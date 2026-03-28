@@ -1,3 +1,4 @@
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use futures::channel::oneshot;
 use futures::future::{select, Either};
 use futures::pin_mut;
@@ -7,7 +8,6 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 use crate::error::WebUiError;
-use aura_ui::FrontendUiOperation as WebUiOperation;
 
 async fn browser_timer_ms(
     ms: u64,

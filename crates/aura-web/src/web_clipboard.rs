@@ -5,8 +5,7 @@
 
 use crate::browser_promises::await_browser_promise_with_timeout;
 use crate::error::{log_web_error, WebUiError};
-use aura_ui::ClipboardPort;
-use aura_ui::FrontendUiOperation as WebUiOperation;
+use aura_app::frontend_primitives::{ClipboardPort, FrontendUiOperation as WebUiOperation};
 use js_sys::Reflect;
 use std::sync::RwLock;
 use wasm_bindgen::JsCast;

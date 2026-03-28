@@ -17,6 +17,24 @@ import type {
   UiSnapshotPayload,
 } from "./contracts.js";
 import {
+  DRIVER_OBSERVER_INSTALLED_KEY,
+  DRIVER_PUSH_CLIPBOARD_KEY,
+  DRIVER_PUSH_RENDER_HEARTBEAT_KEY,
+  DRIVER_PUSH_STATE_KEY,
+  DRIVER_PUSH_UI_STATE_KEY,
+  HARNESS_API_KEY,
+  HARNESS_OBSERVE_KEY,
+  RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+  SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY,
+  UI_ACTIVE_GENERATION_KEY,
+  UI_GENERATION_PHASE_KEY,
+  UI_PUBLICATION_STATE_KEY,
+  UI_READY_GENERATION_KEY,
+  UI_STATE_CACHE_KEY,
+  UI_STATE_JSON_KEY,
+  UI_STATE_OBSERVE_KEY,
+} from "./contracts.js";
+import {
   ACTION_METHODS,
   OBSERVATION_METHODS,
   RECOVERY_METHODS,
@@ -38,9 +56,11 @@ import {
   PUSH_RUNTIME_STAGE_RESULT_KEY,
   PUSH_SEMANTIC_RESULT_KEY,
   PUSH_SEMANTIC_SUBMIT_STATE_KEY,
+  RUNTIME_STAGE_ENQUEUE_DISPATCHED_KEY,
   RUNTIME_STAGE_DEBUG_KEY,
   RUNTIME_STAGE_ENQUEUE_KEY,
   RUNTIME_STAGE_RESULTS_KEY,
+  SEMANTIC_ENQUEUE_DISPATCHED_KEY,
   SEMANTIC_DEBUG_KEY,
   SEMANTIC_ENQUEUE_KEY,
   SEMANTIC_RESULTS_KEY,
@@ -440,16 +460,23 @@ async function observeSemanticCompletionAfterEnqueueFailure(
 
     const pageStatus = await withOperationTimeout(
       `semantic_enqueue_probe_${session.id}`,
-      session.page.evaluate((activeCommandId) => {
-        const semanticResults = window[SEMANTIC_RESULTS_KEY];
-        const debug = window[SEMANTIC_DEBUG_KEY] ?? null;
-        const result =
-          semanticResults &&
-          Object.prototype.hasOwnProperty.call(semanticResults, activeCommandId)
-            ? semanticResults[activeCommandId]
-            : null;
-        return JSON.stringify({ result, debug });
-      }, commandId),
+      session.page.evaluate(
+        ({ activeCommandId, semanticResultsKey, semanticDebugKey }) => {
+          const semanticResults = window[semanticResultsKey];
+          const debug = window[semanticDebugKey] ?? null;
+          const result =
+            semanticResults &&
+            Object.prototype.hasOwnProperty.call(semanticResults, activeCommandId)
+              ? semanticResults[activeCommandId]
+              : null;
+          return JSON.stringify({ result, debug });
+        },
+        {
+          activeCommandId: commandId,
+          semanticResultsKey: SEMANTIC_RESULTS_KEY,
+          semanticDebugKey: SEMANTIC_DEBUG_KEY,
+        },
+      ),
       commandObservedOnPage ? 1500 : 1000,
     ).catch(() => null);
     if (typeof pageStatus !== "string") {
@@ -514,16 +541,23 @@ async function observeRuntimeStageCompletionAfterEnqueueFailure(
 
   const pageStatus = await withOperationTimeout(
     `runtime_stage_enqueue_probe_${session.id}`,
-    session.page.evaluate((activeCommandId) => {
-      const runtimeStageResults = window[RUNTIME_STAGE_RESULTS_KEY];
-      const debug = window[RUNTIME_STAGE_DEBUG_KEY] ?? null;
-      const result =
-        runtimeStageResults &&
-        Object.prototype.hasOwnProperty.call(runtimeStageResults, activeCommandId)
-          ? runtimeStageResults[activeCommandId]
-          : null;
-      return JSON.stringify({ result, debug });
-    }, commandId),
+    session.page.evaluate(
+      ({ activeCommandId, runtimeStageResultsKey, runtimeStageDebugKey }) => {
+        const runtimeStageResults = window[runtimeStageResultsKey];
+        const debug = window[runtimeStageDebugKey] ?? null;
+        const result =
+          runtimeStageResults &&
+          Object.prototype.hasOwnProperty.call(runtimeStageResults, activeCommandId)
+            ? runtimeStageResults[activeCommandId]
+            : null;
+        return JSON.stringify({ result, debug });
+      },
+      {
+        activeCommandId: commandId,
+        runtimeStageResultsKey: RUNTIME_STAGE_RESULTS_KEY,
+        runtimeStageDebugKey: RUNTIME_STAGE_DEBUG_KEY,
+      },
+    ),
     timeoutMs,
   ).catch(() => null);
   if (typeof pageStatus !== "string") {
@@ -679,16 +713,23 @@ async function refreshGenerationState(session, reason) {
   try {
     const generationState = await withOperationTimeout(
       `ui_generation:${reason}`,
-      session.page.evaluate(() => {
+      session.page.evaluate(
+        ({ activeGenerationKey, readyGenerationKey, generationPhaseKey }) => {
         return {
-          active_generation: Number(window.__AURA_UI_ACTIVE_GENERATION__ ?? 0),
-          ready_generation: Number(window.__AURA_UI_READY_GENERATION__ ?? 0),
+          active_generation: Number(window[activeGenerationKey] ?? 0),
+          ready_generation: Number(window[readyGenerationKey] ?? 0),
           phase:
-            typeof window.__AURA_UI_GENERATION_PHASE__ === "string"
-              ? window.__AURA_UI_GENERATION_PHASE__
+            typeof window[generationPhaseKey] === "string"
+              ? window[generationPhaseKey]
               : null,
         };
-      }),
+        },
+        {
+          activeGenerationKey: UI_ACTIVE_GENERATION_KEY,
+          readyGenerationKey: UI_READY_GENERATION_KEY,
+          generationPhaseKey: UI_GENERATION_PHASE_KEY,
+        },
+      ),
       1000,
     );
     noteGenerationState(session, generationState);
@@ -987,9 +1028,9 @@ function runSelfTest() {
     "default observation must fail diagnostically before any recovery path runs",
   );
   assert(
-    String(readStructuredUiState).includes("__AURA_UI_PUBLICATION_STATE__") &&
+    String(readStructuredUiState).includes(UI_PUBLICATION_STATE_KEY) &&
       String(readStructuredUiState).includes(
-        "__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__",
+        RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
       ),
     "structured observation must surface explicit browser publication diagnostics",
   );
@@ -998,8 +1039,8 @@ function runSelfTest() {
     "structured observation must fail closed with explicit publication-state detail",
   );
   assert(
-    String(readStructuredUiState).includes("__AURA_UI_ACTIVE_GENERATION__") &&
-      String(readStructuredUiState).includes("__AURA_UI_READY_GENERATION__"),
+    String(readStructuredUiState).includes(UI_ACTIVE_GENERATION_KEY) &&
+      String(readStructuredUiState).includes(UI_READY_GENERATION_KEY),
     "structured observation must wait on the page-owned generation boundary during browser rebinding",
   );
   assert(
@@ -1070,15 +1111,38 @@ function consoleTailText(session, lines = 40) {
 }
 
 async function ensureHarnessWithTimeout(page, timeoutMs) {
-  await page.waitForFunction(
-    () => {
-      const bridge = window.__AURA_HARNESS__;
-      const observe = window.__AURA_HARNESS_OBSERVE__;
-      return bridge && observe && typeof observe.snapshot === "function";
-    },
-    null,
-    { timeout: timeoutMs },
-  );
+  const deadlineMs = Date.now() + timeoutMs;
+  let lastProbe = null;
+  while (Date.now() < deadlineMs) {
+    lastProbe = await page
+      .evaluate(({ harnessApiKey, harnessObserveKey }) => {
+        const bridge = window[harnessApiKey];
+        const observe = window[harnessObserveKey];
+        return {
+          bridge_type: typeof bridge,
+          observe_type: typeof observe,
+          snapshot_type: typeof observe?.snapshot,
+        };
+      }, {
+        harnessApiKey: HARNESS_API_KEY,
+        harnessObserveKey: HARNESS_OBSERVE_KEY,
+      })
+      .catch((error) => ({
+        bridge_type: null,
+        observe_type: null,
+        snapshot_type: null,
+        error: error?.message ?? String(error),
+      }));
+    if (
+      lastProbe?.bridge_type === "object" &&
+      lastProbe?.observe_type === "object" &&
+      lastProbe?.snapshot_type === "function"
+    ) {
+      return;
+    }
+    await delay(100);
+  }
+  throw new Error(`harness_not_ready:${JSON.stringify(lastProbe)}`);
 }
 
 async function ensurePageInteractive(page, timeoutMs) {
@@ -1102,7 +1166,7 @@ async function installDomObserver(page, session) {
   await installDomObserverBinding(page, session);
   await withOperationTimeout(
     `install_dom_observer:${session.id}`,
-    page.evaluate(() => {
+    page.evaluate(({ pushStateKey, observerInstalledKey }) => {
       const pushState = () => {
         const root =
           document.getElementById("aura-app-root") ??
@@ -1111,13 +1175,13 @@ async function installDomObserver(page, session) {
         const ids = Array.from(document.querySelectorAll("[id]"))
           .map((element) => element.id)
           .filter((id) => id.startsWith("aura-"));
-        return window.__AURA_DRIVER_PUSH_STATE({
+        return window[pushStateKey]({
           text: root?.textContent ?? "",
           ids,
         });
       };
 
-      if (window.__AURA_DRIVER_OBSERVER_INSTALLED) {
+      if (window[observerInstalledKey]) {
         pushState();
         return;
       }
@@ -1146,8 +1210,11 @@ async function installDomObserver(page, session) {
       });
 
       window.addEventListener("load", schedulePush, { once: true });
-      window.__AURA_DRIVER_OBSERVER_INSTALLED = true;
+      window[observerInstalledKey] = true;
       schedulePush();
+    }, {
+      pushStateKey: DRIVER_PUSH_STATE_KEY,
+      observerInstalledKey: DRIVER_OBSERVER_INSTALLED_KEY,
     }),
     4000,
   );
@@ -1157,9 +1224,12 @@ async function installDomObserverBinding(page, session) {
   if (session.domObserverBindingInstalled) {
     return;
   }
+  // Retained intentionally: this binding is the driver-owned DOM observer sink.
+  // It is not part of the shared Rust/browser queue contract and is still used
+  // to drive conformance-only DOM snapshots and waiters.
   await withOperationTimeout(
     `install_dom_observer_binding:${session.id}`,
-    page.exposeBinding("__AURA_DRIVER_PUSH_STATE", (_source, payload) => {
+    page.exposeBinding(DRIVER_PUSH_STATE_KEY, (_source, payload) => {
       session.domState = normalizeDomState(payload);
       notifyDomStateWaiters(session);
     }),
@@ -1172,7 +1242,7 @@ async function installUiStateObserver(page, session) {
   if (!session.uiStateBindingsInstalled) {
     await withOperationTimeout(
       `install_ui_state_observer_push_state:${session.id}`,
-      page.exposeFunction("__AURA_DRIVER_PUSH_UI_STATE", (payload) => {
+      page.exposeFunction(DRIVER_PUSH_UI_STATE_KEY, (payload) => {
         const stored = storeUiState(session, payload, "driver_push");
         console.error(
           `[driver] ui_state push instance=${session.id} stored=${stored} payload_type=${typeof payload} revision=${uiSnapshotRevision(
@@ -1185,7 +1255,7 @@ async function installUiStateObserver(page, session) {
     await withOperationTimeout(
       `install_ui_state_observer_render_heartbeat:${session.id}`,
       page.exposeFunction(
-        "__AURA_DRIVER_PUSH_RENDER_HEARTBEAT",
+        DRIVER_PUSH_RENDER_HEARTBEAT_KEY,
         (payload) => {
           if (typeof payload === "string") {
             try {
@@ -1204,7 +1274,7 @@ async function installUiStateObserver(page, session) {
     );
     await withOperationTimeout(
       `install_ui_state_observer_clipboard:${session.id}`,
-      page.exposeFunction("__AURA_DRIVER_PUSH_CLIPBOARD", (payload) => {
+      page.exposeFunction(DRIVER_PUSH_CLIPBOARD_KEY, (payload) => {
         session.clipboardCache = String(payload ?? "");
       }),
       4000,
@@ -1349,16 +1419,61 @@ async function waitForSubmitQueueReady(session, reason, timeoutMs = 10000) {
     `[driver] submit_queue_ready_wait start instance=${session.id} reason=${reason} timeout_ms=${timeoutMs}`,
   );
   while (Date.now() < deadlineMs) {
-    const submitState = session.semanticSubmitState ?? null;
-    const enqueueReady = submitState?.enqueue_ready === true;
-    lastProbe = {
-      submit_state: submitState,
-      semantic_queue_installed: enqueueReady,
-    };
+    lastProbe = await session.page
+      .evaluate(
+        ({
+          semanticSubmitPublicationStateKey,
+          semanticEnqueueKey,
+          activeGenerationKey,
+          readyGenerationKey,
+          generationPhaseKey,
+        }) => {
+          return {
+            submit_state:
+              window[semanticSubmitPublicationStateKey] ?? null,
+            semantic_queue_installed:
+              window[semanticSubmitPublicationStateKey]?.enqueue_ready ===
+              true,
+            semantic_enqueue_callable:
+              typeof window[semanticEnqueueKey] === "function",
+            active_generation: Number(window[activeGenerationKey] ?? 0),
+            ready_generation: Number(window[readyGenerationKey] ?? 0),
+            phase:
+              typeof window[generationPhaseKey] === "string"
+                ? window[generationPhaseKey]
+                : null,
+          };
+        },
+        {
+          semanticSubmitPublicationStateKey:
+            SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY,
+          semanticEnqueueKey: SEMANTIC_ENQUEUE_KEY,
+          activeGenerationKey: UI_ACTIVE_GENERATION_KEY,
+          readyGenerationKey: UI_READY_GENERATION_KEY,
+          generationPhaseKey: UI_GENERATION_PHASE_KEY,
+        },
+      )
+      .catch(() => ({
+        submit_state: session.semanticSubmitState ?? null,
+        semantic_queue_installed: session.semanticQueueInstalled === true,
+        semantic_enqueue_callable: false,
+        active_generation: null,
+        ready_generation: null,
+        phase: null,
+      }));
+    if (lastProbe?.submit_state && typeof lastProbe.submit_state === "object") {
+      session.semanticSubmitState = lastProbe.submit_state;
+    }
+    session.semanticQueueInstalled =
+      lastProbe?.semantic_queue_installed === true;
     if (
-      lastProbe.submit_state?.status === "ready" &&
-      lastProbe.submit_state?.generation_id != null &&
-      enqueueReady
+      lastProbe?.submit_state?.status === "ready" &&
+      lastProbe?.submit_state?.generation_id != null &&
+      lastProbe?.semantic_queue_installed === true &&
+      lastProbe?.semantic_enqueue_callable === true &&
+      (Number(lastProbe?.active_generation ?? 0) <= 0 ||
+        Number(lastProbe?.ready_generation ?? 0) >=
+          Number(lastProbe?.active_generation ?? 0))
     ) {
       console.error(
         `[driver] submit_queue_ready_wait done instance=${session.id} reason=${reason} state=${JSON.stringify(lastProbe)}`,
@@ -1375,76 +1490,67 @@ async function waitForSubmitQueueReady(session, reason, timeoutMs = 10000) {
   );
 }
 
-async function assertHarnessEnqueueCallable(
+async function assertSemanticEnqueueCallable(
   session,
   reason,
   timeoutMs = 2000,
 ) {
   await withOperationTimeout(
-    `assert_harness_enqueue_callable:${session.id}:${reason}`,
-    session.page.waitForFunction(
-      () =>
-        typeof window[SEMANTIC_ENQUEUE_KEY] === "function" &&
-        typeof window[RUNTIME_STAGE_ENQUEUE_KEY] === "function",
-      null,
-      { timeout: timeoutMs },
-    ),
+    `assert_semantic_enqueue_callable:${session.id}:${reason}`,
+    (async () => {
+      const deadlineMs = Date.now() + timeoutMs;
+      let lastType = null;
+      while (Date.now() < deadlineMs) {
+        lastType = await session.page
+          .evaluate(
+            (semanticEnqueueKey) => typeof window[semanticEnqueueKey],
+            SEMANTIC_ENQUEUE_KEY,
+          )
+          .catch((error) => `eval_failed:${error?.message ?? String(error)}`);
+        if (lastType === "function") {
+          return;
+        }
+        await delay(100);
+      }
+      throw new Error(`semantic_enqueue_not_callable:${lastType ?? "unknown"}`);
+    })(),
     timeoutMs,
   );
   console.error(
-    `[driver] harness_enqueue_callable instance=${session.id} reason=${reason}`,
+    `[driver] semantic_enqueue_callable instance=${session.id} reason=${reason}`,
   );
 }
 
-async function waitForSettledSemanticSnapshot(
+async function assertRuntimeStageEnqueueCallable(
   session,
-  instanceId,
   reason,
-  timeoutMs = 5000,
-  quietMs = 250,
+  timeoutMs = 2000,
 ) {
-  const deadlineMs = Date.now() + timeoutMs;
-  let candidateRevision = null;
-  let candidateAt = 0;
-  let lastSnapshot = null;
-  while (Date.now() < deadlineMs) {
-    const snapshot = await uiState({ instance_id: instanceId });
-    lastSnapshot = snapshot;
-    const ready = snapshot?.readiness === "ready";
-    const settled = snapshot?.quiescence?.state === "settled";
-    const revision = uiSnapshotRevision(snapshot);
-    if (ready && settled && revision > 0) {
-      if (candidateRevision === revision) {
-        if (Date.now() - candidateAt >= quietMs) {
-          console.error(
-            `[driver] semantic_snapshot_settled instance=${instanceId} reason=${reason} revision=${revision}`,
-          );
-          return snapshot;
+  await withOperationTimeout(
+    `assert_runtime_stage_enqueue_callable:${session.id}:${reason}`,
+    (async () => {
+      const deadlineMs = Date.now() + timeoutMs;
+      let lastType = null;
+      while (Date.now() < deadlineMs) {
+        lastType = await session.page
+          .evaluate(
+            (runtimeStageEnqueueKey) => typeof window[runtimeStageEnqueueKey],
+            RUNTIME_STAGE_ENQUEUE_KEY,
+          )
+          .catch((error) => `eval_failed:${error?.message ?? String(error)}`);
+        if (lastType === "function") {
+          return;
         }
-      } else {
-        candidateRevision = revision;
-        candidateAt = Date.now();
+        await delay(100);
       }
-    } else {
-      candidateRevision = null;
-      candidateAt = 0;
-    }
-    const remainingMs = deadlineMs - Date.now();
-    if (remainingMs <= 0) {
-      break;
-    }
-    try {
-      await waitForUiStateVersion(
-        session,
-        revision,
-        Math.max(1, Math.min(quietMs, remainingMs)),
+      throw new Error(
+        `runtime_stage_enqueue_not_callable:${lastType ?? "unknown"}`,
       );
-    } catch {
-      await delay(Math.min(50, remainingMs));
-    }
-  }
-  throw new Error(
-    `semantic_snapshot_not_settled:${reason}:${JSON.stringify(lastSnapshot)}`,
+    })(),
+    timeoutMs,
+  );
+  console.error(
+    `[driver] runtime_stage_enqueue_callable instance=${session.id} reason=${reason}`,
   );
 }
 
@@ -1457,35 +1563,57 @@ async function enqueueSemanticPayload(
   return withOperationTimeout(
     label,
     (async () => {
-      const handle = await session.page.waitForFunction(
-        (payload) => {
-          if (typeof window[SEMANTIC_ENQUEUE_KEY] !== "function") {
-            return false;
-          }
-          const stateKey = "__AURA_DRIVER_SEMANTIC_ENQUEUE_DISPATCHED__";
-          const win = window;
-          let dispatched = win[stateKey];
-          if (!dispatched || typeof dispatched !== "object") {
-            dispatched = Object.create(null);
-            win[stateKey] = dispatched;
-          }
-          let marker = payload;
-          try {
-            const parsed = JSON.parse(payload);
-            if (parsed && typeof parsed.command_id === "string") {
-              marker = parsed.command_id;
-            }
-          } catch {}
-          if (dispatched[marker] !== true) {
-            window[SEMANTIC_ENQUEUE_KEY](payload);
-            dispatched[marker] = true;
-          }
-          return true;
-        },
-        payloadJson,
-        { timeout: timeoutMs },
-      );
-      await handle.dispose().catch(() => null);
+      const deadlineMs = Date.now() + timeoutMs;
+      let lastProbe = null;
+      while (Date.now() < deadlineMs) {
+        lastProbe = await session.page
+          .evaluate(
+            ({ payload, semanticEnqueueKey, semanticEnqueueDispatchedKey }) => {
+              if (typeof window[semanticEnqueueKey] !== "function") {
+                return {
+                  dispatched: false,
+                  enqueue_type: typeof window[semanticEnqueueKey],
+                };
+              }
+              const stateKey = semanticEnqueueDispatchedKey;
+              const win = window;
+              let dispatched = win[stateKey];
+              if (!dispatched || typeof dispatched !== "object") {
+                dispatched = Object.create(null);
+                win[stateKey] = dispatched;
+              }
+              let marker = payload;
+              try {
+                const parsed = JSON.parse(payload);
+                if (parsed && typeof parsed.command_id === "string") {
+                  marker = parsed.command_id;
+                }
+              } catch {}
+              if (dispatched[marker] !== true) {
+                window[semanticEnqueueKey](payload);
+                dispatched[marker] = true;
+              }
+              return {
+                dispatched: dispatched[marker] === true,
+                enqueue_type: typeof window[semanticEnqueueKey],
+              };
+            },
+            {
+              payload: payloadJson,
+              semanticEnqueueKey: SEMANTIC_ENQUEUE_KEY,
+              semanticEnqueueDispatchedKey: SEMANTIC_ENQUEUE_DISPATCHED_KEY,
+            },
+          )
+          .catch((error) => ({
+            dispatched: false,
+            enqueue_type: `eval_failed:${error?.message ?? String(error)}`,
+          }));
+        if (lastProbe?.dispatched === true) {
+          return null;
+        }
+        await delay(100);
+      }
+      throw new Error(`semantic_enqueue_unavailable:${JSON.stringify(lastProbe)}`);
       return null;
     })(),
     timeoutMs,
@@ -1501,35 +1629,64 @@ async function enqueueRuntimeStagePayload(
   return withOperationTimeout(
     label,
     (async () => {
-      const handle = await session.page.waitForFunction(
-        (payload) => {
-          if (typeof window[RUNTIME_STAGE_ENQUEUE_KEY] !== "function") {
-            return false;
-          }
-          const stateKey = "__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE_DISPATCHED__";
-          const win = window;
-          let dispatched = win[stateKey];
-          if (!dispatched || typeof dispatched !== "object") {
-            dispatched = Object.create(null);
-            win[stateKey] = dispatched;
-          }
-          let marker = payload;
-          try {
-            const parsed = JSON.parse(payload);
-            if (parsed && typeof parsed.command_id === "string") {
-              marker = parsed.command_id;
-            }
-          } catch {}
-          if (dispatched[marker] !== true) {
-            window[RUNTIME_STAGE_ENQUEUE_KEY](payload);
-            dispatched[marker] = true;
-          }
-          return true;
-        },
-        payloadJson,
-        { timeout: timeoutMs },
+      const deadlineMs = Date.now() + timeoutMs;
+      let lastProbe = null;
+      while (Date.now() < deadlineMs) {
+        lastProbe = await session.page
+          .evaluate(
+            ({
+              payload,
+              runtimeStageEnqueueKey,
+              runtimeStageEnqueueDispatchedKey,
+            }) => {
+              if (typeof window[runtimeStageEnqueueKey] !== "function") {
+                return {
+                  dispatched: false,
+                  enqueue_type: typeof window[runtimeStageEnqueueKey],
+                };
+              }
+              const stateKey = runtimeStageEnqueueDispatchedKey;
+              const win = window;
+              let dispatched = win[stateKey];
+              if (!dispatched || typeof dispatched !== "object") {
+                dispatched = Object.create(null);
+                win[stateKey] = dispatched;
+              }
+              let marker = payload;
+              try {
+                const parsed = JSON.parse(payload);
+                if (parsed && typeof parsed.command_id === "string") {
+                  marker = parsed.command_id;
+                }
+              } catch {}
+              if (dispatched[marker] !== true) {
+                window[runtimeStageEnqueueKey](payload);
+                dispatched[marker] = true;
+              }
+              return {
+                dispatched: dispatched[marker] === true,
+                enqueue_type: typeof window[runtimeStageEnqueueKey],
+              };
+            },
+            {
+              payload: payloadJson,
+              runtimeStageEnqueueKey: RUNTIME_STAGE_ENQUEUE_KEY,
+              runtimeStageEnqueueDispatchedKey:
+                RUNTIME_STAGE_ENQUEUE_DISPATCHED_KEY,
+            },
+          )
+          .catch((error) => ({
+            dispatched: false,
+            enqueue_type: `eval_failed:${error?.message ?? String(error)}`,
+          }));
+        if (lastProbe?.dispatched === true) {
+          return null;
+        }
+        await delay(100);
+      }
+      throw new Error(
+        `runtime_stage_enqueue_unavailable:${JSON.stringify(lastProbe)}`,
       );
-      await handle.dispose().catch(() => null);
       return null;
     })(),
     timeoutMs,
@@ -1556,14 +1713,7 @@ async function recoverSemanticQueueOnCurrentPage(session, reason) {
   }
   await assertRootStructure(session, `semantic_queue_${reason}`);
   await waitForSubmitQueueReady(session, `semantic_queue:${reason}`, 5000);
-  await waitForSettledSemanticSnapshot(
-    session,
-    session.id,
-    `semantic_queue:${reason}`,
-    5000,
-    250,
-  );
-  await assertHarnessEnqueueCallable(session, `semantic_queue:${reason}`, 2000);
+  await assertSemanticEnqueueCallable(session, `semantic_queue:${reason}`, 2000);
   return session;
 }
 
@@ -1575,11 +1725,11 @@ async function assertRootStructure(session, reason) {
     try {
       const structure = await withOperationTimeout(
         `root_structure_${reason}`,
-        session.page.evaluate(() => {
+        session.page.evaluate((harnessObserveKey) => {
           if (
-            typeof window.__AURA_HARNESS_OBSERVE__?.root_structure === "function"
+            typeof window[harnessObserveKey]?.root_structure === "function"
           ) {
-            return window.__AURA_HARNESS_OBSERVE__.root_structure();
+            return window[harnessObserveKey].root_structure();
           }
 
           const document = window.document;
@@ -1615,7 +1765,7 @@ async function assertRootStructure(session, reason) {
               : 0,
             active_screen_root_count: presentScreenIds.length,
           };
-        }),
+        }, HARNESS_OBSERVE_KEY),
         2000,
       );
 
@@ -1783,8 +1933,8 @@ function normalizeClickError(error) {
 
 async function dispatchHarnessKey(page, rawKey, repeat = 1) {
   return page.evaluate(
-    ({ key, repeatCount }) => {
-      const harness = window.__AURA_HARNESS__;
+    ({ key, repeatCount, harnessApiKey }) => {
+      const harness = window[harnessApiKey];
       if (!harness) {
         return { ok: false, reason: "harness_missing" };
       }
@@ -1800,19 +1950,19 @@ async function dispatchHarnessKey(page, rawKey, repeat = 1) {
       }
       return { ok: false, reason: "harness_send_key_missing" };
     },
-    { key: rawKey, repeatCount: repeat },
+    { key: rawKey, repeatCount: repeat, harnessApiKey: HARNESS_API_KEY },
   );
 }
 
 async function dispatchHarnessKeysText(page, text) {
-  return page.evaluate((value) => {
-    const harness = window.__AURA_HARNESS__;
+  return page.evaluate(({ value, harnessApiKey }) => {
+    const harness = window[harnessApiKey];
     if (!harness || typeof harness.send_keys !== "function") {
       return { ok: false, reason: "harness_send_keys_missing" };
     }
     harness.send_keys(value);
     return { ok: true, mode: "send_keys" };
-  }, text);
+  }, { value: text, harnessApiKey: HARNESS_API_KEY });
 }
 
 async function clickLocatorWithDiagnostics(locator, context) {
@@ -2584,21 +2734,27 @@ async function startPage(params) {
         args: CHROMIUM_HARNESS_ARGS,
       });
       if (pendingSemanticPayload) {
-        await context.addInitScript((payloadJson) => {
-          window[PENDING_SEMANTIC_QUEUE_SEED_KEY] = seedQueuePayloadArray(
+        await context.addInitScript(({ payloadJson, pendingSemanticQueueSeedKey }) => {
+          window[pendingSemanticQueueSeedKey] = seedQueuePayloadArray(
             payloadJson,
           );
-        }, pendingSemanticPayload);
+        }, {
+          payloadJson: pendingSemanticPayload,
+          pendingSemanticQueueSeedKey: PENDING_SEMANTIC_QUEUE_SEED_KEY,
+        });
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} startup_pending_semantic_seed installed`,
         );
       }
       if (pendingRuntimeStagePayload) {
-        await context.addInitScript((payloadJson) => {
-          window[PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY] = seedQueuePayloadArray(
+        await context.addInitScript(({ payloadJson, pendingRuntimeStageQueueSeedKey }) => {
+          window[pendingRuntimeStageQueueSeedKey] = seedQueuePayloadArray(
             payloadJson,
           );
-        }, pendingRuntimeStagePayload);
+        }, {
+          payloadJson: pendingRuntimeStagePayload,
+          pendingRuntimeStageQueueSeedKey: PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY,
+        });
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} startup_pending_runtime_stage_seed installed`,
         );
@@ -2739,7 +2895,8 @@ async function startPage(params) {
       );
       try {
         const bindingType = await page.evaluate(
-          () => typeof window.__AURA_DRIVER_PUSH_UI_STATE,
+          (driverPushUiStateKey) => typeof window[driverPushUiStateKey],
+          DRIVER_PUSH_UI_STATE_KEY,
         );
         traceDriver(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} uiStateBinding type=${bindingType}`,
@@ -2753,6 +2910,10 @@ async function startPage(params) {
       }
       if (startupReadiness === STARTUP_READINESS_SEMANTIC) {
         try {
+          await waitForPageNavigationStabilization(
+            session,
+            `startup_harness:${instanceId}`,
+          );
           console.error(
             `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout start`,
           );
@@ -3025,19 +3186,24 @@ async function readStructuredUiState(
   let publicationState = null;
   try {
     const handle = await session.page.waitForFunction(
-      () => {
+      ({
+        uiStateJsonKey,
+        uiStateCacheKey,
+        activeGenerationKey,
+        readyGenerationKey,
+        uiPublicationStateKey,
+        renderHeartbeatPublicationStateKey,
+      }) => {
         const hasPublishedUiState =
-          typeof window.__AURA_UI_STATE_JSON__ === "string" ||
-          (window.__AURA_UI_STATE_CACHE__ &&
-            typeof window.__AURA_UI_STATE_CACHE__ === "object");
+          typeof window[uiStateJsonKey] === "string" ||
+          (window[uiStateCacheKey] &&
+            typeof window[uiStateCacheKey] === "object");
         if (!hasPublishedUiState) {
           return false;
         }
 
-        const activeGeneration = Number(
-          window.__AURA_UI_ACTIVE_GENERATION__ ?? 0,
-        );
-        const readyGeneration = Number(window.__AURA_UI_READY_GENERATION__ ?? 0);
+        const activeGeneration = Number(window[activeGenerationKey] ?? 0);
+        const readyGeneration = Number(window[readyGenerationKey] ?? 0);
         if (activeGeneration > 0 && readyGeneration < activeGeneration) {
           return false;
         }
@@ -3045,28 +3211,51 @@ async function readStructuredUiState(
         return {
           active_generation: activeGeneration,
           ready_generation: readyGeneration,
-          ui_state: window.__AURA_UI_PUBLICATION_STATE__ ?? null,
-          render_heartbeat: window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__ ?? null,
+          ui_state: window[uiPublicationStateKey] ?? null,
+          render_heartbeat: window[renderHeartbeatPublicationStateKey] ?? null,
         };
       },
-      null,
+      {
+        uiStateJsonKey: UI_STATE_JSON_KEY,
+        uiStateCacheKey: UI_STATE_CACHE_KEY,
+        activeGenerationKey: UI_ACTIVE_GENERATION_KEY,
+        readyGenerationKey: UI_READY_GENERATION_KEY,
+        uiPublicationStateKey: UI_PUBLICATION_STATE_KEY,
+        renderHeartbeatPublicationStateKey: RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+      },
       { timeout: fallbackTimeoutMs },
     );
     publicationState = await handle.jsonValue().catch(() => null);
     noteGenerationState(session, publicationState);
   } catch (error) {
     const pageGenerationState = await session.page
-      .evaluate(() => {
+      .evaluate(({
+        activeGenerationKey,
+        readyGenerationKey,
+        generationPhaseKey,
+        uiStateJsonKey,
+        uiStateCacheKey,
+        uiPublicationStateKey,
+        renderHeartbeatPublicationStateKey,
+      }) => {
         return JSON.stringify({
-          active_generation: window.__AURA_UI_ACTIVE_GENERATION__ ?? null,
-          ready_generation: window.__AURA_UI_READY_GENERATION__ ?? null,
-          phase: window.__AURA_UI_GENERATION_PHASE__ ?? null,
-          ui_state_json_type: typeof window.__AURA_UI_STATE_JSON__,
-          ui_state_cache_type: typeof window.__AURA_UI_STATE_CACHE__,
-          ui_state_publication: window.__AURA_UI_PUBLICATION_STATE__ ?? null,
+          active_generation: window[activeGenerationKey] ?? null,
+          ready_generation: window[readyGenerationKey] ?? null,
+          phase: window[generationPhaseKey] ?? null,
+          ui_state_json_type: typeof window[uiStateJsonKey],
+          ui_state_cache_type: typeof window[uiStateCacheKey],
+          ui_state_publication: window[uiPublicationStateKey] ?? null,
           render_heartbeat_publication:
-            window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__ ?? null,
+            window[renderHeartbeatPublicationStateKey] ?? null,
         });
+      }, {
+        activeGenerationKey: UI_ACTIVE_GENERATION_KEY,
+        readyGenerationKey: UI_READY_GENERATION_KEY,
+        generationPhaseKey: UI_GENERATION_PHASE_KEY,
+        uiStateJsonKey: UI_STATE_JSON_KEY,
+        uiStateCacheKey: UI_STATE_CACHE_KEY,
+        uiPublicationStateKey: UI_PUBLICATION_STATE_KEY,
+        renderHeartbeatPublicationStateKey: RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
       })
       .catch(() => null);
     throw new Error(
@@ -3076,32 +3265,46 @@ async function readStructuredUiState(
   const payload = await withOperationTimeout(
     `ui_state_structured_${reason}`,
     (async () => {
-      return session.page.evaluate(() => {
-        if (typeof window.__AURA_UI_STATE_JSON__ === "string") {
-          return window.__AURA_UI_STATE_JSON__;
+      return session.page.evaluate(({
+        uiStateJsonKey,
+        uiStateCacheKey,
+        harnessObserveKey,
+        uiStateObserveKey,
+        uiPublicationStateKey,
+        renderHeartbeatPublicationStateKey,
+      }) => {
+        if (typeof window[uiStateJsonKey] === "string") {
+          return window[uiStateJsonKey];
         }
         if (
-          window.__AURA_UI_STATE_CACHE__ &&
-          typeof window.__AURA_UI_STATE_CACHE__ === "object"
+          window[uiStateCacheKey] &&
+          typeof window[uiStateCacheKey] === "object"
         ) {
-          return window.__AURA_UI_STATE_CACHE__;
+          return window[uiStateCacheKey];
         }
-        if (typeof window.__AURA_HARNESS_OBSERVE__?.ui_state === "function") {
-          return window.__AURA_HARNESS_OBSERVE__.ui_state();
+        if (typeof window[harnessObserveKey]?.ui_state === "function") {
+          return window[harnessObserveKey].ui_state();
         }
-        if (typeof window.__AURA_UI_STATE__ === "function") {
-          const payload = window.__AURA_UI_STATE__();
+        if (typeof window[uiStateObserveKey] === "function") {
+          const payload = window[uiStateObserveKey]();
           if (payload != null) {
             return payload;
           }
         }
         throw new Error(
           `ui_state_publication_unavailable:${JSON.stringify({
-            ui_state: window.__AURA_UI_PUBLICATION_STATE__ ?? null,
+            ui_state: window[uiPublicationStateKey] ?? null,
             render_heartbeat:
-              window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__ ?? null,
+              window[renderHeartbeatPublicationStateKey] ?? null,
           })}`,
         );
+      }, {
+        uiStateJsonKey: UI_STATE_JSON_KEY,
+        uiStateCacheKey: UI_STATE_CACHE_KEY,
+        harnessObserveKey: HARNESS_OBSERVE_KEY,
+        uiStateObserveKey: UI_STATE_OBSERVE_KEY,
+        uiPublicationStateKey: UI_PUBLICATION_STATE_KEY,
+        renderHeartbeatPublicationStateKey: RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
       });
     })(),
     fallbackTimeoutMs,
@@ -3262,14 +3465,22 @@ async function navigateScreen(params) {
   try {
     result = await withOperationTimeout(
       `navigate_screen:${instanceId}:${screen}`,
-      session.page.evaluate((targetScreen) => {
-        if (!window[MUTATION_QUEUE_INSTALLED_KEY]) {
-          return { ok: false, reason: "mutation_queue_missing" };
-        }
-        window[PENDING_NAV_SCREEN_KEY] = targetScreen;
-        window[WAKE_PENDING_NAV_KEY]?.();
-        return { ok: true };
-      }, screen),
+      session.page.evaluate(
+        ({ targetScreen, mutationQueueInstalledKey, pendingNavScreenKey, wakePendingNavKey }) => {
+          if (!window[mutationQueueInstalledKey]) {
+            return { ok: false, reason: "mutation_queue_missing" };
+          }
+          window[pendingNavScreenKey] = targetScreen;
+          window[wakePendingNavKey]?.();
+          return { ok: true };
+        },
+        {
+          targetScreen: screen,
+          mutationQueueInstalledKey: MUTATION_QUEUE_INSTALLED_KEY,
+          pendingNavScreenKey: PENDING_NAV_SCREEN_KEY,
+          wakePendingNavKey: WAKE_PENDING_NAV_KEY,
+        },
+      ),
       1000,
     );
   } catch (error) {
@@ -3282,14 +3493,22 @@ async function navigateScreen(params) {
     );
     result = await withOperationTimeout(
       `navigate_screen_restart:${instanceId}:${screen}`,
-      restartedSession.page.evaluate((targetScreen) => {
-        if (!window[MUTATION_QUEUE_INSTALLED_KEY]) {
-          return { ok: false, reason: "mutation_queue_missing" };
-        }
-        window[PENDING_NAV_SCREEN_KEY] = targetScreen;
-        window[WAKE_PENDING_NAV_KEY]?.();
-        return { ok: true };
-      }, screen),
+      restartedSession.page.evaluate(
+        ({ targetScreen, mutationQueueInstalledKey, pendingNavScreenKey, wakePendingNavKey }) => {
+          if (!window[mutationQueueInstalledKey]) {
+            return { ok: false, reason: "mutation_queue_missing" };
+          }
+          window[pendingNavScreenKey] = targetScreen;
+          window[wakePendingNavKey]?.();
+          return { ok: true };
+        },
+        {
+          targetScreen: screen,
+          mutationQueueInstalledKey: MUTATION_QUEUE_INSTALLED_KEY,
+          pendingNavScreenKey: PENDING_NAV_SCREEN_KEY,
+          wakePendingNavKey: WAKE_PENDING_NAV_KEY,
+        },
+      ),
       2000,
     );
   }
@@ -3312,14 +3531,14 @@ async function openSettingsSection(params) {
   try {
     result = await withOperationTimeout(
       `open_settings_section:${instanceId}:${section}`,
-      session.page.evaluate((targetSection) => {
-        const harness = window.__AURA_HARNESS__;
+      session.page.evaluate(({ targetSection, harnessApiKey }) => {
+        const harness = window[harnessApiKey];
         if (typeof harness?.open_settings_section !== "function") {
           return { ok: false, reason: "open_settings_section_missing" };
         }
         const accepted = harness.open_settings_section(targetSection);
         return { ok: accepted === true };
-      }, section),
+      }, { targetSection: section, harnessApiKey: HARNESS_API_KEY }),
       1000,
     );
   } catch (error) {
@@ -3332,14 +3551,14 @@ async function openSettingsSection(params) {
     );
     result = await withOperationTimeout(
       `open_settings_section_restart:${instanceId}:${section}`,
-      restartedSession.page.evaluate((targetSection) => {
-        const harness = window.__AURA_HARNESS__;
+      restartedSession.page.evaluate(({ targetSection, harnessApiKey }) => {
+        const harness = window[harnessApiKey];
         if (typeof harness?.open_settings_section !== "function") {
           return { ok: false, reason: "open_settings_section_missing" };
         }
         const accepted = harness.open_settings_section(targetSection);
         return { ok: accepted === true };
-      }, section),
+      }, { targetSection: section, harnessApiKey: HARNESS_API_KEY }),
       2000,
     );
   }
@@ -3361,12 +3580,12 @@ async function snapshot(params) {
   try {
     payload = await withOperationTimeout(
       "snapshot",
-      session.page.evaluate(() => {
-        if (window.__AURA_HARNESS_OBSERVE__?.snapshot) {
-          return window.__AURA_HARNESS_OBSERVE__.snapshot();
+      session.page.evaluate((harnessObserveKey) => {
+        if (window[harnessObserveKey]?.snapshot) {
+          return window[harnessObserveKey].snapshot();
         }
         return null;
-      }),
+      }, HARNESS_OBSERVE_KEY),
     );
   } catch (error) {
     console.error(
@@ -4095,14 +4314,7 @@ async function submitSemanticCommand(params) {
                 `submit_semantic_command_enqueue:${instanceId}`,
               );
               session = restartedSession;
-              await waitForSettledSemanticSnapshot(
-                session,
-                instanceId,
-                `submit_semantic_command_restart:${instanceId}`,
-                5000,
-                250,
-              );
-              await assertHarnessEnqueueCallable(
+              await assertSemanticEnqueueCallable(
                 session,
                 `submit_semantic_command_restart:${instanceId}`,
                 2000,
@@ -4169,19 +4381,26 @@ async function submitSemanticCommand(params) {
     );
     const pageStatus = await withOperationTimeout(
       `submit_semantic_command_result_${instanceId}`,
-      session.page.evaluate((activeCommandId) => {
-        const semanticResults = window[SEMANTIC_RESULTS_KEY];
-        const debug = window[SEMANTIC_DEBUG_KEY] ?? null;
-        let result = null;
-        if (
-          semanticResults &&
-          Object.prototype.hasOwnProperty.call(semanticResults, activeCommandId)
-        ) {
-          result = semanticResults[activeCommandId];
-          delete semanticResults[activeCommandId];
-        }
-        return JSON.stringify({ result, debug });
-      }, commandId),
+      session.page.evaluate(
+        ({ activeCommandId, semanticResultsKey, semanticDebugKey }) => {
+          const semanticResults = window[semanticResultsKey];
+          const debug = window[semanticDebugKey] ?? null;
+          let result = null;
+          if (
+            semanticResults &&
+            Object.prototype.hasOwnProperty.call(semanticResults, activeCommandId)
+          ) {
+            result = semanticResults[activeCommandId];
+            delete semanticResults[activeCommandId];
+          }
+          return JSON.stringify({ result, debug });
+        },
+        {
+          activeCommandId: commandId,
+          semanticResultsKey: SEMANTIC_RESULTS_KEY,
+          semanticDebugKey: SEMANTIC_DEBUG_KEY,
+        },
+      ),
       2000,
     ).catch(() => null);
     if (typeof pageStatus === "string") {
@@ -4225,14 +4444,12 @@ async function submitSemanticCommand(params) {
 async function getAuthorityId(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
-  const authorityId = await session.page.evaluate(() => {
-    if (
-      typeof window.__AURA_HARNESS_OBSERVE__?.get_authority_id === "function"
-    ) {
-      return window.__AURA_HARNESS_OBSERVE__.get_authority_id();
+  const authorityId = await session.page.evaluate((harnessObserveKey) => {
+    if (typeof window[harnessObserveKey]?.get_authority_id === "function") {
+      return window[harnessObserveKey].get_authority_id();
     }
     return null;
-  });
+  }, HARNESS_OBSERVE_KEY);
   if (authorityId == null) {
     return {};
   }
@@ -4261,6 +4478,10 @@ async function reloadPage(params) {
           session.page,
           session.startOptions?.harnessReadyTimeoutMs ??
             DEFAULT_HARNESS_READY_TIMEOUT_MS,
+        );
+        await waitForPageNavigationStabilization(
+          session,
+          `reload_page:${reason}`,
         );
         await ensureHarnessWithTimeout(
           session.page,
@@ -4300,9 +4521,12 @@ async function tailLog(params): Promise<TailLogResult> {
   try {
     const result = await withOperationTimeout(
       "tail_log",
-      session.page.evaluate((count) => {
-        return window.__AURA_HARNESS_OBSERVE__.tail_log(count);
-      }, requested),
+      session.page.evaluate(
+        ({ count, harnessObserveKey }) => {
+          return window[harnessObserveKey].tail_log(count);
+        },
+        { count: requested, harnessObserveKey: HARNESS_OBSERVE_KEY },
+      ),
       1000,
     );
     if (Array.isArray(result)) {
@@ -4340,11 +4564,11 @@ async function injectMessage(params) {
   const message = String(params?.message ?? "");
   const session = getSession(instanceId);
 
-  await session.page.evaluate((value) => {
-    if (window.__AURA_HARNESS__?.inject_message) {
-      window.__AURA_HARNESS__.inject_message(value);
+  await session.page.evaluate(({ value, harnessApiKey }) => {
+    if (window[harnessApiKey]?.inject_message) {
+      window[harnessApiKey].inject_message(value);
     }
-  }, message);
+  }, { value: message, harnessApiKey: HARNESS_API_KEY });
 
   return { status: "injected" };
 }

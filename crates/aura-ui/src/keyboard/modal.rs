@@ -5,7 +5,7 @@ use super::wizard::{
     save_create_channel_details_buffer, toggle_create_channel_member, toggle_guardian_selection,
     toggle_mfa_selection,
 };
-use crate::clipboard::ClipboardPort;
+use aura_app::frontend_primitives::ClipboardPort;
 use crate::model::{
     ActiveModal, AddDeviceWizardStep, CreateChannelDetailsField, CreateChannelModalState,
     CreateChannelWizardStep, ModalState, ScreenId, SelectDeviceModalState,

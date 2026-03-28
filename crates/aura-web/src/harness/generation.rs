@@ -5,9 +5,9 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
-pub(crate) const UI_ACTIVE_GENERATION_KEY: &str = "__AURA_UI_ACTIVE_GENERATION__";
-pub(crate) const UI_READY_GENERATION_KEY: &str = "__AURA_UI_READY_GENERATION__";
-pub(crate) const UI_GENERATION_PHASE_KEY: &str = "__AURA_UI_GENERATION_PHASE__";
+pub(crate) use crate::harness::browser_contract::{
+    UI_ACTIVE_GENERATION_KEY, UI_GENERATION_PHASE_KEY, UI_READY_GENERATION_KEY,
+};
 
 thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };

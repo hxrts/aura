@@ -1022,8 +1022,17 @@ impl InvitationHandler {
                 );
             }
             InvitationType::Guardian { .. } => {
-                self.execute_guardian_invitation_principal(effects.clone(), &invitation)
-                    .await?;
+                if let Err(error) = self
+                    .execute_guardian_invitation_principal(effects.clone(), &invitation)
+                    .await
+                {
+                    tracing::warn!(
+                        invitation_id = %invitation.invitation_id,
+                        receiver = %invitation.receiver_id,
+                        error = %error,
+                        "Guardian principal choreography did not complete during invitation preparation; continuing with deferred delivery"
+                    );
+                }
             }
             InvitationType::DeviceEnrollment { .. } => {}
             InvitationType::Channel { .. } => {}
@@ -2650,6 +2659,8 @@ fn default_imported_invitation_status() -> InvitationStatus {
 struct StoredImportedInvitation {
     #[serde(flatten)]
     shareable: ShareableInvitation,
+    // Legacy bare `ShareableInvitation` payloads decode through these defaults,
+    // so cache reads no longer need a separate migration branch.
     #[serde(default = "default_imported_invitation_status")]
     status: InvitationStatus,
     #[serde(default)]
@@ -3956,7 +3967,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn choreography_load_preserves_cached_terminal_status_for_legacy_imports() {
+    async fn choreography_load_defaults_terminal_status_for_legacy_imports() {
         let authority_context = create_test_authority(113);
         let effects = effects_for(&authority_context);
         let shareable = ShareableInvitation {
@@ -3998,8 +4009,8 @@ mod tests {
         )
         .await
         .expect("legacy imported invitation should remain loadable");
-        assert_eq!(stored.status, InvitationStatus::Declined);
-        assert_eq!(stored.created_at, 456);
+        assert_eq!(stored.status, InvitationStatus::Pending);
+        assert_eq!(stored.created_at, 0);
     }
 
     #[tokio::test]

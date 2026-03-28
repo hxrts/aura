@@ -1,6 +1,6 @@
 use super::navigation::bounded_step;
 use super::set_toast;
-use crate::clipboard::ClipboardPort;
+use aura_app::frontend_primitives::ClipboardPort;
 use crate::model::{
     ActiveModal, AddDeviceModalState, AddDeviceWizardStep, CapabilityTier,
     CreateChannelDetailsField, CreateChannelModalState, CreateChannelWizardStep, ModalState,

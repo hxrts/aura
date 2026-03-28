@@ -12,7 +12,7 @@ mod runtime_events;
 mod settings;
 mod snapshot;
 
-use crate::clipboard::ClipboardPort;
+use aura_app::frontend_primitives::ClipboardPort;
 use crate::keyboard::{apply_named_key, apply_text_keys};
 use crate::readiness_owner;
 use crate::snapshot::render_canonical_snapshot;

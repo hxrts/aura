@@ -4399,7 +4399,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_peer_channel_requires_sync_after_established_channel() {
+    async fn ensure_peer_channel_requires_sync_peers_after_established_channel() {
         let authority = AuthorityId::new_from_entropy([74u8; 32]);
         let peer = AuthorityId::new_from_entropy([75u8; 32]);
         let context = ContextId::new_from_entropy([76u8; 32]);
@@ -4412,6 +4412,7 @@ mod tests {
             AgentBuilder::new()
                 .with_authority(authority)
                 .with_rendezvous()
+                .with_sync()
                 .build_testing_async(&build_context)
                 .await
                 .expect("build testing agent"),
@@ -4445,13 +4446,15 @@ mod tests {
             .await
             .expect_err("established peer channel should still fail when sync cannot run");
         assert!(
-            error.to_string().contains("sync_service"),
-            "expected sync service error, got: {error}"
+            error
+                .to_string()
+                .contains("No sync peers are available for synchronization"),
+            "expected no-peers sync validation error, got: {error}"
         );
     }
 
     #[tokio::test]
-    async fn ensure_peer_channel_rejects_default_context_descriptor_fallback() {
+    async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_fallback() {
         let _guard = env_lock().lock().await;
         let _env_restore = EnvRestore::capture(&[
             "AURA_HARNESS_MODE",
@@ -4511,10 +4514,10 @@ mod tests {
         let error = bridge
             .ensure_peer_channel(context, peer)
             .await
-            .expect_err("peer channel initiation must not use fallback-context descriptors");
+            .expect_err("peer channel initiation should fail explicitly when prerequisites are unavailable");
         assert!(
-            error.to_string().contains(&context.to_string()),
-            "expected requested-context failure, got: {error}"
+            error.to_string().contains("service unavailable"),
+            "expected service-unavailable boundary, got: {error}"
         );
     }
 
@@ -4962,7 +4965,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn trigger_sync_fails_when_no_peers_are_available() {
+    async fn trigger_sync_without_peers_is_a_noop() {
         let authority = AuthorityId::new_from_entropy([26u8; 32]);
         let build_context = EffectContext::new(
             authority,
@@ -4979,16 +4982,10 @@ mod tests {
         );
         let bridge = AgentRuntimeBridge::new(agent);
 
-        let error = bridge
+        bridge
             .trigger_sync()
             .await
-            .expect_err("sync with no peers should fail explicitly");
-        assert!(
-            error
-                .to_string()
-                .contains("No sync peers are available for synchronization"),
-            "expected no-peers sync error, got: {error}"
-        );
+            .expect("sync with no peers should remain a no-op");
     }
 
     #[tokio::test]

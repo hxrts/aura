@@ -26,7 +26,7 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 ## Key Modules
 
 - `config.rs` — Schema parsing for run config, semantic scenarios, and the narrow remaining compatibility-only executor fixtures.
-- `compatibility_step.rs` — Internal compatibility IR retained only for synthetic phase-state-machine fixtures plus executor-local metadata/wait shaping; shared inventory scenarios are semantic-only.
+- `compatibility_step.rs` — Internal compatibility IR retained only for synthetic phase-state-machine fixtures plus executor-local metadata/wait shaping; shared inventory scenarios are semantic-only, and the public `ScenarioConfig::compatibility_steps()` accessor is explicitly deprecated to discourage new usage.
 - `coordinator.rs` — Multi-instance orchestration and per-instance command routing.
 - `tool_api.rs` — Versioned request and typed response surface used by tests and automation.
 - `executor.rs` — Semantic and compatibility scenario execution with deterministic budgets.

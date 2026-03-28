@@ -3,8 +3,8 @@ use aura_app::ui::types::{
     PendingAccountBootstrap,
 };
 use aura_app::ui::workflows::account as account_workflows;
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_effects::{new_authority_id, new_device_id, RealRandomHandler};
-use aura_ui::FrontendUiOperation as WebUiOperation;
 
 use crate::error::{log_web_error, WebUiError};
 use crate::harness_bridge;

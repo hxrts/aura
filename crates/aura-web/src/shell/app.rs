@@ -1,7 +1,8 @@
 use async_lock::Mutex;
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::ui::contract::{ControlId, FieldId, ScreenId, UiReadiness};
 use aura_app::ui::workflows::runtime as runtime_workflows;
-use aura_ui::{AuraUiRoot, FrontendUiOperation as WebUiOperation, RequiredDomId};
+use aura_ui::{AuraUiRoot, RequiredDomId};
 use dioxus::dioxus_core::schedule_update;
 use dioxus::prelude::*;
 use std::cell::Cell;

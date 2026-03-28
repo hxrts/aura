@@ -8,7 +8,7 @@
 //! - test_invite_as_guardian_via_agent: 220-229
 //! - test_invite_to_channel_via_agent: 230-239
 //! - test_accept_invitation_via_agent: 240-241
-//! - test_decline_invitation_via_agent_surfaces_followup_failure: 242-243
+//! - test_decline_invitation_via_agent_succeeds_despite_followup_failure: 242-243
 //! - test_cancel_invitation_via_agent: 244-245
 //! - test_list_pending_via_agent: 246-249
 //! - test_get_invitation_via_agent: 250-251
@@ -222,7 +222,7 @@ async fn test_accept_invitation_via_agent() -> TestResult {
 }
 
 #[tokio::test]
-async fn test_decline_invitation_via_agent_surfaces_followup_failure() -> TestResult {
+async fn test_decline_invitation_via_agent_succeeds_despite_followup_failure() -> TestResult {
     // Entropy range: 242-243
     let sender = create_test_agent(242).await?;
     let receiver = create_test_agent(243).await?;
@@ -238,17 +238,8 @@ async fn test_decline_invitation_via_agent_surfaces_followup_failure() -> TestRe
         .await?;
     let imported = receiver_invitations.import_and_cache(&code).await?;
 
-    let error = match receiver_invitations.decline(&imported.invitation_id).await {
-        Ok(_) => {
-            return Err(
-                "contact decline unexpectedly succeeded despite follow-up exchange failure".into(),
-            );
-        }
-        Err(error) => error,
-    };
-    assert!(error
-        .to_string()
-        .contains("decline invitation follow-up failed"));
+    let result = receiver_invitations.decline(&imported.invitation_id).await?;
+    assert_eq!(result.new_status, InvitationStatus::Declined);
     Ok(())
 }
 

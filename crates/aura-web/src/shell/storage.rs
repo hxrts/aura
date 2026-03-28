@@ -2,7 +2,7 @@ use aura_app::ui::types::{
     BootstrapRuntimeIdentity, PendingAccountBootstrap, WEB_ACCOUNT_CONFIG_STORAGE_SUFFIX,
     WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX, WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX,
 };
-use aura_ui::FrontendUiOperation as WebUiOperation;
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 

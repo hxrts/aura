@@ -489,9 +489,14 @@ mod tests {
         let effects = crate::testing::simulation_effect_system(&config);
         let handler = AuthHandler::new(authority_context.clone()).unwrap();
 
-        let status = handler.authentication_status(&effects).await.unwrap();
-        assert_eq!(status.authority_id, authority_id);
-        assert_eq!(status.device_id, handler.device_id());
+        let error = handler
+            .authentication_status(&effects)
+            .await
+            .expect_err("authentication status should require authorization");
+        assert!(
+            error.to_string().contains("Authorization denied"),
+            "expected authorization denial, got: {error}"
+        );
     }
 
     #[tokio::test]

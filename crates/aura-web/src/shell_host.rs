@@ -7,9 +7,10 @@ use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
 use aura_app::ui::workflows::system as system_workflows;
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::{AppConfig, AppCore};
 use aura_core::types::identifiers::AuthorityId;
-use aura_ui::{FrontendUiOperation as WebUiOperation, UiController};
+use aura_ui::UiController;
 use dioxus::prelude::{Signal, WritableExt};
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
@@ -408,8 +409,6 @@ fn install_harness_instrumentation(controller: Arc<UiController>, generation_id:
         harness_bridge::publish_ui_snapshot(&snapshot);
     }));
 
-    harness_bridge::set_active_generation(generation_id);
-    harness_bridge::set_controller(controller.clone());
     if let Err(error) = harness_bridge::install_window_harness_api() {
         log_web_error(
             "error",
@@ -420,6 +419,8 @@ fn install_harness_instrumentation(controller: Arc<UiController>, generation_id:
             ),
         );
     }
+    harness_bridge::set_active_generation(generation_id);
+    harness_bridge::set_controller(controller.clone());
     let _ = harness_bridge::publish_semantic_controller_snapshot(controller);
 }
 
@@ -836,7 +837,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
 #[cfg(test)]
 mod tests {
     use super::{BootstrapPhase, BootstrapPhaseTracker};
-    use aura_ui::FrontendUiOperation as WebUiOperation;
+    use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 
     #[test]
     fn bootstrap_phase_tracker_enforces_monotonic_ordering() {

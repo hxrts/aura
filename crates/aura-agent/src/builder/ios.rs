@@ -181,6 +181,16 @@ impl IosPresetBuilder {
 
         #[cfg(feature = "ios")]
         {
+            // `ios` feature stub status:
+            // the preset type and configuration contract are compiled so callers
+            // can bind to the shape now, but the platform handlers below are
+            // still intentionally unimplemented:
+            // - KeychainCryptoHandler / KeychainSecureStorageHandler
+            // - AppContainerStorageHandler
+            // - IOSTimeHandler
+            // - SecRandomHandler
+            // - OSLogConsoleHandler
+            // - URLSessionTransportHandler
             // Validate required configuration
             let app_group = self.app_group.ok_or_else(|| BuildError::MissingRequired(
                 "app_group is required for iOS preset. Call .app_group(\"group.com.example\") before building."
@@ -197,15 +207,6 @@ impl IosPresetBuilder {
                 ContextId::new_from_entropy(context_entropy)
             });
 
-            // TODO: Wire up iOS-specific handlers when ios feature is implemented
-            // - KeychainCryptoHandler for Secure Enclave operations
-            // - AppContainerStorageHandler with data protection
-            // - IOSTimeHandler
-            // - SecRandomHandler
-            // - OSLogConsoleHandler
-            // - URLSessionTransportHandler
-
-            // TODO: Implement iOS platform handlers (KeychainSecureStorageHandler, etc.)
             // For now, fall back to testing mode until iOS handlers are implemented
             let _ = (
                 app_group,

@@ -1,6 +1,7 @@
 use aura_app::scenario_contract::{
     SharedActionContract, SubmissionContract, SubmissionState, SubmissionValueContract,
 };
+use aura_app::frontend_primitives::FrontendUiOperation;
 use aura_app::ui::contract::{OperationId, ScreenId};
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
@@ -35,6 +36,7 @@ use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
 use crate::browser_promises::await_browser_promise_with_timeout;
+use crate::harness::browser_contract::SEMANTIC_DEBUG_KEY;
 use crate::harness::channel_selection::{
     authoritative_channel_binding, selected_authority_id, selected_channel_binding,
     selected_channel_id, selected_device_id, SelectionError, WeakChannelSelection,
@@ -383,7 +385,7 @@ async fn yield_to_browser_event_loop() {
         let _ = await_browser_promise_with_timeout(
             js_sys::Promise::resolve(&JsValue::UNDEFINED),
             250,
-            aura_ui::FrontendUiOperation::BackgroundSync,
+            FrontendUiOperation::BackgroundSync,
             "WEB_BROWSER_EVENT_LOOP_YIELD_REJECTED",
             "WEB_BROWSER_EVENT_LOOP_YIELD_TIMEOUT",
             "WEB_BROWSER_EVENT_LOOP_YIELD_TIMEOUT_SCHEDULE_FAILED",
@@ -496,7 +498,7 @@ pub(crate) fn update_semantic_debug(event: &str, detail: Option<&str>) {
     };
     let debug = js_sys::Reflect::get(
         window.as_ref(),
-        &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"),
+        &JsValue::from_str(SEMANTIC_DEBUG_KEY),
     )
     .ok()
     .filter(|value| !value.is_null() && !value.is_undefined())
@@ -504,7 +506,7 @@ pub(crate) fn update_semantic_debug(event: &str, detail: Option<&str>) {
         let object = js_sys::Object::new();
         let _ = js_sys::Reflect::set(
             window.as_ref(),
-            &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"),
+            &JsValue::from_str(SEMANTIC_DEBUG_KEY),
             object.as_ref(),
         );
         object.into()

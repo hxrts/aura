@@ -1,4 +1,4 @@
-use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot};
+use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiSnapshot};
 use aura_ui::UiController;
 use js_sys::{JSON, Object};
 use serde_wasm_bindgen::to_value;
@@ -16,13 +16,13 @@ use crate::harness::driver_contract::{
     PUSH_SEMANTIC_SUBMIT_STATE_KEY, SEMANTIC_ENQUEUE_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY,
     WAKE_SEMANTIC_QUEUE_KEY,
 };
+use crate::harness::browser_contract::{
+    DRIVER_PUSH_RENDER_HEARTBEAT_KEY, DRIVER_PUSH_UI_STATE_KEY, RENDER_HEARTBEAT_JSON_KEY,
+    RENDER_HEARTBEAT_KEY, RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+    SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY, UI_PUBLICATION_STATE_KEY, UI_STATE_CACHE_KEY,
+    UI_STATE_JSON_KEY,
+};
 use crate::harness::window_contract::{object_set, HarnessWindowContract};
-
-pub(crate) const UI_PUBLICATION_STATE_KEY: &str = "__AURA_UI_PUBLICATION_STATE__";
-pub(crate) const RENDER_HEARTBEAT_PUBLICATION_STATE_KEY: &str =
-    "__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__";
-pub(crate) const SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY: &str =
-    "__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PublicationReliability {
@@ -191,8 +191,8 @@ fn publish_ui_snapshot_now(
     operation_count: usize,
 ) -> bool {
     let window_contract = HarnessWindowContract::new(window.clone());
-    let cache_publish = window_contract.set("__AURA_UI_STATE_CACHE__", &value);
-    let json_publish = window_contract.set("__AURA_UI_STATE_JSON__", &JsValue::from_str(&json));
+    let cache_publish = window_contract.set(UI_STATE_CACHE_KEY, &value);
+    let json_publish = window_contract.set(UI_STATE_JSON_KEY, &JsValue::from_str(&json));
 
     let mut publication_issues = Vec::new();
     let cache_published = match cache_publish {
@@ -211,7 +211,7 @@ fn publish_ui_snapshot_now(
     };
 
     let (binding_mode, driver_push_published) = window_contract
-        .function("__AURA_DRIVER_PUSH_UI_STATE")
+        .function(DRIVER_PUSH_UI_STATE_KEY)
     .map(|function| {
         if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
             publication_issues.push(format!("driver_push_failed: {}", js_value_detail(&error)));
@@ -275,9 +275,9 @@ pub(crate) fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &Ren
     };
 
     let window_contract = HarnessWindowContract::new(window.clone());
-    let heartbeat_publish = window_contract.set("__AURA_RENDER_HEARTBEAT__", &value);
+    let heartbeat_publish = window_contract.set(RENDER_HEARTBEAT_KEY, &value);
     let heartbeat_json_publish =
-        window_contract.set("__AURA_RENDER_HEARTBEAT_JSON__", &JsValue::from_str(&json));
+        window_contract.set(RENDER_HEARTBEAT_JSON_KEY, &JsValue::from_str(&json));
 
     let mut publication_issues = Vec::new();
     let heartbeat_published = match heartbeat_publish {
@@ -302,7 +302,7 @@ pub(crate) fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &Ren
     };
 
     let driver_push_published =
-        if let Some(function) = window_contract.function("__AURA_DRIVER_PUSH_RENDER_HEARTBEAT") {
+        if let Some(function) = window_contract.function(DRIVER_PUSH_RENDER_HEARTBEAT_KEY) {
         if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
             publication_issues.push(format!("driver_push_failed: {}", js_value_detail(&error)));
             log_js_callback_error("driver render heartbeat push", &error);
@@ -354,6 +354,10 @@ pub(crate) fn semantic_submit_surface_state() -> PublicationState {
     let active_generation = active_generation();
     let has_controller = crate::harness::generation::current_controller().is_some();
     let phase = current_browser_shell_phase();
+    let queue_installed = web_sys::window()
+        .map(HarnessWindowContract::new)
+        .and_then(|window_contract| window_contract.function(SEMANTIC_ENQUEUE_KEY))
+        .is_some();
     if active_generation == 0 {
         return PublicationState::new(
             PublicationStatus::Unavailable,
@@ -365,6 +369,13 @@ pub(crate) fn semantic_submit_surface_state() -> PublicationState {
         return PublicationState::new(
             PublicationStatus::Unavailable,
             "semantic_submit_surface_missing_controller",
+            PublicationBindingMode::SemanticBridge,
+        );
+    }
+    if !queue_installed {
+        return PublicationState::new(
+            PublicationStatus::Unavailable,
+            "semantic_submit_surface_missing_queue",
             PublicationBindingMode::SemanticBridge,
         );
     }
@@ -500,7 +511,7 @@ pub(crate) fn mark_generation_rebinding(window: &web_sys::Window, reason: &str) 
 pub(crate) fn published_ui_snapshot_value(window: &web_sys::Window) -> JsValue {
     let window_contract = HarnessWindowContract::new(window.clone());
     let published_json = window_contract
-        .get("__AURA_UI_STATE_JSON__")
+        .get(UI_STATE_JSON_KEY)
         .ok()
         .filter(|value| !value.is_null() && !value.is_undefined());
 
@@ -511,7 +522,7 @@ pub(crate) fn published_ui_snapshot_value(window: &web_sys::Window) -> JsValue {
     }
 
     let published_cache = window_contract
-        .get("__AURA_UI_STATE_CACHE__")
+        .get(UI_STATE_CACHE_KEY)
         .ok()
         .filter(|value| !value.is_null() && !value.is_undefined());
     if let Some(published_cache) = published_cache {
@@ -528,10 +539,6 @@ pub(crate) fn published_ui_snapshot_value(window: &web_sys::Window) -> JsValue {
         ),
     );
     JsValue::NULL
-}
-
-fn snapshot_marks_generation_ready(snapshot: &UiSnapshot) -> bool {
-    snapshot.readiness == UiReadiness::Ready
 }
 
 pub(crate) fn publish_ui_snapshot(snapshot: &UiSnapshot) {
@@ -573,9 +580,13 @@ pub(crate) fn publish_ui_snapshot(snapshot: &UiSnapshot) {
         return;
     }
     let generation_id = active_generation();
-    if snapshot_marks_generation_ready(&published_snapshot) {
-        mark_generation_ready(generation_id);
-    }
+    // Generation readiness tracks the canonical publication boundary for the
+    // active browser shell generation, not whether the domain is already at
+    // `UiReadiness::Ready`. Shared semantic startup/restart recovery must be
+    // allowed to proceed once the current generation has published its first
+    // authoritative snapshot, including pre-account and other non-ready
+    // screens.
+    mark_generation_ready(generation_id);
 
     let callback_window = window.clone();
     let callback = Closure::once_into_js(move || {

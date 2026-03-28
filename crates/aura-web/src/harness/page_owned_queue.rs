@@ -9,21 +9,22 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::harness::commands;
+use crate::harness::browser_contract::SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY;
 use crate::harness::driver_contract::{
     MUTATION_QUEUE_INSTALLED_KEY, PENDING_NAV_SCREEN_KEY, PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY,
     PENDING_SEMANTIC_QUEUE_SEED_KEY, PUSH_RUNTIME_STAGE_RESULT_KEY,
     PUSH_SEMANTIC_RESULT_KEY, PUSH_SEMANTIC_SUBMIT_STATE_KEY, RUNTIME_STAGE_BUSY_KEY,
-    RUNTIME_STAGE_DEBUG_KEY, RUNTIME_STAGE_ENQUEUE_KEY, RUNTIME_STAGE_QUEUE_KEY,
-    RUNTIME_STAGE_RESULTS_KEY, RUNTIME_STAGE_WAKE_SCHEDULED_KEY, RuntimeStageQueuePayload,
-    SEMANTIC_BUSY_KEY, SEMANTIC_DEBUG_KEY, SEMANTIC_ENQUEUE_KEY, SEMANTIC_QUEUE_KEY,
-    SEMANTIC_RESULTS_KEY, SEMANTIC_WAKE_SCHEDULED_KEY, SemanticQueuePayload,
-    WAKE_PENDING_NAV_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY, WAKE_SEMANTIC_QUEUE_KEY,
+    RUNTIME_STAGE_DEBUG_KEY, RUNTIME_STAGE_ENQUEUE_DISPATCHED_KEY,
+    RUNTIME_STAGE_ENQUEUE_KEY, RUNTIME_STAGE_QUEUE_KEY, RUNTIME_STAGE_RESULTS_KEY,
+    RUNTIME_STAGE_WAKE_SCHEDULED_KEY, RuntimeStageQueuePayload, SEMANTIC_BUSY_KEY,
+    SEMANTIC_DEBUG_KEY, SEMANTIC_ENQUEUE_DISPATCHED_KEY, SEMANTIC_ENQUEUE_KEY,
+    SEMANTIC_QUEUE_KEY, SEMANTIC_RESULTS_KEY, SEMANTIC_WAKE_SCHEDULED_KEY,
+    SemanticQueuePayload, WAKE_PENDING_NAV_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY,
+    WAKE_SEMANTIC_QUEUE_KEY,
 };
 use crate::harness::generation::current_controller;
 use crate::harness::mutation::{apply_browser_ui_mutation, schedule_browser_task_next_tick};
-use crate::harness::publication::{
-    semantic_submit_surface_state, PublicationStatus, SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY,
-};
+use crate::harness::publication::{semantic_submit_surface_state, PublicationStatus};
 use crate::harness::window_contract::{
     ensure_object_field as ensure_window_object_field, object_set,
     HarnessWindowContract,
@@ -123,6 +124,8 @@ fn ensure_window_globals(window: &web_sys::Window) -> Result<(), JsValue> {
     ensure_array(&window_contract, RUNTIME_STAGE_QUEUE_KEY)?;
     ensure_object(&window_contract, SEMANTIC_RESULTS_KEY)?;
     ensure_object(&window_contract, RUNTIME_STAGE_RESULTS_KEY)?;
+    ensure_object(&window_contract, SEMANTIC_ENQUEUE_DISPATCHED_KEY)?;
+    ensure_object(&window_contract, RUNTIME_STAGE_ENQUEUE_DISPATCHED_KEY)?;
     ensure_semantic_debug(window)?;
     ensure_runtime_stage_debug(window)?;
     ensure_bool(&window_contract, SEMANTIC_BUSY_KEY, false)?;

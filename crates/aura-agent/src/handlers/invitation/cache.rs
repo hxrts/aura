@@ -141,44 +141,9 @@ impl<'a> InvitationCacheHandler<'a> {
 
     pub(super) fn parse_imported_invitation_bytes(
         bytes: &[u8],
-        preserved: Option<&Invitation>,
+        _preserved: Option<&Invitation>,
     ) -> Option<StoredImportedInvitation> {
-        let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-        let object = value.as_object()?;
-        let is_legacy_payload =
-            !object.contains_key("status") || !object.contains_key("created_at");
-        if is_legacy_payload {
-            return Self::load_legacy_imported_invitation_value(value, preserved);
-        }
-        serde_json::from_value::<StoredImportedInvitation>(value).ok()
-    }
-
-    fn load_legacy_imported_invitation_value(
-        value: serde_json::Value,
-        preserved: Option<&Invitation>,
-    ) -> Option<StoredImportedInvitation> {
-        let shareable = serde_json::from_value::<ShareableInvitation>(value).ok()?;
-        let preserved_status = preserved
-            .filter(|invitation| {
-                invitation.invitation_id == shareable.invitation_id
-                    && invitation.status != InvitationStatus::Pending
-            })
-            .map(|invitation| invitation.status.clone())
-            .unwrap_or(InvitationStatus::Pending);
-        let preserved_created_at = preserved
-            .map(|invitation| invitation.created_at)
-            .unwrap_or(0);
-
-        // Legacy storage note: older entries lack `status` and `created_at`
-        // and are stored as bare `ShareableInvitation`. New writes always use
-        // `StoredImportedInvitation`, so this branch only fires for
-        // pre-migration data and can go away after local stores are
-        // re-persisted through the current shape.
-        Some(StoredImportedInvitation {
-            shareable,
-            status: preserved_status,
-            created_at: preserved_created_at,
-        })
+        serde_json::from_slice::<StoredImportedInvitation>(bytes).ok()
     }
 
     pub(super) async fn get_invitation(&self, invitation_id: &InvitationId) -> Option<Invitation> {

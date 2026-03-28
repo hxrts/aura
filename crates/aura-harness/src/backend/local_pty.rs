@@ -1,4 +1,5 @@
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -208,6 +209,7 @@ struct RunningSession {
     ui_snapshot_thread: Option<thread::JoinHandle<()>>,
     ui_snapshot_stop: Arc<AtomicU64>,
     transient_root: PathBuf,
+    socket_root: PathBuf,
     ui_snapshot_socket_path: PathBuf,
     ui_snapshot_file_path: PathBuf,
     command_socket_path: PathBuf,
@@ -348,9 +350,15 @@ impl LocalPtyBackend {
             })
     }
 
+    fn socket_root(&self) -> PathBuf {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.config.id.hash(&mut hasher);
+        self.transient_root().hash(&mut hasher);
+        std::env::temp_dir().join(format!("aura-h-{:016x}", hasher.finish()))
+    }
+
     fn ui_state_socket_path(&self, session_generation: u64) -> PathBuf {
-        self.transient_root()
-            .join(format!("ui-state-gen{session_generation}.sock"))
+        self.socket_root().join(format!("u{session_generation:x}.sock"))
     }
 
     fn ui_state_file_path(&self, session_generation: u64) -> PathBuf {
@@ -359,8 +367,7 @@ impl LocalPtyBackend {
     }
 
     fn command_socket_path(&self, session_generation: u64) -> PathBuf {
-        self.transient_root()
-            .join(format!("command-gen{session_generation}.sock"))
+        self.socket_root().join(format!("c{session_generation:x}.sock"))
     }
 
     fn clipboard_file_path(&self) -> PathBuf {
@@ -758,6 +765,13 @@ impl InstanceBackend for LocalPtyBackend {
                 transient_root.display()
             )
         })?;
+        let socket_root = self.socket_root();
+        fs::create_dir_all(&socket_root).with_context(|| {
+            format!(
+                "failed to create instance socket root {}",
+                socket_root.display()
+            )
+        })?;
         if Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env).is_none() {
             let clipboard_file = Self::absolutize_path(self.clipboard_file_path());
             command.env(
@@ -927,6 +941,7 @@ impl InstanceBackend for LocalPtyBackend {
             ui_snapshot_thread: Some(ui_snapshot_thread),
             ui_snapshot_stop,
             transient_root,
+            socket_root,
             ui_snapshot_socket_path,
             ui_snapshot_file_path,
             command_socket_path,
@@ -966,6 +981,7 @@ impl InstanceBackend for LocalPtyBackend {
             let _ = fs::remove_file(&session.command_socket_path);
             let _ = fs::remove_file(&session.ui_snapshot_socket_path);
             let _ = fs::remove_file(&session.clipboard_file_path);
+            let _ = fs::remove_dir_all(&session.socket_root);
             let _ = fs::remove_dir_all(&session.transient_root);
         }
 

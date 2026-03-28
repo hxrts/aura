@@ -1,3 +1,4 @@
+pub(crate) mod browser_contract;
 pub(crate) mod channel_selection;
 pub(crate) mod commands;
 pub(crate) mod driver_contract;

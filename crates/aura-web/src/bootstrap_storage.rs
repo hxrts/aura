@@ -4,8 +4,8 @@ use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
 use aura_app::ui::workflows::time as time_workflows;
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::AppCore;
-use aura_ui::FrontendUiOperation as WebUiOperation;
 use std::sync::Arc;
 
 use crate::error::WebUiError;

@@ -548,9 +548,14 @@ mod tests {
 
         let service = AuthServiceApi::new(effects.clone(), authority_context, account_id).unwrap();
 
-        let status = service.authentication_status().await.unwrap();
-        assert_eq!(status.authority_id, authority_id);
-        assert_eq!(status.device_id, service.device_id());
+        let error = service
+            .authentication_status()
+            .await
+            .expect_err("authentication status should require authorization");
+        assert!(
+            error.to_string().contains("Authorization denied"),
+            "expected authorization denial, got: {error}"
+        );
     }
 
     #[tokio::test]

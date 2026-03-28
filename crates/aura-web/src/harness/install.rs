@@ -10,6 +10,10 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::future_to_promise;
 
 use crate::harness::commands;
+use crate::harness::browser_contract::{
+    HARNESS_API_KEY, HARNESS_CLIPBOARD_KEY, HARNESS_OBSERVE_KEY, RENDER_HEARTBEAT_KEY,
+    RENDER_HEARTBEAT_STATE_KEY, UI_STATE_OBSERVE_KEY,
+};
 use crate::harness::page_owned_queue;
 use crate::harness::publication::{
     initialize_harness_publication_state, published_ui_snapshot_value,
@@ -214,7 +218,7 @@ pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
         if let Some(window) = web_sys::window() {
             if let Ok(value) = Reflect::get(
                 window.as_ref(),
-                &JsValue::from_str("__AURA_HARNESS_CLIPBOARD__"),
+                &JsValue::from_str(HARNESS_CLIPBOARD_KEY),
             ) {
                 if let Some(text) = value.as_string() {
                     if !text.is_empty() {
@@ -445,12 +449,12 @@ pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
     install_page_owned_mutation_queues(&window)?;
     Reflect::set(
         window.as_ref(),
-        &JsValue::from_str("__AURA_HARNESS__"),
+        &JsValue::from_str(HARNESS_API_KEY),
         &harness,
     )?;
     Reflect::set(
         window.as_ref(),
-        &JsValue::from_str("__AURA_HARNESS_OBSERVE__"),
+        &JsValue::from_str(HARNESS_OBSERVE_KEY),
         &observe,
     )?;
     initialize_harness_publication_state(&window);
@@ -475,7 +479,7 @@ pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         window.as_ref(),
-        &JsValue::from_str("__AURA_UI_STATE__"),
+        &JsValue::from_str(UI_STATE_OBSERVE_KEY),
         read_only_ui_state.as_ref().unchecked_ref(),
     )?;
     read_only_ui_state.forget();
@@ -487,7 +491,7 @@ pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
         };
         Reflect::get(
             window.as_ref(),
-            &JsValue::from_str("__AURA_RENDER_HEARTBEAT__"),
+            &JsValue::from_str(RENDER_HEARTBEAT_KEY),
         )
         .unwrap_or(JsValue::NULL)
     }) as Box<dyn FnMut() -> JsValue>);
@@ -498,7 +502,7 @@ pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
     )?;
     Reflect::set(
         window.as_ref(),
-        &JsValue::from_str("__AURA_RENDER_HEARTBEAT_STATE__"),
+        &JsValue::from_str(RENDER_HEARTBEAT_STATE_KEY),
         render_heartbeat.as_ref().unchecked_ref(),
     )?;
     render_heartbeat.forget();

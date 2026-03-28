@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::path::Path;
@@ -164,13 +165,27 @@ impl HarnessCoordinator {
         let instance_claim_paths = instance_order
             .iter()
             .map(|instance_id| {
+                let mode = instance_modes
+                    .get(instance_id)
+                    .unwrap_or_else(|| panic!("missing instance mode for {instance_id}"));
+                let bind_address = instance_bind_addresses
+                    .get(instance_id)
+                    .unwrap_or_else(|| panic!("missing bind address for {instance_id}"));
+                let data_dir = instance_data_dirs
+                    .get(instance_id)
+                    .unwrap_or_else(|| panic!("missing data_dir for {instance_id}"));
+                let transient_dir = instance_transient_dirs
+                    .get(instance_id)
+                    .unwrap_or_else(|| panic!("missing transient_dir for {instance_id}"));
+                let claim_key =
+                    instance_claim_key(instance_id, mode, bind_address, data_dir, transient_dir);
                 (
                     instance_id.clone(),
                     workspace_root()
                         .join(".tmp")
                         .join("harness")
                         .join("instance-claims")
-                        .join(format!("{instance_id}.json")),
+                        .join(format!("{claim_key}.json")),
                 )
             })
             .collect::<HashMap<_, _>>();
@@ -1584,6 +1599,22 @@ fn process_alive(pid: u32) -> bool {
         Err(Errno::EPERM) => true,
         Err(_) => false,
     }
+}
+
+fn instance_claim_key(
+    instance_id: &str,
+    mode: &InstanceMode,
+    bind_address: &str,
+    data_dir: &Path,
+    transient_dir: &Path,
+) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    instance_id.hash(&mut hasher);
+    format!("{mode:?}").hash(&mut hasher);
+    bind_address.hash(&mut hasher);
+    data_dir.hash(&mut hasher);
+    transient_dir.hash(&mut hasher);
+    format!("{instance_id}-{:016x}", hasher.finish())
 }
 
 fn clear_directory_contents(dir: &Path) -> Result<()> {

@@ -11,7 +11,7 @@ mod neighborhood;
 mod settings;
 mod wizard;
 
-use crate::clipboard::ClipboardPort;
+use aura_app::frontend_primitives::ClipboardPort;
 use crate::model::{
     ActiveModal, ModalState, ScreenId, SettingsSection, TextModalState, ToastState, UiModel,
 };
@@ -260,7 +260,7 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
 #[cfg(test)]
 mod tests {
     use super::{apply_named_key, apply_text_keys};
-    use crate::clipboard::{ClipboardPort, MemoryClipboard};
+    use aura_app::frontend_primitives::{ClipboardPort, MemoryClipboard};
     use crate::model::{
         ActiveModal, AddDeviceModalState, AddDeviceWizardStep, CreateChannelModalState,
         CreateChannelWizardStep, CreateInvitationModalState, ModalState, ScreenId, SettingsSection,

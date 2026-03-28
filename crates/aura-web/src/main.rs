@@ -20,7 +20,7 @@ cfg_if! {
         mod web_clipboard;
         mod workflows;
 
-        use aura_ui::FrontendUiOperation as WebUiOperation;
+        use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
         use shell::{apply_harness_mode_document_flags, App};
 
         pub(crate) use shell::{
@@ -407,6 +407,29 @@ mod tests {
         assert!(
             semantic_publish_index < animation_frame_index,
             "semantic snapshot publication must happen before render-heartbeat scheduling"
+        );
+    }
+
+    #[test]
+    fn generation_ready_tracks_snapshot_publication_not_domain_ready() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let publication_path = repo_root.join("crates/aura-web/src/harness/publication.rs");
+        let source = std::fs::read_to_string(&publication_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", publication_path.display())
+        });
+
+        let publish_start = source
+            .find("pub(crate) fn publish_ui_snapshot(snapshot: &UiSnapshot) {")
+            .unwrap_or_else(|| panic!("missing publish_ui_snapshot"));
+        let publish_block = &source[publish_start..];
+
+        assert!(
+            publish_block.contains("mark_generation_ready(generation_id);"),
+            "published snapshots must mark the active generation ready through the canonical publication path",
+        );
+        assert!(
+            !publish_block.contains("snapshot.readiness == UiReadiness::Ready"),
+            "generation-ready publication must not be gated on domain UiReadiness::Ready",
         );
     }
 

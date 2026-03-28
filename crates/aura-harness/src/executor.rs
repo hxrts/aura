@@ -221,6 +221,7 @@ impl ScenarioExecutor {
                 budgets,
             );
         }
+        #[allow(deprecated)]
         let compatibility_steps = scenario
             .compatibility_steps()
             .ok_or_else(|| anyhow!("non-semantic scenarios must expose compatibility steps"))?
@@ -4833,7 +4834,7 @@ mod tests {
                 name: "executor-test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(5),
@@ -4919,7 +4920,7 @@ mod tests {
                 name: "executor-determinism".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(11),
@@ -4987,7 +4988,7 @@ mod tests {
                 name: "executor-chat-command".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(7),
@@ -5176,7 +5177,7 @@ mod tests {
                 name: "executor-send-clipboard".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(8),
@@ -5256,7 +5257,7 @@ mod tests {
             panic!("start_all failed: {error}");
         }
 
-        let clipboard_path = alice_data.join(".harness-clipboard.txt");
+        let clipboard_path = alice_data.join(".harness-transient/clipboard.txt");
         let writer_thread = std::thread::spawn(move || {
             blocking_sleep(std::time::Duration::from_millis(200));
             let _ = std::fs::write(&clipboard_path, "invite-code-123\n");
@@ -5301,7 +5302,7 @@ mod tests {
                 name: "executor-send-clipboard-chunked".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(9),
@@ -5385,7 +5386,7 @@ mod tests {
             panic!("start_all failed: {error}");
         }
 
-        let clipboard_path = alice_data.join(".harness-clipboard.txt");
+        let clipboard_path = alice_data.join(".harness-transient/clipboard.txt");
         let _ = std::fs::write(&clipboard_path, format!("{long_payload}\n"));
 
         if let Err(error) =

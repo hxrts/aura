@@ -1500,7 +1500,7 @@ mod tests {
         );
         assert!(
             driver_source.contains("from \"./driver_contract.js\";")
-                && driver_source.contains("window[RUNTIME_STAGE_ENQUEUE_KEY](payload)")
+                && driver_source.contains("window[runtimeStageEnqueueKey](payload)")
                 && driver_source.contains("buildRuntimeStageQueuePayloadJson("),
             "browser driver should submit runtime-identity staging through the dedicated driver contract module instead of re-spelling queue globals or payload builders inline"
         );
@@ -1526,7 +1526,7 @@ mod tests {
             "browser harness bridge should reuse the production-owned driver contract module and keep semantic replay ownership inside the generation-aware page queue"
         );
         assert!(
-            driver_source.contains("window[SEMANTIC_ENQUEUE_KEY](payload)")
+            driver_source.contains("window[semanticEnqueueKey](payload)")
                 && driver_source.contains("buildSemanticQueuePayloadJson(")
                 && !driver_source.contains("request_json: requestJson"),
             "browser driver should submit semantic commands through the dedicated driver contract module instead of open-coded queue globals or payload JSON"
@@ -1623,8 +1623,8 @@ mod tests {
             "driver startup should not keep the in-page storage reset loop"
         );
         assert!(
-            driver_source.contains("window.__AURA_DRIVER_WAKE_PENDING_NAV__?.();"),
-            "navigation should wake an explicit pending-nav runner"
+            driver_source.contains("window[wakePendingNavKey]?.();"),
+            "navigation should wake an explicit pending-nav runner through the shared driver contract"
         );
         assert!(
             !driver_source.contains("window.setTimeout(drain, 16)"),

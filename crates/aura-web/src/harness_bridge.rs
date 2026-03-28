@@ -3,6 +3,7 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
+use aura_app::frontend_primitives::FrontendUiOperation;
 use aura_core::{AuthorityId, DeviceId};
 use aura_ui::UiController;
 use std::cell::RefCell;
@@ -114,7 +115,7 @@ pub async fn submit_bootstrap_handoff(handoff: BootstrapHandoff) -> Result<(), J
     let _ = await_browser_promise_with_timeout(
         promise,
         30_000,
-        aura_ui::FrontendUiOperation::SubmitBootstrapHandoff,
+        FrontendUiOperation::SubmitBootstrapHandoff,
         "WEB_BOOTSTRAP_HANDOFF_REJECTED",
         "WEB_BOOTSTRAP_HANDOFF_TIMEOUT",
         "WEB_BOOTSTRAP_HANDOFF_TIMEOUT_SCHEDULE_FAILED",
@@ -139,7 +140,7 @@ pub async fn stage_runtime_identity(serialized_identity: String) -> Result<(), J
     let _ = await_browser_promise_with_timeout(
         promise,
         30_000,
-        aura_ui::FrontendUiOperation::SubmitBootstrapHandoff,
+        FrontendUiOperation::SubmitBootstrapHandoff,
         "WEB_RUNTIME_IDENTITY_STAGE_REJECTED",
         "WEB_RUNTIME_IDENTITY_STAGE_TIMEOUT",
         "WEB_RUNTIME_IDENTITY_STAGE_TIMEOUT_SCHEDULE_FAILED",
