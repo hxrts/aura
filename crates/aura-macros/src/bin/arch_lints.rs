@@ -522,68 +522,76 @@ fn scan_concurrency(file: &Path, source: &str, syntax: &File) -> Vec<String> {
 
 fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<String> {
     let path = display_path(file);
-    if !path.starts_with("crates/aura-app/src/frontend_primitives/") {
+    if !is_frontend_portability_path(&path) {
         return Vec::new();
     }
 
     let mut violations = Vec::new();
+    let patterns = [
+        (
+            "std::sync::Mutex",
+            "shared frontend task ownership must use the sanctioned frontend waiter abstraction instead of std::sync::Mutex",
+        ),
+        (
+            "std::sync::RwLock",
+            "shared frontend task ownership must use the sanctioned frontend waiter abstraction instead of std::sync::RwLock",
+        ),
+        (
+            "parking_lot::Mutex",
+            "shared frontend primitives must remain platform-neutral; do not use native-only parking_lot mutexes",
+        ),
+        (
+            "parking_lot::RwLock",
+            "shared frontend primitives must remain platform-neutral; do not use native-only parking_lot rwlocks",
+        ),
+        (
+            "std::sync::Condvar",
+            "shared frontend primitives must remain platform-neutral; do not use native-only condition variables",
+        ),
+        (
+            "lock_blocking(",
+            "shared frontend primitives must remain wasm-safe; do not use blocking async-lock APIs",
+        ),
+        (
+            "std::thread::spawn",
+            "shared frontend primitives must use the sanctioned frontend task owner instead of native thread spawning",
+        ),
+        (
+            "tokio::task::spawn_blocking",
+            "shared frontend primitives must remain wasm-safe; do not use spawn_blocking in shared frontend code",
+        ),
+        (
+            "tokio::time::sleep",
+            "shared frontend primitives must not own platform-specific sleep mechanics directly",
+        ),
+        (
+            "gloo_timers::future::sleep",
+            "shared frontend primitives must not own browser-specific sleep mechanics directly",
+        ),
+        (
+            "wasm_bindgen_futures::spawn_local",
+            "shared frontend primitives must use the sanctioned frontend task owner instead of direct platform-specific spawn_local",
+        ),
+        (
+            "tokio::spawn",
+            "shared frontend primitives must use the sanctioned frontend task owner instead of direct tokio::spawn",
+        ),
+        (
+            "dioxus::prelude::spawn",
+            "shared frontend primitives must use the sanctioned frontend task owner instead of direct dioxus spawn",
+        ),
+    ];
+    let filtered_patterns = patterns
+        .into_iter()
+        .filter(|(pattern, _)| {
+            !(path == "crates/aura-web/src/task_owner.rs"
+                && *pattern == "wasm_bindgen_futures::spawn_local")
+        })
+        .collect::<Vec<_>>();
     scan_line_patterns(
         file,
         source,
-        &[
-            (
-                "std::sync::Mutex",
-                "shared frontend task ownership must use the sanctioned frontend waiter abstraction instead of std::sync::Mutex",
-            ),
-            (
-                "std::sync::RwLock",
-                "shared frontend task ownership must use the sanctioned frontend waiter abstraction instead of std::sync::RwLock",
-            ),
-            (
-                "parking_lot::Mutex",
-                "shared frontend primitives must remain platform-neutral; do not use native-only parking_lot mutexes",
-            ),
-            (
-                "parking_lot::RwLock",
-                "shared frontend primitives must remain platform-neutral; do not use native-only parking_lot rwlocks",
-            ),
-            (
-                "std::sync::Condvar",
-                "shared frontend primitives must remain platform-neutral; do not use native-only condition variables",
-            ),
-            (
-                "lock_blocking(",
-                "shared frontend primitives must remain wasm-safe; do not use blocking async-lock APIs",
-            ),
-            (
-                "std::thread::spawn",
-                "shared frontend primitives must use the sanctioned frontend task owner instead of native thread spawning",
-            ),
-            (
-                "tokio::task::spawn_blocking",
-                "shared frontend primitives must remain wasm-safe; do not use spawn_blocking in shared frontend code",
-            ),
-            (
-                "tokio::time::sleep",
-                "shared frontend primitives must not own platform-specific sleep mechanics directly",
-            ),
-            (
-                "gloo_timers::future::sleep",
-                "shared frontend primitives must not own browser-specific sleep mechanics directly",
-            ),
-            (
-                "wasm_bindgen_futures::spawn_local",
-                "shared frontend primitives must use the sanctioned frontend task owner instead of direct platform-specific spawn_local",
-            ),
-            (
-                "tokio::spawn",
-                "shared frontend primitives must use the sanctioned frontend task owner instead of direct tokio::spawn",
-            ),
-            (
-                "dioxus::prelude::spawn",
-                "shared frontend primitives must use the sanctioned frontend task owner instead of direct dioxus spawn",
-            ),
-        ],
+        &filtered_patterns,
         &ignored_test_lines(syntax),
         &mut violations,
     );
@@ -592,7 +600,7 @@ fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<St
 
 fn scan_semantic_bridge_contracts(file: &Path, syntax: &File) -> Vec<String> {
     let path = display_path(file);
-    if !path.starts_with("crates/aura-web/src/harness/") {
+    if !is_semantic_bridge_contract_path(&path) {
         return Vec::new();
     }
 
@@ -701,6 +709,18 @@ fn scan_semantic_bridge_contracts(file: &Path, syntax: &File) -> Vec<String> {
     }
 
     violations
+}
+
+fn is_frontend_portability_path(path: &str) -> bool {
+    path.starts_with("crates/aura-app/src/frontend_primitives/")
+        || path == "crates/aura-terminal/src/tui/semantic_lifecycle.rs"
+        || path == "crates/aura-ui/src/semantic_lifecycle.rs"
+        || path == "crates/aura-web/src/task_owner.rs"
+}
+
+fn is_semantic_bridge_contract_path(path: &str) -> bool {
+    path.starts_with("crates/aura-web/src/harness/")
+        || path == "crates/aura-web/src/harness_bridge.rs"
 }
 
 fn scan_crypto_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<String> {
@@ -1030,6 +1050,44 @@ fn maybe_flag_builder_method_without_must_use(
             file,
             method.sig.ident.span(),
             format!("builder `{}` must be marked #[must_use]", method.sig.ident),
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_frontend_portability_path, is_semantic_bridge_contract_path};
+
+    #[test]
+    fn frontend_portability_scope_covers_shared_frontend_owners() {
+        assert!(is_frontend_portability_path(
+            "crates/aura-app/src/frontend_primitives/task_owner.rs"
+        ));
+        assert!(is_frontend_portability_path(
+            "crates/aura-terminal/src/tui/semantic_lifecycle.rs"
+        ));
+        assert!(is_frontend_portability_path(
+            "crates/aura-ui/src/semantic_lifecycle.rs"
+        ));
+        assert!(is_frontend_portability_path("crates/aura-web/src/task_owner.rs"));
+        assert!(!is_frontend_portability_path(
+            "crates/aura-web/src/harness/install.rs"
+        ));
+    }
+
+    #[test]
+    fn semantic_bridge_contract_scope_covers_bridge_root_and_harness_modules() {
+        assert!(is_semantic_bridge_contract_path(
+            "crates/aura-web/src/harness/commands.rs"
+        ));
+        assert!(is_semantic_bridge_contract_path(
+            "crates/aura-web/src/harness/install.rs"
+        ));
+        assert!(is_semantic_bridge_contract_path(
+            "crates/aura-web/src/harness_bridge.rs"
+        ));
+        assert!(!is_semantic_bridge_contract_path(
+            "crates/aura-web/src/task_owner.rs"
         ));
     }
 }

@@ -6,15 +6,12 @@ use aura_app::ui::workflows::system as system_workflows;
 use aura_app::AppCore;
 use aura_ui::{FrontendUiOperation as WebUiOperation, UiController};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use futures::channel::oneshot;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::future::Future;
 use std::sync::Arc;
-use wasm_bindgen::closure::Closure;
-use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::JsFuture;
 
+use crate::browser_promises::{browser_sleep_ms, fetch_text_with_timeout};
 use crate::error::{log_web_error, WebUiError};
 use crate::task_owner::{new_web_task_owner, WebTaskOwner};
 
@@ -77,63 +74,22 @@ async fn drain_harness_transport_mailbox(agent: &AuraAgent) -> Result<usize, Web
         &format!("authority={authority};url={url}"),
     );
 
-    let window = web_sys::window().ok_or_else(|| {
-        WebUiError::operation(
-            WebUiOperation::BackgroundSync,
-            "WEB_HARNESS_TRANSPORT_WINDOW_UNAVAILABLE",
-            "window unavailable for harness transport poll".to_string(),
-        )
-    })?;
     emit_browser_harness_debug_event("transport_poll_fetch_begin", &format!("authority={authority}"));
-    let response_value = JsFuture::from(window.fetch_with_str(&url))
-        .await
-        .map_err(|error| {
-            WebUiError::operation(
-                WebUiOperation::BackgroundSync,
-                "WEB_HARNESS_TRANSPORT_POLL_FAILED",
-                format!("failed to poll harness transport mailbox: {error:?}"),
-            )
-        })?;
+    let payload_text = fetch_text_with_timeout(
+        &url,
+        3_000,
+        WebUiOperation::BackgroundSync,
+        "WEB_HARNESS_TRANSPORT_POLL_FAILED",
+        "WEB_HARNESS_TRANSPORT_POLL_TIMEOUT",
+        "WEB_HARNESS_TRANSPORT_POLL_TEXT_AWAIT_FAILED",
+        "WEB_HARNESS_TRANSPORT_POLL_TEXT_TIMEOUT",
+    )
+    .await?;
     emit_browser_harness_debug_event(
         "transport_poll_fetch_resolved",
         &format!("authority={authority}"),
     );
-    let response: web_sys::Response = response_value.dyn_into().map_err(|value: JsValue| {
-        WebUiError::operation(
-            WebUiOperation::BackgroundSync,
-            "WEB_HARNESS_TRANSPORT_RESPONSE_CAST_FAILED",
-            format!("failed to cast harness transport poll response: {value:?}"),
-        )
-    })?;
-    emit_browser_harness_debug_event(
-        "transport_poll_response_cast",
-        &format!("authority={authority};ok={}", response.ok()),
-    );
-    let text_promise = response.text().map_err(|error| {
-        WebUiError::operation(
-            WebUiOperation::BackgroundSync,
-            "WEB_HARNESS_TRANSPORT_POLL_TEXT_FAILED",
-            format!("failed to read harness transport mailbox response body: {error:?}"),
-        )
-    })?;
     emit_browser_harness_debug_event("transport_poll_text_begin", &format!("authority={authority}"));
-    let payload_text = JsFuture::from(text_promise)
-    .await
-    .map_err(|error| {
-        WebUiError::operation(
-            WebUiOperation::BackgroundSync,
-            "WEB_HARNESS_TRANSPORT_POLL_TEXT_AWAIT_FAILED",
-            format!("failed while awaiting harness transport mailbox response body: {error:?}"),
-        )
-    })?
-    .as_string()
-    .ok_or_else(|| {
-        WebUiError::operation(
-            WebUiOperation::BackgroundSync,
-            "WEB_HARNESS_TRANSPORT_POLL_TEXT_INVALID",
-            "harness transport mailbox response body was not a string".to_string(),
-        )
-    })?;
     emit_browser_harness_debug_event(
         "transport_poll_text_resolved",
         &format!("authority={authority};bytes={}", payload_text.len()),
@@ -189,42 +145,6 @@ async fn drain_harness_transport_mailbox(agent: &AuraAgent) -> Result<usize, Web
     Ok(drained)
 }
 
-async fn browser_sleep_ms(ms: u64) -> Result<(), WebUiError> {
-    let window = web_sys::window().ok_or_else(|| {
-        WebUiError::operation(
-            WebUiOperation::BackgroundSync,
-            "WEB_BROWSER_SLEEP_WINDOW_UNAVAILABLE",
-            "window unavailable for browser maintenance timer".to_string(),
-        )
-    })?;
-    let timeout_ms = ms.min(i32::MAX as u64) as i32;
-    let (tx, rx) = oneshot::channel::<()>();
-    let callback = Closure::once(move || {
-        let _ = tx.send(());
-    });
-    window
-        .set_timeout_with_callback_and_timeout_and_arguments_0(
-            callback.as_ref().unchecked_ref(),
-            timeout_ms,
-        )
-        .map_err(|error| {
-            WebUiError::operation(
-                WebUiOperation::BackgroundSync,
-                "WEB_BROWSER_SLEEP_SCHEDULE_FAILED",
-                format!("failed to schedule browser maintenance timer: {error:?}"),
-            )
-        })?;
-    callback.forget();
-    rx.await.map_err(|_| {
-        WebUiError::operation(
-            WebUiOperation::BackgroundSync,
-            "WEB_BROWSER_SLEEP_DROPPED",
-            "browser maintenance timer dropped before completion".to_string(),
-        )
-    })?;
-    Ok(())
-}
-
 fn replace_generation_maintenance_owner() -> WebTaskOwner {
     let owner = new_web_task_owner();
     ACTIVE_GENERATION_MAINTENANCE.with(|slot| {
@@ -262,7 +182,17 @@ pub(crate) fn spawn_browser_maintenance_loop<F, Fut>(
     owner.spawn_local_cancellable(async move {
         loop {
             tick().await;
-            if let Err(error) = browser_sleep_ms(interval_ms).await {
+            if let Err(error) = browser_sleep_ms(
+                interval_ms,
+                _sleep_operation,
+                "WEB_BROWSER_SLEEP_WINDOW_UNAVAILABLE",
+                _sleep_error_code,
+                "WEB_BROWSER_SLEEP_DROPPED",
+                "window unavailable for browser maintenance timer",
+                "browser maintenance timer",
+            )
+            .await
+            {
                 log_web_error(
                     "warn",
                     &WebUiError::operation(_sleep_operation, _sleep_error_code, error.to_string()),

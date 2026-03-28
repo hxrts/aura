@@ -1,11 +1,8 @@
-use async_lock::RwLock;
-use aura_agent::AuraAgent;
 use aura_app::ui::contract::{
     classify_screen_item_id, classify_semantic_settings_section_item_id, ScreenId,
 };
 use aura_app::ui::scenarios::SemanticCommandRequest;
 use aura_app::ui::types::BootstrapRuntimeIdentity;
-use aura_app::AppCore;
 use aura_ui::{control_selector, UiController};
 use js_sys::{Array, Function, Object, Reflect};
 use serde_json::{from_str, to_string};

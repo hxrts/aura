@@ -3,15 +3,13 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use async_lock::RwLock;
-use aura_agent::AuraAgent;
-use aura_app::AppCore;
 use aura_core::{AuthorityId, DeviceId};
 use aura_ui::UiController;
 use std::cell::RefCell;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
+use crate::browser_promises::await_browser_promise_with_timeout;
 use crate::harness::{
     generation::{
         self, browser_shell_phase_label, reset_published_ui_snapshot_dedup,
@@ -113,7 +111,19 @@ pub async fn submit_bootstrap_handoff(handoff: BootstrapHandoff) -> Result<(), J
     let submitter =
         submitter.ok_or_else(|| JsValue::from_str("bootstrap handoff submitter is unavailable"))?;
     let promise = submitter(handoff);
-    let _ = wasm_bindgen_futures::JsFuture::from(promise).await?;
+    let _ = await_browser_promise_with_timeout(
+        promise,
+        30_000,
+        aura_ui::FrontendUiOperation::SubmitBootstrapHandoff,
+        "WEB_BOOTSTRAP_HANDOFF_REJECTED",
+        "WEB_BOOTSTRAP_HANDOFF_TIMEOUT",
+        "WEB_BOOTSTRAP_HANDOFF_TIMEOUT_SCHEDULE_FAILED",
+        "WEB_BOOTSTRAP_HANDOFF_TIMEOUT_DROPPED",
+        "bootstrap handoff bridge submission",
+        None,
+    )
+    .await
+    .map_err(|error| JsValue::from_str(&error.user_message()))?;
     web_sys::console::log_1(
         &format!("[web-harness] submit_bootstrap_handoff done detail={detail}").into(),
     );
@@ -126,7 +136,19 @@ pub async fn stage_runtime_identity(serialized_identity: String) -> Result<(), J
     let stager =
         stager.ok_or_else(|| JsValue::from_str("runtime identity stager is unavailable"))?;
     let promise = stager(serialized_identity);
-    let _ = wasm_bindgen_futures::JsFuture::from(promise).await?;
+    let _ = await_browser_promise_with_timeout(
+        promise,
+        30_000,
+        aura_ui::FrontendUiOperation::SubmitBootstrapHandoff,
+        "WEB_RUNTIME_IDENTITY_STAGE_REJECTED",
+        "WEB_RUNTIME_IDENTITY_STAGE_TIMEOUT",
+        "WEB_RUNTIME_IDENTITY_STAGE_TIMEOUT_SCHEDULE_FAILED",
+        "WEB_RUNTIME_IDENTITY_STAGE_TIMEOUT_DROPPED",
+        "runtime identity staging bridge submission",
+        None,
+    )
+    .await
+    .map_err(|error| JsValue::from_str(&error.user_message()))?;
     web_sys::console::log_1(&"[web-harness] stage_runtime_identity done".into());
     Ok(())
 }
