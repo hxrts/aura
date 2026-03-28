@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Compile-time DSL parser for choreographies with Aura-specific annotations. Generates type-safe Rust code for distributed protocols. Also hosts Rust-native syntax lints via `src/bin/arch_lints.rs`.
+Compile-time DSL parser for choreographies with Aura-specific annotations. Generates type-safe Rust code for distributed protocols. Also hosts Rust-native syntax lints via `src/bin/arch_lints.rs` and ownership/runtime boundary lints via `src/bin/ownership_lints.rs`.
 
 ## Scope
 
@@ -13,8 +13,8 @@ Compile-time DSL parser for choreographies with Aura-specific annotations. Gener
 | `aura_effect_handlers` macro: Mock/real handler variant boilerplate | |
 | `aura_handler_adapters` macro: AuraHandler trait adapters | |
 | `aura_test` attribute macro: Async test setup with tracing | |
-| `src/bin/arch_lints.rs`: Rust-native syntax lints for `just lint-arch-syntax` | |
-| `src/bin/ownership_lints.rs`: Ownership/runtime boundary enforcement lints | |
+| `src/bin/arch_lints.rs`: Rust-native syntax lints for `just lint-arch-syntax`, including shared frontend portability and semantic-bridge contract checks | |
+| `src/bin/ownership_lints.rs`: Ownership/runtime boundary enforcement lints for `just ci-ownership-policy`, including frontend handoff, best-effort side-effect, and proof-bearing success boundaries | |
 | Validated ownership marker attrs: `authoritative_source`, `strong_reference`, `weak_identifier` | Unchecked ownership marker comments or ad hoc tags |
 
 ## Dependencies
@@ -49,6 +49,7 @@ Failure mode:
 Verification hooks:
 - just test-crate aura-macros
 - just lint-arch-syntax
+- just ci-ownership-policy
 
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines annotation semantics for guards and leakage.
@@ -116,6 +117,7 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | actor_owned missing capacity | `boundaries/actor_owned_missing_capacity.rs` | covered (compile_fail) |
 | actor_owned missing gate | `boundaries/actor_owned_missing_gate.rs` | covered (compile_fail) |
 | actor_owned bypass without macro | `boundaries/actor_owned_bypass_without_macro.rs` | covered (compile_fail) |
+| actor_owned embeds move-owned or terminal publication field | `boundaries/actor_owned_forbidden_field.rs` | covered (compile_fail) |
 | capability_boundary missing category | `boundaries/capability_boundary_missing_category.rs` | covered (compile_fail) |
 | ownership_lifecycle invalid variant | `boundaries/ownership_lifecycle_invalid_variant.rs` | covered (compile_fail) |
 | authoritative_source metadata or target invalid | `boundaries/authoritative_source_missing_kind.rs`, `boundaries/authoritative_source_invalid_kind.rs`, `boundaries/authoritative_source_on_struct.rs` | covered (compile_fail) |

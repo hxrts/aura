@@ -475,7 +475,7 @@ return true;
 }
 
 pub(crate) fn install_window_harness_api(
-    harness_transport_context: Option<(Arc<RwLock<AppCore>>, Arc<AuraAgent>)>,
+    _harness_transport_context: Option<(Arc<RwLock<AppCore>>, Arc<AuraAgent>)>,
 ) -> Result<(), JsValue> {
     let harness = Object::new();
     let observe = Object::new();
@@ -805,15 +805,9 @@ try {
     )?;
     tail_log.forget();
 
-    let process_harness_transport_context = harness_transport_context.clone();
     let process_harness_transport = Closure::wrap(Box::new(move || -> js_sys::Promise {
-        let context = process_harness_transport_context.clone();
         future_to_promise(async move {
-            if let Some((app_core, agent)) = context {
-                crate::shell::run_harness_transport_tick_for(app_core, agent).await;
-            } else {
-                crate::shell::run_harness_transport_tick_once().await;
-            }
+            crate::shell::run_harness_transport_tick_once().await;
             Ok(JsValue::UNDEFINED)
         })
     }) as Box<dyn FnMut() -> js_sys::Promise>);
@@ -832,6 +826,7 @@ if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_INSTALLED__) {
 }
 window.__AURA_HARNESS_TRANSPORT_INTERVAL_INSTALLED__ = true;
 window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
+window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = null;
 window.setInterval(() => {
   if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__) {
     return;
@@ -841,10 +836,32 @@ window.setInterval(() => {
     return;
   }
   window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = true;
-  Promise.resolve(processTransport())
+  if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ !== null) {
+    window.clearTimeout(window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__);
+  }
+  window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = window.setTimeout(() => {
+    window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
+    window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = null;
+  }, 1500);
+  let result;
+  try {
+    result = processTransport();
+  } catch (_) {
+    window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
+    if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ !== null) {
+      window.clearTimeout(window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__);
+      window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = null;
+    }
+    return;
+  }
+  Promise.resolve(result)
     .catch(() => {})
     .finally(() => {
       window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
+      if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ !== null) {
+        window.clearTimeout(window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__);
+        window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = null;
+      }
     });
 }, 100);
 return true;

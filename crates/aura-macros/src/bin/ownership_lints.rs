@@ -2781,16 +2781,19 @@ fn check_parity_critical_callback_settlement(
     let has_handoff = function_contains_call(block, "handoff_to_app_workflow");
     if has_handoff {
         // Functions that delegate to spawn_handoff_workflow_callback_with_success
-        // are safe — that helper internally calls apply_handed_off_terminal_status.
+        // are safe, as are callbacks that drive the canonical
+        // SemanticOperationTransfer::run_workflow path or settle explicitly.
         let uses_canonical_helper =
             function_contains_call(block, "spawn_handoff_workflow_callback_with_success");
+        let uses_canonical_transfer_runner = function_contains_call(block, "run_workflow");
         let has_explicit_settlement =
             function_contains_call(block, "apply_handed_off_terminal_status");
 
-        if !uses_canonical_helper && !has_explicit_settlement {
+        if !uses_canonical_helper && !uses_canonical_transfer_runner && !has_explicit_settlement {
             violations.push(format!(
                 "{}:{}: function `{}` calls handoff_to_app_workflow without a paired \
-                 apply_handed_off_terminal_status or spawn_handoff_workflow_callback_with_success",
+                 apply_handed_off_terminal_status, SemanticOperationTransfer::run_workflow, \
+                 or spawn_handoff_workflow_callback_with_success",
                 file.display(),
                 function_line,
                 function_name

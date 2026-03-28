@@ -10,8 +10,8 @@ pub(crate) use bootstrap::{
     submit_runtime_bootstrap_handoff,
 };
 pub(crate) use maintenance::{
-    cancel_generation_maintenance_loops, run_harness_transport_tick_for,
-    run_harness_transport_tick_once, spawn_generation_maintenance_loops,
+    cancel_generation_maintenance_loops, run_harness_transport_tick_once,
+    spawn_generation_maintenance_loops,
 };
 pub(crate) use storage::{
     active_storage_prefix, clear_pending_device_enrollment_code, clear_storage_key,

@@ -418,52 +418,9 @@ async fn run_harness_transport_tick(app_core: Arc<RwLock<AppCore>>, agent: Arc<A
         "transport_tick_polled",
         &format!("authority={};drained={drained}", agent.authority_id()),
     );
+    let _ = app_core;
     if drained == 0 {
         return;
-    }
-
-    if let Err(error) = agent.process_ceremony_acceptances().await {
-        log_web_error(
-            "warn",
-            &WebUiError::operation(
-                WebUiOperation::BackgroundSync,
-                "WEB_HARNESS_TRANSPORT_CEREMONY_ACCEPT_FAILED",
-                error.to_string(),
-            ),
-        );
-    }
-
-    let runtime = { app_core.read().await.runtime().cloned() };
-    if let Some(runtime) = runtime {
-        if let Err(error) = runtime_workflows::timeout_runtime_call(
-            &runtime,
-            "web_harness_transport_drain",
-            "process_ceremony_messages",
-            std::time::Duration::from_secs(3),
-            || runtime.process_ceremony_messages(),
-        )
-        .await
-        {
-            log_web_error(
-                "warn",
-                &WebUiError::operation(
-                    WebUiOperation::BackgroundSync,
-                    "WEB_HARNESS_TRANSPORT_PROCESS_MESSAGES_FAILED",
-                    error.to_string(),
-                ),
-            );
-        }
-    }
-
-    if let Err(error) = system_workflows::refresh_account(&app_core).await {
-        log_web_error(
-            "warn",
-            &WebUiError::operation(
-                WebUiOperation::BackgroundSync,
-                "WEB_HARNESS_TRANSPORT_REFRESH_ACCOUNT_FAILED",
-                error.to_string(),
-            ),
-        );
     }
 }
 
@@ -472,13 +429,6 @@ pub(crate) async fn run_harness_transport_tick_once() {
     if let Some(context) = context {
         run_harness_transport_tick(context.app_core, context.agent).await;
     }
-}
-
-pub(crate) async fn run_harness_transport_tick_for(
-    app_core: Arc<RwLock<AppCore>>,
-    agent: Arc<AuraAgent>,
-) {
-    run_harness_transport_tick(app_core, agent).await;
 }
 
 pub(crate) fn spawn_generation_maintenance_loops(
@@ -513,7 +463,7 @@ pub(crate) fn spawn_generation_maintenance_loops(
             agent.clone(),
         );
         spawn_ceremony_acceptance_loop(&owner, controller, app_core, agent);
-    } else {
+    } else if !account_ready {
         ACTIVE_HARNESS_TRANSPORT_TICK.with(|slot| {
             slot.borrow_mut().take();
         });

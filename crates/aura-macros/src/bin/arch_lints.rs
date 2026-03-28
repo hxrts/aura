@@ -540,8 +540,36 @@ fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<St
                 "shared frontend task ownership must use the sanctioned frontend waiter abstraction instead of std::sync::RwLock",
             ),
             (
+                "parking_lot::Mutex",
+                "shared frontend primitives must remain platform-neutral; do not use native-only parking_lot mutexes",
+            ),
+            (
+                "parking_lot::RwLock",
+                "shared frontend primitives must remain platform-neutral; do not use native-only parking_lot rwlocks",
+            ),
+            (
+                "std::sync::Condvar",
+                "shared frontend primitives must remain platform-neutral; do not use native-only condition variables",
+            ),
+            (
                 "lock_blocking(",
                 "shared frontend primitives must remain wasm-safe; do not use blocking async-lock APIs",
+            ),
+            (
+                "std::thread::spawn",
+                "shared frontend primitives must use the sanctioned frontend task owner instead of native thread spawning",
+            ),
+            (
+                "tokio::task::spawn_blocking",
+                "shared frontend primitives must remain wasm-safe; do not use spawn_blocking in shared frontend code",
+            ),
+            (
+                "tokio::time::sleep",
+                "shared frontend primitives must not own platform-specific sleep mechanics directly",
+            ),
+            (
+                "gloo_timers::future::sleep",
+                "shared frontend primitives must not own browser-specific sleep mechanics directly",
             ),
             (
                 "wasm_bindgen_futures::spawn_local",
@@ -592,7 +620,16 @@ fn scan_semantic_bridge_contracts(file: &Path, syntax: &File) -> Vec<String> {
                 "begin_exact_ui_operation",
                 "browser semantic bridge files must not begin raw exact operations outside harness/commands.rs",
             ),
+            (
+                "WeakChannelSelection",
+                "browser semantic bridge files must not emit weak channel fallback payloads outside harness/commands.rs",
+            ),
         ] {
+            if path == "crates/aura-web/src/harness/channel_selection.rs"
+                && pattern == "WeakChannelSelection"
+            {
+                continue;
+            }
             if source.contains(pattern) {
                 violations.push(format_violation(
                     file,

@@ -47,6 +47,9 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 | Arch | `just check-arch` | Verify architecture compliance |
 | Arch | `just ci-ownership-policy` | Run ownership/runtime boundary enforcement |
 | Arch | `just lint-arch-syntax` | Run Rust-native syntax/policy lints that replaced grep-heavy `arch.sh` checks |
+| Arch | `just ci-annotation-ratchet` | Run changed-files ownership annotation ratchets |
+| Arch | `just ci-frontend-portability` | Run shared frontend portability and semantic-bridge syntax lints |
+| Arch | `just ci-frontend-handoff-boundary` | Run frontend semantic owner allocation / handoff boundary lints |
 
 ## Architecture Overview
 
@@ -110,6 +113,19 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
   parity-critical ownership/runtime boundaries; it is the default aggregate lane
   for compile-fail ownership guards, Rust-native ownership lints, retained
   runtime/integration checks, and governance wrappers
+- **Annotation ratchet gate**: new parity-critical workflow boundaries,
+  runtime services, and first-party capability gates must pass the
+  changed-files ratchets in `scripts/check/ownership-annotation-ratchet.sh`;
+  prefer adding the declaration-layer attribute over adding a shell allowlist
+- **Frontend handoff boundary**: direct `LocalTerminalOperationOwner::submit`
+  and `WorkflowHandoffOperationOwner::submit` allocation stays inside the
+  sanctioned terminal/browser submission boundaries; callback factories and
+  bridge helpers must go through the exported submit helpers instead of
+  allocating owners ad hoc
+- **Shared frontend portability**: code under
+  `aura-app::frontend_primitives` must stay wasm-safe and platform-neutral;
+  do not introduce blocking locks, native thread primitives, platform-specific
+  spawn/sleep helpers, or handwritten browser-only coordination there
 
 ### Conditional Compilation
 

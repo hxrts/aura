@@ -188,7 +188,9 @@ const CHANNEL_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 30_000;
 const CHANNEL_INVITATION_ACCEPT_RECONCILE_TIMEOUT_MS: u64 = 120_000;
 const INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS: usize = 4;
 const INVITATION_ACCEPT_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 500;
+#[cfg(feature = "signals")]
 const PENDING_INVITATION_AUTHORITATIVE_ATTEMPTS: usize = 24;
+#[cfg(feature = "signals")]
 const PENDING_INVITATION_AUTHORITATIVE_BACKOFF_MS: u64 = 100;
 const CONTACT_LINK_ATTEMPTS: usize = 32;
 const CONTACT_LINK_BACKOFF_MS: u64 = 100;
@@ -1336,6 +1338,10 @@ pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
     .await
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_readiness"
+)]
 async fn publish_authoritative_contact_invitation_accepted(
     app_core: &Arc<RwLock<AppCore>>,
     authority_id: AuthorityId,

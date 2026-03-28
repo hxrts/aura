@@ -80,6 +80,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Playwright-to-page semantic submission uses the page-owned semantic queue
   (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`) so the driver does not own
   browser semantic lifecycle or runtime/bootstrap state.
+- Browser semantic routing, weak selected-channel fallback handling, and raw
+  semantic response construction stay centralized in `src/harness/commands.rs`;
+  `src/harness/install.rs` and sibling bridge files must delegate through that
+  module rather than constructing parallel submission paths.
 - Browser semantic submit readiness publication is page-owned and must report
   whether the page-owned enqueue surface is installed (`enqueue_ready`) so
   driver startup/recovery waits bind to generation-owned readiness instead of
@@ -170,6 +174,7 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 - `just ci-observed-layer-boundaries`
 - `just ci-frontend-handoff-boundary`
 - `just ci-actor-lifecycle`
+- `just ci-frontend-portability`
 
 ### Compatibility Policy
 

@@ -452,6 +452,10 @@ fn channel_membership_fact(
     }
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_readiness"
+)]
 pub(in crate::workflows) async fn publish_authoritative_channel_membership_ready(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,

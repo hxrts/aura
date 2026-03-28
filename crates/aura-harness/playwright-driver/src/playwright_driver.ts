@@ -2478,6 +2478,7 @@ async function startPage(params) {
         uiStateWaiters: [],
         requiredUiStateRevision: 0,
         requiredUiGeneration: 0,
+        lastHarnessTransportAt: 0,
         currentUiGeneration: 0,
         lastMainFrameNavigationAt: Date.now(),
         observationEpoch: 0,
@@ -3314,6 +3315,11 @@ async function waitForUiState(params) {
   const deadlineMs = Date.now() + timeoutMs;
 
   while (true) {
+    if (Date.now() - Number(session.lastHarnessTransportAt ?? 0) >= 250) {
+      await processHarnessTransport(session, instanceId);
+      session.lastHarnessTransportAt = Date.now();
+    }
+
     if (session.uiStateCache && typeof session.uiStateCache === "object") {
       const cached =
         typeof session.uiStateCacheJson === "string"

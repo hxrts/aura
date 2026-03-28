@@ -417,6 +417,16 @@ impl LocalTerminalOperationOwner {
     }
 }
 
+pub(crate) fn submit_local_terminal_operation(
+    app_core: Arc<RwLock<AppCore>>,
+    tasks: Arc<UiTaskOwner>,
+    tx: UiUpdateSender,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+) -> LocalTerminalOperationOwner {
+    LocalTerminalOperationOwner::submit(app_core, tasks, tx, operation_id, kind)
+}
+
 impl WorkflowHandoffOperationOwner {
     pub(crate) fn submit(
         app_core: Arc<RwLock<AppCore>>,
