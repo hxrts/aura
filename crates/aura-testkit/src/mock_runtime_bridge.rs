@@ -3,6 +3,10 @@
 //! Provides a test-friendly implementation of the RuntimeBridge trait that
 //! uses in-memory state instead of real runtime infrastructure.
 //!
+//! This surface is intentionally native-only. It owns host task handles and
+//! uses short blocking critical sections for deterministic teardown, so it is
+//! not exported to wasm/shared test surfaces.
+//!
 //! Uses `std::sync::Mutex` because this is Layer 8 test infrastructure where:
 //! - task-handle bookkeeping is host-only and never held across `.await`
 //! - deterministic teardown needs short blocking critical sections

@@ -123,6 +123,7 @@ pub mod foundation;
 pub mod handlers; // Test and mock handlers moved from aura-protocol
 pub mod infrastructure;
 pub mod mock_effects;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mock_runtime_bridge;
 pub mod mocks;
 pub mod protocol_test; // Fluent protocol test API
@@ -146,6 +147,7 @@ pub use fixtures::*;
 pub use foundation::*;
 pub use infrastructure::*;
 pub use mock_effects::MockEffects;
+#[cfg(not(target_arch = "wasm32"))]
 pub use mock_runtime_bridge::MockRuntimeBridge;
 pub use mocks::*;
 #[cfg(not(target_arch = "wasm32"))]

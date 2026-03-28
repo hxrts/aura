@@ -30,6 +30,29 @@ Shared testing infrastructure providing test fixtures, effect system harnesses, 
 - Tests are deterministic and isolated.
 - Mock effects behave consistently with production ones.
 - Mock handlers MAY be stateful (using `Arc<Mutex<>>`) for controllable testing.
+- Host-only helpers must be explicit and local; shared or wasm-exercised test surfaces must stay aligned with the same async-trait and boundary contracts as production.
+
+### Host-Only vs Shared Test Surfaces
+
+`aura-testkit` now distinguishes between:
+
+- shared test surfaces, which remain available on native and wasm-targeted test lanes and must follow the same portability and boundary model as production-facing helpers
+- host-only test surfaces, which may use native task handles or short blocking critical sections, but must be explicitly gated and documented
+
+Current host-only surface:
+
+- `MockRuntimeBridge` in `src/mock_runtime_bridge.rs`
+
+Why it is host-only:
+
+- it owns native task handles for deterministic teardown
+- it provides a native testing bridge over `RuntimeBridge`
+- its short blocking critical sections are intentional for host-only deterministic cleanup, not a model for shared test infrastructure
+
+Enforcement:
+
+- `src/lib.rs` gates `mock_runtime_bridge` and the `MockRuntimeBridge` re-export behind `#[cfg(not(target_arch = "wasm32"))]`
+- `scripts/check/testkit-exception-boundary.sh` keeps the `clippy::disallowed_types` exception set explicit and local to named files
 
 ### InvariantMockContractFidelity
 

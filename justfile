@@ -651,6 +651,9 @@ ci-frontend-portability:
     cargo run -q -p aura-macros --bin arch_lints -- semantic-bridge-contracts crates
     just web-check
 
+ci-testkit-exception-boundary:
+    bash scripts/check/testkit-exception-boundary.sh
+
 ci-ownership-policy:
     just ci-ownership-categories
     just ci-annotation-ratchet
@@ -693,6 +696,7 @@ ci-ownership-policy:
     just ci-timeout-policy
     just ci-timeout-time-domains
     just ci-harness-ownership-policy
+    just ci-testkit-exception-boundary
 
 ci-annotation-ratchet:
     bash scripts/check/ownership-annotation-ratchet.sh semantic-owner
