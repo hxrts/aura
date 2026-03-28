@@ -28,6 +28,7 @@ use aura_ui::{
     },
     UiController,
 };
+use serde_json::{from_str, to_string};
 use std::cell::RefCell as StdRefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -56,6 +57,43 @@ pub(crate) fn browser_settings_section(
 ) -> aura_ui::model::SettingsSection {
     match section {
         SettingsSection::Devices => aura_ui::model::SettingsSection::Devices,
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct BrowserSemanticBridgeRequest(SemanticCommandRequest);
+
+impl BrowserSemanticBridgeRequest {
+    pub(crate) fn from_json(request_json: &str) -> Result<Self, JsValue> {
+        from_str::<SemanticCommandRequest>(request_json)
+            .map(Self)
+            .map_err(|error| JsValue::from_str(&format!("invalid semantic command request: {error}")))
+    }
+
+    pub(crate) async fn submit(
+        self,
+        controller: Arc<UiController>,
+    ) -> Result<BrowserSemanticBridgeResponse, JsValue> {
+        submit_semantic_command(controller, self.0)
+            .await
+            .map(BrowserSemanticBridgeResponse)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct BrowserSemanticBridgeResponse(SemanticCommandResponse);
+
+impl BrowserSemanticBridgeResponse {
+    pub(crate) fn into_json(self) -> Result<String, JsValue> {
+        to_string(&self.0).map_err(|error| {
+            JsValue::from_str(&format!(
+                "failed to serialize semantic command response: {error}"
+            ))
+        })
+    }
+
+    pub(crate) fn into_js_value(self) -> Result<JsValue, JsValue> {
+        self.into_json().map(|response_json| JsValue::from_str(&response_json))
     }
 }
 
@@ -1176,8 +1214,12 @@ pub(crate) async fn submit_semantic_command(
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        BrowserSemanticBridgeRequest, BrowserSemanticBridgeResponse, SemanticCommandResponse,
+    };
     use aura_app::ui::contract::OperationId;
     use aura_app::scenario_contract::{IntentAction, SubmissionContract, SubmissionValueContract};
+    use serde_json::json;
 
     #[test]
     fn start_device_enrollment_contract_requires_handle_submission() {
@@ -1213,6 +1255,31 @@ mod tests {
                 value: SubmissionValueContract::AuthoritativeChannelBinding,
             }
         );
+    }
+
+    #[test]
+    fn browser_semantic_bridge_request_rejects_invalid_json() {
+        let error = BrowserSemanticBridgeRequest::from_json("{")
+            .expect_err("invalid semantic command json should fail");
+        assert!(
+            error
+                .as_string()
+                .unwrap_or_default()
+                .contains("invalid semantic command request"),
+            "bridge request parse errors should stay typed and contextual"
+        );
+    }
+
+    #[test]
+    fn browser_semantic_bridge_response_serializes_contract_shape() {
+        let response =
+            BrowserSemanticBridgeResponse(SemanticCommandResponse::accepted_without_value());
+        let serialized = response
+            .into_json()
+            .expect("semantic bridge response should serialize");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&serialized).expect("serialized response should be valid json");
+        assert_eq!(parsed["status"], json!("accepted"));
     }
 
     #[test]

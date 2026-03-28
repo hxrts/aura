@@ -632,6 +632,10 @@ fn scan_semantic_bridge_contracts(file: &Path, syntax: &File) -> Vec<String> {
                 "WeakChannelSelection",
                 "browser semantic bridge files must not emit weak channel fallback payloads outside harness/commands.rs",
             ),
+            (
+                "from_str :: < SemanticCommandRequest >",
+                "browser semantic bridge files must not parse semantic command json directly outside the typed BrowserSemanticBridgeRequest surface",
+            ),
         ] {
             if path == "crates/aura-web/src/harness/channel_selection.rs"
                 && pattern == "WeakChannelSelection"
@@ -648,12 +652,21 @@ fn scan_semantic_bridge_contracts(file: &Path, syntax: &File) -> Vec<String> {
         }
 
         if path == "crates/aura-web/src/harness/install.rs"
-            && !source.contains("commands :: submit_semantic_command")
+            && !source.contains("BrowserSemanticBridgeRequest :: from_json")
         {
             violations.push(format_violation(
                 file,
                 Span::call_site(),
-                "browser harness install path must delegate semantic submission through harness/commands.rs".to_string(),
+                "browser harness install path must delegate semantic submission through the typed BrowserSemanticBridgeRequest surface in harness/commands.rs".to_string(),
+            ));
+        }
+        if path == "crates/aura-web/src/harness/page_owned_queue.rs"
+            && !source.contains("BrowserSemanticBridgeRequest :: from_json")
+        {
+            violations.push(format_violation(
+                file,
+                Span::call_site(),
+                "page-owned browser semantic queue must delegate semantic submission through the typed BrowserSemanticBridgeRequest surface in harness/commands.rs".to_string(),
             ));
         }
         return violations;

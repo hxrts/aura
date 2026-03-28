@@ -1433,6 +1433,14 @@ mod tests {
                 .unwrap_or_else(|error| {
                     panic!("failed to read browser harness installer: {error}")
                 });
+        let contract_source = std::fs::read_to_string(
+            workspace_root.join("crates/aura-web/src/harness/driver_contract.rs"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read browser harness driver contract: {error}"));
+        let queue_source = std::fs::read_to_string(
+            workspace_root.join("crates/aura-web/src/harness/page_owned_queue.rs"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read browser harness queue module: {error}"));
         let commands_source =
             std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness/commands.rs"))
                 .unwrap_or_else(|error| panic!("failed to read browser harness commands: {error}"));
@@ -1446,8 +1454,10 @@ mod tests {
         let backend_source = include_str!("playwright_browser.rs");
 
         assert!(
-            install_source.contains("invalid semantic command request"),
-            "browser bridge should reject malformed semantic requests with typed context"
+            commands_source.contains("BrowserSemanticBridgeRequest")
+                && commands_source.contains("invalid semantic command request")
+                && install_source.contains("BrowserSemanticBridgeRequest::from_json(&request_json)?"),
+            "browser bridge should reject malformed semantic requests with typed context through the shared typed bridge surface"
         );
         assert!(
             commands_source.contains("BootstrapHandoff::PendingAccountBootstrap {")
@@ -1457,6 +1467,12 @@ mod tests {
         assert!(
             install_source.contains("&JsValue::from_str(\"stage_runtime_identity\")"),
             "browser harness bridge should expose an explicit runtime identity staging entrypoint"
+        );
+        assert!(
+            install_source.contains("page_owned_queue::install(window)")
+                && !install_source.contains("Function::new_no_args(")
+                && !install_source.contains("include_str!(\"page_owned_mutation_queues.js\")"),
+            "browser harness install should stay a thin typed installer over the canonical Rust-owned page queue module"
         );
         assert!(
             !bridge_source.contains("&JsValue::from_str(\"submit_bootstrap_handoff\")"),
@@ -1477,10 +1493,10 @@ mod tests {
             "browser driver should advance the semantic observation baseline after semantic submission"
         );
         assert!(
-            install_source.contains("typeof harness?.stage_runtime_identity !== \"function\"")
-                && install_source
-                    .contains("window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__ = (payloadJson) => {"),
-            "browser harness bridge should own the runtime-stage queue and invoke the explicit runtime identity staging entrypoint inside the page"
+            contract_source.contains("pub(crate) const RUNTIME_STAGE_ENQUEUE_KEY")
+                && queue_source.contains("use crate::harness::driver_contract::{")
+                && queue_source.contains("crate::harness_bridge::stage_runtime_identity("),
+            "browser harness bridge should reuse the production-owned driver contract module and invoke the explicit runtime identity staging entrypoint inside the page"
         );
         assert!(
             driver_source.contains("window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__"),
@@ -1495,9 +1511,11 @@ mod tests {
             "browser driver must not own browser runtime-identity storage layout"
         );
         assert!(
-            install_source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ = (payloadJson) => {")
-                && install_source.contains("submitState?.status === \"ready\""),
-            "browser harness bridge should own a generation-aware page semantic queue instead of leaving semantic replay ownership to the driver"
+            contract_source.contains("pub(crate) const SEMANTIC_ENQUEUE_KEY")
+                && contract_source.contains("pub(crate) struct SemanticQueuePayload")
+                && queue_source.contains("BrowserSemanticBridgeRequest::from_json")
+                && queue_source.contains("semantic_submit_surface_state().status() != PublicationStatus::Ready"),
+            "browser harness bridge should reuse the production-owned driver contract module and keep semantic replay ownership inside the generation-aware page queue"
         );
         assert!(
             driver_source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__"),

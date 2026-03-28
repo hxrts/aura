@@ -1,17 +1,16 @@
 use aura_app::ui::contract::{
     classify_screen_item_id, classify_semantic_settings_section_item_id, ScreenId,
 };
-use aura_app::ui::scenarios::SemanticCommandRequest;
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_ui::{control_selector, UiController};
-use js_sys::{Array, Function, Object, Reflect};
-use serde_json::{from_str, to_string};
+use js_sys::{Array, JSON, Object, Reflect};
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::future_to_promise;
 
 use crate::harness::commands;
+use crate::harness::page_owned_queue;
 use crate::harness::publication::{
     initialize_harness_publication_state, published_ui_snapshot_value,
     refresh_semantic_submit_surface, semantic_submit_surface_state, PublicationBindingMode,
@@ -24,465 +23,7 @@ fn current_controller() -> Result<Arc<UiController>, JsValue> {
 }
 
 pub(crate) fn install_page_owned_mutation_queues(window: &web_sys::Window) -> Result<(), JsValue> {
-    let installer = Function::new_no_args(
-        r#"
-const window = globalThis;
-if (window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
-  window.__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE?.(
-    window.__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__ ?? null,
-  );
-  window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.();
-  window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__?.();
-  return true;
-}
-
-window.__AURA_DRIVER_PENDING_NAV_SCREEN__ =
-  window.__AURA_DRIVER_PENDING_NAV_SCREEN__ ?? null;
-window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__ =
-  Array.isArray(window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__)
-    ? window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__
-    : [];
-window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__ =
-  Array.isArray(window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__)
-    ? window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__
-    : [];
-window.__AURA_DRIVER_SEMANTIC_QUEUE__ =
-  window.__AURA_DRIVER_SEMANTIC_QUEUE__ ?? [];
-window.__AURA_DRIVER_SEMANTIC_RESULTS__ =
-  window.__AURA_DRIVER_SEMANTIC_RESULTS__ ?? Object.create(null);
-window.__AURA_DRIVER_SEMANTIC_BUSY__ =
-  window.__AURA_DRIVER_SEMANTIC_BUSY__ ?? false;
-window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ =
-  window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ ?? false;
-window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__ =
-  window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__ ?? [];
-window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__ =
-  window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__ ?? Object.create(null);
-window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ =
-  window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ ?? false;
-window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__ =
-  window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__ ?? false;
-window.__AURA_DRIVER_SEMANTIC_DEBUG__ =
-  window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? {
-    last_event: "installed",
-    active_command_id: null,
-    last_command_id: null,
-    last_completed_command_id: null,
-    last_result_ok: null,
-    last_error: null,
-    queue_depth: 0,
-    last_progress_at: Date.now(),
-  };
-window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ =
-  window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ ?? {
-    last_event: "installed",
-    active_command_id: null,
-    last_error: null,
-    queue_depth: 0,
-    last_progress_at: Date.now(),
-  };
-const normalizeDriverResultPayload = (value) => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch (error) {
-    return {
-      __driver_result_normalization_error: error?.message ?? String(error),
-    };
-  }
-};
-
-window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__ = (delayMs = 0) => {
-  const effectiveDelay =
-    Number.isFinite(delayMs) && delayMs >= 0 ? Number(delayMs) : 0;
-  if (effectiveDelay === 0) {
-    if (Array.isArray(window.__AURA_DRIVER_SEMANTIC_QUEUE__)) {
-      console.log(
-        `[driver-page] semantic queue wake depth=${window.__AURA_DRIVER_SEMANTIC_QUEUE__.length}`,
-      );
-    }
-    queueMicrotask(() => {
-      window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__?.();
-    });
-    return;
-  }
-  if (window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__) {
-    return;
-  }
-  window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ = true;
-  window.setTimeout(() => {
-    window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ = false;
-    if (Array.isArray(window.__AURA_DRIVER_SEMANTIC_QUEUE__)) {
-      console.log(
-        `[driver-page] semantic queue wake depth=${window.__AURA_DRIVER_SEMANTIC_QUEUE__.length}`,
-      );
-    }
-    window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__?.();
-  }, effectiveDelay);
-};
-
-window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__ = () => {
-  const semanticQueue = window.__AURA_DRIVER_SEMANTIC_QUEUE__;
-  const semanticResults = window.__AURA_DRIVER_SEMANTIC_RESULTS__;
-  const semanticDebug = window.__AURA_DRIVER_SEMANTIC_DEBUG__;
-  if (semanticDebug) {
-    semanticDebug.queue_depth = Array.isArray(semanticQueue)
-      ? semanticQueue.length
-      : 0;
-  }
-  if (Array.isArray(semanticQueue) && semanticQueue.length > 0) {
-    console.log(
-      `[driver-page] semantic queue pump depth=${semanticQueue.length};busy=${window.__AURA_DRIVER_SEMANTIC_BUSY__ === true}`,
-    );
-  }
-  if (
-    window.__AURA_DRIVER_SEMANTIC_BUSY__ ||
-    !Array.isArray(semanticQueue) ||
-    semanticQueue.length === 0
-  ) {
-    return;
-  }
-  const harness = window.__AURA_HARNESS__;
-  const submitState = window.__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__ ?? null;
-  const submitReady = submitState?.status === "ready";
-  if (!submitReady || typeof harness?.submit_semantic_command !== "function") {
-    const waitEvent = submitReady ? "queue_wait_bridge" : "queue_wait_ready";
-    if (semanticDebug?.last_event !== waitEvent) {
-      console.log(
-        `[driver-page] semantic queue wait event=${waitEvent};submit_ready=${submitReady};has_bridge=${typeof harness?.submit_semantic_command === "function"}`,
-      );
-    }
-    if (semanticDebug) {
-      semanticDebug.last_event = waitEvent;
-      semanticDebug.last_error = null;
-      semanticDebug.active_command_id = null;
-      semanticDebug.last_progress_at = Date.now();
-    }
-    window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.(25);
-    return;
-  }
-  const nextJson = semanticQueue.shift();
-  if (typeof nextJson !== "string" || nextJson.length === 0) {
-    queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
-    return;
-  }
-  let next = null;
-  try {
-    next = JSON.parse(nextJson);
-  } catch (error) {
-    if (semanticDebug) {
-      semanticDebug.last_event = "queue_parse_error";
-      semanticDebug.last_error = error?.message ?? String(error);
-      semanticDebug.active_command_id = null;
-      semanticDebug.last_progress_at = Date.now();
-    }
-    queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
-    return;
-  }
-  if (!next || typeof next.command_id !== "string") {
-    queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
-    return;
-  }
-  if (semanticDebug) {
-    semanticDebug.last_event = "queue_start";
-    semanticDebug.active_command_id = next.command_id;
-    semanticDebug.last_command_id = next.command_id;
-    semanticDebug.last_error = null;
-    semanticDebug.last_progress_at = Date.now();
-  }
-  window.__AURA_DRIVER_SEMANTIC_BUSY__ = true;
-  Promise.resolve()
-    .then(() => {
-      console.log(`[driver-page] semantic queue start id=${next.command_id}`);
-      const requestObject = JSON.parse(next.request_json);
-      if (semanticDebug) {
-        semanticDebug.last_event = "queue_invoke";
-        semanticDebug.last_progress_at = Date.now();
-      }
-      return harness.submit_semantic_command(requestObject);
-    })
-    .then((result) => {
-      console.log(`[driver-page] semantic queue ok id=${next.command_id}`);
-      const normalizedResult = normalizeDriverResultPayload(result);
-      semanticResults[next.command_id] = { ok: true, result: normalizedResult };
-      Promise.resolve(
-        window.__AURA_DRIVER_PUSH_SEMANTIC_RESULT?.({
-          command_id: next.command_id,
-          ok: true,
-          result: normalizedResult,
-        }),
-      ).catch(() => {});
-      if (semanticDebug) {
-        semanticDebug.last_event = "queue_ok";
-        semanticDebug.active_command_id = null;
-        semanticDebug.last_completed_command_id = next.command_id;
-        semanticDebug.last_result_ok = true;
-        semanticDebug.last_progress_at = Date.now();
-      }
-    })
-    .catch((error) => {
-      console.error(
-        `[driver-page] semantic queue error id=${next.command_id}: ${error?.message ?? String(error)}`,
-      );
-      semanticResults[next.command_id] = {
-        ok: false,
-        error: error?.message ?? String(error),
-      };
-      Promise.resolve(
-        window.__AURA_DRIVER_PUSH_SEMANTIC_RESULT?.({
-          command_id: next.command_id,
-          ok: false,
-          error: error?.message ?? String(error),
-        }),
-      ).catch(() => {});
-      if (semanticDebug) {
-        semanticDebug.last_event = "queue_error";
-        semanticDebug.last_error = error?.message ?? String(error);
-        semanticDebug.active_command_id = null;
-        semanticDebug.last_completed_command_id = next.command_id;
-        semanticDebug.last_result_ok = false;
-        semanticDebug.last_progress_at = Date.now();
-      }
-    })
-    .finally(() => {
-      window.__AURA_DRIVER_SEMANTIC_BUSY__ = false;
-      if (semanticDebug) {
-        semanticDebug.queue_depth = Array.isArray(semanticQueue)
-          ? semanticQueue.length
-          : 0;
-      }
-      queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
-    });
-};
-
-window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ = (payloadJson) => {
-  if (typeof payloadJson !== "string") {
-    return {
-      queue_depth: Array.isArray(window.__AURA_DRIVER_SEMANTIC_QUEUE__)
-        ? window.__AURA_DRIVER_SEMANTIC_QUEUE__.length
-        : null,
-      debug: window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null,
-    };
-  }
-  if (!Array.isArray(window.__AURA_DRIVER_SEMANTIC_QUEUE__)) {
-    throw new Error("window.__AURA_DRIVER_SEMANTIC_QUEUE__ is unavailable");
-  }
-  window.__AURA_DRIVER_SEMANTIC_QUEUE__.push(payloadJson);
-  if (window.__AURA_DRIVER_SEMANTIC_DEBUG__) {
-    window.__AURA_DRIVER_SEMANTIC_DEBUG__.last_event = "enqueued";
-    window.__AURA_DRIVER_SEMANTIC_DEBUG__.active_command_id = null;
-    window.__AURA_DRIVER_SEMANTIC_DEBUG__.queue_depth =
-      window.__AURA_DRIVER_SEMANTIC_QUEUE__.length;
-    window.__AURA_DRIVER_SEMANTIC_DEBUG__.last_progress_at = Date.now();
-  }
-  window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.();
-  return {
-    queue_depth: window.__AURA_DRIVER_SEMANTIC_QUEUE__.length,
-    debug: window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null,
-  };
-};
-
-if (
-  Array.isArray(window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__) &&
-  window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__.length > 0
-) {
-  const seededCount = window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__.length;
-  for (const payloadJson of window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__) {
-    if (typeof payloadJson === "string" && payloadJson.length > 0) {
-      window.__AURA_DRIVER_SEMANTIC_QUEUE__.push(payloadJson);
-    }
-  }
-  console.log(`[driver-page] semantic queue seed count=${seededCount}`);
-  window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__ = [];
-}
-
-if (
-  Array.isArray(window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__) &&
-  window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__.length > 0
-) {
-  const seededCount = window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__.length;
-  for (const payloadJson of window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__) {
-    if (typeof payloadJson === "string" && payloadJson.length > 0) {
-      window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.push(payloadJson);
-    }
-  }
-  console.log(`[driver-page] runtime stage queue seed count=${seededCount}`);
-  window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__ = [];
-}
-
-window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__ = (delayMs = 0) => {
-  const effectiveDelay =
-    Number.isFinite(delayMs) && delayMs >= 0 ? Number(delayMs) : 0;
-  if (effectiveDelay === 0) {
-    queueMicrotask(() => {
-      window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__?.();
-    });
-    return;
-  }
-  if (window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__) {
-    return;
-  }
-  window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__ = true;
-  window.setTimeout(() => {
-    window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__ = false;
-    window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__?.();
-  }, effectiveDelay);
-};
-
-window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__ = () => {
-  const harness = window.__AURA_HARNESS__;
-  const runtimeStageQueue = window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__;
-  const runtimeStageResults = window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__;
-  const runtimeStageDebug = window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__;
-  if (runtimeStageDebug) {
-    runtimeStageDebug.queue_depth = Array.isArray(runtimeStageQueue)
-      ? runtimeStageQueue.length
-      : 0;
-  }
-  if (
-    window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ ||
-    !Array.isArray(runtimeStageQueue) ||
-    runtimeStageQueue.length === 0
-  ) {
-    return;
-  }
-  if (typeof harness?.stage_runtime_identity !== "function") {
-    if (runtimeStageDebug) {
-      runtimeStageDebug.last_event = "queue_wait_bridge";
-      runtimeStageDebug.last_error = null;
-      runtimeStageDebug.active_command_id = null;
-      runtimeStageDebug.last_progress_at = Date.now();
-    }
-    window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__?.(25);
-    return;
-  }
-  const nextJson = runtimeStageQueue.shift();
-  if (typeof nextJson !== "string" || nextJson.length === 0) {
-    queueMicrotask(window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__);
-    return;
-  }
-  let next = null;
-  try {
-    next = JSON.parse(nextJson);
-  } catch (error) {
-    if (runtimeStageDebug) {
-      runtimeStageDebug.last_event = "queue_parse_error";
-      runtimeStageDebug.last_error = error?.message ?? String(error);
-      runtimeStageDebug.active_command_id = null;
-      runtimeStageDebug.last_progress_at = Date.now();
-    }
-    queueMicrotask(window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__);
-    return;
-  }
-  if (!next || typeof next.command_id !== "string") {
-    queueMicrotask(window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__);
-    return;
-  }
-  if (runtimeStageDebug) {
-    runtimeStageDebug.last_event = "queue_start";
-    runtimeStageDebug.active_command_id = next.command_id;
-    runtimeStageDebug.last_error = null;
-    runtimeStageDebug.last_progress_at = Date.now();
-  }
-  window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ = true;
-  Promise.resolve()
-    .then(() => {
-      console.log(`[driver-page] runtime stage queue start id=${next.command_id}`);
-      if (runtimeStageDebug) {
-        runtimeStageDebug.last_event = "queue_invoke";
-        runtimeStageDebug.last_progress_at = Date.now();
-      }
-      return harness.stage_runtime_identity(next.runtime_identity_json);
-    })
-    .then((result) => {
-      console.log(`[driver-page] runtime stage queue ok id=${next.command_id}`);
-      const normalizedResult = normalizeDriverResultPayload(result);
-      runtimeStageResults[next.command_id] = { ok: true, result: normalizedResult };
-      Promise.resolve(
-        window.__AURA_DRIVER_PUSH_RUNTIME_STAGE_RESULT?.({
-          command_id: next.command_id,
-          ok: true,
-          result: normalizedResult,
-        }),
-      ).catch(() => {});
-      if (runtimeStageDebug) {
-        runtimeStageDebug.last_event = "queue_ok";
-        runtimeStageDebug.active_command_id = null;
-        runtimeStageDebug.last_progress_at = Date.now();
-      }
-    })
-    .catch((error) => {
-      console.error(
-        `[driver-page] runtime stage queue error id=${next.command_id}: ${error?.message ?? String(error)}`,
-      );
-      runtimeStageResults[next.command_id] = {
-        ok: false,
-        error: error?.message ?? String(error),
-      };
-      Promise.resolve(
-        window.__AURA_DRIVER_PUSH_RUNTIME_STAGE_RESULT?.({
-          command_id: next.command_id,
-          ok: false,
-          error: error?.message ?? String(error),
-        }),
-      ).catch(() => {});
-      if (runtimeStageDebug) {
-        runtimeStageDebug.last_event = "queue_error";
-        runtimeStageDebug.last_error = error?.message ?? String(error);
-        runtimeStageDebug.active_command_id = null;
-        runtimeStageDebug.last_progress_at = Date.now();
-      }
-    })
-    .finally(() => {
-      window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ = false;
-      if (runtimeStageDebug) {
-        runtimeStageDebug.queue_depth = Array.isArray(runtimeStageQueue)
-          ? runtimeStageQueue.length
-          : 0;
-      }
-      queueMicrotask(window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__);
-    });
-};
-
-window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__ = (payloadJson) => {
-  if (typeof payloadJson !== "string") {
-    return {
-      queue_depth: Array.isArray(window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__)
-        ? window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.length
-        : null,
-      debug: window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ ?? null,
-    };
-  }
-  if (!Array.isArray(window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__)) {
-    throw new Error("window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__ is unavailable");
-  }
-  window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.push(payloadJson);
-  if (window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__) {
-    window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__.last_event = "enqueued";
-    window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__.active_command_id = null;
-    window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__.queue_depth =
-      window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.length;
-    window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__.last_progress_at = Date.now();
-  }
-  window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__?.();
-  return {
-    queue_depth: window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.length,
-    debug: window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ ?? null,
-  };
-};
-
-window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED = true;
-window.__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE?.(
-  window.__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__ ?? null,
-);
-window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.();
-window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__?.();
-return true;
-"#,
-    );
-    installer.call0(window.as_ref()).map(|_| ())
+    page_owned_queue::install(window)
 }
 
 pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
@@ -694,92 +235,59 @@ pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
     )?;
     read_clipboard.forget();
 
-    let submit_semantic_command_raw =
-        Closure::wrap(Box::new(move |request_json: String| -> js_sys::Promise {
+    let submit_semantic_command_fn =
+        Closure::wrap(Box::new(move |request: JsValue| -> js_sys::Promise {
             future_to_promise(async move {
-                commands::update_semantic_debug("raw_entry", None);
+                commands::update_semantic_debug("wrapper_entry", None);
                 web_sys::console::log_1(&"[web-harness] submit_semantic_command entry".into());
                 let outcome: Result<JsValue, JsValue> = async {
-                    let controller = current_controller()?;
-                    let request =
-                        from_str::<SemanticCommandRequest>(&request_json).map_err(|error| {
-                            JsValue::from_str(&format!("invalid semantic command request: {error}"))
+                    let request_json = JSON::stringify(&request)
+                        .map_err(|_| {
+                            JsValue::from_str(
+                                "failed to stringify semantic command request for bridge dispatch",
+                            )
+                        })?
+                        .as_string()
+                        .ok_or_else(|| {
+                            JsValue::from_str(
+                                "semantic command request stringification did not produce a string",
+                            )
                         })?;
+                    let controller = current_controller()?;
+                    let request = commands::BrowserSemanticBridgeRequest::from_json(&request_json)?;
                     commands::update_semantic_debug(
-                        "raw_parsed",
-                        Some(&format!("{:?}", request.intent)),
+                        "wrapper_parsed",
+                        Some(&request_json),
                     );
+                    let response = request.submit(controller).await?;
                     web_sys::console::log_1(
-                        &format!(
-                            "[web-harness] submit_semantic_command intent={:?}",
-                            request.intent
-                        )
-                        .into(),
+                        &"[web-harness] submit_semantic_command done".into(),
                     );
-                    let response = commands::submit_semantic_command(controller, request).await?;
-                    web_sys::console::log_1(&"[web-harness] submit_semantic_command done".into());
-                    to_string(&response)
-                        .map(|response_json| JsValue::from_str(&response_json))
-                        .map_err(|error| {
-                            JsValue::from_str(&format!(
-                                "failed to serialize semantic command response: {error}"
-                            ))
-                        })
+                    response.into_js_value()
                 }
                 .await;
 
                 match outcome {
                     Ok(value) => {
-                        commands::update_semantic_debug("raw_resolved", None);
+                        commands::update_semantic_debug("wrapper_resolved", None);
                         Ok(value)
                     }
                     Err(error) => {
                         commands::update_semantic_debug(
-                            "raw_rejected",
+                            "wrapper_rejected",
                             error.as_string().as_deref(),
                         );
                         Err(error)
                     }
                 }
             })
-        }) as Box<dyn FnMut(String) -> js_sys::Promise>);
-    Reflect::set(
-        &harness,
-        &JsValue::from_str("__submit_semantic_command_raw"),
-        submit_semantic_command_raw.as_ref().unchecked_ref(),
-    )?;
-    let submit_semantic_command_fn = Function::new_with_args(
-        "request",
-        r#"
-window.__AURA_SEMANTIC_DEBUG__ = window.__AURA_SEMANTIC_DEBUG__ || {};
-window.__AURA_SEMANTIC_DEBUG__.last_event = "wrapper_entry";
-console.log("[web-harness-js] submit_semantic_command wrapper entry");
-const raw = window.__AURA_HARNESS__?.__submit_semantic_command_raw;
-if (typeof raw !== "function") {
-  window.__AURA_SEMANTIC_DEBUG__.last_event = "wrapper_missing_raw";
-  return Promise.reject(
-    new Error("window.__AURA_HARNESS__.__submit_semantic_command_raw is unavailable"),
-  );
-}
-try {
-  const result = raw(JSON.stringify(request));
-  window.__AURA_SEMANTIC_DEBUG__.last_event = "wrapper_raw_return";
-  console.log("[web-harness-js] submit_semantic_command wrapper raw returned");
-  return Promise.resolve(result);
-} catch (error) {
-  window.__AURA_SEMANTIC_DEBUG__.last_event = "wrapper_threw";
-  window.__AURA_SEMANTIC_DEBUG__.last_detail = error?.message ?? String(error);
-  console.error("[web-harness-js] submit_semantic_command wrapper threw", error);
-  return Promise.reject(error);
-}
-"#,
-    );
+        }) as Box<dyn FnMut(JsValue) -> js_sys::Promise>);
     Reflect::set(
         &harness,
         &JsValue::from_str("submit_semantic_command"),
-        submit_semantic_command_fn.as_ref(),
+        submit_semantic_command_fn.as_ref().unchecked_ref(),
     )?;
-    submit_semantic_command_raw.forget();
+    submit_semantic_command_fn.forget();
 
     let get_authority_id = Closure::wrap(Box::new(move || -> JsValue {
         match current_controller() {

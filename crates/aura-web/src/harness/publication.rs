@@ -12,6 +12,10 @@ use crate::harness::generation::{
     mark_generation_ready, next_render_seq, note_published_ui_snapshot_json, BrowserShellPhase,
     UI_GENERATION_PHASE_KEY,
 };
+use crate::harness::driver_contract::{
+    PUSH_SEMANTIC_SUBMIT_STATE_KEY, SEMANTIC_ENQUEUE_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY,
+    WAKE_SEMANTIC_QUEUE_KEY,
+};
 
 pub(crate) const UI_PUBLICATION_STATE_KEY: &str = "__AURA_UI_PUBLICATION_STATE__";
 pub(crate) const RENDER_HEARTBEAT_PUBLICATION_STATE_KEY: &str =
@@ -371,10 +375,7 @@ pub(crate) fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &Ren
 }
 
 pub(crate) fn wake_page_owned_mutation_queues(window: &web_sys::Window) {
-    for key in [
-        "__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__",
-        "__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__",
-    ] {
+    for key in [WAKE_SEMANTIC_QUEUE_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY] {
         if let Ok(function) = Reflect::get(window.as_ref(), &JsValue::from_str(key))
             .and_then(|value| value.dyn_into::<Function>())
         {
@@ -457,7 +458,7 @@ pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &Pu
     );
     let enqueue_ready = Reflect::get(
         window.as_ref(),
-        &JsValue::from_str("__AURA_DRIVER_SEMANTIC_ENQUEUE__"),
+        &JsValue::from_str(SEMANTIC_ENQUEUE_KEY),
     )
     .ok()
     .and_then(|candidate| candidate.dyn_into::<Function>().ok())
@@ -469,7 +470,7 @@ pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &Pu
     );
     if let Ok(function) = Reflect::get(
         window.as_ref(),
-        &JsValue::from_str("__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE"),
+        &JsValue::from_str(PUSH_SEMANTIC_SUBMIT_STATE_KEY),
     )
     .and_then(|candidate| candidate.dyn_into::<Function>())
     {

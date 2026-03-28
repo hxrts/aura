@@ -289,7 +289,10 @@ mod tests {
         let source = std::fs::read_to_string(&install_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", install_path.display()));
 
-        assert!(source.contains("commands::submit_semantic_command(controller, request).await?"));
+        assert!(source.contains("page_owned_queue::install(window)"));
+        assert!(source.contains("commands::BrowserSemanticBridgeRequest::from_json(&request_json)?"));
+        assert!(!source.contains("include_str!(\"page_owned_mutation_queues.js\")"));
+        assert!(!source.contains("Function::new_no_args("));
         assert!(!source.contains("route_semantic_intent("));
         assert!(!source.contains("execute_semantic_intent("));
     }
