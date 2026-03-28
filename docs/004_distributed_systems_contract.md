@@ -37,6 +37,18 @@ This contract uses shared terminology from [Theoretical Model](002_theoretical_m
 - This contract does not guarantee progress during permanent partitions.
 - This contract does not guarantee metadata secrecy without privacy controls defined in [Privacy and Information Flow Contract](003_information_flow_contract.md).
 
+### 1.4 Service Object Classes
+
+Distributed behavior depends on three object classes with different contracts:
+
+- authoritative shared objects
+- transport and protocol objects
+- runtime-derived local state
+
+Authoritative shared objects include descriptors, bindings, and other fact-like service advertisements. Transport and protocol objects include envelopes, selectors in flight, receipts, and held opaque objects. Runtime-derived local state includes provider candidates, rankings, cache indexes, and live connection state.
+
+Only authoritative shared objects participate in replicated truth. Transport and protocol objects support execution. Runtime-derived local state remains `ActorOwned` and non-authoritative.
+
 ## 2. Safety Guarantees
 
 ### 2.1 Journal CRDT Properties
@@ -170,6 +182,25 @@ Commitment tree operations resolve conflicts using the stable ordering described
 
 Multi-hop forwarding requires signed receipts. Downstream peers reject messages lacking a chain rooted in their relational context. See [Transport and Information Flow](111_transport_and_information_flow.md). This prevents unauthorized message propagation.
 
+### 2.11 Onion Accountability Verification
+
+Onion-routed accountability uses typed single-use reply blocks rather than direct reverse connectivity.
+
+- `Move` uses bounded anonymous reply paths to return forwarding witnesses
+- `Hold` uses bounded anonymous reply paths to return deposit, retrieval, or audit witnesses
+- verifier roles are explicit and local
+
+Adjacent peers verify hop-local `Move` witnesses. Retrievers, holders, or bounded auditors verify `Hold` witnesses. Local runtime consequences such as scoring, reciprocal budget, and admission preference apply only after verification succeeds.
+
+### 2.12 Hold Substrate Profiles
+
+`Hold` is one shared custody substrate with named service profiles.
+
+- `DeferredDeliveryHold`
+- `CacheReplicaHold`
+
+Both profiles share deposit, custody, bounded retention, selector-based retrieval, and GC vocabulary. They differ in retrieval semantics and local interpretation. `DeferredDeliveryHold` is retrieve-once. `CacheReplicaHold` is retrieve-many or retention-window-governed.
+
 ## 3. Protocol-Specific Guarantees
 
 ### 3.1 DKG and Resharing
@@ -243,6 +274,12 @@ Budget exhaustion remains temporary only under these assumptions.
 
 Liveness requires that each authority eventually receives messages from its immediate neighbors. This is the eventual delivery assumption. Liveness also requires that clocks do not drift unboundedly. This is necessary for epoch rotation and receipt expiry.
 
+### 4.6 Hold Availability
+
+`Hold` availability is neighborhood-scoped and selector-driven. It is not a guarantee that any specific holder remains available.
+
+Liveness for `Hold` requires that the runtime can find some admissible holder within the neighborhood-scoped provider set. Runtime selection may use a bounded rotating subset of that wider set. Retrieval miss and re-deposit are expected recovery behaviors. They are not contract violations by themselves.
+
 ## 5. Time System
 
 Aura uses a unified `TimeStamp` with domain-specific comparison:
@@ -300,9 +337,15 @@ Verified by: `Aura.Proofs.Consensus.Adversary`, `consensus/adversary.qnt`
 
 A malicious relay may drop or delay envelopes. It cannot forge flow receipts because receipts require cryptographic signatures. It cannot read payloads because of context-specific encryption.
 
-Downstream peers detect misbehavior via missing receipts or inconsistent budget charges. The transport layer detects relay failures automatically.
+Downstream or adjacent peers detect misbehavior via missing receipts, inconsistent budget charges, or failed witness verification. The transport layer detects relay failures automatically.
 
-### 8.4 Device Compromise
+### 8.4 Malicious Hold Provider
+
+A malicious hold provider may accept custody and later evict, refuse retrieval, or selectively under-serve.
+
+It cannot turn opaque held objects into authoritative state. It cannot legitimately earn service credit without passing the relevant witness-verification path. Under onion routing it may still deny service. The contract treats retrieval miss, eviction, and re-deposit as expected failure-handling paths.
+
+### 8.5 Device Compromise
 
 A compromised device reveals its share and journal copy. It cannot reconstitute the account without meeting the branch policy. Recovery relies on relational contexts as described in [Relational Contexts](114_relational_contexts.md).
 
@@ -321,6 +364,14 @@ Each authority's view of its own journal is monotone. Once it observes a fact lo
 
 ## 10. Failure Handling
 
+Failure classes are distinct:
+
+- authoritative state failure
+- custody failure
+- runtime-local cache or selection failure
+
+Authoritative state failure concerns journals, consensus outputs, and replicated truth. Custody failure concerns `Hold` availability, retrieval miss, and eviction. Runtime-local cache or selection failure concerns non-authoritative local views and can be healed by re-selection, invalidation, or anti-entropy.
+
 Timeouts trigger fallback consensus. See [Consensus](108_consensus.md) for `T_fallback` guidelines. Fallback consensus allows the system to make progress during temporary network instability.
 
 Partition recovery relies on anti-entropy. Authorities merge fact sets when connectivity returns. The journal is the single source of truth for state.
@@ -338,6 +389,14 @@ Guard-chain failures return local errors. These errors include `AuthorizationDen
 ## 11. Deployment Guidance
 
 Configure witness sets using the parameter bounds declared in §2.3.3 for the active ceremony profile.
+
+Deployment proceeds in stages:
+
+- family model and `Hold` availability deployment
+- privacy-policy tuning in simulation
+- encrypted-envelope privacy deployment
+
+The service-family model is always active after migration. Debug or simulation modes such as `transparent_onion` are excluded from production privacy claims.
 
 Tune gossip fanout and timeout parameters based on observed round-trip times and network topology. Conservative parameters ensure liveness under poor conditions.
 

@@ -17,6 +17,9 @@ The contract applies to information flows across privacy boundaries:
 - Context isolation: Separation of identities and journals across contexts
 - Receipt chains: Multi-hop forwarding accountability
 - Epoch boundaries: Temporal isolation of budget and receipt state
+- Service families: `Establish`, `Move`, and `Hold` as the privacy-relevant service surfaces
+- Selector retrieval: Capability-derived retrieval without identity-addressed mailbox polling
+- Hold custody: Neighborhood-scoped opaque retention with bounded retrieval authority
 
 Related specifications: [Authorization](106_authorization.md), [Transport and Information Flow](111_transport_and_information_flow.md), and [Theoretical Model](002_theoretical_model.md).
 Shared notation appears in [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation).
@@ -35,12 +38,15 @@ This contract uses shared terminology from [Theoretical Model](002_theoretical_m
 - Cryptographic primitives are secure at configured key sizes.
 - Local runtimes enforce guard-chain ordering before transport sends.
 - Epoch updates and budget facts eventually propagate through anti-entropy.
-- Optional privacy enhancements such as Tor and cover traffic are correctly configured when enabled.
+- The service-family model is always active after migration.
+- Privacy-mode deployments use encrypted envelopes and the fixed adaptive policy.
+- Debug or simulation modes such as `transparent_onion` are excluded from production privacy claims.
 
 ### 1.3 Non-goals
 
-- This contract does not guarantee traffic-analysis resistance against global passive adversaries without optional privacy overlays.
+- This contract does not guarantee traffic-analysis resistance against global passive adversaries without encrypted envelopes and sufficiently regular cover behavior.
 - This contract does not define social policy decisions such as who should trust whom.
+- This contract does not treat `Hold` custody as authoritative durable storage.
 
 ## 2. Privacy Philosophy
 
@@ -60,7 +66,9 @@ Traditional privacy systems offer only complete isolation or complete exposure. 
 | Relationship | Graph opacity | No central directory, out-of-band establishment |
 | Group | Membership hiding | Threshold operations, group-scoped identity |
 | Content | End-to-end encryption | AES-256-GCM, HPKE, per-message keys |
-| Metadata | Rate/volume bounds | Flow budgets, fixed-size envelopes, batching |
+| Metadata | Rate, volume, and path-shape bounds | Flow budgets, fixed-size envelopes, batching, encrypted routing |
+| Retrieval | Non-semantic access intent | Capability-derived selectors, sync-blended retrieval |
+| Custody | Opaque retained-object handling | `Hold` substrate, bounded capabilities, uniform retention |
 
 Verified by: `Aura.Proofs.KeyDerivation`, `authorization.qnt`
 
@@ -162,7 +170,8 @@ Information leakage is tracked per observer class:
 | `Relationship` | Full context content | Consensual, no budget |
 | `Group` | Group-scoped content | Group dimension |
 | `Neighbor` | Encrypted envelope metadata | Per-hop budget |
-| `External` | Network-level patterns | Tor + cover traffic |
+| `Custody` | Opaque held objects, selectors, and retention behavior | Per-holder budget and leakage policy |
+| `External` | Network-level patterns | Encrypted Aura onion routing plus cover traffic |
 
 ### 4.2 Leakage Budget
 
@@ -179,6 +188,8 @@ LeakageBudget {
 ```
 
 Leakage is charged before any operation that exposes information to the observer class.
+
+`Custody` observers are special. They may see that an opaque object is deposited, retained, expired, or retrieved. They must not learn mailbox identity or depositor identity from that flow. Selector design, uniform retention, and reply-path accountability all constrain this observer class.
 
 ### 4.3 Policy Modes
 
@@ -220,9 +231,25 @@ Group participants share group-scoped information:
 
 External observers have no relationship with you:
 
-- With Tor: Only encrypted Tor traffic visible
-- Without Tor: ISP sees connections to Aura nodes only
-- Enforcement: Fixed-size envelopes, no central directory, flow budgets
+- In privacy mode: Encrypted Aura onion traffic and timing patterns are visible
+- In passthrough mode: Connections to Aura nodes are visible
+- Enforcement: Fixed-size envelopes, no central directory, encrypted envelopes in privacy mode, and flow budgets
+
+### 5.5 Retrieval Boundary
+
+Retrieval is not identity-addressed at the network boundary.
+
+- Visible to intermediaries: selector traffic shape and reply-path usage
+- Hidden from intermediaries: mailbox identity, semantic object meaning, and direct reverse identity
+- Enforcement: retrieval capabilities, capability-derived selectors, sync-blended retrieval, and typed single-use reply blocks
+
+### 5.6 Custody Boundary
+
+`Hold` providers operate on opaque custody objects rather than authoritative truth.
+
+- Visible to the holder: bounded retention requests, opaque held objects, selector usage, and storage pressure
+- Hidden from the holder under onion routing: specific depositor identity and mailbox identity
+- Enforcement: neighborhood-scoped provider set, uniform retention policy, bounded rotating holder subsets, and best-effort custody semantics
 
 ## 6. Time Domain Semantics
 
@@ -271,10 +298,10 @@ Devices forwarding your traffic observe encrypted metadata.
 
 An ISP-level adversary sees IP connections and packet timing.
 
-- With Tor: Only Tor usage visible
-- Without Tor: Connections to known Aura nodes visible
+- In privacy mode: Connections to Aura nodes and encrypted onion traffic shape are visible
+- In passthrough mode: Connections to known Aura nodes are visible
 - Attack vector: Confirmation attacks, traffic correlation
-- Mitigation: Tor integration, fixed-size envelopes, cover traffic
+- Mitigation: Encrypted envelopes, fixed-size envelopes, and cover traffic
 
 ### 7.5 Compromised Device
 
@@ -299,7 +326,7 @@ Tests instantiate adversary observers and measure inference confidence against t
 
 ## 9. Cover Traffic
 
-Cover traffic is an optional enhancement layered on mandatory flow-budget enforcement:
+Cover traffic is part of privacy-mode deployment. It is not required for passthrough availability deployment:
 
 - Adaptive: Matches real usage patterns (e.g., 20 messages/hour during work hours)
 - Group-leveraged: Groups naturally provide steady traffic rates
@@ -307,6 +334,8 @@ Cover traffic is an optional enhancement layered on mandatory flow-budget enforc
 - Indistinguishable: Only recipient can distinguish real from cover by decryption attempt
 
 Target: `P(real | observed) ≈ 0.5`
+
+Privacy claims for global or strong partial observers rely on encrypted envelopes plus sufficiently regular cover behavior. Passthrough deployment does not claim those stronger bounds.
 
 ## 10. Hub Node Mitigation
 
@@ -336,6 +365,9 @@ Verified by: `Aura.Proofs.KeyDerivation`
 - Encrypted and authenticated
 - Onion-routed through multiple hops
 - Rtags rotate on negotiated schedule
+- Accountability callbacks use typed single-use reply blocks
+
+Typed single-use reply blocks carry accountability witnesses back through anonymous reply paths. They are pre-committed return capabilities. They are not open-ended reverse channels.
 
 ### 11.3 Guard Chain
 
@@ -345,13 +377,28 @@ Verified by: `Aura.Proofs.KeyDerivation`
 
 Verified by: `authorization.qnt` (`chargeBeforeSend`, `spentWithinLimit`)
 
-### 11.4 Secure Storage
+### 11.4 Retrieval and Custody Requirements
+
+- Parity-critical retrieval must use capability-derived selectors
+- Parity-critical retrieval must not use identity-addressed mailbox polling
+- `Hold` custody must remain opaque and non-authoritative
+- Uniform retention policy must not vary by social distance
+- Applications that require guaranteed durability must use authoritative replicated state rather than `Hold`
+
+### 11.5 Accountability Verification Requirements
+
+- Adjacent peers verify hop-local `Move` witnesses
+- Retrievers, holders, or bounded auditors verify `Hold` witnesses relevant to deposit, retrieval, or custody checks
+- Local runtime scoring, reciprocal budget, and admission effects apply only after witness verification succeeds
+- Raw accountability proof traffic must not become a global visibility layer
+
+### 11.6 Secure Storage
 
 - Use platform secure storage (Keychain, Secret Service, Keystore)
 - Never store keys in plaintext files
 - Audit logs for security-critical operations in journal
 
-### 11.5 Error-Channel Privacy Requirements
+### 11.7 Error-Channel Privacy Requirements
 
 - Guard failures must return bounded, typed errors only.
 - Error payloads must not include raw context payload, peer identity material, or decrypted content.
