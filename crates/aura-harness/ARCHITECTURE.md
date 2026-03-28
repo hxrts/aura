@@ -59,6 +59,10 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Projection-based semantic waits may resume across bounded browser/runtime restarts only by clearing stale freshness baselines and re-entering typed snapshot observation. Runtime-event, toast, and exact operation-state waits remain fail-closed across restarts.
 - Time-bounded loops in shared semantic code are allowed only for infrastructure readiness, transport, or bounded observation waits whose owner is explicit; ownership transfer itself must not depend on settle windows or heuristic polling.
 - The Playwright browser driver should prefer pushed UI/DOM observer waiters over fixed settle sleeps when deterministic publication state is already available.
+- The Playwright browser driver's `restart_page_session` path is infrastructure
+  recovery only. Semantic command submission and runtime-identity staging must
+  fail closed or wait on page-owned bootstrap/publication state rather than
+  replaying semantic work through a restarted browser session.
 - Do not add backwards-compatibility, migration, fallback, or legacy code paths for removed shared-semantic harness behavior. Delete obsolete paths instead.
 
 ### InvariantHarnessDeterministicReplayInputs

@@ -699,6 +699,7 @@ ci-ownership-policy:
     just ci-timeout-policy
     just ci-timeout-time-domains
     just ci-harness-ownership-policy
+    just ci-browser-semantic-restart-boundary
     just ci-testkit-exception-boundary
 
 ci-ratchet-audit:
@@ -711,6 +712,9 @@ ci-ratchet-audit:
     just ci-agent-wasm
     env CARGO_TARGET_DIR=target/ratchet just ci-workspace-wasm-test
     cargo test -p aura-macros --test compile_fail -- --nocapture
+
+ci-browser-semantic-restart-boundary:
+    bash scripts/check/browser-semantic-restart-boundary.sh
 
 ci-annotation-ratchet:
     bash scripts/check/ownership-annotation-ratchet.sh semantic-owner
