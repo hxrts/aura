@@ -1493,6 +1493,16 @@ mod tests {
             "browser driver should advance the semantic observation baseline after semantic submission"
         );
         assert!(
+            driver_source.contains("seedSemanticSubmitStateFromPublication(")
+                && driver_source.contains("waitForUiStateVersion("),
+            "browser driver startup and submit readiness should seed from the published semantic submit surface and prefer observed UI-state publication over structured probe reconstruction"
+        );
+        assert!(
+            !driver_source.contains("submit_queue_probe:")
+                && !driver_source.contains("semantic_enqueue_callable_probe:"),
+            "browser driver should not regress submit readiness to repeated page-evaluate probe loops once the page-owned semantic submit publication is available"
+        );
+        assert!(
             contract_source.contains("pub(crate) const RUNTIME_STAGE_ENQUEUE_KEY")
                 && queue_source.contains("use crate::harness::driver_contract::{")
                 && queue_source.contains("crate::harness_bridge::stage_runtime_identity("),

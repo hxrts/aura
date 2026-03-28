@@ -1243,6 +1243,32 @@ async function installDomObserverBinding(page, session) {
   session.domObserverBindingInstalled = true;
 }
 
+function normalizeSemanticSubmitPublicationState(payload) {
+  return payload && typeof payload === "object"
+    ? (payload as SemanticSubmitPublicationState)
+    : null;
+}
+
+function rememberSemanticSubmitPublicationState(session, payload, source) {
+  const nextState = normalizeSemanticSubmitPublicationState(payload);
+  session.semanticSubmitState = nextState;
+  session.semanticQueueInstalled = nextState?.enqueue_ready === true;
+  if (nextState && typeof nextState === "object") {
+    noteGenerationState(session, {
+      active_generation: Number(nextState.active_generation ?? 0),
+      ready_generation: Number(nextState.ready_generation ?? 0),
+      phase:
+        typeof nextState.phase === "string"
+          ? nextState.phase
+          : null,
+    });
+  }
+  console.error(
+    `[driver] semantic_submit_state instance=${session.id} source=${source} state=${JSON.stringify(nextState)}`,
+  );
+  return nextState;
+}
+
 async function installUiStateObserver(page, session) {
   if (!session.uiStateBindingsInstalled) {
     await withOperationTimeout(
@@ -1295,15 +1321,7 @@ async function installHarnessMutationBindings(page, session) {
       page.exposeFunction(
         PUSH_SEMANTIC_SUBMIT_STATE_KEY,
         (payload) => {
-          session.semanticSubmitState =
-            payload && typeof payload === "object"
-              ? (payload as SemanticSubmitPublicationState)
-              : null;
-          session.semanticQueueInstalled =
-            session.semanticSubmitState?.enqueue_ready === true;
-          console.error(
-            `[driver] semantic_submit_state instance=${session.id} state=${JSON.stringify(session.semanticSubmitState)}`,
-          );
+          rememberSemanticSubmitPublicationState(session, payload, "driver_push");
         },
       ),
       4000,
@@ -1350,10 +1368,34 @@ async function installHarnessMutationBindings(page, session) {
   }
 }
 
+async function seedSemanticSubmitStateFromPublication(
+  page,
+  session,
+  reason,
+  timeoutMs = 1000,
+) {
+  const published = await withOperationTimeout(
+    `seed_semantic_submit_state:${session.id}:${reason}`,
+    page.evaluate((semanticSubmitPublicationStateKey) => {
+      return window[semanticSubmitPublicationStateKey] ?? null;
+    }, SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY),
+    timeoutMs,
+  ).catch(() => null);
+  if (published != null) {
+    rememberSemanticSubmitPublicationState(
+      session,
+      published,
+      `publication_seed:${reason}`,
+    );
+  }
+  return session.semanticSubmitState;
+}
+
 async function installHarnessMutationQueue(page, session) {
   await installHarnessMutationBindings(page, session);
   session.semanticQueueInstalled =
     session.semanticSubmitState?.enqueue_ready === true;
+  await seedSemanticSubmitStateFromPublication(page, session, "install", 1000);
 }
 
 function normalizeStartupReadiness(params) {
@@ -1419,85 +1461,42 @@ async function waitForNavigationQuietPeriod(
 
 async function waitForSubmitQueueReady(session, reason, timeoutMs = 10000) {
   const deadlineMs = Date.now() + timeoutMs;
-  let lastProbe = null;
   await focusAuraPageSafe(session.page, session.id, `submit_queue_ready:${reason}`);
   console.error(
     `[driver] submit_queue_ready_wait start instance=${session.id} reason=${reason} timeout_ms=${timeoutMs}`,
   );
+  let seededPublication = false;
   while (Date.now() < deadlineMs) {
-    const remainingMs = Math.max(1, deadlineMs - Date.now());
-    const probeTimeoutMs = Math.min(remainingMs, 500);
-    lastProbe = await withOperationTimeout(
-      `submit_queue_probe:${session.id}:${reason}`,
-      session.page.evaluate(
-        ({
-          semanticSubmitPublicationStateKey,
-          semanticEnqueueKey,
-          activeGenerationKey,
-          readyGenerationKey,
-          generationPhaseKey,
-        }) => {
-          return {
-            submit_state:
-              window[semanticSubmitPublicationStateKey] ?? null,
-            semantic_queue_installed:
-              window[semanticSubmitPublicationStateKey]?.enqueue_ready ===
-              true,
-            semantic_enqueue_callable:
-              typeof window[semanticEnqueueKey] === "function",
-            active_generation: Number(window[activeGenerationKey] ?? 0),
-            ready_generation: Number(window[readyGenerationKey] ?? 0),
-            phase:
-              typeof window[generationPhaseKey] === "string"
-                ? window[generationPhaseKey]
-                : null,
-          };
-        },
-        {
-          semanticSubmitPublicationStateKey:
-            SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY,
-          semanticEnqueueKey: SEMANTIC_ENQUEUE_KEY,
-          activeGenerationKey: UI_ACTIVE_GENERATION_KEY,
-          readyGenerationKey: UI_READY_GENERATION_KEY,
-          generationPhaseKey: UI_GENERATION_PHASE_KEY,
-        },
-      ),
-      probeTimeoutMs,
-    )
-      .catch(() => ({
-        submit_state: session.semanticSubmitState ?? null,
-        semantic_queue_installed: session.semanticQueueInstalled === true,
-        semantic_enqueue_callable: false,
-        active_generation: null,
-        ready_generation: null,
-        phase: null,
-      }));
-    if (lastProbe?.submit_state && typeof lastProbe.submit_state === "object") {
-      session.semanticSubmitState = lastProbe.submit_state;
-    }
-    session.semanticQueueInstalled =
-      lastProbe?.semantic_queue_installed === true;
+    const state = session.semanticSubmitState;
     if (
-      lastProbe?.submit_state?.status === "ready" &&
-      lastProbe?.submit_state?.generation_id != null &&
-      lastProbe?.semantic_queue_installed === true &&
-      lastProbe?.semantic_enqueue_callable === true &&
-      (Number(lastProbe?.active_generation ?? 0) <= 0 ||
-        Number(lastProbe?.ready_generation ?? 0) >=
-          Number(lastProbe?.active_generation ?? 0))
+      state?.status === "ready" &&
+      state?.enqueue_ready === true &&
+      state?.generation_id != null &&
+      state?.generation_ready === true
     ) {
       console.error(
-        `[driver] submit_queue_ready_wait done instance=${session.id} reason=${reason} state=${JSON.stringify(lastProbe)}`,
+        `[driver] submit_queue_ready_wait done instance=${session.id} reason=${reason} state=${JSON.stringify(state)}`,
       );
       return;
+    }
+    if (!seededPublication) {
+      seededPublication = true;
+      const remainingMs = Math.max(1, deadlineMs - Date.now());
+      await seedSemanticSubmitStateFromPublication(
+        session.page,
+        session,
+        reason,
+        Math.min(remainingMs, 500),
+      );
+      continue;
     }
     await delay(100);
   }
   console.error(
-    `[driver] submit_queue_ready_wait timeout instance=${session.id} reason=${reason} state=${JSON.stringify(lastProbe)}`,
+    `[driver] submit_queue_ready_wait timeout instance=${session.id} reason=${reason} state=${JSON.stringify(session.semanticSubmitState ?? null)}`,
   );
   throw new Error(
-    `submit_queue_not_ready:${reason}:${JSON.stringify(lastProbe)}`,
+    `submit_queue_not_ready:${reason}:${JSON.stringify(session.semanticSubmitState ?? null)}`,
   );
 }
 
@@ -1506,32 +1505,7 @@ async function assertSemanticEnqueueCallable(
   reason,
   timeoutMs = 2000,
 ) {
-  await withOperationTimeout(
-    `assert_semantic_enqueue_callable:${session.id}:${reason}`,
-    (async () => {
-      const deadlineMs = Date.now() + timeoutMs;
-      let lastType = null;
-      while (Date.now() < deadlineMs) {
-        const remainingMs = Math.max(1, deadlineMs - Date.now());
-        const probeTimeoutMs = Math.min(remainingMs, 500);
-        lastType = await withOperationTimeout(
-          `semantic_enqueue_callable_probe:${session.id}:${reason}`,
-          session.page.evaluate(
-            (semanticEnqueueKey) => typeof window[semanticEnqueueKey],
-            SEMANTIC_ENQUEUE_KEY,
-          ),
-          probeTimeoutMs,
-        )
-          .catch((error) => `eval_failed:${error?.message ?? String(error)}`);
-        if (lastType === "function") {
-          return;
-        }
-        await delay(100);
-      }
-      throw new Error(`semantic_enqueue_not_callable:${lastType ?? "unknown"}`);
-    })(),
-    timeoutMs,
-  );
+  await waitForSubmitQueueReady(session, `assert_enqueue:${reason}`, timeoutMs);
   console.error(
     `[driver] semantic_enqueue_callable instance=${session.id} reason=${reason}`,
   );
@@ -3031,8 +3005,12 @@ async function startPage(params) {
             `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} semantic_ready start`,
           );
           await withOperationTimeout(
-            `startup_semantic_ready_${instanceId}`,
-            uiState({ instance_id: instanceId }),
+            `startup_semantic_push_${instanceId}`,
+            waitForUiStateVersion(
+              session,
+              -1,
+              Math.min(harnessReadyTimeoutMs, 5000),
+            ),
             Math.min(harnessReadyTimeoutMs, 5000),
           );
           await waitForSubmitQueueReady(
