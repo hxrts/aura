@@ -1499,8 +1499,10 @@ mod tests {
             "browser harness bridge should reuse the production-owned driver contract module and invoke the explicit runtime identity staging entrypoint inside the page"
         );
         assert!(
-            driver_source.contains("window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__"),
-            "browser driver should submit runtime-identity staging through the page-owned in-page queue instead of a direct long-lived Playwright evaluate await"
+            driver_source.contains("from \"./driver_contract.js\";")
+                && driver_source.contains("window[RUNTIME_STAGE_ENQUEUE_KEY](payload)")
+                && driver_source.contains("buildRuntimeStageQueuePayloadJson("),
+            "browser driver should submit runtime-identity staging through the dedicated driver contract module instead of re-spelling queue globals or payload builders inline"
         );
         assert!(
             !driver_source.contains("await stageRuntimeIdentity(serializedIdentity);"),
@@ -1518,8 +1520,10 @@ mod tests {
             "browser harness bridge should reuse the production-owned driver contract module and keep semantic replay ownership inside the generation-aware page queue"
         );
         assert!(
-            driver_source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__"),
-            "browser driver should submit semantic commands through the page-owned in-page semantic queue"
+            driver_source.contains("window[SEMANTIC_ENQUEUE_KEY](payload)")
+                && driver_source.contains("buildSemanticQueuePayloadJson(")
+                && !driver_source.contains("request_json: requestJson"),
+            "browser driver should submit semantic commands through the dedicated driver contract module instead of open-coded queue globals or payload JSON"
         );
         assert!(
             backend_source.contains("failed to decode browser semantic command response"),

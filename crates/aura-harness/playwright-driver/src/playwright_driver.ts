@@ -28,6 +28,25 @@ import {
   uiSnapshotRevision,
   uiStateStalenessReason,
 } from "./observation.js";
+import {
+  buildRuntimeStageQueuePayloadJson,
+  buildSemanticQueuePayloadJson,
+  MUTATION_QUEUE_INSTALLED_KEY,
+  PENDING_NAV_SCREEN_KEY,
+  PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY,
+  PENDING_SEMANTIC_QUEUE_SEED_KEY,
+  PUSH_RUNTIME_STAGE_RESULT_KEY,
+  PUSH_SEMANTIC_RESULT_KEY,
+  PUSH_SEMANTIC_SUBMIT_STATE_KEY,
+  RUNTIME_STAGE_DEBUG_KEY,
+  RUNTIME_STAGE_ENQUEUE_KEY,
+  RUNTIME_STAGE_RESULTS_KEY,
+  SEMANTIC_DEBUG_KEY,
+  SEMANTIC_ENQUEUE_KEY,
+  SEMANTIC_RESULTS_KEY,
+  seedQueuePayloadArray,
+  WAKE_PENDING_NAV_KEY,
+} from "./driver_contract.js";
 
 const sessions = new Map<string, DriverSession>();
 let requestChain: Promise<void> = Promise.resolve();
@@ -422,8 +441,8 @@ async function observeSemanticCompletionAfterEnqueueFailure(
     const pageStatus = await withOperationTimeout(
       `semantic_enqueue_probe_${session.id}`,
       session.page.evaluate((activeCommandId) => {
-        const semanticResults = window.__AURA_DRIVER_SEMANTIC_RESULTS__;
-        const debug = window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null;
+        const semanticResults = window[SEMANTIC_RESULTS_KEY];
+        const debug = window[SEMANTIC_DEBUG_KEY] ?? null;
         const result =
           semanticResults &&
           Object.prototype.hasOwnProperty.call(semanticResults, activeCommandId)
@@ -496,8 +515,8 @@ async function observeRuntimeStageCompletionAfterEnqueueFailure(
   const pageStatus = await withOperationTimeout(
     `runtime_stage_enqueue_probe_${session.id}`,
     session.page.evaluate((activeCommandId) => {
-      const runtimeStageResults = window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__;
-      const debug = window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ ?? null;
+      const runtimeStageResults = window[RUNTIME_STAGE_RESULTS_KEY];
+      const debug = window[RUNTIME_STAGE_DEBUG_KEY] ?? null;
       const result =
         runtimeStageResults &&
         Object.prototype.hasOwnProperty.call(runtimeStageResults, activeCommandId)
@@ -1199,7 +1218,7 @@ async function installHarnessMutationBindings(page, session) {
     await withOperationTimeout(
       `install_mutation_queue_submit_state_binding:${session.id}`,
       page.exposeFunction(
-        "__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE",
+        PUSH_SEMANTIC_SUBMIT_STATE_KEY,
         (payload) => {
           session.semanticSubmitState =
             payload && typeof payload === "object"
@@ -1216,7 +1235,7 @@ async function installHarnessMutationBindings(page, session) {
     );
     await withOperationTimeout(
       `install_mutation_queue_semantic_result_binding:${session.id}`,
-      page.exposeFunction("__AURA_DRIVER_PUSH_SEMANTIC_RESULT", (payload) => {
+      page.exposeFunction(PUSH_SEMANTIC_RESULT_KEY, (payload) => {
         if (!session.semanticResultCache || typeof session.semanticResultCache !== "object") {
           session.semanticResultCache = Object.create(null);
         }
@@ -1233,7 +1252,7 @@ async function installHarnessMutationBindings(page, session) {
     await withOperationTimeout(
       `install_mutation_queue_runtime_stage_result_binding:${session.id}`,
       page.exposeFunction(
-        "__AURA_DRIVER_PUSH_RUNTIME_STAGE_RESULT",
+        PUSH_RUNTIME_STAGE_RESULT_KEY,
         (payload) => {
           if (
             !session.runtimeStageResultCache ||
@@ -1356,6 +1375,79 @@ async function waitForSubmitQueueReady(session, reason, timeoutMs = 10000) {
   );
 }
 
+async function assertHarnessEnqueueCallable(
+  session,
+  reason,
+  timeoutMs = 2000,
+) {
+  await withOperationTimeout(
+    `assert_harness_enqueue_callable:${session.id}:${reason}`,
+    session.page.waitForFunction(
+      () =>
+        typeof window[SEMANTIC_ENQUEUE_KEY] === "function" &&
+        typeof window[RUNTIME_STAGE_ENQUEUE_KEY] === "function",
+      null,
+      { timeout: timeoutMs },
+    ),
+    timeoutMs,
+  );
+  console.error(
+    `[driver] harness_enqueue_callable instance=${session.id} reason=${reason}`,
+  );
+}
+
+async function waitForSettledSemanticSnapshot(
+  session,
+  instanceId,
+  reason,
+  timeoutMs = 5000,
+  quietMs = 250,
+) {
+  const deadlineMs = Date.now() + timeoutMs;
+  let candidateRevision = null;
+  let candidateAt = 0;
+  let lastSnapshot = null;
+  while (Date.now() < deadlineMs) {
+    const snapshot = await uiState({ instance_id: instanceId });
+    lastSnapshot = snapshot;
+    const ready = snapshot?.readiness === "ready";
+    const settled = snapshot?.quiescence?.state === "settled";
+    const revision = uiSnapshotRevision(snapshot);
+    if (ready && settled && revision > 0) {
+      if (candidateRevision === revision) {
+        if (Date.now() - candidateAt >= quietMs) {
+          console.error(
+            `[driver] semantic_snapshot_settled instance=${instanceId} reason=${reason} revision=${revision}`,
+          );
+          return snapshot;
+        }
+      } else {
+        candidateRevision = revision;
+        candidateAt = Date.now();
+      }
+    } else {
+      candidateRevision = null;
+      candidateAt = 0;
+    }
+    const remainingMs = deadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      break;
+    }
+    try {
+      await waitForUiStateVersion(
+        session,
+        revision,
+        Math.max(1, Math.min(quietMs, remainingMs)),
+      );
+    } catch {
+      await delay(Math.min(50, remainingMs));
+    }
+  }
+  throw new Error(
+    `semantic_snapshot_not_settled:${reason}:${JSON.stringify(lastSnapshot)}`,
+  );
+}
+
 async function enqueueSemanticPayload(
   session,
   payloadJson,
@@ -1364,13 +1456,38 @@ async function enqueueSemanticPayload(
 ) {
   return withOperationTimeout(
     label,
-    session.page.evaluate((payload) => {
-      if (typeof window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ !== "function") {
-        throw new Error("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ is unavailable");
-      }
-      window.__AURA_DRIVER_SEMANTIC_ENQUEUE__(payload);
+    (async () => {
+      const handle = await session.page.waitForFunction(
+        (payload) => {
+          if (typeof window[SEMANTIC_ENQUEUE_KEY] !== "function") {
+            return false;
+          }
+          const stateKey = "__AURA_DRIVER_SEMANTIC_ENQUEUE_DISPATCHED__";
+          const win = window;
+          let dispatched = win[stateKey];
+          if (!dispatched || typeof dispatched !== "object") {
+            dispatched = Object.create(null);
+            win[stateKey] = dispatched;
+          }
+          let marker = payload;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed && typeof parsed.command_id === "string") {
+              marker = parsed.command_id;
+            }
+          } catch {}
+          if (dispatched[marker] !== true) {
+            window[SEMANTIC_ENQUEUE_KEY](payload);
+            dispatched[marker] = true;
+          }
+          return true;
+        },
+        payloadJson,
+        { timeout: timeoutMs },
+      );
+      await handle.dispose().catch(() => null);
       return null;
-    }, payloadJson),
+    })(),
     timeoutMs,
   );
 }
@@ -1383,13 +1500,38 @@ async function enqueueRuntimeStagePayload(
 ) {
   return withOperationTimeout(
     label,
-    session.page.evaluate((payload) => {
-      if (typeof window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__ !== "function") {
-        throw new Error("window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__ is unavailable");
-      }
-      window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__(payload);
+    (async () => {
+      const handle = await session.page.waitForFunction(
+        (payload) => {
+          if (typeof window[RUNTIME_STAGE_ENQUEUE_KEY] !== "function") {
+            return false;
+          }
+          const stateKey = "__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE_DISPATCHED__";
+          const win = window;
+          let dispatched = win[stateKey];
+          if (!dispatched || typeof dispatched !== "object") {
+            dispatched = Object.create(null);
+            win[stateKey] = dispatched;
+          }
+          let marker = payload;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed && typeof parsed.command_id === "string") {
+              marker = parsed.command_id;
+            }
+          } catch {}
+          if (dispatched[marker] !== true) {
+            window[RUNTIME_STAGE_ENQUEUE_KEY](payload);
+            dispatched[marker] = true;
+          }
+          return true;
+        },
+        payloadJson,
+        { timeout: timeoutMs },
+      );
+      await handle.dispose().catch(() => null);
       return null;
-    }, payloadJson),
+    })(),
     timeoutMs,
   );
 }
@@ -1414,6 +1556,14 @@ async function recoverSemanticQueueOnCurrentPage(session, reason) {
   }
   await assertRootStructure(session, `semantic_queue_${reason}`);
   await waitForSubmitQueueReady(session, `semantic_queue:${reason}`, 5000);
+  await waitForSettledSemanticSnapshot(
+    session,
+    session.id,
+    `semantic_queue:${reason}`,
+    5000,
+    250,
+  );
+  await assertHarnessEnqueueCallable(session, `semantic_queue:${reason}`, 2000);
   return session;
 }
 
@@ -2435,10 +2585,9 @@ async function startPage(params) {
       });
       if (pendingSemanticPayload) {
         await context.addInitScript((payloadJson) => {
-          window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__ =
-            typeof payloadJson === "string" && payloadJson.length > 0
-              ? [payloadJson]
-              : [];
+          window[PENDING_SEMANTIC_QUEUE_SEED_KEY] = seedQueuePayloadArray(
+            payloadJson,
+          );
         }, pendingSemanticPayload);
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} startup_pending_semantic_seed installed`,
@@ -2446,10 +2595,9 @@ async function startPage(params) {
       }
       if (pendingRuntimeStagePayload) {
         await context.addInitScript((payloadJson) => {
-          window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__ =
-            typeof payloadJson === "string" && payloadJson.length > 0
-              ? [payloadJson]
-              : [];
+          window[PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY] = seedQueuePayloadArray(
+            payloadJson,
+          );
         }, pendingRuntimeStagePayload);
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} startup_pending_runtime_stage_seed installed`,
@@ -2687,6 +2835,11 @@ async function startPage(params) {
           await withOperationTimeout(
             `startup_semantic_ready_${instanceId}`,
             uiState({ instance_id: instanceId }),
+            Math.min(harnessReadyTimeoutMs, 5000),
+          );
+          await waitForSubmitQueueReady(
+            session,
+            `startup_semantic:${instanceId}`,
             Math.min(harnessReadyTimeoutMs, 5000),
           );
           traceDriver(
@@ -3110,11 +3263,11 @@ async function navigateScreen(params) {
     result = await withOperationTimeout(
       `navigate_screen:${instanceId}:${screen}`,
       session.page.evaluate((targetScreen) => {
-        if (!window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
+        if (!window[MUTATION_QUEUE_INSTALLED_KEY]) {
           return { ok: false, reason: "mutation_queue_missing" };
         }
-        window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = targetScreen;
-        window.__AURA_DRIVER_WAKE_PENDING_NAV__?.();
+        window[PENDING_NAV_SCREEN_KEY] = targetScreen;
+        window[WAKE_PENDING_NAV_KEY]?.();
         return { ok: true };
       }, screen),
       1000,
@@ -3130,11 +3283,11 @@ async function navigateScreen(params) {
     result = await withOperationTimeout(
       `navigate_screen_restart:${instanceId}:${screen}`,
       restartedSession.page.evaluate((targetScreen) => {
-        if (!window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
+        if (!window[MUTATION_QUEUE_INSTALLED_KEY]) {
           return { ok: false, reason: "mutation_queue_missing" };
         }
-        window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = targetScreen;
-        window.__AURA_DRIVER_WAKE_PENDING_NAV__?.();
+        window[PENDING_NAV_SCREEN_KEY] = targetScreen;
+        window[WAKE_PENDING_NAV_KEY]?.();
         return { ok: true };
       }, screen),
       2000,
@@ -3508,10 +3661,10 @@ async function stageRuntimeIdentity(params) {
   delete session.runtimeStageResultWaiters[commandId];
   let responsePromise = waitForRuntimeStageResult(session, commandId, 45000);
   void responsePromise.catch(() => null);
-  const enqueuePayload = JSON.stringify({
-    command_id: commandId,
-    runtime_identity_json: runtimeIdentityJson,
-  });
+  const enqueuePayload = buildRuntimeStageQueuePayloadJson(
+    commandId,
+    runtimeIdentityJson,
+  );
   const enqueueCommand = async (activeSession, label, timeoutMs) =>
     enqueueRuntimeStagePayload(activeSession, enqueuePayload, label, timeoutMs);
   try {
@@ -3831,10 +3984,7 @@ async function submitSemanticCommand(params) {
   traceDriver(
     `[driver] submit_semantic_command invoke_start instance=${instanceId}`,
   );
-  const enqueuePayload = JSON.stringify({
-    command_id: commandId,
-    request_json: requestJson,
-  });
+  const enqueuePayload = buildSemanticQueuePayloadJson(commandId, requestJson);
   const enqueueCommand = async (activeSession, label, timeoutMs) =>
     {
       await focusAuraPageSafe(
@@ -3943,14 +4093,62 @@ async function submitSemanticCommand(params) {
               const restartedSession = await restartPageSession(
                 session,
                 `submit_semantic_command_enqueue:${instanceId}`,
-                { pendingSemanticPayload: enqueuePayload },
               );
               session = restartedSession;
+              await waitForSettledSemanticSnapshot(
+                session,
+                instanceId,
+                `submit_semantic_command_restart:${instanceId}`,
+                5000,
+                250,
+              );
+              await assertHarnessEnqueueCallable(
+                session,
+                `submit_semantic_command_restart:${instanceId}`,
+                2000,
+              );
+              if (
+                !session.semanticResultCache ||
+                typeof session.semanticResultCache !== "object"
+              ) {
+                session.semanticResultCache = Object.create(null);
+              }
+              if (
+                !session.semanticResultWaiters ||
+                typeof session.semanticResultWaiters !== "object"
+              ) {
+                session.semanticResultWaiters = Object.create(null);
+              }
+              delete session.semanticResultCache[commandId];
+              delete session.semanticResultWaiters[commandId];
               responsePromise = waitForSemanticResult(session, commandId, 10000);
               void responsePromise.catch(() => null);
-              console.error(
-                `[driver] submit_semantic_command enqueue_ok instance=${instanceId} stage=restart_seeded`,
-              );
+              try {
+                await enqueueCommand(
+                  session,
+                  `submit_semantic_command_enqueue_restart_${instanceId}`,
+                  4000,
+                );
+                console.error(
+                  `[driver] submit_semantic_command enqueue_ok instance=${instanceId} stage=restart`,
+                );
+              } catch (restartError) {
+                const completedAfterRestartFailure =
+                  await observeSemanticCompletionAfterEnqueueFailure(
+                    session,
+                    commandId,
+                    responsePromise,
+                    `restart:${instanceId}`,
+                  );
+                if (completedAfterRestartFailure) {
+                  responsePromise = Promise.resolve(completedAfterRestartFailure);
+                  console.error(
+                    `[driver] submit_semantic_command enqueue_superseded_by_result instance=${instanceId} stage=restart`,
+                  );
+                } else {
+                  throw restartError;
+                }
+              }
             }
           }
         }
@@ -3972,8 +4170,8 @@ async function submitSemanticCommand(params) {
     const pageStatus = await withOperationTimeout(
       `submit_semantic_command_result_${instanceId}`,
       session.page.evaluate((activeCommandId) => {
-        const semanticResults = window.__AURA_DRIVER_SEMANTIC_RESULTS__;
-        const debug = window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null;
+        const semanticResults = window[SEMANTIC_RESULTS_KEY];
+        const debug = window[SEMANTIC_DEBUG_KEY] ?? null;
         let result = null;
         if (
           semanticResults &&

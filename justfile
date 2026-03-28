@@ -163,6 +163,9 @@ browser-driver-smoke:
 ci-harness-browser-driver-types:
     bash scripts/check/harness-browser-driver-types.sh
 
+ci-browser-driver-contract-sync:
+    bash scripts/check/browser-driver-contract-sync.sh
+
 harness-browser-install-check:
     bash scripts/check/harness-browser-install.sh
 
