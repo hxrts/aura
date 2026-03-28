@@ -30,12 +30,16 @@ crates/aura-web/src
 crates/aura-terminal/src
 EOF
     required_attr='#[aura_macros::semantic_owner'
+    mapfile -t completeness_exclusions <<'EOF'
+EOF
     ;;
   actor-owned)
     mapfile -t scope_paths <<'EOF'
 crates/aura-agent/src/runtime/services
 EOF
     required_attr='#[aura_macros::actor_'
+    mapfile -t completeness_exclusions <<'EOF'
+EOF
     ;;
   capability-boundary)
     mapfile -t scope_paths <<'EOF'
@@ -43,12 +47,43 @@ crates/aura-app/src/workflows
 crates/aura-agent/src/runtime_bridge
 EOF
     required_attr='#[aura_macros::capability_boundary'
+    mapfile -t completeness_exclusions <<'EOF'
+EOF
     ;;
   *)
     echo "ownership-annotation-ratchet: unknown mode: $mode" >&2
     exit 1
     ;;
 esac
+
+exclusion_count="${#completeness_exclusions[@]}"
+
+has_named_exclusion() {
+  local key="$1"
+  local entry
+  for entry in "${completeness_exclusions[@]}"; do
+    [[ "$entry" == "$key:"* ]] && return 0
+  done
+  return 1
+}
+
+validate_named_exclusions() {
+  local entry reason
+  for entry in "${completeness_exclusions[@]}"; do
+    [[ -n "$entry" ]] || continue
+    if [[ "$entry" != *:* ]]; then
+      echo "ownership-annotation-ratchet($mode): invalid exclusion entry '$entry' (expected file:function:reason)" >&2
+      exit 1
+    fi
+    reason="${entry#*:*:}"
+    if [[ "$reason" == "$entry" || -z "$reason" ]]; then
+      echo "ownership-annotation-ratchet($mode): exclusion '$entry' is missing a reason" >&2
+      exit 1
+    fi
+  done
+}
+
+validate_named_exclusions
 
 diff_output="$(git diff -U3 "$diff_range" -- "${scope_paths[@]}" || true)"
 has_diff=1
@@ -131,6 +166,9 @@ check_capability_boundary_completeness() {
   for entry in "${required_entries[@]}"; do
     file="${entry%%:*}"
     function_name="${entry##*:}"
+    if has_named_exclusion "$file:$function_name"; then
+      continue
+    fi
     if ! file_has_attr_for_function "$file" "$function_name" "$attr_regex"; then
       echo "✖ $file: capability-boundary completeness requires #[aura_macros::capability_boundary] near fn $function_name(...)" >&2
       violations=$((violations + 1))
@@ -169,6 +207,9 @@ check_semantic_owner_completeness() {
   for entry in "${required_entries[@]}"; do
     file="${entry%%:*}"
     function_name="${entry##*:}"
+    if has_named_exclusion "$file:$function_name"; then
+      continue
+    fi
     if ! file_has_attr_for_function "$file" "$function_name" "$attr_regex"; then
       echo "✖ $file: semantic-owner completeness requires #[aura_macros::semantic_owner] near async fn $function_name(...)" >&2
       violations=$((violations + 1))
@@ -256,7 +297,7 @@ if (( violations > 0 )); then
 fi
 
 if (( has_diff == 0 )); then
-  echo "ownership-annotation-ratchet($mode): no diff in scope; completeness clean"
+  echo "ownership-annotation-ratchet($mode): no diff in scope; completeness clean (${exclusion_count} named exclusions)"
 else
-  echo "ownership-annotation-ratchet($mode): clean"
+  echo "ownership-annotation-ratchet($mode): clean (${exclusion_count} named exclusions)"
 fi
