@@ -9,8 +9,8 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use crate::harness::generation::{
     active_generation, browser_shell_phase_label, current_browser_shell_phase, generation_js_value,
-    mark_generation_ready, next_render_seq, note_published_ui_snapshot_json, BrowserShellPhase,
-    UI_GENERATION_PHASE_KEY,
+    current_bootstrap_transition_detail, mark_generation_ready, next_render_seq,
+    note_published_ui_snapshot_json, ready_generation, BrowserShellPhase, UI_GENERATION_PHASE_KEY,
 };
 use crate::harness::driver_contract::{
     PUSH_SEMANTIC_SUBMIT_STATE_KEY, SEMANTIC_ENQUEUE_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY,
@@ -179,6 +179,14 @@ fn update_publication_state(
             surface.key,
             js_value_detail(&error)
         )));
+    }
+}
+
+fn semantic_submit_surface_detail(base: &'static str) -> Cow<'static, str> {
+    if let Some(detail) = current_bootstrap_transition_detail() {
+        Cow::Owned(format!("{base}:{detail}"))
+    } else {
+        Cow::Borrowed(base)
     }
 }
 
@@ -361,43 +369,43 @@ pub(crate) fn semantic_submit_surface_state() -> PublicationState {
     if active_generation == 0 {
         return PublicationState::new(
             PublicationStatus::Unavailable,
-            "semantic_submit_surface_missing_generation",
+            semantic_submit_surface_detail("semantic_submit_surface_missing_generation"),
             PublicationBindingMode::SemanticBridge,
         );
     }
     if !has_controller {
         return PublicationState::new(
             PublicationStatus::Unavailable,
-            "semantic_submit_surface_missing_controller",
+            semantic_submit_surface_detail("semantic_submit_surface_missing_controller"),
             PublicationBindingMode::SemanticBridge,
         );
     }
     if !queue_installed {
         return PublicationState::new(
             PublicationStatus::Unavailable,
-            "semantic_submit_surface_missing_queue",
+            semantic_submit_surface_detail("semantic_submit_surface_missing_queue"),
             PublicationBindingMode::SemanticBridge,
         );
     }
     match phase {
         BrowserShellPhase::Ready => PublicationState::new(
             PublicationStatus::Ready,
-            "semantic_submit_surface_ready",
+            semantic_submit_surface_detail("semantic_submit_surface_ready"),
             PublicationBindingMode::SemanticBridge,
         ),
         BrowserShellPhase::Bootstrapping => PublicationState::new(
             PublicationStatus::Unavailable,
-            "semantic_submit_surface_bootstrapping",
+            semantic_submit_surface_detail("semantic_submit_surface_bootstrapping"),
             PublicationBindingMode::SemanticBridge,
         ),
         BrowserShellPhase::HandoffCommitted => PublicationState::new(
             PublicationStatus::Unavailable,
-            "semantic_submit_surface_handoff_committed",
+            semantic_submit_surface_detail("semantic_submit_surface_handoff_committed"),
             PublicationBindingMode::SemanticBridge,
         ),
         BrowserShellPhase::Rebinding => PublicationState::new(
             PublicationStatus::Unavailable,
-            "semantic_submit_surface_generation_rebinding",
+            semantic_submit_surface_detail("semantic_submit_surface_generation_rebinding"),
             PublicationBindingMode::GenerationRebinding,
         ),
     }
@@ -415,6 +423,8 @@ pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &Pu
     }
 
     let generation_id = active_generation();
+    let ready_generation = ready_generation();
+    let controller_present = crate::harness::generation::current_controller().is_some();
     let phase = window_contract
         .get(UI_GENERATION_PHASE_KEY)
         .ok()
@@ -424,7 +434,43 @@ pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &Pu
         return;
     };
     let _ = object_set(&state_object, "generation_id", &generation_js_value(generation_id));
+    let _ = object_set(
+        &state_object,
+        "active_generation",
+        &generation_js_value(generation_id),
+    );
+    let _ = object_set(
+        &state_object,
+        "ready_generation",
+        &generation_js_value(ready_generation),
+    );
+    let _ = object_set(
+        &state_object,
+        "generation_ready",
+        &JsValue::from_bool(generation_id > 0 && ready_generation >= generation_id),
+    );
     let _ = object_set(&state_object, "phase", &JsValue::from_str(&phase));
+    let _ = object_set(
+        &state_object,
+        "controller_present",
+        &JsValue::from_bool(controller_present),
+    );
+    match current_bootstrap_transition_detail() {
+        Some(detail) => {
+            let _ = object_set(
+                &state_object,
+                "bootstrap_transition_detail",
+                &JsValue::from_str(&detail),
+            );
+        }
+        None => {
+            let _ = object_set(
+                &state_object,
+                "bootstrap_transition_detail",
+                &JsValue::NULL,
+            );
+        }
+    }
     let enqueue_ready = window_contract.function(SEMANTIC_ENQUEUE_KEY).is_some();
     let _ = object_set(
         &state_object,
@@ -658,5 +704,30 @@ mod tests {
             body.contains("dedup_snapshot.revision.render_seq = None;"),
             "dedup must ignore render heartbeat sequencing"
         );
+    }
+
+    #[test]
+    fn semantic_submit_publication_exposes_generation_owned_bootstrap_fields() {
+        let source = include_str!("publication.rs");
+        let start = source
+            .find("pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &PublicationState) {")
+            .expect("publish_semantic_submit_state definition");
+        let end = source[start..]
+            .find("pub(crate) fn refresh_semantic_submit_surface(")
+            .map(|offset| start + offset)
+            .expect("refresh_semantic_submit_surface marker");
+        let body = &source[start..end];
+        for required in [
+            "\"active_generation\"",
+            "\"ready_generation\"",
+            "\"generation_ready\"",
+            "\"controller_present\"",
+            "\"bootstrap_transition_detail\"",
+        ] {
+            assert!(
+                body.contains(required),
+                "semantic submit publication should expose {required} for observed bootstrap ownership"
+            );
+        }
     }
 }

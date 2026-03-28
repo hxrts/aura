@@ -14,8 +14,8 @@ use crate::browser_promises::await_browser_promise_with_timeout;
 use crate::harness::{
     generation::{
         self, browser_shell_phase_label, reset_published_ui_snapshot_dedup,
-        set_active_generation_local, set_browser_shell_phase_local, BrowserShellPhase,
-        UI_GENERATION_PHASE_KEY,
+        set_active_generation_local, set_bootstrap_transition_detail_local,
+        set_browser_shell_phase_local, BrowserShellPhase, UI_GENERATION_PHASE_KEY,
     },
     install, mutation,
     publication::{self, PublicationBindingMode},
@@ -171,6 +171,16 @@ pub fn set_active_generation(generation_id: u64) {
     set_active_generation_local(generation_id);
     if let Some(window) = web_sys::window() {
         generation::sync_generation_globals(&window);
+        publication::refresh_semantic_submit_surface(
+            &window,
+            PublicationBindingMode::SemanticBridge,
+        );
+    }
+}
+
+pub fn set_bootstrap_transition_detail(detail: Option<String>) {
+    set_bootstrap_transition_detail_local(detail);
+    if let Some(window) = web_sys::window() {
         publication::refresh_semantic_submit_surface(
             &window,
             PublicationBindingMode::SemanticBridge,

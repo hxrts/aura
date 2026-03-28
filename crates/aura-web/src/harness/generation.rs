@@ -15,6 +15,7 @@ thread_local! {
     static RENDER_SEQ: RefCell<u64> = const { RefCell::new(0) };
     static ACTIVE_GENERATION: Cell<u64> = const { Cell::new(0) };
     static READY_GENERATION: Cell<u64> = const { Cell::new(0) };
+    static BOOTSTRAP_TRANSITION_DETAIL: RefCell<Option<String>> = const { RefCell::new(None) };
     static BROWSER_SHELL_PHASE: Cell<BrowserShellPhase> =
         const { Cell::new(BrowserShellPhase::Bootstrapping) };
     static GENERATION_READY_WAITERS: RefCell<Vec<(u64, oneshot::Sender<()>)>> =
@@ -62,6 +63,16 @@ pub(crate) fn active_generation() -> u64 {
 
 pub(crate) fn ready_generation() -> u64 {
     READY_GENERATION.with(|slot| slot.get())
+}
+
+pub(crate) fn current_bootstrap_transition_detail() -> Option<String> {
+    BOOTSTRAP_TRANSITION_DETAIL.with(|slot| slot.borrow().clone())
+}
+
+pub(crate) fn set_bootstrap_transition_detail_local(detail: Option<String>) {
+    BOOTSTRAP_TRANSITION_DETAIL.with(|slot| {
+        *slot.borrow_mut() = detail;
+    });
 }
 
 pub(crate) fn sync_generation_globals(window: &web_sys::Window) {

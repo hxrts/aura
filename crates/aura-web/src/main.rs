@@ -63,7 +63,7 @@ mod tests {
             panic!("failed to read {}: {error}", publication_path.display())
         });
 
-        assert!(source.contains("__AURA_UI_PUBLICATION_STATE__"));
+        assert!(source.contains("UI_PUBLICATION_STATE_KEY"));
         assert!(source.contains("semantic_snapshot_not_published"));
         assert!(!source.contains("return live_json;"));
     }
@@ -76,7 +76,7 @@ mod tests {
             panic!("failed to read {}: {error}", publication_path.display())
         });
 
-        assert!(source.contains("__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__"));
+        assert!(source.contains("RENDER_HEARTBEAT_PUBLICATION_STATE_KEY"));
         assert!(source.contains("\"degraded\""));
         assert!(source.contains("\"unavailable\""));
         assert!(source.contains("driver_push_failed"));
@@ -91,7 +91,7 @@ mod tests {
         });
 
         assert!(source.contains("pub(crate) fn spawn_browser_maintenance_loop<"));
-        assert!(source.contains("controller.runtime_error_toast(pause_message);"));
+        assert!(source.contains("_controller.runtime_error_toast(_pause_message);"));
 
         let helper_start = source
             .find("pub(crate) fn spawn_background_sync_loop")

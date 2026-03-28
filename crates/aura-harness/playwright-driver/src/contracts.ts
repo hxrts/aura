@@ -75,7 +75,12 @@ export interface SemanticSubmitPublicationState {
   detail?: string;
   binding_mode?: string;
   generation_id?: number | null;
+  active_generation?: number | null;
+  ready_generation?: number | null;
+  generation_ready?: boolean;
   phase?: string | null;
+  controller_present?: boolean;
+  bootstrap_transition_detail?: string | null;
   enqueue_ready?: boolean;
 }
 

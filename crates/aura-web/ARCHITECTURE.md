@@ -95,6 +95,11 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   whether the page-owned enqueue surface is installed (`enqueue_ready`) so
   driver startup/recovery waits bind to generation-owned readiness instead of
   stale driver-local probes.
+- Browser semantic submit readiness publication must also carry the active
+  generation, ready generation, controller presence, current browser shell
+  phase, and any in-flight bootstrap transition detail so the driver can
+  observe product-owned bootstrap/rebinding state instead of inferring
+  lifecycle from page-evaluate failures.
 - Long-lived browser maintenance tasks must surface terminal pause/failure
   through observed UI state or equivalent structured browser signals rather than
   relying on console logging alone.

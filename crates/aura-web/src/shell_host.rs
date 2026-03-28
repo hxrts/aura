@@ -234,6 +234,7 @@ impl WebShellHost {
             )
             .into(),
         );
+        harness_bridge::set_bootstrap_transition_detail(Some(handoff.detail()));
         harness_bridge::set_browser_shell_phase(BrowserShellPhase::Bootstrapping);
         if !matches!(handoff, BootstrapHandoff::InitialBootstrap) {
             harness_bridge::set_browser_shell_phase(BrowserShellPhase::HandoffCommitted);
@@ -280,6 +281,7 @@ impl WebShellHost {
                             )
                         })?;
                 }
+                harness_bridge::set_bootstrap_transition_detail(None);
                 harness_bridge::set_browser_shell_phase(BrowserShellPhase::Ready);
                 Ok(())
             }
