@@ -86,7 +86,7 @@ file_has_attr_for_function() {
   local attr_regex="$3"
   awk -v fn="$function_name" -v attr_regex="$attr_regex" '
     { lines[NR] = $0 }
-    $0 ~ "async fn " fn "\\(" {
+    $0 ~ "(async[[:space:]]+)?fn " fn "\\(" {
       found = 1
       for (i = NR - 1; i >= 1 && i >= NR - 16; i--) {
         if (lines[i] ~ attr_regex) {
@@ -101,6 +101,40 @@ file_has_attr_for_function() {
       }
     }
   ' "$file"
+}
+
+check_capability_boundary_completeness() {
+  local attr_regex='#[[](aura_macros::)?capability_boundary'
+  local -a required_entries=(
+    "crates/aura-app/src/workflows/semantic_facts.rs:semantic_lifecycle_publication_capability"
+    "crates/aura-app/src/workflows/semantic_facts.rs:semantic_readiness_publication_capability"
+    "crates/aura-app/src/workflows/semantic_facts.rs:semantic_postcondition_proof_capability"
+    "crates/aura-app/src/workflows/semantic_facts.rs:authorize_readiness_publication"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_home_created_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_account_created_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_channel_membership_ready_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_invitation_created_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_invitation_exported_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_channel_invitation_created_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_invitation_accepted_or_materialized_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_pending_invitation_consumed_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_invitation_declined_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_invitation_revoked_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_device_enrollment_started_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_message_committed_proof"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_device_enrollment_imported_proof"
+    "crates/aura-agent/src/runtime_bridge/mod.rs:secure_storage_bootstrap_boundary"
+    "crates/aura-agent/src/runtime_bridge/mod.rs:secure_storage_bootstrap_store_capabilities"
+  )
+  local entry file function_name
+  for entry in "${required_entries[@]}"; do
+    file="${entry%%:*}"
+    function_name="${entry##*:}"
+    if ! file_has_attr_for_function "$file" "$function_name" "$attr_regex"; then
+      echo "✖ $file: capability-boundary completeness requires #[aura_macros::capability_boundary] near fn $function_name(...)" >&2
+      violations=$((violations + 1))
+    fi
+  done
 }
 
 check_actor_owned_completeness() {
@@ -208,6 +242,9 @@ case "$mode" in
     ;;
   semantic-owner)
     check_semantic_owner_completeness
+    ;;
+  capability-boundary)
+    check_capability_boundary_completeness
     ;;
 esac
 
