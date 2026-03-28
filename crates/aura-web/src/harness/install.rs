@@ -81,6 +81,18 @@ window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ =
     queue_depth: 0,
     last_progress_at: Date.now(),
   };
+const normalizeDriverResultPayload = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    return {
+      __driver_result_normalization_error: error?.message ?? String(error),
+    };
+  }
+};
 
 window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__ = (delayMs = 0) => {
   const effectiveDelay =
@@ -193,12 +205,13 @@ window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__ = () => {
     })
     .then((result) => {
       console.log(`[driver-page] semantic queue ok id=${next.command_id}`);
-      semanticResults[next.command_id] = { ok: true, result };
+      const normalizedResult = normalizeDriverResultPayload(result);
+      semanticResults[next.command_id] = { ok: true, result: normalizedResult };
       Promise.resolve(
         window.__AURA_DRIVER_PUSH_SEMANTIC_RESULT?.({
           command_id: next.command_id,
           ok: true,
-          result,
+          result: normalizedResult,
         }),
       ).catch(() => {});
       if (semanticDebug) {
@@ -385,12 +398,13 @@ window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__ = () => {
     })
     .then((result) => {
       console.log(`[driver-page] runtime stage queue ok id=${next.command_id}`);
-      runtimeStageResults[next.command_id] = { ok: true, result };
+      const normalizedResult = normalizeDriverResultPayload(result);
+      runtimeStageResults[next.command_id] = { ok: true, result: normalizedResult };
       Promise.resolve(
         window.__AURA_DRIVER_PUSH_RUNTIME_STAGE_RESULT?.({
           command_id: next.command_id,
           ok: true,
-          result,
+          result: normalizedResult,
         }),
       ).catch(() => {});
       if (runtimeStageDebug) {

@@ -106,7 +106,21 @@ function jsonResponse(
 }
 
 function writeResponse(response: DriverResponse) {
+  const id =
+    response && typeof response === "object" && "id" in response
+      ? response.id
+      : null;
+  const ok =
+    response && typeof response === "object" && "ok" in response
+      ? response.ok
+      : null;
+  console.error(
+    `[driver] write_response start id=${id} ok=${ok === true}`,
+  );
   process.stdout.write(`${JSON.stringify(response)}\n`);
+  console.error(
+    `[driver] write_response done id=${id} ok=${ok === true}`,
+  );
 }
 
 function traceDriver(message) {
@@ -350,6 +364,28 @@ function takeRuntimeStageResultFromCache(session, commandId) {
     delete session.runtimeStageResultCache[commandId];
   }
   return payload;
+}
+
+function normalizeDriverRpcResultPayload(value, context) {
+  if (value == null) {
+    return null;
+  }
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  if (
+    (typeof value === "object" || typeof value === "function") &&
+    typeof value.then === "function"
+  ) {
+    console.error(
+      `[driver] normalize_result thenable_detected context=${context}`,
+    );
+  }
+  return JSON.parse(JSON.stringify(value));
 }
 
 async function observeSemanticCompletionAfterEnqueueFailure(
@@ -1044,229 +1080,186 @@ async function ensurePageInteractive(page, timeoutMs) {
 }
 
 async function installDomObserver(page, session) {
-  if (!session.domObserverBindingInstalled) {
-    await page.exposeBinding("__AURA_DRIVER_PUSH_STATE", (_source, payload) => {
-      session.domState = normalizeDomState(payload);
-      notifyDomStateWaiters(session);
-    });
-    session.domObserverBindingInstalled = true;
-  }
-  await page.evaluate(() => {
-    const pushState = () => {
-      const root =
-        document.getElementById("aura-app-root") ??
-        document.querySelector("main:last-of-type") ??
-        document.body;
-      const ids = Array.from(document.querySelectorAll("[id]"))
-        .map((element) => element.id)
-        .filter((id) => id.startsWith("aura-"));
-      return window.__AURA_DRIVER_PUSH_STATE({
-        text: root?.textContent ?? "",
-        ids,
-      });
-    };
+  await installDomObserverBinding(page, session);
+  await withOperationTimeout(
+    `install_dom_observer:${session.id}`,
+    page.evaluate(() => {
+      const pushState = () => {
+        const root =
+          document.getElementById("aura-app-root") ??
+          document.querySelector("main:last-of-type") ??
+          document.body;
+        const ids = Array.from(document.querySelectorAll("[id]"))
+          .map((element) => element.id)
+          .filter((id) => id.startsWith("aura-"));
+        return window.__AURA_DRIVER_PUSH_STATE({
+          text: root?.textContent ?? "",
+          ids,
+        });
+      };
 
-    if (window.__AURA_DRIVER_OBSERVER_INSTALLED) {
-      pushState();
-      return;
-    }
-
-    let scheduled = false;
-    const schedulePush = () => {
-      if (scheduled) {
+      if (window.__AURA_DRIVER_OBSERVER_INSTALLED) {
+        pushState();
         return;
       }
-      scheduled = true;
-      requestAnimationFrame(() => {
-        scheduled = false;
-        pushState().catch(() => {});
+
+      let scheduled = false;
+      const schedulePush = () => {
+        if (scheduled) {
+          return;
+        }
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          pushState().catch(() => {});
+        });
+      };
+
+      const observer = new MutationObserver(() => {
+        schedulePush();
       });
-    };
+      observer.observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ["id", "class", "aria-hidden", "open", "data-state"],
+      });
 
-    const observer = new MutationObserver(() => {
+      window.addEventListener("load", schedulePush, { once: true });
+      window.__AURA_DRIVER_OBSERVER_INSTALLED = true;
       schedulePush();
-    });
-    observer.observe(document.body, {
-      subtree: true,
-      childList: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: ["id", "class", "aria-hidden", "open", "data-state"],
-    });
+    }),
+    4000,
+  );
+}
 
-    window.addEventListener("load", schedulePush, { once: true });
-    window.__AURA_DRIVER_OBSERVER_INSTALLED = true;
-    schedulePush();
-  });
+async function installDomObserverBinding(page, session) {
+  if (session.domObserverBindingInstalled) {
+    return;
+  }
+  await withOperationTimeout(
+    `install_dom_observer_binding:${session.id}`,
+    page.exposeBinding("__AURA_DRIVER_PUSH_STATE", (_source, payload) => {
+      session.domState = normalizeDomState(payload);
+      notifyDomStateWaiters(session);
+    }),
+    4000,
+  );
+  session.domObserverBindingInstalled = true;
 }
 
 async function installUiStateObserver(page, session) {
   if (!session.uiStateBindingsInstalled) {
-    await page.exposeFunction("__AURA_DRIVER_PUSH_UI_STATE", (payload) => {
-      const stored = storeUiState(session, payload, "driver_push");
-      console.error(
-        `[driver] ui_state push instance=${session.id} stored=${stored} payload_type=${typeof payload} revision=${uiSnapshotRevision(
-          session.uiStateCache,
-        )}`,
-      );
-    });
-    await page.exposeFunction(
-      "__AURA_DRIVER_PUSH_RENDER_HEARTBEAT",
-      (payload) => {
-        if (typeof payload === "string") {
-          try {
-            session.renderHeartbeat = normalizeRenderHeartbeat(
-              JSON.parse(payload),
-            );
-          } catch {
-            session.renderHeartbeat = null;
-          }
-          return;
-        }
-        session.renderHeartbeat = normalizeRenderHeartbeat(payload);
-      },
+    await withOperationTimeout(
+      `install_ui_state_observer_push_state:${session.id}`,
+      page.exposeFunction("__AURA_DRIVER_PUSH_UI_STATE", (payload) => {
+        const stored = storeUiState(session, payload, "driver_push");
+        console.error(
+          `[driver] ui_state push instance=${session.id} stored=${stored} payload_type=${typeof payload} revision=${uiSnapshotRevision(
+            session.uiStateCache,
+          )}`,
+        );
+      }),
+      4000,
     );
-    await page.exposeFunction("__AURA_DRIVER_PUSH_CLIPBOARD", (payload) => {
-      session.clipboardCache = String(payload ?? "");
-    });
+    await withOperationTimeout(
+      `install_ui_state_observer_render_heartbeat:${session.id}`,
+      page.exposeFunction(
+        "__AURA_DRIVER_PUSH_RENDER_HEARTBEAT",
+        (payload) => {
+          if (typeof payload === "string") {
+            try {
+              session.renderHeartbeat = normalizeRenderHeartbeat(
+                JSON.parse(payload),
+              );
+            } catch {
+              session.renderHeartbeat = null;
+            }
+            return;
+          }
+          session.renderHeartbeat = normalizeRenderHeartbeat(payload);
+        },
+      ),
+      4000,
+    );
+    await withOperationTimeout(
+      `install_ui_state_observer_clipboard:${session.id}`,
+      page.exposeFunction("__AURA_DRIVER_PUSH_CLIPBOARD", (payload) => {
+        session.clipboardCache = String(payload ?? "");
+      }),
+      4000,
+    );
     session.uiStateBindingsInstalled = true;
   }
 }
 
-async function installHarnessMutationQueue(page, session) {
+async function installHarnessMutationBindings(page, session) {
   if (!session.mutationQueueBindingsInstalled) {
-    await page.exposeFunction("__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE", (payload) => {
-      session.semanticSubmitState =
-        payload && typeof payload === "object"
-          ? (payload as SemanticSubmitPublicationState)
-          : null;
-      session.semanticQueueInstalled =
-        session.semanticSubmitState?.enqueue_ready === true;
-      console.error(
-        `[driver] semantic_submit_state instance=${session.id} state=${JSON.stringify(session.semanticSubmitState)}`,
-      );
-    });
-    await page.exposeFunction("__AURA_DRIVER_PUSH_SEMANTIC_RESULT", (payload) => {
-      if (!session.semanticResultCache || typeof session.semanticResultCache !== "object") {
-        session.semanticResultCache = Object.create(null);
-      }
-      if (payload && typeof payload === "object" && typeof payload.command_id === "string") {
-        console.error(
-          `[driver] semantic_result_push instance=${session.id} command_id=${payload.command_id} ok=${payload.ok === true}`,
-        );
-        session.semanticResultCache[payload.command_id] = payload;
-        resolveSemanticResultWaiter(session, payload);
-      }
-    });
-    await page.exposeFunction("__AURA_DRIVER_PUSH_RUNTIME_STAGE_RESULT", (payload) => {
-      if (
-        !session.runtimeStageResultCache ||
-        typeof session.runtimeStageResultCache !== "object"
-      ) {
-        session.runtimeStageResultCache = Object.create(null);
-      }
-      if (payload && typeof payload === "object" && typeof payload.command_id === "string") {
-        console.error(
-          `[driver] runtime_stage_result_push instance=${session.id} command_id=${payload.command_id} ok=${payload.ok === true}`,
-        );
-        session.runtimeStageResultCache[payload.command_id] = payload;
-        resolveRuntimeStageResultWaiter(session, payload);
-      }
-    });
+    await withOperationTimeout(
+      `install_mutation_queue_submit_state_binding:${session.id}`,
+      page.exposeFunction(
+        "__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE",
+        (payload) => {
+          session.semanticSubmitState =
+            payload && typeof payload === "object"
+              ? (payload as SemanticSubmitPublicationState)
+              : null;
+          session.semanticQueueInstalled =
+            session.semanticSubmitState?.enqueue_ready === true;
+          console.error(
+            `[driver] semantic_submit_state instance=${session.id} state=${JSON.stringify(session.semanticSubmitState)}`,
+          );
+        },
+      ),
+      4000,
+    );
+    await withOperationTimeout(
+      `install_mutation_queue_semantic_result_binding:${session.id}`,
+      page.exposeFunction("__AURA_DRIVER_PUSH_SEMANTIC_RESULT", (payload) => {
+        if (!session.semanticResultCache || typeof session.semanticResultCache !== "object") {
+          session.semanticResultCache = Object.create(null);
+        }
+        if (payload && typeof payload === "object" && typeof payload.command_id === "string") {
+          console.error(
+            `[driver] semantic_result_push instance=${session.id} command_id=${payload.command_id} ok=${payload.ok === true}`,
+          );
+          session.semanticResultCache[payload.command_id] = payload;
+          resolveSemanticResultWaiter(session, payload);
+        }
+      }),
+      4000,
+    );
+    await withOperationTimeout(
+      `install_mutation_queue_runtime_stage_result_binding:${session.id}`,
+      page.exposeFunction(
+        "__AURA_DRIVER_PUSH_RUNTIME_STAGE_RESULT",
+        (payload) => {
+          if (
+            !session.runtimeStageResultCache ||
+            typeof session.runtimeStageResultCache !== "object"
+          ) {
+            session.runtimeStageResultCache = Object.create(null);
+          }
+          if (payload && typeof payload === "object" && typeof payload.command_id === "string") {
+            console.error(
+              `[driver] runtime_stage_result_push instance=${session.id} command_id=${payload.command_id} ok=${payload.ok === true}`,
+            );
+            session.runtimeStageResultCache[payload.command_id] = payload;
+            resolveRuntimeStageResultWaiter(session, payload);
+          }
+        },
+      ),
+      4000,
+    );
     session.mutationQueueBindingsInstalled = true;
   }
+}
 
-  const cacheMutationResult = (resultType, payload) => {
-    if (!payload || typeof payload !== "object" || typeof payload.command_id !== "string") {
-      return;
-    }
-    if (resultType === "semantic") {
-      if (!session.semanticResultCache || typeof session.semanticResultCache !== "object") {
-        session.semanticResultCache = Object.create(null);
-      }
-      session.semanticResultCache[payload.command_id] = payload;
-      resolveSemanticResultWaiter(session, payload);
-      console.error(
-        `[driver] semantic_result_cache_sync instance=${session.id} command_id=${payload.command_id} ok=${payload.ok === true}`,
-      );
-      return;
-    }
-    if (
-      !session.runtimeStageResultCache ||
-      typeof session.runtimeStageResultCache !== "object"
-    ) {
-      session.runtimeStageResultCache = Object.create(null);
-    }
-    session.runtimeStageResultCache[payload.command_id] = payload;
-    resolveRuntimeStageResultWaiter(session, payload);
-    console.error(
-      `[driver] runtime_stage_result_cache_sync instance=${session.id} command_id=${payload.command_id} ok=${payload.ok === true}`,
-    );
-  };
-
-  const queueState = await page.evaluate(() => {
-    const runPendingNav = () => {
-      const pendingNav = window.__AURA_DRIVER_PENDING_NAV_SCREEN__;
-      const harness = window.__AURA_HARNESS__;
-      if (
-        pendingNav &&
-        harness &&
-        typeof harness.navigate_screen === "function"
-      ) {
-        window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = null;
-        try {
-          harness.navigate_screen(pendingNav);
-        } catch {
-          window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = pendingNav;
-          window.setTimeout(() => {
-            window.__AURA_DRIVER_RUN_PENDING_NAV__?.();
-          }, 16);
-        }
-      }
-    };
-
-    window.__AURA_DRIVER_RUN_PENDING_NAV__ = runPendingNav;
-    window.__AURA_DRIVER_WAKE_PENDING_NAV__ = () => {
-      window.setTimeout(() => {
-        window.__AURA_DRIVER_RUN_PENDING_NAV__?.();
-      }, 0);
-    };
-    window.__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE?.(
-      window.__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__ ?? null,
-    );
-    window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.();
-    window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__?.();
-    return {
-      semantic_enqueue_ready:
-        typeof window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ === "function",
-      runtime_stage_enqueue_ready:
-        typeof window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__ === "function",
-      semantic_results:
-        window.__AURA_DRIVER_SEMANTIC_RESULTS__ &&
-        typeof window.__AURA_DRIVER_SEMANTIC_RESULTS__ === "object"
-          ? window.__AURA_DRIVER_SEMANTIC_RESULTS__
-          : null,
-      runtime_stage_results:
-        window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__ &&
-        typeof window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__ === "object"
-          ? window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__
-          : null,
-    };
-  });
-  session.semanticQueueInstalled = queueState?.semantic_enqueue_ready === true;
-  if (queueState?.semantic_results && typeof queueState.semantic_results === "object") {
-    for (const payload of Object.values(queueState.semantic_results)) {
-      cacheMutationResult("semantic", payload);
-    }
-  }
-  if (
-    queueState?.runtime_stage_results &&
-    typeof queueState.runtime_stage_results === "object"
-  ) {
-    for (const payload of Object.values(queueState.runtime_stage_results)) {
-      cacheMutationResult("runtime_stage", payload);
-    }
-  }
+async function installHarnessMutationQueue(page, session) {
+  await installHarnessMutationBindings(page, session);
+  session.semanticQueueInstalled =
+    session.semanticSubmitState?.enqueue_ready === true;
 }
 
 function normalizeStartupReadiness(params) {
@@ -1286,11 +1279,16 @@ function normalizeStartupReadiness(params) {
 function restartStartupReadiness(reason) {
   if (
     reason === "create_account_bootstrap" ||
-    reason === "stage_runtime_identity_bootstrap" ||
-    String(reason).startsWith("submit_semantic_command_enqueue:")
+    reason === "stage_runtime_identity_bootstrap"
   ) {
+    // Bootstrap-staging restarts are allowed to recover against the lighter
+    // submit surface because the page may not have an account/runtime-backed
+    // semantic snapshot yet.
     return STARTUP_READINESS_SUBMIT;
   }
+  // Semantic-command replay must wait for full semantic readiness again so the
+  // restarted page has completed generation bootstrap and re-owned shell
+  // maintenance before the replayed command runs.
   return STARTUP_READINESS_SEMANTIC;
 }
 
@@ -1405,7 +1403,15 @@ async function recoverSemanticQueueOnCurrentPage(session, reason) {
   );
   await installUiStateObserver(session.page, session);
   await installHarnessMutationQueue(session.page, session);
-  await installDomObserver(session.page, session);
+  try {
+    await installDomObserver(session.page, session);
+  } catch (error) {
+    console.error(
+      `[driver] recover_semantic_queue dom_observer_optional_failure instance=${session.id} reason=${reason} error=${
+        error?.message ?? String(error)
+      }`,
+    );
+  }
   await assertRootStructure(session, `semantic_queue_${reason}`);
   await waitForSubmitQueueReady(session, `semantic_queue:${reason}`, 5000);
   return session;
@@ -2527,16 +2533,40 @@ async function startPage(params) {
         );
       }
 
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver start`,
+      );
       await installUiStateObserver(page, session);
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installUiStateObserver done`,
+      );
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installHarnessMutationBindings start`,
+      );
+      await installHarnessMutationBindings(page, session);
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installHarnessMutationBindings done`,
+      );
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserverBinding start`,
+      );
+      await installDomObserverBinding(page, session);
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserverBinding done`,
+      );
       installPageNavigationReset(session);
 
       traceDriver(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto start url=${targetUrl}`,
       );
-      await page.goto(targetUrl, {
-        waitUntil: "commit",
-        timeout: pageGotoTimeoutMs,
-      });
+      await withOperationTimeout(
+        `start_page_goto:${instanceId}`,
+        page.goto(targetUrl, {
+          waitUntil: "commit",
+          timeout: pageGotoTimeoutMs,
+        }),
+        pageGotoTimeoutMs + 2000,
+      );
       traceDriver(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto done`,
       );
@@ -2548,7 +2578,11 @@ async function startPage(params) {
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensurePageInteractive start`,
       );
-      await ensurePageInteractive(page, harnessReadyTimeoutMs);
+      await withOperationTimeout(
+        `start_page_interactive:${instanceId}`,
+        ensurePageInteractive(page, harnessReadyTimeoutMs),
+        harnessReadyTimeoutMs + 2000,
+      );
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensurePageInteractive done`,
       );
@@ -2571,18 +2605,38 @@ async function startPage(params) {
       }
       if (startupReadiness === STARTUP_READINESS_SEMANTIC) {
         try {
+          console.error(
+            `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout start`,
+          );
           traceDriver(
             `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout start`,
           );
-          await ensureHarnessWithTimeout(
-            page,
-            Math.min(harnessReadyTimeoutMs, 5000),
+          await withOperationTimeout(
+            `start_page_harness_ready:${instanceId}`,
+            ensureHarnessWithTimeout(
+              page,
+              Math.min(harnessReadyTimeoutMs, 5000),
+            ),
+            Math.min(harnessReadyTimeoutMs, 5000) + 2000,
+          );
+          console.error(
+            `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout done`,
           );
           traceDriver(
             `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout done`,
           );
           await installUiStateObserver(page, session);
-          await assertRootStructure({ page }, "startup");
+          console.error(
+            `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} assertRootStructure start`,
+          );
+          await withOperationTimeout(
+            `start_page_root_structure:${instanceId}`,
+            assertRootStructure({ page }, "startup"),
+            5000,
+          );
+          console.error(
+            `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} assertRootStructure done`,
+          );
         } catch (error) {
           consoleLog.push(
             `[${nowIso()}] harness bridge not ready after startup: ${error?.message ?? String(error)}`,
@@ -2594,7 +2648,7 @@ async function startPage(params) {
           );
         }
       }
-      traceDriver(
+      console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installHarnessMutationQueue start`,
       );
       await installHarnessMutationQueue(page, session);
@@ -2604,13 +2658,21 @@ async function startPage(params) {
       traceDriver(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installHarnessMutationQueue done`,
       );
-      traceDriver(
-        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver start`,
-      );
-      await installDomObserver(page, session);
-      console.error(
-        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver done`,
-      );
+      try {
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver start`,
+        );
+        await installDomObserver(page, session);
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver done`,
+        );
+      } catch (error) {
+        console.error(
+          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver optional failure: ${
+            error?.message ?? String(error)
+          }`,
+        );
+      }
       traceDriver(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} installDomObserver done`,
       );
@@ -3887,7 +3949,7 @@ async function submitSemanticCommand(params) {
               responsePromise = waitForSemanticResult(session, commandId, 10000);
               void responsePromise.catch(() => null);
               console.error(
-                `[driver] submit_semantic_command enqueue_ok instance=${instanceId} stage=restart_startup`,
+                `[driver] submit_semantic_command enqueue_ok instance=${instanceId} stage=restart_seeded`,
               );
             }
           }
@@ -3952,10 +4014,14 @@ async function submitSemanticCommand(params) {
   traceDriver(
     `[driver] submit_semantic_command resolved instance=${instanceId}`,
   );
-  if (typeof response.result === "string") {
-    return JSON.parse(response.result);
-  }
-  return response.result;
+  const normalizedResult = normalizeDriverRpcResultPayload(
+    response.result,
+    `submit_semantic_command:${instanceId}:${commandId}`,
+  );
+  console.error(
+    `[driver] submit_semantic_command return_ready instance=${instanceId} command_id=${commandId} result_type=${typeof normalizedResult}`,
+  );
+  return normalizedResult;
 }
 
 async function getAuthorityId(params) {
@@ -4272,6 +4338,9 @@ rl.on("line", (line) => {
           `request:${request.method}`,
           dispatch(request.method, request.params ?? {}),
           requestTimeoutMs(request.method, request.params ?? {}),
+        );
+        console.error(
+          `[driver] request result_ready id=${id} method=${request.method} result_type=${typeof result}`,
         );
         traceDriver(
           `[driver] request done id=${id} method=${request.method}`,
