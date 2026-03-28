@@ -706,6 +706,7 @@ ci-ratchet-audit:
     just lint-arch-syntax
     just ci-annotation-ratchet
     just ci-ownership-policy
+    just ci-browser-driver-contract-sync
     just web-check
     just ci-agent-wasm
     env CARGO_TARGET_DIR=target/ratchet just ci-workspace-wasm-test

@@ -1505,6 +1505,12 @@ mod tests {
             "browser driver should submit runtime-identity staging through the dedicated driver contract module instead of re-spelling queue globals or payload builders inline"
         );
         assert!(
+            !driver_source.contains("\"__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__\"")
+                && !driver_source.contains("\"__AURA_DRIVER_RUNTIME_STAGE_RESULTS__\"")
+                && !driver_source.contains("\"__AURA_DRIVER_RUNTIME_STAGE_DEBUG__\""),
+            "browser driver should not re-spell shared runtime-stage driver globals inline once the dedicated contract module owns them"
+        );
+        assert!(
             !driver_source.contains("await stageRuntimeIdentity(serializedIdentity);"),
             "browser driver should not hold a direct page-evaluate await open across a generation-changing runtime staging handoff"
         );
@@ -1524,6 +1530,12 @@ mod tests {
                 && driver_source.contains("buildSemanticQueuePayloadJson(")
                 && !driver_source.contains("request_json: requestJson"),
             "browser driver should submit semantic commands through the dedicated driver contract module instead of open-coded queue globals or payload JSON"
+        );
+        assert!(
+            !driver_source.contains("\"__AURA_DRIVER_SEMANTIC_ENQUEUE__\"")
+                && !driver_source.contains("\"__AURA_DRIVER_SEMANTIC_RESULTS__\"")
+                && !driver_source.contains("\"__AURA_DRIVER_SEMANTIC_DEBUG__\""),
+            "browser driver should not re-spell shared semantic driver globals inline once the dedicated contract module owns them"
         );
         assert!(
             backend_source.contains("failed to decode browser semantic command response"),

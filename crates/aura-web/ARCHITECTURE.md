@@ -86,8 +86,9 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   module rather than constructing parallel submission paths.
 - The page-owned semantic queue and runtime-stage queue contract has one
   canonical ownership split across `src/harness/driver_contract.rs` for raw
-  driver key names and payload schema, and `src/harness/page_owned_queue.rs`
-  for the Rust-owned queue behavior.
+  driver key names and payload schema, `src/harness/window_contract.rs` for
+  the narrow Rust-owned browser-global access helper, and
+  `src/harness/page_owned_queue.rs` for the Rust-owned queue behavior.
   `src/harness/install.rs` is only the typed installer for those modules and
   must not become a second contract owner via ad hoc queue logic.
 - Browser semantic submit readiness publication is page-owned and must report
@@ -118,6 +119,9 @@ Enforcement locus:
 - `src/harness/install.rs` wires the page-owned observation/readiness surfaces.
 - `src/harness/driver_contract.rs` owns the raw browser-driver key names and
   queue payload schema.
+- `src/harness/window_contract.rs` owns the thin browser-global access helper
+  used by queue/publication code instead of open-coded `Reflect::get` /
+  `Reflect::set(window, ...)` patterns.
 - `src/harness/page_owned_queue.rs` owns the page-side semantic and
   runtime-stage queue behavior that consumes that contract.
 - `src/harness_bridge.rs` remains the thin stable facade rather than the

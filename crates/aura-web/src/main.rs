@@ -298,6 +298,24 @@ mod tests {
     }
 
     #[test]
+    fn web_harness_window_contract_centralizes_browser_globals() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let queue_path = repo_root.join("crates/aura-web/src/harness/page_owned_queue.rs");
+        let publication_path = repo_root.join("crates/aura-web/src/harness/publication.rs");
+        let queue_source = std::fs::read_to_string(&queue_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", queue_path.display()));
+        let publication_source = std::fs::read_to_string(&publication_path).unwrap_or_else(
+            |error| panic!("failed to read {}: {error}", publication_path.display()),
+        );
+
+        for source in [&queue_source, &publication_source] {
+            assert!(source.contains("use crate::harness::window_contract::"));
+            assert!(!source.contains("Reflect::get(window.as_ref()"));
+            assert!(!source.contains("Reflect::set(window.as_ref()"));
+        }
+    }
+
+    #[test]
     fn web_bootstrap_handoff_waits_for_completion() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let shell_host_path = repo_root.join("crates/aura-web/src/shell_host.rs");

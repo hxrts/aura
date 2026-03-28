@@ -6,3 +6,4 @@ pub(crate) mod install;
 pub(crate) mod mutation;
 pub(crate) mod page_owned_queue;
 pub(crate) mod publication;
+pub(crate) mod window_contract;

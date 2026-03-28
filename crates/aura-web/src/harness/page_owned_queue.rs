@@ -1,6 +1,6 @@
 use aura_app::ui::contract::classify_screen_item_id;
 use aura_app::ui::types::BootstrapRuntimeIdentity;
-use js_sys::{Array, Function, JSON, Object, Reflect};
+use js_sys::{Array, Function, JSON, Object};
 use serde::Deserialize;
 use serde_json::from_str;
 use std::cell::RefCell;
@@ -23,6 +23,10 @@ use crate::harness::generation::current_controller;
 use crate::harness::mutation::{apply_browser_ui_mutation, schedule_browser_task_next_tick};
 use crate::harness::publication::{
     semantic_submit_surface_state, PublicationStatus, SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY,
+};
+use crate::harness::window_contract::{
+    ensure_object_field as ensure_window_object_field, object_set,
+    HarnessWindowContract,
 };
 use crate::task_owner::shared_web_task_owner;
 
@@ -53,7 +57,9 @@ thread_local! {
 
 pub(crate) fn install(window: &web_sys::Window) -> Result<(), JsValue> {
     web_sys::console::log_1(&"[web-harness-queue] install start".into());
-    if Reflect::get(window.as_ref(), &JsValue::from_str(MUTATION_QUEUE_INSTALLED_KEY))
+    let window_contract = HarnessWindowContract::new(window.clone());
+    if window_contract
+        .get(MUTATION_QUEUE_INSTALLED_KEY)
         .ok()
         .and_then(|value| value.as_bool())
         == Some(true)
@@ -74,11 +80,7 @@ pub(crate) fn install(window: &web_sys::Window) -> Result<(), JsValue> {
     install_wake_runtime_stage_queue(window)?;
     install_pending_nav_wake(window)?;
     drain_seed_queues(window)?;
-    Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(MUTATION_QUEUE_INSTALLED_KEY),
-        &JsValue::TRUE,
-    )?;
+    window_contract.set(MUTATION_QUEUE_INSTALLED_KEY, &JsValue::TRUE)?;
     web_sys::console::log_1(&"[web-harness-queue] install complete".into());
     push_current_semantic_submit_state(window);
     wake_semantic_queue(0);
@@ -113,68 +115,49 @@ fn drain_seed_queues(window: &web_sys::Window) -> Result<(), JsValue> {
 }
 
 fn ensure_window_globals(window: &web_sys::Window) -> Result<(), JsValue> {
-    ensure_nullish(window, PENDING_NAV_SCREEN_KEY, JsValue::NULL)?;
-    ensure_array(window, PENDING_SEMANTIC_QUEUE_SEED_KEY)?;
-    ensure_array(window, PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY)?;
-    ensure_array(window, SEMANTIC_QUEUE_KEY)?;
-    ensure_array(window, RUNTIME_STAGE_QUEUE_KEY)?;
-    ensure_object(window, SEMANTIC_RESULTS_KEY)?;
-    ensure_object(window, RUNTIME_STAGE_RESULTS_KEY)?;
+    let window_contract = HarnessWindowContract::new(window.clone());
+    ensure_nullish(&window_contract, PENDING_NAV_SCREEN_KEY, JsValue::NULL)?;
+    ensure_array(&window_contract, PENDING_SEMANTIC_QUEUE_SEED_KEY)?;
+    ensure_array(&window_contract, PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY)?;
+    ensure_array(&window_contract, SEMANTIC_QUEUE_KEY)?;
+    ensure_array(&window_contract, RUNTIME_STAGE_QUEUE_KEY)?;
+    ensure_object(&window_contract, SEMANTIC_RESULTS_KEY)?;
+    ensure_object(&window_contract, RUNTIME_STAGE_RESULTS_KEY)?;
     ensure_semantic_debug(window)?;
     ensure_runtime_stage_debug(window)?;
-    ensure_bool(window, SEMANTIC_BUSY_KEY, false)?;
-    ensure_bool(window, RUNTIME_STAGE_BUSY_KEY, false)?;
-    ensure_bool(window, SEMANTIC_WAKE_SCHEDULED_KEY, false)?;
-    ensure_bool(window, RUNTIME_STAGE_WAKE_SCHEDULED_KEY, false)?;
+    ensure_bool(&window_contract, SEMANTIC_BUSY_KEY, false)?;
+    ensure_bool(&window_contract, RUNTIME_STAGE_BUSY_KEY, false)?;
+    ensure_bool(&window_contract, SEMANTIC_WAKE_SCHEDULED_KEY, false)?;
+    ensure_bool(&window_contract, RUNTIME_STAGE_WAKE_SCHEDULED_KEY, false)?;
     Ok(())
 }
 
-fn ensure_nullish(window: &web_sys::Window, key: &str, default: JsValue) -> Result<(), JsValue> {
-    let existing = Reflect::get(window.as_ref(), &JsValue::from_str(key))?;
-    if existing.is_null() || existing.is_undefined() {
-        Reflect::set(window.as_ref(), &JsValue::from_str(key), &default)?;
-    }
-    Ok(())
+fn ensure_nullish(
+    window_contract: &HarnessWindowContract,
+    key: &str,
+    default: JsValue,
+) -> Result<(), JsValue> {
+    window_contract.ensure_nullish(key, &default)
 }
 
-fn ensure_bool(window: &web_sys::Window, key: &str, value: bool) -> Result<(), JsValue> {
-    let existing = Reflect::get(window.as_ref(), &JsValue::from_str(key))?;
-    if existing.is_undefined() {
-        Reflect::set(
-            window.as_ref(),
-            &JsValue::from_str(key),
-            &JsValue::from_bool(value),
-        )?;
-    }
-    Ok(())
+fn ensure_bool(
+    window_contract: &HarnessWindowContract,
+    key: &str,
+    value: bool,
+) -> Result<(), JsValue> {
+    window_contract.ensure_bool(key, value)
 }
 
-fn ensure_array(window: &web_sys::Window, key: &str) -> Result<Array, JsValue> {
-    let existing = Reflect::get(window.as_ref(), &JsValue::from_str(key))?;
-    if Array::is_array(&existing) {
-        Ok(Array::from(&existing))
-    } else {
-        let array = Array::new();
-        Reflect::set(window.as_ref(), &JsValue::from_str(key), &array)?;
-        Ok(array)
-    }
+fn ensure_array(window_contract: &HarnessWindowContract, key: &str) -> Result<Array, JsValue> {
+    window_contract.ensure_array(key)
 }
 
-fn ensure_object(window: &web_sys::Window, key: &str) -> Result<Object, JsValue> {
-    let existing = Reflect::get(window.as_ref(), &JsValue::from_str(key))?;
-    if existing.is_object() && !existing.is_null() {
-        existing
-            .dyn_into::<Object>()
-            .map_err(|_| JsValue::from_str(&format!("failed to access object window.{key}")))
-    } else {
-        let object = Object::new();
-        Reflect::set(window.as_ref(), &JsValue::from_str(key), &object)?;
-        Ok(object)
-    }
+fn ensure_object(window_contract: &HarnessWindowContract, key: &str) -> Result<Object, JsValue> {
+    window_contract.ensure_object(key)
 }
 
 fn ensure_semantic_debug(window: &web_sys::Window) -> Result<(), JsValue> {
-    let debug = ensure_object(window, SEMANTIC_DEBUG_KEY)?;
+    let debug = ensure_object(&HarnessWindowContract::new(window.clone()), SEMANTIC_DEBUG_KEY)?;
     ensure_object_field(&debug, "last_event", JsValue::from_str("installed"))?;
     ensure_object_field(&debug, "active_command_id", JsValue::NULL)?;
     ensure_object_field(&debug, "last_command_id", JsValue::NULL)?;
@@ -187,7 +170,7 @@ fn ensure_semantic_debug(window: &web_sys::Window) -> Result<(), JsValue> {
 }
 
 fn ensure_runtime_stage_debug(window: &web_sys::Window) -> Result<(), JsValue> {
-    let debug = ensure_object(window, RUNTIME_STAGE_DEBUG_KEY)?;
+    let debug = ensure_object(&HarnessWindowContract::new(window.clone()), RUNTIME_STAGE_DEBUG_KEY)?;
     ensure_object_field(&debug, "last_event", JsValue::from_str("installed"))?;
     ensure_object_field(&debug, "active_command_id", JsValue::NULL)?;
     ensure_object_field(&debug, "last_error", JsValue::NULL)?;
@@ -197,11 +180,7 @@ fn ensure_runtime_stage_debug(window: &web_sys::Window) -> Result<(), JsValue> {
 }
 
 fn ensure_object_field(object: &Object, key: &str, default: JsValue) -> Result<(), JsValue> {
-    let existing = Reflect::get(object.as_ref(), &JsValue::from_str(key))?;
-    if existing.is_undefined() {
-        Reflect::set(object.as_ref(), &JsValue::from_str(key), &default)?;
-    }
-    Ok(())
+    ensure_window_object_field(object, key, &default)
 }
 
 fn seed_queue_from_window<T>(
@@ -212,7 +191,8 @@ fn seed_queue_from_window<T>(
 where
     T: for<'de> Deserialize<'de>,
 {
-    let seed = ensure_array(window, key)?;
+    let window_contract = HarnessWindowContract::new(window.clone());
+    let seed = ensure_array(&window_contract, key)?;
     let mut accepted = 0usize;
     for entry in seed.iter() {
         if let Some(payload_json) = entry.as_string() {
@@ -232,7 +212,7 @@ where
             }
         }
     }
-    Reflect::set(window.as_ref(), &JsValue::from_str(key), &Array::new())?;
+    window_contract.set(key, &Array::new())?;
     Ok(accepted)
 }
 
@@ -273,11 +253,8 @@ fn install_semantic_enqueue(window: &web_sys::Window) -> Result<(), JsValue> {
             SEMANTIC_QUEUE_STATE.with(|state| state.borrow().queue.len())
         })
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
-    Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(SEMANTIC_ENQUEUE_KEY),
-        enqueue.as_ref().unchecked_ref(),
-    )?;
+    HarnessWindowContract::new(window.clone())
+        .set(SEMANTIC_ENQUEUE_KEY, enqueue.as_ref().unchecked_ref())?;
     enqueue.forget();
     Ok(())
 }
@@ -317,11 +294,8 @@ fn install_runtime_stage_enqueue(window: &web_sys::Window) -> Result<(), JsValue
             RUNTIME_STAGE_QUEUE_STATE.with(|state| state.borrow().queue.len())
         })
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
-    Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(RUNTIME_STAGE_ENQUEUE_KEY),
-        enqueue.as_ref().unchecked_ref(),
-    )?;
+    HarnessWindowContract::new(window.clone())
+        .set(RUNTIME_STAGE_ENQUEUE_KEY, enqueue.as_ref().unchecked_ref())?;
     enqueue.forget();
     Ok(())
 }
@@ -331,11 +305,8 @@ fn install_wake_semantic_queue(window: &web_sys::Window) -> Result<(), JsValue> 
         let delay_ms = delay_ms.as_f64().unwrap_or(0.0).max(0.0) as i32;
         wake_semantic_queue(delay_ms);
     }) as Box<dyn FnMut(JsValue)>);
-    Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(WAKE_SEMANTIC_QUEUE_KEY),
-        wake.as_ref().unchecked_ref(),
-    )?;
+    HarnessWindowContract::new(window.clone())
+        .set(WAKE_SEMANTIC_QUEUE_KEY, wake.as_ref().unchecked_ref())?;
     wake.forget();
     Ok(())
 }
@@ -345,11 +316,8 @@ fn install_wake_runtime_stage_queue(window: &web_sys::Window) -> Result<(), JsVa
         let delay_ms = delay_ms.as_f64().unwrap_or(0.0).max(0.0) as i32;
         wake_runtime_stage_queue(delay_ms);
     }) as Box<dyn FnMut(JsValue)>);
-    Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(WAKE_RUNTIME_STAGE_QUEUE_KEY),
-        wake.as_ref().unchecked_ref(),
-    )?;
+    HarnessWindowContract::new(window.clone())
+        .set(WAKE_RUNTIME_STAGE_QUEUE_KEY, wake.as_ref().unchecked_ref())?;
     wake.forget();
     Ok(())
 }
@@ -358,11 +326,8 @@ fn install_pending_nav_wake(window: &web_sys::Window) -> Result<(), JsValue> {
     let wake = Closure::wrap(Box::new(move || {
         wake_pending_nav();
     }) as Box<dyn FnMut()>);
-    Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(WAKE_PENDING_NAV_KEY),
-        wake.as_ref().unchecked_ref(),
-    )?;
+    HarnessWindowContract::new(window.clone())
+        .set(WAKE_PENDING_NAV_KEY, wake.as_ref().unchecked_ref())?;
     wake.forget();
     Ok(())
 }
@@ -429,21 +394,16 @@ fn wake_pending_nav() {
         PENDING_NAV_STATE.with(|state| {
             state.borrow_mut().wake_scheduled = false;
         });
-        let Some(window) = web_sys::window() else {
+        let Some(window_contract) = HarnessWindowContract::current() else {
             return;
         };
-        let Ok(value) = Reflect::get(window.as_ref(), &JsValue::from_str(PENDING_NAV_SCREEN_KEY))
-        else {
+        let Ok(value) = window_contract.get(PENDING_NAV_SCREEN_KEY) else {
             return;
         };
         let Some(screen_name) = value.as_string() else {
             return;
         };
-        let _ = Reflect::set(
-            window.as_ref(),
-            &JsValue::from_str(PENDING_NAV_SCREEN_KEY),
-            &JsValue::NULL,
-        );
+        let _ = window_contract.set(PENDING_NAV_SCREEN_KEY, &JsValue::NULL);
         let Some(screen) = classify_screen_item_id(&screen_name) else {
             return;
         };
@@ -691,31 +651,27 @@ fn push_result(
     result: Option<JsValue>,
     error: Option<&str>,
 ) {
-    let Some(window) = web_sys::window() else {
+    let Some(window_contract) = HarnessWindowContract::current() else {
         return;
     };
-    let Ok(results) = ensure_object(&window, result_key) else {
+    let Ok(results) = ensure_object(&window_contract, result_key) else {
         return;
     };
     let payload = Object::new();
-    let _ = Reflect::set(payload.as_ref(), &JsValue::from_str("ok"), &JsValue::from_bool(ok));
+    let _ = object_set(&payload, "ok", &JsValue::from_bool(ok));
     match result {
         Some(result) => {
             let normalized = normalize_driver_result_payload(&result);
-            let _ = Reflect::set(payload.as_ref(), &JsValue::from_str("result"), &normalized);
+            let _ = object_set(&payload, "result", &normalized);
         }
         None => {
-            let _ = Reflect::set(payload.as_ref(), &JsValue::from_str("result"), &JsValue::NULL);
+            let _ = object_set(&payload, "result", &JsValue::NULL);
         }
     }
     if let Some(error) = error {
-        let _ = Reflect::set(
-            payload.as_ref(),
-            &JsValue::from_str("error"),
-            &JsValue::from_str(error),
-        );
+        let _ = object_set(&payload, "error", &JsValue::from_str(error));
     }
-    let _ = Reflect::set(results.as_ref(), &JsValue::from_str(command_id), &payload);
+    let _ = object_set(&results, command_id, &payload);
 }
 
 fn notify_push_function(
@@ -725,10 +681,10 @@ fn notify_push_function(
     result: Option<JsValue>,
     error: Option<&str>,
 ) {
-    let Some(window) = web_sys::window() else {
+    let Some(window_contract) = HarnessWindowContract::current() else {
         return;
     };
-    let Some(function) = window_function(&window, function_key) else {
+    let Some(function) = window_function(&window_contract, function_key) else {
         web_sys::console::warn_1(
             &format!(
                 "[web-harness-queue] push function missing key={function_key} command_id={command_id}"
@@ -738,32 +694,20 @@ fn notify_push_function(
         return;
     };
     let payload = Object::new();
-    let _ = Reflect::set(
-        payload.as_ref(),
-        &JsValue::from_str("command_id"),
-        &JsValue::from_str(command_id),
-    );
-    let _ = Reflect::set(
-        payload.as_ref(),
-        &JsValue::from_str("ok"),
-        &JsValue::from_bool(ok),
-    );
+    let _ = object_set(&payload, "command_id", &JsValue::from_str(command_id));
+    let _ = object_set(&payload, "ok", &JsValue::from_bool(ok));
     match result {
         Some(result) => {
-            let _ = Reflect::set(payload.as_ref(), &JsValue::from_str("result"), &result);
+            let _ = object_set(&payload, "result", &result);
         }
         None => {
-            let _ = Reflect::set(payload.as_ref(), &JsValue::from_str("result"), &JsValue::NULL);
+            let _ = object_set(&payload, "result", &JsValue::NULL);
         }
     }
     if let Some(error) = error {
-        let _ = Reflect::set(
-            payload.as_ref(),
-            &JsValue::from_str("error"),
-            &JsValue::from_str(error),
-        );
+        let _ = object_set(&payload, "error", &JsValue::from_str(error));
     }
-    let _ = function.call1(window.as_ref(), &payload);
+    let _ = function.call1(window_contract.raw_window().as_ref(), &payload);
 }
 
 fn normalize_driver_result_payload(value: &JsValue) -> JsValue {
@@ -778,9 +722,9 @@ fn normalize_driver_result_payload(value: &JsValue) -> JsValue {
         Some(parsed) => parsed,
         None => {
             let payload = Object::new();
-            let _ = Reflect::set(
-                payload.as_ref(),
-                &JsValue::from_str("__driver_result_normalization_error"),
+            let _ = object_set(
+                &payload,
+                "__driver_result_normalization_error",
                 &JsValue::from_str("failed to normalize driver result payload"),
             );
             payload.into()
@@ -840,24 +784,19 @@ fn schedule_browser_action(delay_ms: i32, action: impl FnOnce() + 'static) {
 }
 
 fn sync_semantic_queue_state_to_window() {
-    let Some(window) = web_sys::window() else {
+    let Some(window_contract) = HarnessWindowContract::current() else {
         return;
     };
     let (queue_depth, busy, wake_scheduled) = SEMANTIC_QUEUE_STATE.with(|state| {
         let state = state.borrow();
         (state.queue.len(), state.busy, state.wake_scheduled)
     });
-    let _ = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(SEMANTIC_BUSY_KEY),
-        &JsValue::from_bool(busy),
-    );
-    let _ = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(SEMANTIC_WAKE_SCHEDULED_KEY),
+    let _ = window_contract.set(SEMANTIC_BUSY_KEY, &JsValue::from_bool(busy));
+    let _ = window_contract.set(
+        SEMANTIC_WAKE_SCHEDULED_KEY,
         &JsValue::from_bool(wake_scheduled),
     );
-    if let Ok(queue) = ensure_array(&window, SEMANTIC_QUEUE_KEY) {
+    if let Ok(queue) = ensure_array(&window_contract, SEMANTIC_QUEUE_KEY) {
         queue.set_length(0);
         for _ in 0..queue_depth {
             queue.push(&JsValue::from_str("queued"));
@@ -867,24 +806,19 @@ fn sync_semantic_queue_state_to_window() {
 }
 
 fn sync_runtime_stage_queue_state_to_window() {
-    let Some(window) = web_sys::window() else {
+    let Some(window_contract) = HarnessWindowContract::current() else {
         return;
     };
     let (queue_depth, busy, wake_scheduled) = RUNTIME_STAGE_QUEUE_STATE.with(|state| {
         let state = state.borrow();
         (state.queue.len(), state.busy, state.wake_scheduled)
     });
-    let _ = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(RUNTIME_STAGE_BUSY_KEY),
-        &JsValue::from_bool(busy),
-    );
-    let _ = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(RUNTIME_STAGE_WAKE_SCHEDULED_KEY),
+    let _ = window_contract.set(RUNTIME_STAGE_BUSY_KEY, &JsValue::from_bool(busy));
+    let _ = window_contract.set(
+        RUNTIME_STAGE_WAKE_SCHEDULED_KEY,
         &JsValue::from_bool(wake_scheduled),
     );
-    if let Ok(queue) = ensure_array(&window, RUNTIME_STAGE_QUEUE_KEY) {
+    if let Ok(queue) = ensure_array(&window_contract, RUNTIME_STAGE_QUEUE_KEY) {
         queue.set_length(0);
         for _ in 0..queue_depth {
             queue.push(&JsValue::from_str("queued"));
@@ -901,84 +835,56 @@ fn set_semantic_debug(
     queue_depth: Option<usize>,
     error: Option<&str>,
 ) {
-    let Some(window) = web_sys::window() else {
+    let Some(window_contract) = HarnessWindowContract::current() else {
         return;
     };
-    let Ok(debug) = ensure_object(&window, SEMANTIC_DEBUG_KEY) else {
+    let Ok(debug) = ensure_object(&window_contract, SEMANTIC_DEBUG_KEY) else {
         return;
     };
-    let _ = Reflect::set(
-        debug.as_ref(),
-        &JsValue::from_str("last_event"),
-        &JsValue::from_str(event),
-    );
+    let _ = object_set(&debug, "last_event", &JsValue::from_str(event));
     if let Some(active_command_id) = active_command_id {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("active_command_id"),
+        let _ = object_set(
+            &debug,
+            "active_command_id",
             &JsValue::from_str(active_command_id),
         );
     } else if matches!(event, "queue_ok" | "queue_error" | "queue_wait_ready" | "queue_wait_bridge")
     {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("active_command_id"),
-            &JsValue::NULL,
-        );
+        let _ = object_set(&debug, "active_command_id", &JsValue::NULL);
     }
     if let Some(last_command_id) = last_command_id {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("last_command_id"),
-            &JsValue::from_str(last_command_id),
-        );
+        let _ = object_set(&debug, "last_command_id", &JsValue::from_str(last_command_id));
     }
     if let Some(last_completed_command_id) = last_completed_command_id {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("last_completed_command_id"),
+        let _ = object_set(
+            &debug,
+            "last_completed_command_id",
             &JsValue::from_str(last_completed_command_id),
         );
     }
     if let Some(queue_depth) = queue_depth {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("queue_depth"),
-            &JsValue::from_f64(queue_depth as f64),
-        );
+        let _ = object_set(&debug, "queue_depth", &JsValue::from_f64(queue_depth as f64));
     }
-    let _ = Reflect::set(
-        debug.as_ref(),
-        &JsValue::from_str("last_progress_at"),
-        &js_sys::Date::now().into(),
-    );
+    let _ = object_set(&debug, "last_progress_at", &js_sys::Date::now().into());
     if let Some(error) = error {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("last_error"),
-            &JsValue::from_str(error),
-        );
+        let _ = object_set(&debug, "last_error", &JsValue::from_str(error));
     } else if event != "queue_error" && event != "enqueue_parse_error" {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("last_error"),
-            &JsValue::NULL,
-        );
+        let _ = object_set(&debug, "last_error", &JsValue::NULL);
     }
 }
 
 fn set_semantic_last_result_ok(result: Option<bool>) {
-    let Some(window) = web_sys::window() else {
+    let Some(window_contract) = HarnessWindowContract::current() else {
         return;
     };
-    let Ok(debug) = ensure_object(&window, SEMANTIC_DEBUG_KEY) else {
+    let Ok(debug) = ensure_object(&window_contract, SEMANTIC_DEBUG_KEY) else {
         return;
     };
     let value = match result {
         Some(result) => JsValue::from_bool(result),
         None => JsValue::NULL,
     };
-    let _ = Reflect::set(debug.as_ref(), &JsValue::from_str("last_result_ok"), &value);
+    let _ = object_set(&debug, "last_result_ok", &value);
 }
 
 fn set_runtime_stage_debug(
@@ -987,88 +893,56 @@ fn set_runtime_stage_debug(
     queue_depth: Option<usize>,
     error: Option<&str>,
 ) {
-    let Some(window) = web_sys::window() else {
+    let Some(window_contract) = HarnessWindowContract::current() else {
         return;
     };
-    let Ok(debug) = ensure_object(&window, RUNTIME_STAGE_DEBUG_KEY) else {
+    let Ok(debug) = ensure_object(&window_contract, RUNTIME_STAGE_DEBUG_KEY) else {
         return;
     };
-    let _ = Reflect::set(
-        debug.as_ref(),
-        &JsValue::from_str("last_event"),
-        &JsValue::from_str(event),
-    );
+    let _ = object_set(&debug, "last_event", &JsValue::from_str(event));
     if let Some(active_command_id) = active_command_id {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("active_command_id"),
+        let _ = object_set(
+            &debug,
+            "active_command_id",
             &JsValue::from_str(active_command_id),
         );
     } else if matches!(event, "queue_ok" | "queue_error") {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("active_command_id"),
-            &JsValue::NULL,
-        );
+        let _ = object_set(&debug, "active_command_id", &JsValue::NULL);
     }
     if let Some(queue_depth) = queue_depth {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("queue_depth"),
-            &JsValue::from_f64(queue_depth as f64),
-        );
+        let _ = object_set(&debug, "queue_depth", &JsValue::from_f64(queue_depth as f64));
     }
-    let _ = Reflect::set(
-        debug.as_ref(),
-        &JsValue::from_str("last_progress_at"),
-        &js_sys::Date::now().into(),
-    );
+    let _ = object_set(&debug, "last_progress_at", &js_sys::Date::now().into());
     if let Some(error) = error {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("last_error"),
-            &JsValue::from_str(error),
-        );
+        let _ = object_set(&debug, "last_error", &JsValue::from_str(error));
     } else if event != "queue_error" && event != "enqueue_parse_error" {
-        let _ = Reflect::set(
-            debug.as_ref(),
-            &JsValue::from_str("last_error"),
-            &JsValue::NULL,
-        );
+        let _ = object_set(&debug, "last_error", &JsValue::NULL);
     }
 }
 
 fn queue_status_snapshot(debug_key: &str, depth: impl Fn() -> usize) -> JsValue {
-    let Some(window) = web_sys::window() else {
+    let Some(window_contract) = HarnessWindowContract::current() else {
         return JsValue::NULL;
     };
     let payload = Object::new();
     let queue_depth = depth();
-    let _ = Reflect::set(
-        payload.as_ref(),
-        &JsValue::from_str("queue_depth"),
-        &JsValue::from_f64(queue_depth as f64),
-    );
-    if let Ok(debug) = Reflect::get(window.as_ref(), &JsValue::from_str(debug_key)) {
-        let _ = Reflect::set(payload.as_ref(), &JsValue::from_str("debug"), &debug);
+    let _ = object_set(&payload, "queue_depth", &JsValue::from_f64(queue_depth as f64));
+    if let Ok(debug) = window_contract.get(debug_key) {
+        let _ = object_set(&payload, "debug", &debug);
     }
     payload.into()
 }
 
 fn push_current_semantic_submit_state(window: &web_sys::Window) {
-    let Some(function) = window_function(window, PUSH_SEMANTIC_SUBMIT_STATE_KEY) else {
+    let window_contract = HarnessWindowContract::new(window.clone());
+    let Some(function) = window_function(&window_contract, PUSH_SEMANTIC_SUBMIT_STATE_KEY) else {
         return;
     };
-    if let Ok(state) = Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str(SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY),
-    ) {
-        let _ = function.call1(window.as_ref(), &state);
+    if let Ok(state) = window_contract.get(SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY) {
+        let _ = function.call1(window_contract.raw_window().as_ref(), &state);
     }
 }
 
-fn window_function(window: &web_sys::Window, key: &str) -> Option<Function> {
-    Reflect::get(window.as_ref(), &JsValue::from_str(key))
-        .ok()
-        .and_then(|value| value.dyn_into::<Function>().ok())
+fn window_function(window_contract: &HarnessWindowContract, key: &str) -> Option<Function> {
+    window_contract.function(key)
 }

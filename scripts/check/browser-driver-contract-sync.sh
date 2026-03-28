@@ -11,9 +11,11 @@ fail() {
 
 rust_contract="crates/aura-web/src/harness/driver_contract.rs"
 ts_contract="crates/aura-harness/playwright-driver/src/driver_contract.ts"
+ts_driver="crates/aura-harness/playwright-driver/src/playwright_driver.ts"
 
 [[ -f "$rust_contract" ]] || fail "missing Rust contract file: $rust_contract"
 [[ -f "$ts_contract" ]] || fail "missing TS contract file: $ts_contract"
+[[ -f "$ts_driver" ]] || fail "missing TS driver file: $ts_driver"
 
 mapfile -t rust_consts < <(
   perl -0ne 'while (/pub\(crate\) const (\w+): &str =\s*"([^"]+)";/sg) { print "$1=$2\n"; }' "$rust_contract"
@@ -51,6 +53,45 @@ if [[ "$(printf '%s\n' "${rust_semantic_fields[@]}" | sort)" != "$(printf '%s\n'
 fi
 if [[ "$(printf '%s\n' "${rust_runtime_fields[@]}" | sort)" != "$(printf '%s\n' "${ts_runtime_fields[@]}" | sort)" ]]; then
   fail "Runtime-stage queue payload fields differ between Rust and TS contracts"
+fi
+
+mapfile -t raw_driver_names < <(
+  perl -0ne 'while (/"(__AURA_DRIVER_[A-Z0-9_]+)"/g) { print "$1\n"; }' "$ts_driver" | sort -u
+)
+mapfile -t allowed_driver_names < <(
+  printf '%s\n' \
+    "__AURA_DRIVER_OBSERVER_INSTALLED" \
+    "__AURA_DRIVER_PUSH_CLIPBOARD" \
+    "__AURA_DRIVER_PUSH_RENDER_HEARTBEAT" \
+    "__AURA_DRIVER_PUSH_STATE" \
+    "__AURA_DRIVER_PUSH_UI_STATE" \
+    "__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE_DISPATCHED__" \
+    "__AURA_DRIVER_SEMANTIC_ENQUEUE_DISPATCHED__" \
+    | sort -u
+)
+
+unexpected_driver_names="$(
+  comm -23 \
+    <(printf '%s\n' "${raw_driver_names[@]}") \
+    <(
+      {
+        printf '%s\n' "${allowed_driver_names[@]}"
+        printf '%s\n' "${ts_consts[@]}" | cut -d= -f2
+      } | sort -u
+    )
+)"
+if [[ -n "$unexpected_driver_names" ]]; then
+  echo "Unexpected raw TS driver names:" >&2
+  printf '%s\n' "$unexpected_driver_names" >&2
+  fail "TS driver contains raw __AURA_DRIVER_* literals outside the sanctioned contract set"
+fi
+
+if ! perl -0ne 'exit 1 if /JSON\.stringify\(\{\s*command_id:\s*commandId,\s*request_json:\s*requestJson,\s*\}\)/s' "$ts_driver"; then
+  fail "TS driver still hand-builds semantic queue payload JSON"
+fi
+
+if ! perl -0ne 'exit 1 if /JSON\.stringify\(\{\s*command_id:\s*commandId,\s*runtime_identity_json:\s*runtimeIdentityJson,\s*\}\)/s' "$ts_driver"; then
+  fail "TS driver still hand-builds runtime-stage queue payload JSON"
 fi
 
 echo "browser-driver-contract-sync: clean"

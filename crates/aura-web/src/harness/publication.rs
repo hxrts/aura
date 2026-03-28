@@ -1,6 +1,6 @@
 use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot};
 use aura_ui::UiController;
-use js_sys::{Function, Object, Reflect, JSON};
+use js_sys::{JSON, Object};
 use serde_wasm_bindgen::to_value;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -16,6 +16,7 @@ use crate::harness::driver_contract::{
     PUSH_SEMANTIC_SUBMIT_STATE_KEY, SEMANTIC_ENQUEUE_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY,
     WAKE_SEMANTIC_QUEUE_KEY,
 };
+use crate::harness::window_contract::{object_set, HarnessWindowContract};
 
 pub(crate) const UI_PUBLICATION_STATE_KEY: &str = "__AURA_UI_PUBLICATION_STATE__";
 pub(crate) const RENDER_HEARTBEAT_PUBLICATION_STATE_KEY: &str =
@@ -157,37 +158,22 @@ fn update_publication_state(
     surface: PublicationSurface,
     state: &PublicationState,
 ) {
+    let window_contract = HarnessWindowContract::new(window.clone());
     let state_object = Object::new();
-    let _ = Reflect::set(
+    let _ = object_set(&state_object, "surface", &JsValue::from_str(surface.name));
+    let _ = object_set(&state_object, "status", &JsValue::from_str(state.status.label()));
+    let _ = object_set(&state_object, "detail", &JsValue::from_str(state.detail()));
+    let _ = object_set(
         &state_object,
-        &JsValue::from_str("surface"),
-        &JsValue::from_str(surface.name),
-    );
-    let _ = Reflect::set(
-        &state_object,
-        &JsValue::from_str("status"),
-        &JsValue::from_str(state.status.label()),
-    );
-    let _ = Reflect::set(
-        &state_object,
-        &JsValue::from_str("detail"),
-        &JsValue::from_str(state.detail()),
-    );
-    let _ = Reflect::set(
-        &state_object,
-        &JsValue::from_str("binding_mode"),
+        "binding_mode",
         &JsValue::from_str(state.binding_mode.label()),
     );
-    let _ = Reflect::set(
+    let _ = object_set(
         &state_object,
-        &JsValue::from_str("reliability"),
+        "reliability",
         &JsValue::from_str(surface.reliability.label()),
     );
-    if let Err(error) = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(surface.key),
-        state_object.as_ref(),
-    ) {
+    if let Err(error) = window_contract.set(surface.key, state_object.as_ref()) {
         web_sys::console::error_1(&JsValue::from_str(&format!(
             "[web-harness] failed to update publication state {}: {}",
             surface.key,
@@ -204,16 +190,9 @@ fn publish_ui_snapshot_now(
     modal: Option<ModalId>,
     operation_count: usize,
 ) -> bool {
-    let cache_publish = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
-        &value,
-    );
-    let json_publish = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_UI_STATE_JSON__"),
-        &JsValue::from_str(&json),
-    );
+    let window_contract = HarnessWindowContract::new(window.clone());
+    let cache_publish = window_contract.set("__AURA_UI_STATE_CACHE__", &value);
+    let json_publish = window_contract.set("__AURA_UI_STATE_JSON__", &JsValue::from_str(&json));
 
     let mut publication_issues = Vec::new();
     let cache_published = match cache_publish {
@@ -231,12 +210,8 @@ fn publish_ui_snapshot_now(
         }
     };
 
-    let (binding_mode, driver_push_published) = Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_DRIVER_PUSH_UI_STATE"),
-    )
-    .ok()
-    .and_then(|candidate| candidate.dyn_into::<Function>().ok())
+    let (binding_mode, driver_push_published) = window_contract
+        .function("__AURA_DRIVER_PUSH_UI_STATE")
     .map(|function| {
         if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
             publication_issues.push(format!("driver_push_failed: {}", js_value_detail(&error)));
@@ -299,16 +274,10 @@ pub(crate) fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &Ren
         return;
     };
 
-    let heartbeat_publish = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_RENDER_HEARTBEAT__"),
-        &value,
-    );
-    let heartbeat_json_publish = Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_RENDER_HEARTBEAT_JSON__"),
-        &JsValue::from_str(&json),
-    );
+    let window_contract = HarnessWindowContract::new(window.clone());
+    let heartbeat_publish = window_contract.set("__AURA_RENDER_HEARTBEAT__", &value);
+    let heartbeat_json_publish =
+        window_contract.set("__AURA_RENDER_HEARTBEAT_JSON__", &JsValue::from_str(&json));
 
     let mut publication_issues = Vec::new();
     let heartbeat_published = match heartbeat_publish {
@@ -332,12 +301,8 @@ pub(crate) fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &Ren
         }
     };
 
-    let driver_push_published = if let Ok(function) = Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_DRIVER_PUSH_RENDER_HEARTBEAT"),
-    )
-    .and_then(|candidate| candidate.dyn_into::<Function>())
-    {
+    let driver_push_published =
+        if let Some(function) = window_contract.function("__AURA_DRIVER_PUSH_RENDER_HEARTBEAT") {
         if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
             publication_issues.push(format!("driver_push_failed: {}", js_value_detail(&error)));
             log_js_callback_error("driver render heartbeat push", &error);
@@ -375,10 +340,9 @@ pub(crate) fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &Ren
 }
 
 pub(crate) fn wake_page_owned_mutation_queues(window: &web_sys::Window) {
+    let window_contract = HarnessWindowContract::new(window.clone());
     for key in [WAKE_SEMANTIC_QUEUE_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY] {
-        if let Ok(function) = Reflect::get(window.as_ref(), &JsValue::from_str(key))
-            .and_then(|value| value.dyn_into::<Function>())
-        {
+        if let Some(function) = window_contract.function(key) {
             if let Err(error) = function.call0(window.as_ref()) {
                 log_js_callback_error("page-owned mutation queue wake", &error);
             }
@@ -429,12 +393,10 @@ pub(crate) fn semantic_submit_surface_state() -> PublicationState {
 }
 
 pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &PublicationState) {
+    let window_contract = HarnessWindowContract::new(window.clone());
     update_publication_state(window, SEMANTIC_SUBMIT_SURFACE, state);
 
-    let Ok(state_object) = Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str(SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY),
-    ) else {
+    let Ok(state_object) = window_contract.get(SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY) else {
         return;
     };
     if state_object.is_null() || state_object.is_undefined() {
@@ -442,38 +404,23 @@ pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &Pu
     }
 
     let generation_id = active_generation();
-    let phase = Reflect::get(window.as_ref(), &JsValue::from_str(UI_GENERATION_PHASE_KEY))
+    let phase = window_contract
+        .get(UI_GENERATION_PHASE_KEY)
         .ok()
         .and_then(|value| value.as_string())
         .unwrap_or_else(|| browser_shell_phase_label(BrowserShellPhase::Rebinding).to_string());
-    let _ = Reflect::set(
+    let Some(state_object) = state_object.dyn_into::<Object>().ok() else {
+        return;
+    };
+    let _ = object_set(&state_object, "generation_id", &generation_js_value(generation_id));
+    let _ = object_set(&state_object, "phase", &JsValue::from_str(&phase));
+    let enqueue_ready = window_contract.function(SEMANTIC_ENQUEUE_KEY).is_some();
+    let _ = object_set(
         &state_object,
-        &JsValue::from_str("generation_id"),
-        &generation_js_value(generation_id),
-    );
-    let _ = Reflect::set(
-        &state_object,
-        &JsValue::from_str("phase"),
-        &JsValue::from_str(&phase),
-    );
-    let enqueue_ready = Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str(SEMANTIC_ENQUEUE_KEY),
-    )
-    .ok()
-    .and_then(|candidate| candidate.dyn_into::<Function>().ok())
-    .is_some();
-    let _ = Reflect::set(
-        &state_object,
-        &JsValue::from_str("enqueue_ready"),
+        "enqueue_ready",
         &JsValue::from_bool(enqueue_ready),
     );
-    if let Ok(function) = Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str(PUSH_SEMANTIC_SUBMIT_STATE_KEY),
-    )
-    .and_then(|candidate| candidate.dyn_into::<Function>())
-    {
+    if let Some(function) = window_contract.function(PUSH_SEMANTIC_SUBMIT_STATE_KEY) {
         if let Err(error) = function.call1(window.as_ref(), &state_object) {
             log_js_callback_error("driver semantic submit state push", &error);
         }
@@ -551,12 +498,11 @@ pub(crate) fn mark_generation_rebinding(window: &web_sys::Window, reason: &str) 
 }
 
 pub(crate) fn published_ui_snapshot_value(window: &web_sys::Window) -> JsValue {
-    let published_json = Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_UI_STATE_JSON__"),
-    )
-    .ok()
-    .filter(|value| !value.is_null() && !value.is_undefined());
+    let window_contract = HarnessWindowContract::new(window.clone());
+    let published_json = window_contract
+        .get("__AURA_UI_STATE_JSON__")
+        .ok()
+        .filter(|value| !value.is_null() && !value.is_undefined());
 
     if let Some(published_json) = published_json {
         if published_json.as_string().is_some() {
@@ -564,12 +510,10 @@ pub(crate) fn published_ui_snapshot_value(window: &web_sys::Window) -> JsValue {
         }
     }
 
-    let published_cache = Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
-    )
-    .ok()
-    .filter(|value| !value.is_null() && !value.is_undefined());
+    let published_cache = window_contract
+        .get("__AURA_UI_STATE_CACHE__")
+        .ok()
+        .filter(|value| !value.is_null() && !value.is_undefined());
     if let Some(published_cache) = published_cache {
         return published_cache;
     }
