@@ -124,6 +124,7 @@ check_semantic_owner_completeness() {
     "crates/aura-app/src/workflows/context.rs:create_home_owned"
     "crates/aura-app/src/workflows/invitation.rs:accept_invitation_id_owned"
     "crates/aura-app/src/workflows/invitation.rs:accept_imported_invitation_owned"
+    "crates/aura-app/src/workflows/invitation.rs:accept_pending_home_invitation_id_owned"
     "crates/aura-app/src/workflows/messaging.rs:join_channel_by_name_owned"
     "crates/aura-app/src/workflows/messaging.rs:send_message_ref_owned"
     "crates/aura-app/src/workflows/messaging.rs:invite_user_to_channel_with_context_owned"
@@ -141,7 +142,7 @@ check_semantic_owner_completeness() {
 
 is_semantic_owner_candidate() {
   local line="$1"
-  local pattern='^\+.*async[[:space:]]+fn[[:space:]]+[A-Za-z0-9_]+(_owned|_with_terminal_status)\('
+  local pattern='^\+[[:space:]]*(pub([[:space:]]*\([^)]*\))?[[:space:]]+)?async[[:space:]]+fn[[:space:]]+[A-Za-z0-9_]+(_owned|_with_terminal_status)\('
   [[ "$current_file" == crates/aura-app/src/workflows/* \
       || "$current_file" == crates/aura-web/src/* \
       || "$current_file" == crates/aura-terminal/src/* ]] || return 1

@@ -691,6 +691,19 @@ pub(in crate::workflows) fn issue_invitation_accepted_or_materialized_proof(
     capability = "semantic_postcondition_proof"
 )]
 #[allow(dead_code)]
+pub(in crate::workflows) fn issue_pending_invitation_consumed_proof(
+    invitation_id: aura_core::InvitationId,
+) -> PendingInvitationConsumedProof {
+    let _ = semantic_postcondition_proof_capability();
+    PendingInvitationConsumedProof { invitation_id }
+}
+
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+#[allow(dead_code)]
 pub(in crate::workflows) fn issue_invitation_declined_proof(
     invitation_id: aura_core::InvitationId,
 ) -> InvitationDeclinedProof {

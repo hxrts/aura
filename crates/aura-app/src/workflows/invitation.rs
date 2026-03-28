@@ -159,6 +159,7 @@ use crate::workflows::semantic_facts::{
     issue_device_enrollment_imported_proof, issue_invitation_accepted_or_materialized_proof,
     issue_invitation_created_proof, issue_invitation_declined_proof,
     issue_invitation_exported_proof, issue_invitation_revoked_proof,
+    issue_pending_invitation_consumed_proof,
     publish_authoritative_semantic_fact,
     replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
     update_authoritative_semantic_facts, SemanticWorkflowOwner,
@@ -2682,6 +2683,30 @@ async fn accept_imported_invitation_owned(
         &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
     >,
 ) -> Result<(), AuraError> {
+    match accept_imported_invitation_inner(app_core, invitation, owner).await? {
+        #[cfg(feature = "signals")]
+        Some(channel_id) => {
+            let membership_proof = prove_channel_membership_ready(app_core, channel_id).await?;
+            owner.publish_success_with(membership_proof).await?;
+        }
+        #[cfg(not(feature = "signals"))]
+        Some(_) => unreachable!("channel membership proofs are only issued with signals"),
+        None => {
+            owner
+                .publish_success_with(issue_invitation_accepted_or_materialized_proof(
+                    invitation.invitation_id.clone(),
+                ))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn accept_imported_invitation_inner(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation: &crate::runtime_bridge::InvitationInfo,
+    owner: &SemanticWorkflowOwner,
+) -> Result<Option<ChannelId>, AuraError> {
     let contact_probe = matches!(
         invitation.invitation_type,
         crate::runtime_bridge::InvitationBridgeType::Contact { .. }
@@ -2802,13 +2827,8 @@ async fn accept_imported_invitation_owned(
                 .await;
             }
             emit_contact_accept_probe("publish_success");
-            owner
-                .publish_success_with(issue_invitation_accepted_or_materialized_proof(
-                    invitation.invitation_id.clone(),
-                ))
-                .await?;
             emit_contact_accept_probe("done");
-            return Ok(());
+            return Ok(None);
         }
         crate::runtime_bridge::InvitationBridgeType::Channel {
             home_id,
@@ -2860,23 +2880,6 @@ async fn accept_imported_invitation_owned(
                     )
                     .await;
                 }
-                let membership_proof = match prove_channel_membership_ready(app_core, channel_id)
-                    .await
-                {
-                    Ok(proof) => proof,
-                    Err(error) => {
-                        return fail_invitation_accept(
-                                owner,
-                                AcceptInvitationError::AcceptFailed {
-                                    detail: format!(
-                                        "channel invitation accept missing membership readiness for {channel_id}: {error}"
-                                    ),
-                                },
-                            )
-                            .await;
-                    }
-                };
-                owner.publish_success_with(membership_proof).await?;
                 run_post_channel_accept_followups(
                     app_core,
                     channel_id,
@@ -2884,28 +2887,18 @@ async fn accept_imported_invitation_owned(
                     nickname_suggestion.clone(),
                 )
                 .await;
+                return Ok(Some(channel_id));
             }
             #[cfg(not(feature = "signals"))]
             {
-                owner
-                    .publish_success_with(issue_invitation_accepted_or_materialized_proof(
-                        invitation.invitation_id.clone(),
-                    ))
-                    .await?;
+                return Ok(None);
             }
-            return Ok(());
         }
         crate::runtime_bridge::InvitationBridgeType::Guardian { .. } => {}
         crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => unreachable!(),
     }
 
-    owner
-        .publish_success_with(issue_invitation_accepted_or_materialized_proof(
-            invitation.invitation_id.clone(),
-        ))
-        .await?;
-
-    Ok(())
+    Ok(None)
 }
 
 /// Accept an imported invitation and attribute the semantic operation to a specific UI instance.
@@ -3618,7 +3611,16 @@ pub async fn accept_pending_home_invitation(
     accept_pending_home_invitation_with_instance(app_core, None).await
 }
 
-// OWNERSHIP: authoritative-source
+#[aura_macros::semantic_owner(
+    owner = "accept_pending_home_invitation_id_owned",
+    terminal = "publish_success_with",
+    postcondition = "pending_invitation_consumed",
+    proof = crate::workflows::semantic_facts::PendingInvitationConsumedProof,
+    authoritative_inputs = "runtime,authoritative_source",
+    depends_on = "runtime_accept_converged,invitation_accepted_or_materialized",
+    child_ops = "accept_imported_invitation",
+    category = "move_owned"
+)]
 async fn accept_pending_home_invitation_id_owned(
     app_core: &Arc<RwLock<AppCore>>,
     owner: &SemanticWorkflowOwner,
@@ -3654,7 +3656,12 @@ async fn accept_pending_home_invitation_id_owned(
     };
 
     let invitation_id = invitation.invitation_id.clone();
-    accept_imported_invitation_owned(app_core, &invitation, owner, None).await?;
+    let _ = accept_imported_invitation_inner(app_core, &invitation, owner).await?;
+    owner
+        .publish_success_with(issue_pending_invitation_consumed_proof(
+            invitation_id.clone(),
+        ))
+        .await?;
     Ok(invitation_id)
 }
 
@@ -3878,8 +3885,24 @@ mod tests {
     use crate::workflows::semantic_facts::assert_terminal_failure_status;
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
+    use std::{fs, path::PathBuf};
 
     // === Invitation Role Parsing Tests ===
+
+    #[test]
+    fn accept_pending_home_invitation_owned_boundary_is_declared_and_wrapped() {
+        let source = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/workflows/invitation.rs"),
+        )
+        .expect("invitation workflow source should be readable");
+
+        assert!(source.contains("owner = \"accept_pending_home_invitation_id_owned\""));
+        assert!(source.contains("async fn accept_pending_home_invitation_id_owned("));
+        assert!(source.contains(
+            "let _ = accept_imported_invitation_inner(app_core, &invitation, owner).await?;"
+        ));
+        assert!(source.contains("issue_pending_invitation_consumed_proof("));
+    }
 
     #[test]
     fn test_parse_invitation_role_guardian() -> Result<(), InvitationRoleParseError> {

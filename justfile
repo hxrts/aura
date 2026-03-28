@@ -28,7 +28,11 @@ _harness action *ARGS:
     scripts/harness/cmd.sh {{ action }} {{ ARGS }}
 
 _ownership-lint mode *PATHS:
-    cargo run -q -p aura-macros --bin ownership_lints -- {{ mode }} {{ PATHS }}
+    if [ -x target/debug/ownership_lints ]; then \
+        target/debug/ownership_lints {{ mode }} {{ PATHS }}; \
+    else \
+        cargo run -q -p aura-macros --bin ownership_lints -- {{ mode }} {{ PATHS }}; \
+    fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Build
@@ -771,7 +775,12 @@ ci-must-settle-boundary:
     just _ownership-lint must-settle-boundary crates/aura-agent/src crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src
 
 ci-owner-issued-readiness-boundary:
-    just _ownership-lint owner-issued-readiness-boundary crates/aura-agent/src crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-agent/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-app/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-terminal/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-ui/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-web/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-harness/src
 
 ci-observed-layer-boundaries:
     bash scripts/check/observed-layer-authorship.sh
