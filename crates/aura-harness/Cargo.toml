@@ -7,6 +7,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Multi-instance runtime harness for Aura"
+publish = false
 
 [lints]
 workspace = true
@@ -44,8 +45,8 @@ hex = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 sysinfo = { workspace = true }
-aura-core = { path = "../aura-core" }
-aura-app = { path = "../aura-app" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-app = { path = "../aura-app", version = "0.1.0" }
 aura-simulator = { path = "../aura-simulator" }
 ctrlc = "3.4"
 patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura", optional = true }

@@ -2,15 +2,16 @@
 name = "session-choreography"
 version = "0.1.0"
 edition = "2021"
+publish = false
 include = ["src/**", "Cargo.toml"]
 
 [dependencies]
-aura-core = { path = "../../crates/aura-core" }
-aura-macros = { path = "../../crates/aura-macros" }
-aura-mpst = { path = "../../crates/aura-mpst" }
-aura-agent = { path = "../../crates/aura-agent" }
-aura-protocol = { path = "../../crates/aura-protocol" }
-aura-effects = { path = "../../crates/aura-effects" }
+aura-core = { path = "../../crates/aura-core", version = "0.1.0" }
+aura-macros = { path = "../../crates/aura-macros", version = "0.1.0" }
+aura-mpst = { path = "../../crates/aura-mpst", version = "0.1.0" }
+aura-agent = { path = "../../crates/aura-agent", version = "0.1.0" }
+aura-protocol = { path = "../../crates/aura-protocol", version = "0.1.0" }
+aura-effects = { path = "../../crates/aura-effects", version = "0.1.0" }
 telltale = { workspace = true }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

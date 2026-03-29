@@ -9,16 +9,16 @@ repository.workspace = true
 include = ["src/**", "Cargo.toml"]
 
 [dependencies]
-aura-core = { path = "../aura-core" }
-aura-effects = { path = "../aura-effects" }
-aura-journal = { path = "../aura-journal" }
-aura-macros = { path = "../aura-macros" }
-aura-mpst = { path = "../aura-mpst" }
-aura-protocol = { path = "../aura-protocol" }
-aura-guards = { path = "../aura-guards" }
-aura-relational = { path = "../aura-relational" }
-aura-signature = { path = "../aura-signature" }
-aura-authorization = { path = "../aura-authorization" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-effects = { path = "../aura-effects", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
+aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
+aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
+aura-guards = { path = "../aura-guards", version = "0.1.0" }
+aura-relational = { path = "../aura-relational", version = "0.1.0" }
+aura-signature = { path = "../aura-signature", version = "0.1.0" }
+aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 

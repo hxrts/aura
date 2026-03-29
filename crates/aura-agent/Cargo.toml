@@ -13,30 +13,30 @@ include = ["src/**", "Cargo.toml"]
 
 [dependencies]
 # Workspace crates
-aura-core = { path = "../aura-core" }
-aura-app = { path = "../aura-app", features = ["signals"] }  # RuntimeBridge trait definition + signals for forwarding
-aura-effects = { path = "../aura-effects" }
-aura-composition = { path = "../aura-composition" }
-aura-protocol = { path = "../aura-protocol" }
-aura-guards = { path = "../aura-guards" }
-aura-consensus = { path = "../aura-consensus" }
-aura-journal = { path = "../aura-journal" }
-aura-relational = { path = "../aura-relational" }
-aura-amp = { path = "../aura-amp" }
-aura-chat = { path = "../aura-chat" }
-aura-authentication = { path = "../aura-authentication" }
-aura-invitation = { path = "../aura-invitation" }
-aura-rendezvous = { path = "../aura-rendezvous" }
-aura-social = { path = "../aura-social" }
-aura-sync = { path = "../aura-sync" }
-aura-maintenance = { path = "../aura-maintenance" }
-aura-transport = { path = "../aura-transport" }
-aura-recovery = { path = "../aura-recovery" }
-aura-authorization = { path = "../aura-authorization" }
-aura-macros = { path = "../aura-macros" }
-aura-mpst = { path = "../aura-mpst" }
-aura-signature = { path = "../aura-signature" }
-aura-store = { path = "../aura-store" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-app = { path = "../aura-app", version = "0.1.0", features = ["signals"] }  # RuntimeBridge trait definition + signals for forwarding
+aura-effects = { path = "../aura-effects", version = "0.1.0" }
+aura-composition = { path = "../aura-composition", version = "0.1.0" }
+aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
+aura-guards = { path = "../aura-guards", version = "0.1.0" }
+aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-relational = { path = "../aura-relational", version = "0.1.0" }
+aura-amp = { path = "../aura-amp", version = "0.1.0" }
+aura-chat = { path = "../aura-chat", version = "0.1.0" }
+aura-authentication = { path = "../aura-authentication", version = "0.1.0" }
+aura-invitation = { path = "../aura-invitation", version = "0.1.0" }
+aura-rendezvous = { path = "../aura-rendezvous", version = "0.1.0" }
+aura-social = { path = "../aura-social", version = "0.1.0" }
+aura-sync = { path = "../aura-sync", version = "0.1.0" }
+aura-maintenance = { path = "../aura-maintenance", version = "0.1.0" }
+aura-transport = { path = "../aura-transport", version = "0.1.0" }
+aura-recovery = { path = "../aura-recovery", version = "0.1.0" }
+aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
+aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
+aura-signature = { path = "../aura-signature", version = "0.1.0" }
+aura-store = { path = "../aura-store", version = "0.1.0" }
 
 # Cryptography dependencies
 ed25519-dalek = { workspace = true }

@@ -21,11 +21,11 @@ telltale-runtime-capability = ["dep:telltale-vm"]
 
 [dependencies]
 # Core traits (interface layer)
-aura-core = { path = "../aura-core" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
 
 # NOTE: aura-store creates circular dependency (aura-store → aura-protocol → aura-effects)
 # Encrypted storage handler belongs in a higher layer
-# aura-store = { path = "../aura-store" }
+# aura-store = { path = "../aura-store", version = "0.1.0" }
 
 # Async runtime
 tokio = { workspace = true }

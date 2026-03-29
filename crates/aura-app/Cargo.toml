@@ -98,17 +98,17 @@ required-features = ["host"]
 
 [dependencies]
 # Core Aura crates
-aura-core = { path = "../aura-core" }
-aura-effects = { path = "../aura-effects" }
-aura-composition = { path = "../aura-composition" }
-aura-journal = { path = "../aura-journal" }
-aura-relational = { path = "../aura-relational" }
-aura-chat = { path = "../aura-chat" }
-aura-social = { path = "../aura-social" }
-aura-maintenance = { path = "../aura-maintenance" }
-aura-protocol = { path = "../aura-protocol" }
-aura-recovery = { path = "../aura-recovery" }
-aura-macros = { path = "../aura-macros" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-effects = { path = "../aura-effects", version = "0.1.0" }
+aura-composition = { path = "../aura-composition", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-relational = { path = "../aura-relational", version = "0.1.0" }
+aura-chat = { path = "../aura-chat", version = "0.1.0" }
+aura-social = { path = "../aura-social", version = "0.1.0" }
+aura-maintenance = { path = "../aura-maintenance", version = "0.1.0" }
+aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
+aura-recovery = { path = "../aura-recovery", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
 
 # Always required
 serde = { version = "1", features = ["derive"] }

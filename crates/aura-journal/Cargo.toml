@@ -13,14 +13,14 @@ workspace = true
 [dependencies]
 
 # Internal crates  
-aura-core = { path = "../aura-core" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
 # aura-authorization dependency removed - authorization via effects system only
 # aura-macros, aura-mpst, aura-signature dependencies removed - Layer 2 horizontal coupling violations
 
 # Choreography dependencies removed - unused
 # Note: Cannot import aura-protocol due to circular dependency (aura-protocol imports journal)
 # Protocol types are now available through aura-core
-# aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
+# aura-session-core = { path = "../aura-session-core", version = "0.1.0" }  # For future session types implementation
 
 # CRDT
 

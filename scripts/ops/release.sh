@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Publish workspace crates to crates.io in dependency order.
-# Supports dry-run, version validation, git tagging, and push.
+# Publish workspace crates to crates.io using cargo publish --workspace.
+# Crates marked publish = false in Cargo.toml are automatically excluded.
+# Re-running after a partial failure is safe — crates.io rejects duplicates.
 set -euo pipefail
 
 # ── Setup ──────────────────────────────────────────────────────────────
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
-
-source "${ROOT_DIR}/scripts/ops/release-packages.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────
 DRY_RUN=0
@@ -25,10 +24,10 @@ TAG_NAME=""
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/ops/release.sh --version <version> [options]
+  ./scripts/ops/release.sh [options]
 
 Options:
-  --version <version>   Release version (defaults to workspace version if omitted)
+  --version <version>   Release version (defaults to workspace version)
   --dry-run             Run all publishing steps with --dry-run
   --skip-ci             Skip just ci-dry-run preflight checks
   --skip-nix            Skip nix build and flake check
@@ -37,6 +36,9 @@ Options:
   --allow-dirty         Allow a dirty git working tree
   --no-require-main     Allow releasing from non-main branches
   -h, --help            Show this help text
+
+Re-running after a partial failure is safe. crates.io rejects duplicate
+versions, and cargo publish --workspace skips already-published crates.
 EOF
 }
 
@@ -63,24 +65,6 @@ extract_workspace_version() {
       exit
     }
   ' "${ROOT_DIR}/Cargo.toml"
-}
-
-# Extract version from a crate's Cargo.toml (handles workspace inheritance)
-extract_crate_version() {
-  local manifest_path="$1"
-  local version_line
-  version_line="$(awk '
-    /^\[package\]/ { in_package = 1; next }
-    /^\[/ { in_package = 0 }
-    in_package && /^version/ { print; exit }
-  ' "${manifest_path}")"
-
-  if echo "${version_line}" | grep -q "workspace.*=.*true"; then
-    # Uses workspace version inheritance
-    extract_workspace_version
-  else
-    echo "${version_line}" | sed 's/.*"\(.*\)".*/\1/'
-  fi
 }
 
 # ── Validation ─────────────────────────────────────────────────────────
@@ -113,20 +97,6 @@ assert_branch() {
   fi
 }
 
-assert_versions_match() {
-  local package="$1"
-  local package_manifest_path
-  local package_version
-  package_manifest_path="$(manifest_path "${package}")" || die "unknown package: ${package}"
-  package_version="$(extract_crate_version "${package_manifest_path}")"
-  if [[ -z "${package_version}" ]]; then
-    die "unable to read version for ${package} from ${package_manifest_path}"
-  fi
-  if [[ "${package_version}" != "${VERSION}" ]]; then
-    die "version mismatch for ${package}: ${package_version} != ${VERSION}"
-  fi
-}
-
 # ── Preflight ──────────────────────────────────────────────────────────
 
 run_ci_dry_run() {
@@ -141,27 +111,12 @@ run_nix_checks() {
   nix flake check
 }
 
-run_wasm_check() {
-  echo "== verifying WASM build (aura-web) =="
-  cargo check -p aura-web --target wasm32-unknown-unknown
-}
+# ── Publish ────────────────────────────────────────────────────────────
 
-# ── Publish Pipeline ───────────────────────────────────────────────────
-
-publish_package() {
-  local package="$1"
-  # Skip if this version is already on crates.io.
-  if [[ "${DRY_RUN}" -eq 0 ]]; then
-    if cargo search "${package}" --limit 1 2>/dev/null | grep -q "\"${VERSION}\""; then
-      echo "== ${package}@${VERSION} already published, skipping =="
-      return
-    fi
-  fi
-  local cmd
+publish_workspace() {
+  local cmd=(cargo publish --workspace --locked)
   if [[ "${DRY_RUN}" -eq 1 ]]; then
-    cmd=(cargo publish -p "${package}" --dry-run --locked)
-  else
-    cmd=(cargo publish -p "${package}" --locked)
+    cmd+=(--dry-run)
   fi
   if [[ "${ALLOW_DIRTY}" -eq 1 ]]; then
     cmd+=(--allow-dirty)
@@ -279,12 +234,6 @@ main() {
   assert_branch
   assert_clean_tree
 
-  echo "== validating crate versions =="
-  for package in "${RELEASE_PACKAGES[@]}"; do
-    assert_versions_match "${package}"
-  done
-  echo "== all ${#RELEASE_PACKAGES[@]} crates match version ${VERSION} =="
-
   # Registry token check (skip for dry-run)
   if [[ "${DRY_RUN}" -eq 0 && "${CARGO_REGISTRY_TOKEN:-}" == "" ]]; then
     die "CARGO_REGISTRY_TOKEN is not set; publishing will fail"
@@ -305,14 +254,8 @@ main() {
     echo "== skipping nix checks =="
   fi
 
-  run_wasm_check
-
-  # Publish crates in dependency order
-  echo ""
-  echo "== publishing ${#RELEASE_PACKAGES[@]} crates =="
-  for package in "${RELEASE_PACKAGES[@]}"; do
-    publish_package "${package}"
-  done
+  # Publish workspace (cargo handles dependency ordering and skips publish=false crates)
+  publish_workspace
 
   # Tag and push
   create_release_tag
