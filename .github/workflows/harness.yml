@@ -121,11 +121,6 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: harness-browser
-      - name: Cache browser web tools
-        uses: actions/cache@v4
-        with:
-          path: target/aura-web-tools
-          key: ${{ runner.os }}-aura-web-tools-${{ hashFiles('Cargo.lock') }}
       - run: nix develop .#ci --command just ci-harness-browser
         env:
           PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1"
@@ -169,11 +164,6 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: harness-matrix-web
-      - name: Cache browser web tools
-        uses: actions/cache@v4
-        with:
-          path: target/aura-web-tools
-          key: ${{ runner.os }}-aura-web-tools-${{ hashFiles('Cargo.lock') }}
       - run: nix develop .#ci --command just ci-harness-matrix-web
         env:
           PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1"

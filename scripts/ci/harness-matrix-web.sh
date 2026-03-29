@@ -4,6 +4,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+mkdir -p artifacts/harness/browser
+log_file="$repo_root/artifacts/harness/browser/ci-matrix-web.log"
+exec > >(tee "$log_file") 2>&1
+
+web_tools_cache_root="$repo_root/target/aura-web-tools-ci"
+
 prepare_browser_web_assets() {
   (
     cd crates/aura-web
@@ -21,8 +27,8 @@ prepare_browser_web_assets() {
   )
 }
 
-mkdir -p artifacts/harness/browser
-mkdir -p "$repo_root/target/aura-web-tools"
+rm -rf "$web_tools_cache_root"
+mkdir -p "$web_tools_cache_root"
 
 (
   cd crates/aura-harness/playwright-driver
@@ -36,7 +42,7 @@ cargo build -p aura-harness --bin aura-harness -q
 export AURA_HARNESS_BIN="$repo_root/target/debug/aura-harness"
 export AURA_HARNESS_WEB_BUILD_PROFILE=release
 export AURA_HARNESS_WEB_SERVER_READY_TIMEOUT_SECS=1800
-export AURA_WEB_TOOLS_CACHE_ROOT="$repo_root/target/aura-web-tools"
+export AURA_WEB_TOOLS_CACHE_ROOT="$web_tools_cache_root"
 
 prepare_browser_web_assets
 
