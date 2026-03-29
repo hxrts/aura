@@ -7,6 +7,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Social topology (blocks and neighborhoods) for the Aura threshold identity platform"
 keywords = ["social", "topology", "blocks", "neighborhoods", "relay"]
 categories = ["cryptography"]

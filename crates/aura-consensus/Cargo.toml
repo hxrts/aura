@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Single-shot consensus protocol for non-monotone operations in Aura"
 include = ["src/**", "Cargo.toml"]
 
 [lints]

@@ -5,6 +5,7 @@ edition = "2021"
 description = "Portable headless application core for Aura"
 license = "Apache-2.0"
 repository = "https://github.com/aura-org/aura"
+homepage.workspace = true
 
 [features]
 default = []

@@ -47,8 +47,9 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["Sam Hart"]
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/aura-project/aura"
+license = "Apache-2.0"
+repository = "https://github.com/hxrts/aura"
+homepage = "https://hxrts.com/aura"
 
 [workspace.dependencies]
 # Cryptography

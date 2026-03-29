@@ -6,6 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+description = "Journal synchronization and peer-to-peer fact exchange"
 include = ["src/**", "Cargo.toml"]
 
 [features]

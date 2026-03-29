@@ -6,6 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+description = "Guardian-based device recovery and key restoration protocols"
 include = ["src/**", "Cargo.toml"]
 
 [dependencies]

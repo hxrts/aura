@@ -6,6 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+description = "Authentication protocols and identity verification for Aura"
 include = ["src/**", "Cargo.toml"]
 
 [dependencies]

@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Fact-based journal storage, validation, and deterministic reduction"
 
 [lints]
 workspace = true

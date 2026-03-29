@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Guard chain enforcement for authorization, flow budgets, and leakage tracking"
 
 [lints]
 workspace = true

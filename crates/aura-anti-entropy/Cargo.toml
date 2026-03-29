@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Journal anti-entropy and fact synchronization for Aura"
 
 [lints]
 workspace = true
