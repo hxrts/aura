@@ -102,6 +102,7 @@ Contract alignment:
 | Parity-critical operation rendering | `Observed` | Authoritative semantic facts from `aura-app` own truth; `model.rs` projects. |
 | Shared-flow completion helpers | `Observed` | Upstream workflow/runtime coordinators own truth; helpers dismiss UI state only. |
 | Dioxus-specific spawn wiring for shared task-owner | `ActorOwned` helper for Dioxus shells | `task_owner.rs` provides the Dioxus-specific default spawn wiring. The core `FrontendTaskOwner` type lives in `aura-app::frontend_primitives`. |
+| Mounted shell signal subscriptions | `ActorOwned` helper scoped to component lifetime | `app/shell/subscriptions.rs` owns cancellable component-scoped subscription tasks so preserved-profile rebootstrap tears down old generation observers instead of accumulating immortal frontend loops. |
 
 ### Capability-Gated Points
 

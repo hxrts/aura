@@ -652,7 +652,13 @@ impl ScenarioAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IntentAction {
-    OpenScreen(ScreenId),
+    OpenScreen {
+        screen: ScreenId,
+        #[serde(default)]
+        channel_id: Option<String>,
+        #[serde(default)]
+        context_id: Option<String>,
+    },
     CreateAccount {
         account_name: String,
     },
@@ -700,6 +706,10 @@ pub enum IntentAction {
     },
     SendChatMessage {
         message: String,
+        #[serde(default)]
+        channel_id: Option<String>,
+        #[serde(default)]
+        context_id: Option<String>,
     },
 }
 
@@ -707,7 +717,7 @@ impl IntentAction {
     #[must_use]
     pub fn kind(&self) -> IntentKind {
         match self {
-            Self::OpenScreen(_) => IntentKind::OpenScreen,
+            Self::OpenScreen { .. } => IntentKind::OpenScreen,
             Self::CreateAccount { .. } => IntentKind::CreateAccount,
             Self::CreateHome { .. } => IntentKind::CreateHome,
             Self::CreateChannel { .. } => IntentKind::CreateChannel,
@@ -728,7 +738,7 @@ impl IntentAction {
     #[must_use]
     pub fn contract(&self) -> SharedActionContract {
         match self {
-            Self::OpenScreen(screen) => SharedActionContract {
+            Self::OpenScreen { screen, .. } => SharedActionContract {
                 intent: IntentKind::OpenScreen,
                 submission: SubmissionContract::Immediate {
                     value: SubmissionValueContract::None,
@@ -1598,9 +1608,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                     actor: required(value.actor, "actor", value.action)?,
                 })
             }
-            SemanticActionKind::OpenScreen => ScenarioAction::Intent(IntentAction::OpenScreen(
-                required(value.screen_id, "screen_id", value.action)?,
-            )),
+            SemanticActionKind::OpenScreen => ScenarioAction::Intent(IntentAction::OpenScreen {
+                screen: required(value.screen_id, "screen_id", value.action)?,
+                channel_id: None,
+                context_id: None,
+            }),
             SemanticActionKind::CreateAccount => {
                 ScenarioAction::Intent(IntentAction::CreateAccount {
                     account_name: required(value.value, "value", value.action)?,
@@ -1706,6 +1718,8 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::SendChatMessage => {
                 ScenarioAction::Intent(IntentAction::SendChatMessage {
                     message: required(value.value, "value", value.action)?,
+                    channel_id: None,
+                    context_id: None,
                 })
             }
             SemanticActionKind::PasteClipboard => ScenarioAction::Ui(UiAction::PasteClipboard {
@@ -2070,7 +2084,11 @@ mod tests {
                 id: "open".to_string(),
                 actor: Some(super::ActorId("alice".to_string())),
                 timeout_ms: Some(1000),
-                action: ScenarioAction::Intent(IntentAction::OpenScreen(ScreenId::Chat)),
+                action: ScenarioAction::Intent(IntentAction::OpenScreen {
+                    screen: ScreenId::Chat,
+                    channel_id: None,
+                    context_id: None,
+                }),
             }],
         };
 
@@ -2123,7 +2141,11 @@ mod tests {
     #[test]
     fn every_intent_kind_has_a_matching_contract() {
         let samples = vec![
-            IntentAction::OpenScreen(ScreenId::Chat),
+            IntentAction::OpenScreen {
+                screen: ScreenId::Chat,
+                channel_id: None,
+                context_id: None,
+            },
             IntentAction::CreateAccount {
                 account_name: "alice".to_string(),
             },
@@ -2165,6 +2187,8 @@ mod tests {
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             },
         ];
         assert_eq!(samples.len(), IntentKind::ALL.len());
@@ -2186,7 +2210,11 @@ mod tests {
     #[test]
     fn every_intent_kind_declares_barrier_metadata() {
         let actions = [
-            IntentAction::OpenScreen(ScreenId::Chat),
+            IntentAction::OpenScreen {
+                screen: ScreenId::Chat,
+                channel_id: None,
+                context_id: None,
+            },
             IntentAction::CreateAccount {
                 account_name: "alice".to_string(),
             },
@@ -2228,6 +2256,8 @@ mod tests {
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             },
         ];
         for action in actions {
@@ -2248,7 +2278,11 @@ mod tests {
     #[test]
     fn every_intent_kind_declares_focus_and_selection_semantics() {
         let actions = [
-            IntentAction::OpenScreen(ScreenId::Chat),
+            IntentAction::OpenScreen {
+                screen: ScreenId::Chat,
+                channel_id: None,
+                context_id: None,
+            },
             IntentAction::CreateAccount {
                 account_name: "alice".to_string(),
             },
@@ -2290,6 +2324,8 @@ mod tests {
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             },
         ];
         for action in actions {
@@ -2337,6 +2373,8 @@ mod tests {
 
         let send_message_contract = IntentAction::SendChatMessage {
             message: "hello".to_string(),
+            channel_id: None,
+            context_id: None,
         }
         .contract();
         assert!(send_message_contract.post_operation_convergence.is_none());
@@ -2415,6 +2453,8 @@ mod tests {
     fn send_chat_message_requires_delivery_ready_before_issue() {
         let contract = IntentAction::SendChatMessage {
             message: "hello".to_string(),
+            channel_id: None,
+            context_id: None,
         }
         .contract();
 
@@ -2460,6 +2500,8 @@ mod tests {
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             },
         ] {
             let contract = intent.contract();

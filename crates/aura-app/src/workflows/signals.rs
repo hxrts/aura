@@ -62,3 +62,20 @@ where
         .await
         .map_err(|e| AuraError::internal(e.to_string()))
 }
+
+/// Emit a signal only when its value changes.
+pub async fn emit_signal_if_changed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    signal: &Signal<T>,
+    value: T,
+    name: &str,
+) -> Result<(), AuraError>
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    let current = read_signal(app_core, signal, name).await?;
+    if current == value {
+        return Ok(());
+    }
+    emit_signal(app_core, signal, value, name).await
+}

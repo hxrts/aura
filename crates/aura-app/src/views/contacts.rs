@@ -66,7 +66,7 @@ pub struct MySuggestion {
 // =============================================================================
 
 /// A contact
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Contact {
     /// Contact identifier (authority ID)
@@ -143,7 +143,7 @@ mod contact_map_serde {
 ///
 /// Stores contacts in a HashMap for O(1) lookup by ID. Selection and filtering
 /// are UI concerns and should be stored in TuiState, not here.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ContactsState {
     /// All contacts, keyed by authority ID

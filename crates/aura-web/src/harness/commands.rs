@@ -39,7 +39,7 @@ use crate::browser_promises::await_browser_promise_with_timeout;
 use crate::harness::browser_contract::SEMANTIC_DEBUG_KEY;
 use crate::harness::channel_selection::{
     authoritative_channel_binding, selected_authority_id, selected_channel_binding,
-    selected_channel_id, selected_device_id, SelectionError, WeakChannelSelection,
+    selected_device_id, SelectionError,
 };
 use crate::harness_bridge::{
     BootstrapHandoff, PendingAccountBootstrapSource, RuntimeIdentityStageSource,
@@ -125,7 +125,10 @@ impl BrowserSemanticBridgeResponse {
 
 #[derive(Clone, Debug)]
 enum RoutedSemanticIntent {
-    OpenScreen(ScreenId),
+    OpenScreen {
+        screen: ScreenId,
+        channel_id: Option<String>,
+    },
     CreateAccount {
         account_name: String,
     },
@@ -168,7 +171,7 @@ enum RoutedSemanticIntent {
     },
     SendChatMessage {
         message: String,
-        channel: WeakChannelSelection,
+        channel_id: ChannelId,
     },
 }
 
@@ -549,7 +552,14 @@ async fn route_semantic_intent(
     intent: IntentAction,
 ) -> Result<RoutedSemanticIntent, RouteSemanticIntentError> {
     match intent {
-        IntentAction::OpenScreen(screen) => Ok(RoutedSemanticIntent::OpenScreen(screen)),
+        IntentAction::OpenScreen {
+            screen,
+            channel_id,
+            context_id,
+        } => {
+            let _ = context_id;
+            Ok(RoutedSemanticIntent::OpenScreen { screen, channel_id })
+        }
         IntentAction::CreateAccount { account_name } => {
             Ok(RoutedSemanticIntent::CreateAccount { account_name })
         }
@@ -629,10 +639,27 @@ async fn route_semantic_intent(
                 .transpose()?,
             channel_name,
         }),
-        IntentAction::SendChatMessage { message } => Ok(RoutedSemanticIntent::SendChatMessage {
+        IntentAction::SendChatMessage {
             message,
-            channel: selected_channel_id(controller)?,
-        }),
+            channel_id,
+            context_id,
+        } => {
+            let channel_id = match channel_id {
+                Some(channel_id) => channel_id
+                    .parse::<ChannelId>()
+                    .map_err(RouteSemanticIntentError::invalid_channel_id)?,
+                None => selected_channel_binding(controller)
+                    .await?
+                    .channel_id
+                    .parse::<ChannelId>()
+                    .map_err(RouteSemanticIntentError::invalid_channel_id)?,
+            };
+            let _ = context_id;
+            Ok(RoutedSemanticIntent::SendChatMessage {
+                message,
+                channel_id,
+            })
+        }
     }
 }
 
@@ -642,11 +669,16 @@ async fn execute_semantic_intent(
     contract: SharedActionContract,
 ) -> Result<SemanticCommandResponse, JsValue> {
     match intent {
-        RoutedSemanticIntent::OpenScreen(screen) => {
+        RoutedSemanticIntent::OpenScreen { screen, channel_id } => {
             crate::harness_bridge::apply_browser_ui_mutation(
                 controller.clone(),
                 move |controller| {
                     controller.set_screen(screen);
+                    if matches!(screen, ScreenId::Chat) {
+                        if let Some(channel_id) = channel_id.as_deref() {
+                            controller.select_channel_by_id(channel_id);
+                        }
+                    }
                 },
             );
             declared_immediate_unit_response(&contract)
@@ -1070,16 +1102,15 @@ async fn execute_semantic_intent(
                 &contract,
                 OperationId::join_channel(),
             )?;
-            messaging_workflows::join_channel_by_name_with_instance(
+            let binding = messaging_workflows::join_channel_by_name_with_binding_terminal_status(
                 controller.app_core(),
                 &channel_name,
                 Some(handle.instance_id().clone()),
             )
             .await
+            .result
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let binding = selected_channel_binding(&controller)
-                .await
-                .map_err(|error| JsValue::from_str(&error.detail()))?;
+            controller.select_channel_by_id(&binding.channel_id);
             declared_handle_response(&contract, handle, binding.semantic_value())
         }
         RoutedSemanticIntent::InviteActorToChannel {
@@ -1185,7 +1216,10 @@ async fn execute_semantic_intent(
             );
             declared_handle_unit_response(&contract, handle)
         }
-        RoutedSemanticIntent::SendChatMessage { message, channel } => {
+        RoutedSemanticIntent::SendChatMessage {
+            message,
+            channel_id,
+        } => {
             let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
                 &contract,
@@ -1206,7 +1240,7 @@ async fn execute_semantic_intent(
                             &workflow_app_core,
                             messaging_workflows::handoff::SendChatMessageRequest {
                                 target: messaging_workflows::handoff::SendChatTarget::ChannelId(
-                                    channel.channel_id().clone(),
+                                    channel_id,
                                 ),
                                 content: message,
                                 operation_instance_id: Some(instance_id),

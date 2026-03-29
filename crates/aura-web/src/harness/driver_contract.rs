@@ -19,6 +19,7 @@ pub(crate) const SEMANTIC_QUEUE_KEY: &str = "__AURA_DRIVER_SEMANTIC_QUEUE__";
 pub(crate) const RUNTIME_STAGE_QUEUE_KEY: &str = "__AURA_DRIVER_RUNTIME_STAGE_QUEUE__";
 pub(crate) const SEMANTIC_ENQUEUE_KEY: &str = "__AURA_DRIVER_SEMANTIC_ENQUEUE__";
 pub(crate) const RUNTIME_STAGE_ENQUEUE_KEY: &str = "__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__";
+pub(crate) const SEMANTIC_QUEUE_INGRESS_ID: &str = "aura-harness-semantic-queue-ingress";
 pub(crate) const WAKE_SEMANTIC_QUEUE_KEY: &str = "__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__";
 pub(crate) const WAKE_RUNTIME_STAGE_QUEUE_KEY: &str = "__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__";
 pub(crate) const WAKE_PENDING_NAV_KEY: &str = "__AURA_DRIVER_WAKE_PENDING_NAV__";

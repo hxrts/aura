@@ -1,5 +1,5 @@
 use async_lock::{Mutex, RwLock};
-use aura_agent::AgentBuilder;
+use aura_agent::{AgentBuilder, AuraAgent};
 use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::ui::types::{
     BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity, BootstrapSurface,
@@ -12,12 +12,13 @@ use aura_app::{AppConfig, AppCore};
 use aura_core::types::identifiers::AuthorityId;
 use aura_ui::UiController;
 use dioxus::prelude::{Signal, WritableExt};
+use std::cell::Cell;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::future_to_promise;
 
 use crate::bootstrap_storage::{load_persisted_account_config, persist_runtime_account_config};
-use crate::browser_promises::await_browser_promise_with_timeout;
+use crate::browser_promises::{await_browser_promise_with_timeout, browser_sleep_ms};
 use crate::error::{log_web_error, WebUiError};
 use crate::harness::generation::BrowserShellPhase;
 use crate::harness_bridge::{self, BootstrapHandoff, RuntimeIdentityStageSource};
@@ -33,13 +34,28 @@ use crate::{
     workflows::{self, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest, RebootstrapPolicy},
 };
 
-#[derive(Clone, PartialEq)]
+thread_local! {
+    static HARNESS_UI_SNAPSHOT_PUBLISH_COUNT: Cell<u64> = const { Cell::new(0) };
+}
+
+#[derive(Clone)]
 pub(crate) struct BootstrapState {
     pub(crate) generation_id: u64,
     pub(crate) controller: Arc<UiController>,
+    agent: Option<Arc<AuraAgent>>,
     pub(crate) account_ready: bool,
     pub(crate) pending_device_enrollment_code: Option<String>,
     pub(crate) pending_device_enrollment_code_key: String,
+}
+
+impl PartialEq for BootstrapState {
+    fn eq(&self, other: &Self) -> bool {
+        self.generation_id == other.generation_id
+            && self.controller == other.controller
+            && self.account_ready == other.account_ready
+            && self.pending_device_enrollment_code == other.pending_device_enrollment_code
+            && self.pending_device_enrollment_code_key == other.pending_device_enrollment_code_key
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -241,10 +257,14 @@ impl WebShellHost {
         }
         bootstrap_epoch.set(epoch);
         bootstrap_error.set(None);
-        committed_bootstrap.set(None);
+        let previous_bootstrap = {
+            let mut slot = committed_bootstrap.write();
+            slot.take()
+        };
         cancel_generation_maintenance_loops();
         harness_bridge::clear_controller(&format!("bootstrap_generation_rebinding:{epoch}"));
         harness_bridge::set_browser_shell_phase(BrowserShellPhase::Rebinding);
+        shutdown_previous_bootstrap_generation(previous_bootstrap).await;
 
         web_sys::console::log_1(
             &format!(
@@ -300,6 +320,81 @@ impl WebShellHost {
                     log_web_error("error", &error);
                 }
                 Err(error)
+            }
+        }
+    }
+}
+
+async fn shutdown_previous_bootstrap_generation(previous: Option<BootstrapState>) {
+    let Some(previous) = previous else {
+        return;
+    };
+
+    let BootstrapState {
+        generation_id,
+        controller,
+        agent,
+        ..
+    } = previous;
+    let app_core = controller.app_core().clone();
+    let _ = AppCore::detach_runtime(&app_core).await;
+    drop(controller);
+    drop(app_core);
+
+    let Some(agent) = agent else {
+        return;
+    };
+
+    let authority_id = agent.authority_id();
+    let effect_context = aura_agent::EffectContext::with_authority(authority_id);
+    let mut agent = agent;
+    for attempt in 1..=8 {
+        match Arc::try_unwrap(agent) {
+            Ok(agent) => {
+                if let Err(error) = agent.shutdown(&effect_context).await {
+                    log_web_error(
+                        "warn",
+                        &WebUiError::operation(
+                            WebUiOperation::BootstrapController,
+                            "WEB_PREVIOUS_GENERATION_RUNTIME_SHUTDOWN_FAILED",
+                            format!(
+                                "failed shutting down previous web runtime generation {generation_id}: {error}"
+                            ),
+                        ),
+                    );
+                }
+                return;
+            }
+            Err(shared_agent) => {
+                let strong_count = Arc::strong_count(&shared_agent);
+                if attempt == 8 {
+                    log_web_error(
+                        "warn",
+                        &WebUiError::operation(
+                            WebUiOperation::BootstrapController,
+                            "WEB_PREVIOUS_GENERATION_RUNTIME_SHUTDOWN_SKIPPED",
+                            format!(
+                                "previous web runtime generation {generation_id} still has {strong_count} strong references after controller teardown and {attempt} browser-yield attempts",
+                            ),
+                        ),
+                    );
+                    return;
+                }
+                agent = shared_agent;
+                if let Err(error) = browser_sleep_ms(
+                    0,
+                    WebUiOperation::BootstrapController,
+                    "WEB_PREVIOUS_GENERATION_RUNTIME_SHUTDOWN_YIELD_WINDOW_UNAVAILABLE",
+                    "WEB_PREVIOUS_GENERATION_RUNTIME_SHUTDOWN_YIELD_FAILED",
+                    "WEB_PREVIOUS_GENERATION_RUNTIME_SHUTDOWN_YIELD_DROPPED",
+                    "window unavailable while yielding previous generation runtime teardown",
+                    "previous generation runtime teardown yield",
+                )
+                .await
+                {
+                    log_web_error("warn", &error);
+                    return;
+                }
             }
         }
     }
@@ -408,6 +503,19 @@ fn install_harness_instrumentation(controller: Arc<UiController>, generation_id:
         return;
     }
     controller.set_ui_snapshot_sink(Arc::new(|snapshot| {
+        HARNESS_UI_SNAPSHOT_PUBLISH_COUNT.with(|count| {
+            let next = count.get().saturating_add(1);
+            count.set(next);
+            if next <= 8 || next % 64 == 0 {
+                web_sys::console::log_1(
+                    &format!(
+                        "[web-harness-diag] snapshot_publish count={next};screen={:?};readiness={:?};revision={:?}",
+                        snapshot.screen, snapshot.readiness, snapshot.revision
+                    )
+                    .into(),
+                );
+            }
+        });
         harness_bridge::publish_ui_snapshot(&snapshot);
     }));
 
@@ -784,6 +892,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         Ok(BootstrapState {
             generation_id,
             controller,
+            agent: Some(agent),
             account_ready,
             pending_device_enrollment_code: pending_device_enrollment_code
                 .filter(|code| !code.is_empty()),
@@ -829,6 +938,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         Ok(BootstrapState {
             generation_id,
             controller,
+            agent: None,
             account_ready: false,
             pending_device_enrollment_code: None,
             pending_device_enrollment_code_key: pending_code_storage_key,

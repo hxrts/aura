@@ -75,6 +75,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Browser generation rebinding must be surfaced explicitly through page-owned
   generation diagnostics, so harness observation can distinguish rebinding from
   stale or missing semantic publication.
+- Preserved-profile rebootstrap must tear down the previous browser runtime
+  generation before starting the next one; clearing controller/publication
+  state without stopping the old `aura-agent` runtime is forbidden because it
+  can stack whole runtimes on the single browser main thread.
 - Harness mode may change instrumentation and render stability, but not business-flow semantics.
 - Shared browser-flow execution must go through the semantic command bridge and real app workflows; DOM clicks and selector helpers are frontend-conformance-only.
 - Playwright-to-page semantic submission uses the page-owned semantic queue
@@ -111,9 +115,20 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   sync are explicitly non-semantic upkeep. They may keep local runtime/browser
   state moving, but they must not become browser-owned semantic lifecycle
   authorities.
-- Browser-owned maintenance loops share one bounded helper for interval sleep,
-  cancellation, and visible pause reporting so the maintenance contract stays
-  uniform across browser-owned tasks.
+- Browser-owned maintenance upkeep for a generation is serialized under one
+  generation-owned supervisor loop. Distinct cadences such as harness transport
+  polling, ceremony acceptance, and background sync may share one bounded sleep
+  helper, but they must not run as parallel long-lived loops that compete for
+  the same browser main thread and runtime bridge.
+- Browser-hosted harness transport polling is mailbox upkeep only. After a poll
+  drains envelopes, the browser may process the local inbox and refresh
+  observed account state, but full discovery/sync convergence stays on the
+  slower background-sync cadence so transport polling does not create a
+  browser-owned convergence feedback loop.
+- In harness mode, browser background sync must leave an explicit initial
+  interactivity window after bootstrap handoff and use a coarser cadence than
+  production so upkeep does not starve Playwright page-execution and semantic
+  enqueue channels during preserved-profile scenario startup.
 - The browser shell is an `Observed` plus bridge crate for shared semantic flows. It may submit commands and expose projections, but it must not own terminal semantic lifecycle truth for parity-critical operations.
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState

@@ -1,6 +1,8 @@
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
@@ -18,6 +20,8 @@ use aura_app::ui::scenarios::{
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_core::{AuthorityId, DeviceId};
 use nix::poll::{poll, PollFd, PollFlags};
+use nix::sys::signal;
+use nix::unistd::Pid;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -42,6 +46,7 @@ const DEFAULT_START_MAX_ATTEMPTS: u32 = 3;
 const DEFAULT_START_RETRY_BACKOFF_MS: u64 = 1_200;
 const MAX_START_ATTEMPTS: u32 = 10;
 const MAX_TIMEOUT_MS: u64 = 600_000;
+const PLAYWRIGHT_DRIVER_OWNED_MARKER: &str = "--aura-harness-owned-playwright-driver";
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum BackendState {
@@ -354,7 +359,10 @@ impl PlaywrightBrowserBackend {
             .ok_or_else(|| anyhow!("invalid driver script path {}", driver_script.display()))?;
         Ok((
             "node".to_string(),
-            vec![driver_script.to_string_lossy().to_string()],
+            vec![
+                driver_script.to_string_lossy().to_string(),
+                PLAYWRIGHT_DRIVER_OWNED_MARKER.to_string(),
+            ],
             Some(driver_cwd),
         ))
     }
@@ -367,8 +375,7 @@ impl PlaywrightBrowserBackend {
 
         let mut session = session_mutex.into_inner();
         let _ = session.rpc_call("stop", json!({ "instance_id": self.config.id }));
-        let _ = session.child.kill();
-        let _ = session.child.wait();
+        terminate_owned_child(&mut session.child);
         if let Some(handle) = session.stderr_thread.take() {
             let _ = handle.join();
         }
@@ -457,6 +464,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         child_command.stdout(Stdio::piped());
         child_command.stderr(Stdio::piped());
         child_command.env("AURA_HARNESS_BROWSER", "1");
+        configure_owned_process_group(&mut child_command);
         for entry in &self.config.env {
             if let Some((key, value)) = entry.split_once('=') {
                 child_command.env(key.trim(), value.trim());
@@ -517,8 +525,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         );
         if let Err(error) = start_result {
             let _ = session.rpc_call("stop", json!({ "instance_id": self.config.id }));
-            let _ = session.child.kill();
-            let _ = session.child.wait();
+            terminate_owned_child(&mut session.child);
             if let Some(handle) = session.stderr_thread.take() {
                 let _ = handle.join();
             }
@@ -945,7 +952,11 @@ impl RawUiBackend for PlaywrightBrowserBackend {
             };
             if let Some(target_screen) = target_screen {
                 let navigate_result = self.submit_semantic_command(SemanticCommandRequest::new(
-                    IntentAction::OpenScreen(target_screen),
+                    IntentAction::OpenScreen {
+                        screen: target_screen,
+                        channel_id: None,
+                        context_id: None,
+                    },
                 ));
                 if navigate_result.is_ok() {
                     return Ok(());
@@ -1171,6 +1182,29 @@ fn default_driver_script_path() -> Result<PathBuf> {
     Ok(candidate)
 }
 
+fn configure_owned_process_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        command.process_group(0);
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+    }
+}
+
+fn terminate_owned_child(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as i32;
+        let _ = signal::kill(Pid::from_raw(-pid), signal::Signal::SIGKILL);
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn control_selector(control_id: ControlId) -> Result<String> {
     control_id
         .web_selector()
@@ -1224,6 +1258,7 @@ mod tests {
     use super::{
         browser_app_url, control_selector, field_selector, navigation_control_id,
         parse_bool_setting, parse_u64_setting, tool_key_name, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+        PLAYWRIGHT_DRIVER_OWNED_MARKER,
     };
     use crate::tool_api::ToolKey;
     use aura_app::ui::contract::{ControlId, FieldId};
@@ -1309,6 +1344,19 @@ mod tests {
     #[test]
     fn browser_driver_maps_dismiss_key_name() {
         assert_eq!(tool_key_name(ToolKey::Esc), "esc");
+    }
+
+    #[test]
+    fn default_playwright_driver_command_keeps_owned_process_marker() {
+        let source = include_str!("playwright_browser.rs");
+        assert!(
+            source.contains("PLAYWRIGHT_DRIVER_OWNED_MARKER.to_string()"),
+            "default browser driver command should carry the owned-process marker argument"
+        );
+        assert_eq!(
+            PLAYWRIGHT_DRIVER_OWNED_MARKER,
+            "--aura-harness-owned-playwright-driver"
+        );
     }
 
     #[test]

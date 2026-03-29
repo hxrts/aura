@@ -743,7 +743,11 @@ mod tests {
                     id: "next-intent".to_string(),
                     actor: Some(ActorId("alice".to_string())),
                     timeout_ms: Some(1000),
-                    action: SemanticAction::Intent(IntentAction::OpenScreen(ScreenId::Chat)),
+                    action: SemanticAction::Intent(IntentAction::OpenScreen {
+                        screen: ScreenId::Chat,
+                        channel_id: None,
+                        context_id: None,
+                    }),
                 },
             ],
         };
@@ -817,6 +821,8 @@ mod tests {
                     timeout_ms: Some(1000),
                     action: SemanticAction::Intent(IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }),
                 },
             ],

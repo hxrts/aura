@@ -227,6 +227,19 @@ mod tests {
     }
 
     #[test]
+    fn shell_subscriptions_use_component_scoped_cancellable_owner() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let subscriptions_path = repo_root.join("crates/aura-ui/src/app/shell/subscriptions.rs");
+        let source = std::fs::read_to_string(&subscriptions_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", subscriptions_path.display())
+        });
+
+        assert!(source.contains("use_hook(crate::task_owner::new_ui_task_owner)"));
+        assert!(source.contains("subscription_task_owner.spawn_local_cancellable(async move {"));
+        assert!(!source.contains("spawn_ui(async move {"));
+    }
+
+    #[test]
     fn runtime_chat_send_uses_handoff_owner_and_typed_workflow() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let actions_path = repo_root.join("crates/aura-ui/src/app/shell/actions.rs");

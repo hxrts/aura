@@ -300,4 +300,4 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(port, host, () => {
   process.stdout.write(`[serve-web-static] serving ${publicDir} on http://${host}:${port}\n`);
 });
-' "$public_dir" "$port"
+' "$public_dir" "$port" "${2:-}"

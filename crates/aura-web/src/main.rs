@@ -83,6 +83,36 @@ mod tests {
     }
 
     #[test]
+    fn web_ui_publication_keeps_console_json_fallback_even_with_driver_push() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let publication_path = repo_root.join("crates/aura-web/src/harness/publication.rs");
+        let source = std::fs::read_to_string(&publication_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", publication_path.display())
+        });
+
+        assert!(
+            source.contains("[aura-ui-json]{json}")
+                && source.contains("if binding_mode == PublicationBindingMode::WindowCacheOnly {"),
+            "ui_state publication must keep the console JSON fallback even when driver_push is available so a missed Playwright callback cannot strand semantic observation during generation handoff"
+        );
+    }
+
+    #[test]
+    fn web_semantic_submit_publication_keeps_console_json_fallback() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let publication_path = repo_root.join("crates/aura-web/src/harness/publication.rs");
+        let source = std::fs::read_to_string(&publication_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", publication_path.display())
+        });
+
+        assert!(
+            source.contains("[aura-semantic-submit-json]{json}")
+                && source.contains("PUSH_SEMANTIC_SUBMIT_STATE_KEY"),
+            "semantic-submit publication must keep a structured console JSON fallback alongside the scheduled Playwright callback so queue readiness survives callback delivery gaps during generation rebinding"
+        );
+    }
+
+    #[test]
     fn web_background_sync_exit_is_structurally_visible() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let maintenance_path = repo_root.join("crates/aura-web/src/shell/maintenance.rs");
@@ -202,6 +232,36 @@ mod tests {
             .contains("harness_bridge::publish_semantic_controller_snapshot(controller.clone())"));
         assert!(!production_main.contains("harness_bridge::publish_ui_snapshot(&final_snapshot)"));
         assert!(!production_main.contains("harness_bridge::publish_ui_snapshot(&initial_snapshot)"));
+    }
+
+    #[test]
+    fn web_generation_reset_clears_controller_and_publication_snapshot_dedup() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let bridge_path = repo_root.join("crates/aura-web/src/harness_bridge.rs");
+        let bridge_source = std::fs::read_to_string(&bridge_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", bridge_path.display()));
+
+        let set_generation_start = bridge_source
+            .find("pub fn set_active_generation(generation_id: u64) {")
+            .unwrap_or_else(|| panic!("missing set_active_generation"));
+        let set_generation_end = bridge_source[set_generation_start..]
+            .find("pub fn set_bootstrap_transition_detail(")
+            .map(|offset| set_generation_start + offset)
+            .unwrap_or_else(|| panic!("missing set_bootstrap_transition_detail"));
+        let set_generation = &bridge_source[set_generation_start..set_generation_end];
+        assert!(set_generation.contains("controller.reset_published_ui_snapshot();"));
+        assert!(set_generation.contains("reset_published_ui_snapshot_dedup();"));
+
+        let set_controller_start = bridge_source
+            .find("pub fn set_controller(controller: Arc<UiController>) {")
+            .unwrap_or_else(|| panic!("missing set_controller"));
+        let set_controller_end = bridge_source[set_controller_start..]
+            .find("pub fn clear_controller(reason: &str) {")
+            .map(|offset| set_controller_start + offset)
+            .unwrap_or_else(|| panic!("missing clear_controller"));
+        let set_controller = &bridge_source[set_controller_start..set_controller_end];
+        assert!(set_controller.contains("controller.reset_published_ui_snapshot();"));
+        assert!(set_controller.contains("reset_published_ui_snapshot_dedup();"));
     }
 
     #[test]
@@ -336,6 +396,59 @@ mod tests {
     }
 
     #[test]
+    fn web_harness_channel_join_selects_and_send_prefers_authoritative_binding() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let commands_path = repo_root.join("crates/aura-web/src/harness/commands.rs");
+        let source = std::fs::read_to_string(&commands_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", commands_path.display()));
+
+        let create_start = source
+            .find("RoutedSemanticIntent::CreateChannel { channel_name } => {")
+            .unwrap_or_else(|| panic!("missing create channel intent"));
+        let create_end = source[create_start..]
+            .find("RoutedSemanticIntent::StartDeviceEnrollment {")
+            .map(|offset| create_start + offset)
+            .unwrap_or_else(|| panic!("missing create channel terminator"));
+        let create_block = &source[create_start..create_end];
+        assert!(create_block.contains("create_channel_with_authoritative_binding("));
+        assert!(!create_block.contains("select_channel_by_id_after_row_visible("));
+        assert!(!create_block.contains("controller.select_channel_by_id(&created.channel_id.to_string());"));
+
+        let open_start = source
+            .find("RoutedSemanticIntent::OpenScreen { screen, channel_id } => {")
+            .unwrap_or_else(|| panic!("missing open screen intent"));
+        let open_end = source[open_start..]
+            .find("RoutedSemanticIntent::CreateAccount { account_name } => {")
+            .map(|offset| open_start + offset)
+            .unwrap_or_else(|| panic!("missing open screen terminator"));
+        let open_block = &source[open_start..open_end];
+        assert!(open_block.contains("controller.set_screen(screen);"));
+        assert!(open_block.contains("controller.select_channel_by_id(channel_id);"));
+
+        let join_start = source
+            .find("RoutedSemanticIntent::JoinChannel { channel_name } => {")
+            .unwrap_or_else(|| panic!("missing join channel intent"));
+        let join_end = source[join_start..]
+            .find("RoutedSemanticIntent::InviteActorToChannel {")
+            .map(|offset| join_start + offset)
+            .unwrap_or_else(|| panic!("missing join channel terminator"));
+        let join_block = &source[join_start..join_end];
+        assert!(join_block.contains("join_channel_by_name_with_binding_terminal_status("));
+        assert!(join_block.contains("controller.select_channel_by_id(&binding.channel_id);"));
+
+        let send_start = source
+            .find("IntentAction::SendChatMessage {")
+            .unwrap_or_else(|| panic!("missing send chat route"));
+        let send_end = source[send_start..]
+            .find("}\n    }\n}")
+            .map(|offset| send_start + offset)
+            .unwrap_or(source.len());
+        let send_block = &source[send_start..send_end];
+        assert!(send_block.contains("selected_channel_binding(controller)"));
+        assert!(send_block.contains("Some(channel_id) => channel_id"));
+    }
+
+    #[test]
     fn web_harness_install_delegates_semantic_submission_to_commands_module() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let install_path = repo_root.join("crates/aura-web/src/harness/install.rs");
@@ -389,12 +502,43 @@ mod tests {
         let helper = &source[helper_start..helper_end];
 
         assert!(helper.contains("bootstrap_generation(epoch).await"));
-        assert!(helper.contains("committed_bootstrap.set(None);"));
+        assert!(helper.contains("let previous_bootstrap = {"));
+        assert!(helper.contains("slot.take()"));
         assert!(helper.contains("harness_bridge::clear_controller("));
+        assert!(
+            helper.contains("shutdown_previous_bootstrap_generation(previous_bootstrap).await;")
+        );
         assert!(helper.contains("harness_bridge::wait_for_generation_ready(generation_id)"));
         assert!(helper.contains("set_browser_shell_phase(BrowserShellPhase::Ready)"));
         assert!(helper.contains("Err(error)"));
         assert!(!helper.contains("spawn_local(async move"));
+    }
+
+    #[test]
+    fn web_rebootstrap_shuts_down_previous_runtime_generation() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_host_path = repo_root.join("crates/aura-web/src/shell_host.rs");
+        let source = std::fs::read_to_string(&shell_host_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", shell_host_path.display())
+        });
+
+        let helper_start = source
+            .find("async fn shutdown_previous_bootstrap_generation(")
+            .unwrap_or_else(|| panic!("missing shutdown_previous_bootstrap_generation"));
+        let helper_end = source[helper_start..]
+            .find("\nasync fn hydrate_existing_runtime_account_projection")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing hydrate_existing_runtime_account_projection"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(helper.contains("let app_core = controller.app_core().clone();"));
+        assert!(helper.contains("AppCore::detach_runtime(&app_core).await;"));
+        assert!(helper.contains("drop(controller);"));
+        assert!(helper.contains("Arc::try_unwrap(agent)"));
+        assert!(helper.contains("agent.shutdown(&effect_context).await"));
+        assert!(helper.contains("for attempt in 1..=8 {"));
+        assert!(helper.contains("browser_sleep_ms("));
+        assert!(helper.contains("WEB_PREVIOUS_GENERATION_RUNTIME_SHUTDOWN_SKIPPED"));
     }
 
     #[test]
@@ -421,6 +565,89 @@ mod tests {
         assert!(source.contains("fn run_semantic_queue() {\n    drain_pending_seed_queues();"));
         assert!(source.contains("fn run_runtime_stage_queue() {\n    drain_pending_seed_queues();"));
         assert!(source.contains("drain_seed_queues(&window)"));
+    }
+
+    #[test]
+    fn web_page_owned_queue_installs_dom_ingress_fallback_for_semantic_enqueue() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let queue_path = repo_root.join("crates/aura-web/src/harness/page_owned_queue.rs");
+        let source = std::fs::read_to_string(&queue_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", queue_path.display()));
+
+        assert!(source.contains("install_semantic_ingress(window)?;"));
+        assert!(source.contains("textarea.set_id(SEMANTIC_QUEUE_INGRESS_ID);"));
+        assert!(source.contains("add_event_listener_with_callback(\"input\""));
+        assert!(source.contains("accept_semantic_payload_json(&payload_json, \"live_enqueue\")"));
+        assert!(source.contains("accept_semantic_payload_json(&payload_json, \"dom_ingress\")"));
+    }
+
+    #[test]
+    fn web_generation_maintenance_serializes_browser_upkeep() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let maintenance_path = repo_root.join("crates/aura-web/src/shell/maintenance.rs");
+        let source = std::fs::read_to_string(&maintenance_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", maintenance_path.display())
+        });
+
+        let start = source
+            .find("pub(crate) fn spawn_generation_maintenance_loops(")
+            .unwrap_or_else(|| panic!("missing spawn_generation_maintenance_loops"));
+        let body = &source[start..];
+
+        assert!(source.contains("fn spawn_generation_maintenance_supervisor("));
+        assert!(body.contains("spawn_generation_maintenance_supervisor(&owner"));
+        assert!(!body.contains("spawn_background_sync_loop(&owner"));
+        assert!(!body.contains("spawn_harness_transport_poll_loop("));
+        assert!(!body.contains("spawn_ceremony_acceptance_loop("));
+    }
+
+    #[test]
+    fn web_generation_maintenance_debug_events_do_not_fetch_per_tick() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let maintenance_path = repo_root.join("crates/aura-web/src/shell/maintenance.rs");
+        let source = std::fs::read_to_string(&maintenance_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", maintenance_path.display())
+        });
+
+        let start = source
+            .find("#[cfg(target_arch = \"wasm32\")]\nfn emit_browser_harness_debug_event(")
+            .unwrap_or_else(|| panic!("missing emit_browser_harness_debug_event"));
+        let body = &source[start..];
+
+        assert!(
+            !body.contains("fetch_with_str(&url)"),
+            "browser maintenance diagnostics must not issue per-tick fetch traffic from the wasm page; that diagnostic side channel can starve Playwright actionability on preserved-profile restarts"
+        );
+    }
+
+    #[test]
+    fn web_generation_maintenance_transport_poll_budget_stays_coarse() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let maintenance_path = repo_root.join("crates/aura-web/src/shell/maintenance.rs");
+        let source = std::fs::read_to_string(&maintenance_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", maintenance_path.display())
+        });
+
+        assert!(
+            source.contains("const HARNESS_TRANSPORT_POLL_INTERVAL_MS: u64 = 1_000;"),
+            "browser steady-state harness transport polling must stay on a coarse cadence; a 100 ms browser poll loop can starve Playwright actionability on preserved-profile runs"
+        );
+    }
+
+    #[test]
+    fn web_harness_background_sync_grants_bootstrap_interactivity_window() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let maintenance_path = repo_root.join("crates/aura-web/src/shell/maintenance.rs");
+        let source = std::fs::read_to_string(&maintenance_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", maintenance_path.display())
+        });
+
+        assert!(
+            source.contains("const HARNESS_BACKGROUND_SYNC_INTERVAL_MS: u64 = 10_000;")
+                && source.contains("const HARNESS_BACKGROUND_SYNC_START_DELAY_MS: u64 = 15_000;")
+                && source.contains("tick_count >= background_sync_start_delay_ticks"),
+            "harness-mode browser background sync must leave an initial interactivity window after bootstrap handoff instead of starting full sync work on the first maintenance tick"
+        );
     }
 
     #[test]

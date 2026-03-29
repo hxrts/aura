@@ -21,7 +21,7 @@ use crate::signal_defs::{
 use crate::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::workflows::runtime::{timeout_runtime_call, workflow_best_effort};
-use crate::workflows::signals::{emit_signal, read_signal};
+use crate::workflows::signals::{emit_signal, emit_signal_if_changed, read_signal};
 use crate::{AppCore, ReactiveHandler};
 use async_lock::RwLock;
 use aura_core::effects::reactive::{ReactiveEffects, Signal};
@@ -334,7 +334,7 @@ async fn publish_connection_status_bundle(
 ) -> Result<(), AuraError> {
     let mut best_effort = workflow_best_effort();
     let _ = best_effort
-        .capture(emit_signal(
+        .capture(emit_signal_if_changed(
             app_core,
             &*CONTACTS_SIGNAL,
             contacts_state,
@@ -342,7 +342,7 @@ async fn publish_connection_status_bundle(
         ))
         .await;
     let _ = best_effort
-        .capture(emit_signal(
+        .capture(emit_signal_if_changed(
             app_core,
             &*CONNECTION_STATUS_SIGNAL,
             connection,
@@ -351,7 +351,7 @@ async fn publish_connection_status_bundle(
         .await;
     if let Some(network_status) = network_status {
         let _ = best_effort
-            .capture(emit_signal(
+            .capture(emit_signal_if_changed(
                 app_core,
                 &*NETWORK_STATUS_SIGNAL,
                 network_status,
@@ -361,7 +361,7 @@ async fn publish_connection_status_bundle(
     }
     if let Some(transport_peers) = transport_peers {
         let _ = best_effort
-            .capture(emit_signal(
+            .capture(emit_signal_if_changed(
                 app_core,
                 &*TRANSPORT_PEERS_SIGNAL,
                 transport_peers,
@@ -856,9 +856,11 @@ pub async fn is_available(app_core: &Arc<RwLock<AppCore>>) -> bool {
 mod tests {
     use super::*;
     #[cfg(feature = "signals")]
-    use crate::signal_defs::CHAT_SIGNAL;
+    use crate::signal_defs::{register_app_signals, CHAT_SIGNAL, CONTACTS_SIGNAL};
     #[cfg(feature = "signals")]
     use crate::views::chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus};
+    #[cfg(feature = "signals")]
+    use crate::views::ContactsState;
     use crate::AppConfig;
     #[cfg(feature = "signals")]
     use aura_core::crypto::hash::hash;
@@ -1080,6 +1082,47 @@ mod tests {
             .await
             .expect_err("missing task spawner should fail hook installation");
         assert!(matches!(error, AuraError::Internal { .. }));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn contacts_refresh_hook_does_not_reemit_unchanged_contacts_state() {
+        let authority = AuthorityId::new_from_entropy([90u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        let app_core = crate::testing::test_app_core_with_runtime(AppConfig::default(), runtime);
+
+        {
+            let core = app_core.read().await;
+            register_app_signals(&*core).await.unwrap();
+        }
+        install_contacts_refresh_hook(&app_core).await.unwrap();
+
+        let mut stream = {
+            let core = app_core.read().await;
+            core.subscribe(&*CONTACTS_SIGNAL).unwrap()
+        };
+        tokio::task::yield_now().await;
+
+        emit_signal(
+            &app_core,
+            &*CONTACTS_SIGNAL,
+            ContactsState::default(),
+            CONTACTS_SIGNAL_NAME,
+        )
+        .await
+        .unwrap();
+
+        let first = tokio::time::timeout(std::time::Duration::from_millis(250), stream.recv())
+            .await
+            .expect("initial contacts emission should be observed");
+        assert!(first.is_ok(), "initial contacts emission should succeed");
+
+        let second = tokio::time::timeout(std::time::Duration::from_millis(250), stream.recv())
+            .await;
+        assert!(
+            second.is_err(),
+            "unchanged contacts refresh must not self-trigger a second CONTACTS_SIGNAL emission"
+        );
     }
 
     #[tokio::test]

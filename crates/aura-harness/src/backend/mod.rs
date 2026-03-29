@@ -252,6 +252,8 @@ pub trait SharedSemanticBackend {
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::SendChatMessage {
                     message: message.to_string(),
+                    channel_id: None,
+                    context_id: None,
                 },
             ))?,
             "submit_send_chat_message",

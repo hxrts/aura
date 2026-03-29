@@ -27,13 +27,12 @@ thread_local! {
     static SHARED_UI_TASK_OWNER: OnceCell<FrontendTaskOwner> = const { OnceCell::new() };
 }
 
+pub(crate) fn new_ui_task_owner() -> FrontendTaskOwner {
+    FrontendTaskOwner::new(FrontendTaskRuntime::new(spawn_boxed, spawn_local_boxed))
+}
+
 fn shared_ui_task_owner() -> FrontendTaskOwner {
-    SHARED_UI_TASK_OWNER.with(|slot| {
-        slot.get_or_init(|| {
-            FrontendTaskOwner::new(FrontendTaskRuntime::new(spawn_boxed, spawn_local_boxed))
-        })
-        .clone()
-    })
+    SHARED_UI_TASK_OWNER.with(|slot| slot.get_or_init(new_ui_task_owner).clone())
 }
 
 pub(crate) fn spawn_ui<F>(fut: F)

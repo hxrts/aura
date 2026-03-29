@@ -181,6 +181,10 @@ pub fn set_browser_shell_phase(phase: BrowserShellPhase) {
 
 pub fn set_active_generation(generation_id: u64) {
     set_active_generation_local(generation_id);
+    if let Some(controller) = generation::current_controller() {
+        controller.reset_published_ui_snapshot();
+    }
+    reset_published_ui_snapshot_dedup();
     if let Some(window) = web_sys::window() {
         generation::sync_generation_globals(&window);
         publication::refresh_semantic_submit_surface(
@@ -240,6 +244,9 @@ pub fn set_controller(controller: Arc<UiController>) {
     })));
     let controller_changed = generation::set_controller(controller);
     if controller_changed {
+        if let Some(controller) = generation::current_controller() {
+            controller.reset_published_ui_snapshot();
+        }
         reset_published_ui_snapshot_dedup();
     }
     if let Some(window) = web_sys::window() {

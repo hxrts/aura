@@ -274,6 +274,7 @@ fn publish_ui_snapshot_now(
     } else {
         PublicationBindingMode::WindowCacheOnly
     };
+    web_sys::console::log_1(&JsValue::from_str(&format!("[aura-ui-json]{json}")));
     if binding_mode == PublicationBindingMode::WindowCacheOnly {
         web_sys::console::log_1(&JsValue::from_str(&format!(
             "[aura-ui-publish]binding={};screen={screen:?};modal={modal:?};ops={operation_count}",
@@ -283,7 +284,6 @@ fn publish_ui_snapshot_now(
             "[aura-ui-state]screen={screen:?};modal={modal:?};ops={operation_count};binding={}",
             binding_mode.label(),
         )));
-        web_sys::console::log_1(&JsValue::from_str(&format!("[aura-ui-json]{json}")));
     }
 
     let has_observable_publication = cache_published || json_published || driver_push_published;
@@ -504,6 +504,13 @@ pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &Pu
         "enqueue_ready",
         &JsValue::from_bool(enqueue_ready),
     );
+    if let Ok(json) = JSON::stringify(&JsValue::from(state_object.clone())) {
+        if let Some(json) = json.as_string() {
+            web_sys::console::log_1(&JsValue::from_str(&format!(
+                "[aura-semantic-submit-json]{json}"
+            )));
+        }
+    }
     let _ = schedule_window_callback_push(
         window,
         PUSH_SEMANTIC_SUBMIT_STATE_KEY,

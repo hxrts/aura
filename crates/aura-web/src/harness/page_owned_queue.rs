@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
+use web_sys::HtmlTextAreaElement;
 
 use crate::harness::browser_contract::SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY;
 use crate::harness::commands;
@@ -16,8 +17,8 @@ use crate::harness::driver_contract::{
     PUSH_RUNTIME_STAGE_RESULT_KEY, PUSH_SEMANTIC_RESULT_KEY, PUSH_SEMANTIC_SUBMIT_STATE_KEY,
     RUNTIME_STAGE_BUSY_KEY, RUNTIME_STAGE_DEBUG_KEY, RUNTIME_STAGE_ENQUEUE_KEY,
     RUNTIME_STAGE_QUEUE_KEY, RUNTIME_STAGE_RESULTS_KEY, RUNTIME_STAGE_WAKE_SCHEDULED_KEY,
-    SEMANTIC_BUSY_KEY, SEMANTIC_DEBUG_KEY, SEMANTIC_ENQUEUE_KEY, SEMANTIC_QUEUE_KEY,
-    SEMANTIC_RESULTS_KEY, SEMANTIC_WAKE_SCHEDULED_KEY, WAKE_PENDING_NAV_KEY,
+    SEMANTIC_BUSY_KEY, SEMANTIC_DEBUG_KEY, SEMANTIC_ENQUEUE_KEY, SEMANTIC_QUEUE_INGRESS_ID,
+    SEMANTIC_QUEUE_KEY, SEMANTIC_RESULTS_KEY, SEMANTIC_WAKE_SCHEDULED_KEY, WAKE_PENDING_NAV_KEY,
     WAKE_RUNTIME_STAGE_QUEUE_KEY, WAKE_SEMANTIC_QUEUE_KEY,
 };
 use crate::harness::generation::current_controller;
@@ -53,6 +54,7 @@ thread_local! {
     static SEMANTIC_QUEUE_STATE: RefCell<SemanticQueueState> = RefCell::new(SemanticQueueState::default());
     static RUNTIME_STAGE_QUEUE_STATE: RefCell<RuntimeStageQueueState> = RefCell::new(RuntimeStageQueueState::default());
     static PENDING_NAV_STATE: RefCell<PendingNavState> = RefCell::new(PendingNavState::default());
+    static SEMANTIC_INGRESS_DRAIN_SCHEDULED: RefCell<bool> = const { RefCell::new(false) };
 }
 
 pub(crate) fn install(window: &web_sys::Window) -> Result<(), JsValue> {
@@ -74,6 +76,7 @@ pub(crate) fn install(window: &web_sys::Window) -> Result<(), JsValue> {
     }
 
     ensure_window_globals(window)?;
+    install_semantic_ingress(window)?;
     install_semantic_enqueue(window)?;
     install_runtime_stage_enqueue(window)?;
     install_wake_semantic_queue(window)?;
@@ -223,35 +226,7 @@ where
 fn install_semantic_enqueue(window: &web_sys::Window) -> Result<(), JsValue> {
     let enqueue = Closure::wrap(Box::new(move |payload: JsValue| {
         if let Some(payload_json) = payload.as_string() {
-            match from_str::<SemanticQueuePayload>(&payload_json) {
-                Ok(payload) => {
-                    let command_id = payload.command_id.clone();
-                    let queue_depth = SEMANTIC_QUEUE_STATE.with(|state| {
-                        let mut state = state.borrow_mut();
-                        state.queue.push_back(payload);
-                        state.queue.len()
-                    });
-                    web_sys::console::log_1(
-                        &format!(
-                            "[web-harness-queue] semantic enqueue command_id={command_id} depth={queue_depth}"
-                        )
-                        .into(),
-                    );
-                    sync_semantic_queue_state_to_window();
-                    set_semantic_debug("enqueued", None, None, None, Some(queue_depth), None);
-                    wake_semantic_queue(0);
-                }
-                Err(error) => {
-                    set_semantic_debug(
-                        "enqueue_parse_error",
-                        None,
-                        None,
-                        None,
-                        None,
-                        Some(&error.to_string()),
-                    );
-                }
-            }
+            accept_semantic_payload_json(&payload_json, "live_enqueue");
         } else {
             set_semantic_debug(
                 "enqueue_parse_error",
@@ -267,6 +242,111 @@ fn install_semantic_enqueue(window: &web_sys::Window) -> Result<(), JsValue> {
         .set(SEMANTIC_ENQUEUE_KEY, enqueue.as_ref().unchecked_ref())?;
     enqueue.forget();
     Ok(())
+}
+
+fn install_semantic_ingress(window: &web_sys::Window) -> Result<(), JsValue> {
+    let document = window
+        .document()
+        .ok_or_else(|| JsValue::from_str("document unavailable"))?;
+    if document
+        .get_element_by_id(SEMANTIC_QUEUE_INGRESS_ID)
+        .is_some()
+    {
+        return Ok(());
+    }
+    let body = document
+        .body()
+        .ok_or_else(|| JsValue::from_str("document body unavailable"))?;
+    let textarea = document
+        .create_element("textarea")?
+        .dyn_into::<HtmlTextAreaElement>()?;
+    textarea.set_id(SEMANTIC_QUEUE_INGRESS_ID);
+    textarea.set_attribute("aria-hidden", "true")?;
+    textarea.set_attribute("tabindex", "-1")?;
+    textarea.set_attribute(
+        "style",
+        "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;",
+    )?;
+    let listener = Closure::wrap(Box::new(move || {
+        schedule_semantic_ingress_drain();
+    }) as Box<dyn FnMut()>);
+    textarea.add_event_listener_with_callback("input", listener.as_ref().unchecked_ref())?;
+    listener.forget();
+    body.append_child(&textarea)?;
+    Ok(())
+}
+
+fn schedule_semantic_ingress_drain() {
+    let should_schedule = SEMANTIC_INGRESS_DRAIN_SCHEDULED.with(|scheduled| {
+        let mut scheduled = scheduled.borrow_mut();
+        if *scheduled {
+            return false;
+        }
+        *scheduled = true;
+        true
+    });
+    if !should_schedule {
+        return;
+    }
+    schedule_browser_action(0, move || {
+        SEMANTIC_INGRESS_DRAIN_SCHEDULED.with(|scheduled| {
+            *scheduled.borrow_mut() = false;
+        });
+        drain_semantic_ingress();
+    });
+}
+
+fn drain_semantic_ingress() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    let Some(element) = document.get_element_by_id(SEMANTIC_QUEUE_INGRESS_ID) else {
+        return;
+    };
+    let Ok(textarea) = element.dyn_into::<HtmlTextAreaElement>() else {
+        return;
+    };
+    let payload_json = textarea.value();
+    if payload_json.is_empty() {
+        return;
+    }
+    textarea.set_value("");
+    accept_semantic_payload_json(&payload_json, "dom_ingress");
+}
+
+fn accept_semantic_payload_json(payload_json: &str, source: &str) {
+    match from_str::<SemanticQueuePayload>(payload_json) {
+        Ok(payload) => {
+            let command_id = payload.command_id.clone();
+            let queue_depth = SEMANTIC_QUEUE_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                state.queue.push_back(payload);
+                state.queue.len()
+            });
+            web_sys::console::log_1(
+                &format!(
+                    "[web-harness-queue] semantic enqueue source={source} command_id={command_id} depth={queue_depth}"
+                )
+                .into(),
+            );
+            sync_semantic_queue_state_to_window();
+            set_semantic_debug("enqueued", None, None, None, Some(queue_depth), None);
+            wake_semantic_queue(0);
+        }
+        Err(error) => {
+            set_semantic_debug(
+                "enqueue_parse_error",
+                None,
+                None,
+                None,
+                None,
+                Some(&error.to_string()),
+            );
+        }
+    }
 }
 
 fn install_runtime_stage_enqueue(window: &web_sys::Window) -> Result<(), JsValue> {

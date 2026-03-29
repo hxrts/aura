@@ -1628,7 +1628,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
         request: SemanticCommandRequest,
     ) -> Result<SemanticCommandResponse> {
         match request.intent {
-            IntentAction::OpenScreen(screen) => {
+            IntentAction::OpenScreen { screen, .. } => {
                 self.send_harness_command(&HarnessUiCommand::NavigateScreen { screen })?;
                 Ok(SemanticCommandResponse::accepted_without_value())
             }
@@ -1762,7 +1762,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     },
                 })
             }
-            IntentAction::SendChatMessage { message } => {
+            IntentAction::SendChatMessage { message, .. } => {
                 let handle = require_ui_operation_handle(
                     self.send_harness_command_receipt(&HarnessUiCommand::SendChatMessage {
                         content: message,
@@ -2057,7 +2057,7 @@ mod tests {
     #[test]
     fn local_frontend_conformance_preserves_navigation_and_settings_semantics() {
         let source = include_str!("local_pty.rs");
-        assert!(source.contains("IntentAction::OpenScreen(screen) => {"));
+        assert!(source.contains("IntentAction::OpenScreen { screen, .. } => {"));
         assert!(source
             .contains("self.send_harness_command(&HarnessUiCommand::NavigateScreen { screen })?;"));
         assert!(source.contains("IntentAction::OpenSettingsSection(section) => {"));

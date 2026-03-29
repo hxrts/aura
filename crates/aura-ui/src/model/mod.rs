@@ -756,6 +756,7 @@ pub struct UiController {
     clipboard: Arc<dyn ClipboardPort>,
     authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
     ui_snapshot_sink: Mutex<Option<UiSnapshotSink>>,
+    last_published_ui_snapshot: Mutex<Option<UiSnapshot>>,
     rerender: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     runtime_device_enrollment_ceremony:
         Mutex<Option<runtime_events::RuntimeDeviceEnrollmentCeremony>>,
@@ -805,6 +806,7 @@ impl UiController {
             clipboard,
             authority_switcher,
             ui_snapshot_sink: Mutex::new(None),
+            last_published_ui_snapshot: Mutex::new(None),
             rerender: Mutex::new(None),
             runtime_device_enrollment_ceremony: Mutex::new(None),
         }

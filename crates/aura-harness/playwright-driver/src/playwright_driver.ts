@@ -65,6 +65,7 @@ import {
   RUNTIME_STAGE_RESULTS_KEY,
   SEMANTIC_DEBUG_KEY,
   SEMANTIC_ENQUEUE_KEY,
+  SEMANTIC_QUEUE_INGRESS_ID,
   SEMANTIC_RESULTS_KEY,
   WAKE_PENDING_NAV_KEY,
 } from "./driver_contract.js";
@@ -74,6 +75,7 @@ let requestChain: Promise<void> = Promise.resolve();
 let chromiumPromise = null;
 const UI_STATE_LOG_PREFIX = "[aura-ui-state]";
 const UI_STATE_JSON_LOG_PREFIX = "[aura-ui-json]";
+const SEMANTIC_SUBMIT_JSON_LOG_PREFIX = "[aura-semantic-submit-json]";
 const PLAYWRIGHT_TRACE_ENABLED =
   process.env.AURA_HARNESS_PLAYWRIGHT_TRACE === "1" ||
   process.env.AURA_HARNESS_PLAYWRIGHT_TRACE === "true";
@@ -1133,6 +1135,30 @@ function runSelfTest() {
     "driver publication and interactivity waits must stay on driver-owned bounded polling instead of bare page.waitForFunction",
   );
   assert(
+    String(startPage).includes(SEMANTIC_SUBMIT_JSON_LOG_PREFIX) &&
+      String(startPage).includes("console_push"),
+    "driver console ingestion must preserve the semantic-submit JSON fallback so queue readiness survives missed Playwright callback pushes during generation rebinding",
+  );
+  assert(
+    ACTION_METHODS.has("submit_semantic_command") &&
+      !String(submitSemanticCommand).includes("markObservationMutation("),
+    "semantic submit must raise the ui-observation mutation floor exactly once at dispatch; a second local mark can strand browser ui_state behind an unreachable revision floor after startup",
+  );
+  assert(
+    String(submitSemanticCommand).includes("waitForSemanticEnqueueChannelReady(") &&
+      String(enqueueSemanticPayload).includes(
+        "enqueueSemanticPayloadViaDomIngress(",
+      ),
+    "semantic enqueue must prefer direct page execution when healthy but fall back to the page-owned DOM ingress when Playwright's raw evaluate channel is transiently unavailable",
+  );
+  assert(
+    String(submitSemanticCommand).includes("restartPageSession(") &&
+      String(submitSemanticCommand).includes(
+        "submit_semantic_command_enqueue_restart_",
+      ),
+    "semantic submit must keep a bounded preserved-profile page-session restart lane for execution-channel wedge recovery; page restart remains infrastructure recovery only after observed product-owned readiness is healthy",
+  );
+  assert(
     mutableSession.requiredUiStateRevision === 4,
     "mutating actions should require a newer semantic revision",
   );
@@ -1573,9 +1599,6 @@ async function waitForSubmitQueueReady(session, reason, timeoutMs = 10000) {
       directProbeSucceeded = true;
       if (directState) {
         rememberSemanticSubmitPublicationState(session, directState, "page_probe");
-      } else {
-        session.semanticSubmitState = null;
-        session.semanticQueueInstalled = false;
       }
     } catch {
       directProbeSucceeded = false;
@@ -1587,7 +1610,6 @@ async function waitForSubmitQueueReady(session, reason, timeoutMs = 10000) {
       Number(session.requiredUiGeneration ?? 0),
     );
     if (
-      directProbeSucceeded &&
       state?.status === "ready" &&
       state?.enqueue_ready === true &&
       state?.generation_id != null &&
@@ -1669,6 +1691,43 @@ async function enqueueSemanticPayload(
   payloadJson,
   label,
   timeoutMs,
+  preferredChannel = "auto",
+) {
+  if (preferredChannel === "dom_ingress") {
+    return enqueueSemanticPayloadViaDomIngress(
+      session,
+      payloadJson,
+      label,
+      timeoutMs,
+    );
+  }
+
+  try {
+    return await enqueueSemanticPayloadViaPageExecution(
+      session,
+      payloadJson,
+      label,
+      timeoutMs,
+    );
+  } catch (error) {
+    const message = error?.message ?? String(error);
+    console.error(
+      `[driver] semantic_enqueue page_execution_failed instance=${session.id} label=${label} error=${message}`,
+    );
+    return enqueueSemanticPayloadViaDomIngress(
+      session,
+      payloadJson,
+      label,
+      timeoutMs,
+    );
+  }
+}
+
+async function enqueueSemanticPayloadViaPageExecution(
+  session,
+  payloadJson,
+  label,
+  timeoutMs,
 ) {
   return withOperationTimeout(
     label,
@@ -1717,6 +1776,63 @@ async function enqueueSemanticPayload(
       return null;
     })(),
     timeoutMs,
+  );
+}
+
+async function enqueueSemanticPayloadViaDomIngress(
+  session,
+  payloadJson,
+  label,
+  timeoutMs,
+) {
+  const selector = `#${SEMANTIC_QUEUE_INGRESS_ID}`;
+  const locator = session.page.locator(selector).first();
+  const attachTimeoutMs = Math.min(timeoutMs, 1500);
+  const fillTimeoutMs = Math.min(timeoutMs, 2000);
+  const drainAckTimeoutMs = Math.min(timeoutMs, 1500);
+
+  return withOperationTimeout(
+    `${label}:dom_ingress`,
+    (async () => {
+      await focusAuraPageSafe(
+        session.page,
+        session.id,
+        `semantic_enqueue_dom_ingress:${label}`,
+      );
+      await withOperationTimeout(
+        `semantic_enqueue_dom_ingress_attach:${session.id}:${label}`,
+        locator.waitFor({ state: "attached", timeout: attachTimeoutMs }),
+        attachTimeoutMs + 1000,
+      );
+      await withOperationTimeout(
+        `semantic_enqueue_dom_ingress_fill:${session.id}:${label}`,
+        locator.fill(payloadJson, { timeout: fillTimeoutMs }),
+        fillTimeoutMs + 1000,
+      );
+
+      const deadlineMs = Date.now() + drainAckTimeoutMs;
+      while (Date.now() < deadlineMs) {
+        const remainingMs = Math.max(1, deadlineMs - Date.now());
+        const probeTimeoutMs = Math.min(remainingMs, 300);
+        const currentValue = await withOperationTimeout(
+          `semantic_enqueue_dom_ingress_probe:${session.id}:${label}`,
+          locator.inputValue({ timeout: probeTimeoutMs }),
+          probeTimeoutMs + 500,
+        );
+        if (currentValue === "") {
+          console.error(
+            `[driver] semantic_enqueue_dom_ingress instance=${session.id} label=${label} status=accepted`,
+          );
+          return null;
+        }
+        await delay(50);
+      }
+
+      throw new Error(
+        `semantic_enqueue_dom_ingress_ack_timeout:${selector}:${label}`,
+      );
+    })(),
+    timeoutMs + 1000,
   );
 }
 
@@ -1986,6 +2102,58 @@ async function waitForPageExecutionChannelReady(
   throw new Error(
     `page_execution_not_ready:${reason}:${lastError ?? "unknown"}`,
   );
+}
+
+async function waitForSemanticEnqueueDomIngressReady(
+  session,
+  reason,
+  timeoutMs = 3000,
+) {
+  const selector = `#${SEMANTIC_QUEUE_INGRESS_ID}`;
+  const locator = session.page.locator(selector).first();
+  console.error(
+    `[driver] semantic_enqueue_dom_ingress_ready start instance=${session.id} reason=${reason} timeout_ms=${timeoutMs}`,
+  );
+  await focusAuraPageSafe(
+    session.page,
+    session.id,
+    `semantic_enqueue_dom_ingress_ready:${reason}`,
+  );
+  await withOperationTimeout(
+    `semantic_enqueue_dom_ingress_ready_attach:${session.id}:${reason}`,
+    locator.waitFor({ state: "attached", timeout: timeoutMs }),
+    timeoutMs + 1000,
+  );
+  console.error(
+    `[driver] semantic_enqueue_dom_ingress_ready done instance=${session.id} reason=${reason} selector=${selector}`,
+  );
+  return "dom_ingress";
+}
+
+async function waitForSemanticEnqueueChannelReady(
+  session,
+  reason,
+  timeoutMs = 4000,
+) {
+  const pageExecutionBudgetMs = Math.min(timeoutMs, 1000);
+  try {
+    await waitForPageExecutionChannelReady(
+      session,
+      reason,
+      pageExecutionBudgetMs,
+    );
+    return "page_execution";
+  } catch (error) {
+    const remainingMs = Math.max(1, timeoutMs - pageExecutionBudgetMs);
+    console.error(
+      `[driver] semantic_enqueue_channel_fallback instance=${session.id} reason=${reason} page_execution_error=${error?.message ?? String(error)}`,
+    );
+    return waitForSemanticEnqueueDomIngressReady(
+      session,
+      reason,
+      remainingMs,
+    );
+  }
 }
 
 async function logSemanticEnqueueFailureDiagnostics(session, stage) {
@@ -2994,6 +3162,22 @@ async function startPage(params) {
           );
           return;
         }
+        if (text.startsWith(SEMANTIC_SUBMIT_JSON_LOG_PREFIX)) {
+          const payload = text.slice(SEMANTIC_SUBMIT_JSON_LOG_PREFIX.length);
+          try {
+            rememberSemanticSubmitPublicationState(
+              session,
+              JSON.parse(payload),
+              "console_push",
+            );
+          } catch {
+            // Keep the raw log below if the structured fallback payload is malformed.
+          }
+          consoleLog.push(
+            `[${nowIso()}] ${message.type()}: ${SEMANTIC_SUBMIT_JSON_LOG_PREFIX}<json>`,
+          );
+          return;
+        }
         if (text.startsWith(UI_STATE_LOG_PREFIX)) {
           consoleLog.push(`[${nowIso()}] ${message.type()}: ${text}`);
           return;
@@ -3422,8 +3606,9 @@ async function readStructuredUiState(
       );
     }
   } catch (error) {
-    const pageGenerationState = await session.page
-      .evaluate(({
+    const pageGenerationState = await withOperationTimeout(
+      `structured_publication_diagnostics:${reason}`,
+      session.page.evaluate(({
         activeGenerationKey,
         readyGenerationKey,
         generationPhaseKey,
@@ -3450,8 +3635,9 @@ async function readStructuredUiState(
         uiStateCacheKey: UI_STATE_CACHE_KEY,
         uiPublicationStateKey: UI_PUBLICATION_STATE_KEY,
         renderHeartbeatPublicationStateKey: RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
-      })
-      .catch(() => null);
+      }),
+      500,
+    ).catch(() => null);
     throw new Error(
       `structured publication wait failed reason=${reason} state=${pageGenerationState ?? "unavailable"} cause=${error?.message ?? String(error)}`,
     );
@@ -4418,7 +4604,6 @@ async function submitSemanticCommand(params) {
   if (!session.semanticResultWaiters || typeof session.semanticResultWaiters !== "object") {
     session.semanticResultWaiters = Object.create(null);
   }
-  markObservationMutation(session, "submit_semantic_command");
   let responsePromise = ensureSemanticResultTracking(
     session,
     commandId,
@@ -4455,6 +4640,11 @@ async function submitSemanticCommand(params) {
         `semantic_enqueue:${label}`,
         Math.min(readinessTimeoutMs, 3000),
       );
+      const enqueueChannel = await waitForSemanticEnqueueChannelReady(
+        activeSession,
+        `semantic_enqueue:${label}`,
+        Math.min(readinessTimeoutMs, 4000),
+      );
       await focusAuraPageSafe(
         activeSession.page,
         instanceId,
@@ -4465,6 +4655,7 @@ async function submitSemanticCommand(params) {
         enqueuePayload,
         label,
         timeoutMs,
+        enqueueChannel,
       );
     };
   try {
@@ -4551,19 +4742,52 @@ async function submitSemanticCommand(params) {
                 `[driver] submit_semantic_command enqueue_superseded_by_result instance=${instanceId} stage=recover`,
               );
             } else {
+              console.error(
+                `[driver] submit_semantic_command enqueue_restart instance=${instanceId} error=${recoverError?.message ?? String(recoverError)}`,
+              );
               await logSemanticEnqueueFailureDiagnostics(
                 session,
                 `recover:${instanceId}`,
               );
-              invalidateSemanticResultWaiter(
-                session,
-                commandId,
-                `submit_semantic_command_failed_closed:${instanceId}`,
-              );
-              void responsePromise.catch(() => null);
-              throw new Error(
-                `submit_semantic_command_enqueue_failed_closed:${recoverError?.message ?? String(recoverError)}`,
-              );
+              try {
+                invalidateSemanticResultWaiter(
+                  session,
+                  commandId,
+                  `submit_semantic_command_session_restart:${instanceId}`,
+                );
+                void responsePromise.catch(() => null);
+                session = await restartPageSession(
+                  session,
+                  `submit_semantic_command_enqueue:${instanceId}`,
+                );
+                responsePromise = ensureSemanticResultTracking(
+                  session,
+                  commandId,
+                  10000,
+                );
+                await enqueueCommand(
+                  session,
+                  `submit_semantic_command_enqueue_restart_${instanceId}`,
+                  6000,
+                );
+                console.error(
+                  `[driver] submit_semantic_command enqueue_ok instance=${instanceId} stage=restart`,
+                );
+              } catch (restartError) {
+                await logSemanticEnqueueFailureDiagnostics(
+                  session,
+                  `restart:${instanceId}`,
+                );
+                invalidateSemanticResultWaiter(
+                  session,
+                  commandId,
+                  `submit_semantic_command_failed_closed:${instanceId}`,
+                );
+                void responsePromise.catch(() => null);
+                throw new Error(
+                  `submit_semantic_command_enqueue_failed_closed:${restartError?.message ?? String(restartError)}`,
+                );
+              }
             }
           }
         }

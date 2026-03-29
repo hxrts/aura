@@ -492,6 +492,26 @@ impl AppCore {
         Ok(())
     }
 
+    /// Detach the runtime bridge from one AppCore instance.
+    ///
+    /// This is a teardown-only escape hatch for frontend generation shutdown.
+    /// Long-lived tasks may still hold `Arc<RwLock<AppCore>>`; clearing the
+    /// shared runtime pointer breaks the `AppCore -> RuntimeBridge -> runtime
+    /// task -> AppCore` retention cycle so the owned runtime can be shut down.
+    pub async fn detach_runtime(app_core: &Arc<RwLock<AppCore>>) -> bool {
+        let mut core = app_core.write().await;
+        let had_runtime = core.runtime.take().is_some();
+        if had_runtime {
+            core.contacts_refresh_hook_installed = false;
+            core.chat_refresh_hook_installed = false;
+            #[cfg(feature = "signals")]
+            {
+                core.authoritative_readiness_hook_installed = false;
+            }
+        }
+        had_runtime
+    }
+
     // ==================== Threshold Signing Operations ====================
 
     /// Sign a tree operation and return an attested operation

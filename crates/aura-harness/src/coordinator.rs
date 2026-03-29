@@ -10,6 +10,8 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::net::TcpListener;
 use std::net::TcpStream;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
@@ -48,10 +50,19 @@ const BACKEND_TEARDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const WEB_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(600);
 const WEB_SERVER_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const PLAYWRIGHT_DRIVER_OWNED_MARKER: &str = "--aura-harness-owned-playwright-driver";
+const OWNED_WEB_SERVER_MARKER: &str = "--aura-harness-owned-web-server";
 
 struct OwnedWebServer {
     child: Child,
     url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcessSnapshot {
+    pid: u32,
+    ppid: u32,
+    command: String,
 }
 
 pub enum DiagnosticObservationWait<'a> {
@@ -110,6 +121,7 @@ struct InstanceClaim {
 #[allow(clippy::disallowed_methods)] // Harness timeout enforcement requires wall-clock bounds.
 impl HarnessCoordinator {
     pub fn from_run_config(config: &RunConfig) -> Result<Self> {
+        reap_orphaned_harness_processes();
         let browser_app_url = provision_browser_app_url(config)?;
         let mut backends = HashMap::new();
         let mut instance_order = Vec::new();
@@ -501,8 +513,7 @@ impl HarnessCoordinator {
             self.verify_post_run_cleanup()?;
             self.runtime_substrate_controller.finish()?;
             if let Some(server) = &mut self.owned_web_server {
-                let _ = server.child.kill();
-                let _ = server.child.wait();
+                terminate_owned_child(server.child.id(), &mut server.child);
             }
             Ok(())
         })();
@@ -1397,9 +1408,11 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
     let log_file_err = log_file.try_clone()?;
     let child = Command::new(&script)
         .arg(port.to_string())
+        .arg(OWNED_WEB_SERVER_MARKER)
         .env("AURA_HARNESS_WEB_BUILD_PROFILE", "release")
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
+        .process_group(0)
         .spawn()
         .map_err(|error| {
             anyhow!(
@@ -1601,6 +1614,108 @@ fn process_alive(pid: u32) -> bool {
     }
 }
 
+fn terminate_owned_child(pid: u32, child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let _ = signal::kill(Pid::from_raw(-(pid as i32)), signal::Signal::SIGKILL);
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn reap_orphaned_harness_processes() {
+    let snapshots = current_process_snapshots().unwrap_or_default();
+    let parent_commands = snapshots
+        .iter()
+        .map(|snapshot| (snapshot.pid, snapshot.command.clone()))
+        .collect::<HashMap<_, _>>();
+    for snapshot in snapshots {
+        let Some(kind) = classify_owned_harness_process(&snapshot.command) else {
+            continue;
+        };
+        if has_live_harness_parent(snapshot.ppid, &parent_commands) {
+            continue;
+        }
+        match kind {
+            OwnedHarnessProcessKind::MarkedProcessGroup => {
+                #[cfg(unix)]
+                let _ = signal::kill(
+                    Pid::from_raw(-(snapshot.pid as i32)),
+                    signal::Signal::SIGKILL,
+                );
+                #[cfg(not(unix))]
+                let _ = signal::kill(Pid::from_raw(snapshot.pid as i32), signal::Signal::SIGKILL);
+            }
+            OwnedHarnessProcessKind::LegacySingleProcess => {
+                let _ = signal::kill(Pid::from_raw(snapshot.pid as i32), signal::Signal::SIGKILL);
+            }
+        }
+    }
+}
+
+fn has_live_harness_parent(ppid: u32, parent_commands: &HashMap<u32, String>) -> bool {
+    if ppid == 0 || ppid == 1 || !process_alive(ppid) {
+        return false;
+    }
+    parent_commands
+        .get(&ppid)
+        .map(String::as_str)
+        .is_some_and(looks_like_live_harness_owner)
+}
+
+fn looks_like_live_harness_owner(command: &str) -> bool {
+    command.contains("tool_repl")
+        || command.contains("cargo run") && command.contains("aura-harness")
+        || command.contains("target/debug/aura-harness")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OwnedHarnessProcessKind {
+    MarkedProcessGroup,
+    LegacySingleProcess,
+}
+
+fn current_process_snapshots() -> Result<Vec<ProcessSnapshot>> {
+    let output = Command::new("ps")
+        .args(["-Ao", "pid=,ppid=,command="])
+        .output()
+        .context("failed to query process table for harness-owned cleanup")?;
+    if !output.status.success() {
+        bail!("process table query exited with status {}", output.status);
+    }
+    let stdout =
+        String::from_utf8(output.stdout).context("process table query returned non-utf8 output")?;
+    Ok(stdout
+        .lines()
+        .filter_map(parse_process_snapshot)
+        .collect::<Vec<_>>())
+}
+
+fn parse_process_snapshot(line: &str) -> Option<ProcessSnapshot> {
+    let mut parts = line.trim().splitn(3, char::is_whitespace);
+    let pid = parts.next()?.trim().parse::<u32>().ok()?;
+    let ppid = parts.next()?.trim().parse::<u32>().ok()?;
+    let command = parts.next()?.trim().to_string();
+    (!command.is_empty()).then_some(ProcessSnapshot { pid, ppid, command })
+}
+
+fn classify_owned_harness_process(command: &str) -> Option<OwnedHarnessProcessKind> {
+    if command.contains(PLAYWRIGHT_DRIVER_OWNED_MARKER) || command.contains(OWNED_WEB_SERVER_MARKER)
+    {
+        return Some(OwnedHarnessProcessKind::MarkedProcessGroup);
+    }
+    if command.contains("playwright_driver.mjs") {
+        return Some(OwnedHarnessProcessKind::LegacySingleProcess);
+    }
+    if command.contains(r#"TRANSPORT_POLL_PATH = "/__aura_harness_transport__/poll""#)
+        && command.contains("/target/dx/aura-web/")
+    {
+        return Some(OwnedHarnessProcessKind::LegacySingleProcess);
+    }
+    None
+}
+
 fn instance_claim_key(
     instance_id: &str,
     mode: &InstanceMode,
@@ -1672,7 +1787,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        clear_directory_contents, normalize_key_stream, wait_pattern_matches, HarnessCoordinator,
+        classify_owned_harness_process, clear_directory_contents, normalize_key_stream,
+        parse_process_snapshot, wait_pattern_matches, HarnessCoordinator, OwnedHarnessProcessKind,
     };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
     use std::net::TcpListener;
@@ -1716,6 +1832,63 @@ mod tests {
         let screen = "Neighborhood Chat Contacts Notifications Settings";
         assert!(wait_pattern_matches(screen, "Chat Contacts"));
         assert!(!wait_pattern_matches(screen, "Missing Token"));
+    }
+
+    #[test]
+    fn parse_process_snapshot_reads_pid_ppid_and_command() {
+        let snapshot =
+            parse_process_snapshot("123 1 node /tmp/playwright_driver.mjs --flag").unwrap();
+        assert_eq!(snapshot.pid, 123);
+        assert_eq!(snapshot.ppid, 1);
+        assert_eq!(snapshot.command, "node /tmp/playwright_driver.mjs --flag");
+    }
+
+    #[test]
+    fn owned_harness_process_classifier_matches_marked_and_legacy_processes() {
+        assert_eq!(
+            classify_owned_harness_process(
+                "node /repo/crates/aura-harness/playwright-driver/playwright_driver.mjs --aura-harness-owned-playwright-driver"
+            ),
+            Some(OwnedHarnessProcessKind::MarkedProcessGroup)
+        );
+        assert_eq!(
+            classify_owned_harness_process(
+                "node -e 'const TRANSPORT_POLL_PATH = \"/__aura_harness_transport__/poll\";' /Users/hxrts/projects/aura/target/dx/aura-web/release/web/public 4174 --aura-harness-owned-web-server"
+            ),
+            Some(OwnedHarnessProcessKind::MarkedProcessGroup)
+        );
+        assert_eq!(
+            classify_owned_harness_process(
+                "node /repo/crates/aura-harness/playwright-driver/playwright_driver.mjs"
+            ),
+            Some(OwnedHarnessProcessKind::LegacySingleProcess)
+        );
+        assert_eq!(
+            classify_owned_harness_process(
+                "node -e 'const TRANSPORT_POLL_PATH = \"/__aura_harness_transport__/poll\";' /Users/hxrts/projects/aura/target/dx/aura-web/release/web/public 4174"
+            ),
+            Some(OwnedHarnessProcessKind::LegacySingleProcess)
+        );
+        assert_eq!(
+            classify_owned_harness_process("node /tmp/other-script.js"),
+            None
+        );
+    }
+
+    #[test]
+    fn live_harness_owner_classifier_is_explicit() {
+        assert!(super::looks_like_live_harness_owner(
+            "target/debug/tool_repl --config scenarios/harness.toml"
+        ));
+        assert!(super::looks_like_live_harness_owner(
+            "cargo run -q -p aura-harness --bin tool_repl -- --config work/browser-loopback-interactive.toml"
+        ));
+        assert!(!super::looks_like_live_harness_owner(
+            "/bin/zsh -lc scripts/web/serve-static.sh"
+        ));
+        assert!(!super::looks_like_live_harness_owner(
+            "node /repo/crates/aura-harness/playwright-driver/playwright_driver.mjs"
+        ));
     }
 
     #[test]

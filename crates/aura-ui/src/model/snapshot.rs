@@ -262,12 +262,24 @@ impl UiController {
         snapshot
             .validate_invariants()
             .unwrap_or_else(|error| panic!("invalid published UI snapshot: {error}"));
+        if let Ok(mut last_snapshot) = self.last_published_ui_snapshot.lock() {
+            if last_snapshot.as_ref() == Some(&snapshot) {
+                return;
+            }
+            *last_snapshot = Some(snapshot.clone());
+        }
         if let Ok(slot) = self.ui_snapshot_sink.lock() {
             let sink = slot.as_ref().cloned();
             drop(slot);
             if let Some(sink) = sink {
                 sink(snapshot);
             }
+        }
+    }
+
+    pub fn reset_published_ui_snapshot(&self) {
+        if let Ok(mut last_snapshot) = self.last_published_ui_snapshot.lock() {
+            *last_snapshot = None;
         }
     }
 }

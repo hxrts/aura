@@ -722,15 +722,27 @@ fn execute_semantic_step(
             fault_rng,
             context,
         ),
-        SemanticAction::Intent(IntentAction::OpenScreen(screen_id)) => {
+        SemanticAction::Intent(IntentAction::OpenScreen { screen, .. }) => {
             let instance_id = resolve_required_semantic_instance(step)?;
             let metadata_step = semantic_metadata_step(step);
+            let explicit_binding = (*screen == ScreenId::Chat)
+                .then(|| context.current_channel_binding.get(&instance_id).cloned())
+                .flatten();
+            let open_intent = IntentAction::OpenScreen {
+                screen: *screen,
+                channel_id: explicit_binding
+                    .as_ref()
+                    .map(|binding| binding.channel_id.clone()),
+                context_id: explicit_binding
+                    .as_ref()
+                    .map(|binding| binding.context_id.clone()),
+            };
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
                 context,
                 &instance_id,
-                IntentAction::OpenScreen(*screen_id),
+                open_intent,
             )?;
             record_submission_handle(
                 context,
@@ -739,7 +751,7 @@ fn execute_semantic_step(
             );
             let timeout_ms = metadata_step.timeout_ms.unwrap_or(step_budget_ms);
             let mut wait_step = semantic_wait_step(&metadata_step);
-            wait_step.screen_id = Some(*screen_id);
+            wait_step.screen_id = Some(*screen);
             clear_projection_baseline_if_semantic_state_already_visible(
                 tool_api,
                 context,
@@ -1488,13 +1500,27 @@ fn execute_semantic_intent(
             )?;
             Ok(())
         }
-        IntentAction::SendChatMessage { message } => {
+        IntentAction::SendChatMessage { message, .. } => {
+            let explicit_binding = context
+                .current_channel_binding
+                .get(&instance_id)
+                .cloned();
+            let send_intent = IntentAction::SendChatMessage {
+                message: message.clone(),
+                channel_id: explicit_binding
+                    .as_ref()
+                    .map(|binding| binding.channel_id.clone()),
+                context_id: explicit_binding
+                    .as_ref()
+                    .map(|binding| binding.context_id.clone()),
+            };
+            let contract = send_intent.contract();
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
                 context,
                 &instance_id,
-                intent.clone(),
+                send_intent,
             )?;
             record_submission_handle(
                 context,
@@ -1514,13 +1540,13 @@ fn execute_semantic_intent(
                 &contract,
                 &SubmissionEvidence {
                     handle: context.last_operation_handle.get(&instance_id).cloned(),
-                    channel_binding: None,
+                    channel_binding: explicit_binding,
                     runtime_event_detail: Some(message.clone()),
                 },
             )?;
             Ok(())
         }
-        IntentAction::OpenScreen(_) | IntentAction::OpenSettingsSection(_) => unreachable!(),
+        IntentAction::OpenScreen { .. } | IntentAction::OpenSettingsSection(_) => unreachable!(),
     }
 }
 
@@ -1585,7 +1611,21 @@ fn resolve_intent_templates(
     context: &ScenarioContext,
 ) -> Result<IntentAction> {
     Ok(match intent {
-        IntentAction::OpenScreen(screen) => IntentAction::OpenScreen(*screen),
+        IntentAction::OpenScreen {
+            screen,
+            channel_id,
+            context_id,
+        } => IntentAction::OpenScreen {
+            screen: *screen,
+            channel_id: channel_id
+                .clone()
+                .map(|channel_id| resolve_template(&channel_id, context))
+                .transpose()?,
+            context_id: context_id
+                .clone()
+                .map(|context_id| resolve_template(&context_id, context))
+                .transpose()?,
+        },
         IntentAction::CreateAccount { account_name } => IntentAction::CreateAccount {
             account_name: resolve_template(account_name, context)?,
         },
@@ -1660,8 +1700,20 @@ fn resolve_intent_templates(
                 .map(|channel_name| resolve_template(&channel_name, context))
                 .transpose()?,
         },
-        IntentAction::SendChatMessage { message } => IntentAction::SendChatMessage {
+        IntentAction::SendChatMessage {
+            message,
+            channel_id,
+            context_id,
+        } => IntentAction::SendChatMessage {
             message: resolve_template(message, context)?,
+            channel_id: channel_id
+                .clone()
+                .map(|channel_id| resolve_template(&channel_id, context))
+                .transpose()?,
+            context_id: context_id
+                .clone()
+                .map(|context_id| resolve_template(&context_id, context))
+                .transpose()?,
         },
     })
 }
@@ -1917,7 +1969,7 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             }
         },
         SemanticAction::Intent(intent) => match intent {
-            IntentAction::OpenScreen(_) => "open_screen",
+            IntentAction::OpenScreen { .. } => "open_screen",
             IntentAction::CreateAccount { .. } => "create_account",
             IntentAction::CreateHome { .. } => "create_home",
             IntentAction::CreateChannel { .. } => "create_channel",
@@ -4260,7 +4312,7 @@ mod tests {
             .split_once("SemanticAction::Intent(IntentAction::OpenSettingsSection(section)) => {")
             .unwrap_or_else(|| panic!("missing open settings branch"));
         let open_screen_branch = open_screen_prefix
-            .split_once("SemanticAction::Intent(IntentAction::OpenScreen(screen_id)) => {")
+            .split_once("SemanticAction::Intent(IntentAction::OpenScreen { screen, .. }) => {")
             .map(|(_, branch)| branch)
             .unwrap_or_else(|| panic!("missing open screen branch"));
         let open_settings_branch = open_settings_and_rest
@@ -4268,7 +4320,7 @@ mod tests {
             .map(|(branch, _)| branch)
             .unwrap_or_else(|| panic!("missing variables branch after open settings"));
         assert!(
-            open_screen_branch.contains("IntentAction::OpenScreen(*screen_id)"),
+            open_screen_branch.contains("let open_intent = IntentAction::OpenScreen {"),
             "shared OpenScreen branch must submit the semantic intent"
         );
         assert!(
@@ -4372,10 +4424,14 @@ mod tests {
                     actor: ActorId("alice".to_string()),
                     intent: IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }
                     .kind(),
                     contract: IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }
                     .contract(),
                     baseline_revision: None,
@@ -4391,10 +4447,14 @@ mod tests {
                     actor: ActorId("bob".to_string()),
                     intent: IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }
                     .kind(),
                     contract: IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }
                     .contract(),
                     baseline_revision: None,
@@ -4416,6 +4476,8 @@ mod tests {
         let failures = unsatisfied_action_preconditions(
             &IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             }
             .contract(),
             &snapshot,
