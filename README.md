@@ -1,12 +1,6 @@
 # Aura
 
-Aura is a private peer-to-peer social network designed around a few novel concepts:
-
-Social infrastructure • Aura forms an encrypted mesh across the social graph. Gossip, rendezvous, consensus, and storage all operate through scoped contexts.
-
-Relational identity • Identity emerges bottom-up between parties that share encrypted context. Social recovery enables restoring full account access through their relationships.
-
-Bounded autonomy • Coordination becomes intuitive when capabilities are composable and legible to the system, ensuring consent by design.
+Aura is a private peer-to-peer communication system built around three core requirements. ① The network must be fully P2P with no dedicated servers, DNS, or central software distribution authority. ② The system must tolerate intermittent connectivity and device loss. ③ All channels must be end-to-end encrypted with bounded forward secrecy. Everything else in the design follows from these constraints.
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hxrts/aura)
 
@@ -28,9 +22,6 @@ nix develop
 
 # Launch the cross-frontend developer demo UX (TUI + web)
 just demo
-
-# Launch the older simulated TUI-only demo
-just demo-sim
 
 # Build production binary
 just build
