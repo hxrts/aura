@@ -92,26 +92,13 @@ The network layer does not reveal authority structure. Context identifiers do no
 
 ## 8. Secure Channel Lifecycle
 
-Secure channels follow a lifecycle aligned with rendezvous and epoch semantics:
+Secure channels follow a lifecycle aligned with rendezvous and epoch semantics.
 
-1. **Establishment**:
-   - Ranch rendezvous per [Rendezvous Architecture](113_rendezvous.md) to exchange descriptors inside the [relational context](114_relational_contexts.md) journal.
-   - Each descriptor contains transport hints, a handshake PSK derived from the context key, and a `punch_nonce`.
-   - Once both parties receive offer/answer envelopes, they perform Noise IKpsk2 using the context-derived keys and establish a QUIC or relay-backed channel bound to `(ContextId, peer)`.
+Establishment begins with rendezvous per [Rendezvous Architecture](113_rendezvous.md) to exchange descriptors inside the [Relational Contexts](114_relational_contexts.md) journal. Each descriptor contains transport hints, a handshake PSK derived from the context key, and a `punch_nonce`. Once both parties receive offer/answer envelopes, they perform Noise IKpsk2 using context-derived keys and establish a QUIC or relay-backed channel bound to `(ContextId, peer)`.
 
-2. **Steady state**:
-   - Guard chain enforces CapGuard → FlowGuard → JournalCoupler for every send.
-   - FlowBudget receipts created on each hop are inserted into the [relational context](114_relational_contexts.md) journal so downstream peers can audit path compliance.
+During steady state, the guard chain enforces CapGuard, FlowGuard, and JournalCoupler for every send. FlowBudget receipts created on each hop are inserted into the [Relational Contexts](114_relational_contexts.md) journal so downstream peers can audit path compliance.
 
-3. **Re-keying on epoch change**:
-   - When the account or context epoch changes (as recorded in [Authority and Identity](102_authority_and_identity.md) / [Relational Contexts](114_relational_contexts.md)), the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys.
-   - Existing receipts are marked invalid for the new epoch, preventing replay.
-
-4. **Teardown**:
-   - Channels close explicitly when contexts end or when FlowGuard hits the configured budget limit.
-   - Receipts emitted during teardown propagate through the relational context journal so guardians or auditors can verify all hops charged their budgets up to the final packet.
-
-By tying establishment and teardown to relational context journals, receipts become part of the same fact set tracked in `116_maintenance.md`, ensuring long-term accountability.
+When the account or context epoch changes, the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys. Existing receipts are marked invalid for the new epoch, preventing replay. Channels close explicitly when contexts end or when FlowGuard hits the configured budget limit. Receipts emitted during teardown propagate through the relational context journal so guardians or auditors can verify all hops charged their budgets. Tying establishment and teardown to relational context journals ensures receipts become part of the same fact set tracked in [Distributed Maintenance Architecture](116_maintenance.md).
 
 ## 9. Privacy-by-Design Patterns
 
@@ -133,12 +120,7 @@ Anti-entropy implements journal synchronization between peers. The protocol exch
 
 ### 11.1 Sync Phases
 
-1. **Load Local State**: Read local `Journal` (facts + caps) and the local operation log.
-2. **Compute Digest**: Compute `JournalDigest` for local state.
-3. **Digest Exchange**: Send local digest to peer and receive peer digest.
-4. **Reconciliation Planning**: Compare digests and choose action (equal, LocalBehind, RemoteBehind, or Diverged).
-5. **Operation Transfer**: Pull or push operations in batches.
-6. **Merge + Persist**: Convert applied ops to journal delta, merge with local journal, persist once per round.
+A sync round begins by loading the local `Journal` and operation log, then computing a `JournalDigest` for the local state. The digest is exchanged with the peer. The two digests are compared to determine whether the states are equal, whether one side is behind, or whether they have diverged. Missing operations are then pulled or pushed in batches. Applied operations are converted to a journal delta, merged with the local journal, and persisted once per round.
 
 ### 11.2 Digest Format
 
