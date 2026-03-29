@@ -1308,6 +1308,7 @@ mod tests {
     fn runtime_backed_test_app_core() -> Arc<RwLock<AppCore>> {
         let authority = AuthorityId::new_from_entropy([42; 32]);
         let runtime = Arc::new(OfflineRuntimeBridge::new(authority));
+        runtime.set_pending_invitations(Vec::new());
         crate::testing::test_app_core_with_runtime(AppConfig::default(), runtime)
     }
 

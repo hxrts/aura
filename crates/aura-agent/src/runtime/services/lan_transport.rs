@@ -98,7 +98,7 @@ cfg_if! {
             }
         }
     } else {
-        use std::net::IpAddr;
+        use std::net::{IpAddr, SocketAddr};
         use std::sync::Arc;
 
         use get_if_addrs::{get_if_addrs, IfAddr};
@@ -167,11 +167,11 @@ cfg_if! {
                                     IfAddr::V6(v6) => IpAddr::V6(v6.ip),
                                 };
                                 if is_advertisable_ip(addr) {
-                                    advertised_addrs.push(format!("{addr}:{port}"));
+                                    advertised_addrs.push(format_transport_addr(addr, port));
                                     continue;
                                 }
                                 if addr.is_loopback() {
-                                    loopback_addrs.push(format!("{addr}:{port}"));
+                                    loopback_addrs.push(format_transport_addr(addr, port));
                                     continue;
                                 }
                             }
@@ -211,11 +211,13 @@ cfg_if! {
                                     IfAddr::V6(v6) => IpAddr::V6(v6.ip),
                                 };
                                 if is_advertisable_ip(addr) {
-                                    websocket_addrs.push(format!("{addr}:{websocket_port}"));
+                                    websocket_addrs
+                                        .push(format_transport_addr(addr, websocket_port));
                                     continue;
                                 }
                                 if addr.is_loopback() {
-                                    loopback_ws_addrs.push(format!("{addr}:{websocket_port}"));
+                                    loopback_ws_addrs
+                                        .push(format_transport_addr(addr, websocket_port));
                                 }
                             }
                         }
@@ -285,6 +287,10 @@ cfg_if! {
             }
         }
 
+        fn format_transport_addr(addr: IpAddr, port: u16) -> String {
+            SocketAddr::new(addr, port).to_string()
+        }
+
         fn is_advertisable_ip(addr: IpAddr) -> bool {
             match addr {
                 IpAddr::V4(v4) => {
@@ -299,6 +305,24 @@ cfg_if! {
                         && !v6.is_unspecified()
                         && (v6.segments()[0] & 0xffc0) != 0xfe80
                 }
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::format_transport_addr;
+            use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+            #[test]
+            fn format_transport_addr_preserves_ipv4_shape() {
+                let addr = format_transport_addr(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 4242);
+                assert_eq!(addr, "127.0.0.1:4242");
+            }
+
+            #[test]
+            fn format_transport_addr_brackets_ipv6_hosts() {
+                let addr = format_transport_addr(IpAddr::V6(Ipv6Addr::LOCALHOST), 4242);
+                assert_eq!(addr, "[::1]:4242");
             }
         }
     }

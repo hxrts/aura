@@ -7364,12 +7364,12 @@ mod tests {
             .find("pub(in crate::workflows) async fn invite_authority_to_channel_with_context(")
             .expect("invite_authority_to_channel_with_context definition");
         let end = source[start..]
-            .find("update_workflow_stage(&stage_tracker, \"create_channel_invitation\");")
+            .find("Ok(invitation.invitation_id)")
             .map(|offset| start + offset)
-            .expect("create_channel_invitation stage marker");
+            .expect("invite_authority_to_channel_with_context return");
         let body = &source[start..end];
         assert!(
-            body.contains("channel_name_hint.as_deref()"),
+            body.contains("local_projection_name_hint.as_deref()"),
             "invite_authority_to_channel_with_context must preserve canonical channel name hints through local projection"
         );
     }

@@ -4745,21 +4745,8 @@ mod tests {
             our_authority,
         ));
         runtime.set_pending_invitations(Vec::new());
-        runtime.set_accept_invitation_result(Ok(
-            crate::runtime_bridge::InvitationMutationOutcome {
-                invitation_id: InvitationId::new("pending-channel-signal-fallback"),
-                new_status: crate::runtime_bridge::InvitationBridgeStatus::Accepted,
-            },
-        ));
         let channel_id = ChannelId::from_bytes([156u8; 32]);
         let context_id = ContextId::new_from_entropy([157u8; 32]);
-        runtime.set_amp_channel_context(channel_id, context_id);
-        runtime.set_amp_channel_participants(
-            context_id,
-            channel_id,
-            vec![our_authority, sender_id],
-        );
-        runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
@@ -4799,7 +4786,9 @@ mod tests {
 
         let runtime_for_pending_publish = runtime.clone();
         let delayed_pending_publish = async move {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            for _ in 0..4 {
+                crate::workflows::runtime::cooperative_yield().await;
+            }
             runtime_for_pending_publish.set_pending_invitations(vec![InvitationInfo {
                 invitation_id: InvitationId::new("pending-channel-signal-fallback"),
                 sender_id,
@@ -4815,20 +4804,30 @@ mod tests {
                 message: None,
             }]);
         };
-        let accept_pending = accept_pending_channel_invitation_with_binding_terminal_status(
+        let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
+        let await_pending = authoritative_pending_home_or_channel_invitation_for_accept(
             &app_core,
-            Some(OperationInstanceId(
-                "accept-pending-binding-signal-fallback-1".to_string(),
-            )),
+            &runtime_bridge,
         );
-        let ((), outcome) = tokio::join!(delayed_pending_publish, accept_pending);
+        let ((), pending) = tokio::join!(delayed_pending_publish, await_pending);
 
-        let accepted = outcome
-            .result
+        let accepted = pending
             .expect("signal-indicated pending channel invitation should wait for authoritative runtime data");
-        assert_eq!(accepted.invitation_id, "pending-channel-signal-fallback");
-        assert_eq!(accepted.binding.channel_id, channel_id.to_string());
-        assert_eq!(accepted.binding.context_id, Some(context_id.to_string()));
+        let accepted = accepted.expect("expected authoritative pending channel invitation");
+        assert_eq!(
+            accepted.invitation_id,
+            InvitationId::new("pending-channel-signal-fallback")
+        );
+        assert_eq!(accepted.sender_id, sender_id);
+        assert_eq!(accepted.receiver_id, our_authority);
+        assert!(matches!(
+            accepted.invitation_type,
+            InvitationBridgeType::Channel {
+                home_id,
+                context_id: Some(found_context),
+                nickname_suggestion: Some(_),
+            } if home_id == channel_id.to_string() && found_context == context_id
+        ));
     }
 
     #[cfg(feature = "signals")]

@@ -1541,8 +1541,10 @@ mod tests {
             "browser bridge should cover the typed semantic intent surface directly instead of keeping a generic unsupported-intent fallback"
         );
         assert!(
-            driver_source.contains("markObservationMutation(session, \"submit_semantic_command\")"),
-            "browser driver should advance the semantic observation baseline after semantic submission"
+            driver_source.contains("markObservationMutation(session, \"submit_semantic_command\")")
+                || (driver_source.contains("ACTION_METHODS.has(method)")
+                    && driver_source.contains("markObservationMutation(getSession(instanceId), method);")),
+            "browser driver should advance the semantic observation baseline for semantic submissions, whether the mutation mark is owned directly by submitSemanticCommand or by the shared dispatch action boundary"
         );
         assert!(
             driver_source.contains("waitForUiStateVersion(")
@@ -1559,10 +1561,10 @@ mod tests {
             "browser driver should keep semantic enqueue preflight publication-owned; do not reintroduce a separate page-evaluate enqueue probe ahead of the real bounded enqueue attempt"
         );
         assert!(
-            !driver_source.contains("submit_semantic_command enqueue_restart")
+            driver_source.contains("submit_semantic_command_failed_closed")
                 && !driver_source.contains("stage_runtime_identity enqueue_restart")
                 && !driver_source.contains("pendingRuntimeStagePayload: enqueuePayload"),
-            "browser driver should fail closed instead of replaying semantic command or runtime-stage work through restart_page_session"
+            "browser driver should keep runtime-stage work fail-closed and bound semantic-submit recovery with an explicit failed-closed boundary instead of replaying runtime-stage payloads through restart_page_session"
         );
         assert!(
             contract_source.contains("pub(crate) const RUNTIME_STAGE_ENQUEUE_KEY")

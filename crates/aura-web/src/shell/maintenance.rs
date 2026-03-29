@@ -463,7 +463,9 @@ fn spawn_generation_maintenance_supervisor(
                 && tick_count % background_sync_interval_ticks == 0;
             async move {
                 if let Some(agent) = agent.clone() {
-                    run_harness_transport_tick(tick_app_core.clone(), agent.clone()).await;
+                    if browser_harness_mode_enabled() {
+                        run_harness_transport_tick(tick_app_core.clone(), agent.clone()).await;
+                    }
                     if run_ceremony {
                         run_ceremony_acceptance_pass(agent).await;
                     }

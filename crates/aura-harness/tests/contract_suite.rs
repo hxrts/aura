@@ -2,7 +2,8 @@
 
 #![allow(missing_docs)]
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use aura_harness::config::{
@@ -14,6 +15,24 @@ use aura_harness::determinism::build_seed_bundle;
 use aura_harness::replay::{ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::routing::AddressResolver;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
+
+fn artifact_run_dir(artifact_root: &Path, run_name: &str) -> PathBuf {
+    let run_root = artifact_root.join("harness").join(run_name);
+    let runs_dir = run_root.join("runs");
+    if !runs_dir.exists() {
+        return run_root;
+    }
+    let mut entries = fs::read_dir(&runs_dir)
+        .unwrap_or_else(|error| panic!("failed to read runs dir {}: {error}", runs_dir.display()))
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    entries.sort();
+    entries
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("expected at least one artifact run dir under {}", runs_dir.display()))
+}
 
 #[test]
 fn contract_pty_control_path() {
@@ -166,7 +185,7 @@ action = "launch_actors"
     };
     assert!(status.success());
 
-    let run_dir = artifacts_dir.join("harness").join("contract-artifacts");
+    let run_dir = artifact_run_dir(&artifacts_dir, "contract-artifacts");
     assert!(run_dir.join("startup_summary.json").exists());
     assert!(run_dir.join("replay_bundle.json").exists());
     assert!(run_dir.join("seed_bundle.json").exists());

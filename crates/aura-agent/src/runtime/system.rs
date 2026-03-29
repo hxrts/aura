@@ -1399,24 +1399,30 @@ pub(crate) async fn publish_lan_descriptor_with(
     let context_id = authority_context.default_context_id();
 
     let mut hints = Vec::new();
+    let tcp_addrs = lan_transport.advertised_addrs();
+    let websocket_addrs = lan_transport.websocket_addrs();
     tracing::info!(
         authority = %authority_id,
-        tcp_addrs = ?lan_transport.advertised_addrs(),
-        websocket_addrs = ?lan_transport.websocket_addrs(),
+        tcp_addrs = ?tcp_addrs,
+        websocket_addrs = ?websocket_addrs,
         "publish_lan_descriptor_with transport addresses"
     );
-    for addr in lan_transport.advertised_addrs() {
+    let mut invalid_tcp_hints = 0usize;
+    for addr in tcp_addrs {
         match TransportHint::tcp_direct(addr) {
             Ok(hint) => hints.push(hint),
             Err(err) => {
+                invalid_tcp_hints += 1;
                 tracing::warn!(addr = %addr, error = %err, "Skipping invalid LAN transport hint");
             }
         }
     }
-    for addr in lan_transport.websocket_addrs() {
+    let mut invalid_websocket_hints = 0usize;
+    for addr in websocket_addrs {
         match TransportHint::websocket_direct(addr) {
             Ok(hint) => hints.push(hint),
             Err(err) => {
+                invalid_websocket_hints += 1;
                 tracing::warn!(
                     addr = %addr,
                     error = %err,
@@ -1427,7 +1433,14 @@ pub(crate) async fn publish_lan_descriptor_with(
     }
 
     if hints.is_empty() {
-        tracing::warn!("No valid LAN transport addresses to advertise");
+        tracing::warn!(
+            authority = %authority_id,
+            tcp_addrs = ?tcp_addrs,
+            websocket_addrs = ?websocket_addrs,
+            invalid_tcp_hints,
+            invalid_websocket_hints,
+            "LAN listeners are bound, but no rendezvous descriptor was published because every advertised address was rejected as an invalid direct transport hint; direct LAN discovery will be unavailable until at least one valid address is advertisable"
+        );
         return Ok(());
     }
 
