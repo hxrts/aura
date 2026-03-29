@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use crate::browser_promises::{browser_sleep_ms, fetch_text_with_timeout};
 use crate::error::{log_web_error, WebUiError};
+use crate::shell::storage::harness_mode_enabled;
 use crate::task_owner::{new_web_task_owner, WebTaskOwner};
 
 // Browser-hosted harness transport polling must stay responsive without
@@ -62,10 +63,6 @@ fn emit_browser_harness_debug_event(event: &str, detail: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn emit_browser_harness_debug_event(_event: &str, _detail: &str) {}
-
-fn browser_harness_mode_enabled() -> bool {
-    std::env::var_os("AURA_HARNESS_MODE").is_some()
-}
 
 fn interval_ticks(interval_ms: u64) -> u64 {
     interval_ms
@@ -434,12 +431,13 @@ fn spawn_generation_maintenance_supervisor(
 ) {
     let tick_app_core = app_core.clone();
     let ceremony_interval_ticks = interval_ticks(500);
-    let background_sync_interval_ticks = if browser_harness_mode_enabled() {
+    let browser_harness_mode = harness_mode_enabled();
+    let background_sync_interval_ticks = if browser_harness_mode {
         interval_ticks(HARNESS_BACKGROUND_SYNC_INTERVAL_MS)
     } else {
         interval_ticks(1_000)
     };
-    let background_sync_start_delay_ticks = if browser_harness_mode_enabled() {
+    let background_sync_start_delay_ticks = if browser_harness_mode {
         delay_ticks(HARNESS_BACKGROUND_SYNC_START_DELAY_MS)
     } else {
         0
@@ -463,7 +461,7 @@ fn spawn_generation_maintenance_supervisor(
                 && tick_count % background_sync_interval_ticks == 0;
             async move {
                 if let Some(agent) = agent.clone() {
-                    if browser_harness_mode_enabled() {
+                    if browser_harness_mode {
                         run_harness_transport_tick(tick_app_core.clone(), agent.clone()).await;
                     }
                     if run_ceremony {

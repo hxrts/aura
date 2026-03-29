@@ -1,8 +1,7 @@
 //! Snapshot export for harness observation.
 
 use super::commands::{
-    map_modal, map_screen, map_toast_kind, push_list, selected_by_index, visible_home_ids,
-    TuiSemanticInputs,
+    map_modal, map_screen, map_toast_kind, push_list, visible_home_ids, TuiSemanticInputs,
 };
 use super::socket::authoritative_harness_snapshot_readiness;
 use crate::tui::screens::Screen;
@@ -172,12 +171,16 @@ fn build_authoritative_ui_snapshot(
             is_current: false,
         })
         .collect::<Vec<_>>();
+    let selected_notification_id = notification_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
     push_list(
         &mut lists,
         &mut selections,
         ListId::Notifications,
         notification_items,
-        selected_by_index(&notification_ids, state.notifications.selected_index),
+        selected_notification_id,
     );
 
     if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
@@ -196,12 +199,16 @@ fn build_authoritative_ui_snapshot(
                 is_current: false,
             })
             .collect::<Vec<_>>();
+        let selected_invitation_type_id = invitation_type_items
+            .iter()
+            .find(|item| item.selected)
+            .map(|item| item.id.clone());
         push_list(
             &mut lists,
             &mut selections,
             ListId::InvitationTypes,
             invitation_type_items,
-            selected_by_index(&invitation_type_ids, modal_state.type_index),
+            selected_invitation_type_id,
         );
     }
 
@@ -216,12 +223,16 @@ fn build_authoritative_ui_snapshot(
             is_current: false,
         })
         .collect::<Vec<_>>();
+    let selected_home_id = home_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
     push_list(
         &mut lists,
         &mut selections,
         ListId::Homes,
         home_items,
-        selected_by_index(&home_ids, state.neighborhood.selected_home),
+        selected_home_id,
     );
 
     let member_ids = app_snapshot
@@ -244,19 +255,18 @@ fn build_authoritative_ui_snapshot(
             is_current: false,
         })
         .collect::<Vec<_>>();
+    let selected_member_id = member_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
     push_list(
         &mut lists,
         &mut selections,
         ListId::NeighborhoodMembers,
         member_items,
-        selected_by_index(&member_ids, state.neighborhood.selected_member),
+        selected_member_id,
     );
 
-    let authority_ids = state
-        .authorities
-        .iter()
-        .map(|authority| authority.id.clone())
-        .collect::<Vec<_>>();
     let authority_items = state
         .authorities
         .iter()
@@ -268,12 +278,16 @@ fn build_authoritative_ui_snapshot(
             is_current: false,
         })
         .collect::<Vec<_>>();
+    let selected_authority_id = authority_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
     push_list(
         &mut lists,
         &mut selections,
         ListId::Authorities,
         authority_items,
-        selected_by_index(&authority_ids, state.current_authority_index),
+        selected_authority_id,
     );
 
     let settings_section_ids = SettingsSection::all()
@@ -506,9 +520,9 @@ mod tests {
         assert!(source.contains("ListId::Contacts"));
         assert!(source.contains("selected_contact_id"));
         assert!(source.contains("ListId::Homes"));
-        assert!(source.contains("selected_by_index(&home_ids, state.neighborhood.selected_home)"));
+        assert!(source.contains("let selected_home_id = home_items"));
         assert!(source.contains("ListId::Authorities"));
-        assert!(source.contains("selected_by_index(&authority_ids, state.current_authority_index)"));
+        assert!(source.contains("let selected_authority_id = authority_items"));
         assert!(source.contains("ListId::SettingsSections"));
         assert!(source.contains("settings_section_ids"));
     }
