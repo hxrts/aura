@@ -1072,9 +1072,9 @@ function runSelfTest() {
     "default observation must fail diagnostically before any recovery path runs",
   );
   assert(
-    String(readStructuredUiState).includes(UI_PUBLICATION_STATE_KEY) &&
+    String(readStructuredUiState).includes("UI_PUBLICATION_STATE_KEY") &&
       String(readStructuredUiState).includes(
-        RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+        "RENDER_HEARTBEAT_PUBLICATION_STATE_KEY",
       ),
     "structured observation must surface explicit browser publication diagnostics",
   );
@@ -1083,8 +1083,8 @@ function runSelfTest() {
     "structured observation must fail closed with explicit publication-state detail",
   );
   assert(
-    String(readStructuredUiState).includes(UI_ACTIVE_GENERATION_KEY) &&
-      String(readStructuredUiState).includes(UI_READY_GENERATION_KEY),
+    String(readStructuredUiState).includes("UI_ACTIVE_GENERATION_KEY") &&
+      String(readStructuredUiState).includes("UI_READY_GENERATION_KEY"),
     "structured observation must wait on the page-owned generation boundary during browser rebinding",
   );
   assert(
@@ -1135,7 +1135,7 @@ function runSelfTest() {
     "driver publication and interactivity waits must stay on driver-owned bounded polling instead of bare page.waitForFunction",
   );
   assert(
-    String(startPage).includes(SEMANTIC_SUBMIT_JSON_LOG_PREFIX) &&
+    String(startPage).includes("SEMANTIC_SUBMIT_JSON_LOG_PREFIX") &&
       String(startPage).includes("console_push"),
     "driver console ingestion must preserve the semantic-submit JSON fallback so queue readiness survives missed Playwright callback pushes during generation rebinding",
   );
@@ -1152,11 +1152,11 @@ function runSelfTest() {
     "semantic enqueue must prefer direct page execution when healthy but fall back to the page-owned DOM ingress when Playwright's raw evaluate channel is transiently unavailable",
   );
   assert(
-    String(submitSemanticCommand).includes("restartPageSession(") &&
+    !String(submitSemanticCommand).includes("restartPageSession(") &&
       String(submitSemanticCommand).includes(
-        "submit_semantic_command_enqueue_restart_",
+        "submit_semantic_command_enqueue_failed_closed",
       ),
-    "semantic submit must keep a bounded preserved-profile page-session restart lane for execution-channel wedge recovery; page restart remains infrastructure recovery only after observed product-owned readiness is healthy",
+    "semantic submit must fail closed after bounded same-page recovery instead of replaying through restartPageSession",
   );
   assert(
     mutableSession.requiredUiStateRevision === 4,
@@ -4080,12 +4080,15 @@ async function uiState(params) {
   }
 
   try {
-    const observed = await readStructuredUiStateWithNavigationRecovery(
+    const observed = await readStructuredUiState(
       session,
       instanceId,
       "ui_state_primary",
       recoveryTimeoutMs,
-      null,
+      {
+        storeResult: false,
+        afterVersion: null,
+      },
     );
     if (observed) {
       const staleReason = uiStateStalenessReason(session, observed);
@@ -4100,11 +4103,9 @@ async function uiState(params) {
       }
     }
   } catch (error) {
-    if (!isUiStateRecoveryCandidate(error)) {
-      throw new Error(
-        `structured ui_state observation failed for instance ${instanceId}: ${error}\nBrowser console tail:\n${consoleTailText(session)}`,
-      );
-    }
+    throw new Error(
+      `structured ui_state observation failed for instance ${instanceId}: ${error}\nBrowser console tail:\n${consoleTailText(session)}`,
+    );
   }
 
   throw new Error(
@@ -4743,51 +4744,21 @@ async function submitSemanticCommand(params) {
               );
             } else {
               console.error(
-                `[driver] submit_semantic_command enqueue_restart instance=${instanceId} error=${recoverError?.message ?? String(recoverError)}`,
+                `[driver] submit_semantic_command enqueue_failed_closed instance=${instanceId} error=${recoverError?.message ?? String(recoverError)}`,
               );
               await logSemanticEnqueueFailureDiagnostics(
                 session,
                 `recover:${instanceId}`,
               );
-              try {
-                invalidateSemanticResultWaiter(
-                  session,
-                  commandId,
-                  `submit_semantic_command_session_restart:${instanceId}`,
-                );
-                void responsePromise.catch(() => null);
-                session = await restartPageSession(
-                  session,
-                  `submit_semantic_command_enqueue:${instanceId}`,
-                );
-                responsePromise = ensureSemanticResultTracking(
-                  session,
-                  commandId,
-                  10000,
-                );
-                await enqueueCommand(
-                  session,
-                  `submit_semantic_command_enqueue_restart_${instanceId}`,
-                  6000,
-                );
-                console.error(
-                  `[driver] submit_semantic_command enqueue_ok instance=${instanceId} stage=restart`,
-                );
-              } catch (restartError) {
-                await logSemanticEnqueueFailureDiagnostics(
-                  session,
-                  `restart:${instanceId}`,
-                );
-                invalidateSemanticResultWaiter(
-                  session,
-                  commandId,
-                  `submit_semantic_command_failed_closed:${instanceId}`,
-                );
-                void responsePromise.catch(() => null);
-                throw new Error(
-                  `submit_semantic_command_enqueue_failed_closed:${restartError?.message ?? String(restartError)}`,
-                );
-              }
+              invalidateSemanticResultWaiter(
+                session,
+                commandId,
+                `submit_semantic_command_failed_closed:${instanceId}`,
+              );
+              void responsePromise.catch(() => null);
+              throw new Error(
+                `submit_semantic_command_enqueue_failed_closed:${recoverError?.message ?? String(recoverError)}`,
+              );
             }
           }
         }

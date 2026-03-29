@@ -11,7 +11,8 @@ const BREAKING_CURRENT_PATH: &str = "../fixtures/protocol_compat/breaking_curren
 
 const BASELINE: &str = include_str!("../fixtures/protocol_compat/compatible_baseline.choreo");
 const CURRENT: &str = include_str!("../fixtures/protocol_compat/compatible_current.choreo");
-const BREAKING_BASELINE: &str = include_str!("../fixtures/protocol_compat/breaking_baseline.choreo");
+const BREAKING_BASELINE: &str =
+    include_str!("../fixtures/protocol_compat/breaking_baseline.choreo");
 const BREAKING_CURRENT: &str = include_str!("../fixtures/protocol_compat/breaking_current.choreo");
 
 #[test]

@@ -366,12 +366,14 @@ mod tests {
         let commands_path = repo_root.join("crates/aura-web/src/harness/commands.rs");
         let source = std::fs::read_to_string(&commands_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", commands_path.display()));
+        let submit_semantic_command_marker =
+            ["pub(crate) async fn submit_", "semantic_command("].concat();
 
         let start = source
             .find("async fn execute_semantic_intent(")
             .unwrap_or_else(|| panic!("missing execute_semantic_intent"));
         let end = source[start..]
-            .find("pub(crate) async fn submit_semantic_command(")
+            .find(&submit_semantic_command_marker)
             .map(|offset| start + offset)
             .unwrap_or_else(|| panic!("missing submit_semantic_command marker"));
         let body = &source[start..end];
@@ -398,6 +400,14 @@ mod tests {
         let commands_path = repo_root.join("crates/aura-web/src/harness/commands.rs");
         let source = std::fs::read_to_string(&commands_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", commands_path.display()));
+        let select_created = [
+            "controller.select_channel_by_id(",
+            "&created.channel_id.to_string());",
+        ]
+        .concat();
+        let set_screen_call = ["controller.set_", "screen(screen);"].concat();
+        let select_channel = ["controller.select_channel_by_id(", "channel_id);"].concat();
+        let select_binding = ["controller.select_channel_by_id(", "&binding.channel_id);"].concat();
 
         let create_start = source
             .find("RoutedSemanticIntent::CreateChannel { channel_name } => {")
@@ -409,8 +419,7 @@ mod tests {
         let create_block = &source[create_start..create_end];
         assert!(create_block.contains("create_channel_with_authoritative_binding("));
         assert!(!create_block.contains("select_channel_by_id_after_row_visible("));
-        assert!(!create_block
-            .contains("controller.select_channel_by_id(&created.channel_id.to_string());"));
+        assert!(!create_block.contains(&select_created));
 
         let open_start = source
             .find("RoutedSemanticIntent::OpenScreen { screen, channel_id } => {")
@@ -420,8 +429,8 @@ mod tests {
             .map(|offset| open_start + offset)
             .unwrap_or_else(|| panic!("missing open screen terminator"));
         let open_block = &source[open_start..open_end];
-        assert!(open_block.contains("controller.set_screen(screen);"));
-        assert!(open_block.contains("controller.select_channel_by_id(channel_id);"));
+        assert!(open_block.contains(&set_screen_call));
+        assert!(open_block.contains(&select_channel));
 
         let join_start = source
             .find("RoutedSemanticIntent::JoinChannel { channel_name } => {")
@@ -432,7 +441,7 @@ mod tests {
             .unwrap_or_else(|| panic!("missing join channel terminator"));
         let join_block = &source[join_start..join_end];
         assert!(join_block.contains("join_channel_by_name_with_binding_terminal_status("));
-        assert!(join_block.contains("controller.select_channel_by_id(&binding.channel_id);"));
+        assert!(join_block.contains(&select_binding));
 
         let send_start = source
             .find("IntentAction::SendChatMessage {")

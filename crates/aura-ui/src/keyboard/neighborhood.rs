@@ -1,7 +1,7 @@
 use super::set_toast;
 use crate::model::{
-    AccessDepth, AccessOverrideModalState, ActiveModal, CapabilityConfigModalState,
-    SelectedHome, TextModalState, UiModel,
+    AccessDepth, AccessOverrideModalState, ActiveModal, CapabilityConfigModalState, SelectedHome,
+    TextModalState, UiModel,
 };
 
 pub(super) fn handle_neighborhood_char(model: &mut UiModel, ch: char) {

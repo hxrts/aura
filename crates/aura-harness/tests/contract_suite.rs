@@ -28,10 +28,12 @@ fn artifact_run_dir(artifact_root: &Path, run_name: &str) -> PathBuf {
         .filter(|path| path.is_dir())
         .collect::<Vec<_>>();
     entries.sort();
-    entries
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| panic!("expected at least one artifact run dir under {}", runs_dir.display()))
+    entries.into_iter().next().unwrap_or_else(|| {
+        panic!(
+            "expected at least one artifact run dir under {}",
+            runs_dir.display()
+        )
+    })
 }
 
 #[test]

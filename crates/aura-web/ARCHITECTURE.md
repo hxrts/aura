@@ -69,6 +69,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Browser semantic observation must fail closed when published semantic state is
   unavailable; it must not repair observation by reading a live controller
   snapshot behind the harness bridge.
+- Browser `ui_state` observation remains observation-only: it may use the
+  page-owned publication path and pushed caches, but navigation/session
+  recovery stays on the explicit `recover_ui_state` path rather than being
+  folded into ordinary semantic observation reads.
 - Missing or degraded semantic snapshot/render-heartbeat publication must be
   surfaced explicitly through browser-side publication state, not just console
   logging or `null`/default fallbacks.

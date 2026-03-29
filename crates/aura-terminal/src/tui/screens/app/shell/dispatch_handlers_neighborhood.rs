@@ -1,9 +1,9 @@
 use super::dispatch::*;
 use super::*;
 
+use crate::tui::types::AccessLevel;
 use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui_contract::SemanticOperationKind;
-use crate::tui::types::AccessLevel;
 
 pub(super) fn handle_neighborhood_dispatch(
     dispatch_cmd: DispatchCommand,

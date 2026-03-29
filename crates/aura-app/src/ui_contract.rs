@@ -2446,6 +2446,12 @@ pub const HARNESS_MODE_ALLOWLIST: &[HarnessModeAllowance] = &[
         owner: "aura-web-main",
         design_ref: "docs/804_testing_guide.md",
     },
+    HarnessModeAllowance {
+        path: "crates/aura-web/src/shell/maintenance.rs",
+        kind: HarnessModeChangeKind::TimingDiscipline,
+        owner: "aura-web-browser-maintenance",
+        design_ref: "crates/aura-web/ARCHITECTURE.md",
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

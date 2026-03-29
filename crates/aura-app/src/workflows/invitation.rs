@@ -4805,10 +4805,8 @@ mod tests {
             }]);
         };
         let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
-        let await_pending = authoritative_pending_home_or_channel_invitation_for_accept(
-            &app_core,
-            &runtime_bridge,
-        );
+        let await_pending =
+            authoritative_pending_home_or_channel_invitation_for_accept(&app_core, &runtime_bridge);
         let ((), pending) = tokio::join!(delayed_pending_publish, await_pending);
 
         let accepted = pending

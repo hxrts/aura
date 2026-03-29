@@ -740,8 +740,9 @@ mod tests {
     fn neighborhood_screen_uses_automatic_full_access_and_no_enter_as_control() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let neighborhood_path = repo_root.join("crates/aura-ui/src/app/screens/neighborhood.rs");
-        let source = std::fs::read_to_string(&neighborhood_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", neighborhood_path.display()));
+        let source = std::fs::read_to_string(&neighborhood_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", neighborhood_path.display())
+        });
 
         assert!(source.contains("let depth = AccessDepth::Full;"));
         assert!(!source.contains("NeighborhoodEnterAsButton"));

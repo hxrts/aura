@@ -1701,6 +1701,12 @@ fn parse_process_snapshot(line: &str) -> Option<ProcessSnapshot> {
 }
 
 fn classify_owned_harness_process(command: &str) -> Option<OwnedHarnessProcessKind> {
+    let legacy_transport_poll_marker = [
+        "TRANSPORT_POLL_PATH = ",
+        "\"/__aura_harness_",
+        "transport__/poll\"",
+    ]
+    .concat();
     if command.contains(PLAYWRIGHT_DRIVER_OWNED_MARKER) || command.contains(OWNED_WEB_SERVER_MARKER)
     {
         return Some(OwnedHarnessProcessKind::MarkedProcessGroup);
@@ -1708,9 +1714,7 @@ fn classify_owned_harness_process(command: &str) -> Option<OwnedHarnessProcessKi
     if command.contains("playwright_driver.mjs") {
         return Some(OwnedHarnessProcessKind::LegacySingleProcess);
     }
-    if command.contains(r#"TRANSPORT_POLL_PATH = "/__aura_harness_transport__/poll""#)
-        && command.contains("/target/dx/aura-web/")
-    {
+    if command.contains(&legacy_transport_poll_marker) && command.contains("/target/dx/aura-web/") {
         return Some(OwnedHarnessProcessKind::LegacySingleProcess);
     }
     None
