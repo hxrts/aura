@@ -173,16 +173,17 @@ All choreographic protocols participate in version negotiation during connection
 
 ### 12.1 Version Handshake Flow
 
-```
-Initiator                    Responder
-   |                            |
-   |-- VersionHandshakeRequest -->
-   |     (version, min_version, capabilities, nonce)
-   |                            |
-   |<-- VersionHandshakeResponse -|
-   |     (Accepted/Rejected)
-   |                            |
-[Use negotiated version or disconnect]
+```mermaid
+sequenceDiagram
+    participant I as Initiator
+    participant R as Responder
+    I->>R: VersionHandshakeRequest(version, min_version, capabilities, nonce)
+    R->>I: VersionHandshakeResponse(Accepted/Rejected)
+    alt Compatible
+        Note over I,R: Use negotiated version
+    else Incompatible
+        Note over I,R: Disconnect
+    end
 ```
 
 See [Choreography Development Guide](803_choreography_guide.md) for version handshake implementation.
