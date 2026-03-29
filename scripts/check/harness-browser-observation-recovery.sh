@@ -41,6 +41,8 @@ do
   fi
 done
 
+bash scripts/check/harness-browser-toolchain.sh
+
 node crates/aura-harness/playwright-driver/playwright_driver.mjs --selftest
 # Note: observation_endpoints_are_side_effect_free is run by harness-observation-surface.sh
 
