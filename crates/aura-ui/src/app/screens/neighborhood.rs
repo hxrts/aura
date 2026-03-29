@@ -372,7 +372,6 @@ pub(super) fn NeighborhoodScreen(
                     UiCardBody {
                         extra_class: Some("gap-3".to_string()),
                         div { class: "flex flex-wrap gap-2",
-                            UiPill { label: format!("Entry access: {strongest_access_label}"), tone: strongest_access_tone }
                             UiPill {
                                 label: if home_rows.is_empty() {
                                     "Known Homes: 0".to_string()
@@ -462,7 +461,7 @@ pub(super) fn NeighborhoodScreen(
                                             .to_string(),
                                     ),
                                     label: "Accept Invitation".to_string(),
-                                    variant: ButtonVariant::Secondary,
+                                    variant: ButtonVariant::Primary,
                                     onclick: move |_| {
                                         map_accept_invitation_controller.send_action_keys("a");
                                         render_tick.set(render_tick() + 1);

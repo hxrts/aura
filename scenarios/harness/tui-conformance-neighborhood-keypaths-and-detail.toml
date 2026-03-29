@@ -18,7 +18,8 @@
 # 2. Assert stable rendered map visibility.
 #
 # Phase 4 - Home detail:
-# 1. Enter home detail via Enter key.
+# 1. Enter home detail via Enter key; the TUI auto-selects the strongest
+#    available entry access.
 # 2. Send a message via insert mode.
 #
 # Success criteria: neighborhood keypath commands preserve the expected
@@ -64,14 +65,14 @@ timeout_ms = 30000
 id = "alice-neighborhood-map-visible"
 action = "diagnostic_screen_contains"
 actor = "alice"
-value = "Can enter:"
+value = "Entry access:"
 timeout_ms = 8000
 
 [[steps]]
 id = "alice-neighborhood-state-indicator-visible"
 action = "diagnostic_screen_contains"
 actor = "alice"
-value = "D:Lim M:Off P:0"
+value = "M:Off"
 timeout_ms = 8000
 
 [[steps]]
@@ -148,7 +149,7 @@ timeout_ms = 2000
 id = "alice-map-stable-after-g"
 action = "diagnostic_screen_contains"
 actor = "alice"
-value = "Can enter:"
+value = "Entry access:"
 timeout_ms = 8000
 
 [[steps]]
@@ -162,7 +163,7 @@ timeout_ms = 2000
 id = "alice-map-stable-after-H"
 action = "diagnostic_screen_contains"
 actor = "alice"
-value = "Can enter:"
+value = "Entry access:"
 timeout_ms = 8000
 
 [[steps]]
@@ -176,15 +177,8 @@ timeout_ms = 2000
 id = "alice-map-stable-after-b"
 action = "diagnostic_screen_contains"
 actor = "alice"
-value = "Can enter:"
+value = "Entry access:"
 timeout_ms = 8000
-
-[[steps]]
-id = "alice-enter-depth-full"
-action = "input_text"
-actor = "alice"
-value = "dd"
-timeout_ms = 2000
 
 [[steps]]
 id = "alice-enter-home-detail"
@@ -197,7 +191,7 @@ timeout_ms = 1000
 id = "alice-home-detail-visible"
 action = "diagnostic_screen_contains"
 actor = "alice"
-value = "Access:"
+value = "Entry access:"
 timeout_ms = 10000
 
 [[steps]]
@@ -211,5 +205,5 @@ timeout_ms = 2000
 id = "alice-detail-still-visible-after-send"
 action = "diagnostic_screen_contains"
 actor = "alice"
-value = "Access:"
+value = "Entry access:"
 timeout_ms = 8000

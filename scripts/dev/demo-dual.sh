@@ -239,13 +239,14 @@ start_web_server() {
   stop_port_listener "$web_port" "web"
 
   : >"$web_log"
-  printf "[demo] building web frontend... (0 crates, 0s)" >&2
+  printf "[demo] building web frontend... (0/? crates, 0s)" >&2
   ./scripts/web/serve-static.sh "$web_port" >"$web_log" 2>&1 &
   web_server_pid=$!
   echo "$web_server_pid" >"$web_pid_file"
 
   local ready="0"
   local elapsed=0
+  local total="?"
   for _ in $(seq 1 600); do
     if ! kill -0 "$web_server_pid" 2>/dev/null; then
       echo "" >&2
@@ -262,7 +263,12 @@ start_web_server() {
     if (( elapsed % 5 == 0 )); then
       local progress
       progress="$(grep -c 'INFO Compiled' "$web_log" 2>/dev/null || echo 0)"
-      printf "\r[demo] building web frontend... (%s crates, %ss)" "$progress" "$elapsed" >&2
+      if [[ "$total" == "?" ]]; then
+        local last_entry
+        last_entry="$(grep -oP 'Compiled \[\d+/\K\d+' "$web_log" 2>/dev/null | tail -1)"
+        [[ -n "$last_entry" ]] && total="$last_entry"
+      fi
+      printf "\r[demo] building web frontend... (%s/%s crates, %ss)" "$progress" "$total" "$elapsed" >&2
     fi
   done
 

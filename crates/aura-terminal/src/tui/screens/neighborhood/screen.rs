@@ -317,7 +317,7 @@ fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>
             Text(content: format!("Neighborhood: {}", props.neighborhood_name), color: Theme::TEXT)
             Text(content: format!("Selected home: {}", props.selected_home_name), color: Theme::TEXT)
             Text(content: format!("Home ID: {}", props.selected_home_id), color: Theme::TEXT_MUTED)
-            Text(content: format!("Access: {} ({}) • {}", props.enter_depth.label(), hop_distance_hint(props.enter_depth), entered_text), color: Theme::TEXT_MUTED)
+            Text(content: format!("Entry access: {} ({}) • {}", props.enter_depth.label(), hop_distance_hint(props.enter_depth), entered_text), color: Theme::TEXT_MUTED)
             Text(content: format!("Known homes: {}", props.homes_count), color: Theme::TEXT_MUTED)
             Text(content: format!("Channels: {} • Focus: #{}", props.channel_count, props.selected_channel_name), color: Theme::TEXT_MUTED)
             Text(content: format!("Members/participants in view: {}", props.member_count), color: Theme::TEXT_MUTED)

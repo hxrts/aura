@@ -107,11 +107,11 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     let can_import = !device_import_code.trim().is_empty() && !creating;
 
     // Input field props
-    let input_props = LabeledInputProps::new("Nickname", "Enter your name...")
+    let input_props = LabeledInputProps::new("Create a new account", "Enter your nickname...")
         .with_value(nickname_suggestion)
         .with_focused(props.name_focused);
     let import_props =
-        LabeledInputProps::new("Device Enrollment Code", "Paste enrollment code...")
+        LabeledInputProps::new("Join an existing account", "Enter device enrollment code...")
             .with_value(device_import_code)
             .with_focused(props.import_code_focused);
 
@@ -148,25 +148,9 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 flex_direction: FlexDirection::Column,
                 overflow: Overflow::Hidden,
             ) {
-                // Create a new account
-                View(width: 100pct) {
-                    Text(
-                        content: "Create a new account",
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
-
                 // Nickname input
                 View(margin_top: Spacing::SM) {
                     #(Some(labeled_input(&input_props).into()))
-                }
-
-                // Join existing account
-                View(margin_top: Spacing::SM) {
-                    Text(
-                        content: "Join existing account",
-                        color: Theme::TEXT_MUTED,
-                    )
                 }
 
                 // Device enrollment code input

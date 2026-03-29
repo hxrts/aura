@@ -372,10 +372,16 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                 class: "grid place-items-center px-6",
                 div {
                     id: "aura-onboarding-card",
-                    class: "w-full max-w-md rounded-sm border border-border bg-card px-6 py-8 shadow-sm",
-                    h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
+                    class: "w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl",
+                    // Header
                     div {
-                        class: "mt-6 space-y-4",
+                        class: "bg-card px-4 py-3 border-b border-border",
+                        h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
+                    }
+                    // Body
+                    div {
+                        class: "px-4 py-4 space-y-4",
+                        // Create a new account
                         h2 { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Create a new account" }
                         label {
                             class: "block space-y-2",
@@ -408,12 +414,14 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                                 "Create Account"
                             }
                         }
+                        // Divider
                         div { class: "flex items-center gap-3 py-1",
                             div { class: "h-px flex-1 bg-border" }
                             span { class: "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground", "or" }
                             div { class: "h-px flex-1 bg-border" }
                         }
-                        h2 { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Join existing account" }
+                        // Join an existing account
+                        h2 { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Join an existing account" }
                         label {
                             class: "block space-y-2",
                             span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Device Enrollment Code" }
