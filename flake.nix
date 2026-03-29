@@ -43,7 +43,8 @@
         };
 
         # Pin to specific Rust version for reproducible CI behavior
-        rustToolchain = pkgs.rust-bin.stable."1.93.0".default.override {
+        # Note: 1.93.0 breaks futures-util 0.3.32 (ambiguous Self::Error in into_sink.rs)
+        rustToolchain = pkgs.rust-bin.stable."1.92.0".default.override {
           extensions = [
             "rust-src"
             "rust-analyzer"
