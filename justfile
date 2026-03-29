@@ -1712,6 +1712,51 @@ metrics:
     echo "Number of crates:"
     ls -1 crates | wc -l
 
+# Run release validation and publish crates.
+# Usage:
+#   just release <version> [dry_run] [skip_ci] [skip_nix] [no_tag] [push] [allow_dirty] [no_require_main]
+# Example:
+#   just release 0.2.0
+#   just release 0.2.0 true                       # dry-run
+#   just release 0.2.0 false false false false true # publish + push
+release \
+  version="" \
+  dry_run="false" \
+  skip_ci="false" \
+  skip_nix="false" \
+  no_tag="false" \
+  push="false" \
+  allow_dirty="false" \
+  no_require_main="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=()
+    if [ -n "{{version}}" ]; then
+      args+=(--version "{{version}}")
+    fi
+    if [ "{{dry_run}}" = "true" ]; then
+      args+=(--dry-run)
+    fi
+    if [ "{{skip_ci}}" = "true" ]; then
+      args+=(--skip-ci)
+    fi
+    if [ "{{skip_nix}}" = "true" ]; then
+      args+=(--skip-nix)
+    fi
+    if [ "{{no_tag}}" = "true" ]; then
+      args+=(--no-tag)
+    fi
+    if [ "{{push}}" = "true" ]; then
+      args+=(--push)
+    fi
+    if [ "{{allow_dirty}}" = "true" ]; then
+      args+=(--allow-dirty)
+    fi
+    if [ "{{no_require_main}}" = "true" ]; then
+      args+=(--no-require-main)
+    fi
+    ./scripts/ops/release.sh "${args[@]}"
+
 # Install git hooks
 install-hooks:
     #!/usr/bin/env bash
