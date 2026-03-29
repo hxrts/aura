@@ -378,21 +378,21 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                     class: "w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl",
                     // Header
                     div {
-                        class: "bg-card px-4 py-3 border-b border-border",
+                        class: "bg-card px-4 py-3 border-b border-border text-center",
                         h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
                     }
                     // Body
                     div {
                         class: "px-4 py-4 space-y-4",
                         // Create a new account
-                        h2 { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Create a new account" }
                         label {
                             class: "block space-y-2",
-                            span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Nickname" }
+                            span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Create a new account" }
                             input {
                                 id: FieldId::AccountName
                                     .required_dom_id("FieldId::AccountName"),
                                 class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                                placeholder: "Enter your nickname...",
                                 value: "{account_name()}",
                                 disabled: creating_account(),
                                 oninput: move |event| {
@@ -405,16 +405,18 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         if let Some(error) = account_error() {
                             p { class: "text-sm text-destructive", "{error.user_message()}" }
                         }
-                        button {
-                            id: ControlId::OnboardingCreateAccountButton
-                                .required_dom_id("ControlId::OnboardingCreateAccountButton"),
-                            class: "inline-flex h-10 items-center justify-center rounded-md bg-foreground px-6 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
-                            disabled: creating_account() || account_name().trim().is_empty(),
-                            onclick: submit_account,
-                            if creating_account() {
-                                "Creating Account..."
-                            } else {
-                                "Create Account"
+                        div { class: "flex justify-center",
+                            button {
+                                id: ControlId::OnboardingCreateAccountButton
+                                    .required_dom_id("ControlId::OnboardingCreateAccountButton"),
+                                class: "inline-flex h-10 items-center justify-center rounded-md bg-foreground px-6 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
+                                disabled: creating_account() || account_name().trim().is_empty(),
+                                onclick: submit_account,
+                                if creating_account() {
+                                    "Creating Account..."
+                                } else {
+                                    "Create Account"
+                                }
                             }
                         }
                         // Divider
@@ -424,14 +426,14 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                             div { class: "h-px flex-1 bg-border" }
                         }
                         // Join an existing account
-                        h2 { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Join an existing account" }
                         label {
                             class: "block space-y-2",
-                            span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Device Enrollment Code" }
+                            span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Join an existing account" }
                             input {
                                 id: FieldId::DeviceImportCode
                                     .required_dom_id("FieldId::DeviceImportCode"),
                                 class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                                placeholder: "Enter device enrollment code...",
                                 value: "{import_code()}",
                                 disabled: importing_code(),
                                 oninput: move |event| {
@@ -443,16 +445,18 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         if let Some(error) = import_error() {
                             p { class: "text-sm text-destructive", "{error.user_message()}" }
                         }
-                        button {
-                            id: ControlId::OnboardingImportDeviceButton
-                                .required_dom_id("ControlId::OnboardingImportDeviceButton"),
-                            class: "inline-flex h-10 items-center justify-center rounded-md bg-foreground px-6 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
-                            disabled: importing_code() || import_code().trim().is_empty(),
-                            onclick: submit_import,
-                            if importing_code() {
-                                "Joining Account..."
-                            } else {
-                                "Join Account"
+                        div { class: "flex justify-center",
+                            button {
+                                id: ControlId::OnboardingImportDeviceButton
+                                    .required_dom_id("ControlId::OnboardingImportDeviceButton"),
+                                class: "inline-flex h-10 items-center justify-center rounded-md bg-foreground px-6 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
+                                disabled: importing_code() || import_code().trim().is_empty(),
+                                onclick: submit_import,
+                                if importing_code() {
+                                    "Joining Account..."
+                                } else {
+                                    "Join Account"
+                                }
                             }
                         }
                     }
