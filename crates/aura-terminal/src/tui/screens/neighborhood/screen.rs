@@ -616,7 +616,7 @@ pub fn NeighborhoodScreen(
                         }]
                     } else {
                         vec![element! {
-                            View {
+                            View(flex_grow: 1.0) {
                                 HomeMap(homes: homes, selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
                             }
                         }]

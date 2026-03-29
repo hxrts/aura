@@ -265,7 +265,7 @@ start_web_server() {
       progress="$(grep -c 'INFO Compiled' "$web_log" 2>/dev/null || echo 0)"
       if [[ "$total" == "?" ]]; then
         local last_entry
-        last_entry="$(grep -oP 'Compiled \[\d+/\K\d+' "$web_log" 2>/dev/null | tail -1)"
+        last_entry="$(grep -o 'Compiled \[[0-9]*/[0-9]*\]' "$web_log" 2>/dev/null | tail -1 | grep -o '/[0-9]*' | tr -d '/' || true)"
         [[ -n "$last_entry" ]] && total="$last_entry"
       fi
       printf "\r[demo] building web frontend... (%s/%s crates, %ss)" "$progress" "$total" "$elapsed" >&2
