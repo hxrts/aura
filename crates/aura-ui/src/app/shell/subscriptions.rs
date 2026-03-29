@@ -7,11 +7,8 @@ struct CoalescedRefreshState {
     dirty: bool,
 }
 
-fn set_signal_if_changed<T>(
-    mut signal: Signal<T>,
-    next: T,
-    controller: &UiController,
-) where
+fn set_signal_if_changed<T>(mut signal: Signal<T>, next: T, controller: &UiController)
+where
     T: Clone + PartialEq + 'static,
 {
     if signal() == next {
@@ -80,8 +77,7 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
     let subscription_task_owner = use_hook(crate::task_owner::new_ui_task_owner);
     let neighborhood_refresh_state =
         use_hook(|| Rc::new(RefCell::new(CoalescedRefreshState::default())));
-    let chat_refresh_state =
-        use_hook(|| Rc::new(RefCell::new(CoalescedRefreshState::default())));
+    let chat_refresh_state = use_hook(|| Rc::new(RefCell::new(CoalescedRefreshState::default())));
     let contacts_refresh_state =
         use_hook(|| Rc::new(RefCell::new(CoalescedRefreshState::default())));
     let settings_refresh_state =
@@ -195,8 +191,7 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
         let runtime_for_contacts = neighborhood_runtime;
         let controller_for_contacts = controller_for_runtime.clone();
         let subscription_task_owner_for_runtime_contacts = subscription_task_owner.clone();
-        let neighborhood_refresh_state_for_runtime_contacts =
-            neighborhood_refresh_state.clone();
+        let neighborhood_refresh_state_for_runtime_contacts = neighborhood_refresh_state.clone();
         subscription_task_owner.spawn_local_cancellable(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_contacts.app_core().read().await;
@@ -425,10 +420,8 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
 
         let notifications_for_recovery = notifications_runtime;
         let controller_for_notifications_recovery = controller_for_runtime.clone();
-        let subscription_task_owner_for_notifications_recovery =
-            subscription_task_owner.clone();
-        let notifications_refresh_state_for_recovery =
-            notifications_refresh_state.clone();
+        let subscription_task_owner_for_notifications_recovery = subscription_task_owner.clone();
+        let notifications_refresh_state_for_recovery = notifications_refresh_state.clone();
         subscription_task_owner.spawn_local_cancellable(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_notifications_recovery

@@ -3179,7 +3179,10 @@ mod tests {
             struct DemoProof;
         "#;
 
-        let syntax = parse_file(source).expect("parse lint fixture");
+        let syntax = match parse_file(source) {
+            Ok(syntax) => syntax,
+            Err(error) => panic!("parse lint fixture: {error}"),
+        };
         let violations = scan_semantic_owner_stable_wrapper(
             Path::new("crates/aura-app/src/workflows/demo.rs"),
             &syntax,
@@ -3219,7 +3222,10 @@ mod tests {
             struct DemoProof;
         "#;
 
-        let syntax = parse_file(source).expect("parse lint fixture");
+        let syntax = match parse_file(source) {
+            Ok(syntax) => syntax,
+            Err(error) => panic!("parse lint fixture: {error}"),
+        };
         let violations = scan_semantic_owner_stable_wrapper(
             Path::new("crates/aura-app/src/workflows/demo.rs"),
             &syntax,

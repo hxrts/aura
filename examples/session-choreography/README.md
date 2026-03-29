@@ -10,19 +10,6 @@ Demonstrates the conversion from manual session handling to choreography macros 
 - Participant invitation and response
 - Session lifecycle management
 
-### 2. `multi_party_session.rs` - Multi-Party Session Management
-Shows how to handle complex multi-party sessions with:
-- Dynamic participant management
-- Consensus-based decision making
-- Graceful handling of participant failures
-
-### 3. `session_lifecycle.rs` - Complete Session Lifecycle
-Comprehensive example covering the full session lifecycle:
-- Session initiation and setup
-- Active session management
-- Session termination and cleanup
-- Error handling and recovery
-
 ## Architecture Benefits
 
 Converting from manual session handling to choreography macros provides:
@@ -46,10 +33,4 @@ This addresses the 76 manual session handling patterns identified in the archite
 ```bash
 # Basic session patterns
 cargo run --bin session_patterns
-
-# Multi-party session management
-cargo run --bin multi_party_session
-
-# Complete session lifecycle
-cargo run --bin session_lifecycle
 ```

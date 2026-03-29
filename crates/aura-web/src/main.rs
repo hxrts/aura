@@ -412,7 +412,8 @@ mod tests {
         let create_block = &source[create_start..create_end];
         assert!(create_block.contains("create_channel_with_authoritative_binding("));
         assert!(!create_block.contains("select_channel_by_id_after_row_visible("));
-        assert!(!create_block.contains("controller.select_channel_by_id(&created.channel_id.to_string());"));
+        assert!(!create_block
+            .contains("controller.select_channel_by_id(&created.channel_id.to_string());"));
 
         let open_start = source
             .find("RoutedSemanticIntent::OpenScreen { screen, channel_id } => {")

@@ -23,11 +23,3 @@ futures = { workspace = true }
 [[bin]]
 name = "session_patterns"
 path = "src/session_patterns.rs"
-
-[[bin]]
-name = "multi_party_session"
-path = "src/multi_party_session.rs"
-
-[[bin]]
-name = "session_lifecycle"
-path = "src/session_lifecycle.rs"

@@ -300,7 +300,6 @@ mod tests {
         let run_root = materialized
             .run
             .artifact_dir
-            .clone()
             .unwrap_or_else(|| panic!("artifact_dir should be assigned"));
         assert!(run_root.is_absolute());
         assert!(run_root.to_string_lossy().contains(".tmp/harness/runs"));
@@ -371,7 +370,6 @@ mod tests {
         let run_root = materialized
             .run
             .artifact_dir
-            .clone()
             .unwrap_or_else(|| panic!("artifact_dir should be assigned"));
         assert!(
             run_root.starts_with(override_root.join("harness").join("provisioning-test")),

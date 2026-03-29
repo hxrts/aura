@@ -7364,9 +7364,9 @@ mod tests {
             .find("pub(in crate::workflows) async fn invite_authority_to_channel_with_context(")
             .expect("invite_authority_to_channel_with_context definition");
         let end = source[start..]
-            .find("update_workflow_stage(&stage_tracker, \"ensure_invited_peer_channel\");")
+            .find("update_workflow_stage(&stage_tracker, \"create_channel_invitation\");")
             .map(|offset| start + offset)
-            .expect("ensure_invited_peer_channel stage marker");
+            .expect("create_channel_invitation stage marker");
         let body = &source[start..end];
         assert!(
             body.contains("channel_name_hint.as_deref()"),
@@ -7377,23 +7377,32 @@ mod tests {
     #[test]
     fn invite_authority_with_context_warms_receiver_before_create() {
         let source = include_str!("messaging.rs");
-        let start = source
+        let invite_start = source
             .find("pub(in crate::workflows) async fn invite_authority_to_channel_with_context(")
             .expect("invite_authority_to_channel_with_context definition");
-        let end = source[start..]
+        let invite_end = source[invite_start..]
             .find("update_workflow_stage(&stage_tracker, \"create_channel_invitation\");")
-            .map(|offset| start + offset)
+            .map(|offset| invite_start + offset)
             .expect("create_channel_invitation stage marker");
-        let body = &source[start..end];
+        let invite_body = &source[invite_start..invite_end];
+        let warm_start = source
+            .find("async fn warm_invited_peer_connectivity(")
+            .expect("warm_invited_peer_connectivity definition");
+        let warm_end = source[warm_start..]
+            .find("async fn ensure_invited_peer_channel(")
+            .map(|offset| warm_start + offset)
+            .expect("ensure_invited_peer_channel definition");
+        let warm_body = &source[warm_start..warm_end];
         assert!(
-            body.contains("warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver)")
-                || body.contains(
+            invite_body.contains(
+                "warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver)"
+            ) || invite_body.contains(
                     "warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver).await;"
                 ),
             "invite_authority_to_channel_with_context must warm the invite receiver before creating the channel invitation"
         );
         assert!(
-            body.contains("authority_default_relational_context(receiver)"),
+            warm_body.contains("authority_default_relational_context(receiver)"),
             "invite_authority_to_channel_with_context must warm the receiver's authority-scoped peer path before delivery"
         );
     }

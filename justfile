@@ -51,6 +51,7 @@ build-dev:
     cargo build -p aura-terminal --bin aura --features development --release
     mkdir -p bin
     cp target/release/aura bin/aura
+    codesign -s - bin/aura
     @echo "Binary available at: ./bin/aura"
 
 # Build Aura terminal in release mode without dev features
@@ -58,6 +59,7 @@ build-terminal-release:
     cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal
     mkdir -p bin
     cp target/release/aura bin/aura
+    codesign -s - bin/aura
     @echo "Binary available at: ./bin/aura"
 
 # Build app-host binary

@@ -6,7 +6,7 @@ use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Simple session coordination choreography
+// Simple session coordination choreography.
 choreography!(include_str!("src/session_patterns.choreo"));
 
 // Message types
@@ -91,23 +91,24 @@ impl SessionPatternExample {
     /// OLD: Manual session handling (what we're replacing)
     pub async fn manual_session_handling(&mut self) {
         println!("✗ MANUAL PATTERN (replaced by choreography):");
-        
+        println!("   Session: {}", self.session_id);
+
         // Manual session creation
         println!("   1. Manually creating session...");
         // session.send(invitation).await;
-        
+
         // Manual response handling
         println!("   2. Manually waiting for responses...");
         // let response = session.recv().await;
-        
+
         // Manual state management
         println!("   3. Manually managing session state...");
         // if response.accepted { self.participants.push(response.participant); }
-        
+
         // Manual message broadcasting
         println!("   4. Manually broadcasting messages...");
         // for participant in &self.participants { session.send_to(participant, msg).await; }
-        
+
         // Manual session cleanup
         println!("   5. Manually cleaning up session...");
         // session.close().await;
@@ -116,13 +117,14 @@ impl SessionPatternExample {
     /// NEW: Choreographic session handling (what we use now)
     pub async fn choreographic_session_handling(&mut self) {
         println!("✓ CHOREOGRAPHIC PATTERN (new approach):");
-        
+
         println!("   1. Choreography automatically handles message flows");
         println!("   2. Guard capabilities ensure authorization");
         println!("   3. Flow budgets manage resource usage");
         println!("   4. Journal facts provide audit trail");
         println!("   5. Built-in error handling and timeouts");
-        
+        println!("   Active participants: {}", self.participants.len());
+
         // The choreography macro generates all the coordination logic
         // Protocol compliance is guaranteed by the type system
         println!("   ➜ Protocol executed via generated choreography code");
@@ -141,31 +143,31 @@ impl SessionPatternExample {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::init();
-    
+    tracing_subscriber::fmt::init();
+
     println!("Session Pattern Conversion Example");
     println!("=====================================");
     println!();
-    
+
     let mut example = SessionPatternExample::new("example-session-001".to_string());
-    
+
     // Show the old manual pattern
     example.manual_session_handling().await;
     println!();
-    
+
     // Show the new choreographic pattern
     example.choreographic_session_handling().await;
     println!();
-    
+
     // Show the benefits
     SessionPatternExample::show_benefits();
     println!();
-    
+
     println!("IMPACT SUMMARY:");
     println!("   • 76 manual session patterns → choreography macros");
     println!("   • Consistent protocol implementation across codebase");
     println!("   • Reduced maintenance burden and improved reliability");
-    
+
     Ok(())
 }
 
@@ -176,11 +178,11 @@ mod tests {
     #[tokio::test]
     async fn test_session_pattern_example() {
         let mut example = SessionPatternExample::new("test-session".to_string());
-        
+
         // Both patterns should complete without error
         example.manual_session_handling().await;
         example.choreographic_session_handling().await;
-        
+
         // Benefits should be displayable
         SessionPatternExample::show_benefits();
     }
@@ -194,10 +196,16 @@ mod tests {
             max_participants: 5,
             timeout_seconds: 300,
         };
-        
+
         // Should serialize and deserialize correctly
-        let json = serde_json::to_string(&invitation).unwrap();
-        let deserialized: SessionInvitation = serde_json::from_str(&json).unwrap();
+        let json = match serde_json::to_string(&invitation) {
+            Ok(json) => json,
+            Err(error) => panic!("serialize invitation: {error}"),
+        };
+        let deserialized: SessionInvitation = match serde_json::from_str(&json) {
+            Ok(invitation) => invitation,
+            Err(error) => panic!("deserialize invitation: {error}"),
+        };
         assert_eq!(invitation.session_id, deserialized.session_id);
     }
 }

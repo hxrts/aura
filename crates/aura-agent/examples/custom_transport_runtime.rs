@@ -14,8 +14,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use aura_agent::AgentBuilder;
+use aura_agent::{AgentBuilder, EffectContext, ExecutionMode};
 use aura_core::effects::{TransportEffects, TransportEnvelope, TransportError, TransportStats};
+use aura_core::hash::hash;
 use aura_core::{AuthorityId, ContextId};
 use aura_effects::{
     FilesystemStorageHandler, PhysicalTimeHandler, RealConsoleHandler, RealCryptoHandler,
@@ -117,7 +118,9 @@ impl TransportEffects for LoggingTransportWrapper {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing for visibility
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter("info,aura_agent::task_registry=error")
+        .init();
 
     println!("Creating Aura agent with custom transport handlers...\n");
 
@@ -129,6 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let time = Arc::new(PhysicalTimeHandler);
     let random = Arc::new(RealRandomHandler);
     let console = Arc::new(RealConsoleHandler);
+    let authority_id = AuthorityId::new_from_entropy([0xA1; 32]);
 
     // Create custom transport handlers
     // Multiple transports can be added for different network protocols
@@ -147,6 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Add multiple transport handlers for different network protocols
         .with_transport(primary_transport)
         .with_transport(backup_transport)
+        .authority(authority_id)
         .testing_mode()
         .build()
         .await?;
@@ -162,6 +167,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // - A direct TCP transport for local network communication
     // - A relay transport for NAT traversal
     // - A BLE transport for nearby device discovery
+    let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+    let shutdown_ctx = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
+    agent.shutdown(&shutdown_ctx).await?;
 
     Ok(())
 }

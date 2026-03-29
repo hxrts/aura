@@ -38,6 +38,7 @@ members = [
     "crates/aura-harness",
     "examples/hello-crdt",
     "examples/hello-choreo",
+    "examples/session-choreography",
 ]
 
 

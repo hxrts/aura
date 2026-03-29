@@ -68,7 +68,9 @@ fn browser_harness_mode_enabled() -> bool {
 }
 
 fn interval_ticks(interval_ms: u64) -> u64 {
-    interval_ms.div_ceil(HARNESS_TRANSPORT_POLL_INTERVAL_MS).max(1)
+    interval_ms
+        .div_ceil(HARNESS_TRANSPORT_POLL_INTERVAL_MS)
+        .max(1)
 }
 
 fn delay_ticks(delay_ms: u64) -> u64 {
@@ -522,8 +524,8 @@ async fn run_harness_transport_tick(app_core: Arc<RwLock<AppCore>>, agent: Arc<A
             "transport_tick_maintenance_start",
             &format!("authority={};drained={drained}", agent.authority_id()),
         );
-        if let Err(error) = runtime_workflows::run_harness_runtime_mailbox_pass(&app_core, &runtime)
-            .await
+        if let Err(error) =
+            runtime_workflows::run_harness_runtime_mailbox_pass(&app_core, &runtime).await
         {
             emit_browser_harness_debug_event(
                 "transport_tick_maintenance_error",

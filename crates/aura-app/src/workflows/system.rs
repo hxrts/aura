@@ -1117,8 +1117,8 @@ mod tests {
             .expect("initial contacts emission should be observed");
         assert!(first.is_ok(), "initial contacts emission should succeed");
 
-        let second = tokio::time::timeout(std::time::Duration::from_millis(250), stream.recv())
-            .await;
+        let second =
+            tokio::time::timeout(std::time::Duration::from_millis(250), stream.recv()).await;
         assert!(
             second.is_err(),
             "unchanged contacts refresh must not self-trigger a second CONTACTS_SIGNAL emission"

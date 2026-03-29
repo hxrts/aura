@@ -1501,10 +1501,7 @@ fn execute_semantic_intent(
             Ok(())
         }
         IntentAction::SendChatMessage { message, .. } => {
-            let explicit_binding = context
-                .current_channel_binding
-                .get(&instance_id)
-                .cloned();
+            let explicit_binding = context.current_channel_binding.get(&instance_id).cloned();
             let send_intent = IntentAction::SendChatMessage {
                 message: message.clone(),
                 channel_id: explicit_binding
@@ -1515,13 +1512,8 @@ fn execute_semantic_intent(
                     .map(|binding| binding.context_id.clone()),
             };
             let contract = send_intent.contract();
-            let response = submit_shared_intent(
-                &metadata_step,
-                tool_api,
-                context,
-                &instance_id,
-                send_intent,
-            )?;
+            let response =
+                submit_shared_intent(&metadata_step, tool_api, context, &instance_id, send_intent)?;
             record_submission_handle(
                 context,
                 &instance_id,

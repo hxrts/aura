@@ -2772,42 +2772,42 @@ pub const SHARED_SCREEN_MODULE_MAP: &[SharedScreenModuleMap] = &[
     SharedScreenModuleMap {
         screen: ScreenId::Onboarding,
         web_symbol: "OnboardingScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/mod.rs",
         tui_symbol: "AccountSetupModal",
         tui_path: "crates/aura-terminal/src/tui/components/account_setup_modal_template.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Neighborhood,
         web_symbol: "NeighborhoodScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/neighborhood.rs",
         tui_symbol: "NeighborhoodScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/neighborhood/screen.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Chat,
         web_symbol: "ChatScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/chat.rs",
         tui_symbol: "ChatScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/chat/screen.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Contacts,
         web_symbol: "ContactsScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/contacts.rs",
         tui_symbol: "ContactsScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/contacts/screen.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Notifications,
         web_symbol: "NotificationsScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/notifications.rs",
         tui_symbol: "NotificationsScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/notifications/screen.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Settings,
         web_symbol: "SettingsScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/settings.rs",
         tui_symbol: "SettingsScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/settings/screen.rs",
     },
@@ -2954,7 +2954,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateNeighborhood,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/neighborhood.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateNeighborhood,
@@ -2970,7 +2970,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateChat,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/chat.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateChat,
@@ -2986,7 +2986,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateContacts,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/contacts.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateContacts,
@@ -3002,7 +3002,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateNotifications,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/notifications.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateNotifications,
@@ -3018,7 +3018,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateSettings,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/settings.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateSettings,
@@ -3034,7 +3034,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::CreateInvitation,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/contacts.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::CreateInvitation,
@@ -3054,7 +3054,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::AcceptInvitation,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/contacts.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::AcceptInvitation,
@@ -3070,7 +3070,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::CreateHome,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/neighborhood.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::CreateHome,
@@ -3086,7 +3086,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::JoinChannel,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/chat.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::JoinChannel,
@@ -3102,7 +3102,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::SendChatMessage,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/chat.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::SendChatMessage,
@@ -3118,7 +3118,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::AddDevice,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/settings.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::AddDevice,
@@ -3134,7 +3134,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::RemoveDevice,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/settings.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::RemoveDevice,
@@ -3150,7 +3150,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::SwitchAuthority,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/settings.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::SwitchAuthority,
@@ -4589,8 +4589,9 @@ mod tests {
         let web_source =
             std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness_bridge.rs"))
                 .unwrap_or_else(|error| panic!("failed to read harness bridge source: {error}"));
-        let ui_source = std::fs::read_to_string(workspace_root.join("crates/aura-ui/src/app.rs"))
-            .unwrap_or_else(|error| panic!("failed to read aura-ui source: {error}"));
+        let ui_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-ui/src/components.rs"))
+                .unwrap_or_else(|error| panic!("failed to read aura-ui source: {error}"));
 
         assert!(
             web_source.contains(".web_dom_id()"),
@@ -5113,7 +5114,7 @@ mod tests {
     #[test]
     fn frontend_settings_sources_use_shared_section_ids() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let web_model_path = repo_root.join("crates/aura-ui/src/model.rs");
+        let web_model_path = repo_root.join("crates/aura-ui/src/model/settings.rs");
         let tui_types_path = repo_root.join("crates/aura-terminal/src/tui/types.rs");
         let tui_export_path =
             repo_root.join("crates/aura-terminal/src/tui/harness_state/snapshot.rs");
@@ -5299,7 +5300,7 @@ mod tests {
         let chat = shared_screen_module_map(ScreenId::Chat);
         assert_eq!(chat.web_symbol, "ChatScreen");
         assert_eq!(chat.tui_symbol, "ChatScreen");
-        assert!(chat.web_path.ends_with("crates/aura-ui/src/app.rs"));
+        assert!(chat.web_path.ends_with("crates/aura-ui/src/app/screens/chat.rs"));
         assert!(chat
             .tui_path
             .ends_with("crates/aura-terminal/src/tui/screens/chat/screen.rs"));
