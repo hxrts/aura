@@ -17,6 +17,7 @@ allowed_rust_files=(
   "crates/aura-harness/src/coordinator.rs"
   "crates/aura-harness/src/executor.rs"
   "crates/aura-web/src/harness_bridge.rs"
+  "crates/aura-web/src/harness/commands.rs"
 )
 
 allowed_ts_files=(

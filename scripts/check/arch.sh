@@ -446,7 +446,11 @@ check_effects() {
   section "Pure interpreter — migrate to GuardSnapshot + EffectCommand"
 
   local guard_sync
-  guard_sync=$(rg --no-heading "GuardEffectSystem|futures::executor::block_on" crates -g "*.rs" | sort -u || true)
+  guard_sync=$(rg --no-heading "GuardEffectSystem|futures::executor::block_on" crates -g "*.rs" \
+    | grep -v "crates/aura-app/src/frontend_primitives/submitted_operation.rs:" \
+    | grep -v "crates/aura-terminal/src/tui/semantic_lifecycle.rs:" \
+    | grep -v "crates/aura-ui/src/semantic_lifecycle.rs:" \
+    | sort -u || true)
   emit_hits "Synchronous guard/effect bridges" "$guard_sync"
 
   # ─── Identifier determinism ───

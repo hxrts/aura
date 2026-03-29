@@ -24,31 +24,28 @@ fi
 
 case "$mode" in
   semantic-owner)
-    mapfile -t scope_paths <<'EOF'
-crates/aura-app/src/workflows
-crates/aura-web/src
-crates/aura-terminal/src
-EOF
+    scope_paths=(
+      crates/aura-app/src/workflows
+      crates/aura-web/src
+      crates/aura-terminal/src
+    )
     required_attr='#[aura_macros::semantic_owner'
-    mapfile -t completeness_exclusions <<'EOF'
-EOF
+    completeness_exclusions=()
     ;;
   actor-owned)
-    mapfile -t scope_paths <<'EOF'
-crates/aura-agent/src/runtime/services
-EOF
+    scope_paths=(
+      crates/aura-agent/src/runtime/services
+    )
     required_attr='#[aura_macros::actor_'
-    mapfile -t completeness_exclusions <<'EOF'
-EOF
+    completeness_exclusions=()
     ;;
   capability-boundary)
-    mapfile -t scope_paths <<'EOF'
-crates/aura-app/src/workflows
-crates/aura-agent/src/runtime_bridge
-EOF
+    scope_paths=(
+      crates/aura-app/src/workflows
+      crates/aura-agent/src/runtime_bridge
+    )
     required_attr='#[aura_macros::capability_boundary'
-    mapfile -t completeness_exclusions <<'EOF'
-EOF
+    completeness_exclusions=()
     ;;
   *)
     echo "ownership-annotation-ratchet: unknown mode: $mode" >&2
@@ -61,7 +58,7 @@ exclusion_count="${#completeness_exclusions[@]}"
 has_named_exclusion() {
   local key="$1"
   local entry
-  for entry in "${completeness_exclusions[@]}"; do
+  for entry in "${completeness_exclusions[@]:-}"; do
     [[ "$entry" == "$key:"* ]] && return 0
   done
   return 1
@@ -69,7 +66,7 @@ has_named_exclusion() {
 
 validate_named_exclusions() {
   local entry reason
-  for entry in "${completeness_exclusions[@]}"; do
+  for entry in "${completeness_exclusions[@]:-}"; do
     [[ -n "$entry" ]] || continue
     if [[ "$entry" != *:* ]]; then
       echo "ownership-annotation-ratchet($mode): invalid exclusion entry '$entry' (expected file:function:reason)" >&2

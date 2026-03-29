@@ -34,7 +34,8 @@ while IFS= read -r path; do
   [[ -n "$path" ]] || continue
   raw_accessors+=("$path")
 done < <(rg -l 'as_raw_ui_mut\(' crates/aura-harness/src)
-for path in "${raw_accessors[@]}"; do
+for path in "${raw_accessors[@]:-}"; do
+  [[ -n "$path" ]] || continue
   case "$path" in
     crates/aura-harness/src/backend/mod.rs|crates/aura-harness/src/coordinator.rs)
       ;;

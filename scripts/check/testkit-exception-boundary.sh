@@ -22,15 +22,25 @@ allowed_entries=(
   "crates/aura-testkit/src/time/controllable_time.rs|controllable deterministic time source"
 )
 
-declare -A allowed_reasons=()
+allowed_files=()
 for entry in "${allowed_entries[@]}"; do
   path="${entry%%|*}"
-  reason="${entry#*|}"
-  allowed_reasons["$path"]="$reason"
+  allowed_files+=("$path")
 done
 
-mapfile -t actual_files < <(rg -l '^#!\[allow\(clippy::disallowed_types\)\]' crates/aura-testkit/src -g'*.rs' | sort)
-mapfile -t allowed_files < <(printf '%s\n' "${!allowed_reasons[@]}" | sort)
+actual_files=()
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+  actual_files+=("$path")
+done < <(rg -l '^#!\[allow\(clippy::disallowed_types\)\]' crates/aura-testkit/src -g'*.rs' | sort)
+
+sorted_allowed_files=()
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+  sorted_allowed_files+=("$path")
+done < <(printf '%s\n' "${allowed_files[@]}" | sort)
+
+allowed_files=("${sorted_allowed_files[@]}")
 
 if [[ "${actual_files[*]-}" != "${allowed_files[*]-}" ]]; then
   echo "testkit exception boundary: disallowed_types allowlist drift" >&2

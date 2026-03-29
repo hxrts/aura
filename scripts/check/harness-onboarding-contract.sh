@@ -11,7 +11,7 @@ fail() {
 
 rg -q 'ScreenId::Onboarding' crates/aura-app/src/ui_contract.rs \
   || fail "onboarding must be declared in the shared snapshot model"
-rg -F -q 'controller.publish_ui_snapshot(snapshot.clone())' crates/aura-web/src/harness_bridge.rs \
+rg -F -q 'controller.set_account_setup_state(' crates/aura-web/src/main.rs \
   || fail "web onboarding must publish through the canonical controller snapshot pipeline"
 
 hits="$(rg --no-heading -n 'publish_onboarding_snapshot|stale_onboarding_publish|synthetic_onboarding_snapshot' \

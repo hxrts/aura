@@ -11,7 +11,9 @@ rg -q "./contracts.js" src/playwright_driver.ts \
   || { echo "harness-browser-driver-types: driver does not import typed contracts" >&2; exit 1; }
 rg -q "./method_sets.js" src/playwright_driver.ts \
   || { echo "harness-browser-driver-types: driver does not import typed method sets" >&2; exit 1; }
-rg -q "playwright_driver.js" playwright_driver.mjs \
+rg -q "./driver_loader.mjs" playwright_driver.mjs \
+  || { echo "harness-browser-driver-types: stable wrapper does not delegate to the driver loader" >&2; exit 1; }
+rg -q "dist', 'playwright_driver.js'" driver_loader.mjs \
   || { echo "harness-browser-driver-types: stable wrapper does not load compiled TS driver" >&2; exit 1; }
 
 echo "harness-browser-driver-types: clean"
