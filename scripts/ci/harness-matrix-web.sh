@@ -4,6 +4,23 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+prepare_browser_web_assets() {
+  (
+    cd crates/aura-web
+    if [ ! -d node_modules ] || [ ! -d node_modules/ws ]; then
+      npm ci
+    fi
+    npm run tailwind:build >/dev/null
+    mkdir -p \
+      "$repo_root/target/dx/aura-web/release/web/public/assets" \
+      "$repo_root/target/dx/aura-web/release/web/public/fonts"
+    target_css="$repo_root/target/dx/aura-web/release/web/public/assets/tailwind.css"
+    rm -f "$target_css"
+    ln -s "$repo_root/crates/aura-web/public/assets/tailwind.css" "$target_css"
+    NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web >/dev/null
+  )
+}
+
 mkdir -p artifacts/harness/browser
 
 (
@@ -17,5 +34,8 @@ bash scripts/check/harness-browser-install.sh
 cargo build -p aura-harness --bin aura-harness -q
 export AURA_HARNESS_BIN="$repo_root/target/debug/aura-harness"
 export AURA_HARNESS_WEB_BUILD_PROFILE=release
+export AURA_HARNESS_WEB_SERVER_READY_TIMEOUT_SECS=1800
+
+prepare_browser_web_assets
 
 bash scripts/harness/run-matrix.sh --lane web "$@"
