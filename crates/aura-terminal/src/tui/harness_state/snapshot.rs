@@ -184,7 +184,7 @@ fn build_authoritative_ui_snapshot(
     );
 
     if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
-        let invitation_type_ids = vec![
+        let invitation_type_ids = [
             "guardian".to_string(),
             "contact".to_string(),
             "channel".to_string(),
