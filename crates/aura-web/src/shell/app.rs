@@ -408,7 +408,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         button {
                             id: ControlId::OnboardingCreateAccountButton
                                 .required_dom_id("ControlId::OnboardingCreateAccountButton"),
-                            class: "inline-flex h-10 w-full items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
+                            class: "inline-flex h-10 items-center justify-center rounded-md bg-foreground px-6 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
                             disabled: creating_account() || account_name().trim().is_empty(),
                             onclick: submit_account,
                             if creating_account() {
@@ -446,7 +446,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         button {
                             id: ControlId::OnboardingImportDeviceButton
                                 .required_dom_id("ControlId::OnboardingImportDeviceButton"),
-                            class: "inline-flex h-10 w-full items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
+                            class: "inline-flex h-10 items-center justify-center rounded-md bg-foreground px-6 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
                             disabled: importing_code() || import_code().trim().is_empty(),
                             onclick: submit_import,
                             if importing_code() {
