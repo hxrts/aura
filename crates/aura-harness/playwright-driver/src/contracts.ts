@@ -1,3 +1,32 @@
+export const HARNESS_API_KEY = "__AURA_HARNESS__";
+export const HARNESS_OBSERVE_KEY = "__AURA_HARNESS_OBSERVE__";
+export const UI_PUBLICATION_STATE_KEY = "__AURA_UI_PUBLICATION_STATE__";
+export const RENDER_HEARTBEAT_PUBLICATION_STATE_KEY =
+  "__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__";
+export const RENDER_HEARTBEAT_KEY = "__AURA_RENDER_HEARTBEAT__";
+export const RENDER_HEARTBEAT_JSON_KEY = "__AURA_RENDER_HEARTBEAT_JSON__";
+export const SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY =
+  "__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__";
+export const UI_ACTIVE_GENERATION_KEY = "__AURA_UI_ACTIVE_GENERATION__";
+export const UI_READY_GENERATION_KEY = "__AURA_UI_READY_GENERATION__";
+export const UI_GENERATION_PHASE_KEY = "__AURA_UI_GENERATION_PHASE__";
+export const UI_STATE_JSON_KEY = "__AURA_UI_STATE_JSON__";
+export const UI_STATE_CACHE_KEY = "__AURA_UI_STATE_CACHE__";
+export const UI_STATE_OBSERVE_KEY = "__AURA_UI_STATE__";
+export const DRIVER_PUSH_STATE_KEY = "__AURA_DRIVER_PUSH_STATE";
+export const DRIVER_OBSERVER_INSTALLED_KEY = "__AURA_DRIVER_OBSERVER_INSTALLED";
+export const DRIVER_PUSH_UI_STATE_KEY = "__AURA_DRIVER_PUSH_UI_STATE";
+export const DRIVER_PUSH_RENDER_HEARTBEAT_KEY =
+  "__AURA_DRIVER_PUSH_RENDER_HEARTBEAT";
+export const DRIVER_PUSH_CLIPBOARD_KEY = "__AURA_DRIVER_PUSH_CLIPBOARD";
+export const PENDING_SEMANTIC_QUEUE_SEED_KEY =
+  "__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__";
+export const PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY =
+  "__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__";
+export const WAKE_SEMANTIC_QUEUE_KEY = "__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__";
+export const WAKE_RUNTIME_STAGE_QUEUE_KEY =
+  "__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__";
+
 export interface ProjectionRevision {
   semantic_seq?: number;
   render_seq?: number;
@@ -49,6 +78,21 @@ export interface TailLogResult {
   lines: string[];
 }
 
+export interface SemanticSubmitPublicationState {
+  surface?: string;
+  status?: string;
+  detail?: string;
+  binding_mode?: string;
+  generation_id?: number | null;
+  active_generation?: number | null;
+  ready_generation?: number | null;
+  generation_ready?: boolean;
+  phase?: string | null;
+  controller_present?: boolean;
+  bootstrap_transition_detail?: string | null;
+  enqueue_ready?: boolean;
+}
+
 export interface DriverRequest {
   id: number | null;
   method: DriverMethod;
@@ -75,6 +119,10 @@ export interface StartPageParams extends Record<string, unknown> {
   data_dir?: string;
   artifact_dir?: string;
   headless?: boolean;
+  startup_readiness?: string;
+  require_semantic_ready?: boolean;
+  pending_semantic_payload?: string;
+  pending_runtime_stage_payload?: string;
 }
 
 export interface InstanceParams extends Record<string, unknown> {
@@ -130,6 +178,11 @@ export interface DriverSession {
   domState: { text: string; ids: Set<string> | string[] };
   renderHeartbeat: Record<string, unknown> | null;
   requiredUiStateRevision: number | null;
+  requiredUiGeneration?: number | null;
+  currentUiGeneration?: number | null;
+  semanticSubmitState?: SemanticSubmitPublicationState | null;
+  semanticQueueInstalled?: boolean;
+  lastMainFrameNavigationAt?: number;
   lastObservationResetReason?: string;
   observationEpoch?: number;
   clipboardCache?: string;

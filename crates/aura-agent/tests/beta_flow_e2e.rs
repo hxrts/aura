@@ -10,8 +10,12 @@
 //!
 //! Note: LAN discovery is tested separately as it requires actual UDP sockets.
 
-use aura_agent::handlers::{InvitationServiceApi, InvitationType, ShareableInvitation};
+use aura_agent::handlers::{
+    InvitationServiceApi, InvitationStatus, InvitationType, ShareableInvitation,
+};
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
+use aura_core::effects::amp::ChannelCreateParams;
+use aura_core::effects::AmpChannelEffects;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
 use aura_core::threshold::ParticipantIdentity;
@@ -73,7 +77,14 @@ async fn test_invitation_code_roundtrip() -> TestResult {
     };
 
     // Encode to shareable code
-    let code = shareable.to_code();
+    let code = match shareable.to_code() {
+        Ok(code) => code,
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "shareable invitation should serialize: {error}"
+            ))
+        }
+    };
     assert!(code.starts_with("aura:v1:"));
 
     // Decode back
@@ -136,7 +147,7 @@ async fn test_two_agent_invitation_flow() -> TestResult {
         .accept(&invitation.invitation_id)
         .await?;
 
-    assert!(accept_result.success);
+    assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
     Ok(())
 }
 
@@ -313,7 +324,7 @@ async fn test_complete_beta_flow() -> TestResult {
 
     // === Step 4: Alice accepts (simulating invitation acknowledgment) ===
     let result = alice_invitations.accept(&invitation.invitation_id).await?;
-    assert!(result.success);
+    assert_eq!(result.new_status, InvitationStatus::Accepted);
 
     // === Step 5: Chat operations (single-agent for testing) ===
     let alice_chat = agent_alice.chat()?;
@@ -397,7 +408,18 @@ async fn test_guardian_invitation() -> TestResult {
 async fn test_channel_invitation() -> TestResult {
     let agent = create_test_agent(60).await?;
     let invitee = AuthorityId::new_from_entropy([61u8; 32]);
-    let home_id = ChannelId::from_bytes([61u8; 32]).to_string();
+    let context_id = ContextId::new_from_entropy([62u8; 32]);
+    let home_id = ChannelId::from_bytes([61u8; 32]);
+    agent
+        .runtime()
+        .effects()
+        .create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: Some(home_id),
+            skip_window: None,
+            topic: None,
+        })
+        .await?;
 
     let invitations = agent.invitations()?;
 
@@ -405,8 +427,8 @@ async fn test_channel_invitation() -> TestResult {
     let invitation = invitations
         .invite_to_channel(
             invitee,
-            home_id.clone(),
-            None,                                  // context_id
+            home_id.to_string(),
+            Some(context_id),
             Some("shared-parity-lab".to_string()), // nickname_suggestion
             None,                                  // bootstrap
             Some("Join our discussion channel".to_string()),
@@ -447,7 +469,7 @@ async fn test_invitation_decline() -> TestResult {
     // Decline it
     let result = invitations.decline(&invitation.invitation_id).await?;
 
-    assert!(result.success);
+    assert_eq!(result.new_status, InvitationStatus::Declined);
 
     // No longer pending
     assert!(!invitations.is_pending(&invitation.invitation_id).await);
@@ -474,7 +496,7 @@ async fn test_invitation_cancel() -> TestResult {
     // Cancel it
     let result = invitations.cancel(&invitation.invitation_id).await?;
 
-    assert!(result.success);
+    assert_eq!(result.new_status, InvitationStatus::Cancelled);
 
     // No longer in pending list
     let pending = invitations.list_pending().await;

@@ -125,7 +125,8 @@ impl JournalEffects for TestEffects {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkCoreEffects for TestEffects {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         let sender = self
@@ -165,7 +166,8 @@ impl NetworkCoreEffects for TestEffects {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkExtendedEffects for TestEffects {}
 
 #[async_trait]

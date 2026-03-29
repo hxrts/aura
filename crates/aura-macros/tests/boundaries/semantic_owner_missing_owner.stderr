@@ -2,12 +2,12 @@ error: semantic_owner requires `owner = "..."`
   --> tests/boundaries/semantic_owner_missing_owner.rs:7:1
    |
  7 | / #[aura_macros::semantic_owner(
- 8 | |     terminal = "publish_done",
- 9 | |     postcondition = "demo_done",
-10 | |     proof = DemoProof,
+ 8 | |     wrapper = "missing_owner_wrapper",
+ 9 | |     terminal = "publish_done",
+10 | |     postcondition = "demo_done",
 ...  |
-13 | |     category = "move_owned"
-14 | | )]
+15 | |     category = "move_owned"
+16 | | )]
    | |__^
    |
    = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)

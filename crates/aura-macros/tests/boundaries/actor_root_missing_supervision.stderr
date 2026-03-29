@@ -1,0 +1,11 @@
+error: actor_root requires `supervision = "..."`
+ --> tests/boundaries/actor_root_missing_supervision.rs:1:1
+  |
+1 | / #[aura_macros::actor_root(
+2 | |     owner = "maintenance_service",
+3 | |     domain = "runtime_maintenance",
+4 | |     category = "actor_owned"
+5 | | )]
+  | |__^
+  |
+  = note: this error originates in the attribute macro `aura_macros::actor_root` (in Nightly builds, run with -Z macro-backtrace for more info)

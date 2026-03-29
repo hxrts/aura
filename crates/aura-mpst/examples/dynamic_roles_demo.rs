@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             namespace: "annotated_demo";
             roles: Leader, Follower;
 
-            Leader[guard_capability = "coordinate"] -> Follower: Instruction;
+            Leader[guard_capability = "consensus:initiate"] -> Follower: Instruction;
             Follower[flow_cost = 10] -> Leader: Status;
             Leader[journal_facts = "round_complete"] -> Follower: Completion;
         }

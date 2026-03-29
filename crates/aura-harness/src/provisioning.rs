@@ -16,9 +16,18 @@ const ISOLATED_PORT_MIN: u16 = 20_000;
 const ISOLATED_PORT_SPAN: u16 = 40_000;
 static RUN_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Result<RunConfig> {
-    let root = run_root(&config);
+pub fn materialize_run_config(config: RunConfig, config_path: &Path) -> Result<RunConfig> {
+    materialize_run_config_with_artifact_base(config, config_path, None)
+}
+
+pub fn materialize_run_config_with_artifact_base(
+    mut config: RunConfig,
+    _config_path: &Path,
+    artifact_base_dir: Option<PathBuf>,
+) -> Result<RunConfig> {
+    let root = run_root(&config, artifact_base_dir);
     config.run.artifact_dir = Some(root.clone());
+    let run_name = config.run.name.clone();
 
     let seed_bundle = build_seed_bundle(&config);
     let run_token = run_token();
@@ -30,8 +39,12 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
 
     for instance in &mut config.instances {
         let instance_root = root.join("instances").join(&instance.id);
+        let transient_root = transient_root(&run_name, &instance.id, run_token.as_deref());
         if !instance.data_dir.is_absolute() {
             instance.data_dir = instance_root.join("state");
+        }
+        if instance.log_path.is_none() {
+            instance.log_path = Some(instance_root.join("instance.log"));
         }
 
         if matches!(instance.mode, InstanceMode::Local | InstanceMode::Browser) {
@@ -46,6 +59,17 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
             if let Some(run_token) = run_token.as_deref() {
                 ensure_env_value(&mut instance.env, "AURA_HARNESS_RUN_TOKEN", run_token);
             }
+            ensure_env_path(&mut instance.env, "AURA_HARNESS_RUN_ROOT", root.clone());
+            ensure_env_path(
+                &mut instance.env,
+                "AURA_HARNESS_INSTANCE_ROOT",
+                instance_root.clone(),
+            );
+            ensure_env_path(
+                &mut instance.env,
+                "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT",
+                transient_root,
+            );
         }
 
         if matches!(instance.mode, InstanceMode::Browser) {
@@ -75,17 +99,25 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
     Ok(config)
 }
 
-fn run_root(config: &RunConfig) -> PathBuf {
-    let explicit = config
-        .run
-        .artifact_dir
-        .clone()
-        .unwrap_or_else(|| default_run_root(config));
-    let explicit = if explicit.is_absolute() {
-        explicit
-    } else {
-        workspace_root().join(explicit)
-    };
+fn run_root(config: &RunConfig, artifact_base_dir: Option<PathBuf>) -> PathBuf {
+    if let Some(explicit) = std::env::var_os("AURA_HARNESS_RUN_ROOT") {
+        return absolutize_path(PathBuf::from(explicit));
+    }
+
+    let explicit = artifact_base_dir
+        .map(absolutize_path)
+        .map(|base| {
+            base.join("harness")
+                .join(sanitize_segment(&config.run.name))
+        })
+        .unwrap_or_else(|| {
+            config
+                .run
+                .artifact_dir
+                .clone()
+                .unwrap_or_else(|| default_run_root(config))
+        });
+    let explicit = absolutize_path(explicit);
 
     isolate_run_root(explicit, run_token().as_deref())
 }
@@ -139,6 +171,30 @@ fn isolate_run_root(base: PathBuf, token: Option<&str>) -> PathBuf {
         Some(token) if !token.is_empty() => base.join("runs").join(token),
         _ => base,
     }
+}
+
+fn transient_root(run_name: &str, instance_id: &str, token: Option<&str>) -> PathBuf {
+    if let Some(explicit) = std::env::var_os("AURA_HARNESS_TRANSIENT_ROOT") {
+        return absolutize_path(PathBuf::from(explicit)).join(instance_id);
+    }
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    run_name.hash(&mut hasher);
+    instance_id.hash(&mut hasher);
+    token.unwrap_or_default().hash(&mut hasher);
+    workspace_root()
+        .join(".tmp")
+        .join("harness")
+        .join("transient")
+        .join(format!("{:016x}", hasher.finish()))
+        .join(instance_id)
+}
+
+fn absolutize_path(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+    workspace_root().join(path)
 }
 
 fn namespaced_port_offset(token: &str) -> u16 {
@@ -232,7 +288,7 @@ fn split_host_port(bind_address: &str) -> Result<(&str, u16)> {
 mod tests {
     use std::path::PathBuf;
 
-    use super::materialize_run_config;
+    use super::{materialize_run_config, materialize_run_config_with_artifact_base};
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate};
 
     #[test]
@@ -244,7 +300,6 @@ mod tests {
         let run_root = materialized
             .run
             .artifact_dir
-            .clone()
             .unwrap_or_else(|| panic!("artifact_dir should be assigned"));
         assert!(run_root.is_absolute());
         assert!(run_root.to_string_lossy().contains(".tmp/harness/runs"));
@@ -298,6 +353,27 @@ mod tests {
         assert!(
             (super::ISOLATED_PORT_MIN..super::ISOLATED_PORT_MIN + super::ISOLATED_PORT_SPAN)
                 .contains(&port)
+        );
+    }
+
+    #[test]
+    fn materialize_respects_cli_artifact_base_override() {
+        let config = sample_run_config();
+        let override_root = PathBuf::from("/tmp/aura-artifacts");
+        let materialized = materialize_run_config_with_artifact_base(
+            config,
+            PathBuf::from("run.toml").as_path(),
+            Some(override_root.clone()),
+        )
+        .unwrap_or_else(|error| panic!("materialization should succeed: {error}"));
+
+        let run_root = materialized
+            .run
+            .artifact_dir
+            .unwrap_or_else(|| panic!("artifact_dir should be assigned"));
+        assert!(
+            run_root.starts_with(override_root.join("harness").join("provisioning-test")),
+            "CLI artifact override should become the authoritative harness run root"
         );
     }
 

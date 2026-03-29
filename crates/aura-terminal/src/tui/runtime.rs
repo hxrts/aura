@@ -36,6 +36,7 @@
 //! ```
 
 use crate::tui::state::{transition, TuiCommand, TuiState};
+use crate::tui::timeout_support::{execute_with_terminal_timeout, TerminalTimeoutError};
 use aura_core::effects::terminal::{TerminalEffects, TerminalError, TerminalEvent, TerminalFrame};
 use std::sync::Arc;
 
@@ -174,12 +175,33 @@ impl<T: TerminalEffects> TuiRuntime<T> {
         Ok(())
     }
 
+    /// Per-step timeout to keep the event loop responsive to shutdown signals.
+    const STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
     /// Run a single iteration: read event -> transition -> execute commands.
     ///
     /// Returns `Ok(true)` if should continue, `Ok(false)` if should exit.
+    /// Times out after `STEP_TIMEOUT` so the loop can re-check `should_exit`.
     pub async fn step(&mut self) -> Result<bool, TerminalError> {
-        // Read next event
-        let event = self.terminal.next_event().await?;
+        // Bounded wait for next event — prevents indefinite hang.
+        let event =
+            match execute_with_terminal_timeout("tui_runtime_step", Self::STEP_TIMEOUT, || {
+                self.terminal.next_event()
+            })
+            .await
+            {
+                Ok(event) => event,
+                Err(TerminalTimeoutError::Timeout) => {
+                    // No input within timeout — not an error, just re-check exit.
+                    return Ok(!self.state.should_exit);
+                }
+                Err(TerminalTimeoutError::Setup { context, detail }) => {
+                    return Err(TerminalError::IoError(format!(
+                        "{context}: failed to configure bounded terminal wait: {detail}"
+                    )));
+                }
+                Err(TerminalTimeoutError::Operation(error)) => return Err(error),
+            };
 
         // Transition
         let commands = self.process_event(event);

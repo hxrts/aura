@@ -15,6 +15,8 @@
 //! - Alice uses `seed`, Carol uses `seed + 1`
 //! - Creates Contact invitations (not Guardian)
 
+#![allow(dead_code)]
+
 use aura_terminal::demo_invitation::generate_demo_contact_invite_code;
 use aura_terminal::ids;
 use base64::Engine;

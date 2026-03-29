@@ -60,6 +60,7 @@ use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_testkit::MockRuntimeBridge;
 
+#[allow(clippy::duplicate_mod)]
 mod support;
 
 use support::generate_demo_guardian_invite_code;
@@ -93,32 +94,22 @@ impl TestAgent {
         // Deterministic unique ID avoids entropy-based UUID generation in tests.
         let unique_id = next_test_uuid(name);
         let test_dir = std::env::temp_dir().join(format!("aura-flow-test-{name}-{unique_id}"));
-        let _ = std::fs::remove_dir_all(&test_dir);
-        std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
         let runtime_authority = AuthorityId::new_from_entropy(aura_core::crypto::hash::hash(
             format!("flow-runtime:{name}:{unique_id}").as_bytes(),
         ));
-        let runtime = Arc::new(MockRuntimeBridge::with_authority(runtime_authority));
-        let app_core =
-            AppCore::with_runtime(AppConfig::default(), runtime).expect("Failed to create AppCore");
-        let app_core = Arc::new(RwLock::new(app_core));
-        let initialized_app_core = InitializedAppCore::new(app_core.clone())
-            .await
-            .expect("Failed to init signals");
-
-        let ctx = IoContext::builder()
-            .with_app_core(initialized_app_core)
-            .with_existing_account(false)
+        let built = support::IoContextTestEnvBuilder::new(name)
             .with_base_path(test_dir.clone())
+            .with_mock_runtime_authority(runtime_authority)
             .with_device_id(format!("test-device-{name}"))
             .with_mode(TuiMode::Production)
             .build()
-            .expect("IoContext builder should succeed for tests");
+            .await;
+        let (ctx, app_core, test_dir) = built.into_parts();
 
         Self {
             name: name.to_string(),
-            ctx: Arc::new(ctx),
+            ctx,
             app_core,
             test_dir,
         }

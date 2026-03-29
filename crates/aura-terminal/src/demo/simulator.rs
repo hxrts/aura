@@ -33,20 +33,10 @@ use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
 use aura_relational::ContactFact;
-use serde::Serialize;
 
+use super::identities::{demo_authority_id, demo_context_id, demo_device_id, GuardianAcceptance};
 use crate::error::TerminalResult;
-use crate::ids;
 use crate::tui::tasks::UiTaskOwner;
-
-#[derive(Debug, Clone, Serialize)]
-struct GuardianAcceptance {
-    guardian_id: AuthorityId,
-    setup_id: String,
-    accepted: bool,
-    public_key: Vec<u8>,
-    timestamp: TimeStamp,
-}
 
 const EXTENDED_DEMO_PEER_NAMES: [&str; 13] = [
     "Dave", "Eve", "Frank", "Grace", "Heidi", "Ivan", "Judy", "Mallory", "Niaj", "Olivia", "Peggy",
@@ -100,15 +90,13 @@ impl DemoSimulator {
         let shared_transport = SharedTransport::new();
 
         // Peer identities MUST match demo hint derivations.
-        let alice_authority = ids::authority_id(&format!("demo:{}:{}:authority", seed, "Alice"));
-        let carol_authority =
-            ids::authority_id(&format!("demo:{}:{}:authority", seed + 1, "Carol"));
-        let mobile_authority =
-            ids::authority_id(&format!("demo:{}:{}:authority", seed + 2, "Mobile"));
+        let alice_authority = demo_authority_id(seed, "Alice");
+        let carol_authority = demo_authority_id(seed + 1, "Carol");
+        let mobile_authority = demo_authority_id(seed + 2, "Mobile");
 
-        let alice_device = ids::device_id(&format!("demo:{}:{}:device", seed, "Alice"));
-        let carol_device = ids::device_id(&format!("demo:{}:{}:device", seed + 1, "Carol"));
-        let mobile_device = ids::device_id(&format!("demo:{}:{}:device", seed + 2, "Mobile"));
+        let alice_device = demo_device_id(seed, "Alice");
+        let carol_device = demo_device_id(seed + 1, "Carol");
+        let mobile_device = demo_device_id(seed + 2, "Mobile");
 
         // Each peer has its own storage sandbox under the demo directory.
         let peers_root = base_path.join("peers");
@@ -121,7 +109,7 @@ impl DemoSimulator {
                 seed,
                 "Alice",
                 alice_authority,
-                ids::context_id(&format!("demo:{}:{}:context", seed, "Alice")),
+                demo_context_id(seed, "Alice"),
                 alice_device,
                 alice_dir,
                 shared_transport.clone(),
@@ -130,7 +118,7 @@ impl DemoSimulator {
                 seed + 1,
                 "Carol",
                 carol_authority,
-                ids::context_id(&format!("demo:{}:{}:context", seed + 1, "Carol")),
+                demo_context_id(seed + 1, "Carol"),
                 carol_device,
                 carol_dir,
                 shared_transport.clone(),
@@ -139,7 +127,7 @@ impl DemoSimulator {
                 seed + 2,
                 "Mobile",
                 mobile_authority,
-                ids::context_id(&format!("demo:{}:{}:context", seed + 2, "Mobile")),
+                demo_context_id(seed + 2, "Mobile"),
                 mobile_device,
                 mobile_dir,
                 shared_transport.clone(),
@@ -211,9 +199,9 @@ impl DemoSimulator {
 
         for (idx, name) in EXTENDED_DEMO_PEER_NAMES.iter().enumerate() {
             let peer_seed = self.seed + 10 + idx as u64;
-            let authority_id = ids::authority_id(&format!("demo:{}:{}:authority", peer_seed, name));
-            let device_id = ids::device_id(&format!("demo:{}:{}:device", peer_seed, name));
-            let context_id = ids::context_id(&format!("demo:{}:{}:context", peer_seed, name));
+            let authority_id = demo_authority_id(peer_seed, name);
+            let device_id = demo_device_id(peer_seed, name);
+            let context_id = demo_context_id(peer_seed, name);
             let storage_dir = peers_root.join(name.to_ascii_lowercase());
 
             let agent = build_demo_peer_agent(

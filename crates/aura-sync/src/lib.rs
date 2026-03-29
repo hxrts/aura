@@ -120,6 +120,9 @@
 // Core Foundation Modules
 // =============================================================================
 
+/// Typed capability families owned by sync protocols.
+pub mod capabilities;
+
 /// Core abstractions and unified patterns for sync protocols
 ///
 /// This module provides the foundational types and patterns used throughout

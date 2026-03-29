@@ -10,6 +10,13 @@ use aura_core::time::{LogicalTime, VectorClock};
 use aura_core::types::identifiers::DeviceId;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogicalClockManagerCommand {
+    Advance,
+    ReadNow,
+}
+
 /// Mutable logical clock state.
 #[derive(Debug, Default, Clone)]
 pub struct LogicalClockState {
@@ -35,6 +42,14 @@ impl LogicalClockState {
 
 /// Runtime-owned logical clock manager.
 #[derive(Debug)]
+#[aura_macros::actor_owned(
+    owner = "logical_clock_manager",
+    domain = "logical_clock",
+    gate = "logical_clock_command_ingress",
+    command = LogicalClockManagerCommand,
+    capacity = 32,
+    category = "actor_owned"
+)]
 pub struct LogicalClockManager {
     state: RwLock<LogicalClockState>,
     device_id: Option<DeviceId>,

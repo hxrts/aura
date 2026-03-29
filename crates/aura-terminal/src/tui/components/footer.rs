@@ -100,6 +100,34 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
     // Max realistic: "999 P, 99 On" = 12 chars
     let peer_status = format!("{} P, {} On", props.transport_peers, props.known_online);
     let bottom_status = props.state_indicator.clone().unwrap_or(peer_status);
+    let screen_hint_views = screen_hints_text
+        .iter()
+        .map(|hint| {
+            let color = text_color;
+            element! {
+                View(
+                    width: COL_WIDTH,
+                    height: 1u16,
+                ) {
+                    Text(content: hint, color: color)
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    let global_hint_views = global_hints_text
+        .into_iter()
+        .map(|hint| {
+            let color = text_color;
+            element! {
+                View(
+                    width: COL_WIDTH,
+                    height: 1u16,
+                ) {
+                    Text(content: hint, color: color)
+                }
+            }
+        })
+        .collect::<Vec<_>>();
 
     element! {
         View(
@@ -126,24 +154,14 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
                 overflow: Overflow::Hidden,
             ) {
                 // Columns 1-5: Screen hints in fixed-width columns
-                #(screen_hints_text.iter().map(|hint| {
-                    let color = text_color;
-                    element! {
-                        View(
-                            width: COL_WIDTH,
-                            height: 1u16,
-                        ) {
-                            Text(content: hint.clone(), color: color)
-                        }
-                    }
-                }))
+                #(screen_hint_views)
 
                 // Column 6: Sync status (wider to fit "Synced Xm ago")
                 View(
                     width: STATUS_COL_WIDTH,
                     height: 1u16,
                 ) {
-                    Text(content: sync_status.clone(), color: sync_color)
+                    Text(content: sync_status, color: sync_color)
                 }
             }
 
@@ -156,24 +174,14 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
                 overflow: Overflow::Hidden,
             ) {
                 // Columns 1-5: Global hints in fixed-width columns
-                #(global_hints_text.iter().map(|hint| {
-                    let color = text_color;
-                    element! {
-                        View(
-                            width: COL_WIDTH,
-                            height: 1u16,
-                        ) {
-                            Text(content: hint.clone(), color: color)
-                        }
-                    }
-                }))
+                #(global_hint_views)
 
                 // Column 6: Peer count (wider to fit "123 Peers | 45 On")
                 View(
                     width: STATUS_COL_WIDTH,
                     height: 1u16,
                 ) {
-                    Text(content: bottom_status.clone(), color: text_color)
+                    Text(content: bottom_status, color: text_color)
                 }
             }
         }

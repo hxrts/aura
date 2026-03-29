@@ -141,30 +141,35 @@ use crate::signal_defs::INVITATIONS_SIGNAL;
 use crate::ui::signals::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
 use crate::ui_contract::AuthoritativeSemanticFact;
 use crate::ui_contract::{
-    OperationId, OperationInstanceId, SemanticOperationKind, SemanticOperationPhase,
+    InvitationFactKind, OperationId, OperationInstanceId, OperationState, SemanticOperationKind,
+    SemanticOperationPhase,
 };
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, execute_with_runtime_retry_budget,
     execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
-    warn_workflow_timeout, workflow_retry_policy, workflow_timeout_budget,
+    warn_workflow_timeout, workflow_best_effort, workflow_retry_policy, workflow_timeout_budget,
 };
 use crate::workflows::runtime_error_classification::{
     classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
     InvitationAcceptErrorClass,
 };
+#[cfg(feature = "signals")]
+use crate::workflows::semantic_facts::prove_channel_membership_ready;
 use crate::workflows::semantic_facts::{
     issue_device_enrollment_imported_proof, issue_invitation_accepted_or_materialized_proof,
-    issue_invitation_created_proof, replace_authoritative_semantic_facts_of_kind,
-    semantic_readiness_publication_capability, update_authoritative_semantic_facts,
-    SemanticWorkflowOwner,
+    issue_invitation_created_proof, issue_invitation_declined_proof,
+    issue_invitation_exported_proof, issue_invitation_revoked_proof,
+    issue_pending_invitation_consumed_proof, publish_authoritative_semantic_fact,
+    replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
+    update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
 use crate::workflows::settings;
 use crate::workflows::signals::{read_signal, read_signal_or_default};
+#[cfg(feature = "signals")]
+use crate::workflows::stage_tracker::update_workflow_stage_direct;
 use crate::workflows::stage_tracker::{
     new_workflow_stage_tracker, update_workflow_stage, WorkflowStageTracker,
 };
-#[cfg(feature = "signals")]
-use crate::workflows::stage_tracker::update_workflow_stage_direct;
 use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
@@ -183,8 +188,13 @@ const CHANNEL_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 30_000;
 const CHANNEL_INVITATION_ACCEPT_RECONCILE_TIMEOUT_MS: u64 = 120_000;
 const INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS: usize = 4;
 const INVITATION_ACCEPT_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 500;
+#[cfg(feature = "signals")]
+const PENDING_INVITATION_AUTHORITATIVE_ATTEMPTS: usize = 24;
+#[cfg(feature = "signals")]
+const PENDING_INVITATION_AUTHORITATIVE_BACKOFF_MS: u64 = 100;
 const CONTACT_LINK_ATTEMPTS: usize = 32;
 const CONTACT_LINK_BACKOFF_MS: u64 = 100;
+const CONTACT_ACCEPT_PROPAGATION_ATTEMPTS: usize = 8;
 const CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS: usize = 6;
 const CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS: u64 = 75;
 const CHANNEL_INVITATION_CREATE_TIMEOUT_MS: u64 = 5_000;
@@ -222,10 +232,7 @@ impl InvitationHandle {
     }
 }
 
-fn update_channel_invitation_stage(
-    tracker: &Option<WorkflowStageTracker>,
-    stage: &'static str,
-) {
+fn update_channel_invitation_stage(tracker: &Option<WorkflowStageTracker>, stage: &'static str) {
     update_workflow_stage(tracker, stage);
 }
 
@@ -308,6 +315,18 @@ enum DeviceEnrollmentAcceptConvergenceError {
     Workflow(AuraError),
 }
 
+fn log_device_enrollment_accept_progress(message: impl Into<String>) {
+    let message = message.into();
+    #[cfg(feature = "wasm")]
+    crate::platform::wasm::console_log(&format!("[device-enrollment-accept] {message}"));
+    #[cfg(not(feature = "wasm"))]
+    eprintln!("[device-enrollment-accept] {message}");
+}
+
+fn emit_contact_accept_probe(stage: &str) {
+    let _ = stage;
+}
+
 // OWNERSHIP: first-run-default
 fn channel_invitation_bootstrap_timeout(
     deadline: Option<TimeoutBudget>,
@@ -322,7 +341,9 @@ fn channel_invitation_bootstrap_timeout(
                     context_id.map_or_else(String::new, |context| format!(" in context {context}"));
                 return Err(ChannelInvitationBootstrapError::BootstrapTransport {
                     channel_id,
-                    detail: format!("create_channel_invitation deadline exhausted before {stage}{context_detail}"),
+                    detail: format!(
+                        "create_channel_invitation deadline exhausted before {stage}{context_detail}"
+                    ),
                 });
             }
             Ok(std::cmp::min(
@@ -372,6 +393,80 @@ async fn authoritative_pending_home_or_channel_invitation(
     .cloned())
 }
 
+#[cfg(feature = "signals")]
+fn invitations_signal_has_pending_home_or_channel_invitation(
+    invitations: &crate::views::invitations::InvitationsState,
+) -> bool {
+    invitations.all_pending().iter().any(|invitation| {
+        invitation.direction == crate::views::invitations::InvitationDirection::Received
+            && (invitation.invitation_type == crate::views::invitations::InvitationType::Chat
+                || invitation.home_id.is_some())
+    })
+}
+
+#[cfg(feature = "signals")]
+async fn await_authoritative_pending_home_or_channel_invitation_for_accept(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) -> Result<Option<InvitationInfo>, AuraError> {
+    let invitations = read_signal_or_default(app_core, &*INVITATIONS_SIGNAL).await;
+    if !invitations_signal_has_pending_home_or_channel_invitation(&invitations) {
+        return Ok(None);
+    }
+
+    let policy = workflow_retry_policy(
+        PENDING_INVITATION_AUTHORITATIVE_ATTEMPTS as u32,
+        Duration::from_millis(PENDING_INVITATION_AUTHORITATIVE_BACKOFF_MS),
+        Duration::from_millis(PENDING_INVITATION_AUTHORITATIVE_BACKOFF_MS),
+    )?;
+    let app_core = app_core.clone();
+    execute_with_runtime_retry_budget(runtime, &policy, |_attempt| {
+        let app_core = app_core.clone();
+        let runtime = runtime.clone();
+        async move {
+            if let Some(invitation) =
+                authoritative_pending_home_or_channel_invitation(&runtime).await?
+            {
+                return Ok(invitation);
+            }
+            let _ = crate::workflows::system::refresh_account(&app_core).await;
+            converge_runtime(&runtime).await;
+            Err(AuraError::from(
+                crate::workflows::error::WorkflowError::Precondition(
+                    "pending channel invitation is not yet authoritative",
+                ),
+            ))
+        }
+    })
+    .await
+    .map(Some)
+    .map_err(|error| match error {
+        RetryRunError::Timeout(timeout_error) => AuraError::from(timeout_error),
+        RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
+    })
+}
+
+async fn authoritative_pending_home_or_channel_invitation_for_accept(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) -> Result<Option<InvitationInfo>, AuraError> {
+    if let Some(invitation) = authoritative_pending_home_or_channel_invitation(runtime).await? {
+        return Ok(Some(invitation));
+    }
+    #[cfg(feature = "signals")]
+    {
+        return await_authoritative_pending_home_or_channel_invitation_for_accept(
+            app_core, runtime,
+        )
+        .await;
+    }
+    #[cfg(not(feature = "signals"))]
+    {
+        let _ = app_core;
+        Ok(None)
+    }
+}
+
 async fn publish_invitation_owner_status(
     owner: &SemanticWorkflowOwner,
     deadline: Option<TimeoutBudget>,
@@ -399,28 +494,6 @@ async fn publish_invitation_owner_status(
     .await
 }
 
-async fn publish_contact_accept_success_for_owner(
-    owner: &SemanticWorkflowOwner,
-    proof: crate::workflows::semantic_facts::InvitationAcceptedOrMaterializedProof,
-    authority_id: AuthorityId,
-    contact_count: u32,
-) -> Result<(), AuraError> {
-    let contact_link = AuthoritativeSemanticFact::ContactLinkReady {
-        authority_id: authority_id.to_string(),
-        contact_count,
-    };
-    let operation_status = owner.terminal_success_fact_with(proof).await?;
-
-    update_authoritative_semantic_facts(owner.app_core(), |facts| {
-        facts.retain(|existing| {
-            existing.key() != contact_link.key() && existing.key() != operation_status.key()
-        });
-        facts.push(contact_link);
-        facts.push(operation_status);
-    })
-    .await
-}
-
 fn semantic_kind_for_bridge_invitation(
     invitation: &crate::runtime_bridge::InvitationInfo,
 ) -> SemanticOperationKind {
@@ -433,7 +506,7 @@ fn semantic_kind_for_bridge_invitation(
             SemanticOperationKind::AcceptPendingChannelInvitation
         }
         crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => {
-            SemanticOperationKind::AcceptPendingChannelInvitation
+            SemanticOperationKind::ImportDeviceEnrollmentCode
         }
     }
 }
@@ -815,7 +888,9 @@ async fn trigger_runtime_discovery_with_timeout(
 async fn drive_invitation_accept_convergence(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    peer_hint: Option<AuthorityId>,
 ) -> Result<(), AcceptInvitationError> {
+    let peer_id = peer_hint.map(|peer| peer.to_string());
     let mut converged = false;
     for _ in 0..INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS {
         let step_budget = workflow_timeout_budget(
@@ -831,6 +906,12 @@ async fn drive_invitation_accept_convergence(
             runtime.process_ceremony_messages()
         })
         .await;
+        if let Some(peer_id) = peer_id.as_deref() {
+            let _ = execute_with_runtime_timeout_budget(runtime, &step_budget, || {
+                runtime.sync_with_peer(peer_id)
+            })
+            .await;
+        }
         let _ =
             execute_with_runtime_timeout_budget(runtime, &step_budget, || runtime.trigger_sync())
                 .await;
@@ -861,6 +942,91 @@ async fn drive_invitation_accept_convergence(
     // invitation acceptance itself succeeded and sync will complete once
     // peers become reachable.  The warning above provides diagnostics.
     Ok(())
+}
+
+async fn propagate_contact_acceptance_followup(
+    app_core: &Arc<RwLock<AppCore>>,
+    contact_id: AuthorityId,
+) -> Result<(), AuraError> {
+    let Ok(runtime) = require_runtime(app_core).await else {
+        return Ok(());
+    };
+    let contact_peer_id = contact_id.to_string();
+    let _ = wait_for_contact_link(app_core, &runtime, contact_id).await;
+    for _ in 0..CONTACT_ACCEPT_PROPAGATION_ATTEMPTS {
+        trigger_runtime_discovery_with_timeout(&runtime).await;
+        let _ = crate::workflows::network::refresh_discovered_peers(app_core).await;
+        let _ = timeout_runtime_call(
+            &runtime,
+            "accept_contact_invitation",
+            "process_ceremony_messages",
+            INVITATION_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.process_ceremony_messages(),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            &runtime,
+            "accept_contact_invitation",
+            "sync_with_peer",
+            INVITATION_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.sync_with_peer(&contact_peer_id),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            &runtime,
+            "accept_contact_invitation",
+            "trigger_sync",
+            INVITATION_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.trigger_sync(),
+        )
+        .await;
+        converge_runtime(&runtime).await;
+        let _ = crate::workflows::system::refresh_account(app_core).await;
+        let _ = crate::workflows::network::refresh_discovered_peers(app_core).await;
+        let _ = refresh_authoritative_contact_link_readiness(app_core).await;
+        let linked = contacts_signal_snapshot(app_core)
+            .await
+            .map(|contacts| {
+                contacts
+                    .all_contacts()
+                    .any(|contact| contact.id == contact_id)
+            })
+            .unwrap_or(false);
+        let peer_online = timeout_runtime_call(
+            &runtime,
+            "accept_contact_invitation",
+            "is_peer_online",
+            INVITATION_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.is_peer_online(contact_id),
+        )
+        .await
+        .unwrap_or(false);
+        if linked && peer_online {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Run bounded post-terminal contact-accept convergence without changing the
+/// already-published terminal outcome.
+pub async fn run_post_contact_accept_followups(
+    app_core: &Arc<RwLock<AppCore>>,
+    contact_id: AuthorityId,
+) {
+    let mut best_effort = workflow_best_effort();
+    let _ = best_effort
+        .capture(propagate_contact_acceptance_followup(app_core, contact_id))
+        .await;
+    let _ = best_effort.finish();
+}
+
+async fn prime_device_enrollment_accept_connectivity(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) {
+    trigger_runtime_discovery_with_timeout(runtime).await;
+    let _ = drive_invitation_accept_convergence(app_core, runtime, None).await;
 }
 
 async fn ensure_channel_invitation_context_and_bootstrap(
@@ -1037,12 +1203,12 @@ async fn ensure_channel_invitation_context_and_bootstrap(
                         ..
                     })) => {
                         return Err(ChannelInvitationBootstrapError::BootstrapTransport {
-                                channel_id,
-                                detail: format!(
-                                    "amp_channel_state_exists timed out after {}ms in context {resolved_context}",
-                                    exists_budget.timeout_ms()
-                                ),
-                            });
+                            channel_id,
+                            detail: format!(
+                                "amp_channel_state_exists timed out after {}ms in context {resolved_context}",
+                                exists_budget.timeout_ms()
+                            ),
+                        });
                     }
                     Err(TimeoutRunError::Timeout(error)) => {
                         return Err(ChannelInvitationBootstrapError::BootstrapTransport {
@@ -1053,11 +1219,11 @@ async fn ensure_channel_invitation_context_and_bootstrap(
                     Ok(state_exists) => state_exists,
                     Err(TimeoutRunError::Operation(state_error)) => {
                         return Err(ChannelInvitationBootstrapError::BootstrapTransport {
-                                channel_id,
-                                detail: format!(
-                                    "failed to verify repaired channel state in context {resolved_context}: {state_error}"
-                                ),
-                            });
+                            channel_id,
+                            detail: format!(
+                                "failed to verify repaired channel state in context {resolved_context}: {state_error}"
+                            ),
+                        });
                     }
                 };
                 #[cfg(feature = "signals")]
@@ -1084,11 +1250,11 @@ async fn ensure_channel_invitation_context_and_bootstrap(
             }
             Err(TimeoutRunError::Operation(error)) => {
                 return Err(ChannelInvitationBootstrapError::BootstrapTransport {
-                        channel_id,
-                        detail: format!(
-                            "{error}; requested_context={requested_context:?}; runtime_resolved_context={runtime_resolved_context:?}; bootstrap_context={resolved_context}"
-                        ),
-                    });
+                    channel_id,
+                    detail: format!(
+                        "{error}; requested_context={requested_context:?}; runtime_resolved_context={runtime_resolved_context:?}; bootstrap_context={resolved_context}"
+                    ),
+                });
             }
         }
     }
@@ -1104,10 +1270,17 @@ pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let replacements = if authoritative_pending_home_or_channel_invitation(&runtime)
+    #[cfg(feature = "signals")]
+    let signal_has_pending = invitations_signal_has_pending_home_or_channel_invitation(
+        &read_signal_or_default(app_core, &*INVITATIONS_SIGNAL).await,
+    );
+    #[cfg(not(feature = "signals"))]
+    let signal_has_pending = false;
+
+    let runtime_has_pending = authoritative_pending_home_or_channel_invitation(&runtime)
         .await?
-        .is_some()
-    {
+        .is_some();
+    let replacements = if signal_has_pending || runtime_has_pending {
         vec![AuthoritativeSemanticFact::PendingHomeInvitationReady]
     } else {
         Vec::new()
@@ -1131,21 +1304,56 @@ pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
 ) -> Result<(), AuraError> {
     let contacts = contacts_signal_snapshot(app_core).await?;
     let contact_count = contacts.contact_count() as u32;
-    let replacements = contacts
+    let contact_link_facts = contacts
         .all_contacts()
         .map(|contact| AuthoritativeSemanticFact::ContactLinkReady {
             authority_id: contact.id.to_string(),
             contact_count,
         })
         .collect::<Vec<_>>();
-    replace_authoritative_semantic_facts_of_kind(
+    let invitation_accepted_facts = contacts
+        .all_contacts()
+        .map(|contact| AuthoritativeSemanticFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: Some(contact.id.to_string()),
+            operation_state: Some(OperationState::Succeeded),
+        })
+        .collect::<Vec<_>>();
+    update_authoritative_semantic_facts(app_core, move |facts| {
+        facts.retain(|existing| {
+            !matches!(
+                existing,
+                AuthoritativeSemanticFact::ContactLinkReady { .. }
+                    | AuthoritativeSemanticFact::InvitationAccepted {
+                        invitation_kind: InvitationFactKind::Contact,
+                        ..
+                    }
+            )
+        });
+        facts.extend(contact_link_facts.clone());
+        facts.extend(invitation_accepted_facts);
+    })
+    .await
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_readiness",
+    family = "authorizer"
+)]
+async fn publish_authoritative_contact_invitation_accepted(
+    app_core: &Arc<RwLock<AppCore>>,
+    authority_id: AuthorityId,
+) -> Result<(), AuraError> {
+    publish_authoritative_semantic_fact(
         app_core,
         aura_core::AuthorizedReadinessPublication::authorize(
             semantic_readiness_publication_capability(),
-            (
-                crate::ui_contract::AuthoritativeSemanticFactKind::ContactLinkReady,
-                replacements,
-            ),
+            AuthoritativeSemanticFact::InvitationAccepted {
+                invitation_kind: InvitationFactKind::Contact,
+                authority_id: Some(authority_id.to_string()),
+                operation_state: Some(OperationState::Succeeded),
+            },
         ),
     )
     .await
@@ -1286,23 +1494,48 @@ async fn reconcile_accepted_channel_invitation_authoritative(
         stage_tracker,
         "reconcile_channel_invitation:wait_for_runtime_channel_state",
     );
-    crate::workflows::messaging::wait_for_runtime_channel_state(
+    if !crate::workflows::messaging::runtime_channel_state_exists(runtime, authoritative_channel)
+        .await?
+    {
+        crate::workflows::messaging::wait_for_runtime_channel_state(
+            app_core,
+            runtime,
+            authoritative_channel,
+        )
+        .await?;
+    }
+    crate::workflows::messaging::publish_authoritative_channel_membership_ready(
         app_core,
-        runtime,
-        authoritative_channel,
+        local_channel_id,
+        channel_name_hint,
+        1,
     )
     .await?;
-    update_accept_reconcile_stage(
-        stage_tracker,
-        "reconcile_channel_invitation:refresh_channel_membership_readiness",
-    );
-    crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(app_core)
-        .await?;
-    update_accept_reconcile_stage(
-        stage_tracker,
-        "reconcile_channel_invitation:converge_runtime",
-    );
-    converge_runtime(runtime).await;
+    if let Ok(Some(resolved_context)) = timeout_runtime_call(
+        runtime,
+        "reconcile_accepted_channel_invitation_authoritative",
+        "resolve_amp_channel_context",
+        INVITATION_RUNTIME_QUERY_TIMEOUT,
+        || runtime.resolve_amp_channel_context(local_channel_id),
+    )
+    .await
+    .map_err(|error| super::error::runtime_call("resolve channel context", error))
+    .map(|result| {
+        result.map_err(|error| super::error::runtime_call("resolve channel context", error))
+    })
+    .unwrap_or_else(|_| Ok(None))
+    {
+        if resolved_context == authoritative_context {
+            update_accept_reconcile_stage(
+                stage_tracker,
+                "reconcile_channel_invitation:refresh_channel_membership_readiness",
+            );
+            crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(
+                app_core,
+            )
+            .await?;
+        }
+    }
     Ok(())
 }
 
@@ -1333,17 +1566,47 @@ pub async fn create_contact_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationHandle, AuraError> {
+    create_contact_invitation_with_instance(app_core, receiver, nickname, message, ttl_ms, None)
+        .await
+}
+
+/// Create a contact invitation while preserving a caller-owned semantic
+/// operation instance identity.
+pub async fn create_contact_invitation_with_instance(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    nickname: Option<String>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    operation_instance_id: Option<OperationInstanceId>,
+) -> Result<InvitationHandle, AuraError> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
-        None,
+        operation_instance_id,
         SemanticOperationKind::CreateContactInvitation,
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    let runtime = require_runtime(app_core).await?;
+    let invitation =
+        create_contact_invitation_runtime(app_core, receiver, nickname, message, ttl_ms).await?;
+    owner
+        .publish_success_with(issue_invitation_created_proof(
+            invitation.invitation_id.clone(),
+        ))
+        .await?;
+    Ok(InvitationHandle::new(invitation))
+}
 
-    let invitation = timeout_runtime_call(
+async fn create_contact_invitation_runtime(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    nickname: Option<String>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> Result<InvitationInfo, AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    timeout_runtime_call(
         &runtime,
         "create_contact_invitation",
         "create_contact_invitation",
@@ -1352,13 +1615,227 @@ pub async fn create_contact_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?
-    .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?;
-    owner
-        .publish_success_with(issue_invitation_created_proof(
-            invitation.invitation_id.clone(),
-        ))
-        .await?;
-    Ok(InvitationHandle::new(invitation))
+    .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))
+}
+
+fn command_terminal_error(detail: impl Into<String>) -> crate::ui_contract::SemanticOperationError {
+    crate::ui_contract::SemanticOperationError::new(
+        crate::ui_contract::SemanticFailureDomain::Command,
+        crate::ui_contract::SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into())
+}
+
+/// Typed frontend handoff facades for invitation workflows.
+pub mod handoff {
+    use super::*;
+
+    /// Inputs for the create-contact-invitation handoff workflow.
+    #[derive(Debug, Clone)]
+    pub struct CreateContactInvitationRequest {
+        /// The receiver authority for the invitation.
+        pub receiver: AuthorityId,
+        /// Optional nickname carried in the invitation payload.
+        pub nickname: Option<String>,
+        /// Optional invitation message.
+        pub message: Option<String>,
+        /// Optional invitation TTL in milliseconds.
+        pub ttl_ms: Option<u64>,
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
+    /// Inputs for the create-guardian-invitation handoff workflow.
+    #[derive(Debug, Clone)]
+    pub struct CreateGuardianInvitationRequest {
+        /// The receiver authority for the invitation.
+        pub receiver: AuthorityId,
+        /// The subject authority the guardian protects.
+        pub subject: AuthorityId,
+        /// Optional invitation message.
+        pub message: Option<String>,
+        /// Optional invitation TTL in milliseconds.
+        pub ttl_ms: Option<u64>,
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
+    /// Inputs for accepting a freshly imported invitation.
+    #[derive(Debug)]
+    pub struct AcceptImportedInvitationRequest {
+        /// Imported invitation handle returned by the runtime.
+        pub invitation: InvitationHandle,
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
+    /// Inputs for invitation actions that address an existing invitation id.
+    #[derive(Debug, Clone)]
+    pub struct InvitationByIdRequest {
+        /// Canonical invitation identifier.
+        pub invitation_id: String,
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
+    /// Inputs for accepting the current pending home invitation.
+    #[derive(Debug, Clone, Default)]
+    pub struct PendingHomeInvitationRequest {
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
+    /// Create and export a contact invitation as one typed handoff workflow.
+    pub async fn create_contact_invitation(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: CreateContactInvitationRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+        super::create_contact_invitation_code_with_terminal_status(
+            app_core,
+            request.receiver,
+            request.nickname,
+            request.message,
+            request.ttl_ms,
+            request.operation_instance_id,
+        )
+        .await
+    }
+
+    /// Create a guardian invitation as one typed handoff workflow.
+    pub async fn create_guardian_invitation(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: CreateGuardianInvitationRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationHandle> {
+        super::create_guardian_invitation_with_terminal_status(
+            app_core,
+            request.receiver,
+            request.subject,
+            request.message,
+            request.ttl_ms,
+            request.operation_instance_id,
+        )
+        .await
+    }
+
+    /// Accept a previously imported invitation handle.
+    pub async fn accept_imported_invitation(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: AcceptImportedInvitationRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
+        super::accept_imported_invitation_with_terminal_status(
+            app_core,
+            request.invitation,
+            request.operation_instance_id,
+        )
+        .await
+    }
+
+    /// Accept a pending invitation by its canonical id.
+    pub async fn accept_invitation_by_id(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: InvitationByIdRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationInfo> {
+        super::accept_invitation_by_str_with_terminal_status(
+            app_core,
+            &request.invitation_id,
+            request.operation_instance_id,
+        )
+        .await
+    }
+
+    /// Decline a pending invitation by its canonical id.
+    pub async fn decline_invitation_by_id(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: InvitationByIdRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
+        super::decline_invitation_by_str_with_terminal_status(
+            app_core,
+            &request.invitation_id,
+            request.operation_instance_id,
+        )
+        .await
+    }
+
+    /// Export an existing invitation code by canonical id.
+    pub async fn export_invitation_by_id(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: InvitationByIdRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+        super::export_invitation_by_str_with_terminal_status(
+            app_core,
+            &request.invitation_id,
+            request.operation_instance_id,
+        )
+        .await
+    }
+
+    /// Revoke an existing invitation by canonical id.
+    pub async fn cancel_invitation_by_id(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: InvitationByIdRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
+        super::cancel_invitation_by_str_with_terminal_status(
+            app_core,
+            &request.invitation_id,
+            request.operation_instance_id,
+        )
+        .await
+    }
+
+    /// Accept the current pending home invitation.
+    pub async fn accept_pending_home_invitation(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: PendingHomeInvitationRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationId> {
+        super::accept_pending_home_invitation_with_terminal_status(
+            app_core,
+            request.operation_instance_id,
+        )
+        .await
+    }
+}
+
+/// Create and export a contact invitation code as one typed terminal operation.
+pub async fn create_contact_invitation_code_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    nickname: Option<String>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_create(),
+        instance_id,
+        SemanticOperationKind::CreateContactInvitation,
+    );
+    let result: Result<String, AuraError> = async {
+        publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let invitation =
+            create_contact_invitation_runtime(app_core, receiver, nickname, message, ttl_ms)
+                .await?;
+        let code = export_invitation_runtime(app_core, &invitation.invitation_id).await?;
+        owner
+            .publish_success_with(issue_invitation_created_proof(
+                invitation.invitation_id.clone(),
+            ))
+            .await?;
+        Ok(code)
+    }
+    .await;
+
+    if let Err(error) = &result {
+        let _ = owner
+            .publish_failure(command_terminal_error(error.to_string()))
+            .await;
+    }
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
 }
 
 /// Create a guardian invitation
@@ -1373,10 +1850,24 @@ pub async fn create_guardian_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationHandle, AuraError> {
+    create_guardian_invitation_with_instance(app_core, receiver, subject, message, ttl_ms, None)
+        .await
+}
+
+/// Create a guardian invitation while preserving a caller-owned semantic
+/// operation instance identity.
+pub async fn create_guardian_invitation_with_instance(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    subject: AuthorityId,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    operation_instance_id: Option<OperationInstanceId>,
+) -> Result<InvitationHandle, AuraError> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
-        None,
+        operation_instance_id,
         SemanticOperationKind::CreateContactInvitation,
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
@@ -1399,6 +1890,53 @@ pub async fn create_guardian_invitation(
         ))
         .await?;
     Ok(InvitationHandle::new(invitation))
+}
+
+/// Create a guardian invitation and return the directly-settled terminal
+/// status for frontend handoff consumers.
+pub async fn create_guardian_invitation_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    subject: AuthorityId,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    operation_instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationHandle> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_create(),
+        operation_instance_id.clone(),
+        SemanticOperationKind::CreateGuardianInvitation,
+    );
+    let result: Result<InvitationHandle, AuraError> = async {
+        publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let runtime = require_runtime(app_core).await?;
+        let invitation = timeout_runtime_call(
+            &runtime,
+            "create_guardian_invitation",
+            "create_guardian_invitation",
+            INVITATION_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.create_guardian_invitation(receiver, subject, message, ttl_ms),
+        )
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("create guardian invitation", e)))?
+        .map_err(|e| {
+            AuraError::from(super::error::runtime_call("create guardian invitation", e))
+        })?;
+        owner
+            .publish_success_with(issue_invitation_created_proof(
+                invitation.invitation_id.clone(),
+            ))
+            .await?;
+        Ok(InvitationHandle::new(invitation))
+    }
+    .await;
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
 }
 
 /// Create a channel invitation
@@ -1438,11 +1976,23 @@ pub async fn create_channel_invitation(
         message,
         ttl_ms,
         true,
+        None,
     )
     .await
     .map(InvitationHandle::new)
 }
 
+#[aura_macros::semantic_owner(
+    owner = "create_channel_invitation",
+    wrapper = "create_channel_invitation",
+    terminal = "publish_success_with",
+    postcondition = "invitation_created",
+    proof = crate::workflows::semantic_facts::InvitationCreatedProof,
+    authoritative_inputs = "runtime,authoritative_source",
+    depends_on = "context_and_bootstrap_ready",
+    child_ops = "",
+    category = "move_owned"
+)]
 pub(in crate::workflows) async fn create_channel_invitation_owned(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
@@ -1456,9 +2006,12 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
     message: Option<String>,
     ttl_ms: Option<u64>,
     publish_terminal: bool,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
 ) -> Result<InvitationInfo, AuraError> {
-    let stage_tracker = external_stage_tracker
-        .or_else(|| Some(new_workflow_stage_tracker("require_runtime")));
+    let stage_tracker =
+        external_stage_tracker.or_else(|| Some(new_workflow_stage_tracker("require_runtime")));
     let channel_id = home_id.parse::<ChannelId>().map_err(|_| {
         AuraError::from(ChannelInvitationBootstrapError::InvalidCanonicalChannelId {
             raw: home_id.clone(),
@@ -1709,18 +2262,7 @@ pub async fn export_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &InvitationId,
 ) -> Result<String, AuraError> {
-    let runtime = require_runtime(app_core).await?;
-
-    let code = timeout_runtime_call(
-        &runtime,
-        "export_invitation",
-        "export_invitation",
-        INVITATION_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.export_invitation(invitation_id.as_str()),
-    )
-    .await
-    .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?
-    .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?;
+    let code = export_invitation_runtime(app_core, invitation_id).await?;
     SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
@@ -1738,6 +2280,62 @@ pub async fn export_invitation_by_str(
     invitation_id: &str,
 ) -> Result<String, AuraError> {
     export_invitation(app_core, &InvitationId::new(invitation_id)).await
+}
+
+/// Export an invitation by string ID with typed terminal status publication.
+pub async fn export_invitation_by_str_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_export(),
+        instance_id,
+        SemanticOperationKind::ExportInvitation,
+    );
+    let result: Result<String, AuraError> = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let invitation_id = InvitationId::new(invitation_id);
+        let code = export_invitation_runtime(app_core, &invitation_id).await?;
+        owner
+            .publish_success_with(issue_invitation_exported_proof(invitation_id))
+            .await?;
+        Ok(code)
+    }
+    .await;
+
+    if let Err(error) = &result {
+        if owner.terminal_status().await.is_none() {
+            let _ = owner
+                .publish_failure(command_terminal_error(error.to_string()))
+                .await;
+        }
+    }
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
+async fn export_invitation_runtime(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &InvitationId,
+) -> Result<String, AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    timeout_runtime_call(
+        &runtime,
+        "export_invitation",
+        "export_invitation",
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.export_invitation(invitation_id.as_str()),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?
+    .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))
 }
 
 /// Get current invitations state
@@ -1767,6 +2365,7 @@ pub async fn accept_invitation(
 
 #[aura_macros::semantic_owner(
     owner = "invitation_accept_id_owned",
+    wrapper = "accept_invitation_with_instance",
     terminal = "publish_success_with",
     postcondition = "invitation_accepted_or_materialized",
     proof = crate::workflows::semantic_facts::InvitationAcceptedOrMaterializedProof,
@@ -1841,23 +2440,32 @@ async fn accept_invitation_id_owned(
         }
     }
 
+    let contact_peer = (owner.kind() == SemanticOperationKind::AcceptContactInvitation)
+        .then(|| {
+            accepted_invitation
+                .as_ref()
+                .map(|invitation| invitation.from_id)
+                .or_else(|| {
+                    pending_runtime_invitation.as_ref().and_then(|invitation| {
+                        if matches!(
+                            invitation.invitation_type,
+                            InvitationBridgeType::Contact { .. }
+                        ) {
+                            Some(invitation.sender_id)
+                        } else {
+                            None
+                        }
+                    })
+                })
+        })
+        .flatten();
     trigger_runtime_discovery_with_timeout(&runtime).await;
-    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime).await {
+    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime, contact_peer).await
+    {
         return fail_invitation_accept(owner, error).await;
     }
 
-    if pending_runtime_invitation
-        .as_ref()
-        .is_some_and(|invitation| {
-            matches!(
-                invitation.invitation_type,
-                InvitationBridgeType::Contact { .. }
-            )
-        })
-        || accepted_invitation.as_ref().is_some_and(|invitation| {
-            invitation.invitation_type == crate::views::invitations::InvitationType::Home
-        })
-    {
+    if owner.kind() == SemanticOperationKind::AcceptContactInvitation {
         let contact_id = accepted_invitation
             .as_ref()
             .map(|invitation| invitation.from_id)
@@ -1874,24 +2482,49 @@ async fn accept_invitation_id_owned(
                 })
             });
         if let Some(contact_id) = contact_id {
-            if let Err(error) = wait_for_contact_link(app_core, &runtime, contact_id).await {
-                return fail_invitation_accept(owner, error).await;
+            // Terminal success reflects accepted invitation ownership.
+            // Contact-link materialization can lag and is observed separately
+            // via readiness/runtime signals and refresh hooks.
+            if let Err(error) = refresh_authoritative_contact_link_readiness(app_core).await {
+                return fail_invitation_accept(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "contact invitation readiness refresh failed for {contact_id}: {error}"
+                        ),
+                    },
+                )
+                .await;
             }
-            let contact_count = contacts_signal_snapshot(app_core)
-                .await
-                .map_err(|error| AcceptInvitationError::AcceptFailed {
-                    detail: error.to_string(),
-                })?
-                .contact_count() as u32;
-            publish_contact_accept_success_for_owner(
-                owner,
-                issue_invitation_accepted_or_materialized_proof(invitation_id.clone()),
-                contact_id,
-                contact_count,
-            )
-            .await?;
+            if let Err(error) =
+                publish_authoritative_contact_invitation_accepted(app_core, contact_id).await
+            {
+                return fail_invitation_accept(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "contact invitation authoritative publish failed for {contact_id}: {error}"
+                        ),
+                    },
+                )
+                .await;
+            }
+            owner
+                .publish_success_with(issue_invitation_accepted_or_materialized_proof(
+                    invitation_id.clone(),
+                ))
+                .await?;
             return Ok(());
         }
+        return fail_invitation_accept(
+            owner,
+            AcceptInvitationError::AcceptFailed {
+                detail: format!(
+                    "contact invitation {invitation_id} completed without an authoritative contact id"
+                ),
+            },
+        )
+        .await;
     } else if let Some((channel_id, context_hint, channel_name_hint)) = pending_runtime_invitation
         .as_ref()
         .and_then(|invitation| match &invitation.invitation_type {
@@ -1930,11 +2563,54 @@ async fn accept_invitation_id_owned(
         {
             return fail_invitation_accept(owner, error).await;
         }
-        owner
-            .publish_success_with(issue_invitation_accepted_or_materialized_proof(
-                invitation_id.clone(),
-            ))
-            .await?;
+        #[cfg(feature = "signals")]
+        {
+            if let Err(error) =
+                crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(
+                    app_core,
+                )
+                .await
+            {
+                return fail_invitation_accept(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: error.to_string(),
+                    },
+                )
+                .await;
+            }
+            let membership_proof = match prove_channel_membership_ready(app_core, channel_id).await
+            {
+                Ok(proof) => proof,
+                Err(error) => {
+                    return fail_invitation_accept(
+                            owner,
+                            AcceptInvitationError::AcceptFailed {
+                                detail: format!(
+                                    "channel invitation accept missing membership readiness for {channel_id}: {error}"
+                                ),
+                            },
+                        )
+                        .await;
+                }
+            };
+            owner.publish_success_with(membership_proof).await?;
+            run_post_channel_accept_followups(
+                app_core,
+                channel_id,
+                context_hint,
+                channel_name_hint.map(ToOwned::to_owned),
+            )
+            .await;
+        }
+        #[cfg(not(feature = "signals"))]
+        {
+            owner
+                .publish_success_with(issue_invitation_accepted_or_materialized_proof(
+                    invitation_id.clone(),
+                ))
+                .await?;
+        }
         return Ok(());
     }
 
@@ -2005,6 +2681,7 @@ pub async fn accept_imported_invitation(
 
 #[aura_macros::semantic_owner(
     owner = "accept_imported_invitation_owned",
+    wrapper = "accept_imported_invitation_with_instance",
     terminal = "publish_success_with",
     postcondition = "invitation_accepted_or_materialized",
     proof = crate::workflows::semantic_facts::InvitationAcceptedOrMaterializedProof,
@@ -2021,6 +2698,34 @@ async fn accept_imported_invitation_owned(
         &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
     >,
 ) -> Result<(), AuraError> {
+    match accept_imported_invitation_inner(app_core, invitation, owner).await? {
+        #[cfg(feature = "signals")]
+        Some(channel_id) => {
+            let membership_proof = prove_channel_membership_ready(app_core, channel_id).await?;
+            owner.publish_success_with(membership_proof).await?;
+        }
+        #[cfg(not(feature = "signals"))]
+        Some(_) => unreachable!("channel membership proofs are only issued with signals"),
+        None => {
+            owner
+                .publish_success_with(issue_invitation_accepted_or_materialized_proof(
+                    invitation.invitation_id.clone(),
+                ))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn accept_imported_invitation_inner(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation: &crate::runtime_bridge::InvitationInfo,
+    owner: &SemanticWorkflowOwner,
+) -> Result<Option<ChannelId>, AuraError> {
+    let contact_probe = matches!(
+        invitation.invitation_type,
+        crate::runtime_bridge::InvitationBridgeType::Contact { .. }
+    );
     if matches!(
         invitation.invitation_type,
         crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. }
@@ -2036,13 +2741,22 @@ async fn accept_imported_invitation_owned(
         .await;
     }
 
+    if contact_probe {
+        emit_contact_accept_probe("require_runtime");
+    }
     let runtime = require_runtime(app_core).await?;
 
+    if contact_probe {
+        emit_contact_accept_probe("accept_budget");
+    }
     let accept_budget =
         match invitation_accept_timeout_budget(&runtime, Some(invitation), None).await {
             Ok(budget) => budget,
             Err(error) => return fail_invitation_accept(owner, error).await,
         };
+    if contact_probe {
+        emit_contact_accept_probe("runtime_accept");
+    }
     let accept_result = execute_with_runtime_timeout_budget(&runtime, &accept_budget, || {
         runtime.accept_invitation(invitation.invitation_id.as_str())
     })
@@ -2075,39 +2789,59 @@ async fn accept_imported_invitation_owned(
         }
     }
 
+    if contact_probe {
+        emit_contact_accept_probe("post_accept_discovery");
+    }
     trigger_runtime_discovery_with_timeout(&runtime).await;
-    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime).await {
+    if contact_probe {
+        emit_contact_accept_probe("post_accept_convergence");
+    }
+    let contact_peer = matches!(
+        invitation.invitation_type,
+        crate::runtime_bridge::InvitationBridgeType::Contact { .. }
+    )
+    .then_some(invitation.sender_id);
+    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime, contact_peer).await
+    {
         return fail_invitation_accept(owner, error).await;
     }
 
     match &invitation.invitation_type {
         crate::runtime_bridge::InvitationBridgeType::Contact { .. } => {
-            if let Err(error) =
-                wait_for_contact_link(app_core, &runtime, invitation.sender_id).await
-            {
-                return fail_invitation_accept(owner, error).await;
+            emit_contact_accept_probe("refresh_contact_readiness");
+            // Imported contact acceptance should settle terminal status once
+            // the accept itself succeeds. Contact-link materialization follows
+            // via normal convergence and authoritative readiness hooks.
+            if let Err(error) = refresh_authoritative_contact_link_readiness(app_core).await {
+                return fail_invitation_accept(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "imported contact invitation readiness refresh failed for {}: {error}",
+                            invitation.sender_id
+                        ),
+                    },
+                )
+                .await;
             }
-            let contacts = match contacts_signal_snapshot(app_core).await {
-                Ok(contacts) => contacts,
-                Err(error) => {
-                    return fail_invitation_accept(
-                        owner,
-                        AcceptInvitationError::AcceptFailed {
-                            detail: error.to_string(),
-                        },
-                    )
-                    .await;
-                }
-            };
-            let contact_count = contacts.contact_count() as u32;
-            publish_contact_accept_success_for_owner(
-                owner,
-                issue_invitation_accepted_or_materialized_proof(invitation.invitation_id.clone()),
-                invitation.sender_id,
-                contact_count,
-            )
-            .await?;
-            return Ok(());
+            if let Err(error) =
+                publish_authoritative_contact_invitation_accepted(app_core, invitation.sender_id)
+                    .await
+            {
+                return fail_invitation_accept(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "imported contact invitation authoritative publish failed for {}: {error}",
+                            invitation.sender_id
+                        ),
+                    },
+                )
+                .await;
+            }
+            emit_contact_accept_probe("publish_success");
+            emit_contact_accept_probe("done");
+            return Ok(None);
         }
         crate::runtime_bridge::InvitationBridgeType::Channel {
             home_id,
@@ -2143,24 +2877,41 @@ async fn accept_imported_invitation_owned(
             {
                 return fail_invitation_accept(owner, error).await;
             }
-            owner
-                .publish_success_with(issue_invitation_accepted_or_materialized_proof(
-                    invitation.invitation_id.clone(),
-                ))
-                .await?;
-            return Ok(());
+            #[cfg(feature = "signals")]
+            {
+                if let Err(error) =
+                    crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(
+                        app_core,
+                    )
+                    .await
+                {
+                    return fail_invitation_accept(
+                        owner,
+                        AcceptInvitationError::AcceptFailed {
+                            detail: error.to_string(),
+                        },
+                    )
+                    .await;
+                }
+                run_post_channel_accept_followups(
+                    app_core,
+                    channel_id,
+                    *context_id,
+                    nickname_suggestion.clone(),
+                )
+                .await;
+                return Ok(Some(channel_id));
+            }
+            #[cfg(not(feature = "signals"))]
+            {
+                return Ok(None);
+            }
         }
         crate::runtime_bridge::InvitationBridgeType::Guardian { .. } => {}
         crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => unreachable!(),
     }
 
-    owner
-        .publish_success_with(issue_invitation_accepted_or_materialized_proof(
-            invitation.invitation_id.clone(),
-        ))
-        .await?;
-
-    Ok(())
+    Ok(None)
 }
 
 /// Accept an imported invitation and attribute the semantic operation to a specific UI instance.
@@ -2180,6 +2931,43 @@ pub async fn accept_imported_invitation_with_instance(
         .await?;
     let invitation = invitation.into_info();
     accept_imported_invitation_owned(app_core, &invitation, &owner, None).await
+}
+
+/// Accept an imported invitation and return the directly-settled terminal
+/// status for frontend handoff consumers.
+pub async fn accept_imported_invitation_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation: InvitationHandle,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
+    let operation_kind = semantic_kind_for_bridge_invitation(invitation.info());
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_accept(),
+        instance_id.clone(),
+        operation_kind,
+    );
+    let result: Result<(), AuraError> = async {
+        if operation_kind == SemanticOperationKind::AcceptContactInvitation {
+            emit_contact_accept_probe("publish_workflow_dispatched");
+        }
+        publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let invitation = invitation.into_info();
+        if matches!(
+            invitation.invitation_type,
+            crate::runtime_bridge::InvitationBridgeType::Contact { .. }
+        ) {
+            emit_contact_accept_probe("owned_start");
+        }
+        accept_imported_invitation_owned(app_core, &invitation, &owner, None).await
+    }
+    .await;
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
 }
 
 /// Accept a device-enrollment invitation and wait for the local device view to converge.
@@ -2205,6 +2993,16 @@ pub async fn accept_device_enrollment_invitation(
     };
 
     let runtime = require_runtime(app_core).await?;
+    log_device_enrollment_accept_progress(format!(
+        "start invitation_id={};authority={}",
+        invitation.invitation_id,
+        runtime.authority_id()
+    ));
+    prime_device_enrollment_accept_connectivity(app_core, &runtime).await;
+    log_device_enrollment_accept_progress(format!(
+        "connectivity preflight complete invitation_id={}",
+        invitation.invitation_id
+    ));
     let accept_result = timeout_runtime_call(
         &runtime,
         "accept_device_enrollment_invitation",
@@ -2227,7 +3025,15 @@ pub async fn accept_device_enrollment_invitation(
         )
         .await;
     }
+    log_device_enrollment_accept_progress(format!(
+        "accept_invitation returned invitation_id={}",
+        invitation.invitation_id
+    ));
     converge_runtime(&runtime).await;
+    log_device_enrollment_accept_progress(format!(
+        "initial converge_runtime complete invitation_id={}",
+        invitation.invitation_id
+    ));
 
     let expected_min_devices = 2_usize;
     let policy = device_enrollment_accept_retry_policy()?;
@@ -2245,6 +3051,9 @@ pub async fn accept_device_enrollment_invitation(
             };
             #[cfg(not(feature = "instrumented"))]
             let _ = &invitation_id;
+            log_device_enrollment_accept_progress(format!(
+                "convergence attempt={attempt} invitation_id={invitation_id}"
+            ));
 
             if let Err(error) = timeout_runtime_call(
                 &runtime,
@@ -2261,6 +3070,9 @@ pub async fn accept_device_enrollment_invitation(
                     "device enrollment ceremony processing failed during convergence: {error}"
                 )));
             }
+            log_device_enrollment_accept_progress(format!(
+                "process_ceremony_messages ok attempt={attempt} invitation_id={invitation_id}"
+            ));
 
             converge_runtime(&runtime).await;
             if let Err(error) = settings::refresh_settings_from_runtime(app_core).await {
@@ -2292,6 +3104,9 @@ pub async fn accept_device_enrollment_invitation(
                 Ok(settings) => settings.devices.len(),
                 Err(error) => break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(error)),
             };
+            log_device_enrollment_accept_progress(format!(
+                "counts attempt={attempt} invitation_id={invitation_id} runtime_devices={runtime_device_count} settings_devices={settings_device_count} expected_min_devices={expected_min_devices}"
+            ));
             #[cfg(feature = "instrumented")]
             tracing::info!(
                 invitation_id = %invitation_id,
@@ -2305,6 +3120,9 @@ pub async fn accept_device_enrollment_invitation(
                 || settings_device_count >= expected_min_devices
             {
                 settings::refresh_settings_from_runtime(app_core).await?;
+                log_device_enrollment_accept_progress(format!(
+                    "converged attempt={attempt} invitation_id={invitation_id}"
+                ));
                 if let Err(_error) =
                     ensure_runtime_peer_connectivity(&runtime, "device_enrollment_accept").await
                 {
@@ -2339,6 +3157,7 @@ pub async fn accept_device_enrollment_invitation(
     };
     match enrollment_result {
         Ok(()) => {
+            log_device_enrollment_accept_progress(format!("success invitation_id={invitation_id}"));
             owner
                 .publish_success_with(issue_device_enrollment_imported_proof(invitation_id))
                 .await?;
@@ -2371,9 +3190,65 @@ pub async fn accept_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<InvitationInfo, AuraError> {
+    accept_invitation_by_str_with_instance(app_core, invitation_id, None).await
+}
+
+/// Accept an invitation by string ID while preserving a caller-owned semantic
+/// operation instance identity.
+pub async fn accept_invitation_by_str_with_instance(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> Result<InvitationInfo, AuraError> {
     let invitation = pending_invitation_info_by_id(app_core, invitation_id).await?;
-    accept_invitation(app_core, InvitationHandle::new(invitation.clone())).await?;
+    accept_invitation_with_instance(
+        app_core,
+        InvitationHandle::new(invitation.clone()),
+        instance_id,
+    )
+    .await?;
     Ok(invitation)
+}
+
+/// Accept an existing pending invitation and return the directly-settled
+/// terminal status for frontend handoff consumers.
+pub async fn accept_invitation_by_str_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationInfo> {
+    let prefetched = pending_invitation_info_by_id(app_core, invitation_id).await;
+    let kind = prefetched
+        .as_ref()
+        .map(semantic_kind_for_bridge_invitation)
+        .unwrap_or(SemanticOperationKind::AcceptContactInvitation);
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_accept(),
+        instance_id,
+        kind,
+    );
+    let result: Result<InvitationInfo, AuraError> = async {
+        publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let invitation = prefetched?;
+        accept_invitation_id_owned(app_core, &invitation.invitation_id, &owner, None).await?;
+        Ok(invitation)
+    }
+    .await;
+
+    if let Err(error) = &result {
+        if owner.terminal_status().await.is_none() {
+            let _ = owner
+                .publish_failure(command_terminal_error(error.to_string()))
+                .await;
+        }
+    }
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
 }
 
 /// Decline an invitation using typed InvitationId
@@ -2409,6 +3284,45 @@ pub async fn decline_invitation_by_str(
     decline_invitation(app_core, InvitationHandle::new(invitation)).await
 }
 
+/// Decline an invitation by string ID with typed terminal status publication.
+pub async fn decline_invitation_by_str_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_decline(),
+        instance_id,
+        SemanticOperationKind::DeclineInvitation,
+    );
+    let result: Result<(), AuraError> = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let invitation_id = InvitationId::new(invitation_id);
+        decline_invitation_by_str(app_core, invitation_id.as_str()).await?;
+        owner
+            .publish_success_with(issue_invitation_declined_proof(invitation_id))
+            .await?;
+        Ok(())
+    }
+    .await;
+
+    if let Err(error) = &result {
+        if owner.terminal_status().await.is_none() {
+            let _ = owner
+                .publish_failure(command_terminal_error(error.to_string()))
+                .await;
+        }
+    }
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
 /// Cancel an invitation using typed InvitationId
 ///
 /// **What it does**: Cancels a sent invitation via RuntimeBridge
@@ -2442,6 +3356,45 @@ pub async fn cancel_invitation_by_str(
     cancel_invitation(app_core, InvitationHandle::new(invitation)).await
 }
 
+/// Cancel an invitation by string ID with typed terminal status publication.
+pub async fn cancel_invitation_by_str_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_revoke(),
+        instance_id,
+        SemanticOperationKind::RevokeInvitation,
+    );
+    let result: Result<(), AuraError> = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let invitation_id = InvitationId::new(invitation_id);
+        cancel_invitation_by_str(app_core, invitation_id.as_str()).await?;
+        owner
+            .publish_success_with(issue_invitation_revoked_proof(invitation_id))
+            .await?;
+        Ok(())
+    }
+    .await;
+
+    if let Err(error) = &result {
+        if owner.terminal_status().await.is_none() {
+            let _ = owner
+                .publish_failure(command_terminal_error(error.to_string()))
+                .await;
+        }
+    }
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
 /// Import an invitation from a shareable code
 ///
 /// **What it does**: Parses and validates invite code via RuntimeBridge
@@ -2464,8 +3417,14 @@ pub async fn import_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))?
-    .map(|_| ()) // Discard InvitationInfo, just return success
-    .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
+    .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))?;
+
+    if let Err(_error) = crate::workflows::system::refresh_account(app_core).await {
+        #[cfg(feature = "instrumented")]
+        tracing::debug!(error = %_error, "refresh_account after invitation import failed");
+    }
+
+    refresh_authoritative_invitation_readiness(app_core).await
 }
 
 async fn wait_for_contact_link(
@@ -2665,7 +3624,17 @@ pub async fn accept_pending_home_invitation(
     accept_pending_home_invitation_with_instance(app_core, None).await
 }
 
-// OWNERSHIP: authoritative-source
+#[aura_macros::semantic_owner(
+    owner = "accept_pending_home_invitation_id_owned",
+    wrapper = "accept_pending_home_invitation_with_instance",
+    terminal = "publish_success_with",
+    postcondition = "pending_invitation_consumed",
+    proof = crate::workflows::semantic_facts::PendingInvitationConsumedProof,
+    authoritative_inputs = "runtime,authoritative_source",
+    depends_on = "runtime_accept_converged,invitation_accepted_or_materialized",
+    child_ops = "accept_imported_invitation",
+    category = "move_owned"
+)]
 async fn accept_pending_home_invitation_id_owned(
     app_core: &Arc<RwLock<AppCore>>,
     owner: &SemanticWorkflowOwner,
@@ -2675,19 +3644,20 @@ async fn accept_pending_home_invitation_id_owned(
     >,
 ) -> Result<InvitationId, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let pending_invitation = match authoritative_pending_home_or_channel_invitation(&runtime).await
-    {
-        Ok(invitation) => invitation,
-        Err(error) => {
-            return fail_pending_invitation_accept_owned(
-                owner,
-                AcceptInvitationError::AcceptFailed {
-                    detail: error.to_string(),
-                },
-            )
-            .await;
-        }
-    };
+    let pending_invitation =
+        match authoritative_pending_home_or_channel_invitation_for_accept(app_core, &runtime).await
+        {
+            Ok(invitation) => invitation,
+            Err(error) => {
+                return fail_pending_invitation_accept_owned(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: error.to_string(),
+                    },
+                )
+                .await;
+            }
+        };
 
     let Some(invitation) = pending_invitation else {
         return fail_pending_invitation_accept_owned(
@@ -2700,7 +3670,12 @@ async fn accept_pending_home_invitation_id_owned(
     };
 
     let invitation_id = invitation.invitation_id.clone();
-    accept_imported_invitation_owned(app_core, &invitation, owner, None).await?;
+    let _ = accept_imported_invitation_inner(app_core, &invitation, owner).await?;
+    owner
+        .publish_success_with(issue_pending_invitation_consumed_proof(
+            invitation_id.clone(),
+        ))
+        .await?;
     Ok(invitation_id)
 }
 
@@ -2789,6 +3764,37 @@ async fn pending_channel_binding_witness(
     ))
 }
 
+#[cfg(feature = "signals")]
+async fn run_post_channel_accept_followups(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_hint: Option<ContextId>,
+    channel_name_hint: Option<String>,
+) {
+    let authoritative_context = match context_hint {
+        Some(context_id) => Some(context_id),
+        None => {
+            crate::workflows::messaging::resolve_authoritative_context_id_for_channel(
+                app_core, channel_id,
+            )
+            .await
+        }
+    };
+    let Some(context_id) = authoritative_context else {
+        return;
+    };
+
+    let mut best_effort = workflow_best_effort();
+    let _ = best_effort
+        .capture(crate::workflows::messaging::post_terminal_join_followups(
+            app_core,
+            crate::workflows::messaging::authoritative_channel_ref(channel_id, context_id),
+            channel_name_hint.as_deref(),
+        ))
+        .await;
+    let _ = best_effort.finish();
+}
+
 /// Accept the current pending channel invitation and return the settled
 /// invitation id plus the authoritative channel selection/binding witness.
 pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
@@ -2808,7 +3814,9 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
 
         let runtime = require_runtime(app_core).await?;
         let pending_invitation =
-            match authoritative_pending_home_or_channel_invitation(&runtime).await {
+            match authoritative_pending_home_or_channel_invitation_for_accept(app_core, &runtime)
+                .await
+            {
                 Ok(invitation) => invitation,
                 Err(error) => {
                     return fail_pending_invitation_accept_owned(
@@ -2861,6 +3869,13 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
         Ok(crate::ui_contract::AcceptedPendingChannelBinding {
             invitation_id: invitation_id.to_string(),
             binding,
+            channel_name: match &pending_invitation.invitation_type {
+                crate::runtime_bridge::InvitationBridgeType::Channel {
+                    nickname_suggestion,
+                    ..
+                } => nickname_suggestion.clone(),
+                _ => None,
+            },
         })
     }
     .await;
@@ -2875,17 +3890,64 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
 mod tests {
     use super::*;
     use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
-    use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain};
+    use crate::ui_contract::{
+        SemanticFailureCode, SemanticFailureDomain, SemanticOperationKind, SemanticOperationPhase,
+    };
     use crate::views::invitations::InvitationType;
     #[cfg(feature = "signals")]
     use crate::workflows::messaging::apply_authoritative_membership_projection;
-    use crate::workflows::semantic_facts::{
-        assert_terminal_failure_status,
-    };
+    use crate::workflows::semantic_facts::assert_terminal_failure_status;
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
+    use std::{fs, path::PathBuf};
 
     // === Invitation Role Parsing Tests ===
+
+    #[test]
+    fn accept_pending_home_invitation_owned_boundary_is_declared_and_wrapped() {
+        let source = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/workflows/invitation.rs"),
+        )
+        .expect("invitation workflow source should be readable");
+
+        assert!(source.contains("owner = \"accept_pending_home_invitation_id_owned\""));
+        assert!(source.contains("async fn accept_pending_home_invitation_id_owned("));
+        assert!(source.contains(
+            "let _ = accept_imported_invitation_inner(app_core, &invitation, owner).await?;"
+        ));
+        assert!(source.contains("issue_pending_invitation_consumed_proof("));
+    }
+
+    #[test]
+    fn accept_imported_invitation_owned_boundary_preserves_wrapper_and_inner_split() {
+        let source = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/workflows/invitation.rs"),
+        )
+        .expect("invitation workflow source should be readable");
+
+        assert!(source.contains("owner = \"accept_imported_invitation_owned\""));
+        assert!(source.contains("async fn accept_imported_invitation_owned("));
+        assert!(source.contains("async fn accept_imported_invitation_inner("));
+        assert!(source.contains(
+            "match accept_imported_invitation_inner(app_core, invitation, owner).await? {"
+        ));
+        assert!(source.contains(
+            "accept_imported_invitation_owned(app_core, &invitation, &owner, None).await"
+        ));
+    }
+
+    #[test]
+    fn create_channel_invitation_owned_boundary_is_declared() {
+        let source = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/workflows/invitation.rs"),
+        )
+        .expect("invitation workflow source should be readable");
+
+        assert!(source.contains("owner = \"create_channel_invitation\""));
+        assert!(source.contains("async fn create_channel_invitation_owned("));
+        assert!(source
+            .contains("owner\n            .publish_success_with(issue_invitation_created_proof("));
+    }
 
     #[test]
     fn test_parse_invitation_role_guardian() -> Result<(), InvitationRoleParseError> {
@@ -3162,7 +4224,7 @@ mod tests {
             message: None,
         }]);
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -3177,10 +4239,9 @@ mod tests {
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         assert!(
-            !facts.iter().any(|fact| matches!(
-                fact,
-                AuthoritativeSemanticFact::PendingHomeInvitationReady
-            )),
+            !facts
+                .iter()
+                .any(|fact| matches!(fact, AuthoritativeSemanticFact::PendingHomeInvitationReady)),
             "sent channel invites for the current authority must not advertise accept-pending readiness"
         );
     }
@@ -3191,7 +4252,64 @@ mod tests {
         let error = refresh_authoritative_invitation_readiness(&app_core)
             .await
             .expect_err("authoritative invitation readiness requires runtime");
-        assert!(matches!(error, AuraError::PermissionDenied { .. }));
+        assert!(matches!(error, AuraError::Internal { .. }));
+        assert!(
+            error.to_string().contains("Runtime bridge not available"),
+            "expected explicit missing-runtime failure, got: {error}"
+        );
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn refresh_authoritative_invitation_readiness_uses_signal_pending_channel_invitation_when_runtime_snapshot_is_empty(
+    ) {
+        let authority = AuthorityId::new_from_entropy([165u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        runtime.set_pending_invitations(Vec::new());
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        emit_signal(
+            &app_core,
+            &*INVITATIONS_SIGNAL,
+            crate::views::invitations::InvitationsState::from_parts(
+                vec![crate::views::invitations::Invitation {
+                    id: "signal-pending-channel".to_string(),
+                    invitation_type: crate::views::invitations::InvitationType::Chat,
+                    status: crate::views::invitations::InvitationStatus::Pending,
+                    direction: crate::views::invitations::InvitationDirection::Received,
+                    from_id: AuthorityId::new_from_entropy([164u8; 32]),
+                    from_name: "Alice".to_string(),
+                    to_id: None,
+                    to_name: None,
+                    created_at: 1,
+                    expires_at: None,
+                    message: None,
+                    home_id: Some(ChannelId::from_bytes([163u8; 32])),
+                    home_name: Some("shared-parity-lab".to_string()),
+                }],
+                Vec::new(),
+                Vec::new(),
+            ),
+            "invitations",
+        )
+        .await
+        .unwrap();
+
+        refresh_authoritative_invitation_readiness(&app_core)
+            .await
+            .expect("signal-backed pending invitation should publish readiness");
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts
+            .iter()
+            .any(|fact| matches!(fact, AuthoritativeSemanticFact::PendingHomeInvitationReady)));
     }
 
     #[tokio::test]
@@ -3237,6 +4355,69 @@ mod tests {
                 contact_count
             } if *authority_id == contact_id.to_string() && *contact_count == 1
         )));
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::InvitationAccepted {
+                invitation_kind: InvitationFactKind::Contact,
+                authority_id: Some(authority_id),
+                operation_state: Some(OperationState::Succeeded),
+            } if authority_id == &contact_id.to_string()
+        )));
+    }
+
+    #[tokio::test]
+    async fn refresh_authoritative_contact_link_readiness_preserves_generic_acceptance_facts() {
+        let app_core = crate::testing::default_test_app_core();
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        let contact_id = AuthorityId::new_from_entropy([167u8; 32]);
+        emit_signal(
+            &app_core,
+            &*crate::signal_defs::CONTACTS_SIGNAL,
+            crate::views::contacts::ContactsState::from_contacts(vec![
+                crate::views::contacts::Contact {
+                    id: contact_id,
+                    nickname: "Bob".to_string(),
+                    nickname_suggestion: Some("Bob".to_string()),
+                    is_guardian: false,
+                    is_member: false,
+                    last_interaction: None,
+                    is_online: false,
+                    read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
+                },
+            ]),
+            crate::signal_defs::CONTACTS_SIGNAL_NAME,
+        )
+        .await
+        .unwrap();
+        {
+            let mut core = app_core.write().await;
+            core.set_authoritative_semantic_facts(vec![
+                AuthoritativeSemanticFact::InvitationAccepted {
+                    invitation_kind: InvitationFactKind::Generic,
+                    authority_id: None,
+                    operation_state: Some(OperationState::Succeeded),
+                },
+            ]);
+        }
+
+        refresh_authoritative_contact_link_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::InvitationAccepted {
+                invitation_kind: InvitationFactKind::Generic,
+                authority_id: None,
+                operation_state: Some(OperationState::Succeeded),
+            }
+        )));
     }
 
     #[tokio::test]
@@ -3276,7 +4457,7 @@ mod tests {
             crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority),
         );
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -3293,7 +4474,7 @@ mod tests {
         assert!(result.is_err());
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-        assert_terminal_failure_or_cancelled(
+        crate::workflows::semantic_facts::assert_terminal_failure_or_cancelled(
             &facts,
             &OperationId::invitation_accept(),
             &instance_id,
@@ -3369,7 +4550,7 @@ mod tests {
         .unwrap();
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-        assert_succeeded_with_postcondition(
+        crate::workflows::semantic_facts::assert_succeeded_with_postcondition(
             &facts,
             &OperationId::invitation_accept(),
             &instance_id,
@@ -3439,6 +4620,11 @@ mod tests {
         let channel_id = ChannelId::from_bytes([89u8; 32]);
         let context_id = ContextId::new_from_entropy([90u8; 32]);
         runtime.set_amp_channel_state_exists_without_resolution(context_id, channel_id, true);
+        runtime.set_amp_channel_participants_without_resolution(
+            context_id,
+            channel_id,
+            vec![our_authority],
+        );
 
         reconcile_channel_invitation_acceptance(
             &app_core,
@@ -3460,7 +4646,7 @@ mod tests {
             our_authority,
         ));
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -3526,7 +4712,7 @@ mod tests {
         runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -3551,6 +4737,397 @@ mod tests {
 
     #[cfg(feature = "signals")]
     #[tokio::test]
+    async fn accept_pending_channel_invitation_with_binding_terminal_status_waits_for_authoritative_runtime_pending_snapshot_when_signal_indicates_pending(
+    ) {
+        let our_authority = AuthorityId::new_from_entropy([154u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([155u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
+        runtime.set_pending_invitations(Vec::new());
+        let channel_id = ChannelId::from_bytes([156u8; 32]);
+        let context_id = ContextId::new_from_entropy([157u8; 32]);
+
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        emit_signal(
+            &app_core,
+            &*INVITATIONS_SIGNAL,
+            crate::views::invitations::InvitationsState::from_parts(
+                vec![crate::views::invitations::Invitation {
+                    id: "pending-channel-signal-fallback".to_string(),
+                    invitation_type: crate::views::invitations::InvitationType::Chat,
+                    status: crate::views::invitations::InvitationStatus::Pending,
+                    direction: crate::views::invitations::InvitationDirection::Received,
+                    from_id: sender_id,
+                    from_name: "Alice".to_string(),
+                    to_id: None,
+                    to_name: None,
+                    created_at: 1,
+                    expires_at: None,
+                    message: None,
+                    home_id: Some(channel_id),
+                    home_name: Some("shared-parity-lab".to_string()),
+                }],
+                Vec::new(),
+                Vec::new(),
+            ),
+            "invitations",
+        )
+        .await
+        .unwrap();
+
+        let runtime_for_pending_publish = runtime.clone();
+        let delayed_pending_publish = async move {
+            for _ in 0..4 {
+                crate::workflows::runtime::cooperative_yield().await;
+            }
+            runtime_for_pending_publish.set_pending_invitations(vec![InvitationInfo {
+                invitation_id: InvitationId::new("pending-channel-signal-fallback"),
+                sender_id,
+                receiver_id: our_authority,
+                invitation_type: InvitationBridgeType::Channel {
+                    home_id: channel_id.to_string(),
+                    context_id: Some(context_id),
+                    nickname_suggestion: Some("shared-parity-lab".to_string()),
+                },
+                status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+                created_at_ms: 1,
+                expires_at_ms: None,
+                message: None,
+            }]);
+        };
+        let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
+        let await_pending =
+            authoritative_pending_home_or_channel_invitation_for_accept(&app_core, &runtime_bridge);
+        let ((), pending) = tokio::join!(delayed_pending_publish, await_pending);
+
+        let accepted = pending
+            .expect("signal-indicated pending channel invitation should wait for authoritative runtime data");
+        let accepted = accepted.expect("expected authoritative pending channel invitation");
+        assert_eq!(
+            accepted.invitation_id,
+            InvitationId::new("pending-channel-signal-fallback")
+        );
+        assert_eq!(accepted.sender_id, sender_id);
+        assert_eq!(accepted.receiver_id, our_authority);
+        assert!(matches!(
+            accepted.invitation_type,
+            InvitationBridgeType::Channel {
+                home_id,
+                context_id: Some(found_context),
+                nickname_suggestion: Some(_),
+            } if home_id == channel_id.to_string() && found_context == context_id
+        ));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn accept_contact_invitation_publishes_authoritative_invitation_accepted_fact() {
+        let our_authority = AuthorityId::new_from_entropy([150u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([151u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
+        runtime.set_accept_invitation_result(Ok(
+            crate::runtime_bridge::InvitationMutationOutcome {
+                invitation_id: InvitationId::new("pending-contact-accepted"),
+                new_status: crate::runtime_bridge::InvitationBridgeStatus::Accepted,
+            },
+        ));
+        runtime.set_pending_invitations(vec![InvitationInfo {
+            invitation_id: InvitationId::new("pending-contact-accepted"),
+            sender_id,
+            receiver_id: our_authority,
+            invitation_type: InvitationBridgeType::Contact {
+                nickname: Some("BobUser".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        }]);
+
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        emit_signal(
+            &app_core,
+            &*CONTACTS_SIGNAL,
+            crate::views::contacts::ContactsState::from_contacts(vec![
+                crate::views::contacts::Contact {
+                    id: sender_id,
+                    nickname: "BobUser".to_string(),
+                    nickname_suggestion: Some("BobUser".to_string()),
+                    is_guardian: false,
+                    is_member: false,
+                    last_interaction: None,
+                    is_online: false,
+                    read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
+                },
+            ]),
+            CONTACTS_SIGNAL_NAME,
+        )
+        .await
+        .unwrap();
+
+        let accepted = accept_invitation_by_str_with_instance(
+            &app_core,
+            "pending-contact-accepted",
+            Some(OperationInstanceId(
+                "accept-contact-authoritative-fact-1".to_string(),
+            )),
+        )
+        .await
+        .expect("contact invitation acceptance should succeed");
+        assert_eq!(
+            accepted.invitation_id,
+            InvitationId::new("pending-contact-accepted")
+        );
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::InvitationAccepted {
+                invitation_kind: InvitationFactKind::Contact,
+                authority_id: Some(authority_id),
+                operation_state: Some(OperationState::Succeeded),
+            } if authority_id == &sender_id.to_string()
+        )));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn accept_imported_contact_invitation_succeeds_before_contact_link_converges() {
+        let our_authority = AuthorityId::new_from_entropy([152u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([153u8; 32]);
+        let invitation = InvitationInfo {
+            invitation_id: InvitationId::new("imported-contact-terminal"),
+            sender_id,
+            receiver_id: our_authority,
+            invitation_type: InvitationBridgeType::Contact {
+                nickname: Some("BobUser".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        };
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
+        runtime.set_pending_invitations(vec![invitation.clone()]);
+        runtime.set_accept_invitation_result(Ok(
+            crate::runtime_bridge::InvitationMutationOutcome {
+                invitation_id: invitation.invitation_id.clone(),
+                new_status: crate::runtime_bridge::InvitationBridgeStatus::Accepted,
+            },
+        ));
+
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let outcome = accept_imported_invitation_with_terminal_status(
+            &app_core,
+            InvitationHandle::new(invitation),
+            Some(OperationInstanceId(
+                "accept-imported-contact-terminal-1".to_string(),
+            )),
+        )
+        .await;
+
+        assert!(
+            outcome.result.is_ok(),
+            "terminal success should not wait for contact-link convergence"
+        );
+        assert!(matches!(
+            outcome.terminal,
+            Some(crate::ui_contract::WorkflowTerminalStatus {
+                status: crate::ui_contract::SemanticOperationStatus {
+                    kind: SemanticOperationKind::AcceptContactInvitation,
+                    phase: SemanticOperationPhase::Succeeded,
+                    ..
+                },
+                ..
+            })
+        ));
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::InvitationAccepted {
+                invitation_kind: InvitationFactKind::Contact,
+                authority_id: Some(authority_id),
+                operation_state: Some(OperationState::Succeeded),
+            } if authority_id == &sender_id.to_string()
+        )));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn accept_pending_channel_invitation_refreshes_recipient_resolution_readiness() {
+        let our_authority = AuthorityId::new_from_entropy([116u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([117u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
+        runtime.set_accept_invitation_result(Ok(
+            crate::runtime_bridge::InvitationMutationOutcome {
+                invitation_id: InvitationId::new("pending-channel-recipient-readiness"),
+                new_status: crate::runtime_bridge::InvitationBridgeStatus::Accepted,
+            },
+        ));
+        let channel_id = ChannelId::from_bytes([118u8; 32]);
+        let context_id = ContextId::new_from_entropy([119u8; 32]);
+        runtime.set_pending_invitations(vec![InvitationInfo {
+            invitation_id: InvitationId::new("pending-channel-recipient-readiness"),
+            sender_id,
+            receiver_id: our_authority,
+            invitation_type: InvitationBridgeType::Channel {
+                home_id: channel_id.to_string(),
+                context_id: Some(context_id),
+                nickname_suggestion: Some("shared-parity-lab".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        }]);
+        runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_amp_channel_participants(
+            context_id,
+            channel_id,
+            vec![our_authority, sender_id],
+        );
+        runtime.set_amp_channel_state_exists(context_id, channel_id, true);
+
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let outcome = accept_pending_channel_invitation_with_binding_terminal_status(
+            &app_core,
+            Some(OperationInstanceId(
+                "accept-pending-recipient-readiness-1".to_string(),
+            )),
+        )
+        .await;
+        outcome
+            .result
+            .expect("accepted channel invitation should refresh readiness facts");
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id.to_string().as_str())
+                        && *member_count == 2
+            )
+        }));
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::RecipientPeersResolved { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id.to_string().as_str())
+                        && *member_count == 2
+            )
+        }));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn accept_pending_channel_invitation_succeeds_when_participant_lookup_is_unavailable() {
+        let our_authority = AuthorityId::new_from_entropy([120u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([121u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
+        runtime.set_accept_invitation_result(Ok(
+            crate::runtime_bridge::InvitationMutationOutcome {
+                invitation_id: InvitationId::new("pending-channel-membership-only"),
+                new_status: crate::runtime_bridge::InvitationBridgeStatus::Accepted,
+            },
+        ));
+        let channel_id = ChannelId::from_bytes([122u8; 32]);
+        let context_id = ContextId::new_from_entropy([123u8; 32]);
+        runtime.set_pending_invitations(vec![InvitationInfo {
+            invitation_id: InvitationId::new("pending-channel-membership-only"),
+            sender_id,
+            receiver_id: our_authority,
+            invitation_type: InvitationBridgeType::Channel {
+                home_id: channel_id.to_string(),
+                context_id: Some(context_id),
+                nickname_suggestion: Some("shared-parity-lab".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        }]);
+        runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_amp_channel_state_exists(context_id, channel_id, true);
+
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let outcome = accept_pending_channel_invitation_with_binding_terminal_status(
+            &app_core,
+            Some(OperationInstanceId(
+                "accept-pending-membership-only-1".to_string(),
+            )),
+        )
+        .await;
+        outcome
+            .result
+            .expect("accepted channel invitation should succeed with membership readiness");
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id.to_string().as_str())
+                        && *member_count == 1
+            )
+        }));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
     async fn accept_device_enrollment_invitation_fails_closed_on_ceremony_processing_error() {
         let authority = AuthorityId::new_from_entropy([121u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
@@ -3565,7 +5142,7 @@ mod tests {
         )));
         let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -3580,11 +5157,11 @@ mod tests {
             receiver_id: authority,
             invitation_type: InvitationBridgeType::DeviceEnrollment {
                 subject_authority: authority,
-                initiator_device_id: DeviceId::new_from_entropy([123u8; 32]),
-                device_id: DeviceId::new_from_entropy([124u8; 32]),
+                initiator_device_id: aura_core::DeviceId::new_from_entropy([123u8; 32]),
+                device_id: aura_core::DeviceId::new_from_entropy([124u8; 32]),
                 nickname_suggestion: Some("Laptop".to_string()),
-                ceremony_id: CeremonyId::new("device-enrollment-ceremony"),
-                pending_epoch: Epoch(1),
+                ceremony_id: aura_core::CeremonyId::new("device-enrollment-ceremony"),
+                pending_epoch: aura_core::Epoch(1),
             },
             status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
             created_at_ms: 1,
@@ -3757,9 +5334,9 @@ mod tests {
             .detail
             .as_deref()
             .is_some_and(|detail| detail.contains(&receiver_id.to_string())));
-        assert!(semantic.detail.as_deref().is_some_and(
-            |detail| detail.contains(&CHANNEL_INVITATION_CREATE_TIMEOUT_MS.to_string())
-        ));
+        assert!(semantic.detail.as_deref().is_some_and(|detail| {
+            detail.contains(&CHANNEL_INVITATION_CREATE_TIMEOUT_MS.to_string())
+        }));
     }
 
     #[tokio::test]

@@ -1,0 +1,5 @@
+error: actor_root requires concrete state or handles; unit/empty roots are not allowed
+ --> tests/boundaries/actor_root_unit_struct.rs:7:12
+  |
+7 | pub struct RuntimeService;
+  |            ^^^^^^^^^^^^^^

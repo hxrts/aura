@@ -1,0 +1,11 @@
+error: Namespace mismatch: macro namespace "macro_namespace" does not match module namespace "source_namespace"
+  --> tests/boundaries/choreography_namespace_mismatch.rs:5:5
+   |
+ 5 | /     r#"
+ 6 | | module source_namespace exposing (NamespaceMismatch)
+ 7 | |
+ 8 | | protocol NamespaceMismatch =
+ 9 | |   roles Alice, Bob
+10 | |   Alice[guard_capability = "chat:message:send"] -> Bob : Message
+11 | | "#
+   | |__^

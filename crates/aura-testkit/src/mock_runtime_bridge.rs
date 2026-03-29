@@ -3,6 +3,16 @@
 //! Provides a test-friendly implementation of the RuntimeBridge trait that
 //! uses in-memory state instead of real runtime infrastructure.
 //!
+//! This surface is intentionally native-only. It owns host task handles and
+//! uses short blocking critical sections for deterministic teardown, so it is
+//! not exported to wasm/shared test surfaces.
+//!
+//! Uses `std::sync::Mutex` because this is Layer 8 test infrastructure where:
+//! - task-handle bookkeeping is host-only and never held across `.await`
+//! - deterministic teardown needs short blocking critical sections
+//! - portability-sensitive frontend/shared code is enforced separately
+#![allow(clippy::disallowed_types)]
+//!
 //! ## Usage
 //!
 //! ```rust,ignore
@@ -97,17 +107,17 @@ impl MockRuntimeTaskSpawnerImpl {
     }
 
     fn record(&self, handle: JoinHandle<()>) {
-        if let Ok(mut handles) = self.handles.lock() {
-            handles.push(handle);
-        }
+        self.handles
+            .lock()
+            .expect("mock runtime handles poisoned")
+            .push(handle);
     }
 
     fn abort_all(&self) {
         let _ = self.shutdown_tx.send(true);
-        if let Ok(mut handles) = self.handles.lock() {
-            for handle in handles.drain(..) {
-                handle.abort();
-            }
+        let mut handles = self.handles.lock().expect("mock runtime handles poisoned");
+        for handle in handles.drain(..) {
+            handle.abort();
         }
     }
 }

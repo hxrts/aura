@@ -61,7 +61,14 @@ The `Journal` type keeps these dimensions separate. Facts can only grow. Capabil
 
 Facts represent evidence that accumulates over time. Examples include signed operations, attestations, flow budget charges, and consensus commits. Once a fact is added, it cannot be removed. Garbage collection uses tombstones and reduction rather than deletion.
 
-Capabilities represent authority that restricts over time. The system evaluates Biscuit tokens against policy to derive the current capability frontier. Delegation can only attenuate. No operation can widen capability scope. See [Theoretical Model](002_theoretical_model.md) for formal definitions of these lattices.
+Capabilities represent authority that restricts over time. First-party
+capability vocabulary is declared in typed families owned by the crates that
+define the behavior. The system evaluates Biscuit tokens against policy to
+derive the current capability frontier. Delegation can only attenuate. No
+operation can widen capability scope. Token issuance is explicit, and guard
+snapshots carry evaluated frontiers rather than declared capability families.
+See [Theoretical Model](002_theoretical_model.md) for formal definitions of
+these lattices.
 
 ### 1.2 Journals and namespaces
 
@@ -112,7 +119,7 @@ flowchart LR
     style Authority fill:transparent,stroke:#888,stroke-dasharray: 5 5
 ```
 
-Account authorities maintain device membership using commitment trees. The journal stores signed tree operations as facts. Reduction reconstructs the canonical tree state from accumulated facts. FROST provides the threshold signature scheme. DKG distributes key shares without a trusted dealer. Key rotation and resharing maintain security as devices join or leave. See [Cryptographic Architecture](100_crypto.md) for threshold details.
+Account authorities maintain device membership using commitment trees. The journal stores signed tree operations as facts. Reduction reconstructs the canonical tree state from accumulated facts. FROST provides the threshold signature scheme. DKG distributes key shares without a trusted dealer. Key rotation and resharing maintain security as devices join or leave. See [Cryptography](100_crypto.md) for threshold details.
 
 ### 2.2 Relational contexts
 
@@ -204,7 +211,14 @@ LeakageTrackingGuard records privacy budget usage per observer class. Observer c
 
 ### 5.1 Choreographic protocols
 
-Choreographies define global protocols using multi-party session types. A global type describes the entire protocol from an overview perspective. Each message specifies sender, receiver, payload type, and guard annotations. Annotations compile into guard chain requirements: `guard_capability` specifies required Biscuit capabilities, `flow_cost` specifies budget charges, `journal_facts` specifies facts to commit, and `leak` specifies leakage budget allocation.
+Choreographies define global protocols using multi-party session types. A
+global type describes the entire protocol from an overview perspective. Each
+message specifies sender, receiver, payload type, and guard annotations.
+
+Annotations compile into guard chain requirements: `guard_capability` is the
+canonical namespaced capability string admitted at the DSL boundary,
+`flow_cost` specifies budget charges, `journal_facts` specifies facts to
+commit, and `leak` specifies leakage budget allocation.
 
 Projection extracts each role's local view from the global type. The local view specifies what messages the role sends and receives. Execution interprets the local view against the effect system. See [MPST and Choreography](110_mpst_and_choreography.md) for projection rules and the global type grammar.
 
@@ -292,24 +306,24 @@ Epochs gate budget resets, receipt validity, and upgrade activation. Epoch rotat
 
 ## References
 
-- [Theoretical Model](002_theoretical_model.md) — formal calculus and semilattice semantics
-- [Privacy and Information Flow Contract](003_information_flow_contract.md) — leakage budgets and privacy layers
-- [Distributed Systems Contract](004_distributed_systems_contract.md) — safety, liveness, and consistency guarantees
-- [Cryptographic Architecture](100_crypto.md) — threshold signatures and key management
-- [Identifiers and Boundaries](101_identifiers_and_boundaries.md) — identifier semantics
-- [Authority and Identity](102_authority_and_identity.md) — commitment trees and relational contexts
-- [Effect System](103_effect_system.md) — effect traits and time domains
-- [Runtime](104_runtime.md) — lifecycle management and service composition
-- [Journal](105_journal.md) — fact storage and reduction
-- [Authorization](106_authorization.md) — guard chain and Biscuit integration
-- [Consensus](108_consensus.md) — single-shot agreement protocol
-- [Operation Categories](109_operation_categories.md) — A/B/C classification
-- [MPST and Choreography](110_mpst_and_choreography.md) — session types and projection
-- [Transport and Information Flow](111_transport_and_information_flow.md) — transport semantics
-- [Aura Messaging Protocol](112_amp.md) — reliable async messaging
-- [Rendezvous Architecture](113_rendezvous.md) — peer discovery and channel establishment
-- [Relational Contexts](114_relational_contexts.md) — cross-authority state and recovery
-- [Social Architecture](115_social_architecture.md) — homes, neighborhoods, and governance
-- [Distributed Maintenance Architecture](116_maintenance.md) — snapshots, GC, and OTA
-- [Ownership Model](122_ownership_model.md) — ownership categories and semantic owner protocol
-- [Project Structure](999_project_structure.md) — crate organization and dependency graph
+- [Theoretical Model](002_theoretical_model.md): formal calculus and semilattice semantics
+- [Privacy and Information Flow Contract](003_information_flow_contract.md): leakage budgets and privacy layers
+- [Distributed Systems Contract](004_distributed_systems_contract.md): safety, liveness, and consistency guarantees
+- [Cryptography](100_crypto.md): threshold signatures and key management
+- [Identifiers and Boundaries](101_identifiers_and_boundaries.md): identifier semantics
+- [Authority and Identity](102_authority_and_identity.md): commitment trees and relational contexts
+- [Effect System](103_effect_system.md): effect traits and time domains
+- [Runtime](104_runtime.md): lifecycle management and service composition
+- [Journal](105_journal.md): fact storage and reduction
+- [Authorization](106_authorization.md): guard chain and Biscuit integration
+- [Consensus](108_consensus.md): single-shot agreement protocol
+- [Operation Categories](109_operation_categories.md): A/B/C classification
+- [MPST and Choreography](110_mpst_and_choreography.md): session types and projection
+- [Transport and Information Flow](111_transport_and_information_flow.md): transport semantics
+- [Aura Messaging Protocol](112_amp.md): reliable async messaging
+- [Rendezvous Architecture](113_rendezvous.md): peer discovery and channel establishment
+- [Relational Contexts](114_relational_contexts.md): cross-authority state and recovery
+- [Social Architecture](115_social_architecture.md): homes, neighborhoods, and governance
+- [Distributed Maintenance Architecture](116_maintenance.md): snapshots, GC, and OTA
+- [Ownership Model](122_ownership_model.md): ownership categories and semantic owner protocol
+- [Project Structure](999_project_structure.md): crate organization and dependency graph

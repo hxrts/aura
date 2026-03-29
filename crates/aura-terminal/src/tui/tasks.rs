@@ -141,6 +141,20 @@ impl UiTaskOwner {
         self.spawner.spawn_cancellable(Box::pin(fut));
     }
 
+    pub fn spawn_local<F>(&self, fut: F)
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        self.spawner.spawn_local(Box::pin(fut));
+    }
+
+    pub fn spawn_local_cancellable<F>(&self, fut: F)
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        self.spawner.spawn_local_cancellable(Box::pin(fut));
+    }
+
     #[must_use]
     pub fn owned_spawner(&self) -> OwnedTaskSpawner {
         self.spawner.clone()

@@ -43,6 +43,7 @@ use aura_journal::{
 };
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// Type identifier for contact facts
 pub const CONTACT_FACT_TYPE_ID: &str = "contact";
@@ -51,6 +52,48 @@ pub const CONTACT_FACT_TYPE_ID: &str = "contact";
 pub struct ContactFactKey {
     pub sub_type: &'static str,
     pub data: Vec<u8>,
+}
+
+/// Pure contact-presence index derived from `ContactFact` events.
+///
+/// The index keeps only the active owner/contact pairs so runtime code can make
+/// O(1) existence checks after an initial replay.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContactExistenceIndex {
+    active_contacts: BTreeSet<(AuthorityId, AuthorityId)>,
+}
+
+impl ContactExistenceIndex {
+    /// Create an empty contact-presence index.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Apply a contact fact to the index.
+    pub fn apply_fact(&mut self, fact: &ContactFact) {
+        match fact {
+            ContactFact::Added {
+                owner_id,
+                contact_id,
+                ..
+            } => {
+                self.active_contacts.insert((*owner_id, *contact_id));
+            }
+            ContactFact::Removed {
+                owner_id,
+                contact_id,
+                ..
+            } => {
+                self.active_contacts.remove(&(*owner_id, *contact_id));
+            }
+            ContactFact::Renamed { .. } | ContactFact::ReadReceiptPolicyUpdated { .. } => {}
+        }
+    }
+
+    /// Return whether `owner_id` currently has `contact_id` as an active contact.
+    pub fn contains(&self, owner_id: AuthorityId, contact_id: AuthorityId) -> bool {
+        self.active_contacts.contains(&(owner_id, contact_id))
+    }
 }
 
 /// Read receipt policy for a contact
@@ -641,6 +684,39 @@ mod tests {
             result.is_none(),
             "Guardian binding fact with mismatched context must be rejected"
         );
+    }
+
+    #[test]
+    fn contact_existence_index_tracks_add_and_remove() {
+        let owner = test_authority_id(1);
+        let contact = test_authority_id(2);
+        let mut index = ContactExistenceIndex::new();
+
+        index.apply_fact(&ContactFact::added_with_timestamp_ms(
+            test_context_id(),
+            owner,
+            contact,
+            "Alice".to_string(),
+            1,
+        ));
+        assert!(index.contains(owner, contact));
+
+        index.apply_fact(&ContactFact::renamed_with_timestamp_ms(
+            test_context_id(),
+            owner,
+            contact,
+            "Bob".to_string(),
+            2,
+        ));
+        assert!(index.contains(owner, contact));
+
+        index.apply_fact(&ContactFact::removed_with_timestamp_ms(
+            test_context_id(),
+            owner,
+            contact,
+            3,
+        ));
+        assert!(!index.contains(owner, contact));
     }
 
     /// GuardianBindingDetailsFact survives serialization roundtrip with all

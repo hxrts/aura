@@ -92,7 +92,8 @@ impl CapabilityGuard {
         })?;
 
         // Delegate to evaluator for authorization and budget management
-        let capability = CapabilityId::from(operation.as_str());
+        let capability =
+            CapabilityId::try_from(operation.as_str()).expect("authority ops use valid names");
         match self.evaluator.evaluate_guard(
             token,
             &capability,
@@ -144,7 +145,8 @@ impl CapabilityGuard {
         })?;
 
         // Delegate to evaluator for authorization and budget management
-        let capability = CapabilityId::from(operation.as_str());
+        let capability =
+            CapabilityId::try_from(operation.as_str()).expect("authority ops use valid names");
         match self.evaluator.evaluate_guard(
             token,
             &capability,
@@ -189,7 +191,8 @@ impl CapabilityGuard {
         })?;
 
         // Delegate to evaluator for authorization and budget management
-        let capability = CapabilityId::from(operation.as_str());
+        let capability =
+            CapabilityId::try_from(operation.as_str()).expect("context ops use valid names");
         match self.evaluator.evaluate_guard(
             token,
             &capability,

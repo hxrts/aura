@@ -116,8 +116,7 @@ pub fn check_scenario_capabilities(
             .collect::<Vec<_>>();
         if !unsupported.is_empty() {
             bail!(
-                "shared semantic scenarios require explicit shared-semantic backends; ssh instances {:?} are diagnostic-only and must not enter the semantic lane",
-                unsupported
+                "shared semantic scenarios require explicit shared-semantic backends; ssh instances {unsupported:?} are diagnostic-only and must not enter the semantic lane"
             );
         }
     }
@@ -261,8 +260,10 @@ mod tests {
             }],
         };
 
-        let error = check_scenario_capabilities(&run_config, Some(&scenario))
-            .expect_err("shared semantic ssh combinations must fail early");
+        let error = match check_scenario_capabilities(&run_config, Some(&scenario)) {
+            Ok(_) => panic!("shared semantic ssh combinations must fail early"),
+            Err(error) => error,
+        };
         assert!(error.to_string().contains("diagnostic-only"));
     }
 

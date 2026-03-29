@@ -21,7 +21,7 @@ use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL};
 use aura_app::ui::types::{format_timestamp, ChatState};
 
 use crate::tui::callbacks::{
-    CreateChannelCallback, RetryMessageCallback, SendCallback, SetTopicCallback,
+    CreateChannelCallback, RetryMessageCallback, SetTopicCallback, SlashCommandCallback,
 };
 use crate::tui::channel_selection::{
     authoritative_channel_binding, CommittedChannelSelection, SharedCommittedChannelSelection,
@@ -138,14 +138,14 @@ pub struct ChatScreenProps {
     pub shared_messages: Option<SharedMessages>,
 
     // === Callbacks (still needed for effect dispatch) ===
-    /// Callback when sending a message (channel_id, content)
-    pub(crate) on_send: Option<SendCallback>,
+    /// Callback when running an observed slash command (channel_id, content)
+    pub(crate) on_run_slash_command: Option<SlashCommandCallback>,
     /// Callback when creating a new channel (name, topic)
     pub(crate) on_create_channel: Option<CreateChannelCallback>,
     /// Callback when retrying a failed message (message_id, channel, content)
-    pub on_retry_message: Option<RetryMessageCallback>,
+    pub(crate) on_retry_message: Option<RetryMessageCallback>,
     /// Callback when setting channel topic (channel_id, topic)
-    pub on_set_topic: Option<SetTopicCallback>,
+    pub(crate) on_set_topic: Option<SetTopicCallback>,
     /// UI update sender for syncing navigation state
     pub update_tx: Option<UiUpdateSender>,
 }
@@ -398,7 +398,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         .with_channel(m.channel_id.to_string())
                         .with_timestamp(ts_str)
                         .own(m.is_own)
-                        .with_status(m.delivery_status.into())
+                        .with_status(m.delivery_status)
                         .with_finalized(m.is_finalized)
                 })
                 .collect()

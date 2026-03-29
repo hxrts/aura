@@ -38,9 +38,7 @@ If removing one effect handler requires changing the logic of how other handlers
 
 ### Boundary Questions
 
-- **Stateless or stateful?** Stateless goes in `aura-effects`. Stateful goes in `aura-protocol`.
-- **One party or multiple?** Single-party goes in `aura-effects`. Multi-party goes in `aura-protocol`.
-- **Context-free or context-specific?** Context-free goes in `aura-effects`. Context-specific goes in `aura-protocol`.
+Stateless code goes in `aura-effects`. Stateful code goes in `aura-protocol`. Single-party code goes in `aura-effects`. Multi-party code goes in `aura-protocol`. Context-free code goes in `aura-effects`. Context-specific code goes in `aura-protocol`.
 
 ## 2. Effect Handler Pattern
 
@@ -52,7 +50,7 @@ See [Cryptographic Architecture](100_crypto.md) for cryptographic handler requir
 
 ### Implementing a Handler
 
-**Step 1: Define the trait in `aura-core`**
+Step 1: Define the trait in `aura-core`.
 
 ```rust
 #[async_trait]
@@ -61,7 +59,7 @@ pub trait MyEffects: Send + Sync {
 }
 ```
 
-**Step 2: Implement the production handler in `aura-effects`**
+Step 2: Implement the production handler in `aura-effects`.
 
 ```rust
 pub struct RealMyHandler;
@@ -74,7 +72,7 @@ impl MyEffects for RealMyHandler {
 }
 ```
 
-**Step 3: Implement the mock handler in `aura-testkit`**
+Step 3: Implement the mock handler in `aura-testkit`.
 
 ```rust
 pub struct MockMyHandler {
@@ -203,10 +201,7 @@ async fn test_my_handler() -> aura_core::AuraResult<()> {
 }
 ```
 
-**Key principles**:
-- Never use real system calls in tests (no `SystemTime::now()`, `thread_rng()`, etc.)
-- Use deterministic seeds for reproducibility
-- Test both success and error paths
+Never use real system calls in tests such as `SystemTime::now()` or `thread_rng()`. Use deterministic seeds for reproducibility. Test both success and error paths.
 
 See [Testing Guide](804_testing_guide.md) for comprehensive testing patterns.
 
@@ -222,9 +217,9 @@ For deeper understanding of the effect system architecture, see:
 
 The effect system uses three layers:
 
-1. **Foundation effects** (`aura-core`): Crypto, storage, time, random, console, transport
-2. **Infrastructure effects** (`aura-effects`): Production handlers implementing foundation traits
-3. **Composite effects**: Built by composing foundation effects (e.g., `TreeEffects` = storage + crypto)
+1. Foundation effects in `aura-core` cover crypto, storage, time, random, console, and transport.
+2. Infrastructure effects in `aura-effects` provide production handlers implementing foundation traits.
+3. Composite effects are built by composing foundation effects. For example, `TreeEffects` combines storage and crypto.
 
 All impure operations (time, randomness, filesystem, network) must flow through effect traits. Direct calls break simulation determinism and WASM compatibility.
 

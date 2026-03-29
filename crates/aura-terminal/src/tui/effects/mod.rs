@@ -10,11 +10,9 @@
 //! This module provides:
 //! - `EffectCommand`: Commands that can be dispatched
 //! - `AuraEvent`: Events for demo mode inter-agent communication
-//! - `CommandDispatcher`: Maps IRC commands to effect commands
 //! - `OperationalHandler`: Handles non-journaled operational commands
 
 mod command_parser;
-mod dispatcher;
 mod operational;
 
 // Re-export types from submodules
@@ -22,5 +20,4 @@ pub use command_parser::{
     AuraEvent, CommandAuthorizationLevel, EffectCommand, EventFilter, EventSubscription,
     ThresholdConfig,
 };
-pub use dispatcher::{CommandDispatcher, DispatchError};
 pub use operational::{OpError, OpFailureCode, OpResponse, OpResult, OperationalHandler};

@@ -87,7 +87,7 @@ fn category_c_consensus_global() -> GlobalType {
     )
 }
 
-// Representative Category C shape: requester chooses commit/abort after quorum evidence.
+// Representative Category C shape: requester commits recovery after quorum evidence.
 fn category_c_recovery_global() -> GlobalType {
     GlobalType::send(
         "Requester",
@@ -105,13 +105,11 @@ fn category_c_recovery_global() -> GlobalType {
                     "Guardian1",
                     "Requester",
                     Label::new("approve"),
-                    GlobalType::comm(
+                    GlobalType::send(
                         "Requester",
                         "Storage",
-                        vec![
-                            (Label::new("commit"), GlobalType::End),
-                            (Label::new("abort"), GlobalType::End),
-                        ],
+                        Label::new("commit"),
+                        GlobalType::End,
                     ),
                 ),
             ),
@@ -250,21 +248,21 @@ fn telltale_vm_runtime_benches(c: &mut Criterion) {
         "mixed_class_throughput_runtime",
         mixed_protocol_pressure_global(),
         32,
-        2048,
+        8192,
     );
     bench_pair_with_params(
         c,
         "mixed_class_latency_runtime",
         mixed_protocol_pressure_global(),
         1,
-        2048,
+        4096,
     );
     bench_pair_with_params(
         c,
         "mixed_class_contention_runtime",
         mixed_protocol_pressure_global(),
         64,
-        4096,
+        16384,
     );
 }
 

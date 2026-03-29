@@ -5,6 +5,7 @@
 
 use aura_core::types::identifiers::ChannelId;
 
+use crate::capabilities::ChatCapability;
 use crate::facts::ChatFact;
 use crate::guards::{
     check_capability, check_flow_budget, check_moderation, costs, EffectCommand, GuardOutcome,
@@ -30,10 +31,8 @@ impl ChatFactService {
         topic: Option<String>,
         is_dm: bool,
     ) -> GuardOutcome {
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &crate::guards::types::CapabilityId::from(costs::CAP_CHAT_CHANNEL_CREATE),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &ChatCapability::ChannelCreate.as_name())
+        {
             return outcome;
         }
         if let Some(outcome) = check_flow_budget(snapshot, costs::CHAT_CHANNEL_CREATE_COST) {
@@ -70,10 +69,7 @@ impl ChatFactService {
         reply_to: Option<String>,
         epoch_hint: Option<u32>,
     ) -> GuardOutcome {
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &crate::guards::types::CapabilityId::from(costs::CAP_CHAT_MESSAGE_SEND),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &ChatCapability::MessageSend.as_name()) {
             return outcome;
         }
         if let Some(outcome) = check_moderation(snapshot) {
@@ -145,9 +141,7 @@ mod tests {
             AuthorityId::new_from_entropy([1u8; 32]),
             ContextId::new_from_entropy([2u8; 32]),
             FlowCost::new(10),
-            vec![crate::guards::types::CapabilityId::from(
-                costs::CAP_CHAT_MESSAGE_SEND,
-            )],
+            vec![ChatCapability::MessageSend.as_name()],
             123,
         );
 
@@ -178,9 +172,7 @@ mod tests {
             AuthorityId::new_from_entropy([5u8; 32]),
             ContextId::new_from_entropy([6u8; 32]),
             FlowCost::new(10),
-            vec![crate::guards::types::CapabilityId::from(
-                costs::CAP_CHAT_MESSAGE_SEND,
-            )],
+            vec![ChatCapability::MessageSend.as_name()],
             123,
         )
         .with_moderation_status(false, true);

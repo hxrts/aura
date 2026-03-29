@@ -27,6 +27,7 @@
 //! | Debugging | Hard (terminal) | Easy (state dumps) |
 //! | CI/CD | Requires PTY | Works anywhere |
 
+#[allow(clippy::duplicate_mod)]
 mod support;
 
 use aura_core::effects::terminal::{events, TerminalEvent};

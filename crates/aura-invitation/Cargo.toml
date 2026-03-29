@@ -6,18 +6,20 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+description = "Invitation lifecycle protocols for contacts, channels, and guardians"
 include = ["src/**", "Cargo.toml"]
 
 [dependencies]
-aura-core = { path = "../aura-core" }
-aura-effects = { path = "../aura-effects" }
-aura-guards = { path = "../aura-guards" }
-aura-authorization = { path = "../aura-authorization" }
-aura-authentication = { path = "../aura-authentication" }
-aura-journal = { path = "../aura-journal" }
-aura-composition = { path = "../aura-composition" }
-aura-macros = { path = "../aura-macros" }
-aura-mpst = { path = "../aura-mpst" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-effects = { path = "../aura-effects", version = "0.1.0" }
+aura-guards = { path = "../aura-guards", version = "0.1.0" }
+aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
+aura-authentication = { path = "../aura-authentication", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-composition = { path = "../aura-composition", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
+aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
 
 # Choreography dependencies (required by aura-macros)
 telltale = { workspace = true }

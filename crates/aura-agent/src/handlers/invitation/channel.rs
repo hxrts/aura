@@ -10,6 +10,52 @@ pub(super) struct InvitationChannelHandler<'a> {
 }
 
 impl<'a> InvitationChannelHandler<'a> {
+    async fn seed_sender_descriptor_for_invitation_context(
+        &self,
+        effects: &AuraEffectSystem,
+        sender_id: AuthorityId,
+        invitation_context: ContextId,
+    ) {
+        let Some(rendezvous_manager) = effects.rendezvous_manager() else {
+            return;
+        };
+
+        if rendezvous_manager
+            .get_descriptor(invitation_context, sender_id)
+            .await
+            .is_some()
+        {
+            return;
+        }
+
+        let local_context_id = self.handler.context.authority.default_context_id();
+        let peer_default_context = default_context_id_for_authority(sender_id);
+
+        let descriptor = if let Some(existing) = rendezvous_manager
+            .get_descriptor(local_context_id, sender_id)
+            .await
+        {
+            Some(existing)
+        } else if let Some(existing) = rendezvous_manager
+            .get_descriptor(peer_default_context, sender_id)
+            .await
+        {
+            Some(existing)
+        } else {
+            rendezvous_manager
+                .get_lan_discovered_peer(sender_id)
+                .await
+                .map(|peer| peer.descriptor)
+        };
+
+        let Some(mut descriptor) = descriptor else {
+            return;
+        };
+
+        descriptor.context_id = invitation_context;
+        let _ = rendezvous_manager.cache_descriptor(descriptor).await;
+    }
+
     async fn channel_checkpoint_exists(
         effects: &AuraEffectSystem,
         context_id: ContextId,
@@ -134,7 +180,27 @@ impl<'a> InvitationChannelHandler<'a> {
         let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
             .map_err(|error| AgentError::internal(error.to_string()))?
             .with_rendezvous_manager(rendezvous_manager.clone());
-        for attempt in 0..CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS {
+        let backoff = ExponentialBackoffPolicy::new(
+            Duration::from_millis(CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS),
+            Duration::from_millis(CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS),
+            invitation_timeout_profile(effects).jitter(),
+        )
+        .map_err(|error| AgentError::runtime(error.to_string()))?;
+        let retry_policy = invitation_timeout_profile(effects)
+            .apply_retry_policy(&RetryBudgetPolicy::new(
+                CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS as u32,
+                backoff,
+            ))
+            .map_err(|error| AgentError::runtime(error.to_string()))?;
+
+        execute_with_retry_budget(effects, &retry_policy, |_attempt| async {
+            self.seed_sender_descriptor_for_invitation_context(
+                effects,
+                sender_id,
+                invitation_context,
+            )
+            .await;
+
             if effects
                 .is_channel_established(invitation_context, sender_id)
                 .await
@@ -155,28 +221,19 @@ impl<'a> InvitationChannelHandler<'a> {
             }
 
             let _ = rendezvous_manager.trigger_discovery().await;
-            let _ = effects
-                .sleep_ms(CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS)
-                .await;
-
-            if attempt + 1 == CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS {
-                let detail = result.error.unwrap_or_else(|| {
-                    format!(
-                        "peer channel for sender {sender_id} in {invitation_context} did not establish"
-                    )
-                });
-                return Err(AgentError::runtime(detail));
-            }
-        }
-
-        Err(AgentError::runtime(
-            [
-                "peer channel for sender ",
-                &sender_id.to_string(),
-                " did not establish for channel acceptance",
-            ]
-            .concat(),
-        ))
+            Err(AgentError::runtime(result.error.unwrap_or_else(|| {
+                format!(
+                    "peer channel for sender {sender_id} in {invitation_context} did not establish"
+                )
+            })))
+        })
+        .await
+        .map_err(|error| match error {
+            RetryRunError::Timeout(error) => AgentError::timeout(format!(
+                "channel invitation acceptance peer-channel retry budget exhausted: {error}"
+            )),
+            RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
+        })
     }
 
     async fn attempt_channel_checkpoint_provision(
@@ -312,7 +369,8 @@ impl<'a> InvitationChannelHandler<'a> {
                 );
             }
             Err(TimeoutRunError::Operation(error)) => {
-                if !Self::channel_has_participant(effects, context_id, channel_id, participant).await
+                if !Self::channel_has_participant(effects, context_id, channel_id, participant)
+                    .await
                 {
                     tracing::debug!(
                         context_id = %context_id,
@@ -502,9 +560,10 @@ impl<'a> InvitationChannelHandler<'a> {
             }
         }
 
-        if let Some(shareable) =
-            InvitationHandler::load_imported_invitation(effects, own_id, invitation_id).await
+        if let Some(stored) =
+            InvitationHandler::load_imported_invitation(effects, own_id, invitation_id, None).await
         {
+            let shareable = stored.shareable;
             if let InvitationType::Channel {
                 home_id,
                 nickname_suggestion,
@@ -637,8 +696,8 @@ impl<'a> InvitationChannelHandler<'a> {
             .channel_created_fact_name(effects, own_id, invite.context_id, invite.channel_id)
             .await;
         if existing_channel_name.as_deref() != Some(invite.home_name.as_str()) {
-            let now_ms = effects.current_timestamp().await.unwrap_or(0);
-            let fact = match existing_channel_name {
+            let now_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
+            let chat_fact = match existing_channel_name {
                 Some(_) => ChatFact::channel_updated_ms(
                     invite.context_id,
                     invite.channel_id,
@@ -648,8 +707,7 @@ impl<'a> InvitationChannelHandler<'a> {
                     None,
                     now_ms,
                     invite.sender_id,
-                )
-                .to_generic(),
+                ),
                 None => ChatFact::channel_created_ms(
                     invite.context_id,
                     invite.channel_id,
@@ -658,14 +716,17 @@ impl<'a> InvitationChannelHandler<'a> {
                     false,
                     now_ms,
                     invite.sender_id,
-                )
-                .to_generic(),
+                ),
             };
 
             effects
-                .commit_relational_facts(vec![fact])
+                .commit_relational_facts(vec![chat_fact.to_generic()])
                 .await
                 .map_err(|e| AgentError::effects(e.to_string()))?;
+            self.handler
+                .invitation_cache
+                .record_chat_fact(&chat_fact)
+                .await;
         }
 
         let reactive = effects.reactive_handler();
@@ -709,7 +770,7 @@ impl<'a> InvitationChannelHandler<'a> {
             }
         }
 
-        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let now_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
         let own_id = self.handler.context.authority.authority_id();
         let recipients: Vec<_> = BTreeSet::from([invite.sender_id, own_id])
             .into_iter()

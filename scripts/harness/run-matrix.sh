@@ -9,6 +9,63 @@ fail() {
   exit 1
 }
 
+cleanup_run_scope() {
+  local run_root="${1:-}"
+  local transient_root="${2:-}"
+  local harness_pid="${3:-}"
+  local keep_tmp="${AURA_HARNESS_KEEP_TMP:-}"
+
+  keep_tmp_enabled() {
+    case "$keep_tmp" in
+      1|true|TRUE|yes|YES|on|ON|True|Yes)
+        return 0
+        ;;
+      *) return 1 ;;
+    esac
+  }
+
+  kill_process_tree() {
+    local pid="${1:-}"
+    [[ -n "$pid" ]] || return 0
+    local child_pid=""
+    while IFS= read -r child_pid; do
+      [[ -n "$child_pid" ]] || continue
+      kill_process_tree "$child_pid"
+    done < <(pgrep -P "$pid" 2>/dev/null || true)
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+  }
+
+  kill_process_tree "$harness_pid"
+
+  if keep_tmp_enabled; then
+    [[ -n "$run_root" ]] && echo "[harness-matrix] retained run_root=$run_root" >&2
+    [[ -n "$transient_root" ]] && echo "[harness-matrix] retained transient_root=$transient_root" >&2
+    return 0
+  fi
+
+  cleanup_root_tree() {
+    local root="${1:-}"
+    [[ -n "$root" && -d "$root" ]] || return 0
+    while IFS= read -r pid_file; do
+      [[ -n "$pid_file" ]] || continue
+      if [[ -f "$pid_file" ]]; then
+        local child_pid=""
+        child_pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+        kill_process_tree "$child_pid"
+      fi
+    done < <(find "$root" -type f -name '*.pid' 2>/dev/null)
+    find "$root" -type s -delete 2>/dev/null || true
+    find "$root" -type f \( -name '*.pid' -o -name 'clipboard.txt' -o -name '.bootstrap-runtime-handoff-ready' \) -delete 2>/dev/null || true
+    rm -rf "$root" 2>/dev/null || true
+  }
+
+  cleanup_root_tree "$transient_root"
+  cleanup_root_tree "$run_root"
+}
+
 lane=""
 suite="all"
 dry_run=0
@@ -97,6 +154,50 @@ scenario_id_requested() {
   return 1
 }
 
+ensure_built_artifact() {
+  local package="$1"
+  local bin_name="$2"
+  local artifact_path="$repo_root/target/debug/$bin_name"
+
+  echo "[harness-matrix] building package=$package bin=$bin_name" >&2
+  (
+    cd "$repo_root"
+    cargo build -q -p "$package" --bin "$bin_name"
+  )
+  [[ -x "$artifact_path" ]] || fail "missing built artifact: $artifact_path"
+  printf '%s\n' "$artifact_path"
+}
+
+prepare_lane_artifacts() {
+  local selected_lane="$1"
+
+  if [[ -z "${AURA_HARNESS_BIN:-}" ]]; then
+    export AURA_HARNESS_BIN
+    AURA_HARNESS_BIN="$(ensure_built_artifact aura-harness aura-harness)"
+  fi
+
+  case "$selected_lane" in
+    tui)
+      if [[ -z "${AURA_HARNESS_AURA_BIN:-}" ]]; then
+        export AURA_HARNESS_AURA_BIN
+        AURA_HARNESS_AURA_BIN="$(ensure_built_artifact aura-terminal aura)"
+      fi
+      ;;
+    web)
+      if [[ "${AURA_HARNESS_WEB_CHECK_DONE:-0}" != "1" ]]; then
+        (
+          cd "$repo_root"
+          just web-check
+        )
+        export AURA_HARNESS_WEB_CHECK_DONE=1
+      fi
+      ;;
+    *)
+      fail "unknown lane for artifact preparation: $selected_lane"
+      ;;
+  esac
+}
+
 run_scenario() {
   local config="$1"
   local scenario_path="$2"
@@ -144,6 +245,10 @@ run_lane() {
 
   echo "[harness-matrix] lane=$selected_lane suite=$suite begin"
 
+  if [[ $dry_run -eq 0 ]]; then
+    prepare_lane_artifacts "$selected_lane"
+  fi
+
   while IFS='|' read -r scenario_id scenario_path scenario_class; do
     [[ -n "$scenario_id" ]] || continue
     suite_match "$scenario_class" || continue
@@ -156,11 +261,28 @@ run_lane() {
     echo "[harness-matrix] lane=$selected_lane suite=$suite scenario=$scenario_id class=$scenario_class config=$config"
     if [[ $dry_run -eq 0 ]]; then
       local run_token=""
+      local run_root=""
+      local transient_root=""
+      local transient_key=""
+      local harness_pid=""
       run_token="$(run_token_for_scenario "$selected_lane" "$scenario_id")"
+      run_root="$repo_root/.tmp/harness/matrix/$selected_lane/$scenario_id/$run_token"
+      transient_key="$(printf '%s' "$run_token" | cksum | awk '{print $1}')"
+      transient_root="$repo_root/.tmp/harness/transient/$transient_key"
       (
         cd "$repo_root"
         export AURA_HARNESS_RUN_TOKEN="$run_token"
-        run_scenario "$config" "$scenario_path"
+        export AURA_HARNESS_RUN_ROOT="$run_root"
+        export AURA_HARNESS_TRANSIENT_ROOT="$transient_root"
+        if [[ -n "${AURA_HARNESS_KEEP_TMP:-}" ]]; then
+          echo "[harness-matrix] keep_tmp=$AURA_HARNESS_KEEP_TMP run_root=$AURA_HARNESS_RUN_ROOT transient_root=$AURA_HARNESS_TRANSIENT_ROOT" >&2
+        fi
+        trap 'cleanup_run_scope "$AURA_HARNESS_RUN_ROOT" "$AURA_HARNESS_TRANSIENT_ROOT" "${harness_pid:-}"' EXIT INT TERM
+        mkdir -p "$AURA_HARNESS_RUN_ROOT"
+        mkdir -p "$AURA_HARNESS_TRANSIENT_ROOT"
+        run_scenario "$config" "$scenario_path" &
+        harness_pid=$!
+        wait "$harness_pid"
       )
     fi
   done < <(

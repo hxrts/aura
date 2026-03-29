@@ -453,7 +453,7 @@ Context management:
 - Garbage collect expired bindings periodically
 
 Lifecycle notes:
-- A1/A2 facts are usable immediately but are provisional; any durable relational state must be A3 (consensus-finalized).
+- A1/A2 facts are usable immediately but are provisional. Any durable relational state must be A3 (consensus-finalized).
 - Soft-safe operations should emit `ConvergenceCert` and `ReversionFact` protocol facts to make convergence and reversion risk explicit.
 
 ## 10. Contexts vs Channels: Operation Categories

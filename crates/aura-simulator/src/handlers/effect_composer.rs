@@ -802,7 +802,6 @@ pub mod factory {
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
         SimulationEffectComposer::for_simulation(device_id, authority_id, seed).await
     }
-
 }
 
 #[cfg(test)]

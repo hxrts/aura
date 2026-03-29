@@ -9,6 +9,16 @@ use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContextManagerCommand {
+    CreateContext,
+    SetStatus,
+    DeleteContext,
+    AddPeer,
+    RemovePeer,
+}
+
 /// Context status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextStatus {
@@ -70,6 +80,14 @@ pub enum ContextError {
 }
 
 /// Context manager service
+#[aura_macros::actor_owned(
+    owner = "context_manager",
+    domain = "context",
+    gate = "context_command_ingress",
+    command = ContextManagerCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 pub struct ContextManager {
     #[allow(dead_code)] // Will be used for context configuration
     config: AgentConfig,

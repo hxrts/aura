@@ -327,6 +327,9 @@ pub enum EffectCommand {
         message: Option<String>,
         /// TTL in seconds (None = no expiry)
         ttl_secs: Option<u64>,
+        /// Concrete semantic operation instance when the command originates from
+        /// a local terminal operation owner.
+        operation_instance_id: Option<OperationInstanceId>,
     },
     /// Export an invitation as a shareable code
     ExportInvitation {

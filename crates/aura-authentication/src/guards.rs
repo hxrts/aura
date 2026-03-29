@@ -31,6 +31,10 @@ use aura_guards::types;
 use aura_signature::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
+use crate::capabilities::{
+    AuthenticationCapability, GuardianAuthCapability, RecoveryAuthorizationCapability,
+};
+
 // =============================================================================
 // Guard Cost Constants
 // =============================================================================
@@ -60,34 +64,6 @@ pub mod costs {
 
     /// Flow cost for submitting guardian approval decision
     pub const GUARDIAN_APPROVAL_DECISION_COST: FlowCost = FlowCost::new(2);
-
-    // -------------------------------------------------------------------------
-    // Capabilities
-    // -------------------------------------------------------------------------
-
-    /// Required capability for requesting authentication
-    pub const CAP_REQUEST_AUTH: &str = "auth:request";
-
-    /// Required capability for submitting proofs
-    pub const CAP_SUBMIT_PROOF: &str = "auth:submit_proof";
-
-    /// Required capability for verifying proofs
-    pub const CAP_VERIFY_PROOF: &str = "auth:verify";
-
-    /// Required capability for creating sessions
-    pub const CAP_CREATE_SESSION: &str = "auth:create_session";
-
-    /// Required capability for requesting guardian approval
-    pub const CAP_REQUEST_GUARDIAN_APPROVAL: &str = "auth:request_guardian";
-
-    /// Required capability for providing guardian approval
-    pub const CAP_APPROVE_GUARDIAN: &str = "auth:approve_guardian";
-
-    /// Required capability for initiating recovery
-    pub const CAP_INITIATE_RECOVERY: &str = "recovery:initiate";
-
-    /// Required capability for approving recovery
-    pub const CAP_APPROVE_RECOVERY: &str = "recovery:approve";
 }
 
 // =============================================================================
@@ -497,7 +473,7 @@ pub fn check_recovery_operation(
     match operation_type {
         RecoveryOperationType::GuardianSetModification => {
             // Guardian set modifications require explicit capability
-            if !snapshot.has_capability(&types::CapabilityId::from(costs::CAP_APPROVE_RECOVERY)) {
+            if !snapshot.has_capability(&RecoveryAuthorizationCapability::Approve.as_name()) {
                 return Some(deny(GuardReject {
                     code: "guardian-set-approval-required",
                     category: "auth",
@@ -507,7 +483,7 @@ pub fn check_recovery_operation(
         }
         RecoveryOperationType::EmergencyFreeze => {
             // Emergency freeze requires emergency flag or explicit capability
-            if !snapshot.has_capability(&types::CapabilityId::from(costs::CAP_INITIATE_RECOVERY)) {
+            if !snapshot.has_capability(&RecoveryAuthorizationCapability::Initiate.as_name()) {
                 return Some(deny(GuardReject {
                     code: "emergency-freeze-requires-capability",
                     category: "auth",
@@ -532,10 +508,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
     match request {
         GuardRequest::ChallengeRequest { scope: _ } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &types::CapabilityId::from(costs::CAP_REQUEST_AUTH),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &AuthenticationCapability::Request.as_name())
+            {
                 return outcome;
             }
 
@@ -564,10 +539,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             proof_hash,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &types::CapabilityId::from(costs::CAP_SUBMIT_PROOF),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &AuthenticationCapability::SubmitProof.as_name())
+            {
                 return outcome;
             }
 
@@ -594,10 +568,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
 
         GuardRequest::ProofVerification { session_id } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &types::CapabilityId::from(costs::CAP_VERIFY_PROOF),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &AuthenticationCapability::Verify.as_name())
+            {
                 return outcome;
             }
 
@@ -622,10 +595,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             duration_seconds,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &types::CapabilityId::from(costs::CAP_CREATE_SESSION),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &AuthenticationCapability::CreateSession.as_name())
+            {
                 return outcome;
             }
 
@@ -660,10 +632,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             required_guardians,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &types::CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &GuardianAuthCapability::RequestApproval.as_name())
+            {
                 return outcome;
             }
 
@@ -706,10 +677,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             approved,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &types::CapabilityId::from(costs::CAP_APPROVE_GUARDIAN),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &GuardianAuthCapability::Verify.as_name())
+            {
                 return outcome;
             }
 
@@ -763,10 +733,10 @@ mod tests {
             None,
             FlowCost::new(100),
             vec![
-                types::CapabilityId::from(costs::CAP_REQUEST_AUTH),
-                types::CapabilityId::from(costs::CAP_SUBMIT_PROOF),
-                types::CapabilityId::from(costs::CAP_VERIFY_PROOF),
-                types::CapabilityId::from(costs::CAP_CREATE_SESSION),
+                AuthenticationCapability::Request.as_name(),
+                AuthenticationCapability::SubmitProof.as_name(),
+                AuthenticationCapability::Verify.as_name(),
+                AuthenticationCapability::CreateSession.as_name(),
             ],
             1,
             1000,
@@ -776,11 +746,9 @@ mod tests {
     #[test]
     fn test_guard_snapshot_has_capability() {
         let snapshot = test_snapshot();
-        assert!(snapshot.has_capability(&types::CapabilityId::from(costs::CAP_REQUEST_AUTH)));
-        assert!(snapshot.has_capability(&types::CapabilityId::from(costs::CAP_SUBMIT_PROOF)));
-        assert!(!snapshot.has_capability(&types::CapabilityId::from(
-            costs::CAP_REQUEST_GUARDIAN_APPROVAL
-        )));
+        assert!(snapshot.has_capability(&AuthenticationCapability::Request.as_name()));
+        assert!(snapshot.has_capability(&AuthenticationCapability::SubmitProof.as_name()));
+        assert!(!snapshot.has_capability(&GuardianAuthCapability::RequestApproval.as_name()));
     }
 
     #[test]
@@ -829,10 +797,7 @@ mod tests {
     #[test]
     fn test_check_capability_success() {
         let snapshot = test_snapshot();
-        let result = check_capability(
-            &snapshot,
-            &types::CapabilityId::from(costs::CAP_REQUEST_AUTH),
-        );
+        let result = check_capability(&snapshot, &AuthenticationCapability::Request.as_name());
         assert!(result.is_none());
     }
 
@@ -841,7 +806,7 @@ mod tests {
         let snapshot = test_snapshot();
         let result = check_capability(
             &snapshot,
-            &types::CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
+            &GuardianAuthCapability::RequestApproval.as_name(),
         );
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());
@@ -912,6 +877,9 @@ mod tests {
     fn test_guard_costs_defined() {
         assert_eq!(costs::CHALLENGE_REQUEST_COST.value(), 1);
         assert_eq!(costs::PROOF_SUBMISSION_COST.value(), 2);
-        assert_eq!(costs::CAP_REQUEST_AUTH, "auth:request");
+        assert_eq!(
+            AuthenticationCapability::Request.as_name().as_str(),
+            "auth:request"
+        );
     }
 }

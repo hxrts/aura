@@ -2,7 +2,7 @@
 //! instantiated, composed, and carry the correct metadata. These types
 //! form the runtime side-effect bridge for choreographic guard annotations.
 
-use aura_core::{types::identifiers::DeviceId, ContextId};
+use aura_core::{capability_name, types::identifiers::DeviceId, ContextId};
 use aura_mpst::telltale_choreography::extensions::ExtensionRegistry;
 
 /// Extension registry can be instantiated — basic smoke test.
@@ -32,10 +32,10 @@ fn test_extension_types() {
 
     // Test creating extension instances
     let validate_cap = ValidateCapability {
-        capability: "test_capability".to_string(),
+        capability: capability_name!("chat:message:send"),
         role: RoleId::new("Alice"),
     };
-    assert_eq!(validate_cap.capability, "test_capability");
+    assert_eq!(validate_cap.capability.as_str(), "chat:message:send");
 
     let flow_cost = ChargeFlowCost {
         cost: 100,
@@ -53,7 +53,7 @@ fn test_extension_types() {
 
     // Test composite extension
     let composite = CompositeExtension::new(RoleId::new("Alice"), "complex_op".to_string())
-        .with_capability_guard("access_data".to_string())
+        .with_capability_guard(capability_name!("chat:message:send"))
         .with_flow_cost(200)
         .with_journal_fact("operation_logged".to_string());
 
@@ -69,7 +69,7 @@ fn composite_extension_preserves_guard_chain_order() {
     use aura_mpst::RoleId;
 
     let composite = CompositeExtension::new(RoleId::new("Alice"), "guarded_send".to_string())
-        .with_capability_guard("send_message".to_string())
+        .with_capability_guard(capability_name!("chat:message:send"))
         .with_flow_cost(50)
         .with_journal_fact("message_sent".to_string());
 
@@ -104,10 +104,10 @@ fn extension_fields_preserved() {
     use aura_mpst::RoleId;
 
     let cap = ValidateCapability {
-        capability: "admin_access".to_string(),
+        capability: capability_name!("recovery:coordinate"),
         role: RoleId::new("Moderator"),
     };
-    assert_eq!(cap.capability, "admin_access");
+    assert_eq!(cap.capability.as_str(), "recovery:coordinate");
     assert_eq!(cap.role, RoleId::new("Moderator"));
 
     let cost = ChargeFlowCost {

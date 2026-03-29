@@ -1,0 +1,10 @@
+error: capability_boundary requires `capability = "..."`
+ --> tests/boundaries/capability_boundary_missing_capability.rs:1:1
+  |
+1 | / #[aura_macros::capability_boundary(
+2 | |     category = "capability_gated",
+3 | |     family = "runtime_helper"
+4 | | )]
+  | |__^
+  |
+  = note: this error originates in the attribute macro `aura_macros::capability_boundary` (in Nightly builds, run with -Z macro-backtrace for more info)

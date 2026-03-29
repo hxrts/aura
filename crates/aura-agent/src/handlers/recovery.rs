@@ -15,8 +15,8 @@ use aura_core::effects::RandomExtendedEffects;
 use aura_core::types::identifiers::{AuthorityId, RecoveryId};
 use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard;
-use aura_guards::types::CapabilityId;
 use aura_protocol::effects::EffectApiEffects;
+use aura_recovery::capabilities::RecoveryCapability;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -209,7 +209,7 @@ impl RecoveryHandler {
         // Enforce guard chain (skip in test/simulation mode until flow budget is fully bootstrapped)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                CapabilityId::from("recovery:initiate"),
+                RecoveryCapability::Initiate.as_name(),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
                 FlowCost::new(100), // Higher cost for recovery operations
@@ -289,7 +289,7 @@ impl RecoveryHandler {
         // Enforce guard chain (skip in test/simulation mode until flow budget is fully bootstrapped)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                CapabilityId::from("recovery:approve"),
+                RecoveryCapability::Approve.as_name(),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
                 FlowCost::new(50),
@@ -419,7 +419,7 @@ impl RecoveryHandler {
         // Enforce guard chain (skip in test/simulation mode until flow budget is fully bootstrapped)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                CapabilityId::from("recovery:complete"),
+                RecoveryCapability::Finalize.as_name(),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
                 FlowCost::new(100),
@@ -508,7 +508,7 @@ impl RecoveryHandler {
         // Enforce guard chain (skip in test/simulation mode until flow budget is fully bootstrapped)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                CapabilityId::from("recovery:cancel"),
+                RecoveryCapability::Cancel.as_name(),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
                 FlowCost::new(30),

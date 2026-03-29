@@ -1,0 +1,12 @@
+error: #[actor_root] may only be applied to structs
+ --> tests/boundaries/actor_root_on_function.rs:1:1
+  |
+1 | / #[aura_macros::actor_root(
+2 | |     owner = "maintenance_service",
+3 | |     domain = "runtime_maintenance",
+4 | |     supervision = "maintenance_task_root",
+5 | |     category = "actor_owned"
+6 | | )]
+  | |__^
+  |
+  = note: this error originates in the attribute macro `aura_macros::actor_root` (in Nightly builds, run with -Z macro-backtrace for more info)

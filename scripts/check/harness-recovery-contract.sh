@@ -11,7 +11,9 @@ fail() {
 
 cargo test -p aura-harness registered_recoveries_cover_all_paths --quiet
 
-rg -q 'pub const REGISTERED_RECOVERIES' crates/aura-harness/src/recovery_registry.rs \
+rg -q 'export const RECOVERY_METHODS' crates/aura-harness/playwright-driver/src/method_sets.ts \
   || fail "missing registered recovery metadata"
+rg -q "'recover_ui_state'" crates/aura-harness/playwright-driver/src/method_sets.ts \
+  || fail "recover_ui_state must remain registered as an explicit recovery method"
 
 echo "harness recovery contract: clean"

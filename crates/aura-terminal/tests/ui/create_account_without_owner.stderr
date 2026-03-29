@@ -1,0 +1,8 @@
+error[E0432]: unresolved import `aura_terminal::tui::callbacks::CreateAccountCallback`
+ --> tests/ui/create_account_without_owner.rs:3:5
+  |
+3 | use aura_terminal::tui::callbacks::CreateAccountCallback;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^---------------------
+  |     |                              |
+  |     |                              help: a similar name exists in the module: `CreateChannelCallback`
+  |     no `CreateAccountCallback` in `tui::callbacks`

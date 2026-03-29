@@ -50,9 +50,11 @@ pub(crate) fn simulation_effect_system_with_shared_transport_for_authority_arc(
     authority: AuthorityId,
     shared_transport: SharedTransport,
 ) -> Arc<AuraEffectSystem> {
-    Arc::new(simulation_effect_system_with_shared_transport_for_authority(
-        config,
-        authority,
-        shared_transport,
-    ))
+    Arc::new(
+        simulation_effect_system_with_shared_transport_for_authority(
+            config,
+            authority,
+            shared_transport,
+        ),
+    )
 }

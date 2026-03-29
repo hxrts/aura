@@ -48,16 +48,16 @@ use crate::error::TerminalError;
 use crate::tui::components::ToastMessage;
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::{AuthorityInfo, Device, MfaPolicy};
-use async_lock::Mutex as AsyncMutex;
+pub use aura_app::frontend_primitives::FrontendUiOperation as UiOperation;
 use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui_contract::{
-    ChannelBindingWitness, OperationId, OperationInstanceId, RuntimeEventKind, RuntimeFact,
-    SemanticOperationStatus,
+    ChannelBindingWitness, OperationId, OperationInstanceId, ProjectionRevision, RuntimeEventKind,
+    RuntimeFact, SemanticOperationStatus,
 };
 use aura_core::types::Epoch;
-pub use aura_ui::FrontendUiOperation as UiOperation;
-use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
+use tokio::sync::Notify;
 
 /// Channel sender type for UI updates
 pub type UiUpdateSender = tokio::sync::mpsc::Sender<UiUpdate>;
@@ -114,10 +114,55 @@ pub fn spawn_ui_update(
     }
 }
 
+pub struct OrderedUiUpdateGate {
+    next_ticket: AtomicU64,
+    serving_ticket: AtomicU64,
+    notify: Notify,
+}
+
+impl OrderedUiUpdateGate {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            next_ticket: AtomicU64::new(0),
+            serving_ticket: AtomicU64::new(0),
+            notify: Notify::new(),
+        }
+    }
+
+    fn issue_ticket(&self) -> u64 {
+        self.next_ticket.fetch_add(1, Ordering::AcqRel)
+    }
+
+    async fn wait_turn(&self, ticket: u64) {
+        loop {
+            if self.serving_ticket.load(Ordering::Acquire) == ticket {
+                return;
+            }
+            let notified = self.notify.notified();
+            if self.serving_ticket.load(Ordering::Acquire) == ticket {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    fn finish_turn(&self) {
+        self.serving_ticket.fetch_add(1, Ordering::AcqRel);
+        self.notify.notify_waiters();
+    }
+}
+
+impl Default for OrderedUiUpdateGate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn spawn_ordered_ui_updates(
     tasks: &Arc<UiTaskOwner>,
     tx: &UiUpdateSender,
-    ordered_gate: &Arc<AsyncMutex<()>>,
+    ordered_gate: &Arc<OrderedUiUpdateGate>,
     updates: Vec<UiUpdate>,
 ) {
     if updates.is_empty() {
@@ -126,22 +171,41 @@ pub fn spawn_ordered_ui_updates(
 
     let tx = tx.clone();
     let ordered_gate = Arc::clone(ordered_gate);
+    let ticket = ordered_gate.issue_ticket();
     tasks.spawn(async move {
-        let _guard = ordered_gate.lock().await;
+        ordered_gate.wait_turn(ticket).await;
         for update in updates {
             let _ = publish_ui_update(&tx, update, UiUpdatePublication::OrderedRequired).await;
         }
+        ordered_gate.finish_turn();
     });
 }
 
 /// Send a UI update, trying non-blocking first and falling back to async.
-pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
-    let _ = publish_ui_update(tx, update, UiUpdatePublication::RequiredUnordered).await;
+/// Returns `true` if delivered, `false` if the channel is closed.
+pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) -> bool {
+    publish_ui_update(tx, update, UiUpdatePublication::RequiredUnordered).await
+}
+
+fn required_ui_update_tasks() -> &'static UiTaskOwner {
+    static REQUIRED_UI_UPDATE_TASKS: OnceLock<UiTaskOwner> = OnceLock::new();
+    REQUIRED_UI_UPDATE_TASKS.get_or_init(UiTaskOwner::new)
 }
 
 /// Send a required UI update from a synchronous callback context.
 pub fn send_ui_update_required_blocking(tx: &UiUpdateSender, update: UiUpdate) -> bool {
-    tx.blocking_send(update).is_ok()
+    match tx.try_send(update) {
+        Ok(()) => true,
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(update)) => {
+            let tx = tx.clone();
+            required_ui_update_tasks().spawn(async move {
+                let _ =
+                    publish_ui_update(&tx, update, UiUpdatePublication::RequiredUnordered).await;
+            });
+            true
+        }
+    }
 }
 
 /// Send a UI update without blocking. Returns `true` if sent.
@@ -161,38 +225,10 @@ pub fn harness_command_channel() -> (HarnessCommandSender, HarnessCommandReceive
     tokio::sync::mpsc::channel(128)
 }
 
-#[derive(Clone)]
-pub struct HarnessCommandReceiptHandle {
-    sender: Arc<Mutex<Option<oneshot::Sender<aura_app::ui::contract::HarnessUiCommandReceipt>>>>,
-}
-
-impl std::fmt::Debug for HarnessCommandReceiptHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HarnessCommandReceiptHandle").finish()
-    }
-}
-
-impl HarnessCommandReceiptHandle {
-    #[must_use]
-    pub fn new(sender: oneshot::Sender<aura_app::ui::contract::HarnessUiCommandReceipt>) -> Self {
-        Self {
-            sender: Arc::new(Mutex::new(Some(sender))),
-        }
-    }
-
-    pub fn complete(&self, receipt: aura_app::ui::contract::HarnessUiCommandReceipt) {
-        if let Ok(mut sender) = self.sender.lock() {
-            if let Some(sender) = sender.take() {
-                let _ = sender.send(receipt);
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct HarnessCommandSubmission {
+    pub submission_id: String,
     pub command: HarnessUiCommand,
-    pub receipt: HarnessCommandReceiptHandle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -372,6 +408,10 @@ pub enum UiUpdate {
     InvitationExported {
         /// The exported invite code
         code: String,
+        /// Operation that exported the code, when the export belongs to an exact semantic flow
+        operation_id: Option<OperationId>,
+        /// Exact instance that produced the code, when the export belongs to an exact semantic flow
+        instance_id: Option<OperationInstanceId>,
     },
 
     /// An invitation was imported from a file
@@ -491,6 +531,7 @@ pub enum UiUpdate {
 
     /// Replace the authoritative runtime facts for specific fact kinds.
     RuntimeFactsUpdated {
+        revision: ProjectionRevision,
         replace_kinds: Vec<RuntimeEventKind>,
         facts: Vec<RuntimeFact>,
     },
@@ -601,17 +642,17 @@ mod tests {
     #[test]
     fn test_harness_command_channel() {
         let (tx, mut rx) = harness_command_channel();
-        let (receipt_tx, _receipt_rx) = oneshot::channel();
 
         tx.try_send(HarnessCommandSubmission {
+            submission_id: "submission-1".to_string(),
             command: HarnessUiCommand::NavigateScreen {
                 screen: aura_app::ui::contract::ScreenId::Settings,
             },
-            receipt: HarnessCommandReceiptHandle::new(receipt_tx),
         })
         .unwrap();
 
         let submission = rx.try_recv().unwrap();
+        assert_eq!(submission.submission_id, "submission-1");
         assert!(matches!(
             submission.command,
             HarnessUiCommand::NavigateScreen {
@@ -662,7 +703,7 @@ mod tests {
     async fn ordered_publication_preserves_sequence_under_backpressure() {
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        let ordered_gate = Arc::new(AsyncMutex::new(()));
+        let ordered_gate = Arc::new(OrderedUiUpdateGate::new());
 
         spawn_ordered_ui_updates(
             &tasks,
@@ -670,6 +711,20 @@ mod tests {
             &ordered_gate,
             vec![UiUpdate::SyncStarted, UiUpdate::SyncCompleted],
         );
+
+        assert!(matches!(rx.recv().await, Some(UiUpdate::SyncStarted)));
+        assert!(matches!(rx.recv().await, Some(UiUpdate::SyncCompleted)));
+        tasks.shutdown();
+    }
+
+    #[tokio::test]
+    async fn ordered_publication_preserves_sequence_across_batches() {
+        let tasks = Arc::new(UiTaskOwner::new());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let ordered_gate = Arc::new(OrderedUiUpdateGate::new());
+
+        spawn_ordered_ui_updates(&tasks, &tx, &ordered_gate, vec![UiUpdate::SyncStarted]);
+        spawn_ordered_ui_updates(&tasks, &tx, &ordered_gate, vec![UiUpdate::SyncCompleted]);
 
         assert!(matches!(rx.recv().await, Some(UiUpdate::SyncStarted)));
         assert!(matches!(rx.recv().await, Some(UiUpdate::SyncCompleted)));

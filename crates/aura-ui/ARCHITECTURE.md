@@ -11,20 +11,21 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 | Shared Dioxus component tree and UI state model | Browser API usage (`web_sys`, `wasm_bindgen`, `js_sys`) |
 | Deterministic keyboard routing for harness-driven scenarios | Desktop/mobile shell integration code |
 | Canonical snapshot text rendering for harness introspection | Runtime/effect handler implementation ownership |
-| Platform-neutral harness bridge primitives and clipboard adapter boundary | Parity-critical semantic lifecycle authorship |
-| Shared frontend-facing operation labels reused by Layer 7 shells | Shell-specific runtime/bootstrap orchestration ownership |
-| Shared frontend task-owner implementation reused by Layer 7 shells | Browser shell bridge ownership and publication policy |
+| Typed DOM-id helpers reused by Layer 7 shells | Browser shell bridge ownership and publication policy |
+| Platform-neutral harness bridge primitives | Parity-critical semantic lifecycle authorship |
+| Dioxus-specific spawn wiring for the shared frontend task-owner | Shell-specific runtime/bootstrap orchestration ownership |
 | Shared semantic UI contract materialization from `aura-app` | Callback-owned readiness synthesis |
 
 ## Dependencies
 
 | Direction | Crate | What |
 |-----------|-------|------|
-| Incoming | aura-app | Semantic UI contract (`ui_contract`), authoritative workflow publication |
+| Incoming | aura-app | Semantic UI contract (`ui_contract`), authoritative workflow publication, shared frontend primitives (`frontend_primitives`) |
 | Outgoing | — | Typed screen, modal, operation, toast, list, and runtime-event state |
 | Outgoing | — | `UiSnapshot` for canonical semantic projection export |
+| Outgoing | — | Typed DOM-id helpers for shared/web Layer 7 rendering |
 | Outgoing | — | Platform-neutral harness bridge primitives |
-| Outgoing | `aura-web` | Shared frontend task-owner implementation reused by the browser shell |
+| Outgoing | `aura-web` | Dioxus root component, rendering, keyboard routing |
 
 ## Invariants
 
@@ -100,7 +101,8 @@ Contract alignment:
 | Keyboard/focus/modal state | `Observed` | Shared UI model owns state; `keyboard.rs`, `model.rs` update it. |
 | Parity-critical operation rendering | `Observed` | Authoritative semantic facts from `aura-app` own truth; `model.rs` projects. |
 | Shared-flow completion helpers | `Observed` | Upstream workflow/runtime coordinators own truth; helpers dismiss UI state only. |
-| Shared frontend task-owner primitive | `ActorOwned` helper for Layer 7 shells | `task_owner.rs` provides the bounded cancellation/spawner pattern reused by UI/web shells without authoring semantic truth. |
+| Dioxus-specific spawn wiring for shared task-owner | `ActorOwned` helper for Dioxus shells | `task_owner.rs` provides the Dioxus-specific default spawn wiring. The core `FrontendTaskOwner` type lives in `aura-app::frontend_primitives`. |
+| Mounted shell signal subscriptions | `ActorOwned` helper scoped to component lifetime | `app/shell/subscriptions.rs` owns cancellable component-scoped subscription tasks so preserved-profile rebootstrap tears down old generation observers instead of accumulating immortal frontend loops. |
 
 ### Capability-Gated Points
 

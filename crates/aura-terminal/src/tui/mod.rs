@@ -51,6 +51,7 @@ pub mod screens;
 pub mod state;
 pub mod tasks;
 pub mod theme;
+pub(crate) mod timeout_support;
 pub mod types;
 pub mod updates;
 

@@ -1,0 +1,5 @@
+error: duplicate capability local name `message:send`
+ --> tests/boundaries/capability_family_duplicate_local_name.rs:7:5
+  |
+7 |     #[capability("message:send")]
+  |     ^

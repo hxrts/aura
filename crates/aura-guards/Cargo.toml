@@ -5,16 +5,19 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Guard chain enforcement for authorization, flow budgets, and leakage tracking"
 
 [lints]
 workspace = true
 
 [dependencies]
 # Workspace crates
-aura-core = { path = "../aura-core" }
-aura-authorization = { path = "../aura-authorization" }
-aura-mpst = { path = "../aura-mpst" }
-aura-journal = { path = "../aura-journal" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
+aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
 
 # Serialization
 serde = { workspace = true }

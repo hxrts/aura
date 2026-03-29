@@ -8,13 +8,13 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::fact_types::AUTH_AUTHENTICATED_FACT_TYPE_ID;
 use crate::runtime::services::AuthManager;
 use crate::runtime::AuraEffectSystem;
+use aura_authentication::capabilities::AuthenticationCapability;
 use aura_core::effects::{
     CryptoCoreEffects, CryptoExtendedEffects, RandomCoreEffects, RandomExtendedEffects,
 };
 use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard;
-use aura_guards::types::CapabilityId;
 use aura_protocol::effects::EffectApiEffects;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -450,7 +450,7 @@ impl AuthHandler {
 
         // Enforce guard chain
         let guard = create_send_guard(
-            CapabilityId::from("auth:authenticate"),
+            AuthenticationCapability::Verify.as_name(),
             self.context.effect_context.context_id(),
             self.context.authority.authority_id(),
             FlowCost::new(50),
@@ -489,9 +489,14 @@ mod tests {
         let effects = crate::testing::simulation_effect_system(&config);
         let handler = AuthHandler::new(authority_context.clone()).unwrap();
 
-        let status = handler.authentication_status(&effects).await.unwrap();
-        assert_eq!(status.authority_id, authority_id);
-        assert_eq!(status.device_id, handler.device_id());
+        let error = handler
+            .authentication_status(&effects)
+            .await
+            .expect_err("authentication status should require authorization");
+        assert!(
+            error.to_string().contains("Authorization denied"),
+            "expected authorization denial, got: {error}"
+        );
     }
 
     #[tokio::test]

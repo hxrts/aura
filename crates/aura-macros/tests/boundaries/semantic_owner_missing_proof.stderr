@@ -3,11 +3,11 @@ error: semantic_owner requires `proof = TypePath`
    |
  5 | / #[aura_macros::semantic_owner(
  6 | |     owner = "demo-owner",
- 7 | |     terminal = "publish_done",
- 8 | |     postcondition = "demo_done",
+ 7 | |     wrapper = "missing_proof_wrapper",
+ 8 | |     terminal = "publish_done",
 ...  |
-11 | |     category = "move_owned"
-12 | | )]
+13 | |     category = "move_owned"
+14 | | )]
    | |__^
    |
    = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)

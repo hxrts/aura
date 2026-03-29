@@ -25,6 +25,7 @@
 //! - `hints`: Demo mode hints and invite code generation
 
 pub mod hints;
+mod identities;
 pub mod signal_coordinator;
 pub mod simulator;
 
@@ -39,7 +40,6 @@ use crate::error::{TerminalError, TerminalResult};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
-use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, Mutex};
@@ -53,6 +53,7 @@ use std::str::FromStr;
 
 use crate::ids;
 use crate::tui::effects::{AuraEvent, EffectCommand, EventFilter, EventSubscription};
+use identities::{demo_authority_id, demo_device_id, GuardianAcceptance};
 
 /// High-level demo progression phases used by the simulator integration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,15 +80,6 @@ pub enum AgentCapability {
         /// The context this agent witnesses for
         context_id: ContextId,
     },
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct GuardianAcceptance {
-    guardian_id: AuthorityId,
-    setup_id: String,
-    accepted: bool,
-    public_key: Vec<u8>,
-    timestamp: TimeStamp,
 }
 
 /// Events that flow between agents and the demo system
@@ -277,8 +269,8 @@ impl SimulatedAgent {
         shared_inbox: Option<Arc<parking_lot::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
     ) -> TerminalResult<Self> {
         // Create deterministic identifiers derived from seed and name
-        let device_id = ids::device_id(&format!("demo:{}:{}:device", config.seed, name));
-        let authority_id = ids::authority_id(&format!("demo:{}:{}:authority", config.seed, name));
+        let device_id = demo_device_id(config.seed, &name);
+        let authority_id = demo_authority_id(config.seed, &name);
 
         // Create simulation environment with optional shared transport
         // IMPORTANT: the simulator transport inbox is addressed by AuthorityId (not DeviceId).

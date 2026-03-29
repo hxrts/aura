@@ -9,7 +9,7 @@ use aura_agent::SharedTransport;
 use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
-use futures::future::join_all;
+use futures::{future::join_all, TryFutureExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -295,7 +295,8 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
     };
 
     let response = initiator_task
-        .map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))?;
+        .map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))
+        .await?;
 
     for result in join_all(guardian_tasks).await {
         result.map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))?;

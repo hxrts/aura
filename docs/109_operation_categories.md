@@ -222,24 +222,24 @@ All Category C ceremonies implement:
 | Ceremony | Key Gen | Agreement | Fallback | Notes |
 |----------|---------|-----------|----------|-------|
 | Guardian setup/rotation | K3 | A2→A3 | A2 | Consensus-finalized for durability |
-| Recovery approval | — | A2→A3 | A2 | Soft-safe approvals → consensus |
-| Recovery execution | — | A2→A3 | A2 | Consensus-finalized commit |
+| Recovery approval | | A2→A3 | A2 | Soft-safe approvals → consensus |
+| Recovery execution | | A2→A3 | A2 | Consensus-finalized commit |
 
 #### Channel and Group Ceremonies
 
 | Ceremony | Key Gen | Agreement | Fallback | Notes |
 |----------|---------|-----------|----------|-------|
-| AMP channel epoch bump | — | A1→A2→A3 | A1/A2 | Proposed → cert → commit |
-| AMP channel bootstrap | — | A1→A2→A3 | A1/A2 | Provisional → group key rotation |
+| AMP channel epoch bump | | A1→A2→A3 | A1/A2 | Proposed → cert → commit |
+| AMP channel bootstrap | | A1→A2→A3 | A1/A2 | Provisional → group key rotation |
 | Group/Block creation | K3 | A1→A2→A3 | A1/A2 | Provisional bootstrap → consensus |
-| Rendezvous secure-channel | — | A1→A2→A3 | A1/A2 | Provisional → consensus |
+| Rendezvous secure-channel | | A1→A2→A3 | A1/A2 | Provisional → consensus |
 
 #### Other Ceremonies
 
 | Ceremony | Key Gen | Agreement | Fallback | Notes |
 |----------|---------|-----------|----------|-------|
-| Invitation (contact/channel/guardian) | — | A3 | None | Consensus-finalized only |
-| OTA activation | — | A2→A3 | A2 | Threshold-signed → consensus |
+| Invitation (contact/channel/guardian) | | A3 | None | Consensus-finalized only |
+| OTA activation | | A2→A3 | A2 | Threshold-signed → consensus |
 | DKD ceremony | DKD | A2→A3 | A2 | Multi-party derivation → commit |
 
 ### 5.4 Bootstrap Exception

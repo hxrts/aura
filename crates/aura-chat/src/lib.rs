@@ -14,7 +14,7 @@
 //! ## Canonical API
 //!
 //! Use `ChatFactService` for all chat operations. It integrates with:
-//! - Capability guards (`CAP_CHAT_CHANNEL_CREATE`, `CAP_CHAT_MESSAGE_SEND`)
+//! - Capability guards (`ChatCapability::ChannelCreate`, `ChatCapability::MessageSend`)
 //! - Flow budget charging (`CHAT_CHANNEL_CREATE_COST`, `CHAT_MESSAGE_SEND_COST`)
 //! - Journal fact emission via `EffectCommand::JournalAppend`
 //!
@@ -74,6 +74,8 @@
 
 use aura_core::AuraError;
 
+/// Typed capability families owned by the chat domain.
+pub mod capabilities;
 pub mod fact_service;
 pub mod facts;
 pub mod group;
@@ -102,7 +104,9 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 }
 
 pub use fact_service::ChatFactService;
-pub use facts::{ChatFact, ChatFactReducer, ChatMessageDeliveryStatus, CHAT_FACT_TYPE_ID};
+pub use facts::{
+    ChannelContextIndex, ChatFact, ChatFactReducer, ChatMessageDeliveryStatus, CHAT_FACT_TYPE_ID,
+};
 pub use group::ChatGroup;
 pub use types::*;
 pub use view::{ChatDelta, ChatViewReducer};

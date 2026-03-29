@@ -16,6 +16,8 @@
 //! wait_for_contact(&app_core, contact_id).await;
 //! ```
 
+#![allow(dead_code)]
+
 use async_lock::RwLock;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +31,7 @@ use aura_app::views::{
 };
 use aura_app::{AppCore, AppError};
 use aura_core::effects::reactive::{ReactiveEffects, Signal};
-use aura_core::types::identifiers::{AuthorityId, DeviceId};
+use aura_core::types::identifiers::AuthorityId;
 use aura_terminal::ids;
 
 /// Default timeout for signal waits.

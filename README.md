@@ -1,22 +1,16 @@
 # Aura
 
-Aura is a private peer-to-peer social network designed around a few novel concepts:
-
-Social infrastructure • Aura forms an encrypted mesh across the social graph. Gossip, rendezvous, consensus, and storage all operate through scoped contexts.
-
-Relational identity • Identity emerges bottom-up between parties that share encrypted context. Social recovery enables restoring full account access through their relationships.
-
-Bounded autonomy • Coordination becomes intuitive when capabilities are composable and legible to the system, ensuring consent by design.
+Aura is a private peer-to-peer communication system built around three core requirements. ① The network must function without dedicated relays, DNS, or central software distribution authority. ② Account access must survive device loss. ③ Communication must preserve confidentiality and metadata privacy, with bounded forward secrecy. Everything else in the design follows from these constraints.
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hxrts/aura)
 
 ## Architecture
 
-Aura implements a choreographic programming model that projects global protocols into local session types. The architecture is organized into layers, separating interfaces from implementations and isolating impure evaluation through algebraic effects. This enables deterministic testing and simulation.
+Aura implements a choreographic programming model that projects global protocols into local session types. The architecture is organized into layers, separating interfaces from implementations and isolating impure evaluation through algebraic effects.
 
-State evolves though CRDT operations, stored facts merge via set union and reduce into a deterministic journal. When operations require linearization beyond CRDT convergence, Aura runs single-shot consensus among a context-scoped witness group, with leaderless fallback. Each instance binds an operation to an explicit prestate hash. Witnesses produce threshold signature shares over the deterministic result. Compact commit facts produced by consensus are then merged into the journal.
+State evolves through CRDT operations. Stored facts merge by set union and reduce into a deterministic journal. When operations require linearization beyond CRDT convergence, context-scoped witness groups run single-shot threshold consensus with leaderless fallback.
 
-Pure evaluation enforces authorization, consent predicates, and resource budgets, returning effects as data. Effect commands are executed by an async interpreter. The separation between pure decision logic and effectful execution enables deterministic testing. Simulation executes protocol code with mock interpreters that provide full control over network conditions, fault injection, and state inspection.
+Authorization, consent, and resource budgets are enforced in a pure evaluation pass that returns effects as data. Effect handlers execute through an async interpreter. This separation enables deterministic testing and simulation.
 
 For more details see [System Architecture](docs/001_system_architecture.md) and [Project Structure](docs/999_project_structure.md).
 
@@ -28,9 +22,6 @@ nix develop
 
 # Launch the cross-frontend developer demo UX (TUI + web)
 just demo
-
-# Launch the older simulated TUI-only demo
-just demo-sim
 
 # Build production binary
 just build

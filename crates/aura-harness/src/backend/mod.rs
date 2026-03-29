@@ -14,7 +14,6 @@ use aura_app::ui::contract::{
     ControlId, FieldId, ListId, OperationId, OperationInstanceId, OperationState, UiSnapshot,
 };
 use aura_app::ui_contract::ProjectionRevision;
-use aura_app::ui_contract::RuntimeFact;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -211,12 +210,16 @@ pub trait SharedSemanticBackend {
         &mut self,
         authority_id: &str,
         channel_id: Option<&str>,
+        context_id: Option<&str>,
+        channel_name: Option<&str>,
     ) -> Result<SubmittedAction<()>> {
         expect_semantic_command_unit_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::InviteActorToChannel {
                     authority_id: authority_id.to_string(),
                     channel_id: channel_id.map(ToOwned::to_owned),
+                    context_id: context_id.map(ToOwned::to_owned),
+                    channel_name: channel_name.map(ToOwned::to_owned),
                 },
             ))?,
             "submit_invite_actor_to_channel",
@@ -249,6 +252,8 @@ pub trait SharedSemanticBackend {
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::SendChatMessage {
                     message: message.to_string(),
+                    channel_id: None,
+                    context_id: None,
                 },
             ))?,
             "submit_send_chat_message",
@@ -333,22 +338,6 @@ fn expect_semantic_command_channel_binding_with_required_handle(
 }
 
 #[must_use]
-pub(crate) fn latest_invitation_code(snapshot: &UiSnapshot) -> Option<String> {
-    snapshot
-        .runtime_events
-        .iter()
-        .rev()
-        .find_map(|event| match &event.fact {
-            RuntimeFact::InvitationCodeReady {
-                source_operation,
-                code: Some(code),
-                ..
-            } if *source_operation == OperationId::invitation_create() => Some(code.clone()),
-            _ => None,
-        })
-}
-
-#[must_use]
 pub(crate) fn observe_operation(
     snapshot: &UiSnapshot,
     operation_id: &OperationId,
@@ -383,9 +372,9 @@ fn tool_key_sequence(key: ToolKey) -> &'static str {
 }
 
 pub enum BackendHandle {
-    Local(local_pty::LocalPtyBackend),
+    Local(Box<local_pty::LocalPtyBackend>),
     Browser(Box<playwright_browser::PlaywrightBrowserBackend>),
-    Ssh(ssh_tunnel::SshTunnelBackend),
+    Ssh(Box<ssh_tunnel::SshTunnelBackend>),
 }
 
 impl BackendHandle {
@@ -395,13 +384,15 @@ impl BackendHandle {
         pty_cols: Option<u16>,
     ) -> Result<Self> {
         match config.mode {
-            InstanceMode::Local => Ok(Self::Local(local_pty::LocalPtyBackend::new(
+            InstanceMode::Local => Ok(Self::Local(Box::new(local_pty::LocalPtyBackend::new(
                 config, pty_rows, pty_cols,
-            ))),
+            )))),
             InstanceMode::Browser => Ok(Self::Browser(Box::new(
                 playwright_browser::PlaywrightBrowserBackend::new(config)?,
             ))),
-            InstanceMode::Ssh => Ok(Self::Ssh(ssh_tunnel::SshTunnelBackend::new(config))),
+            InstanceMode::Ssh => Ok(Self::Ssh(Box::new(ssh_tunnel::SshTunnelBackend::new(
+                config,
+            )))),
         }
     }
 

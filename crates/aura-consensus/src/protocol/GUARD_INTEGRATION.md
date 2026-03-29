@@ -15,11 +15,11 @@ This document describes the guard chain integration for the aura-consensus proto
    - Leakage budgets implemented for privacy-sensitive operations
 
 2. **Message Coverage**:
-   - ✓ Execute (Coordinator → Witness): `guard_capability="initiate_consensus"`, `flow_cost=100`
-   - ✓ NonceCommit (Witness → Coordinator): `guard_capability="witness_nonce"`, `flow_cost=50`
-   - ✓ SignRequest (Coordinator → Witness): `guard_capability="aggregate_nonces"`, `flow_cost=75`
-   - ✓ SignShare (Witness → Coordinator): `guard_capability="witness_sign"`, `flow_cost=50`, `leak="pipelined_commitment"`
-   - ✓ ConsensusResult (Coordinator → Witness): `guard_capability="finalize_consensus"`, `flow_cost=100`, `journal_facts="consensus_complete"`
+   - ✓ Execute (Coordinator → Witness): `guard_capability="consensus:initiate"`, `flow_cost=100`
+   - ✓ NonceCommit (Witness → Coordinator): `guard_capability="consensus:witness_nonce"`, `flow_cost=50`
+   - ✓ SignRequest (Coordinator → Witness): `guard_capability="consensus:aggregate_nonces"`, `flow_cost=75`
+   - ✓ SignShare (Witness → Coordinator): `guard_capability="consensus:witness_sign"`, `flow_cost=50`, `leak="pipelined_commitment"`
+   - ✓ ConsensusResult (Coordinator → Witness): `guard_capability="consensus:finalize"`, `flow_cost=100`, `journal_facts="consensus_complete"`
 
 3. **Testing**:
    - ✓ Unit tests validate guard configurations match annotations
@@ -93,23 +93,23 @@ From `choreography.choreo`:
 
 ```purescript
 @parallel
-Coordinator[guard_capability = "initiate_consensus", flow_cost = 100]
+Coordinator[guard_capability = "consensus:initiate", flow_cost = 100]
   -> Witness[*] : Execute(crate::ConsensusMessage)
 
 @parallel
-Witness[*][guard_capability = "witness_nonce", flow_cost = 50]
+Witness[*][guard_capability = "consensus:witness_nonce", flow_cost = 50]
   -> Coordinator : NonceCommit(crate::ConsensusMessage)
 
 @parallel
-Coordinator[guard_capability = "aggregate_nonces", flow_cost = 75]
+Coordinator[guard_capability = "consensus:aggregate_nonces", flow_cost = 75]
   -> Witness[*] : SignRequest(crate::ConsensusMessage)
 
 @parallel
-Witness[*][guard_capability = "witness_sign", flow_cost = 50, leak = "pipelined_commitment"]
+Witness[*][guard_capability = "consensus:witness_sign", flow_cost = 50, leak = "pipelined_commitment"]
   -> Coordinator : SignShare(crate::ConsensusMessage)
 
 @parallel
-Coordinator[guard_capability = "finalize_consensus", flow_cost = 100, journal_facts = "consensus_complete"]
+Coordinator[guard_capability = "consensus:finalize", flow_cost = 100, journal_facts = "consensus_complete"]
   -> Witness[*] : ConsensusResult(crate::ConsensusMessage)
 ```
 

@@ -70,7 +70,7 @@
 //! use aura_guards::{create_send_guard, SendGuardChain};
 //!
 //! let guard = create_send_guard(
-//!     CapabilityId::from("message:send"),
+//!     aura_core::capability_name!("chat:message:send"),
 //!     context_id,
 //!     peer_device,
 //!     100, // flow cost

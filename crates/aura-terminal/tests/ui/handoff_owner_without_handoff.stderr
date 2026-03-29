@@ -1,0 +1,8 @@
+error[E0432]: unresolved import `aura_terminal::tui::callbacks::ImportInvitationOwnedCallback`
+ --> tests/ui/handoff_owner_without_handoff.rs:3:5
+  |
+3 | use aura_terminal::tui::callbacks::ImportInvitationOwnedCallback;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------------------
+  |     |                              |
+  |     |                              help: a similar name exists in the module: `ExportInvitationCallback`
+  |     no `ImportInvitationOwnedCallback` in `tui::callbacks`

@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use proc_macro2::Span;
+use quote::quote;
 use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -16,6 +17,8 @@ use syn::{
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LintMode {
+    BrowserPromiseBoundedAwaits,
+    BrowserTransportSingleOwner,
     WorkflowNoViewReadsForDecisions,
     WorkflowNoViewWrites,
     WorkflowNoFallbackDefaults,
@@ -27,6 +30,7 @@ enum LintMode {
     SemanticOwnerDetachedContinuation,
     SemanticOwnerNoSpawn,
     SemanticOwnerProofSuccess,
+    SemanticOwnerStableWrapper,
     WorkflowProofBearingSuccess,
     ProofIssuerAuthoritativeSource,
     ParityCriticalIgnoredResults,
@@ -36,16 +40,22 @@ enum LintMode {
     HarnessMoveOwnershipBoundary,
     HarnessReadinessOwnership,
     HarnessRecoveryOwnership,
+    MustSettleBoundary,
+    OwnerIssuedReadinessBoundary,
     OptionalOwnerBoundary,
     TimeoutPolicyBoundary,
     TimeDomainUsage,
     AuthoritativeRefNoReresolution,
     WeakToStrongIdentifierUpgrade,
+    ParityCriticalCallbackSettlement,
+    TerminalShellExplicitExitIntent,
 }
 
 impl LintMode {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
+            "browser-promise-bounded-awaits" => Ok(Self::BrowserPromiseBoundedAwaits),
+            "browser-transport-single-owner" => Ok(Self::BrowserTransportSingleOwner),
             "workflow-no-view-reads-for-decisions" => Ok(Self::WorkflowNoViewReadsForDecisions),
             "workflow-no-view-writes" => Ok(Self::WorkflowNoViewWrites),
             "workflow-no-fallback-defaults" => Ok(Self::WorkflowNoFallbackDefaults),
@@ -59,6 +69,7 @@ impl LintMode {
             "semantic-owner-detached-continuation" => Ok(Self::SemanticOwnerDetachedContinuation),
             "semantic-owner-no-spawn" => Ok(Self::SemanticOwnerNoSpawn),
             "semantic-owner-proof-success" => Ok(Self::SemanticOwnerProofSuccess),
+            "semantic-owner-stable-wrapper" => Ok(Self::SemanticOwnerStableWrapper),
             "workflow-proof-bearing-success" => Ok(Self::WorkflowProofBearingSuccess),
             "proof-issuer-authoritative-source" => Ok(Self::ProofIssuerAuthoritativeSource),
             "parity-critical-ignored-results" => Ok(Self::ParityCriticalIgnoredResults),
@@ -68,17 +79,23 @@ impl LintMode {
             "harness-move-ownership-boundary" => Ok(Self::HarnessMoveOwnershipBoundary),
             "harness-readiness-ownership" => Ok(Self::HarnessReadinessOwnership),
             "harness-recovery-ownership" => Ok(Self::HarnessRecoveryOwnership),
+            "must-settle-boundary" => Ok(Self::MustSettleBoundary),
+            "owner-issued-readiness-boundary" => Ok(Self::OwnerIssuedReadinessBoundary),
             "optional-owner-boundary" => Ok(Self::OptionalOwnerBoundary),
             "timeout-policy-boundary" => Ok(Self::TimeoutPolicyBoundary),
             "time-domain-usage" => Ok(Self::TimeDomainUsage),
             "authoritative-ref-no-reresolution" => Ok(Self::AuthoritativeRefNoReresolution),
             "weak-to-strong-identifier-upgrade" => Ok(Self::WeakToStrongIdentifierUpgrade),
+            "parity-critical-callback-settlement" => Ok(Self::ParityCriticalCallbackSettlement),
+            "terminal-shell-explicit-exit-intent" => Ok(Self::TerminalShellExplicitExitIntent),
             other => Err(format!("unknown lint mode: {other}")),
         }
     }
 
     fn display_name(self) -> &'static str {
         match self {
+            Self::BrowserPromiseBoundedAwaits => "browser-promise-bounded-awaits",
+            Self::BrowserTransportSingleOwner => "browser-transport-single-owner",
             Self::WorkflowNoViewReadsForDecisions => "workflow-no-view-reads-for-decisions",
             Self::WorkflowNoViewWrites => "workflow-no-view-writes",
             Self::WorkflowNoFallbackDefaults => "workflow-no-fallback-defaults",
@@ -92,6 +109,7 @@ impl LintMode {
             Self::SemanticOwnerDetachedContinuation => "semantic-owner-detached-continuation",
             Self::SemanticOwnerNoSpawn => "semantic-owner-no-spawn",
             Self::SemanticOwnerProofSuccess => "semantic-owner-proof-success",
+            Self::SemanticOwnerStableWrapper => "semantic-owner-stable-wrapper",
             Self::WorkflowProofBearingSuccess => "workflow-proof-bearing-success",
             Self::ProofIssuerAuthoritativeSource => "proof-issuer-authoritative-source",
             Self::ParityCriticalIgnoredResults => "parity-critical-ignored-results",
@@ -101,11 +119,15 @@ impl LintMode {
             Self::HarnessMoveOwnershipBoundary => "harness-move-ownership-boundary",
             Self::HarnessReadinessOwnership => "harness-readiness-ownership",
             Self::HarnessRecoveryOwnership => "harness-recovery-ownership",
+            Self::MustSettleBoundary => "must-settle-boundary",
+            Self::OwnerIssuedReadinessBoundary => "owner-issued-readiness-boundary",
             Self::OptionalOwnerBoundary => "optional-owner-boundary",
             Self::TimeoutPolicyBoundary => "timeout-policy-boundary",
             Self::TimeDomainUsage => "time-domain-usage",
             Self::AuthoritativeRefNoReresolution => "authoritative-ref-no-reresolution",
             Self::WeakToStrongIdentifierUpgrade => "weak-to-strong-identifier-upgrade",
+            Self::ParityCriticalCallbackSettlement => "parity-critical-callback-settlement",
+            Self::TerminalShellExplicitExitIntent => "terminal-shell-explicit-exit-intent",
         }
     }
 }
@@ -117,6 +139,9 @@ struct ParsedRustFile {
 }
 
 type StrongReferenceRegistry = HashMap<String, String>;
+
+const OWNERSHIP_MODEL_GUIDANCE: &str =
+    "See docs/122_ownership_model.md for owner-issued readiness, typed terminal settlement, and owner-drop failure best practices.";
 
 fn main() {
     if let Err(error) = run() {
@@ -134,6 +159,35 @@ fn run() -> Result<(), String> {
     let paths = args.map(PathBuf::from).collect::<Vec<_>>();
     if paths.is_empty() {
         return Err("expected at least one path to scan".to_string());
+    }
+
+    if mode == LintMode::BrowserTransportSingleOwner {
+        let mut source_files = Vec::new();
+        for path in &paths {
+            collect_source_files(path, &mut source_files)?;
+        }
+        source_files.sort();
+        source_files.dedup();
+
+        let mut violations = Vec::new();
+        for file in &source_files {
+            let source = fs::read_to_string(file)
+                .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
+            violations.extend(scan_browser_transport_single_owner(file, &source));
+        }
+
+        if !violations.is_empty() {
+            for violation in violations {
+                eprintln!("{violation}");
+            }
+            return Err(
+                "browser harness transport/mailbox polling ownership escaped the sanctioned shell owner"
+                    .to_string(),
+            );
+        }
+
+        println!("{}: clean", mode.display_name());
+        return Ok(());
     }
 
     let mut rust_files = Vec::new();
@@ -174,6 +228,14 @@ fn run() -> Result<(), String> {
             eprintln!("{violation}");
         }
         return Err(match mode {
+            LintMode::BrowserPromiseBoundedAwaits => {
+                "raw browser promise awaits still bypass the sanctioned bounded browser helper"
+                    .to_string()
+            }
+            LintMode::BrowserTransportSingleOwner => {
+                "browser harness transport/mailbox polling ownership escaped the sanctioned shell owner"
+                    .to_string()
+            }
             LintMode::WorkflowNoViewReadsForDecisions => {
                 "parity-critical workflow code still reads projections to make semantic decisions"
                     .to_string()
@@ -213,6 +275,10 @@ fn run() -> Result<(), String> {
                 "proof-bound semantic owners still publish plain success or omit typed proof-bearing success"
                     .to_string()
             }
+            LintMode::SemanticOwnerStableWrapper => {
+                "semantic owners still declare missing or malformed stable wrapper boundaries"
+                    .to_string()
+            }
             LintMode::WorkflowProofBearingSuccess => {
                 "workflow code still publishes plain success directly instead of consuming typed postcondition proofs"
                     .to_string()
@@ -246,6 +312,16 @@ fn run() -> Result<(), String> {
                 "parity-critical observation code may not introduce sleeps, retries, or recovery helpers outside approved owner modules"
                     .to_string()
             }
+            LintMode::MustSettleBoundary => {
+                format!(
+                    "typed terminal settlement still escapes sanctioned owner modules. {OWNERSHIP_MODEL_GUIDANCE}"
+                )
+            }
+            LintMode::OwnerIssuedReadinessBoundary => {
+                format!(
+                    "readiness or command-acceptance truth is still authored outside sanctioned owner modules. {OWNERSHIP_MODEL_GUIDANCE}"
+                )
+            }
             LintMode::OptionalOwnerBoundary => {
                 "parity-critical boundaries still expose optional owner or spawner shapes"
                     .to_string()
@@ -264,6 +340,16 @@ fn run() -> Result<(), String> {
             LintMode::WeakToStrongIdentifierUpgrade => {
                 "weak identifiers still upgrade directly into canonical strong references or owned handles"
                     .to_string()
+            }
+            LintMode::ParityCriticalCallbackSettlement => {
+                format!(
+                    "parity-critical callback settlement violation: handoff without terminal settlement, or fact-committing command dispatched through an observed (non-owned) callback helper. {OWNERSHIP_MODEL_GUIDANCE}"
+                )
+            }
+            LintMode::TerminalShellExplicitExitIntent => {
+                format!(
+                    "terminal shell reload/exit still relies on implicit fullscreen return or side-channel state instead of explicit ShellExitIntent ownership. {OWNERSHIP_MODEL_GUIDANCE}"
+                )
             }
         });
     }
@@ -300,6 +386,40 @@ fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Strin
     Ok(())
 }
 
+fn collect_source_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    if path.is_file() {
+        if matches!(
+            path.extension().and_then(OsStr::to_str),
+            Some("rs" | "ts" | "js")
+        ) {
+            files.push(path.to_path_buf());
+        }
+        return Ok(());
+    }
+    if !path.is_dir() {
+        return Err(format!("path does not exist: {}", path.display()));
+    }
+
+    for entry in fs::read_dir(path)
+        .map_err(|error| format!("failed to read directory {}: {error}", path.display()))?
+    {
+        let entry = entry.map_err(|error| {
+            format!("failed to read directory entry {}: {error}", path.display())
+        })?;
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            collect_source_files(&entry_path, files)?;
+        } else if matches!(
+            entry_path.extension().and_then(OsStr::to_str),
+            Some("rs" | "ts" | "js")
+        ) {
+            files.push(entry_path);
+        }
+    }
+
+    Ok(())
+}
+
 fn scan_file(
     mode: LintMode,
     file: &Path,
@@ -308,6 +428,9 @@ fn scan_file(
     strong_references: &StrongReferenceRegistry,
 ) -> Vec<String> {
     match mode {
+        LintMode::BrowserTransportSingleOwner => {
+            return scan_browser_transport_single_owner(file, source);
+        }
         LintMode::ActorOwnedTaskSpawn => return scan_actor_owned_task_spawn(file, syntax),
         LintMode::AsyncSessionOwnership => return scan_async_session_ownership(file, source),
         LintMode::FrontendSemanticHandoffBoundary => {
@@ -315,6 +438,9 @@ fn scan_file(
         }
         LintMode::ProofIssuerAuthoritativeSource => {
             return scan_proof_issuer_authoritative_source(file, syntax);
+        }
+        LintMode::SemanticOwnerStableWrapper => {
+            return scan_semantic_owner_stable_wrapper(file, syntax);
         }
         LintMode::HarnessMoveOwnershipBoundary => {
             return scan_harness_move_ownership_boundary(file, source);
@@ -325,6 +451,12 @@ fn scan_file(
         LintMode::HarnessRecoveryOwnership => {
             return scan_harness_recovery_ownership(file, source);
         }
+        LintMode::MustSettleBoundary => {
+            return scan_must_settle_boundary(file, source);
+        }
+        LintMode::OwnerIssuedReadinessBoundary => {
+            return scan_owner_issued_readiness_boundary(file, source);
+        }
         LintMode::OptionalOwnerBoundary => {
             return scan_optional_owner_boundary(file, source);
         }
@@ -334,7 +466,14 @@ fn scan_file(
         LintMode::WeakToStrongIdentifierUpgrade => {
             return scan_weak_to_strong_identifier_upgrade(file, syntax, strong_references);
         }
-        LintMode::WorkflowNoViewReadsForDecisions
+        LintMode::ParityCriticalCallbackSettlement => {
+            return scan_parity_critical_callback_settlement(file, syntax);
+        }
+        LintMode::TerminalShellExplicitExitIntent => {
+            return scan_terminal_shell_explicit_exit_intent(file, source);
+        }
+        LintMode::BrowserPromiseBoundedAwaits
+        | LintMode::WorkflowNoViewReadsForDecisions
         | LintMode::WorkflowNoViewWrites
         | LintMode::WorkflowNoFallbackDefaults
         | LintMode::WorkflowNoViewDerivedReadiness
@@ -812,6 +951,12 @@ fn scan_function(
     } = function;
     let contains_handoff = function_contains_call(block, "handoff_to_app_workflow");
     let should_scan = match mode {
+        LintMode::BrowserPromiseBoundedAwaits => {
+            !file
+                .to_string_lossy()
+                .ends_with("crates/aura-web/src/browser_promises.rs")
+                && !has_marker_attr(attrs, "observed_only")
+        }
         LintMode::WorkflowNoViewReadsForDecisions
         | LintMode::WorkflowNoViewWrites
         | LintMode::WorkflowNoFallbackDefaults
@@ -843,12 +988,13 @@ fn scan_function(
         LintMode::SemanticOwnerDetachedContinuation => has_marker_attr(attrs, "semantic_owner"),
         LintMode::SemanticOwnerNoSpawn => has_marker_attr(attrs, "semantic_owner"),
         LintMode::SemanticOwnerProofSuccess => semantic_owner_declares_proof(attrs),
+        LintMode::SemanticOwnerStableWrapper => false,
         LintMode::WorkflowProofBearingSuccess => {
             file.to_string_lossy()
                 .contains("crates/aura-app/src/workflows/")
                 && file
                     .file_name()
-                    .is_none_or(|name| name != "semantic_facts.rs")
+                    .map_or(true, |name| name != "semantic_facts.rs")
         }
         LintMode::ProofIssuerAuthoritativeSource => false,
         LintMode::ParityCriticalIgnoredResults => {
@@ -860,14 +1006,19 @@ fn scan_function(
             .contains("crates/aura-app/src/workflows/"),
         LintMode::WeakToStrongIdentifierUpgrade => false,
         LintMode::ActorOwnedTaskSpawn
+        | LintMode::BrowserTransportSingleOwner
         | LintMode::AsyncSessionOwnership
         | LintMode::FrontendSemanticHandoffBoundary
         | LintMode::HarnessMoveOwnershipBoundary
         | LintMode::HarnessReadinessOwnership
         | LintMode::HarnessRecoveryOwnership
+        | LintMode::MustSettleBoundary
+        | LintMode::OwnerIssuedReadinessBoundary
         | LintMode::OptionalOwnerBoundary
         | LintMode::TimeoutPolicyBoundary
-        | LintMode::TimeDomainUsage => false,
+        | LintMode::TimeDomainUsage
+        | LintMode::ParityCriticalCallbackSettlement
+        | LintMode::TerminalShellExplicitExitIntent => false,
     };
     if !should_scan {
         return;
@@ -1005,18 +1156,17 @@ impl OwnershipVisitor<'_> {
                         | "fact-backed"
                 )
             }),
-            LintMode::WorkflowNoViewWrites => tags.iter().any(|tag| {
-                matches!(
-                    tag.as_str(),
-                    "observed-display-update" | "fact-backed"
-                )
-            }),
-            LintMode::WorkflowNoFallbackDefaults => {
-                tags.iter().any(|tag| matches!(tag.as_str(), "first-run-default"))
-            }
+            LintMode::WorkflowNoViewWrites => tags
+                .iter()
+                .any(|tag| matches!(tag.as_str(), "observed-display-update" | "fact-backed")),
+            LintMode::WorkflowNoFallbackDefaults => tags
+                .iter()
+                .any(|tag| matches!(tag.as_str(), "first-run-default")),
             LintMode::WorkflowNoViewDerivedReadiness
             | LintMode::WorkflowNoViewDerivedRecipientResolution => false,
-            LintMode::WorkflowUnboundedRuntimeAwaits => false,
+            LintMode::WorkflowUnboundedRuntimeAwaits | LintMode::BrowserPromiseBoundedAwaits => {
+                false
+            }
             _ => false,
         }
     }
@@ -1454,6 +1604,26 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
         );
 
         match self.mode {
+            LintMode::BrowserPromiseBoundedAwaits => {
+                if let Expr::Call(expr_call) = strip_expression(&node.base) {
+                    if let Some(path) = call_path_string(&expr_call.func) {
+                        let normalized = path.replace(' ', "");
+                        if matches!(
+                            normalized.as_str(),
+                            "JsFuture::from" | "wasm_bindgen_futures::JsFuture::from"
+                        ) {
+                            self.push_violation(
+                                node.span(),
+                                format!(
+                                    "raw browser promise await in `{}`: {}. Route browser promises through `crate::browser_promises::await_browser_promise_with_timeout(...)` or `fetch_text_with_timeout(...)`; browser/WASM ownership code must not await `JsFuture::from(...)` directly because repo policy requires bounded browser waits and a single shell-owned transport poller.",
+                                    self.function_name,
+                                    normalized
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
             LintMode::SemanticOwnerBoundedAwaits => {
                 if let Some(method_call) = method_call_on_ident(&node.base, "runtime") {
                     self.push_violation(
@@ -1549,9 +1719,11 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::WorkflowNoViewDerivedReadiness
             | LintMode::WorkflowNoViewDerivedRecipientResolution
             | LintMode::SemanticOwnerProofSuccess
+            | LintMode::SemanticOwnerStableWrapper
             | LintMode::WorkflowProofBearingSuccess
             | LintMode::ProofIssuerAuthoritativeSource
-            | LintMode::ParityCriticalIgnoredResults => {}
+            | LintMode::ParityCriticalIgnoredResults
+            | LintMode::BrowserTransportSingleOwner => {}
             LintMode::ActorOwnedTaskSpawn
             | LintMode::SemanticOwnerDetachedContinuation
             | LintMode::AsyncSessionOwnership
@@ -1559,11 +1731,15 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::HarnessMoveOwnershipBoundary
             | LintMode::HarnessReadinessOwnership
             | LintMode::HarnessRecoveryOwnership
+            | LintMode::MustSettleBoundary
+            | LintMode::OwnerIssuedReadinessBoundary
             | LintMode::OptionalOwnerBoundary
             | LintMode::TimeoutPolicyBoundary
             | LintMode::TimeDomainUsage
             | LintMode::AuthoritativeRefNoReresolution
-            | LintMode::WeakToStrongIdentifierUpgrade => {}
+            | LintMode::WeakToStrongIdentifierUpgrade
+            | LintMode::ParityCriticalCallbackSettlement
+            | LintMode::TerminalShellExplicitExitIntent => {}
         }
 
         visit::visit_expr_await(self, node);
@@ -1758,6 +1934,39 @@ fn semantic_owner_terminal_helpers(attrs: &[syn::Attribute]) -> Vec<String> {
         .collect()
 }
 
+fn semantic_owner_stable_wrapper(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs
+        .iter()
+        .filter(|attr| {
+            matches!(attr.style, AttrStyle::Outer)
+                && attr
+                    .path()
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "semantic_owner")
+        })
+        .filter_map(|attr| {
+            let metas = attr
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<MetaNameValue, Token![,]>::parse_terminated,
+                )
+                .ok()?;
+            metas.into_iter().find_map(|meta| {
+                if !meta.path.is_ident("wrapper") {
+                    return None;
+                }
+                match meta.value {
+                    Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(value),
+                        ..
+                    }) => Some(value.value()),
+                    _ => None,
+                }
+            })
+        })
+        .next()
+}
+
 fn semantic_owner_declares_proof(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
         matches!(attr.style, AttrStyle::Outer)
@@ -1773,6 +1982,113 @@ fn semantic_owner_declares_proof(attrs: &[syn::Attribute]) -> bool {
                 .ok()
                 .is_some_and(|metas| metas.into_iter().any(|meta| meta.path.is_ident("proof")))
     })
+}
+
+#[derive(Clone)]
+struct StableWrapperDeclaration {
+    owned_name: String,
+    wrapper_name: String,
+    owned_span: Span,
+}
+
+#[derive(Clone)]
+struct FunctionSignatureRecord {
+    visibility: Visibility,
+    tokens: String,
+}
+
+fn scan_semantic_owner_stable_wrapper(file: &Path, syntax: &File) -> Vec<String> {
+    if !file
+        .to_string_lossy()
+        .contains("crates/aura-app/src/workflows/")
+    {
+        return Vec::new();
+    }
+
+    let mut declarations = Vec::new();
+    let mut functions = HashMap::new();
+    collect_semantic_owner_wrapper_metadata(&syntax.items, &mut declarations, &mut functions);
+
+    let mut violations = Vec::new();
+    for declaration in declarations {
+        let Some(wrapper) = functions.get(&declaration.wrapper_name) else {
+            violations.push(format!(
+                "{}:{}: semantic owner `{}` declares stable wrapper `{}` but no such function exists in the file",
+                file.display(),
+                declaration.owned_span.start().line,
+                declaration.owned_name,
+                declaration.wrapper_name,
+            ));
+            continue;
+        };
+
+        if !is_pub(&wrapper.visibility) {
+            violations.push(format!(
+                "{}:{}: semantic owner `{}` stable wrapper `{}` must be public or crate-visible",
+                file.display(),
+                declaration.owned_span.start().line,
+                declaration.owned_name,
+                declaration.wrapper_name,
+            ));
+        }
+
+        let wrapper_tokens = wrapper.tokens.replace(' ', "");
+        if !wrapper_tokens.contains("SemanticWorkflowOwner::new") {
+            violations.push(format!(
+                "{}:{}: semantic owner `{}` stable wrapper `{}` does not create a SemanticWorkflowOwner",
+                file.display(),
+                declaration.owned_span.start().line,
+                declaration.owned_name,
+                declaration.wrapper_name,
+            ));
+        }
+
+        if !wrapper_tokens.contains(&declaration.owned_name) {
+            violations.push(format!(
+                "{}:{}: semantic owner `{}` stable wrapper `{}` does not call the owned function",
+                file.display(),
+                declaration.owned_span.start().line,
+                declaration.owned_name,
+                declaration.wrapper_name,
+            ));
+        }
+    }
+
+    violations
+}
+
+fn collect_semantic_owner_wrapper_metadata(
+    items: &[Item],
+    declarations: &mut Vec<StableWrapperDeclaration>,
+    functions: &mut HashMap<String, FunctionSignatureRecord>,
+) {
+    for item in items {
+        match item {
+            Item::Fn(item_fn) => {
+                let function_name = item_fn.sig.ident.to_string();
+                functions.insert(
+                    function_name.clone(),
+                    FunctionSignatureRecord {
+                        visibility: item_fn.vis.clone(),
+                        tokens: quote!(#item_fn).to_string(),
+                    },
+                );
+                if let Some(wrapper_name) = semantic_owner_stable_wrapper(&item_fn.attrs) {
+                    declarations.push(StableWrapperDeclaration {
+                        owned_name: function_name,
+                        wrapper_name,
+                        owned_span: item_fn.sig.ident.span(),
+                    });
+                }
+            }
+            Item::Mod(item_mod) => {
+                if let Some((_, nested)) = &item_mod.content {
+                    collect_semantic_owner_wrapper_metadata(nested, declarations, functions);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn is_primary_lifecycle_publication_name(
@@ -1900,24 +2216,41 @@ const HARNESS_MOVE_APPROVED_SUFFIXES: &[&str] = &[
     "crates/aura-harness/src/executor.rs",
     "crates/aura-terminal/src/tui/harness_state.rs",
     "crates/aura-terminal/src/tui/harness_state/mod.rs",
+    "crates/aura-terminal/src/tui/harness_state/socket.rs",
     "crates/aura-terminal/src/tui/semantic_lifecycle.rs",
     "crates/aura-terminal/src/tui/screens/app/shell.rs",
+];
+const MUST_SETTLE_APPROVED_SUFFIXES: &[&str] = &[
+    "crates/aura-app/src/ui_contract.rs",
+    "crates/aura-terminal/src/tui/semantic_lifecycle.rs",
+    "crates/aura-terminal/src/tui/harness_state/socket.rs",
+    "crates/aura-terminal/src/tui/updates.rs",
+];
+const OWNER_ISSUED_READINESS_APPROVED_SUFFIXES: &[&str] = &[
+    "crates/aura-app/src/ui_contract.rs",
+    "crates/aura-harness/src/backend/local_pty.rs",
+    "crates/aura-terminal/src/tui/harness_state/socket.rs",
+    "crates/aura-terminal/src/tui/updates.rs",
+    "crates/aura-ui/src/readiness_owner.rs",
 ];
 
 const FRONTEND_INTERNAL_OWNER_SUFFIXES: &[&str] =
     &["crates/aura-terminal/src/tui/semantic_lifecycle.rs"];
 const FRONTEND_SUBMIT_SUFFIXES: &[&str] = &[
     "crates/aura-terminal/src/tui/screens/app/shell.rs",
+    "crates/aura-terminal/src/tui/screens/app/shell/dispatch.rs",
     "crates/aura-terminal/src/tui/semantic_lifecycle.rs",
 ];
 const FRONTEND_HANDOFF_SUFFIXES: &[&str] = &[
     "crates/aura-terminal/src/tui/callbacks/factories/chat.rs",
     "crates/aura-terminal/src/tui/callbacks/factories/contacts.rs",
+    "crates/aura-terminal/src/tui/callbacks/factories/invitation.rs",
     "crates/aura-terminal/src/tui/callbacks/factories/mod.rs",
     "crates/aura-terminal/src/tui/semantic_lifecycle.rs",
 ];
 const FRONTEND_AUTHORITATIVE_STATE_SUFFIXES: &[&str] = &[
     "crates/aura-terminal/src/tui/screens/app/shell.rs",
+    "crates/aura-terminal/src/tui/screens/app/shell/dispatch.rs",
     "crates/aura-terminal/src/tui/state/mod.rs",
     "crates/aura-terminal/src/tui/harness_state/mod.rs",
 ];
@@ -2088,6 +2421,50 @@ fn source_line_violations(
     violations
 }
 
+fn scan_browser_transport_single_owner(file: &Path, source: &str) -> Vec<String> {
+    if file_matches_suffix(
+        file,
+        &[
+            "crates/aura-web/src/shell/maintenance.rs",
+            "crates/aura-macros/src/bin/ownership_lints.rs",
+        ],
+    ) {
+        return Vec::new();
+    }
+
+    let owner_escape_hatches = [
+        "HARNESS_TRANSPORT_POLL_PATH",
+        "\"/__aura_harness_transport__/poll\"",
+        "drain_harness_transport_mailbox(",
+        "process_harness_transport",
+        "processHarnessTransport",
+        "run_harness_transport_tick",
+        "kick_harness_transport",
+        "lastHarnessTransportAt",
+        "transport_poll_fetch_begin",
+    ];
+
+    let mut violations = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        if is_comment_line(line) {
+            continue;
+        }
+        if owner_escape_hatches
+            .iter()
+            .any(|pattern| line.contains(pattern))
+        {
+            violations.push(format!(
+                "{}:{}:1: browser harness transport/mailbox polling ownership escaped the sanctioned shell owner: {}. Keep polling owned by `crates/aura-web/src/shell/maintenance.rs`; harness install, bridge, and Playwright code may observe publication state but must not introduce poll URLs, poll entrypoints, transport kickers, or parallel timer bookkeeping.",
+                file.display(),
+                index + 1,
+                line.trim()
+            ));
+        }
+    }
+
+    violations
+}
+
 fn scan_async_session_ownership(file: &Path, source: &str) -> Vec<String> {
     source_line_violations(
         file,
@@ -2154,6 +2531,162 @@ fn scan_harness_recovery_ownership(file: &Path, source: &str) -> Vec<String> {
             "fallback",
         ],
         &[],
+    )
+}
+
+fn scan_terminal_shell_explicit_exit_intent(file: &Path, source: &str) -> Vec<String> {
+    let display = file.display().to_string();
+    let mut violations = Vec::new();
+
+    if display.ends_with("crates/aura-terminal/src/handlers/tui.rs") {
+        let required = [
+            (
+                "ShellExitIntent::UserQuit",
+                "outer TUI runner must match explicit ShellExitIntent::UserQuit terminal ownership",
+            ),
+            (
+                "ShellExitIntent::BootstrapReload",
+                "outer TUI runner must match explicit ShellExitIntent::BootstrapReload instead of inferring reload from fullscreen return",
+            ),
+            (
+                "ShellExitIntent::AuthoritySwitch",
+                "outer TUI runner must match explicit ShellExitIntent::AuthoritySwitch instead of reading side-channel state",
+            ),
+            (
+                "reexec_current_tui_process(",
+                "outer TUI runner must re-exec through a dedicated owner helper instead of in-process fullscreen continuation",
+            ),
+            (
+                ".exec()",
+                "outer TUI runner must use exec-based reload to reset process-global owner state by construction",
+            ),
+            (
+                "catch_unwind()",
+                "outer TUI runner must convert fullscreen panics into typed terminal failure before process exit",
+            ),
+        ];
+        for (pattern, message) in required {
+            if !source.contains(pattern) {
+                violations.push(format!(
+                    "{}:1:1: {}. {}",
+                    file.display(),
+                    message,
+                    OWNERSHIP_MODEL_GUIDANCE
+                ));
+            }
+        }
+        if source.contains("authority_switch_request_handle(") {
+            violations.push(format!(
+                "{}:1:1: side-channel authority_switch_request_handle reload ownership is forbidden; use explicit ShellExitIntent transfer instead. {}",
+                file.display(),
+                OWNERSHIP_MODEL_GUIDANCE
+            ));
+        }
+    }
+
+    if display.ends_with("crates/aura-terminal/src/tui/screens/app/shell.rs") {
+        let required = [
+            (
+                "-> std::io::Result<ShellExitIntent>",
+                "run_app_with_context must return explicit ShellExitIntent, not implicit unit success",
+            ),
+            (
+                "take_shell_exit_intent()",
+                "shell must consume explicit ShellExitIntent before reporting fullscreen completion",
+            ),
+            (
+                "request_bootstrap_reload()",
+                "bootstrap handoff must request explicit ShellExitIntent::BootstrapReload",
+            ),
+            (
+                "request_user_quit()",
+                "user-driven exit must request explicit ShellExitIntent::UserQuit",
+            ),
+            (
+                "fullscreen generation exited without explicit ShellExitIntent",
+                "shell must fail closed if fullscreen exits without explicit ShellExitIntent ownership",
+            ),
+        ];
+        for (pattern, message) in required {
+            if !source.contains(pattern) {
+                violations.push(format!(
+                    "{}:1:1: {}. {}",
+                    file.display(),
+                    message,
+                    OWNERSHIP_MODEL_GUIDANCE
+                ));
+            }
+        }
+    }
+
+    if display.ends_with("crates/aura-terminal/src/tui/context/io_context.rs") {
+        let required = [
+            (
+                "pub enum ShellExitIntent",
+                "IoContext must define the explicit ShellExitIntent handoff contract",
+            ),
+            (
+                "take_shell_exit_intent(",
+                "IoContext must expose typed ShellExitIntent consumption",
+            ),
+            (
+                "request_bootstrap_reload(",
+                "IoContext must expose explicit bootstrap reload intent",
+            ),
+            (
+                "request_user_quit(",
+                "IoContext must expose explicit user-quit intent",
+            ),
+            (
+                "request_authority_switch(",
+                "IoContext must expose explicit authority-switch intent",
+            ),
+        ];
+        for (pattern, message) in required {
+            if !source.contains(pattern) {
+                violations.push(format!(
+                    "{}:1:1: {}. {}",
+                    file.display(),
+                    message,
+                    OWNERSHIP_MODEL_GUIDANCE
+                ));
+            }
+        }
+    }
+
+    violations
+}
+
+fn scan_must_settle_boundary(file: &Path, source: &str) -> Vec<String> {
+    source_line_violations(
+        file,
+        source,
+        &[
+            "HarnessCommandResponseHandle",
+            "oneshot::Sender<HarnessUiCommandReceipt>",
+            "pending_receipts",
+            "submission.response.complete(",
+            "receipt.complete(",
+            "response.complete(HarnessUiCommandReceipt",
+        ],
+        MUST_SETTLE_APPROVED_SUFFIXES,
+    )
+}
+
+fn scan_owner_issued_readiness_boundary(file: &Path, source: &str) -> Vec<String> {
+    source_line_violations(
+        file,
+        source,
+        &[
+            "fn screen_readiness(",
+            "snapshot.readiness = screen_readiness(",
+            "readiness: if self.account_ready",
+            "harness_command_plane_generation.is_none()",
+            "command plane temporarily unavailable",
+            "command plane not ready",
+            "command plane unavailable",
+        ],
+        OWNER_ISSUED_READINESS_APPROVED_SUFFIXES,
     )
 }
 
@@ -2448,4 +2981,256 @@ fn scan_time_domain_usage(file: &Path, syntax: &File) -> Vec<String> {
     };
     visitor.visit_file(syntax);
     visitor.violations
+}
+
+/// EffectCommand variants that commit facts or mutate authoritative state.
+/// Dispatching these through an observed (non-owned) callback is an ownership
+/// violation because the parity layer has no lifecycle record for the operation.
+const PARITY_CRITICAL_EFFECT_COMMANDS: &[&str] = &[
+    "AcceptInvitation",
+    "DeclineInvitation",
+    "CancelInvitation",
+    "ImportInvitation",
+    "AcceptPendingHomeInvitation",
+    "ToggleContactGuardian",
+    "RemoveContact",
+    "StartRecovery",
+    "SubmitGuardianApproval",
+    "CompleteRecovery",
+    "CancelRecovery",
+];
+
+/// Observed dispatch helpers that provide no terminal lifecycle tracking.
+const OBSERVED_DISPATCH_HELPERS: &[&str] = &[
+    "spawn_observed_dispatch_callback",
+    "spawn_observed_result_callback",
+];
+
+// All known violations remediated. Empty allowlist retained as documentation anchor.
+const PARITY_CRITICAL_CALLBACK_SETTLEMENT_ALLOWLIST: &[&str] = &[];
+
+fn scan_parity_critical_callback_settlement(file: &Path, syntax: &File) -> Vec<String> {
+    let file_str = file.to_string_lossy();
+
+    if !file_str.contains("crates/") {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    scan_parity_critical_callback_settlement_items(file, &syntax.items, &mut violations);
+
+    // Filter out allowlisted files for known violations under active remediation.
+    if PARITY_CRITICAL_CALLBACK_SETTLEMENT_ALLOWLIST
+        .iter()
+        .any(|suffix| file_str.ends_with(suffix))
+    {
+        return Vec::new();
+    }
+
+    violations
+}
+
+fn scan_parity_critical_callback_settlement_items(
+    file: &Path,
+    items: &[Item],
+    violations: &mut Vec<String>,
+) {
+    for item in items {
+        match item {
+            Item::Fn(item_fn) => {
+                if has_cfg_test_attr(&item_fn.attrs) || has_test_attr(&item_fn.attrs) {
+                    continue;
+                }
+                check_parity_critical_callback_settlement(
+                    file,
+                    &item_fn.sig.ident.to_string(),
+                    item_fn.sig.ident.span().start().line,
+                    &item_fn.block,
+                    violations,
+                );
+            }
+            Item::Impl(item_impl) => {
+                for impl_item in &item_impl.items {
+                    if let ImplItem::Fn(item_fn) = impl_item {
+                        if has_cfg_test_attr(&item_fn.attrs) || has_test_attr(&item_fn.attrs) {
+                            continue;
+                        }
+                        check_parity_critical_callback_settlement(
+                            file,
+                            &item_fn.sig.ident.to_string(),
+                            item_fn.sig.ident.span().start().line,
+                            &item_fn.block,
+                            violations,
+                        );
+                    }
+                }
+            }
+            Item::Mod(item_mod) => {
+                if has_cfg_test_attr(&item_mod.attrs) {
+                    continue;
+                }
+                if let Some((_, nested)) = &item_mod.content {
+                    scan_parity_critical_callback_settlement_items(file, nested, violations);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn check_parity_critical_callback_settlement(
+    file: &Path,
+    function_name: &str,
+    function_line: usize,
+    block: &Block,
+    violations: &mut Vec<String>,
+) {
+    // --- Prong 1: handoff without terminal settlement ---
+    let has_handoff = function_contains_call(block, "handoff_to_app_workflow");
+    if has_handoff {
+        // Functions that delegate to spawn_handoff_workflow_callback_with_success
+        // are safe, as are callbacks that drive the canonical
+        // SemanticOperationTransfer::run_workflow path or settle explicitly.
+        let uses_canonical_helper =
+            function_contains_call(block, "spawn_handoff_workflow_callback_with_success");
+        let uses_canonical_transfer_runner = function_contains_call(block, "run_workflow");
+        let has_explicit_settlement =
+            function_contains_call(block, "apply_handed_off_terminal_status");
+
+        if !uses_canonical_helper && !uses_canonical_transfer_runner && !has_explicit_settlement {
+            violations.push(format!(
+                "{}:{}: function `{}` calls handoff_to_app_workflow without a paired \
+                 apply_handed_off_terminal_status, SemanticOperationTransfer::run_workflow, \
+                 or spawn_handoff_workflow_callback_with_success",
+                file.display(),
+                function_line,
+                function_name
+            ));
+        }
+    }
+
+    // --- Prong 2: parity-critical command dispatched through observed helper ---
+    let uses_observed_helper = OBSERVED_DISPATCH_HELPERS
+        .iter()
+        .any(|helper| function_contains_call(block, helper));
+    if !uses_observed_helper {
+        return;
+    }
+
+    // Check if the function body references any parity-critical EffectCommand variant.
+    let block_source = block.to_token_stream().to_string();
+    for command in PARITY_CRITICAL_EFFECT_COMMANDS {
+        if block_source.contains(command) {
+            violations.push(format!(
+                "{}:{}: function `{}` dispatches parity-critical command `{}` through an \
+                 observed (non-owned) callback helper; use spawn_local_terminal_result_callback \
+                 or spawn_handoff_workflow_callback_with_success instead",
+                file.display(),
+                function_line,
+                function_name,
+                command,
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan_semantic_owner_stable_wrapper;
+    use std::path::Path;
+    use syn::parse_file;
+
+    #[test]
+    fn semantic_owner_stable_wrapper_accepts_declared_public_wrapper() {
+        let source = r#"
+            use aura_core::{OperationContext, TraceContext};
+
+            struct SemanticWorkflowOwner;
+            impl SemanticWorkflowOwner {
+                fn new() -> Self { Self }
+            }
+
+            #[aura_macros::semantic_owner(
+                owner = "demo_owner",
+                wrapper = "run_demo",
+                terminal = "publish_success_with",
+                postcondition = "done",
+                proof = DemoProof,
+                authoritative_inputs = "",
+                depends_on = "",
+                child_ops = "",
+                category = "move_owned"
+            )]
+            async fn run_demo_owned(
+                _context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
+            ) {
+                publish_success_with();
+            }
+
+            pub async fn run_demo(
+                context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
+            ) {
+                let owner = SemanticWorkflowOwner::new();
+                let _ = owner;
+                run_demo_owned(context).await;
+            }
+
+            fn publish_success_with() {}
+            struct DemoProof;
+        "#;
+
+        let syntax = match parse_file(source) {
+            Ok(syntax) => syntax,
+            Err(error) => panic!("parse lint fixture: {error}"),
+        };
+        let violations = scan_semantic_owner_stable_wrapper(
+            Path::new("crates/aura-app/src/workflows/demo.rs"),
+            &syntax,
+        );
+        assert!(violations.is_empty(), "{violations:#?}");
+    }
+
+    #[test]
+    fn semantic_owner_stable_wrapper_rejects_wrapper_without_owner_creation() {
+        let source = r#"
+            use aura_core::{OperationContext, TraceContext};
+
+            #[aura_macros::semantic_owner(
+                owner = "demo_owner",
+                wrapper = "run_demo",
+                terminal = "publish_success_with",
+                postcondition = "done",
+                proof = DemoProof,
+                authoritative_inputs = "",
+                depends_on = "",
+                child_ops = "",
+                category = "move_owned"
+            )]
+            async fn run_demo_owned(
+                _context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
+            ) {
+                publish_success_with();
+            }
+
+            pub async fn run_demo(
+                context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
+            ) {
+                run_demo_owned(context).await;
+            }
+
+            fn publish_success_with() {}
+            struct DemoProof;
+        "#;
+
+        let syntax = match parse_file(source) {
+            Ok(syntax) => syntax,
+            Err(error) => panic!("parse lint fixture: {error}"),
+        };
+        let violations = scan_semantic_owner_stable_wrapper(
+            Path::new("crates/aura-app/src/workflows/demo.rs"),
+            &syntax,
+        );
+        assert_eq!(violations.len(), 1, "{violations:#?}");
+        assert!(violations[0].contains("does not create a SemanticWorkflowOwner"));
+    }
 }

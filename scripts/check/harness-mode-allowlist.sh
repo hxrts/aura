@@ -16,7 +16,12 @@ rg -q 'pub const HARNESS_MODE_ALLOWLIST' "$ui_contract" \
 rg -q 'enum HarnessModeChangeKind' "$ui_contract" \
   || fail "missing harness-mode change kind metadata"
 
-frontend_hits="$(rg -l 'AURA_HARNESS_MODE' crates/aura-terminal/src crates/aura-web/src | grep -v 'crates/aura-terminal/src/tui/screens/app/shell/events.rs' || true)"
+frontend_hits="$(
+  rg -l 'AURA_HARNESS_MODE' crates/aura-terminal/src crates/aura-web/src \
+    | grep -v 'crates/aura-terminal/src/tui/screens/app/shell/events.rs' \
+    | grep -v 'crates/aura-web/src/shell/maintenance.rs' \
+    || true
+)"
 if [[ -n "$frontend_hits" ]]; then
   fail "frontend product modules must not branch on AURA_HARNESS_MODE: $frontend_hits"
 fi

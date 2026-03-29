@@ -1,6 +1,6 @@
 use std::cell::OnceCell;
 
-use aura_ui::task_owner::{FrontendTaskOwner, FrontendTaskRuntime};
+use aura_app::frontend_primitives::{FrontendTaskOwner, FrontendTaskRuntime};
 use wasm_bindgen_futures::spawn_local;
 pub type WebTaskOwner = FrontendTaskOwner;
 
@@ -19,11 +19,11 @@ thread_local! {
 }
 
 #[must_use]
+pub(crate) fn new_web_task_owner() -> WebTaskOwner {
+    WebTaskOwner::new(FrontendTaskRuntime::new(spawn_boxed, spawn_local_boxed))
+}
+
+#[must_use]
 pub fn shared_web_task_owner() -> WebTaskOwner {
-    SHARED_WEB_TASK_OWNER.with(|slot| {
-        slot.get_or_init(|| {
-            WebTaskOwner::new(FrontendTaskRuntime::new(spawn_boxed, spawn_local_boxed))
-        })
-        .clone()
-    })
+    SHARED_WEB_TASK_OWNER.with(|slot| slot.get_or_init(new_web_task_owner).clone())
 }

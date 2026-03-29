@@ -8,7 +8,7 @@
 //! - test_invite_as_guardian_via_agent: 220-229
 //! - test_invite_to_channel_via_agent: 230-239
 //! - test_accept_invitation_via_agent: 240-241
-//! - test_decline_invitation_via_agent: 242-243
+//! - test_decline_invitation_via_agent_succeeds_despite_followup_failure: 242-243
 //! - test_cancel_invitation_via_agent: 244-245
 //! - test_list_pending_via_agent: 246-249
 //! - test_get_invitation_via_agent: 250-251
@@ -17,6 +17,8 @@ use aura_agent::{
     AgentBuilder, AuraAgent, AuthorityId, EffectContext, ExecutionMode, InvitationStatus,
     InvitationType,
 };
+use aura_core::effects::amp::ChannelCreateParams;
+use aura_core::effects::AmpChannelEffects;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
 use aura_core::threshold::ParticipantIdentity;
@@ -128,16 +130,27 @@ async fn test_invite_as_guardian_via_agent() -> TestResult {
 async fn test_invite_to_channel_via_agent() -> TestResult {
     // Entropy range: 230-239
     let agent = create_test_agent(230).await?;
+    let context_id = ContextId::new_from_entropy([233u8; 32]);
 
     let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([231u8; 32]);
-    let home_id = ChannelId::from_bytes([232u8; 32]).to_string();
+    let home_id = ChannelId::from_bytes([232u8; 32]);
+    agent
+        .runtime()
+        .effects()
+        .create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: Some(home_id),
+            skip_window: None,
+            topic: None,
+        })
+        .await?;
     let invitation = invitations
         .invite_to_channel(
             receiver_id,
-            home_id.clone(),
-            None,
+            home_id.to_string(),
+            Some(context_id),
             Some("shared-parity-lab".to_string()),
             None,
             None,
@@ -188,38 +201,47 @@ async fn test_invite_to_channel_rejects_invalid_home_id() -> TestResult {
 #[tokio::test]
 async fn test_accept_invitation_via_agent() -> TestResult {
     // Entropy range: 240-241
-    let agent = create_test_agent(240).await?;
+    let sender = create_test_agent(240).await?;
+    let receiver = create_test_agent(241).await?;
 
-    let invitations = agent.invitations()?;
-
-    let receiver_id = AuthorityId::new_from_entropy([241u8; 32]);
-    let invitation = invitations
+    let sender_invitations = sender.invitations()?;
+    let receiver_invitations = receiver.invitations()?;
+    let receiver_id = receiver.authority_id();
+    let invitation = sender_invitations
         .invite_as_contact(receiver_id, None, None, None)
         .await?;
+    let code = sender_invitations
+        .export_code(&invitation.invitation_id)
+        .await?;
+    let imported = receiver_invitations.import_and_cache(&code).await?;
 
-    let result = invitations.accept(&invitation.invitation_id).await?;
+    let result = receiver_invitations.accept(&imported.invitation_id).await?;
 
-    assert!(result.success);
-    assert_eq!(result.new_status, Some(InvitationStatus::Accepted));
+    assert_eq!(result.new_status, InvitationStatus::Accepted);
     Ok(())
 }
 
 #[tokio::test]
-async fn test_decline_invitation_via_agent() -> TestResult {
+async fn test_decline_invitation_via_agent_succeeds_despite_followup_failure() -> TestResult {
     // Entropy range: 242-243
-    let agent = create_test_agent(242).await?;
+    let sender = create_test_agent(242).await?;
+    let receiver = create_test_agent(243).await?;
 
-    let invitations = agent.invitations()?;
-
-    let receiver_id = AuthorityId::new_from_entropy([243u8; 32]);
-    let invitation = invitations
+    let sender_invitations = sender.invitations()?;
+    let receiver_invitations = receiver.invitations()?;
+    let receiver_id = receiver.authority_id();
+    let invitation = sender_invitations
         .invite_as_contact(receiver_id, None, None, None)
         .await?;
+    let code = sender_invitations
+        .export_code(&invitation.invitation_id)
+        .await?;
+    let imported = receiver_invitations.import_and_cache(&code).await?;
 
-    let result = invitations.decline(&invitation.invitation_id).await?;
-
-    assert!(result.success);
-    assert_eq!(result.new_status, Some(InvitationStatus::Declined));
+    let result = receiver_invitations
+        .decline(&imported.invitation_id)
+        .await?;
+    assert_eq!(result.new_status, InvitationStatus::Declined);
     Ok(())
 }
 
@@ -240,8 +262,7 @@ async fn test_cancel_invitation_via_agent() -> TestResult {
 
     let result = invitations.cancel(&invitation.invitation_id).await?;
 
-    assert!(result.success);
-    assert_eq!(result.new_status, Some(InvitationStatus::Cancelled));
+    assert_eq!(result.new_status, InvitationStatus::Cancelled);
 
     // Verify it's no longer pending
     assert!(!invitations.is_pending(&invitation.invitation_id).await);

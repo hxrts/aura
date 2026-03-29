@@ -284,6 +284,7 @@ mod tests {
             protocol_id: protocol_id.to_string(),
             role_names: vec!["A".to_string()],
             required_capabilities: Vec::new(),
+            guard_capabilities: Vec::new(),
             determinism_policy_ref: None,
             delegation_constraints: Vec::new(),
             link_specs: bundle_ids

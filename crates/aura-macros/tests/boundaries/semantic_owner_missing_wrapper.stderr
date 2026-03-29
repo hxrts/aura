@@ -1,0 +1,21 @@
+error: semantic_owner requires `wrapper = "..."`
+  --> tests/boundaries/semantic_owner_missing_wrapper.rs:13:1
+   |
+13 | / #[aura_macros::semantic_owner(
+14 | |     owner = "demo-owner",
+15 | |     terminal = "publish_done",
+16 | |     postcondition = "demo_done",
+...  |
+21 | |     category = "move_owned"
+22 | | )]
+   | |__^
+   |
+   = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused imports: `OperationContext` and `TraceContext`
+ --> tests/boundaries/semantic_owner_missing_wrapper.rs:1:17
+  |
+1 | use aura_core::{OperationContext, SemanticOwnerPostcondition, SemanticSuccessProof, TraceContext};
+  |                 ^^^^^^^^^^^^^^^^                                                    ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

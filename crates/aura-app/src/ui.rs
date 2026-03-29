@@ -114,6 +114,7 @@ pub mod workflows {
     pub use crate::workflows::runtime;
     pub use crate::workflows::settings;
     pub use crate::workflows::signals;
+    pub use crate::workflows::slash_commands;
     pub use crate::workflows::snapshot;
     pub use crate::workflows::strong_command;
     pub use crate::workflows::sync;
@@ -162,8 +163,8 @@ pub mod types {
         default_port, generate_device_config, DeviceConfigDefaults, ACCOUNT_FILENAME,
         DEFAULT_BASE_PORT, DEFAULT_LOG_LEVEL, DEFAULT_MAX_RETRIES, DEFAULT_NETWORK_TIMEOUT_SECS,
         JOURNAL_FILENAME, MAX_TUI_LOG_BYTES, PENDING_ACCOUNT_BOOTSTRAP_FILENAME,
-        TUI_LOG_KEY_PREFIX, TUI_LOG_QUEUE_CAPACITY, WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX,
-        WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX,
+        TUI_LOG_KEY_PREFIX, TUI_LOG_QUEUE_CAPACITY, WEB_ACCOUNT_CONFIG_STORAGE_SUFFIX,
+        WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX, WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX,
     };
     pub use crate::workflows::invitation::{
         format_invitation_type, format_invitation_type_detailed, format_ttl_display,
@@ -247,6 +248,12 @@ pub mod types {
 
 pub mod authorization {
     pub use crate::authorization::*;
+}
+
+pub mod frontend {
+    pub use crate::frontend_primitives::{
+        ClipboardPort, FrontendTaskOwner, FrontendTaskRuntime, FrontendUiOperation, MemoryClipboard,
+    };
 }
 
 pub mod prelude {

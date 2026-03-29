@@ -42,6 +42,7 @@ use aura_relational::ContactFact;
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
+#[allow(clippy::duplicate_mod)]
 #[path = "../support/mod.rs"]
 mod support;
 

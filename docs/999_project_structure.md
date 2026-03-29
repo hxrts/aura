@@ -178,9 +178,9 @@ Layer 2 is the *specification* layer: pure domain semantics with zero runtime co
 Must hold:
 - No handler composition, runtime assembly, or UI dependencies.
 - Domain facts are versioned and encoded via canonical DAG-CBOR.
-- Fact reducers register through `FactRegistry`; no direct wiring in `aura-journal`.
+- Fact reducers register through `FactRegistry`. No direct wiring in `aura-journal`.
 - Authorization scopes use `aura-core` `ResourceScope` and typed operations.
-- No in-memory production state; stateful test handlers live in `aura-testkit`.
+- No in-memory production state. Stateful test handlers live in `aura-testkit`.
 
 Forbidden:
 - Direct OS access (time, fs, network) outside effect traits.
@@ -332,9 +332,15 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 ### Choreography Specification
 
-`aura-mpst`: Aura-facing compatibility crate over Telltale. Re-exports choreography/runtime surfaces and Aura extension traits used by generated protocols, VM artifacts, and testing utilities.
+`aura-mpst`: Aura-facing compatibility crate over Telltale. Re-exports
+choreography/runtime surfaces and Aura extension traits used by generated
+protocols, VM artifacts, and testing utilities, including canonical
+choreography capability parsing into validated `CapabilityName` values.
 
-`aura-macros`: Compile-time choreography frontend. Parses Aura annotations (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) and emits Telltale-backed generated modules plus Aura effect-bridge helpers.
+`aura-macros`: Compile-time choreography frontend. Parses Aura annotations
+(`guard_capability`, `flow_cost`, `journal_facts`, `leak`), generates typed
+first-party capability-family surfaces, and emits Telltale-backed generated
+modules plus Aura effect-bridge helpers.
 
 ## Layer 3: Implementation (`aura-effects` and `aura-composition`)
 
@@ -406,7 +412,7 @@ Contains:
 - Guard chain coordination (`CapGuard → FlowGuard → JournalCoupler`) in `aura-guards`
 - Multi-party protocol orchestration (consensus in `aura-consensus`, anti-entropy in `aura-anti-entropy`)
 - Quorum-driven DKG orchestration and transcript handling in `aura-consensus/src/dkg/`
-- Cross-handler coordination logic (`TransportCoordinator`, `StorageCoordinator`, etc.)
+- Cross-handler transport and storage coordination logic
 - Distributed state management
 - Stateful coordinators for multi-party protocols
 
@@ -439,7 +445,7 @@ Crates:
 | Crate | Protocol | Purpose |
 |-------|----------|---------|
 | `aura-authentication` | Authentication | Device, threshold, and guardian auth flows |
-| `aura-chat` | Chat | Chat domain facts + view reducers; local chat prototype |
+| `aura-chat` | Chat | Chat domain facts and view reducers. Local chat prototype. |
 | `aura-invitation` | Invitations | Peer onboarding and relational facts |
 | `aura-recovery` | Guardian recovery | Recovery grants and dispute escalation |
 | `aura-relational` | Cross-authority relationships | RelationalContext protocols (domain types in aura-core) |

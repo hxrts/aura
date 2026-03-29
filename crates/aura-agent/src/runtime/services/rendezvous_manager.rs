@@ -151,6 +151,13 @@ pub enum RendezvousManagerError {
     NotStarted,
     #[error("peer descriptor not found in cache for authority {peer}")]
     PeerDescriptorNotFound { peer: AuthorityId },
+    #[error(
+        "peer descriptor for authority {peer} in context {context_id} still has placeholder cryptographic fields"
+    )]
+    PlaceholderDescriptorCrypto {
+        peer: AuthorityId,
+        context_id: ContextId,
+    },
     #[error("rendezvous channel preparation failed")]
     ChannelPreparation(#[source] AuraError),
     #[error("rendezvous manager is not running under supervised task ownership")]
@@ -356,6 +363,10 @@ struct RendezvousManagerShared {
 }
 
 impl RendezvousManager {
+    fn descriptor_has_placeholder_crypto(descriptor: &RendezvousDescriptor) -> bool {
+        descriptor.public_key == [0u8; 32] || descriptor.handshake_psk_commitment == [0u8; 32]
+    }
+
     const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
     pub const OWNERSHIP_CATEGORY: OwnershipCategory = OwnershipCategory::ActorOwned;
 
@@ -1017,6 +1028,12 @@ impl RendezvousManager {
                 .await
                 .ok_or(RendezvousManagerError::PeerDescriptorNotFound { peer })?,
         };
+        if Self::descriptor_has_placeholder_crypto(&descriptor) {
+            return Err(RendezvousManagerError::PlaceholderDescriptorCrypto {
+                peer,
+                context_id: descriptor.context_id,
+            });
+        }
         let establish_descriptor = Self::relay_first_initial_descriptor(&descriptor);
 
         // Retrieve identity keys
@@ -1601,8 +1618,7 @@ mod tests {
     use aura_core::time::PhysicalTime;
     use aura_core::FlowCost;
     use aura_effects::time::PhysicalTimeHandler;
-    use aura_guards::types::CapabilityId;
-    use aura_rendezvous::GuardSnapshot;
+    use aura_rendezvous::{capabilities::RendezvousCapability, GuardSnapshot};
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -1622,8 +1638,8 @@ mod tests {
             context_id: context,
             flow_budget_remaining: FlowCost::new(1000),
             capabilities: vec![
-                CapabilityId::from("rendezvous:publish"),
-                CapabilityId::from("rendezvous:connect"),
+                RendezvousCapability::Publish.as_name(),
+                RendezvousCapability::Connect.as_name(),
             ],
             epoch: 1,
         }
@@ -2010,6 +2026,48 @@ mod tests {
             .direct_upgrade_candidates(test_context(), test_peer(), &interfaces)
             .await;
         assert!(none.is_empty());
+
+        RuntimeService::stop(&manager).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_prepare_establish_channel_rejects_placeholder_descriptor_crypto() {
+        let config = RendezvousManagerConfig::for_testing();
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
+        let context = test_service_context();
+        RuntimeService::start(&manager, &context).await.unwrap();
+
+        manager
+            .cache_descriptor(RendezvousDescriptor {
+                authority_id: test_peer(),
+                device_id: None,
+                context_id: test_context(),
+                transport_hints: vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: 0,
+                valid_until: u64::MAX,
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            })
+            .await
+            .unwrap();
+
+        let error = manager
+            .prepare_establish_channel(
+                test_context(),
+                test_peer(),
+                &[7u8; 32],
+                1_000,
+                &test_snapshot(test_authority(), test_context()),
+                &MockEffects,
+            )
+            .await
+            .expect_err("placeholder descriptor crypto must be rejected");
+        assert!(matches!(
+            error,
+            RendezvousManagerError::PlaceholderDescriptorCrypto { .. }
+        ));
 
         RuntimeService::stop(&manager).await.unwrap();
     }

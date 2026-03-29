@@ -23,6 +23,9 @@
 //! `SessionCreationCoordinator`, `GuardianAuthCoordinator`) with a unified
 //! service that uses the guard chain pattern.
 
+use crate::capabilities::{
+    AuthenticationCapability, GuardianAuthCapability, RecoveryAuthorizationCapability,
+};
 use crate::facts::AuthFact;
 use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
@@ -135,10 +138,9 @@ impl AuthService {
     /// the challenge if allowed.
     pub fn request_challenge(&self, snapshot: &GuardSnapshot, scope: SessionScope) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_REQUEST_AUTH),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &AuthenticationCapability::Request.as_name())
+        {
             return outcome;
         }
 
@@ -192,10 +194,9 @@ impl AuthService {
         proof_hash: [u8; 32],
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_SUBMIT_PROOF),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &AuthenticationCapability::SubmitProof.as_name())
+        {
             return outcome;
         }
 
@@ -246,10 +247,9 @@ impl AuthService {
     ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_CREATE_SESSION),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &AuthenticationCapability::CreateSession.as_name())
+        {
             return outcome;
         }
 
@@ -317,10 +317,9 @@ impl AuthService {
     ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &GuardianAuthCapability::RequestApproval.as_name())
+        {
             return outcome;
         }
 
@@ -333,18 +332,17 @@ impl AuthService {
         if policy.require_recovery_capability {
             match context.operation_type {
                 RecoveryOperationType::GuardianSetModification => {
-                    if !snapshot.has_capability(&aura_guards::types::CapabilityId::from(
-                        costs::CAP_APPROVE_RECOVERY,
-                    )) {
+                    if !snapshot.has_capability(&RecoveryAuthorizationCapability::Approve.as_name())
+                    {
                         return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                             AuthGuardError::GuardianSetRequiresApproveCapability.to_string(),
                         ));
                     }
                 }
                 RecoveryOperationType::EmergencyFreeze if !context.is_emergency => {
-                    if !snapshot.has_capability(&aura_guards::types::CapabilityId::from(
-                        costs::CAP_INITIATE_RECOVERY,
-                    )) {
+                    if !snapshot
+                        .has_capability(&RecoveryAuthorizationCapability::Initiate.as_name())
+                    {
                         return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                             AuthGuardError::EmergencyFreezeRequiresInitiateCapability.to_string(),
                         ));
@@ -405,10 +403,8 @@ impl AuthService {
         signature: Vec<u8>,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_APPROVE_GUARDIAN),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &GuardianAuthCapability::Verify.as_name())
+        {
             return outcome;
         }
 
@@ -469,10 +465,9 @@ impl AuthService {
         reason: String,
     ) -> GuardOutcome {
         // Session revocation uses the create_session capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_CREATE_SESSION),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &AuthenticationCapability::CreateSession.as_name())
+        {
             return outcome;
         }
 
@@ -602,18 +597,17 @@ mod tests {
     }
 
     fn test_snapshot() -> GuardSnapshot {
-        use aura_guards::types::CapabilityId;
         GuardSnapshot::new(
             test_authority(),
             None,
             None,
             FlowCost::new(100),
             vec![
-                CapabilityId::from(costs::CAP_REQUEST_AUTH),
-                CapabilityId::from(costs::CAP_SUBMIT_PROOF),
-                CapabilityId::from(costs::CAP_CREATE_SESSION),
-                CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
-                CapabilityId::from(costs::CAP_APPROVE_GUARDIAN),
+                AuthenticationCapability::Request.as_name(),
+                AuthenticationCapability::SubmitProof.as_name(),
+                AuthenticationCapability::CreateSession.as_name(),
+                GuardianAuthCapability::RequestApproval.as_name(),
+                GuardianAuthCapability::Verify.as_name(),
             ],
             1,
             1000,

@@ -1,5 +1,5 @@
 use aura_app::errors::ErrorCategory;
-use aura_ui::FrontendUiOperation as WebUiOperation;
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WebUiError {

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Compile-time DSL parser for choreographies with Aura-specific annotations. Generates type-safe Rust code for distributed protocols. Also hosts Rust-native syntax lints via `src/bin/arch_lints.rs`.
+Compile-time DSL parser for choreographies with Aura-specific annotations. Generates type-safe Rust code for distributed protocols. Also hosts Rust-native syntax lints via `src/bin/arch_lints.rs` and ownership/runtime boundary lints via `src/bin/ownership_lints.rs`.
 
 ## Scope
 
@@ -13,9 +13,9 @@ Compile-time DSL parser for choreographies with Aura-specific annotations. Gener
 | `aura_effect_handlers` macro: Mock/real handler variant boilerplate | |
 | `aura_handler_adapters` macro: AuraHandler trait adapters | |
 | `aura_test` attribute macro: Async test setup with tracing | |
-| `src/bin/arch_lints.rs`: Rust-native syntax lints for `just lint-arch-syntax` | |
-| `src/bin/ownership_lints.rs`: Ownership/runtime boundary enforcement lints | |
-| Validated ownership marker attrs: `authoritative_source`, `strong_reference`, `weak_identifier` | Unchecked ownership marker comments or ad hoc tags |
+| `src/bin/arch_lints.rs`: Rust-native syntax lints for `just lint-arch-syntax`, including shared frontend portability and semantic-bridge contract checks | |
+| `src/bin/ownership_lints.rs`: Ownership/runtime boundary enforcement lints for `just ci-ownership-policy`, including frontend handoff, best-effort side-effect, and proof-bearing success boundaries | |
+| Validated ownership marker attrs: `authoritative_source`, `strong_reference`, `weak_identifier`, `actor_root` | Unchecked ownership marker comments or ad hoc tags |
 
 ## Dependencies
 
@@ -49,6 +49,7 @@ Failure mode:
 Verification hooks:
 - just test-crate aura-macros
 - just lint-arch-syntax
+- just ci-ownership-policy
 
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines annotation semantics for guards and leakage.
@@ -72,6 +73,7 @@ Contract alignment:
 ### Capability-Gated Points
 
 - Generated typed capability surfaces and ownership contracts consumed by downstream crates
+- Compile-time validation for canonical capability-family declarations and choreography capability parsing boundaries
 
 ## Testing
 
@@ -98,12 +100,14 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | Valid choreography annotations rejected | `boundaries/valid_annotations.rs` | covered (pass) |
 | Valid ceremony facts rejected | `boundaries/ceremony_facts_valid.rs` | covered (pass) |
 | Valid semantic_owner rejected | `boundaries/semantic_owner_valid.rs` | covered (pass) |
-| Valid actor_owned rejected | `boundaries/actor_owned_valid.rs` | covered (pass) |
+| Valid actor_owned / actor_root rejected | `boundaries/actor_owned_valid.rs`, `boundaries/actor_root_valid.rs` | covered (pass) |
 | Valid capability_boundary rejected | `boundaries/capability_boundary_valid.rs` | covered (pass) |
 | Valid ownership_lifecycle rejected | `boundaries/ownership_lifecycle_valid.rs` | covered (pass) |
 | Valid authoritative_source / strong_reference / weak_identifier rejected | `boundaries/authoritative_source_valid.rs`, `boundaries/strong_reference_valid.rs`, `boundaries/weak_identifier_valid.rs` | covered (pass) |
 | Invalid flow_cost silently accepted | `boundaries/invalid_flow_cost.rs` | covered (compile_fail) |
 | Invalid guard_capability accepted | `boundaries/invalid_guard_capability.rs` | covered (compile_fail) |
+| Invalid generated canonical capability accepted | `boundaries/capability_family_invalid_generated_name.rs` | covered (compile_fail) |
+| Macro/module namespace mismatch accepted | `boundaries/choreography_namespace_mismatch.rs` | covered (compile_fail) |
 | Self-send accepted | `boundaries/incoherent_self_send.rs` | covered (compile_fail) |
 | Missing namespace accepted | `boundaries/missing_namespace.rs` | covered (compile_fail) |
 | semantic_owner missing context | `boundaries/semantic_owner_missing_context.rs` | covered (compile_fail) |
@@ -111,9 +115,11 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | semantic_owner missing category | `boundaries/semantic_owner_missing_category.rs` | covered (compile_fail) |
 | semantic_owner missing terminal | `boundaries/semantic_owner_missing_terminal_path.rs` | covered (compile_fail) |
 | actor_owned missing capacity | `boundaries/actor_owned_missing_capacity.rs` | covered (compile_fail) |
+| actor_root missing supervision, invalid root name, or non-struct target | `boundaries/actor_root_missing_supervision.rs`, `boundaries/actor_root_invalid_name.rs`, `boundaries/actor_root_on_function.rs` | covered (compile_fail) |
 | actor_owned missing gate | `boundaries/actor_owned_missing_gate.rs` | covered (compile_fail) |
 | actor_owned bypass without macro | `boundaries/actor_owned_bypass_without_macro.rs` | covered (compile_fail) |
-| capability_boundary missing category | `boundaries/capability_boundary_missing_category.rs` | covered (compile_fail) |
+| actor_owned embeds move-owned or terminal publication field | `boundaries/actor_owned_forbidden_field.rs` | covered (compile_fail) |
+| capability_boundary missing category or non-capability-bearing helper body | `boundaries/capability_boundary_missing_category.rs`, `boundaries/capability_boundary_non_capability_helper.rs` | covered (compile_fail) |
 | ownership_lifecycle invalid variant | `boundaries/ownership_lifecycle_invalid_variant.rs` | covered (compile_fail) |
 | authoritative_source metadata or target invalid | `boundaries/authoritative_source_missing_kind.rs`, `boundaries/authoritative_source_invalid_kind.rs`, `boundaries/authoritative_source_on_struct.rs` | covered (compile_fail) |
 | strong_reference metadata or target invalid | `boundaries/strong_reference_missing_domain.rs`, `boundaries/strong_reference_invalid_domain.rs`, `boundaries/strong_reference_on_function.rs` | covered (compile_fail) |

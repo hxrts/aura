@@ -1,15 +1,18 @@
 //! Compile-fail guards for signals-gated workflow privacy invariants.
 
+#[cfg(feature = "signals")]
 struct TrybuildLock {
     path: std::path::PathBuf,
 }
 
+#[cfg(feature = "signals")]
 impl Drop for TrybuildLock {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
+#[cfg(feature = "signals")]
 fn acquire_trybuild_lock() -> TrybuildLock {
     let workspace_root = match std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

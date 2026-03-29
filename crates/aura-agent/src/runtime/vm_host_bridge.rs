@@ -13,7 +13,7 @@ use crate::runtime::{
 use aura_core::effects::{VmBridgeEffects, VmBridgePendingSend};
 use aura_core::AuraVmDeterminismProfileV1;
 use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
-use aura_mpst::CompositionManifest;
+use aura_mpst::{CompositionManifest, GuardCapabilityAdmission};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -73,6 +73,11 @@ pub enum AuraVmSessionOpenError {
     },
     #[error("failed to claim VM fragments for protocol {protocol_id}: {message}")]
     FragmentClaim {
+        protocol_id: String,
+        message: String,
+    },
+    #[error("failed to admit declared guard capabilities for protocol {protocol_id}: {message}")]
+    ManifestGuardCapability {
         protocol_id: String,
         message: String,
     },
@@ -485,6 +490,12 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
     ),
     AuraVmSessionOpenError,
 > {
+    manifest
+        .validate_guard_capabilities(GuardCapabilityAdmission::first_party_only())
+        .map_err(|error| AuraVmSessionOpenError::ManifestGuardCapability {
+            protocol_id: manifest.protocol_id.clone(),
+            message: error.to_string(),
+        })?;
     let role_names = manifest
         .role_names
         .iter()
@@ -822,6 +833,7 @@ mod tests {
             protocol_id: protocol_id.to_string(),
             role_names: vec!["Role".to_string()],
             required_capabilities: Vec::new(),
+            guard_capabilities: Vec::new(),
             determinism_policy_ref: None,
             delegation_constraints: Vec::new(),
             link_specs: bundle_ids
@@ -1157,6 +1169,7 @@ mod tests {
             protocol_id: "aura.sync.anti_entropy".to_string(),
             role_names: vec!["Role".to_string()],
             required_capabilities: Vec::new(),
+            guard_capabilities: Vec::new(),
             determinism_policy_ref: Some(
                 crate::runtime::AURA_VM_POLICY_SYNC_ANTI_ENTROPY.to_string(),
             ),

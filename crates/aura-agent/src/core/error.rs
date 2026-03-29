@@ -27,6 +27,10 @@ pub enum AgentError {
     #[error("Choreography error: {0}")]
     Choreography(String),
 
+    /// Timeout error
+    #[error("Agent timeout error: {0}")]
+    Timeout(String),
+
     /// Underlying Aura error
     #[error("Aura error: {0}")]
     Aura(#[from] AuraError),
@@ -59,6 +63,11 @@ impl AgentError {
     /// Create a choreography error
     pub fn choreography(msg: impl Into<String>) -> Self {
         Self::Choreography(msg.into())
+    }
+
+    /// Create a timeout error
+    pub fn timeout(msg: impl Into<String>) -> Self {
+        Self::Timeout(msg.into())
     }
 
     /// Create an internal error (alias for runtime error)

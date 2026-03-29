@@ -5,7 +5,7 @@
 
 use super::action_registry::{ActionBuilder, ActionRegistry, NoOpHandler};
 use aura_agent::core::{default_context_id_for_authority, AgentBuilder, AgentConfig};
-use aura_agent::handlers::{InvitationServiceApi, InvitationType};
+use aura_agent::handlers::{InvitationServiceApi, InvitationStatus, InvitationType};
 use aura_agent::{AuraAgent, EffectContext, SharedTransport};
 use aura_amp::{amp_recv, get_channel_state, AmpJournalEffects};
 use aura_core::effects::amp::ChannelBootstrapPackage;
@@ -261,13 +261,14 @@ impl AmpChannelHarness {
             .accept(&invitation.invitation_id)
             .await
             .map_err(|e| AuraError::internal(format!("accept invitation: {e}")))?;
-        if result.success {
+        if matches!(result.new_status, InvitationStatus::Accepted) {
             return Ok(());
         }
 
-        Err(AuraError::invalid(result.error.unwrap_or_else(|| {
-            "invitation acceptance failed".to_string()
-        })))
+        Err(AuraError::invalid(format!(
+            "invitation acceptance ended in unexpected status: {:?}",
+            result.new_status
+        )))
     }
 
     async fn receive_amp_message(
@@ -469,7 +470,10 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                             .await
                             .map_err(|e| AuraError::internal(format!("invite failed: {e}")))?;
 
-                        let code = InvitationServiceApi::export_invitation(&invitation);
+                        let code =
+                            InvitationServiceApi::export_invitation(&invitation).map_err(|e| {
+                                AuraError::internal(format!("invite export failed: {e}"))
+                            })?;
                         let key = (normalize_name(&receiver), channel.to_string());
                         {
                             let mut codes = harness.invitation_codes.lock().await;

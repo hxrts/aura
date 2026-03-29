@@ -48,6 +48,14 @@ pub fn check_run_residue(config: &RunConfig) -> ResidueReport {
             }
         }
 
+        for transient_path in discover_transient_residue_artifacts(&instance.env) {
+            issues.push(ResidueIssue {
+                kind: "transient_residue".to_string(),
+                instance_id: instance.id.clone(),
+                detail: transient_path.display().to_string(),
+            });
+        }
+
         for browser_path in discover_browser_lock_artifacts(&instance.env) {
             issues.push(ResidueIssue {
                 kind: "browser_profile_lock".to_string(),
@@ -97,6 +105,32 @@ fn discover_browser_lock_artifacts(env: &[String]) -> Vec<PathBuf> {
     collect_named_artifacts(
         &browser_root,
         &["SingletonLock", "SingletonCookie", ".org.chromium.Chromium"],
+        &mut results,
+    );
+    results
+}
+
+fn discover_transient_residue_artifacts(env: &[String]) -> Vec<PathBuf> {
+    let transient_root = env.iter().find_map(|entry| {
+        let (key, value) = entry.split_once('=')?;
+        (key == "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT").then(|| PathBuf::from(value))
+    });
+    let Some(transient_root) = transient_root else {
+        return Vec::new();
+    };
+    if !transient_root.exists() {
+        return Vec::new();
+    }
+    let mut results = Vec::new();
+    collect_named_artifacts(
+        &transient_root,
+        &[
+            ".sock",
+            ".pid",
+            ".json",
+            "clipboard.txt",
+            ".bootstrap-runtime-handoff-ready",
+        ],
         &mut results,
     );
     results

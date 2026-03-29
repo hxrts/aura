@@ -53,12 +53,17 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
 
     let (depth_icon, depth_label) = (enter_depth.icon().to_string(), enter_depth.label());
 
-    let can_enter_full = homes.get(selected).map(|b| b.can_enter).unwrap_or(false);
-
-    let can_enter_line = format!(
-        "Can enter: Limited ✔ Partial ✔ Full {}",
-        if can_enter_full { "✔" } else { "✖" }
-    );
+    let strongest_access_label = homes
+        .get(selected)
+        .map(|home| {
+            if home.can_enter {
+                AccessLevel::Full.label()
+            } else {
+                AccessLevel::Partial.label()
+            }
+        })
+        .unwrap_or("--");
+    let can_enter_line = format!("Entry access: {strongest_access_label}");
 
     element! {
         View(
@@ -312,7 +317,7 @@ fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>
             Text(content: format!("Neighborhood: {}", props.neighborhood_name), color: Theme::TEXT)
             Text(content: format!("Selected home: {}", props.selected_home_name), color: Theme::TEXT)
             Text(content: format!("Home ID: {}", props.selected_home_id), color: Theme::TEXT_MUTED)
-            Text(content: format!("Access: {} ({}) • {}", props.enter_depth.label(), hop_distance_hint(props.enter_depth), entered_text), color: Theme::TEXT_MUTED)
+            Text(content: format!("Entry access: {} ({}) • {}", props.enter_depth.label(), hop_distance_hint(props.enter_depth), entered_text), color: Theme::TEXT_MUTED)
             Text(content: format!("Known homes: {}", props.homes_count), color: Theme::TEXT_MUTED)
             Text(content: format!("Channels: {} • Focus: #{}", props.channel_count, props.selected_channel_name), color: Theme::TEXT_MUTED)
             Text(content: format!("Members/participants in view: {}", props.member_count), color: Theme::TEXT_MUTED)
@@ -580,9 +585,9 @@ pub fn NeighborhoodScreen(
                                 #(if show_detail_lists {
                                     vec![element! {
                                         View(flex_direction: FlexDirection::Column, gap: 0) {
-                                            ChannelList(channels: display_channels.clone(), selected_index: props.view.selected_channel)
+                                            ChannelList(channels: display_channels, selected_index: props.view.selected_channel)
                                             MemberList(
-                                                members: display_members.clone(),
+                                                members: display_members,
                                                 selected_index: props.view.selected_member,
                                                 moderator_actions_enabled: display_moderator_actions_enabled,
                                             )
@@ -611,8 +616,8 @@ pub fn NeighborhoodScreen(
                         }]
                     } else {
                         vec![element! {
-                            View {
-                                HomeMap(homes: homes.clone(), selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
+                            View(flex_grow: 1.0) {
+                                HomeMap(homes: homes, selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
                             }
                         }]
                     })

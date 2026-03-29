@@ -42,6 +42,8 @@
 pub mod errors;
 
 // Application effects implementation (Layer 2 pattern)
+/// Typed capability families shared across authorization policy surfaces.
+pub mod capabilities;
 pub mod effect_policy;
 pub mod effects;
 pub mod flow_budget;
@@ -64,7 +66,9 @@ pub use aura_core::semilattice::{MeetSemiLattice, Top};
 
 // Re-export Biscuit types
 pub use biscuit_auth::{Biscuit, KeyPair, PublicKey};
-pub use biscuit_token::{BiscuitError, BiscuitTokenManager, SerializableBiscuit, TokenAuthority};
+pub use biscuit_token::{
+    BiscuitError, BiscuitTokenManager, SerializableBiscuit, TokenAuthority, TokenGrantProfile,
+};
 pub use flow_budget::JournalBackedFlowBudgetHandler;
 
 // Re-export fact types for journal integration

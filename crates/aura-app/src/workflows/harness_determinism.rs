@@ -26,6 +26,7 @@ struct HarnessContext {
     instance_id: String,
 }
 
+#[cfg_attr(not(all(target_arch = "wasm32", feature = "wasm")), allow(dead_code))]
 fn parse_seed(raw: &str) -> Option<u64> {
     raw.parse::<u64>().ok()
 }

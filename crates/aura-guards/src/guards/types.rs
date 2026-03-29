@@ -6,43 +6,11 @@
 //! This module provides shared guard decision/outcome types and basic capability/budget
 //! checks that are generic over a feature crate's command enum.
 
-use aura_core::FlowCost;
+use aura_core::{CapabilityName, FlowCost};
 use serde::{Deserialize, Serialize};
 
-/// Typed identifier for guard capabilities.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct CapabilityId(String);
-
-impl CapabilityId {
-    /// Create a new capability identifier.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// Get the underlying string.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for CapabilityId {
-    fn from(value: String) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<&str> for CapabilityId {
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl std::fmt::Display for CapabilityId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+/// Guard capability identifiers are validated Aura capability names.
+pub type CapabilityId = CapabilityName;
 
 /// Structured guard violation reasons.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,7 +150,7 @@ impl<C> GuardOutcome<C> {
 /// Minimal capability query contract required by `check_capability`.
 pub trait CapabilitySnapshot {
     /// Returns `true` if the snapshot contains `cap`.
-    fn has_capability(&self, cap: &CapabilityId) -> bool;
+    fn has_capability(&self, cap: &CapabilityName) -> bool;
 }
 
 /// Minimal budget query contract required by `check_flow_budget`.
@@ -192,7 +160,10 @@ pub trait FlowBudgetSnapshot {
 }
 
 /// Check capability and return denied outcome if missing.
-pub fn check_capability<S, C>(snapshot: &S, required_cap: &CapabilityId) -> Option<GuardOutcome<C>>
+pub fn check_capability<S, C>(
+    snapshot: &S,
+    required_cap: &CapabilityName,
+) -> Option<GuardOutcome<C>>
 where
     S: CapabilitySnapshot,
 {

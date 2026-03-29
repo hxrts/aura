@@ -20,7 +20,7 @@ export AURA_UX_POLICY_DIFF_RANGE_RESOLVED="$diff_range"
 
 changed_files="$(git diff --name-only "$diff_range" || true)"
 
-changed_list=()
+declare -a changed_list=()
 while IFS= read -r file; do
   [[ -n "$file" ]] || continue
   changed_list+=("$file")
@@ -39,7 +39,7 @@ record_violation() {
 has_changed() {
   local target="$1"
   local file
-  for file in "${changed_list[@]}"; do
+  for file in "${changed_list[@]:-}"; do
     [[ "$file" == "$target" ]] && return 0
   done
   return 1

@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Multi-party session type extensions for Aura"
 
 [lints]
@@ -20,7 +22,7 @@ telltale-types = { workspace = true }
 # but aura-mpst does not depend on aura-macros to avoid circular dependency
 
 # Core Aura dependencies
-aura-core = { path = "../aura-core" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
 
 # Dependencies needed for extension system
 proc-macro2 = { workspace = true }

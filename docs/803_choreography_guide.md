@@ -66,16 +66,22 @@ choreography! {
     protocol SecureRequest {
         roles: Client, Server;
 
-        Client[guard_capability = "send_request", flow_cost = 50]
+        Client[guard_capability = "chat:message:send", flow_cost = 50]
         -> Server: SendRequest(RequestData);
 
-        Server[guard_capability = "send_response", flow_cost = 30, journal_facts = "response_sent"]
+        Server[guard_capability = "chat:message:send", flow_cost = 30, journal_facts = "response_sent"]
         -> Client: SendResponse(ResponseData);
     }
 }
 ```
 
-Annotation syntax: `Role[guard_capability = "...", flow_cost = N, journal_facts = "..."] -> Target: Message`
+Annotation syntax: `Role[guard_capability = "namespace:capability", flow_cost = N, journal_facts = "..."] -> Target: Message`
+
+`guard_capability` is the one sanctioned raw-string boundary for first-party
+capability names in choreography source. The macro parses these values into
+validated `CapabilityName`s and fails closed on invalid or legacy names. In
+Rust code outside `.choreo` or `choreography!` inputs, prefer typed capability
+families from the owning crate.
 
 Select the narrowest `TimeStamp` domain for each time field. See [Effect System](103_effect_system.md) for time domains.
 
@@ -113,7 +119,7 @@ pub fn ceremony_status(facts: &[InvitationFact]) -> CeremonyStatus {
 }
 ```
 
-**Definition of Done**:
+Definition of Done:
 - [ ] Operation category declared (A/B/C)
 - [ ] Facts defined with reducer and schema version
 - [ ] Choreography specified with roles/messages documented
@@ -208,7 +214,7 @@ Each phase uses results from previous phases. Failed phases abort the entire wor
 
 ### Parallel Composition
 
-Execute independent protocols concurrently:
+Independent protocols can execute concurrently using `try_join_all`.
 
 ```rust
 pub async fn execute_distributed_computation(
@@ -231,9 +237,11 @@ pub async fn execute_distributed_computation(
 }
 ```
 
+Worker futures launch in parallel and are joined with a timeout. Results are then aggregated into a single computation result.
+
 ### Effect Program Composition
 
-Compose protocols through effect programs:
+Protocols can also be composed through effect programs using a builder pattern.
 
 ```rust
 let composed_protocol = Program::new()
@@ -249,11 +257,13 @@ let composed_protocol = Program::new()
     .end();
 ```
 
+The builder chains validation, protocol execution, and logging into a single composed program.
+
 ## 5. Error Handling and Resilience
 
 ### Timeout and Retry
 
-Implement robust timeout handling with exponential backoff:
+Implement timeout handling with exponential backoff.
 
 ```rust
 pub async fn execute_with_resilience<T>(
@@ -283,9 +293,11 @@ pub async fn execute_with_resilience<T>(
 }
 ```
 
+The function retries on transient errors with exponential backoff and jitter. Non-retryable errors fail immediately.
+
 ### Compensation and Rollback
 
-For multi-phase protocols, implement compensation for partial failures:
+For multi-phase protocols, implement compensation for partial failures.
 
 ```rust
 pub async fn execute_compensating_transaction(
@@ -314,9 +326,11 @@ pub async fn execute_compensating_transaction(
 }
 ```
 
+On failure, completed operations are compensated in reverse order. This ensures partial state is cleaned up before the error is returned.
+
 ### Circuit Breakers
 
-Prevent cascading failures with circuit breakers:
+Circuit breakers prevent cascading failures by tracking error rates.
 
 ```rust
 pub enum CircuitState {
@@ -355,6 +369,8 @@ pub async fn execute_with_circuit_breaker<T>(
 }
 ```
 
+The breaker transitions through closed, open, and half-open states based on failure thresholds and recovery timeouts.
+
 ## 6. Guard Chain Integration
 
 The guard chain specification is defined in [Authorization](106_authorization.md). See [System Internals Guide](807_system_internals_guide.md) for the three-phase implementation pattern.
@@ -365,6 +381,10 @@ When integrating guards into choreographies, use the annotation syntax on choreo
 - `flow_cost`: Charges flow budget
 - `journal_facts`: Records facts after successful send
 - `leak`: Records leakage budget charge
+
+Snapshot builders must not treat declared choreography guard names as already
+granted. They evaluate typed candidate sets against the current Biscuit/policy
+frontier and publish only the admitted frontier into the `GuardSnapshot`.
 
 ## 7. Domain Service Pattern
 
@@ -416,7 +436,7 @@ impl ChatService {
 }
 ```
 
-Benefits: Domain crate stays pure (no tokio/RwLock), testable with mock effects, consistent pattern across crates.
+This keeps the domain crate pure without Tokio-specific locking or runtime coupling. It is testable with mock effects and consistent across crates.
 
 ## 8. Testing Choreographies
 

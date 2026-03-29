@@ -11,13 +11,13 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use aura_harness::artifact_sync::sync_remote_artifacts;
+use aura_harness::artifacts::ArtifactBundle;
 use aura_harness::build_startup_summary;
 use aura_harness::config::{require_existing_file, ScreenSource};
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
 use aura_harness::failure_attribution::attribute_failure;
 use aura_harness::governance::{self, GovernanceCheck};
-use aura_harness::load_and_validate_run_config;
 use aura_harness::network_lab::{resolve_backend_mode, NetworkBackendMode};
 use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
@@ -27,7 +27,7 @@ use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
 use aura_harness::scenario_execution::{execute_with_run_budgets, lint_for_run};
 use aura_harness::tool_api::{DiagnosticScreenCapture, ToolApi, ToolPayload, ToolRequest};
-use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
+use aura_harness::{load_and_validate_run_config, load_and_validate_run_config_with_artifact_base};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -63,14 +63,6 @@ struct RunArgs {
     artifacts_dir: Option<PathBuf>,
     #[arg(long, default_value = "mock")]
     network_backend: String,
-}
-
-impl RunArgs {
-    fn artifacts_dir(&self) -> PathBuf {
-        self.artifacts_dir
-            .clone()
-            .unwrap_or_else(default_artifacts_dir)
-    }
 }
 
 #[derive(Debug, Parser)]
@@ -140,7 +132,10 @@ fn governance_check(args: GovernanceArgs) -> Result<()> {
 
 fn run(args: RunArgs) -> Result<()> {
     require_existing_file(&args.config, "run config")?;
-    let config = load_and_validate_run_config(&args.config)?;
+    let config = load_and_validate_run_config_with_artifact_base(
+        &args.config,
+        args.artifacts_dir.as_deref(),
+    )?;
     let requested_backend: NetworkBackendMode = args
         .network_backend
         .parse()
@@ -154,7 +149,12 @@ fn run(args: RunArgs) -> Result<()> {
     };
 
     let summary = build_startup_summary(&config);
-    let artifact_bundle = ArtifactBundle::create(&args.artifacts_dir(), &config.run.name)?;
+    let authoritative_run_dir = config
+        .run
+        .artifact_dir
+        .as_ref()
+        .context("materialized harness run is missing artifact_dir")?;
+    let artifact_bundle = ArtifactBundle::from_run_dir(authoritative_run_dir)?;
     let residue_report = check_run_residue(&config);
     let _ = artifact_bundle.write_json("residue_report.json", &residue_report);
     if !residue_report.clean {
@@ -283,6 +283,19 @@ fn run_with_artifacts(
     let events = tool_api.event_snapshot();
     let action_log = tool_api.action_log();
     tool_api.stop_all()?;
+    let post_run_residue_report = check_run_residue(config);
+    if !post_run_residue_report.clean {
+        artifact_bundle.write_json("post_run_residue_report.json", &post_run_residue_report)?;
+        return Err(anyhow!(
+            "run residue detected after shutdown: {}",
+            post_run_residue_report
+                .issues
+                .iter()
+                .map(|issue| format!("{}:{}:{}", issue.instance_id, issue.kind, issue.detail))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
+    }
     resource_guard.sample("run_stop");
 
     let routing_metadata: Vec<_> = config
@@ -311,6 +324,7 @@ fn run_with_artifacts(
     artifact_bundle.write_json("seed_bundle.json", &seed_bundle)?;
     artifact_bundle.write_json("resource_report.json", &resource_report)?;
     artifact_bundle.write_json("remote_artifact_sync.json", &remote_sync_report)?;
+    artifact_bundle.write_json("post_run_residue_report.json", &post_run_residue_report)?;
     if let Some(report) = &scenario_report {
         artifact_bundle.write_json("scenario_report.json", report)?;
     }
@@ -336,8 +350,7 @@ fn collect_failure_diagnostics(
             } => capture,
             aura_harness::tool_api::ToolResponse::Ok { payload } => DiagnosticScreenCapture {
                 diagnostic_authoritative_screen: format!(
-                    "diagnostic_screen_unexpected_payload: {:?}",
-                    payload
+                    "diagnostic_screen_unexpected_payload: {payload:?}"
                 ),
                 diagnostic_raw_screen: String::new(),
                 diagnostic_normalized_screen: String::new(),
@@ -403,7 +416,7 @@ fn collect_failure_diagnostics(
 
         let render_convergence = match &ui_state_snapshot {
             Some(snapshot) => {
-                let semantic_screen = serde_json::to_value(&snapshot.screen)
+                let semantic_screen = serde_json::to_value(snapshot.screen)
                     .ok()
                     .and_then(|value| value.as_str().map(str::to_string))
                     .unwrap_or_else(|| format!("{:?}", snapshot.screen));

@@ -1,0 +1,8 @@
+error[E0593]: closure is expected to take 3 arguments, but it takes 2 arguments
+ --> tests/ui/local_owner_without_owner.rs:7:18
+  |
+7 |         Arc::new(|_nickname: String, _authority_id: aura_core::AuthorityId| {});
+  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |                  |
+  |                  expected closure that takes 3 arguments
+  |                  takes 2 arguments

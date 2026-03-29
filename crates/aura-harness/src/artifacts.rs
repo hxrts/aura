@@ -16,16 +16,25 @@ pub struct ArtifactBundle {
 }
 
 impl ArtifactBundle {
+    pub fn from_run_dir(run_dir: &Path) -> Result<Self> {
+        let run_dir = run_dir.to_path_buf();
+        fs::create_dir_all(&run_dir).with_context(|| {
+            format!("failed to create artifact directory {}", run_dir.display())
+        })?;
+        let root = run_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| run_dir.clone());
+
+        Ok(Self { root, run_dir })
+    }
+
     pub fn create(base_dir: &Path, run_name: &str) -> Result<Self> {
         let root = base_dir.join("harness");
         let run_dir = run_token()
             .map(|token| root.join(run_name).join(token))
             .unwrap_or_else(|| root.join(run_name));
-        fs::create_dir_all(&run_dir).with_context(|| {
-            format!("failed to create artifact directory {}", run_dir.display())
-        })?;
-
-        Ok(Self { root, run_dir })
+        Self::from_run_dir(&run_dir).map(|bundle| Self { root, ..bundle })
     }
 
     pub fn write_json<T: Serialize>(&self, file_name: &str, value: &T) -> Result<PathBuf> {
@@ -56,4 +65,25 @@ fn run_token() -> Option<String> {
         })
         .filter(|value| !value.trim_matches('-').is_empty())
         .map(|value| value.trim_matches('-').to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ArtifactBundle;
+
+    #[test]
+    fn explicit_run_dir_stays_authoritative() {
+        let temp_dir = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+        let run_dir = temp_dir.path().join("isolated-run");
+        let bundle = ArtifactBundle::from_run_dir(&run_dir)
+            .unwrap_or_else(|error| panic!("artifact bundle creation should succeed: {error}"));
+
+        assert_eq!(bundle.run_dir, run_dir);
+        assert!(bundle.run_dir.exists());
+        assert_eq!(
+            bundle.root,
+            temp_dir.path().to_path_buf(),
+            "authoritative run_dir creation should not append an extra harness/run-name layer"
+        );
+    }
 }

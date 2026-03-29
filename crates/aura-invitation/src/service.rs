@@ -17,6 +17,7 @@
 //! - Effect execution is explicit and controllable
 //! - No I/O happens during guard evaluation
 
+use crate::capabilities::InvitationCapability;
 use crate::facts::InvitationFact;
 use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
@@ -25,8 +26,7 @@ use crate::InvitationOperation;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::time::PhysicalTime;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
-use aura_core::DeviceId;
-use aura_guards::types::CapabilityId;
+use aura_core::{CapabilityName, DeviceId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
@@ -190,12 +190,14 @@ impl InvitationType {
     }
 
     /// Get required capability for this invitation type (if any)
-    pub fn required_capability(&self) -> Option<&'static str> {
+    pub fn required_capability(&self) -> Option<CapabilityName> {
         match self {
-            InvitationType::Channel { .. } => Some(costs::CAP_CHANNEL_INVITE),
-            InvitationType::Guardian { .. } => Some(costs::CAP_GUARDIAN_INVITE),
+            InvitationType::Channel { .. } => Some(InvitationCapability::Channel.as_name()),
+            InvitationType::Guardian { .. } => Some(InvitationCapability::Guardian.as_name()),
             InvitationType::Contact { .. } => None,
-            InvitationType::DeviceEnrollment { .. } => Some(costs::CAP_DEVICE_ENROLL),
+            InvitationType::DeviceEnrollment { .. } => {
+                Some(InvitationCapability::DeviceEnroll.as_name())
+            }
         }
     }
 }
@@ -312,9 +314,7 @@ impl InvitationService {
     ) -> GuardOutcome {
         let policy = InvitationPolicy::for_snapshot(&self.config, snapshot);
         // Check base capability
-        if let Some(outcome) =
-            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_SEND))
-        {
+        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Send.as_name()) {
             return outcome;
         }
 
@@ -328,7 +328,7 @@ impl InvitationService {
             };
 
             if require_check {
-                let type_capability = CapabilityId::from(type_cap);
+                let type_capability = type_cap;
                 if let Some(outcome) = check_capability(snapshot, &type_capability) {
                     return outcome;
                 }
@@ -430,14 +430,7 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_ACCEPT))
-        {
-            return outcome;
-        }
-
-        // Check flow budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::INVITATION_ACCEPT_COST) {
+        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Accept.as_name()) {
             return outcome;
         }
 
@@ -453,16 +446,7 @@ impl InvitationService {
         };
 
         // Construct effect commands
-        let effects = vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::INVITATION_ACCEPT_COST,
-            },
-            EffectCommand::JournalAppend { fact },
-            EffectCommand::RecordReceipt {
-                operation: InvitationOperation::AcceptInvitation,
-                peer: None,
-            },
-        ];
+        let effects = vec![EffectCommand::JournalAppend { fact }];
 
         GuardOutcome::allowed(effects)
     }
@@ -480,14 +464,8 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_DECLINE))
+        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Decline.as_name())
         {
-            return outcome;
-        }
-
-        // Check flow budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::INVITATION_DECLINE_COST) {
             return outcome;
         }
 
@@ -503,16 +481,7 @@ impl InvitationService {
         };
 
         // Construct effect commands
-        let effects = vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::INVITATION_DECLINE_COST,
-            },
-            EffectCommand::JournalAppend { fact },
-            EffectCommand::RecordReceipt {
-                operation: InvitationOperation::DeclineInvitation,
-                peer: None,
-            },
-        ];
+        let effects = vec![EffectCommand::JournalAppend { fact }];
 
         GuardOutcome::allowed(effects)
     }
@@ -530,14 +499,7 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_CANCEL))
-        {
-            return outcome;
-        }
-
-        // Check flow budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::INVITATION_CANCEL_COST) {
+        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Cancel.as_name()) {
             return outcome;
         }
 
@@ -553,16 +515,7 @@ impl InvitationService {
         };
 
         // Construct effect commands
-        let effects = vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::INVITATION_CANCEL_COST,
-            },
-            EffectCommand::JournalAppend { fact },
-            EffectCommand::RecordReceipt {
-                operation: InvitationOperation::CancelInvitation,
-                peer: None,
-            },
-        ];
+        let effects = vec![EffectCommand::JournalAppend { fact }];
 
         GuardOutcome::allowed(effects)
     }
@@ -591,12 +544,12 @@ mod tests {
 
     fn full_capabilities() -> Vec<aura_guards::types::CapabilityId> {
         vec![
-            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_SEND),
-            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_ACCEPT),
-            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_DECLINE),
-            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_CANCEL),
-            aura_guards::types::CapabilityId::from(costs::CAP_GUARDIAN_INVITE),
-            aura_guards::types::CapabilityId::from(costs::CAP_CHANNEL_INVITE),
+            InvitationCapability::Send.as_name(),
+            InvitationCapability::Accept.as_name(),
+            InvitationCapability::Decline.as_name(),
+            InvitationCapability::Cancel.as_name(),
+            InvitationCapability::Guardian.as_name(),
+            InvitationCapability::Channel.as_name(),
         ]
     }
 
@@ -721,7 +674,7 @@ mod tests {
         let outcome = service.prepare_accept_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
-        assert_eq!(outcome.effects.len(), 3);
+        assert_eq!(outcome.effects.len(), 1);
     }
 
     #[test]
@@ -733,7 +686,7 @@ mod tests {
         let outcome = service.prepare_decline_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
-        assert_eq!(outcome.effects.len(), 3);
+        assert_eq!(outcome.effects.len(), 1);
     }
 
     #[test]
@@ -745,7 +698,7 @@ mod tests {
         let outcome = service.prepare_cancel_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
-        assert_eq!(outcome.effects.len(), 3);
+        assert_eq!(outcome.effects.len(), 1);
     }
 
     #[test]

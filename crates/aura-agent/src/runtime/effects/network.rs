@@ -2,6 +2,7 @@ use super::AuraEffectSystem;
 use crate::core::default_context_id_for_authority;
 use async_trait::async_trait;
 use aura_core::effects::network::PeerEventStream;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
@@ -9,7 +10,9 @@ use aura_core::effects::{
     TransportEffects, TransportError,
 };
 use aura_core::types::identifiers::AuthorityId;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
+#[cfg(not(target_arch = "wasm32"))]
 use aura_effects::time::PhysicalTimeHandler;
 use aura_protocol::amp::deserialize_amp_message;
 use cfg_if::cfg_if;

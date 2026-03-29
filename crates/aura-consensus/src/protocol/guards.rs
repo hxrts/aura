@@ -6,16 +6,16 @@
 //! # Choreography Annotations
 //!
 //! From `choreography.choreo`:
-//! - Execute: guard_capability="initiate_consensus", flow_cost=100
-//! - NonceCommit: guard_capability="witness_nonce", flow_cost=50
-//! - SignRequest: guard_capability="aggregate_nonces", flow_cost=75
-//! - SignShare: guard_capability="witness_sign", flow_cost=50, leak="pipelined_commitment"
-//! - ConsensusResult: guard_capability="finalize_consensus", flow_cost=100, journal_facts="consensus_complete"
+//! - Execute: guard_capability="consensus:initiate", flow_cost=100
+//! - NonceCommit: guard_capability="consensus:witness_nonce", flow_cost=50
+//! - SignRequest: guard_capability="consensus:aggregate_nonces", flow_cost=75
+//! - SignShare: guard_capability="consensus:witness_sign", flow_cost=50, leak="pipelined_commitment"
+//! - ConsensusResult: guard_capability="consensus:finalize", flow_cost=100, journal_facts="consensus_complete"
 
+use crate::capabilities::ConsensusCapability;
 use aura_core::{AuraResult, AuthorityId, ContextId, FlowCost};
 use aura_guards::{
-    CapabilityId, GuardContextProvider, GuardEffects, LeakageBudget, SendGuardChain,
-    SendGuardResult,
+    GuardContextProvider, GuardEffects, LeakageBudget, SendGuardChain, SendGuardResult,
 };
 
 /// Guard configuration for Execute message (Coordinator -> Witness)
@@ -30,10 +30,10 @@ impl ExecuteGuard {
     }
 
     /// Create guard chain for Execute message
-    /// Annotations: guard_capability="initiate_consensus", flow_cost=100
+    /// Annotations: guard_capability="consensus:initiate", flow_cost=100
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
-            CapabilityId::from("consensus:initiate"),
+            ConsensusCapability::Initiate.as_name(),
             self.context,
             self.peer,
             FlowCost::from(100u32),
@@ -63,10 +63,10 @@ impl NonceCommitGuard {
     }
 
     /// Create guard chain for NonceCommit message
-    /// Annotations: guard_capability="witness_nonce", flow_cost=50
+    /// Annotations: guard_capability="consensus:witness_nonce", flow_cost=50
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
-            CapabilityId::from("consensus:witness_nonce"),
+            ConsensusCapability::WitnessNonce.as_name(),
             self.context,
             self.peer,
             FlowCost::from(50u32),
@@ -96,10 +96,10 @@ impl SignRequestGuard {
     }
 
     /// Create guard chain for SignRequest message
-    /// Annotations: guard_capability="aggregate_nonces", flow_cost=75
+    /// Annotations: guard_capability="consensus:aggregate_nonces", flow_cost=75
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
-            CapabilityId::from("consensus:aggregate_nonces"),
+            ConsensusCapability::AggregateNonces.as_name(),
             self.context,
             self.peer,
             FlowCost::from(75u32),
@@ -129,7 +129,7 @@ impl SignShareGuard {
     }
 
     /// Create guard chain for SignShare message
-    /// Annotations: guard_capability="witness_sign", flow_cost=50, leak="pipelined_commitment"
+    /// Annotations: guard_capability="consensus:witness_sign", flow_cost=50, leak="pipelined_commitment"
     pub fn create_guard_chain(&self) -> SendGuardChain {
         // Leakage budget for pipelined commitment metadata
         // External: 0 bits (no external leakage)
@@ -138,7 +138,7 @@ impl SignShareGuard {
         let leakage = LeakageBudget::new(0, 32, 0);
 
         SendGuardChain::new(
-            CapabilityId::from("consensus:witness_sign"),
+            ConsensusCapability::WitnessSign.as_name(),
             self.context,
             self.peer,
             FlowCost::from(50u32),
@@ -169,7 +169,7 @@ impl ConsensusResultGuard {
     }
 
     /// Create guard chain for ConsensusResult message
-    /// Annotations: guard_capability="finalize_consensus", flow_cost=100, journal_facts="consensus_complete"
+    /// Annotations: guard_capability="consensus:finalize", flow_cost=100, journal_facts="consensus_complete"
     ///
     /// # Journal Coupling Pattern
     ///
@@ -187,7 +187,7 @@ impl ConsensusResultGuard {
     /// See: `aura-agent/src/runtime_bridge/consensus.rs` for the implementation.
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
-            CapabilityId::from("consensus:finalize"),
+            ConsensusCapability::Finalize.as_name(),
             self.context,
             self.peer,
             FlowCost::from(100u32),
@@ -208,6 +208,7 @@ impl ConsensusResultGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capabilities::ConsensusCapability;
 
     fn test_context() -> ContextId {
         ContextId::new_from_entropy([1u8; 32])
@@ -222,7 +223,10 @@ mod tests {
         let guard = ExecuteGuard::new(test_context(), test_authority());
         let chain = guard.create_guard_chain();
 
-        assert_eq!(chain.authorization_requirement(), "consensus:initiate");
+        assert_eq!(
+            chain.authorization_requirement(),
+            &ConsensusCapability::Initiate.as_name()
+        );
         assert_eq!(chain.cost(), FlowCost::from(100u32));
         assert_eq!(chain.context(), test_context());
         assert_eq!(chain.peer(), test_authority());
@@ -233,7 +237,10 @@ mod tests {
         let guard = NonceCommitGuard::new(test_context(), test_authority());
         let chain = guard.create_guard_chain();
 
-        assert_eq!(chain.authorization_requirement(), "consensus:witness_nonce");
+        assert_eq!(
+            chain.authorization_requirement(),
+            &ConsensusCapability::WitnessNonce.as_name()
+        );
         assert_eq!(chain.cost(), FlowCost::from(50u32));
     }
 
@@ -244,7 +251,7 @@ mod tests {
 
         assert_eq!(
             chain.authorization_requirement(),
-            "consensus:aggregate_nonces"
+            &ConsensusCapability::AggregateNonces.as_name()
         );
         assert_eq!(chain.cost(), FlowCost::from(75u32));
     }
@@ -254,7 +261,10 @@ mod tests {
         let guard = SignShareGuard::new(test_context(), test_authority());
         let chain = guard.create_guard_chain();
 
-        assert_eq!(chain.authorization_requirement(), "consensus:witness_sign");
+        assert_eq!(
+            chain.authorization_requirement(),
+            &ConsensusCapability::WitnessSign.as_name()
+        );
         assert_eq!(chain.cost(), FlowCost::from(50u32));
     }
 
@@ -263,7 +273,10 @@ mod tests {
         let guard = ConsensusResultGuard::new(test_context(), test_authority());
         let chain = guard.create_guard_chain();
 
-        assert_eq!(chain.authorization_requirement(), "consensus:finalize");
+        assert_eq!(
+            chain.authorization_requirement(),
+            &ConsensusCapability::Finalize.as_name()
+        );
         assert_eq!(chain.cost(), FlowCost::from(100u32));
     }
 }

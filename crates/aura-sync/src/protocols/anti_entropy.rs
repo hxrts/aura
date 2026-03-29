@@ -45,6 +45,7 @@ use std::time::Duration;
 use hex;
 use serde::{Deserialize, Serialize};
 
+use crate::capabilities::SyncCapability;
 use crate::core::{
     sync_biscuit_guard_error, sync_network_error, sync_serialization_error, sync_session_error,
     SyncResult,
@@ -55,7 +56,6 @@ use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::types::scope::ResourceScope;
 use aura_core::types::Epoch;
 use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, FlowCost, Journal};
-use aura_guards::types::CapabilityId;
 use aura_guards::{BiscuitGuardEvaluator, GuardContextProvider, GuardError};
 
 // =============================================================================
@@ -446,7 +446,7 @@ impl AntiEntropyProtocol {
 
             let mut flow_budget = FlowBudget::new(1000, Epoch::new(0)); // Standard sync budget
 
-            let capability = CapabilityId::from("sync_journal");
+            let capability = SyncCapability::RequestDigest.as_name();
             match evaluator.evaluate_guard_default_time(
                 token,
                 &capability,
@@ -461,16 +461,16 @@ impl AntiEntropyProtocol {
                 Ok(_) => {
                     tracing::warn!("Sync authorization denied for peer {}", peer);
                     Err(sync_biscuit_guard_error(
-                        "sync_journal",
+                        capability.as_str(),
                         peer,
                         GuardError::MissingCapability {
-                            capability: "sync.permission".to_string(),
+                            capability: capability.to_string(),
                         },
                     ))
                 }
                 Err(e) => {
                     tracing::error!("Sync authorization error for peer {}: {:?}", peer, e);
-                    Err(sync_biscuit_guard_error("sync_journal", peer, e))
+                    Err(sync_biscuit_guard_error(capability.as_str(), peer, e))
                 }
             }
         } else {
@@ -488,7 +488,7 @@ impl AntiEntropyProtocol {
     /// exchange, reconciliation planning, and operation transfer.
     ///
     /// # Authorization
-    /// - Checks Biscuit token permissions for "sync_journal" capability
+    /// - Checks Biscuit token permissions for `sync:request_digest`
     /// - Validates against peer-specific resource scope
     ///
     /// # Integration Points

@@ -18,7 +18,10 @@ enum LintMode {
     EffectBoundaries,
     ImpureEscapes,
     Concurrency,
+    FrontendPortability,
+    SemanticBridgeContracts,
     CryptoBoundaries,
+    CapabilityBoundaries,
     Style,
 }
 
@@ -29,7 +32,10 @@ impl LintMode {
             "effect-boundaries" => Ok(Self::EffectBoundaries),
             "impure-escapes" => Ok(Self::ImpureEscapes),
             "concurrency" => Ok(Self::Concurrency),
+            "frontend-portability" => Ok(Self::FrontendPortability),
+            "semantic-bridge-contracts" => Ok(Self::SemanticBridgeContracts),
             "crypto-boundaries" => Ok(Self::CryptoBoundaries),
+            "capability-boundaries" => Ok(Self::CapabilityBoundaries),
             "style" => Ok(Self::Style),
             other => Err(format!("unknown lint mode: {other}")),
         }
@@ -41,7 +47,10 @@ impl LintMode {
             Self::EffectBoundaries => "effect-boundaries",
             Self::ImpureEscapes => "impure-escapes",
             Self::Concurrency => "concurrency",
+            Self::FrontendPortability => "frontend-portability",
+            Self::SemanticBridgeContracts => "semantic-bridge-contracts",
             Self::CryptoBoundaries => "crypto-boundaries",
+            Self::CapabilityBoundaries => "capability-boundaries",
             Self::Style => "style",
         }
     }
@@ -194,7 +203,10 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         LintMode::EffectBoundaries => scan_effect_boundaries(file, source, syntax),
         LintMode::ImpureEscapes => scan_impure_escapes(file, source, syntax),
         LintMode::Concurrency => scan_concurrency(file, source, syntax),
+        LintMode::FrontendPortability => scan_frontend_portability(file, source, syntax),
+        LintMode::SemanticBridgeContracts => scan_semantic_bridge_contracts(file, syntax),
         LintMode::CryptoBoundaries => scan_crypto_boundaries(file, source, syntax),
+        LintMode::CapabilityBoundaries => scan_capability_boundaries(file, source, syntax),
         LintMode::Style => scan_style(file, source, syntax),
     }
 }
@@ -508,6 +520,222 @@ fn scan_concurrency(file: &Path, source: &str, syntax: &File) -> Vec<String> {
     violations
 }
 
+fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<String> {
+    let path = display_path(file);
+    if !is_frontend_portability_path(&path) {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    let patterns = [
+        (
+            "std::sync::Mutex",
+            "shared frontend task ownership must use the sanctioned frontend waiter abstraction instead of std::sync::Mutex",
+        ),
+        (
+            "std::sync::RwLock",
+            "shared frontend task ownership must use the sanctioned frontend waiter abstraction instead of std::sync::RwLock",
+        ),
+        (
+            "parking_lot::Mutex",
+            "shared frontend primitives must remain platform-neutral; do not use native-only parking_lot mutexes",
+        ),
+        (
+            "parking_lot::RwLock",
+            "shared frontend primitives must remain platform-neutral; do not use native-only parking_lot rwlocks",
+        ),
+        (
+            "std::sync::Condvar",
+            "shared frontend primitives must remain platform-neutral; do not use native-only condition variables",
+        ),
+        (
+            "lock_blocking(",
+            "shared frontend primitives must remain wasm-safe; do not use blocking async-lock APIs",
+        ),
+        (
+            "std::thread::spawn",
+            "shared frontend primitives must use the sanctioned frontend task owner instead of native thread spawning",
+        ),
+        (
+            "tokio::task::spawn_blocking",
+            "shared frontend primitives must remain wasm-safe; do not use spawn_blocking in shared frontend code",
+        ),
+        (
+            "tokio::time::sleep",
+            "shared frontend primitives must not own platform-specific sleep mechanics directly",
+        ),
+        (
+            "gloo_timers::future::sleep",
+            "shared frontend primitives must not own browser-specific sleep mechanics directly",
+        ),
+        (
+            "wasm_bindgen_futures::spawn_local",
+            "shared frontend primitives must use the sanctioned frontend task owner instead of direct platform-specific spawn_local",
+        ),
+        (
+            "tokio::spawn",
+            "shared frontend primitives must use the sanctioned frontend task owner instead of direct tokio::spawn",
+        ),
+        (
+            "dioxus::prelude::spawn",
+            "shared frontend primitives must use the sanctioned frontend task owner instead of direct dioxus spawn",
+        ),
+    ];
+    let filtered_patterns = patterns
+        .into_iter()
+        .filter(|(pattern, _)| {
+            !(path == "crates/aura-web/src/task_owner.rs"
+                && *pattern == "wasm_bindgen_futures::spawn_local")
+        })
+        .collect::<Vec<_>>();
+    scan_line_patterns(
+        file,
+        source,
+        &filtered_patterns,
+        &ignored_test_lines(syntax),
+        &mut violations,
+    );
+    violations
+}
+
+fn scan_semantic_bridge_contracts(file: &Path, syntax: &File) -> Vec<String> {
+    let path = display_path(file);
+    if !is_semantic_bridge_contract_path(&path) {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    if path != "crates/aura-web/src/harness/commands.rs" {
+        let source = syntax.to_token_stream().to_string();
+        for (pattern, message) in [
+            (
+                "route_semantic_intent",
+                "browser semantic routing must remain centralized in harness/commands.rs",
+            ),
+            (
+                "execute_semantic_intent",
+                "browser semantic execution must remain centralized in harness/commands.rs",
+            ),
+            (
+                "SemanticCommandResponse :: accepted_without_value",
+                "browser semantic bridge files must not construct raw semantic responses outside harness/commands.rs",
+            ),
+            (
+                "begin_exact_handoff_operation",
+                "browser semantic bridge files must not begin raw handoff operations outside harness/commands.rs",
+            ),
+            (
+                "begin_exact_ui_operation",
+                "browser semantic bridge files must not begin raw exact operations outside harness/commands.rs",
+            ),
+            (
+                "WeakChannelSelection",
+                "browser semantic bridge files must not emit weak channel fallback payloads outside harness/commands.rs",
+            ),
+            (
+                "from_str :: < SemanticCommandRequest >",
+                "browser semantic bridge files must not parse semantic command json directly outside the typed BrowserSemanticBridgeRequest surface",
+            ),
+        ] {
+            if path == "crates/aura-web/src/harness/channel_selection.rs"
+                && pattern == "WeakChannelSelection"
+            {
+                continue;
+            }
+            if source.contains(pattern) {
+                violations.push(format_violation(
+                    file,
+                    Span::call_site(),
+                    message.to_string(),
+                ));
+            }
+        }
+
+        if path == "crates/aura-web/src/harness/install.rs"
+            && !source.contains("BrowserSemanticBridgeRequest :: from_json")
+        {
+            violations.push(format_violation(
+                file,
+                Span::call_site(),
+                "browser harness install path must delegate semantic submission through the typed BrowserSemanticBridgeRequest surface in harness/commands.rs".to_string(),
+            ));
+        }
+        if path == "crates/aura-web/src/harness/page_owned_queue.rs"
+            && !source.contains("BrowserSemanticBridgeRequest :: from_json")
+        {
+            violations.push(format_violation(
+                file,
+                Span::call_site(),
+                "page-owned browser semantic queue must delegate semantic submission through the typed BrowserSemanticBridgeRequest surface in harness/commands.rs".to_string(),
+            ));
+        }
+        return violations;
+    }
+
+    for item in &syntax.items {
+        let Item::Fn(function) = item else {
+            continue;
+        };
+        if function.sig.ident != "execute_semantic_intent" {
+            continue;
+        }
+
+        let body = function.block.to_token_stream().to_string();
+        for (pattern, message) in [
+            (
+                "SemanticCommandResponse :: accepted_without_value",
+                "web semantic command execution must use declared immediate-response helpers instead of raw accepted_without_value",
+            ),
+            (
+                "begin_exact_handoff_operation",
+                "web semantic command execution must use declared handoff helpers instead of raw begin_exact_handoff_operation",
+            ),
+            (
+                "begin_exact_ui_operation",
+                "web semantic command execution must use declared exact-handle helpers instead of raw begin_exact_ui_operation",
+            ),
+            (
+                "semantic_response_with_handle",
+                "web semantic command execution must use declared handle-response helpers instead of raw semantic_response_with_handle",
+            ),
+            (
+                "semantic_unit_result_with_handle",
+                "web semantic command execution must use declared handle-response helpers instead of raw semantic_unit_result_with_handle",
+            ),
+            (
+                "semantic_channel_result",
+                "web semantic command execution must use declared response helpers instead of raw semantic_channel_result",
+            ),
+            (
+                "semantic_channel_result_with_handle",
+                "web semantic command execution must use declared handle-response helpers instead of raw semantic_channel_result_with_handle",
+            ),
+        ] {
+            if body.contains(pattern) {
+                violations.push(format_violation(
+                    file,
+                    function.sig.ident.span(),
+                    message.to_string(),
+                ));
+            }
+        }
+    }
+
+    violations
+}
+
+fn is_frontend_portability_path(path: &str) -> bool {
+    path.starts_with("crates/aura-app/src/frontend_primitives/")
+        || path == "crates/aura-terminal/src/tui/semantic_lifecycle.rs"
+        || path == "crates/aura-ui/src/semantic_lifecycle.rs"
+        || path == "crates/aura-web/src/task_owner.rs"
+}
+
+fn is_semantic_bridge_contract_path(path: &str) -> bool {
+    path.starts_with("crates/aura-web/src/harness/")
+        || path == "crates/aura-web/src/harness_bridge.rs"
+}
+
 fn scan_crypto_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<String> {
     let path = display_path(file);
     let mut violations = Vec::new();
@@ -591,6 +819,155 @@ fn scan_style(file: &Path, source: &str, syntax: &File) -> Vec<String> {
     }
 
     violations
+}
+
+fn scan_capability_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<String> {
+    let path = display_path(file);
+    if is_test_like_path(&path) {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    let ignored_lines = ignored_test_lines(syntax);
+
+    if path != "crates/aura-macros/src/bin/arch_lints.rs" {
+        scan_line_patterns(
+            file,
+            source,
+            &[(
+                "CapabilityId::from(",
+                "CapabilityId raw-string construction is forbidden; use typed capability families or an explicit validated boundary",
+            )],
+            &ignored_lines,
+            &mut violations,
+        );
+    }
+
+    if !capability_name_parse_allowed(&path) {
+        scan_line_patterns(
+            file,
+            source,
+            &[(
+                "CapabilityName::parse(",
+                "CapabilityName::parse is restricted to approved boundary modules; use typed capability families elsewhere",
+            )],
+            &ignored_lines,
+            &mut violations,
+        );
+    }
+
+    if !capability_literal_allowed(&path) {
+        scan_line_patterns(
+            file,
+            source,
+            &[(
+                "capability_name!(",
+                "direct capability_name! construction is forbidden in protected modules; use typed capability families or approved fixtures",
+            )],
+            &ignored_lines,
+            &mut violations,
+        );
+    }
+
+    if path.starts_with("crates/aura-agent/src/runtime/") {
+        scan_line_patterns(
+            file,
+            source,
+            &[(
+                "\"module:",
+                "host runtime module capability references must come from admitted descriptors, not handwritten strings",
+            )],
+            &ignored_lines,
+            &mut violations,
+        );
+    }
+
+    scan_line_patterns(
+        file,
+        source,
+        &[
+            (
+                "capability_name!(\"message:send\")",
+                "legacy `message:send` capability usage is forbidden; use the canonical owned capability family",
+            ),
+            (
+                "\"sync_journal\"",
+                "legacy `sync_journal` capability wording is forbidden; use canonical sync capability names",
+            ),
+            (
+                "\"sync.permission\"",
+                "stale sync capability placeholder is forbidden; use canonical sync capability names",
+            ),
+            (
+                "\"invitation:create\"",
+                "stale `invitation:create` capability wording is forbidden; use canonical invitation capability names",
+            ),
+            (
+                "\"recovery_initiate\"",
+                "legacy `recovery_initiate` capability wording is forbidden; use canonical recovery capability names",
+            ),
+            (
+                "\"recovery_approve\"",
+                "legacy `recovery_approve` capability wording is forbidden; use canonical recovery capability names",
+            ),
+        ],
+        &ignored_lines,
+        &mut violations,
+    );
+
+    for item in &syntax.items {
+        if let Item::Struct(item_struct) = item {
+            maybe_flag_raw_capability_string_fields(file, item_struct, &mut violations);
+        }
+    }
+
+    violations
+}
+
+fn maybe_flag_raw_capability_string_fields(
+    file: &Path,
+    item_struct: &ItemStruct,
+    violations: &mut Vec<String>,
+) {
+    for field in &item_struct.fields {
+        let Some(ident) = &field.ident else {
+            continue;
+        };
+        let field_name = ident.to_string();
+        let expects_typed_capability_surface = matches!(
+            field_name.as_str(),
+            "guard_capabilities" | "recovery_capabilities"
+        );
+        if expects_typed_capability_surface && is_vec_of_string(&field.ty) {
+            violations.push(format_violation(
+                file,
+                field.ty.span(),
+                format!(
+                    "field `{}` on struct `{}` may not use Vec<String> for authorization vocabulary; use a typed capability surface",
+                    field_name, item_struct.ident
+                ),
+            ));
+        }
+    }
+}
+
+fn is_vec_of_string(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    let Some(segment) = type_path.path.segments.last() else {
+        return false;
+    };
+    if segment.ident != "Vec" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return false;
+    };
+    let Some(syn::GenericArgument::Type(syn::Type::Path(inner_type))) = args.args.first() else {
+        return false;
+    };
+    inner_type.path.is_ident("String")
 }
 
 fn maybe_flag_serialized_usize_fields(
@@ -873,6 +1250,23 @@ fn crypto_allowed(path: &str) -> bool {
         || is_test_like_path(path)
 }
 
+fn capability_name_parse_allowed(path: &str) -> bool {
+    path == "crates/aura-core/src/capability_name.rs"
+        || path == "crates/aura-authorization/src/biscuit_authorization.rs"
+        || path == "crates/aura-guards/src/authorization.rs"
+        || path == "crates/aura-mpst/src/ast_extraction.rs"
+        || path == "crates/aura-mpst/src/composition.rs"
+        || path == "crates/aura-macros/src/capability_family.rs"
+        || path == "crates/aura-macros/src/bin/arch_lints.rs"
+}
+
+fn capability_literal_allowed(path: &str) -> bool {
+    path == "crates/aura-core/src/capability_name.rs"
+        || path == "crates/aura-macros/src/capability_family.rs"
+        || path.starts_with("crates/aura-testkit/")
+        || path == "crates/aura-macros/src/bin/arch_lints.rs"
+}
+
 fn infra_impl_allowed(path: &str) -> bool {
     path.starts_with("crates/aura-effects/")
         || path.starts_with("crates/aura-testkit/")
@@ -992,4 +1386,44 @@ fn flag_mock_handler_items(file: &Path, item: &Item, violations: &mut Vec<String
 
 fn is_mock_handler_name(name: &str) -> bool {
     (name.contains("Mock") || name.contains("InMemory")) && name.contains("Handler")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_frontend_portability_path, is_semantic_bridge_contract_path};
+
+    #[test]
+    fn frontend_portability_scope_covers_shared_frontend_owners() {
+        assert!(is_frontend_portability_path(
+            "crates/aura-app/src/frontend_primitives/task_owner.rs"
+        ));
+        assert!(is_frontend_portability_path(
+            "crates/aura-terminal/src/tui/semantic_lifecycle.rs"
+        ));
+        assert!(is_frontend_portability_path(
+            "crates/aura-ui/src/semantic_lifecycle.rs"
+        ));
+        assert!(is_frontend_portability_path(
+            "crates/aura-web/src/task_owner.rs"
+        ));
+        assert!(!is_frontend_portability_path(
+            "crates/aura-web/src/harness/install.rs"
+        ));
+    }
+
+    #[test]
+    fn semantic_bridge_contract_scope_covers_bridge_root_and_harness_modules() {
+        assert!(is_semantic_bridge_contract_path(
+            "crates/aura-web/src/harness/commands.rs"
+        ));
+        assert!(is_semantic_bridge_contract_path(
+            "crates/aura-web/src/harness/install.rs"
+        ));
+        assert!(is_semantic_bridge_contract_path(
+            "crates/aura-web/src/harness_bridge.rs"
+        ));
+        assert!(!is_semantic_bridge_contract_path(
+            "crates/aura-web/src/task_owner.rs"
+        ));
+    }
 }

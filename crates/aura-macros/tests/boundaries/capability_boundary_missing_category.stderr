@@ -1,8 +1,11 @@
 error: capability_boundary requires `category = "capability_gated"`
  --> tests/boundaries/capability_boundary_missing_category.rs:3:1
   |
-3 | #[aura_macros::capability_boundary(capability = "demo-capability")]
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3 | / #[aura_macros::capability_boundary(
+4 | |     capability = "demo-capability",
+5 | |     family = "capability_accessor"
+6 | | )]
+  | |__^
   |
   = note: this error originates in the attribute macro `aura_macros::capability_boundary` (in Nightly builds, run with -Z macro-backtrace for more info)
 

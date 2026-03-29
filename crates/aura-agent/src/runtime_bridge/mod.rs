@@ -90,10 +90,34 @@ use invitation::convert_invitation_to_bridge_info;
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request";
 const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
+const FACT_SYNC_SOCKET_TIMEOUT_MS: u64 = 750;
 const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
 const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 8_000;
 const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "secure_storage_bootstrap",
+    family = "runtime_helper"
+)]
+fn secure_storage_bootstrap_boundary(
+    capabilities: &[SecureStorageCapability],
+) -> &[SecureStorageCapability] {
+    capabilities
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "secure_storage_bootstrap_read_write",
+    family = "runtime_helper"
+)]
+fn secure_storage_bootstrap_store_capabilities() -> [SecureStorageCapability; 2] {
+    [
+        SecureStorageCapability::Read,
+        SecureStorageCapability::Write,
+    ]
+}
 
 fn internal_bridge_error(label: &'static str, error: impl Display) -> IntentError {
     IntentError::internal_error(format!("{label}: {error}"))
@@ -162,13 +186,14 @@ fn collect_authoritative_moderation_homes(
     candidates
 }
 
-async fn execute_with_effect_timeout<TTime, T, E, Fut>(
+async fn execute_with_effect_timeout<TTime, T, E, F, Fut>(
     time: &TTime,
     timeout: Duration,
-    operation: Fut,
+    operation: F,
 ) -> Result<T, TimeoutRunError<E>>
 where
     TTime: PhysicalTimeEffects + Sync,
+    F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
 {
     let started_at = time.physical_time().await.map_err(|error| {
@@ -178,7 +203,7 @@ where
     })?;
     let budget = TimeoutBudget::from_start_and_timeout(&started_at, timeout)
         .map_err(TimeoutRunError::Timeout)?;
-    execute_with_timeout_budget(time, &budget, || operation).await
+    execute_with_timeout_budget(time, &budget, operation).await
 }
 
 #[derive(Debug, Default)]
@@ -316,6 +341,43 @@ fn harness_sync_backoff_ms() -> u64 {
         .unwrap_or(DEFAULT_HARNESS_SYNC_BACKOFF_MS)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn browser_harness_page_enabled() -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(search) = window.location().search() else {
+        return false;
+    };
+    let query = search.strip_prefix('?').unwrap_or(&search);
+    let harness_page = query.split('&').any(|pair: &str| {
+        pair.split_once('=')
+            .is_some_and(|(key, value)| key == "__aura_harness_instance" && !value.is_empty())
+    });
+    harness_page
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_harness_browser_mailbox_url(url: &str) -> bool {
+    if !browser_harness_page_enabled() {
+        return false;
+    }
+
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(host) = window.location().host() else {
+        return false;
+    };
+    if host.is_empty() {
+        return false;
+    }
+
+    let ws_host = format!("ws://{host}");
+    let wss_host = format!("wss://{host}");
+    url == ws_host || url == wss_host
+}
+
 /// Wrapper to implement RuntimeBridge for AuraAgent
 ///
 /// This struct wraps an Arc<AuraAgent> to provide the RuntimeBridge implementation.
@@ -421,6 +483,13 @@ impl AgentRuntimeBridge {
             format!("ws://{addr}")
         };
 
+        #[cfg(target_arch = "wasm32")]
+        if is_harness_browser_mailbox_url(&url) {
+            return Err(IntentError::network_error(format!(
+                "Harness browser mailbox transport does not support relational fact sync pull to {peer}"
+            )));
+        }
+
         let request = TransportEnvelope {
             destination: peer,
             source: self.agent.authority_id(),
@@ -437,92 +506,128 @@ impl AgentRuntimeBridge {
             IntentError::internal_error(format!("Failed to encode fact sync request: {e}"))
         })?;
 
-        #[cfg(target_arch = "wasm32")]
-        let remote_facts: Vec<RelationalFact> = run_local_ws(move || async move {
-            let mut socket = WebSocket::open(&url).map_err(|e| {
-                IntentError::network_error(format!("Failed to open fact sync websocket {url}: {e}"))
-            })?;
-            socket.send(Message::Bytes(bytes)).await.map_err(|e| {
-                IntentError::network_error(format!("Failed to send fact sync request: {e}"))
-            })?;
+        let effects = self.agent.runtime().effects();
+        let remote_facts: Vec<RelationalFact> = execute_with_effect_timeout(
+            &effects,
+            Duration::from_millis(FACT_SYNC_SOCKET_TIMEOUT_MS),
+            || async move {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    run_local_ws(move || async move {
+                        let mut socket = WebSocket::open(&url).map_err(|e| {
+                            IntentError::network_error(format!(
+                                "Failed to open fact sync websocket {url}: {e}"
+                            ))
+                        })?;
+                        socket.send(Message::Bytes(bytes)).await.map_err(|e| {
+                            IntentError::network_error(format!(
+                                "Failed to send fact sync request: {e}"
+                            ))
+                        })?;
 
-            let response = socket.next().await.ok_or_else(|| {
-                IntentError::network_error("Fact sync websocket closed before response".to_string())
-            })?;
-            let payload = match response.map_err(|e| {
-                IntentError::network_error(format!("Fact sync websocket read failed: {e}"))
-            })? {
-                Message::Bytes(payload) => payload,
-                _ => {
-                    return Err(IntentError::network_error(
-                        "Fact sync websocket returned non-binary payload".to_string(),
-                    ));
+                        let response = socket.next().await.ok_or_else(|| {
+                            IntentError::network_error(
+                                "Fact sync websocket closed before response".to_string(),
+                            )
+                        })?;
+                        let payload = match response.map_err(|e| {
+                            IntentError::network_error(format!(
+                                "Fact sync websocket read failed: {e}"
+                            ))
+                        })? {
+                            Message::Bytes(payload) => payload,
+                            _ => {
+                                return Err(IntentError::network_error(
+                                    "Fact sync websocket returned non-binary payload".to_string(),
+                                ));
+                            }
+                        };
+
+                        let envelope: TransportEnvelope =
+                            aura_core::util::serialization::from_slice(&payload).map_err(|e| {
+                                IntentError::internal_error(format!(
+                                    "Failed to decode fact sync response: {e}"
+                                ))
+                            })?;
+
+                        if envelope
+                            .metadata
+                            .get("content-type")
+                            .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
+                        {
+                            return Err(IntentError::network_error(
+                                "Fact sync response had unexpected content type".to_string(),
+                            ));
+                        }
+
+                        aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
+                            IntentError::internal_error(format!(
+                                "Failed to decode fact sync payload: {e}"
+                            ))
+                        })
+                    })
+                    .await
                 }
-            };
 
-            let envelope: TransportEnvelope = aura_core::util::serialization::from_slice(&payload)
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Failed to decode fact sync response: {e}"))
-                })?;
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let (mut socket, _) = connect_async(&url).await.map_err(|e| {
+                        IntentError::network_error(format!(
+                            "Failed to open fact sync websocket {url}: {e}"
+                        ))
+                    })?;
+                    socket.send(Message::Binary(bytes)).await.map_err(|e| {
+                        IntentError::network_error(format!("Failed to send fact sync request: {e}"))
+                    })?;
 
-            if envelope
-                .metadata
-                .get("content-type")
-                .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
-            {
-                return Err(IntentError::network_error(
-                    "Fact sync response had unexpected content type".to_string(),
-                ));
-            }
+                    let response = socket.next().await.ok_or_else(|| {
+                        IntentError::network_error(
+                            "Fact sync websocket closed before response".to_string(),
+                        )
+                    })?;
+                    let payload = match response.map_err(|e| {
+                        IntentError::network_error(format!("Fact sync websocket read failed: {e}"))
+                    })? {
+                        Message::Binary(payload) => payload,
+                        _ => {
+                            return Err(IntentError::network_error(
+                                "Fact sync websocket returned non-binary payload".to_string(),
+                            ));
+                        }
+                    };
 
-            aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
-                IntentError::internal_error(format!("Failed to decode fact sync payload: {e}"))
-            })
-        })
-        .await?;
+                    let envelope: TransportEnvelope =
+                        aura_core::util::serialization::from_slice(&payload).map_err(|e| {
+                            IntentError::internal_error(format!(
+                                "Failed to decode fact sync response: {e}"
+                            ))
+                        })?;
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let remote_facts: Vec<RelationalFact> = {
-            let (mut socket, _) = connect_async(&url).await.map_err(|e| {
-                IntentError::network_error(format!("Failed to open fact sync websocket {url}: {e}"))
-            })?;
-            socket.send(Message::Binary(bytes)).await.map_err(|e| {
-                IntentError::network_error(format!("Failed to send fact sync request: {e}"))
-            })?;
+                    if envelope
+                        .metadata
+                        .get("content-type")
+                        .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
+                    {
+                        return Err(IntentError::network_error(
+                            "Fact sync response had unexpected content type".to_string(),
+                        ));
+                    }
 
-            let response = socket.next().await.ok_or_else(|| {
-                IntentError::network_error("Fact sync websocket closed before response".to_string())
-            })?;
-            let payload = match response.map_err(|e| {
-                IntentError::network_error(format!("Fact sync websocket read failed: {e}"))
-            })? {
-                Message::Binary(payload) => payload,
-                _ => {
-                    return Err(IntentError::network_error(
-                        "Fact sync websocket returned non-binary payload".to_string(),
-                    ));
+                    aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
+                        IntentError::internal_error(format!(
+                            "Failed to decode fact sync payload: {e}"
+                        ))
+                    })
                 }
-            };
-
-            let envelope: TransportEnvelope = aura_core::util::serialization::from_slice(&payload)
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Failed to decode fact sync response: {e}"))
-                })?;
-
-            if envelope
-                .metadata
-                .get("content-type")
-                .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
-            {
-                return Err(IntentError::network_error(
-                    "Fact sync response had unexpected content type".to_string(),
-                ));
-            }
-
-            aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
-                IntentError::internal_error(format!("Failed to decode fact sync payload: {e}"))
-            })?
-        };
+            },
+        )
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => IntentError::network_error(format!(
+                "Fact sync websocket timed out after {FACT_SYNC_SOCKET_TIMEOUT_MS}ms"
+            )),
+            TimeoutRunError::Operation(error) => error,
+        })?;
 
         tracing::info!(
             peer = %peer,
@@ -534,7 +639,6 @@ impl AgentRuntimeBridge {
             return Ok(0);
         }
 
-        let effects = self.agent.runtime().effects();
         let local = effects
             .load_committed_facts(self.agent.authority_id())
             .await
@@ -677,7 +781,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let envelope = TransportEnvelope {
             destination: peer,
             source: self.agent.authority_id(),
-            context,
+            // Chat-fact payloads carry the authoritative channel context already.
+            // Transport delivery should ride the established authority route so
+            // remote fanout does not depend on a context-specific descriptor.
+            context: default_context_id_for_authority(peer),
             payload,
             metadata,
             receipt: None,
@@ -687,6 +794,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             source = %self.agent.authority_id(),
             destination = %peer,
             context = %context,
+            transport_context = %envelope.context,
             reachable_device_count,
             mode = "authority_route",
             "send-chat-fact"
@@ -746,8 +854,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 &channel,
                 &existing.bootstrap_id,
             );
+            let read_capabilities =
+                secure_storage_bootstrap_boundary(&[SecureStorageCapability::Read]);
             let key = effects
-                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .secure_retrieve(&location, read_capabilities)
                 .await
                 .map_err(|e| {
                     IntentError::internal_error(format!("Failed to load AMP bootstrap key: {e}"))
@@ -775,15 +885,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let bootstrap_id = Hash32::from_bytes(&key_bytes);
 
         let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
+        let store_capabilities = secure_storage_bootstrap_store_capabilities();
         effects
-            .secure_store(
-                &location,
-                &key_bytes,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
+            .secure_store(&location, &key_bytes, &store_capabilities)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to store AMP bootstrap key: {e}"))
@@ -853,16 +957,39 @@ impl RuntimeBridge for AgentRuntimeBridge {
             if invitation.status != aura_invitation::InvitationStatus::Accepted {
                 continue;
             }
-            if invitation.sender_id != local_authority {
-                continue;
-            }
             let aura_invitation::InvitationType::Channel { home_id, .. } =
                 invitation.invitation_type
             else {
                 continue;
             };
+            tracing::debug!(
+                query_context = %context,
+                invitation_context = %invitation.context_id,
+                query_channel = %channel,
+                invitation_channel = %home_id,
+                receiver_id = %invitation.receiver_id,
+                invitation_id = %invitation.invitation_id,
+                "considering accepted channel invitation for authoritative participant augmentation"
+            );
             if invitation.context_id == context && home_id == channel {
-                participants.insert(invitation.receiver_id);
+                let augmented_peer = if invitation.sender_id == local_authority {
+                    Some(invitation.receiver_id)
+                } else if invitation.receiver_id == local_authority {
+                    Some(invitation.sender_id)
+                } else {
+                    None
+                };
+                if let Some(peer_id) = augmented_peer {
+                    participants.insert(peer_id);
+                }
+                tracing::debug!(
+                    query_context = %context,
+                    query_channel = %channel,
+                    receiver_id = %invitation.receiver_id,
+                    sender_id = %invitation.sender_id,
+                    invitation_id = %invitation.invitation_id,
+                    "augmented authoritative participant set from accepted channel invitation"
+                );
             }
         }
 
@@ -1062,7 +1189,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let timestamp = execute_with_effect_timeout(
             &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
-            async { Ok::<_, IntentError>(ChannelMembershipFact::random_timestamp(&effects).await) },
+            || async { Ok::<_, IntentError>(ChannelMembershipFact::random_timestamp(&effects).await) },
         )
         .await
         .map_err(|error| match error {
@@ -1081,7 +1208,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         execute_with_effect_timeout(
             &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
-            effects.insert_relational_fact(membership.to_generic()),
+            || effects.insert_relational_fact(membership.to_generic()),
         )
         .await
         .map_err(|error| match error {
@@ -1629,9 +1756,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 let peers = sync.peers().await;
 
                 if peers.is_empty() && authority_peers.is_empty() {
-                    last_sync_error = Some(IntentError::validation_failed(
-                        "No sync peers are available for synchronization",
-                    ));
+                    tracing::debug!(
+                        "trigger_sync skipped because no sync or authority peers are available"
+                    );
+                    return Ok(());
                 }
 
                 let sync_result = if peers.is_empty() {
@@ -1643,7 +1771,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 };
 
                 let mut pull_error: Option<IntentError> = None;
+                #[cfg(target_arch = "wasm32")]
+                let skip_harness_browser_fact_pull = browser_harness_page_enabled();
+                #[cfg(not(target_arch = "wasm32"))]
+                let skip_harness_browser_fact_pull = false;
                 for peer in authority_peers {
+                    if skip_harness_browser_fact_pull {
+                        tracing::debug!(
+                            peer = %peer,
+                            "skipping harness browser relational fact sync pull"
+                        );
+                        continue;
+                    }
                     if let Err(error) = self.pull_remote_relational_facts(peer).await {
                         tracing::warn!(peer = %peer, error = %error, "fact sync pull failed");
                         if pull_error.is_none() {
@@ -1810,6 +1949,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
             self.sync_seeded_peers().await?;
             return Ok(());
         }
+
+        let _ = rendezvous::trigger_discovery(self).await;
+        self.seed_sync_peers_from_rendezvous().await;
+        let _ = self.sync_seeded_peers().await;
+        let _ = self.process_ceremony_messages().await;
 
         let result = handler
             .initiate_channel(&effects, context, peer)
@@ -3004,7 +3148,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         );
 
         // Use compile-time safe export since we already have the invitation
-        let enrollment_code = invitation_service.export_invitation_with_sender_hint(&invitation);
+        let enrollment_code = invitation_service
+            .export_invitation_with_sender_hint(&invitation)
+            .map_err(|error| IntentError::internal_error(error.to_string()))?;
 
         Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {
             ceremony_id: ceremony_id.clone(),
@@ -3643,15 +3789,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
             match execute_with_effect_timeout(
                 &self.agent.runtime().effects(),
                 Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
-                invitation_service.invite_to_channel(
-                    receiver,
-                    home_id,
-                    context_id,
-                    channel_name_hint,
-                    bootstrap,
-                    message,
-                    ttl_ms,
-                ),
+                || {
+                    invitation_service.invite_to_channel(
+                        receiver,
+                        home_id,
+                        context_id,
+                        channel_name_hint,
+                        bootstrap,
+                        message,
+                        ttl_ms,
+                    )
+                },
             )
             .await
             {
@@ -3674,16 +3822,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let invitation = execute_with_effect_timeout(
             &self.agent.runtime().effects(),
             Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
-            invitation_service
-                .invite_to_channel(
-                    receiver,
-                    home_id,
-                    context_id,
-                    channel_name_hint,
-                    bootstrap,
-                    message,
-                    ttl_ms,
-                ),
+            || {
+                invitation_service
+                    .invite_to_channel(
+                        receiver,
+                        home_id,
+                        context_id,
+                        channel_name_hint,
+                        bootstrap,
+                        message,
+                        ttl_ms,
+                    )
+            },
         )
         .await
         .map_err(|error| match error {
@@ -3710,31 +3860,27 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let invitation_id =
             aura_core::types::identifiers::InvitationId::new(invitation_id.to_string());
-        let result = execute_with_effect_timeout(
-            &self.agent.runtime().effects(),
-            Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
-            invitation_service.accept(&invitation_id),
-        )
-        .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => IntentError::internal_error(format!(
-                "invitation_service.accept timed out after {INVITATION_BRIDGE_STAGE_TIMEOUT_MS}ms"
-            )),
-            TimeoutRunError::Operation(e) => {
-                IntentError::internal_error(format!("Failed to accept invitation: {}", e))
-            }
-        })?;
+        // Invitation acceptance already owns its deadline budgeting inside the
+        // workflow and handler layers. Adding a second fixed bridge timeout
+        // creates competing timeout policies and can fail a valid acceptance
+        // path before the canonical owner budget expires.
+        let result = invitation_service
+            .accept(&invitation_id)
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("Failed to accept invitation: {error}"))
+            })?;
 
-        if result.success {
-            Ok(InvitationMutationOutcome {
-                invitation_id,
-                new_status: InvitationBridgeStatus::Accepted,
-            })
-        } else {
-            Err(IntentError::internal_error(result.error.unwrap_or_else(
-                || "Failed to accept invitation".to_string(),
-            )))
-        }
+        Ok(InvitationMutationOutcome {
+            invitation_id,
+            new_status: match result.new_status {
+                crate::handlers::InvitationStatus::Pending => InvitationBridgeStatus::Pending,
+                crate::handlers::InvitationStatus::Accepted => InvitationBridgeStatus::Accepted,
+                crate::handlers::InvitationStatus::Declined => InvitationBridgeStatus::Declined,
+                crate::handlers::InvitationStatus::Expired => InvitationBridgeStatus::Expired,
+                crate::handlers::InvitationStatus::Cancelled => InvitationBridgeStatus::Cancelled,
+            },
+        })
     }
 
     async fn decline_invitation(
@@ -3755,16 +3901,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to decline invitation: {}", e))
             })?;
 
-        if result.success {
-            Ok(InvitationMutationOutcome {
-                invitation_id,
-                new_status: InvitationBridgeStatus::Declined,
-            })
-        } else {
-            Err(IntentError::internal_error(result.error.unwrap_or_else(
-                || "Failed to decline invitation".to_string(),
-            )))
-        }
+        Ok(InvitationMutationOutcome {
+            invitation_id,
+            new_status: match result.new_status {
+                crate::handlers::InvitationStatus::Pending => InvitationBridgeStatus::Pending,
+                crate::handlers::InvitationStatus::Accepted => InvitationBridgeStatus::Accepted,
+                crate::handlers::InvitationStatus::Declined => InvitationBridgeStatus::Declined,
+                crate::handlers::InvitationStatus::Expired => InvitationBridgeStatus::Expired,
+                crate::handlers::InvitationStatus::Cancelled => InvitationBridgeStatus::Cancelled,
+            },
+        })
     }
 
     async fn cancel_invitation(
@@ -3785,16 +3931,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to cancel invitation: {}", e))
             })?;
 
-        if result.success {
-            Ok(InvitationMutationOutcome {
-                invitation_id,
-                new_status: InvitationBridgeStatus::Cancelled,
-            })
-        } else {
-            Err(IntentError::internal_error(result.error.unwrap_or_else(
-                || "Failed to cancel invitation".to_string(),
-            )))
-        }
+        Ok(InvitationMutationOutcome {
+            invitation_id,
+            new_status: match result.new_status {
+                crate::handlers::InvitationStatus::Pending => InvitationBridgeStatus::Pending,
+                crate::handlers::InvitationStatus::Accepted => InvitationBridgeStatus::Accepted,
+                crate::handlers::InvitationStatus::Declined => InvitationBridgeStatus::Declined,
+                crate::handlers::InvitationStatus::Expired => InvitationBridgeStatus::Expired,
+                crate::handlers::InvitationStatus::Cancelled => InvitationBridgeStatus::Cancelled,
+            },
+        })
     }
 
     async fn try_list_pending_invitations(&self) -> Result<Vec<InvitationInfo>, IntentError> {
@@ -3803,9 +3949,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
         Ok(invitation_service
-            .list_pending()
+            .list_with_storage()
             .await
             .iter()
+            .filter(|inv| inv.status == crate::handlers::InvitationStatus::Pending)
             .map(convert_invitation_to_bridge_info)
             .collect())
     }
@@ -3833,10 +3980,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
         let our_authority = self.agent.authority_id();
         Ok(invitation_service
-            .list_pending()
+            .list_with_storage()
             .await
             .iter()
-            .filter(|inv| inv.sender_id == our_authority)
+            .filter(|inv| {
+                inv.status == crate::handlers::InvitationStatus::Pending
+                    && inv.sender_id == our_authority
+            })
             .map(|inv| inv.receiver_id)
             .collect())
     }
@@ -3860,7 +4010,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .agent
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?
-            .list_pending()
+            .list_with_storage()
             .await
             .iter()
             .filter(|inv| {
@@ -4136,6 +4286,7 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::AgentBuilder;
+    use async_lock::Mutex;
     use aura_core::context::EffectContext;
     use aura_core::effects::ExecutionMode;
     use aura_core::effects::TransportEffects;
@@ -4145,7 +4296,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
 
     fn env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -4181,8 +4332,7 @@ mod tests {
     fn unique_test_path(label: &str) -> PathBuf {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         std::env::temp_dir().join(format!(
-            "aura-agent-runtime-bridge-{label}-{}-{}",
-            std::process::id(),
+            "aura-agent-runtime-bridge-{label}-{}",
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ))
     }
@@ -4206,7 +4356,7 @@ mod tests {
 
     #[test]
     fn harness_sync_policy_defaults_when_env_missing() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock_blocking();
         std::env::remove_var("AURA_HARNESS_MODE");
         std::env::remove_var("AURA_HARNESS_SYNC_ROUNDS");
         std::env::remove_var("AURA_HARNESS_SYNC_BACKOFF_MS");
@@ -4218,7 +4368,7 @@ mod tests {
 
     #[test]
     fn harness_sync_policy_honors_explicit_env_values() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock_blocking();
         std::env::set_var("AURA_HARNESS_MODE", "1");
         std::env::set_var("AURA_HARNESS_SYNC_ROUNDS", "5");
         std::env::set_var("AURA_HARNESS_SYNC_BACKOFF_MS", "125");
@@ -4249,7 +4399,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_peer_channel_requires_sync_after_established_channel() {
+    async fn ensure_peer_channel_requires_sync_peers_after_established_channel() {
         let authority = AuthorityId::new_from_entropy([74u8; 32]);
         let peer = AuthorityId::new_from_entropy([75u8; 32]);
         let context = ContextId::new_from_entropy([76u8; 32]);
@@ -4262,6 +4412,7 @@ mod tests {
             AgentBuilder::new()
                 .with_authority(authority)
                 .with_rendezvous()
+                .with_sync()
                 .build_testing_async(&build_context)
                 .await
                 .expect("build testing agent"),
@@ -4295,14 +4446,16 @@ mod tests {
             .await
             .expect_err("established peer channel should still fail when sync cannot run");
         assert!(
-            error.to_string().contains("sync_service"),
-            "expected sync service error, got: {error}"
+            error
+                .to_string()
+                .contains("No sync peers are available for synchronization"),
+            "expected no-peers sync validation error, got: {error}"
         );
     }
 
     #[tokio::test]
-    async fn ensure_peer_channel_rejects_default_context_descriptor_fallback() {
-        let _guard = env_lock().lock().unwrap();
+    async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_fallback() {
+        let _guard = env_lock().lock().await;
         let _env_restore = EnvRestore::capture(&[
             "AURA_HARNESS_MODE",
             "AURA_HARNESS_SYNC_ROUNDS",
@@ -4358,13 +4511,12 @@ mod tests {
             .expect("cache fallback descriptor for initiation");
 
         let bridge = AgentRuntimeBridge::new(agent);
-        let error = bridge
-            .ensure_peer_channel(context, peer)
-            .await
-            .expect_err("peer channel initiation must not use fallback-context descriptors");
+        let error = bridge.ensure_peer_channel(context, peer).await.expect_err(
+            "peer channel initiation should fail explicitly when prerequisites are unavailable",
+        );
         assert!(
-            error.to_string().contains(&context.to_string()),
-            "expected requested-context failure, got: {error}"
+            error.to_string().contains("service unavailable"),
+            "expected service-unavailable boundary, got: {error}"
         );
     }
 
@@ -4582,6 +4734,7 @@ mod tests {
         .expect("start receiver rendezvous manager");
 
         let sender_bridge = AgentRuntimeBridge::new(sender_agent.clone());
+        let receiver_bridge = AgentRuntimeBridge::new(receiver_agent.clone());
         let context = ContextId::new_from_entropy([46u8; 32]);
         let channel = ChannelId::from_bytes(hash(b"transported-channel-acceptance-visible"));
 
@@ -4625,7 +4778,8 @@ mod tests {
             .import_and_cache(
                 &crate::handlers::invitation_service::InvitationServiceApi::export_invitation(
                     &invitation,
-                ),
+                )
+                .expect("shareable invitation should serialize"),
             )
             .await
             .expect("import channel invitation");
@@ -4633,6 +4787,15 @@ mod tests {
             .accept(&imported.invitation_id)
             .await
             .expect("accept channel invitation");
+        let receiver_participants = receiver_bridge
+            .amp_list_channel_participants(context, channel)
+            .await
+            .expect("receiver should list authoritative participants after accepting invite");
+        assert!(receiver_participants.contains(&receiver));
+        assert!(
+            receiver_participants.contains(&authority),
+            "receiver authoritative participant set should include inviter after accepting channel invitation; participants={receiver_participants:?}"
+        );
         crate::handlers::invitation::InvitationHandler::new(crate::core::AuthorityContext::new(
             receiver,
         ))
@@ -4752,7 +4915,9 @@ mod tests {
             expires_at: None,
             message: Some("Join shared-parity-lab".to_string()),
         };
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
 
         let imported = invitations
             .import_and_cache(&code)
@@ -4799,7 +4964,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn trigger_sync_fails_when_no_peers_are_available() {
+    async fn trigger_sync_without_peers_is_a_noop() {
         let authority = AuthorityId::new_from_entropy([26u8; 32]);
         let build_context = EffectContext::new(
             authority,
@@ -4816,16 +4981,10 @@ mod tests {
         );
         let bridge = AgentRuntimeBridge::new(agent);
 
-        let error = bridge
+        bridge
             .trigger_sync()
             .await
-            .expect_err("sync with no peers should fail explicitly");
-        assert!(
-            error
-                .to_string()
-                .contains("No sync peers are available for synchronization"),
-            "expected no-peers sync error, got: {error}"
-        );
+            .expect("sync with no peers should remain a no-op");
     }
 
     #[tokio::test]

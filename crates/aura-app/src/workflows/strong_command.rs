@@ -2026,6 +2026,8 @@ mod tests {
     use super::*;
     use crate::views::{Channel, ChannelType, ChatState, Contact, ContactsState};
     #[cfg(feature = "signals")]
+    use crate::AppConfig;
+    #[cfg(feature = "signals")]
     use crate::{
         signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
         ui_contract::{

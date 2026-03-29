@@ -7,10 +7,11 @@ authors.workspace = true
 license.workspace = true
 description = "Capability-based authorization for Aura"
 repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
-aura-core = { path = "../aura-core" }
-aura-macros = { path = "../aura-macros" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

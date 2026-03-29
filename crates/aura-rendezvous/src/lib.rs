@@ -44,6 +44,9 @@
 /// Domain fact types for rendezvous (stored in journal, propagated via sync)
 pub mod facts;
 
+/// Typed capability families owned by the rendezvous domain.
+pub mod capabilities;
+
 /// MPST choreography definitions for rendezvous protocols
 pub mod protocol;
 

@@ -153,6 +153,14 @@ impl OtaState {
     }
 }
 
+#[aura_macros::actor_owned(
+    owner = "ota_manager",
+    domain = "ota",
+    gate = "launcher_command_ingress",
+    command = LauncherCommand,
+    capacity = 32,
+    category = "actor_owned"
+)]
 #[derive(Debug, Default)]
 pub(crate) struct OtaManager {
     state: RwLock<OtaState>,

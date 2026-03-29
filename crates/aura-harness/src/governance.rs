@@ -361,10 +361,10 @@ pub fn validate_ui_parity_contract() -> Result<()> {
 pub fn validate_settings_surface_contract() -> Result<()> {
     let contract = fs::read_to_string("crates/aura-app/src/ui_contract.rs")
         .context("failed to read crates/aura-app/src/ui_contract.rs")?;
-    let web_model = fs::read_to_string("crates/aura-ui/src/model.rs")
-        .context("failed to read crates/aura-ui/src/model.rs")?;
-    let tui_types = fs::read_to_string("crates/aura-terminal/src/tui/types.rs")
-        .context("failed to read crates/aura-terminal/src/tui/types.rs")?;
+    let web_model = fs::read_to_string("crates/aura-ui/src/model/settings.rs")
+        .context("failed to read crates/aura-ui/src/model/settings.rs")?;
+    let tui_types = fs::read_to_string("crates/aura-terminal/src/tui/types/settings.rs")
+        .context("failed to read crates/aura-terminal/src/tui/types/settings.rs")?;
     let tui_export =
         fs::read_to_string("crates/aura-terminal/src/tui/harness_state/snapshot.rs")
             .context("failed to read crates/aura-terminal/src/tui/harness_state/snapshot.rs")?;
@@ -743,7 +743,11 @@ mod tests {
                     id: "next-intent".to_string(),
                     actor: Some(ActorId("alice".to_string())),
                     timeout_ms: Some(1000),
-                    action: SemanticAction::Intent(IntentAction::OpenScreen(ScreenId::Chat)),
+                    action: SemanticAction::Intent(IntentAction::OpenScreen {
+                        screen: ScreenId::Chat,
+                        channel_id: None,
+                        context_id: None,
+                    }),
                 },
             ],
         };
@@ -817,6 +821,8 @@ mod tests {
                     timeout_ms: Some(1000),
                     action: SemanticAction::Intent(IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }),
                 },
             ],

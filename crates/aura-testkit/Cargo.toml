@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+publish = false
+autoexamples = false
 
 [lints]
 workspace = true
@@ -23,25 +25,25 @@ crdt-sync = ["aura-protocol/crdt-sync"]
 [dependencies]
 # Workspace crates - Layer 8 testkit provides test utilities
 # Note: aura-protocol removed (was unused, and would create circular dependency)
-aura-core = { path = "../aura-core", features = ["simulation"] }
-aura-effects = { path = "../aura-effects", features = ["simulation"] }
-aura-mpst = { path = "../aura-mpst" }
-aura-journal = { path = "../aura-journal" }
-aura-relational = { path = "../aura-relational" }
-aura-social = { path = "../aura-social" }
-aura-transport = { path = "../aura-transport" }
-aura-authorization = { path = "../aura-authorization" }
-aura-consensus = { path = "../aura-consensus" }
-aura-anti-entropy = { path = "../aura-anti-entropy" }
-aura-amp = { path = "../aura-amp" }
-aura-protocol = { path = "../aura-protocol" }
+aura-core = { path = "../aura-core", version = "0.1.0", features = ["simulation"] }
+aura-effects = { path = "../aura-effects", version = "0.1.0", features = ["simulation"] }
+aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-relational = { path = "../aura-relational", version = "0.1.0" }
+aura-social = { path = "../aura-social", version = "0.1.0" }
+aura-transport = { path = "../aura-transport", version = "0.1.0" }
+aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
+aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
+aura-anti-entropy = { path = "../aura-anti-entropy", version = "0.1.0" }
+aura-amp = { path = "../aura-amp", version = "0.1.0" }
+aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
 telltale-theory = { workspace = true, features = ["async-subtyping"] }
 
 # App core for RuntimeBridge trait and types
-aura-app = { path = "../aura-app" }
+aura-app = { path = "../aura-app", version = "0.1.0" }
 
 # Optional: Full effect system from Layer 6 (only for higher-layer tests)
-aura-agent = { path = "../aura-agent", optional = true }
+aura-agent = { path = "../aura-agent", version = "0.1.0", optional = true }
 
 # Async runtime
 async-trait = { workspace = true }
@@ -93,7 +95,7 @@ cfg-if = "1"
 # For testing the test utilities themselves
 # tokio-test = { workspace = true } # removed - unused
 aura-composition = { path = "../aura-composition" }
-aura-macros = { path = "../aura-macros" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
 bincode = { workspace = true }
 tempfile = { workspace = true }
 
@@ -102,3 +104,15 @@ criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 telltale-vm = { workspace = true }
+
+[[bench]]
+name = "context_propagation"
+harness = false
+
+[[bench]]
+name = "effect_system"
+harness = false
+
+[[bench]]
+name = "handler_performance"
+harness = false

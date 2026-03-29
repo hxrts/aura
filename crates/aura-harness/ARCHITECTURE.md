@@ -26,7 +26,7 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 ## Key Modules
 
 - `config.rs` — Schema parsing for run config, semantic scenarios, and the narrow remaining compatibility-only executor fixtures.
-- `compatibility_step.rs` — Internal compatibility IR retained only for synthetic phase-state-machine fixtures plus executor-local metadata/wait shaping; shared inventory scenarios are semantic-only.
+- `compatibility_step.rs` — Internal compatibility IR retained only for synthetic phase-state-machine fixtures plus executor-local metadata/wait shaping; shared inventory scenarios are semantic-only, and the public `ScenarioConfig::compatibility_steps()` accessor is explicitly deprecated to discourage new usage.
 - `coordinator.rs` — Multi-instance orchestration and per-instance command routing.
 - `tool_api.rs` — Versioned request and typed response surface used by tests and automation.
 - `executor.rs` — Semantic and compatibility scenario execution with deterministic budgets.
@@ -55,8 +55,15 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Parity-critical create/join/accept shared-channel flows must receive canonical operation handles and channel bindings from the authoritative submission/receipt path; post-hoc polling repair is forbidden.
 - Local PTY shared-semantic submissions must treat harness command receipts as the only success witness at issue time. Visible homes, modal closure, message appearance, selected-list bindings, and `Submitting` are not semantic completion signals.
 - Raw renderer capture is diagnostic-only and is exposed through explicitly named `diagnostic_*` observation surfaces; typed `UiSnapshot` / `UiSnapshotEvent` remain the only authoritative shared-semantic observation plane, and diagnostic query APIs keep the `diagnostic_*` naming through the tool boundary.
+- In semantic scenarios, `message_contains` is authoritative `UiSnapshot.messages` observation only. Rendered-text assertions must use explicitly named conformance-only diagnostic actions such as `diagnostic_screen_contains`, and those actions are forbidden in shared-semantic scenarios.
 - Projection-based semantic waits may resume across bounded browser/runtime restarts only by clearing stale freshness baselines and re-entering typed snapshot observation. Runtime-event, toast, and exact operation-state waits remain fail-closed across restarts.
 - Time-bounded loops in shared semantic code are allowed only for infrastructure readiness, transport, or bounded observation waits whose owner is explicit; ownership transfer itself must not depend on settle windows or heuristic polling.
+- The Playwright browser driver should prefer pushed UI/DOM observer waiters over fixed settle sleeps when deterministic publication state is already available.
+- Harness-owned browser driver and owned web-server child processes must be reclaimed on both normal teardown and stale-run startup sweep; orphaned harness child processes must not survive to perturb later runs.
+- The Playwright browser driver's `restart_page_session` path is infrastructure
+  recovery only. Semantic command submission and runtime-identity staging must
+  fail closed or wait on page-owned bootstrap/publication state rather than
+  replaying semantic work through a restarted browser session.
 - Do not add backwards-compatibility, migration, fallback, or legacy code paths for removed shared-semantic harness behavior. Delete obsolete paths instead.
 
 ### InvariantHarnessDeterministicReplayInputs
@@ -167,6 +174,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 ## Contributor Guidance
 
 - Treat `SharedSemanticBackend` plus `UiSnapshot` / `UiSnapshotEvent` as the primary shared-semantic contract. If you need raw screen or DOM data, the API and variable names must say `diagnostic`.
+- In scenario files, use `message_contains` only for authoritative snapshot message content. Use `diagnostic_screen_contains` only in frontend-conformance scenarios when you intentionally need rendered shell text.
 - When a parity-critical command result needs an operation handle, channel binding, or other owned token, require it in the immediate typed receipt. Do not add later polling, re-resolution, or inferred repair.
 - If a convenience helper still needs exported data after submission, the follow-on wait must bind to an authoritative runtime event or projection contract, not a modal/screen side effect.
 - Shared semantic executor/replay/backend core must decode typed `ToolPayload` and bridge structs directly. Keep `serde_json::Value` and `serde_json::from_value` quarantined to outer CLI/browser boundary adapters.
@@ -174,6 +182,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - If a cleanup removes an old harness path, delete it. Do not preserve it behind compatibility branches, migration helpers, or fallback adapters.
 - Do not add new inventory-backed or shared-flow dependents to `compatibility_step.rs`. If you touch that IR, keep the retention surface limited to `tests/phases/phase3_state_machine.rs` and executor-internal metadata/wait shaping, or delete it instead.
 - The patchbay VM backend uses only its explicit harness work/artifact directories. Do not reintroduce `.qemu-vm` migration or symlink-redirect compatibility paths.
+- Matrix-run temp cleanup stays the default, but diagnostics may retain the per-run temp and transient roots by setting `AURA_HARNESS_KEEP_TMP=1`; this changes artifact retention only and must not change scenario semantics.
 
 ## Testing
 

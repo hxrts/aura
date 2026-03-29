@@ -1351,6 +1351,22 @@ impl OfflineRuntimeBridge {
     }
 
     #[cfg(test)]
+    /// Configure authoritative AMP participants without populating channel ->
+    /// context resolution. This is used to prove parity-critical flows do not
+    /// re-derive context after authoritative context is already known.
+    pub fn set_amp_channel_participants_without_resolution(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        participants: Vec<AuthorityId>,
+    ) {
+        self.amp_channel_participants
+            .try_lock()
+            .unwrap_or_else(|| panic!("amp channel participants mutex already locked"))
+            .insert((context_id, channel_id), participants);
+    }
+
+    #[cfg(test)]
     /// Configure whether authoritative AMP channel state exists for a channel.
     pub fn set_amp_channel_state_exists(
         &self,

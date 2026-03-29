@@ -1,0 +1,7 @@
+error[E0080]: evaluation panicked: invalid capability name literal
+ --> tests/boundaries/capability_name_invalid_literal.rs:2:13
+  |
+2 |     let _ = aura_core::capability_name!("Chat:Send");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `main::_` failed here
+  |
+  = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `aura_core::capability_name` (in Nightly builds, run with -Z macro-backtrace for more info)

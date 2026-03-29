@@ -48,6 +48,7 @@ Failure mode:
 Verification hooks:
 - `just lint-arch-syntax`
 - `just check-arch` and `just test-crate aura-app`
+- `just ci-ownership-policy`
 
 Contract alignment:
 - [System Architecture](../../docs/001_system_architecture.md) defines dependency inversion.
@@ -123,6 +124,7 @@ Strict authoritative-ref rule for parity-critical workflows:
 - Authoritative semantic lifecycle publication in `src/workflows/semantic_facts.rs`.
 - Authoritative readiness publication and replacement in `src/workflows/semantic_facts.rs`.
 - Workflow-owned semantic operation phase/failure publication in `src/workflows/messaging.rs`, `src/workflows/invitation.rs`, and related parity-critical workflow modules.
+- Workflow-owned readiness publication helpers in `src/workflows/messaging.rs` and `src/workflows/invitation.rs` now carry declaration-layer capability-boundary markers when they mint or publish authoritative readiness state directly.
 - Opaque shared command-plane and lifecycle surfaces in `src/ui_contract.rs` and `src/scenario_contract.rs`.
 
 Authoritative resolution is an explicit pre-step, not an implicit helper side
@@ -206,6 +208,7 @@ cargo test -p aura-app --test compile_fail         # semantic boundary tests
 cargo test -p aura-app --test compile_fail_signals  # signal boundary tests
 just ci-capability-boundaries
 just ci-move-semantics
+just ci-ownership-policy
 ```
 
 ### Coverage matrix

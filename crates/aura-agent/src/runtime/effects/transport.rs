@@ -1,14 +1,19 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
 use aura_core::effects::{TransportEffects, TransportError};
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_core::{AuthorityId, ContextId};
+#[cfg(not(target_arch = "wasm32"))]
 use aura_effects::time::PhysicalTimeHandler;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_effects::transport::TransportConfig;
 use aura_rendezvous::TransportHint;
+#[cfg(target_arch = "wasm32")]
+use base64::{engine::general_purpose::STANDARD, Engine};
 use cfg_if::cfg_if;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::SinkExt;
@@ -16,6 +21,8 @@ use futures::SinkExt;
 use futures::SinkExt;
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{futures::WebSocket, Message};
+#[cfg(target_arch = "wasm32")]
+use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
 use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
@@ -26,7 +33,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
-
 #[cfg(not(target_arch = "wasm32"))]
 async fn execute_transport_timeout<F, Fut, T>(
     timeout: std::time::Duration,
@@ -72,6 +78,13 @@ impl TransportEffects for AuraEffectSystem {
         };
         if is_local {
             self.queue_runtime_envelope(envelope);
+            self.transport.record_send(payload_len);
+            return Ok(());
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        if let Some(url) = current_browser_harness_enqueue_url() {
+            send_harness_browser_envelope(&url, &envelope)?;
             self.transport.record_send(payload_len);
             return Ok(());
         }
@@ -238,7 +251,51 @@ async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(
                     reason: format!("Envelope serialization failed: {e}"),
                 }
             })?;
-            let url = normalize_ws_url(addr);
+            let (url, use_harness_transport) = resolve_browser_transport_target(addr);
+            log_harness_mailbox_send(envelope, &url, use_harness_transport);
+            let wrapped_payload = if use_harness_transport {
+                Some(
+                    serde_json::to_string(
+                        &HarnessBrowserTransportEnvelope::from_parts(envelope, &payload),
+                    )
+                    .map_err(|e| TransportError::SendFailed {
+                        destination: envelope.destination,
+                        reason: format!("Harness browser transport encode failed: {e}"),
+                    })?,
+                )
+            } else {
+                None
+            };
+
+            if let Some(wrapped) = wrapped_payload {
+                let window = web_sys::window().ok_or_else(|| TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: "browser window unavailable for harness transport enqueue".to_string(),
+                })?;
+                let init = web_sys::RequestInit::new();
+                init.set_method("POST");
+                let body_value = wrapped.into();
+                init.set_body(&body_value);
+                let request = web_sys::Request::new_with_str_and_init(&url, &init).map_err(
+                    |error| TransportError::SendFailed {
+                        destination: envelope.destination,
+                        reason: format!(
+                            "Harness browser transport build failed ({url}): {error:?}"
+                        ),
+                    },
+                )?;
+                request
+                    .headers()
+                    .set("Content-Type", "application/json; charset=utf-8")
+                    .map_err(|error| TransportError::SendFailed {
+                        destination: envelope.destination,
+                        reason: format!(
+                            "Harness browser transport header failed ({url}): {error:?}"
+                        ),
+                    })?;
+                let _ = window.fetch_with_request(&request);
+                return Ok(());
+            }
 
             run_local_ws(move || async move {
                 let mut ws = WebSocket::open(&url)
@@ -383,12 +440,142 @@ async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Serialize)]
+struct HarnessBrowserTransportEnvelope<'a> {
+    kind: &'static str,
+    destination: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    destination_device_id: Option<&'a str>,
+    envelope_b64: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+const HARNESS_TRANSPORT_ENQUEUE_PATH: &str = "/__aura_harness_transport__/enqueue";
+
+#[cfg(target_arch = "wasm32")]
+impl<'a> HarnessBrowserTransportEnvelope<'a> {
+    fn from_parts(envelope: &'a TransportEnvelope, payload: &[u8]) -> Self {
+        Self {
+            kind: "transport_envelope",
+            destination: envelope.destination.to_string(),
+            destination_device_id: envelope
+                .metadata
+                .get("aura-destination-device-id")
+                .map(String::as_str),
+            envelope_b64: STANDARD.encode(payload),
+        }
+    }
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
 fn normalize_ws_url(addr: &str) -> String {
     if addr.starts_with("ws://") || addr.starts_with("wss://") {
         addr.to_string()
     } else {
         format!("ws://{addr}")
     }
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn harness_browser_transport_ws_url(current_host: &str, harness_mode: bool) -> Option<String> {
+    if !harness_mode || current_host.is_empty() {
+        return None;
+    }
+
+    Some(normalize_ws_url(current_host))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_browser_location_and_harness_mode() -> Option<(String, String, bool)> {
+    let window = web_sys::window()?;
+    let search = window.location().search().ok()?;
+    let host = window.location().host().ok()?;
+    let origin = window.location().origin().ok()?;
+    let query = search.strip_prefix('?').unwrap_or(&search);
+    let harness_mode = query.split('&').any(|pair: &str| {
+        pair.split_once('=')
+            .is_some_and(|(key, value)| key == "__aura_harness_instance" && !value.is_empty())
+    });
+    Some((host, origin, harness_mode))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_browser_harness_enqueue_url() -> Option<String> {
+    let (_host, origin, harness_mode) = current_browser_location_and_harness_mode()?;
+    if !harness_mode || origin.is_empty() {
+        return None;
+    }
+    Some(format!("{origin}{HARNESS_TRANSPORT_ENQUEUE_PATH}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn send_harness_browser_envelope(
+    url: &str,
+    envelope: &TransportEnvelope,
+) -> Result<(), TransportError> {
+    let payload = aura_core::util::serialization::to_vec(envelope).map_err(|e| {
+        TransportError::SendFailed {
+            destination: envelope.destination,
+            reason: format!("Envelope serialization failed: {e}"),
+        }
+    })?;
+    let wrapped = serde_json::to_string(&HarnessBrowserTransportEnvelope::from_parts(
+        envelope, &payload,
+    ))
+    .map_err(|e| TransportError::SendFailed {
+        destination: envelope.destination,
+        reason: format!("Harness browser transport encode failed: {e}"),
+    })?;
+    let window = web_sys::window().ok_or_else(|| TransportError::SendFailed {
+        destination: envelope.destination,
+        reason: "browser window unavailable for harness transport enqueue".to_string(),
+    })?;
+    let init = web_sys::RequestInit::new();
+    init.set_method("POST");
+    let body_value = wrapped.into();
+    init.set_body(&body_value);
+    let request = web_sys::Request::new_with_str_and_init(url, &init).map_err(|error| {
+        TransportError::SendFailed {
+            destination: envelope.destination,
+            reason: format!("Harness browser transport build failed ({url}): {error:?}"),
+        }
+    })?;
+    request
+        .headers()
+        .set("Content-Type", "application/json; charset=utf-8")
+        .map_err(|error| TransportError::SendFailed {
+            destination: envelope.destination,
+            reason: format!("Harness browser transport header failed ({url}): {error:?}"),
+        })?;
+    log_harness_mailbox_send(envelope, url, true);
+    let _ = window.fetch_with_request(&request);
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn log_harness_mailbox_send(envelope: &TransportEnvelope, url: &str, use_harness_transport: bool) {
+    if !use_harness_transport {
+        return;
+    }
+
+    let content_type = envelope
+        .metadata
+        .get("content-type")
+        .map(String::as_str)
+        .unwrap_or("<missing>");
+    if content_type != "application/aura-invitation"
+        && content_type != "application/aura-invitation-acceptance+json"
+    {
+        return;
+    }
+
+    web_sys::console::log_1(
+        &format!(
+            "[web-harness-transport] mailbox_send destination={} context={} content_type={} via={}",
+            envelope.destination, envelope.context, content_type, url
+        )
+        .into(),
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -398,6 +585,20 @@ where
     Fut: Future<Output = Result<(), String>> + 'static,
 {
     make_fut().await
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolve_browser_transport_target(addr: &str) -> (String, bool) {
+    if let Some((host, _origin, harness_mode)) = current_browser_location_and_harness_mode() {
+        if let Some(enqueue_url) = current_browser_harness_enqueue_url() {
+            return (enqueue_url, true);
+        }
+        if let Some(harness_url) = harness_browser_transport_ws_url(&host, harness_mode) {
+            return (harness_url, true);
+        }
+    }
+
+    (normalize_ws_url(addr), false)
 }
 
 #[cfg(test)]
@@ -429,6 +630,19 @@ mod tests {
             nonce: [0u8; 32],
             nickname_suggestion: None,
         }
+    }
+
+    #[test]
+    fn harness_browser_transport_uses_page_host_when_enabled() {
+        assert_eq!(
+            harness_browser_transport_ws_url("127.0.0.1:4173", true).as_deref(),
+            Some("ws://127.0.0.1:4173")
+        );
+        assert_eq!(
+            harness_browser_transport_ws_url("127.0.0.1:4173", false),
+            None
+        );
+        assert_eq!(harness_browser_transport_ws_url("", true), None);
     }
 
     #[tokio::test]

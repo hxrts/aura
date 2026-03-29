@@ -1,8 +1,9 @@
 //! Snapshot export for harness observation.
 
 use super::commands::{
-    map_modal, map_screen, map_toast_kind, push_list, selected_by_index, TuiSemanticInputs,
+    map_modal, map_screen, map_toast_kind, push_list, visible_home_ids, TuiSemanticInputs,
 };
+use super::socket::authoritative_harness_snapshot_readiness;
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
@@ -10,7 +11,9 @@ use aura_app::ui::contract::{
     screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
     ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
 };
-use aura_app::ui_contract::{next_projection_revision, ProjectionRevision, QuiescenceSnapshot};
+use aura_app::ui_contract::{
+    next_projection_revision, ProjectionRevision, QuiescenceSnapshot, QuiescenceState,
+};
 use parking_lot::Mutex;
 use std::fs;
 use std::io;
@@ -60,15 +63,8 @@ fn build_authoritative_ui_snapshot(
     revision: ProjectionRevision,
 ) -> Result<UiSnapshot, String> {
     let app_snapshot = semantic_inputs.app_snapshot;
-    let onboarding_active = matches!(
-        state.modal_queue.current(),
-        Some(QueuedModal::AccountSetup(_))
-    );
-    let screen = if onboarding_active {
-        ScreenId::Onboarding
-    } else {
-        map_screen(state.screen())
-    };
+    let screen = authoritative_screen_id(state);
+    let onboarding_active = screen == ScreenId::Onboarding;
     let open_modal = state.modal_queue.current().and_then(map_modal);
 
     let focused_control = if onboarding_active {
@@ -97,7 +93,7 @@ fn build_authoritative_ui_snapshot(
             let id = map_screen(*candidate);
             ListItemSnapshot {
                 id: screen_item_id(id).to_string(),
-                selected: *candidate == state.screen(),
+                selected: !onboarding_active && *candidate == state.screen(),
                 confirmation: ConfirmationState::Confirmed,
                 is_current: false,
             }
@@ -175,16 +171,20 @@ fn build_authoritative_ui_snapshot(
             is_current: false,
         })
         .collect::<Vec<_>>();
+    let selected_notification_id = notification_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
     push_list(
         &mut lists,
         &mut selections,
         ListId::Notifications,
         notification_items,
-        selected_by_index(&notification_ids, state.notifications.selected_index),
+        selected_notification_id,
     );
 
     if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
-        let invitation_type_ids = vec![
+        let invitation_type_ids = [
             "guardian".to_string(),
             "contact".to_string(),
             "channel".to_string(),
@@ -199,28 +199,20 @@ fn build_authoritative_ui_snapshot(
                 is_current: false,
             })
             .collect::<Vec<_>>();
+        let selected_invitation_type_id = invitation_type_items
+            .iter()
+            .find(|item| item.selected)
+            .map(|item| item.id.clone());
         push_list(
             &mut lists,
             &mut selections,
             ListId::InvitationTypes,
             invitation_type_items,
-            selected_by_index(&invitation_type_ids, modal_state.type_index),
+            selected_invitation_type_id,
         );
     }
 
-    let mut home_ids = Vec::new();
-    if app_snapshot.neighborhood.home_home_id != aura_core::types::identifiers::ChannelId::default()
-    {
-        home_ids.push(app_snapshot.neighborhood.home_home_id.to_string());
-    }
-    let neighbor_home_ids = app_snapshot
-        .neighborhood
-        .all_neighbors()
-        .filter(|home| home.id != aura_core::types::identifiers::ChannelId::default())
-        .map(|home| home.id.to_string())
-        .filter(|home_id| !home_ids.iter().any(|existing| existing == home_id))
-        .collect::<Vec<_>>();
-    home_ids.extend(neighbor_home_ids);
+    let home_ids = visible_home_ids(app_snapshot);
     let home_items = home_ids
         .iter()
         .enumerate()
@@ -231,12 +223,16 @@ fn build_authoritative_ui_snapshot(
             is_current: false,
         })
         .collect::<Vec<_>>();
+    let selected_home_id = home_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
     push_list(
         &mut lists,
         &mut selections,
         ListId::Homes,
         home_items,
-        selected_by_index(&home_ids, state.neighborhood.selected_home),
+        selected_home_id,
     );
 
     let member_ids = app_snapshot
@@ -259,19 +255,18 @@ fn build_authoritative_ui_snapshot(
             is_current: false,
         })
         .collect::<Vec<_>>();
+    let selected_member_id = member_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
     push_list(
         &mut lists,
         &mut selections,
         ListId::NeighborhoodMembers,
         member_items,
-        selected_by_index(&member_ids, state.neighborhood.selected_member),
+        selected_member_id,
     );
 
-    let authority_ids = state
-        .authorities
-        .iter()
-        .map(|authority| authority.id.clone())
-        .collect::<Vec<_>>();
     let authority_items = state
         .authorities
         .iter()
@@ -283,24 +278,26 @@ fn build_authoritative_ui_snapshot(
             is_current: false,
         })
         .collect::<Vec<_>>();
+    let selected_authority_id = authority_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
     push_list(
         &mut lists,
         &mut selections,
         ListId::Authorities,
         authority_items,
-        selected_by_index(&authority_ids, state.current_authority_index),
+        selected_authority_id,
     );
 
     let settings_section_ids = SettingsSection::all()
         .iter()
-        .map(|section| {
-            aura_app::ui_contract::settings_section_item_id(section.surface_id()).to_string()
-        })
+        .map(|section| section.parity_item_id().to_string())
         .collect::<Vec<_>>();
     let settings_items = SettingsSection::all()
         .iter()
         .map(|section| ListItemSnapshot {
-            id: aura_app::ui_contract::settings_section_item_id(section.surface_id()).to_string(),
+            id: section.parity_item_id().to_string(),
             selected: *section == state.settings.section,
             confirmation: ConfirmationState::Confirmed,
             is_current: false,
@@ -317,6 +314,8 @@ fn build_authoritative_ui_snapshot(
     );
 
     if state.settings.section == SettingsSection::Devices {
+        // The TUI does not own an inline device-list selection on the Settings screen.
+        // Do not fabricate one from visible rows; remove-device flow uses the modal-owned selector.
         let device_items = semantic_inputs
             .settings_devices
             .iter()
@@ -382,11 +381,10 @@ fn build_authoritative_ui_snapshot(
 
     let operations = state.exported_operation_snapshots();
     let runtime_events = state.exported_runtime_events();
-    let readiness = if state.pending_runtime_bootstrap {
-        UiReadiness::Loading
-    } else {
-        UiReadiness::Ready
-    };
+    let readiness = authoritative_harness_snapshot_readiness(
+        state.should_exit,
+        state.pending_runtime_bootstrap,
+    );
 
     let snapshot = UiSnapshot {
         screen,
@@ -406,55 +404,49 @@ fn build_authoritative_ui_snapshot(
     Ok(snapshot)
 }
 
-pub fn try_authoritative_ui_snapshot(
-    state: &TuiState,
-    semantic_inputs: TuiSemanticInputs<'_>,
-) -> Result<UiSnapshot, String> {
-    build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))
-}
-
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn authoritative_ui_snapshot(
     state: &TuiState,
     semantic_inputs: TuiSemanticInputs<'_>,
 ) -> UiSnapshot {
-    try_authoritative_ui_snapshot(state, semantic_inputs)
+    build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))
         .unwrap_or_else(|error| panic!("invalid TUI semantic snapshot export: {error}"))
 }
 
-pub fn maybe_export_ui_snapshot(
-    state: &TuiState,
-    semantic_inputs: TuiSemanticInputs<'_>,
-) -> Result<(), String> {
+fn authoritative_screen_id(state: &TuiState) -> ScreenId {
+    if matches!(
+        state.modal_queue.current(),
+        Some(QueuedModal::AccountSetup(_))
+    ) {
+        ScreenId::Onboarding
+    } else {
+        map_screen(state.screen())
+    }
+}
+
+fn publish_snapshot(snapshot: &UiSnapshot) -> Result<(), String> {
     let socket_path = configured_ui_state_socket();
     let file_path = configured_ui_state_file();
     if socket_path.is_none() && file_path.is_none() {
         return Ok(());
     }
 
-    // Build a canonical snapshot with a stable placeholder revision so identical
-    // semantic state deduplicates cleanly instead of generating a fresh revision
-    // and flooding the harness bridge on every render.
-    let canonical_snapshot = build_authoritative_ui_snapshot(
-        state,
-        semantic_inputs,
-        ProjectionRevision {
+    let canonical_snapshot = UiSnapshot {
+        revision: ProjectionRevision {
             semantic_seq: 0,
             render_seq: None,
         },
-    )?;
+        ..snapshot.clone()
+    };
     let canonical_json = serde_json::to_vec(&canonical_snapshot)
         .map_err(|error| format!("failed to encode canonical TUI semantic snapshot: {error}"))?;
+    let snapshot_json = serde_json::to_vec(snapshot)
+        .map_err(|error| format!("failed to encode TUI semantic snapshot: {error}"))?;
 
     let mut last_written = last_written_snapshot().lock();
     if last_written.as_deref() == Some(canonical_json.as_slice()) {
         return Ok(());
     }
-
-    let snapshot =
-        build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))?;
-    let snapshot_json = serde_json::to_vec(&snapshot)
-        .map_err(|error| format!("failed to encode TUI semantic snapshot: {error}"))?;
 
     let socket_write_result = socket_path.map(|path| {
         StdUnixStream::connect(path).and_then(|mut stream| stream.write_all(&snapshot_json))
@@ -477,4 +469,112 @@ pub fn maybe_export_ui_snapshot(
         ));
     }
     Ok(())
+}
+
+pub fn publish_loading_ui_snapshot(state: &TuiState) -> Result<(), String> {
+    let screen = authoritative_screen_id(state);
+    let mut snapshot = UiSnapshot::loading(screen);
+    snapshot.operations = state.exported_operation_snapshots();
+    snapshot.runtime_events = state.exported_runtime_events();
+    snapshot.toasts = state
+        .toast_queue
+        .current()
+        .map(|toast| {
+            vec![ToastSnapshot {
+                id: ToastId(toast.id.to_string()),
+                message: toast.message.clone(),
+                kind: map_toast_kind(toast.level),
+            }]
+        })
+        .unwrap_or_default();
+    snapshot.quiescence = QuiescenceSnapshot {
+        state: QuiescenceState::Busy,
+        reason_codes: vec!["owner_transition_reloading".to_string()],
+    };
+    snapshot.readiness = UiReadiness::Loading;
+    publish_snapshot(&snapshot)
+}
+
+pub fn maybe_export_ui_snapshot(
+    state: &TuiState,
+    semantic_inputs: TuiSemanticInputs<'_>,
+) -> Result<(), String> {
+    // Build a canonical snapshot with a stable placeholder revision so identical
+    // semantic state deduplicates cleanly instead of generating a fresh revision
+    // and flooding the harness bridge on every render.
+    let snapshot =
+        build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))?;
+    publish_snapshot(&snapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tui::harness_state::TuiSemanticInputs;
+
+    #[test]
+    fn tui_harness_snapshot_exports_canonical_selection_for_parity_lists() {
+        let source = include_str!("snapshot.rs");
+
+        assert!(source.contains("ListId::Channels"));
+        assert!(source.contains("selected_channel_id.clone()"));
+        assert!(source.contains("ListId::Contacts"));
+        assert!(source.contains("selected_contact_id"));
+        assert!(source.contains("ListId::Homes"));
+        assert!(source.contains("let selected_home_id = home_items"));
+        assert!(source.contains("ListId::Authorities"));
+        assert!(source.contains("let selected_authority_id = authority_items"));
+        assert!(source.contains("ListId::SettingsSections"));
+        assert!(source.contains("settings_section_ids"));
+    }
+
+    #[test]
+    fn tui_harness_snapshot_does_not_fabricate_device_selection_without_owned_state() {
+        let source = include_str!("snapshot.rs");
+        let devices_start = source
+            .find("if state.settings.section == SettingsSection::Devices {")
+            .unwrap_or_else(|| panic!("missing device snapshot branch"));
+        let devices_end = source[devices_start..]
+            .find("let toasts = state")
+            .map(|offset| devices_start + offset)
+            .unwrap_or(source.len());
+        let devices_block = &source[devices_start..devices_end];
+
+        assert!(devices_block.contains("ListId::Devices"));
+        assert!(devices_block.contains("selected: false"));
+        assert!(devices_block.contains("None,"));
+    }
+
+    #[test]
+    fn onboarding_snapshot_does_not_mark_navigation_row_selected_without_exported_selection() {
+        use super::authoritative_ui_snapshot;
+        use crate::tui::state::modal_queue::QueuedModal;
+        use crate::tui::state::views::AccountSetupModalState;
+        use crate::tui::TuiState;
+        use aura_app::ui::contract::{ListId, ScreenId};
+        use aura_app::ui::types::StateSnapshot;
+
+        let mut state = TuiState::new();
+        state.show_modal(QueuedModal::AccountSetup(AccountSetupModalState::default()));
+
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        );
+
+        assert_eq!(snapshot.screen, ScreenId::Onboarding);
+        assert_eq!(snapshot.selected_item_id(ListId::Navigation), None);
+        let navigation = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Navigation)
+            .unwrap_or_else(|| panic!("navigation list should exist"));
+        assert!(navigation.items.iter().all(|item| !item.selected));
+    }
 }

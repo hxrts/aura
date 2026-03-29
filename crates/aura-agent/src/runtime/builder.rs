@@ -246,7 +246,24 @@ impl EffectSystemBuilder {
         let lan_transport: Option<Arc<super::services::LanTransportService>> = {
             #[cfg(target_arch = "wasm32")]
             {
-                None
+                if rendezvous_enabled {
+                    match super::services::LanTransportService::bind(
+                        config.network.bind_address.as_str(),
+                    )
+                    .await
+                    {
+                        Ok(service) => Some(Arc::new(service)),
+                        Err(err) => {
+                            tracing::warn!(
+                                error = %err,
+                                "Failed to initialize browser transport advertisement"
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
             }
             #[cfg(not(target_arch = "wasm32"))]
             {

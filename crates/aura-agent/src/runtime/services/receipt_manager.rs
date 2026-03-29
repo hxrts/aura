@@ -22,6 +22,15 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReceiptManagerCommand {
+    AddReceipt,
+    GetReceipt,
+    VerifyChain,
+    PruneExpired,
+}
+
 /// Configuration for the receipt manager
 #[derive(Debug, Clone)]
 pub struct ReceiptManagerConfig {
@@ -139,6 +148,14 @@ impl ReceiptState {
 ///
 /// Manages receipt chains for flow budget audit trails. Integrates with the
 /// runtime lifecycle for periodic cleanup of expired receipts.
+#[aura_macros::actor_owned(
+    owner = "receipt_manager",
+    domain = "receipt_audit",
+    gate = "receipt_command_ingress",
+    command = ReceiptManagerCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 pub struct ReceiptManager {
     #[allow(dead_code)] // Will be used for receipt configuration
     agent_config: AgentConfig,

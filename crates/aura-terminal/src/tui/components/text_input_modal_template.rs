@@ -5,11 +5,8 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use super::{
-    modal_footer, modal_header, status_message, ModalFooterProps, ModalHeaderProps, ModalStatus,
-};
-use crate::tui::layout::dim;
-use crate::tui::theme::{Borders, Spacing, Theme};
+use super::{ModalFooterProps, ModalHeaderProps, ModalScaffold, ModalStatus};
+use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::KeyHint;
 
 /// Callback type for modal submit (value: String)
@@ -49,7 +46,8 @@ pub fn TextInputModal(props: &TextInputModalProps) -> impl Into<AnyElement<'stat
     if !props.visible {
         return element! {
             View {}
-        };
+        }
+        .into_any();
     }
 
     let value = props.value.clone();
@@ -100,61 +98,39 @@ pub fn TextInputModal(props: &TextInputModalProps) -> impl Into<AnyElement<'stat
     };
 
     element! {
-        View(
-            width: dim::TOTAL_WIDTH,
-            height: dim::MIDDLE_HEIGHT,
-            flex_direction: FlexDirection::Column,
-            background_color: Theme::BG_MODAL,
-            border_style: Borders::PRIMARY,
-            border_color: border_color,
-            overflow: Overflow::Hidden,
+        ModalScaffold(
+            header: header_props,
+            footer: footer_props,
+            status: status,
+            border_color: Some(border_color),
+            body_overflow: Overflow::Hidden,
         ) {
-            // Header
-            #(Some(modal_header(&header_props).into()))
-
-            // Body - fills available space
             View(
                 width: 100pct,
-                padding: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                overflow: Overflow::Hidden,
+                border_style: crate::tui::theme::Borders::INPUT,
+                border_color: Theme::PRIMARY,
+                padding: Spacing::PANEL_PADDING,
+                margin_bottom: Spacing::XS,
             ) {
-                // Input field
-                View(
-                    width: 100pct,
-                    flex_direction: FlexDirection::Column,
-                    border_style: Borders::INPUT,
-                    border_color: Theme::PRIMARY,
-                    padding: Spacing::PANEL_PADDING,
-                    margin_bottom: Spacing::XS,
-                ) {
-                    Text(
-                        content: display_value,
-                        color: value_color,
-                    )
-                }
-
-                // Hint (if any)
-                #(if !hint.is_empty() {
-                    Some(element! {
-                        View(margin_bottom: Spacing::XS) {
-                            Text(content: hint, color: Theme::TEXT_MUTED)
-                        }
-                    })
-                } else {
-                    None
-                })
-
-                // Status message (error/loading)
-                #(Some(status_message(&status).into()))
+                Text(
+                    content: display_value,
+                    color: value_color,
+                )
             }
 
-            // Footer
-            #(Some(modal_footer(&footer_props).into()))
+            #(if !hint.is_empty() {
+                Some(element! {
+                    View(margin_bottom: Spacing::XS) {
+                        Text(content: hint, color: Theme::TEXT_MUTED)
+                    }
+                })
+            } else {
+                None
+            })
         }
     }
+    .into_any()
 }
 
 /// State for text input modal

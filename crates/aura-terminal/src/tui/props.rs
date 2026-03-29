@@ -33,34 +33,51 @@ use tracing::warn;
 
 /// View state extracted from TuiState for ChatScreen
 #[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChatCreateModalViewProps {
+    pub visible: bool,
+    pub name: String,
+    pub topic: String,
+    pub active_field: usize,
+    pub member_count: usize,
+    pub step: crate::tui::state::CreateChannelStep,
+    pub contacts: Vec<(String, String)>,
+    pub selected_indices: Vec<usize>,
+    pub focused_index: usize,
+    pub threshold_k: u8,
+    pub threshold_n: u8,
+    pub status: String,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChatTopicModalViewProps {
+    pub visible: bool,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChatInfoModalViewProps {
+    pub visible: bool,
+    pub channel_name: String,
+    pub topic: String,
+    pub participants: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChatModalProps {
+    pub create: ChatCreateModalViewProps,
+    pub topic: ChatTopicModalViewProps,
+    pub info: ChatInfoModalViewProps,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ChatViewProps {
     pub focus: ScreenChatFocus,
     pub selected_channel: usize,
     pub message_scroll: usize,
     pub insert_mode: bool,
     pub input_buffer: String,
-    // Create modal
-    pub create_modal_visible: bool,
-    pub create_modal_name: String,
-    pub create_modal_topic: String,
-    pub create_modal_active_field: usize,
-    pub create_modal_member_count: usize,
-    pub create_modal_step: crate::tui::state::CreateChannelStep,
-    pub create_modal_contacts: Vec<(String, String)>,
-    pub create_modal_selected_indices: Vec<usize>,
-    pub create_modal_focused_index: usize,
-    pub create_modal_threshold_k: u8,
-    pub create_modal_threshold_n: u8,
-    pub create_modal_status: String,
-    pub create_modal_error: String,
-    // Topic modal
-    pub topic_modal_visible: bool,
-    pub topic_modal_value: String,
-    // Info modal
-    pub info_modal_visible: bool,
-    pub info_modal_channel_name: String,
-    pub info_modal_topic: String,
-    pub info_modal_participants: Vec<String>,
+    pub modals: ChatModalProps,
 }
 
 /// Extract ChatScreen view props from TuiState
@@ -147,28 +164,33 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
         message_scroll: state.chat.message_scroll,
         insert_mode: state.chat.insert_mode,
         input_buffer: state.chat.input_buffer.clone(),
-        // Create modal (from queue)
-        create_modal_visible: create_visible,
-        create_modal_name: create_name,
-        create_modal_topic: create_topic,
-        create_modal_active_field: create_field,
-        create_modal_member_count: create_member_count,
-        create_modal_step: create_step,
-        create_modal_contacts: create_contacts,
-        create_modal_selected_indices: create_selected,
-        create_modal_focused_index: create_focused,
-        create_modal_threshold_k: create_threshold_k,
-        create_modal_threshold_n: create_threshold_n,
-        create_modal_status: create_status,
-        create_modal_error: create_error,
-        // Topic modal (from queue)
-        topic_modal_visible: topic_visible,
-        topic_modal_value: topic_value,
-        // Info modal (from queue)
-        info_modal_visible: info_visible,
-        info_modal_channel_name: info_channel_name,
-        info_modal_topic: info_topic,
-        info_modal_participants: info_participants,
+        modals: ChatModalProps {
+            create: ChatCreateModalViewProps {
+                visible: create_visible,
+                name: create_name,
+                topic: create_topic,
+                active_field: create_field,
+                member_count: create_member_count,
+                step: create_step,
+                contacts: create_contacts,
+                selected_indices: create_selected,
+                focused_index: create_focused,
+                threshold_k: create_threshold_k,
+                threshold_n: create_threshold_n,
+                status: create_status,
+                error: create_error,
+            },
+            topic: ChatTopicModalViewProps {
+                visible: topic_visible,
+                value: topic_value,
+            },
+            info: ChatInfoModalViewProps {
+                visible: info_visible,
+                channel_name: info_channel_name,
+                topic: info_topic,
+                participants: info_participants,
+            },
+        },
     }
 }
 
@@ -178,6 +200,65 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
 
 /// View state extracted from TuiState for ContactsScreen
 #[derive(Clone, Debug, Default, PartialEq)]
+pub struct ContactsNicknameModalViewProps {
+    pub visible: bool,
+    pub contact_id: String,
+    pub value: String,
+    pub nickname_suggestion: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ContactsImportModalViewProps {
+    pub visible: bool,
+    pub code: String,
+    pub importing: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ContactsCreateModalViewProps {
+    pub visible: bool,
+    pub receiver_id: String,
+    pub receiver_name: String,
+    pub type_index: usize,
+    pub message: String,
+    pub ttl_hours: u64,
+    pub focused_field: CreateInvitationField,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ContactsCodeModalViewProps {
+    pub visible: bool,
+    pub invitation_id: String,
+    pub code: String,
+    pub loading: bool,
+    pub copied: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GuardianWorkflowModalViewProps {
+    pub visible: bool,
+    pub step: GuardianSetupStep,
+    pub contacts: Vec<GuardianCandidateViewProps>,
+    pub selected_indices: Vec<usize>,
+    pub focused_index: usize,
+    pub threshold_k: u8,
+    pub threshold_n: u8,
+    pub ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
+    pub agreement_mode: AgreementMode,
+    pub reversion_risk: bool,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ContactsModalProps {
+    pub nickname: ContactsNicknameModalViewProps,
+    pub import_invitation: ContactsImportModalViewProps,
+    pub create_invitation: ContactsCreateModalViewProps,
+    pub code_display: ContactsCodeModalViewProps,
+    pub guardian_setup: GuardianWorkflowModalViewProps,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ContactsViewProps {
     pub focus: TwoPanelFocus,
     pub list_focus: ContactsListFocus,
@@ -185,41 +266,7 @@ pub struct ContactsViewProps {
     pub filter: String,
     pub lan_selected_index: usize,
     pub lan_peer_count: usize,
-    // Nickname modal
-    pub nickname_modal_visible: bool,
-    pub nickname_modal_contact_id: String,
-    pub nickname_modal_value: String,
-    pub nickname_modal_nickname_suggestion: Option<String>,
-    // Import invitation modal (accept invite code)
-    pub import_modal_visible: bool,
-    pub import_modal_code: String,
-    pub import_modal_importing: bool,
-    // Create invitation modal (send invitation)
-    pub create_modal_visible: bool,
-    pub create_modal_receiver_id: String,
-    pub create_modal_receiver_name: String,
-    pub create_modal_type_index: usize,
-    pub create_modal_message: String,
-    pub create_modal_ttl_hours: u64,
-    pub create_modal_focused_field: CreateInvitationField,
-    // Code display modal (show generated code)
-    pub code_modal_visible: bool,
-    pub code_modal_invitation_id: String,
-    pub code_modal_code: String,
-    pub code_modal_loading: bool,
-    pub code_modal_copied: bool,
-    // Guardian setup modal
-    pub guardian_setup_modal_visible: bool,
-    pub guardian_setup_modal_step: GuardianSetupStep,
-    pub guardian_setup_modal_contacts: Vec<GuardianCandidateViewProps>,
-    pub guardian_setup_modal_selected_indices: Vec<usize>,
-    pub guardian_setup_modal_focused_index: usize,
-    pub guardian_setup_modal_threshold_k: u8,
-    pub guardian_setup_modal_threshold_n: u8,
-    pub guardian_setup_modal_ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
-    pub guardian_setup_modal_agreement_mode: AgreementMode,
-    pub guardian_setup_modal_reversion_risk: bool,
-    pub guardian_setup_modal_error: String,
+    pub modals: ContactsModalProps,
     // Demo mode shortcuts
     #[cfg(feature = "development")]
     pub demo_mode: bool,
@@ -360,41 +407,48 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         filter: state.contacts.filter.clone(),
         lan_selected_index: state.contacts.lan_selected_index,
         lan_peer_count: state.contacts.lan_peer_count,
-        // Nickname modal (from queue)
-        nickname_modal_visible: nickname_visible,
-        nickname_modal_contact_id: nickname_contact_id,
-        nickname_modal_value: nickname_value,
-        nickname_modal_nickname_suggestion: nickname_suggested,
-        // Import modal (from queue)
-        import_modal_visible: import_visible,
-        import_modal_code: import_code,
-        import_modal_importing: import_importing,
-        // Create modal (from queue)
-        create_modal_visible: create_visible,
-        create_modal_receiver_id: create_receiver_id,
-        create_modal_receiver_name: create_receiver_name,
-        create_modal_type_index: create_type_index,
-        create_modal_message: create_message,
-        create_modal_ttl_hours: create_ttl,
-        create_modal_focused_field: create_focused_field,
-        // Code display modal (from queue)
-        code_modal_visible: code_visible,
-        code_modal_invitation_id: code_invitation_id,
-        code_modal_code: code_code,
-        code_modal_loading: code_loading,
-        code_modal_copied: code_copied,
-        // Guardian setup modal (from queue)
-        guardian_setup_modal_visible: guardian_visible,
-        guardian_setup_modal_step: guardian_step,
-        guardian_setup_modal_contacts: guardian_contacts,
-        guardian_setup_modal_selected_indices: guardian_selected,
-        guardian_setup_modal_focused_index: guardian_focused,
-        guardian_setup_modal_threshold_k: guardian_k,
-        guardian_setup_modal_threshold_n: guardian_n,
-        guardian_setup_modal_ceremony_responses: guardian_responses,
-        guardian_setup_modal_agreement_mode: guardian_agreement_mode,
-        guardian_setup_modal_reversion_risk: guardian_reversion_risk,
-        guardian_setup_modal_error: guardian_error,
+        modals: ContactsModalProps {
+            nickname: ContactsNicknameModalViewProps {
+                visible: nickname_visible,
+                contact_id: nickname_contact_id,
+                value: nickname_value,
+                nickname_suggestion: nickname_suggested,
+            },
+            import_invitation: ContactsImportModalViewProps {
+                visible: import_visible,
+                code: import_code,
+                importing: import_importing,
+            },
+            create_invitation: ContactsCreateModalViewProps {
+                visible: create_visible,
+                receiver_id: create_receiver_id,
+                receiver_name: create_receiver_name,
+                type_index: create_type_index,
+                message: create_message,
+                ttl_hours: create_ttl,
+                focused_field: create_focused_field,
+            },
+            code_display: ContactsCodeModalViewProps {
+                visible: code_visible,
+                invitation_id: code_invitation_id,
+                code: code_code,
+                loading: code_loading,
+                copied: code_copied,
+            },
+            guardian_setup: GuardianWorkflowModalViewProps {
+                visible: guardian_visible,
+                step: guardian_step,
+                contacts: guardian_contacts,
+                selected_indices: guardian_selected,
+                focused_index: guardian_focused,
+                threshold_k: guardian_k,
+                threshold_n: guardian_n,
+                ceremony_responses: guardian_responses,
+                agreement_mode: guardian_agreement_mode,
+                reversion_risk: guardian_reversion_risk,
+                error: guardian_error,
+            },
+        },
         // Demo mode (development feature only)
         #[cfg(feature = "development")]
         demo_mode: !state.contacts.demo_alice_code.is_empty(),
@@ -432,6 +486,76 @@ use crate::tui::types::{AuthorityInfo, MfaPolicy, SettingsSection};
 
 /// View state extracted from TuiState for SettingsScreen
 #[derive(Clone, Debug, Default, PartialEq)]
+pub struct AuthorityPickerModalViewProps {
+    pub visible: bool,
+    pub authorities: Vec<(String, String)>,
+    pub selected_index: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SettingsNicknameModalViewProps {
+    pub visible: bool,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AddDeviceModalViewProps {
+    pub visible: bool,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DeviceImportModalViewProps {
+    pub visible: bool,
+    pub code: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DeviceEnrollmentModalViewProps {
+    pub visible: bool,
+    pub ceremony_id: String,
+    pub nickname_suggestion: String,
+    pub code: String,
+    pub accepted_count: u16,
+    pub total_count: u16,
+    pub threshold: u16,
+    pub is_complete: bool,
+    pub has_failed: bool,
+    pub error_message: String,
+    pub copied: bool,
+    pub agreement_mode: AgreementMode,
+    pub reversion_risk: bool,
+    pub is_demo_mode: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DeviceSelectModalViewProps {
+    pub visible: bool,
+    pub devices: Vec<Device>,
+    pub selected_index: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ConfirmRemoveDeviceModalViewProps {
+    pub visible: bool,
+    pub device_id: String,
+    pub display_name: String,
+    pub confirm_focused: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SettingsModalProps {
+    pub authority_picker: AuthorityPickerModalViewProps,
+    pub nickname_suggestion: SettingsNicknameModalViewProps,
+    pub add_device: AddDeviceModalViewProps,
+    pub device_import: DeviceImportModalViewProps,
+    pub device_enrollment: DeviceEnrollmentModalViewProps,
+    pub device_select: DeviceSelectModalViewProps,
+    pub confirm_remove: ConfirmRemoveDeviceModalViewProps,
+    pub mfa_setup: GuardianWorkflowModalViewProps,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SettingsViewProps {
     pub focus: TwoPanelFocus,
     pub section: SettingsSection,
@@ -439,55 +563,7 @@ pub struct SettingsViewProps {
     pub mfa_policy: MfaPolicy,
     pub authorities: Vec<AuthorityInfo>,
     pub current_authority_index: usize,
-    // Authority picker modal
-    pub authority_picker_modal_visible: bool,
-    pub authority_picker_modal_contacts: Vec<(String, String)>,
-    pub authority_picker_modal_selected_index: usize,
-    // Nickname suggestion modal (what you want to be called)
-    pub nickname_suggestion_modal_visible: bool,
-    pub nickname_suggestion_modal_value: String,
-    // Add device modal
-    pub add_device_modal_visible: bool,
-    pub add_device_modal_name: String,
-    // Import device enrollment code modal
-    pub device_import_modal_visible: bool,
-    pub device_import_modal_code: String,
-    // Device enrollment ceremony modal
-    pub device_enrollment_modal_visible: bool,
-    pub device_enrollment_modal_ceremony_id: String,
-    pub device_enrollment_modal_nickname_suggestion: String,
-    pub device_enrollment_modal_code: String,
-    pub device_enrollment_modal_accepted_count: u16,
-    pub device_enrollment_modal_total_count: u16,
-    pub device_enrollment_modal_threshold: u16,
-    pub device_enrollment_modal_is_complete: bool,
-    pub device_enrollment_modal_has_failed: bool,
-    pub device_enrollment_modal_error_message: String,
-    pub device_enrollment_modal_copied: bool,
-    pub device_enrollment_modal_agreement_mode: AgreementMode,
-    pub device_enrollment_modal_reversion_risk: bool,
-    pub device_enrollment_modal_is_demo_mode: bool,
-    // Device select modal (for removal)
-    pub device_select_modal_visible: bool,
-    pub device_select_modal_devices: Vec<Device>,
-    pub device_select_modal_selected_index: usize,
-    // Confirm remove modal
-    pub confirm_remove_modal_visible: bool,
-    pub confirm_remove_modal_device_id: String,
-    pub confirm_remove_modal_display_name: String,
-    pub confirm_remove_modal_confirm_focused: bool,
-    // MFA setup modal (wizard-based)
-    pub mfa_setup_modal_visible: bool,
-    pub mfa_setup_modal_step: GuardianSetupStep,
-    pub mfa_setup_modal_contacts: Vec<GuardianCandidateViewProps>,
-    pub mfa_setup_modal_selected_indices: Vec<usize>,
-    pub mfa_setup_modal_focused_index: usize,
-    pub mfa_setup_modal_threshold_k: u8,
-    pub mfa_setup_modal_threshold_n: u8,
-    pub mfa_setup_modal_ceremony_responses: Vec<(String, String, GuardianCeremonyResponse)>,
-    pub mfa_setup_modal_agreement_mode: AgreementMode,
-    pub mfa_setup_modal_reversion_risk: bool,
-    pub mfa_setup_modal_error: String,
+    pub modals: SettingsModalProps,
 }
 
 /// Extract SettingsScreen view props from TuiState
@@ -656,55 +732,65 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         // Authority context is app-global, in TuiState root
         authorities: state.authorities.clone(),
         current_authority_index: state.current_authority_index,
-        // Authority picker modal (from queue)
-        authority_picker_modal_visible: authority_picker_visible,
-        authority_picker_modal_contacts: authority_picker_contacts,
-        authority_picker_modal_selected_index: authority_picker_selected,
-        // Nickname suggestion modal (from queue)
-        nickname_suggestion_modal_visible: nickname_suggestion_visible,
-        nickname_suggestion_modal_value: nickname_suggestion_value,
-        // Add device modal (from queue)
-        add_device_modal_visible: add_device_visible,
-        add_device_modal_name: add_device_name,
-        // Import device enrollment code modal (from queue)
-        device_import_modal_visible: device_import_visible,
-        device_import_modal_code: device_import_code,
-        // Device enrollment ceremony modal (from queue)
-        device_enrollment_modal_visible: enrollment_visible,
-        device_enrollment_modal_ceremony_id: enrollment_ceremony_id,
-        device_enrollment_modal_nickname_suggestion: enrollment_nickname_suggestion,
-        device_enrollment_modal_code: enrollment_code,
-        device_enrollment_modal_accepted_count: enrollment_accepted,
-        device_enrollment_modal_total_count: enrollment_total,
-        device_enrollment_modal_threshold: enrollment_threshold,
-        device_enrollment_modal_is_complete: enrollment_is_complete,
-        device_enrollment_modal_has_failed: enrollment_has_failed,
-        device_enrollment_modal_error_message: enrollment_error_message,
-        device_enrollment_modal_copied: enrollment_copied,
-        device_enrollment_modal_agreement_mode: enrollment_agreement_mode,
-        device_enrollment_modal_reversion_risk: enrollment_reversion_risk,
-        device_enrollment_modal_is_demo_mode: !state.settings.demo_mobile_device_id.is_empty(),
-        // Device select modal (from queue)
-        device_select_modal_visible: device_select_visible,
-        device_select_modal_devices: device_select_devices,
-        device_select_modal_selected_index: device_select_selected_index,
-        // Confirm remove modal (from queue)
-        confirm_remove_modal_visible: confirm_remove_visible,
-        confirm_remove_modal_device_id: confirm_remove_device_id,
-        confirm_remove_modal_display_name: confirm_remove_display_name,
-        confirm_remove_modal_confirm_focused: confirm_remove_focused,
-        // MFA setup modal (from queue)
-        mfa_setup_modal_visible: mfa_visible,
-        mfa_setup_modal_step: mfa_step,
-        mfa_setup_modal_contacts: mfa_contacts,
-        mfa_setup_modal_selected_indices: mfa_selected,
-        mfa_setup_modal_focused_index: mfa_focused,
-        mfa_setup_modal_threshold_k: mfa_k,
-        mfa_setup_modal_threshold_n: mfa_n,
-        mfa_setup_modal_ceremony_responses: mfa_responses,
-        mfa_setup_modal_agreement_mode: mfa_agreement_mode,
-        mfa_setup_modal_reversion_risk: mfa_reversion_risk,
-        mfa_setup_modal_error: mfa_error,
+        modals: SettingsModalProps {
+            authority_picker: AuthorityPickerModalViewProps {
+                visible: authority_picker_visible,
+                authorities: authority_picker_contacts,
+                selected_index: authority_picker_selected,
+            },
+            nickname_suggestion: SettingsNicknameModalViewProps {
+                visible: nickname_suggestion_visible,
+                value: nickname_suggestion_value,
+            },
+            add_device: AddDeviceModalViewProps {
+                visible: add_device_visible,
+                name: add_device_name,
+            },
+            device_import: DeviceImportModalViewProps {
+                visible: device_import_visible,
+                code: device_import_code,
+            },
+            device_enrollment: DeviceEnrollmentModalViewProps {
+                visible: enrollment_visible,
+                ceremony_id: enrollment_ceremony_id,
+                nickname_suggestion: enrollment_nickname_suggestion,
+                code: enrollment_code,
+                accepted_count: enrollment_accepted,
+                total_count: enrollment_total,
+                threshold: enrollment_threshold,
+                is_complete: enrollment_is_complete,
+                has_failed: enrollment_has_failed,
+                error_message: enrollment_error_message,
+                copied: enrollment_copied,
+                agreement_mode: enrollment_agreement_mode,
+                reversion_risk: enrollment_reversion_risk,
+                is_demo_mode: !state.settings.demo_mobile_device_id.is_empty(),
+            },
+            device_select: DeviceSelectModalViewProps {
+                visible: device_select_visible,
+                devices: device_select_devices,
+                selected_index: device_select_selected_index,
+            },
+            confirm_remove: ConfirmRemoveDeviceModalViewProps {
+                visible: confirm_remove_visible,
+                device_id: confirm_remove_device_id,
+                display_name: confirm_remove_display_name,
+                confirm_focused: confirm_remove_focused,
+            },
+            mfa_setup: GuardianWorkflowModalViewProps {
+                visible: mfa_visible,
+                step: mfa_step,
+                contacts: mfa_contacts,
+                selected_indices: mfa_selected,
+                focused_index: mfa_focused,
+                threshold_k: mfa_k,
+                threshold_n: mfa_n,
+                ceremony_responses: mfa_responses,
+                agreement_mode: mfa_agreement_mode,
+                reversion_risk: mfa_reversion_risk,
+                error: mfa_error,
+            },
+        },
     }
 }
 
@@ -713,6 +799,50 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
 // ============================================================================
 
 /// View state extracted from TuiState for NeighborhoodScreen
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HomeCreateModalViewProps {
+    pub visible: bool,
+    pub name: String,
+    pub description: String,
+    pub active_field: usize,
+    pub error: Option<String>,
+    pub creating: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ModeratorAssignmentModalViewProps {
+    pub visible: bool,
+    pub contacts: Vec<Contact>,
+    pub selected_index: usize,
+    pub assign: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AccessOverrideModalViewProps {
+    pub visible: bool,
+    pub contacts: Vec<Contact>,
+    pub selected_index: usize,
+    pub level: AccessLevel,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CapabilityConfigModalViewProps {
+    pub visible: bool,
+    pub full_caps: String,
+    pub partial_caps: String,
+    pub limited_caps: String,
+    pub active_field: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NeighborhoodModalProps {
+    pub home_create: HomeCreateModalViewProps,
+    pub moderator_assignment: ModeratorAssignmentModalViewProps,
+    pub access_override: AccessOverrideModalViewProps,
+    pub capability_config: CapabilityConfigModalViewProps,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NeighborhoodViewProps {
     pub mode: NeighborhoodMode,
@@ -735,30 +865,7 @@ pub struct NeighborhoodViewProps {
     pub message_scroll: usize,
     pub message_count: usize,
     pub moderator_actions_enabled: bool,
-    // Home create modal
-    pub home_create_modal_visible: bool,
-    pub home_create_modal_name: String,
-    pub home_create_modal_description: String,
-    pub home_create_modal_active_field: usize,
-    pub home_create_modal_error: Option<String>,
-    pub home_create_modal_creating: bool,
-    // Moderator assignment modal
-    pub moderator_modal_visible: bool,
-    pub moderator_modal_contacts: Vec<Contact>,
-    pub moderator_modal_selected_index: usize,
-    pub moderator_modal_assign: bool,
-    // Access override modal
-    pub access_override_modal_visible: bool,
-    pub access_override_modal_contacts: Vec<Contact>,
-    pub access_override_modal_selected_index: usize,
-    pub access_override_modal_level: AccessLevel,
-    // Home capability configuration modal
-    pub capability_config_modal_visible: bool,
-    pub capability_config_modal_full_caps: String,
-    pub capability_config_modal_partial_caps: String,
-    pub capability_config_modal_limited_caps: String,
-    pub capability_config_modal_active_field: usize,
-    pub capability_config_modal_error: Option<String>,
+    pub modals: NeighborhoodModalProps,
 }
 
 /// Extract NeighborhoodScreen view props from TuiState
@@ -847,27 +954,36 @@ pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProp
         message_scroll: state.neighborhood.message_scroll,
         message_count: state.neighborhood.message_count,
         moderator_actions_enabled: state.neighborhood.moderator_actions_enabled,
-        // Home create modal
-        home_create_modal_visible: home_create_visible,
-        home_create_modal_name: home_create_name,
-        home_create_modal_description: home_create_description,
-        home_create_modal_active_field: home_create_active_field,
-        home_create_modal_error: home_create_error,
-        home_create_modal_creating: home_create_creating,
-        moderator_modal_visible,
-        moderator_modal_contacts,
-        moderator_modal_selected_index,
-        moderator_modal_assign,
-        access_override_modal_visible,
-        access_override_modal_contacts,
-        access_override_modal_selected_index,
-        access_override_modal_level,
-        capability_config_modal_visible,
-        capability_config_modal_full_caps,
-        capability_config_modal_partial_caps,
-        capability_config_modal_limited_caps,
-        capability_config_modal_active_field,
-        capability_config_modal_error,
+        modals: NeighborhoodModalProps {
+            home_create: HomeCreateModalViewProps {
+                visible: home_create_visible,
+                name: home_create_name,
+                description: home_create_description,
+                active_field: home_create_active_field,
+                error: home_create_error,
+                creating: home_create_creating,
+            },
+            moderator_assignment: ModeratorAssignmentModalViewProps {
+                visible: moderator_modal_visible,
+                contacts: moderator_modal_contacts,
+                selected_index: moderator_modal_selected_index,
+                assign: moderator_modal_assign,
+            },
+            access_override: AccessOverrideModalViewProps {
+                visible: access_override_modal_visible,
+                contacts: access_override_modal_contacts,
+                selected_index: access_override_modal_selected_index,
+                level: access_override_modal_level,
+            },
+            capability_config: CapabilityConfigModalViewProps {
+                visible: capability_config_modal_visible,
+                full_caps: capability_config_modal_full_caps,
+                partial_caps: capability_config_modal_partial_caps,
+                limited_caps: capability_config_modal_limited_caps,
+                active_field: capability_config_modal_active_field,
+                error: capability_config_modal_error,
+            },
+        },
     }
 }
 
@@ -923,10 +1039,10 @@ mod tests {
         assert_eq!(props.input_buffer, "test message");
         assert_eq!(props.selected_channel, 5);
         assert_eq!(props.message_scroll, 10);
-        assert!(props.create_modal_visible);
-        assert_eq!(props.create_modal_name, "channel-name");
+        assert!(props.modals.create.visible);
+        assert_eq!(props.modals.create.name, "channel-name");
         // info_modal is not active because create_modal is (only one modal at a time)
-        assert!(!props.info_modal_visible);
+        assert!(!props.modals.info.visible);
     }
 
     #[test]
@@ -940,8 +1056,8 @@ mod tests {
 
         let props = extract_chat_view_props(&state);
 
-        assert!(props.info_modal_visible);
-        assert_eq!(props.info_modal_channel_name, "info-channel");
+        assert!(props.modals.info.visible);
+        assert_eq!(props.modals.info.channel_name, "info-channel");
     }
 
     #[test]
@@ -962,9 +1078,9 @@ mod tests {
 
         assert_eq!(props.selected_index, 7);
         assert_eq!(props.filter, "search");
-        assert!(props.nickname_modal_visible);
-        assert_eq!(props.nickname_modal_contact_id, "contact-123");
-        assert_eq!(props.nickname_modal_value, "new-name");
+        assert!(props.modals.nickname.visible);
+        assert_eq!(props.modals.nickname.contact_id, "contact-123");
+        assert_eq!(props.modals.nickname.value, "new-name");
     }
 
     #[test]
@@ -1000,10 +1116,10 @@ mod tests {
         assert_eq!(props.section, SettingsSection::Devices);
         assert_eq!(props.selected_index, 1);
         assert_eq!(props.mfa_policy, MfaPolicy::AlwaysRequired);
-        assert!(props.nickname_suggestion_modal_visible);
-        assert_eq!(props.nickname_suggestion_modal_value, "new-nick");
+        assert!(props.modals.nickname_suggestion.visible);
+        assert_eq!(props.modals.nickname_suggestion.value, "new-nick");
         // add_device_modal is not active because nickname_suggestion_modal is (only one modal at a time)
-        assert!(!props.add_device_modal_visible);
+        assert!(!props.modals.add_device.visible);
     }
 
     #[test]
@@ -1020,8 +1136,8 @@ mod tests {
 
         let props = extract_settings_view_props(&state);
 
-        assert!(props.add_device_modal_visible);
-        assert_eq!(props.add_device_modal_name, "my-device");
+        assert!(props.modals.add_device.visible);
+        assert_eq!(props.modals.add_device.name, "my-device");
     }
 
     #[test]

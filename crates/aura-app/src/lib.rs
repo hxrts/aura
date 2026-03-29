@@ -121,6 +121,8 @@ pub mod ceremonies;
 pub mod core;
 pub mod effects;
 pub mod errors;
+#[allow(missing_docs)]
+pub mod frontend_primitives;
 pub mod policies;
 pub mod queries;
 pub mod runtime_bridge;

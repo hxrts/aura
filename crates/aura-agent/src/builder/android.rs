@@ -179,6 +179,15 @@ impl AndroidPresetBuilder {
 
         #[cfg(feature = "android")]
         {
+            // `android` feature stub status:
+            // the preset contract is compiled, but the platform handlers below
+            // are still intentionally unimplemented:
+            // - KeystoreCryptoHandler
+            // - EncryptedSharedPreferencesStorageHandler
+            // - AndroidTimeHandler
+            // - SecureRandomHandler
+            // - LogcatConsoleHandler
+            // - OkHttpTransportHandler
             // Validate required configuration
             let application_id = self.application_id.ok_or_else(|| BuildError::MissingRequired(
                 "application_id is required for Android preset. Call .application_id(\"com.example\") before building."
@@ -194,14 +203,6 @@ impl AndroidPresetBuilder {
                 let context_entropy = hash::hash(&authority_id.to_bytes());
                 ContextId::new_from_entropy(context_entropy)
             });
-
-            // TODO: Wire up Android-specific handlers when android feature is implemented
-            // - KeystoreCryptoHandler with StrongBox support
-            // - EncryptedSharedPreferencesStorageHandler
-            // - AndroidTimeHandler
-            // - SecureRandomHandler
-            // - LogcatConsoleHandler
-            // - OkHttpTransportHandler
 
             let _ = (
                 application_id,

@@ -252,7 +252,7 @@ All fact validation rules apply during automatic sync. Devices reject invalid fa
 
 ## 9. Migration Infrastructure
 
-The `MigrationCoordinator` in `aura-agent/src/runtime/migration.rs` orchestrates data migrations between protocol versions.
+The migration runtime in `aura-agent/src/runtime/migration.rs` orchestrates data migrations between protocol versions.
 
 ### 9.1 Migration Trait
 

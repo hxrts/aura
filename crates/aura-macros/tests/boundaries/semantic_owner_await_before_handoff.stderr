@@ -1,0 +1,5 @@
+error: semantic_owner awaits before canonical handoff_to_app_workflow
+  --> tests/boundaries/semantic_owner_await_before_handoff.rs:38:5
+   |
+38 |     preflight().await;
+   |     ^^^^^^^^^

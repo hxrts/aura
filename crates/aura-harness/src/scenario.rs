@@ -51,6 +51,7 @@ impl ScenarioRunner {
             return ScenarioLintReport { warnings, errors };
         }
 
+        #[allow(deprecated)]
         let Some(compatibility_steps) = scenario.compatibility_steps() else {
             errors.push("non-semantic scenarios must expose compatibility steps".to_string());
             return ScenarioLintReport { warnings, errors };

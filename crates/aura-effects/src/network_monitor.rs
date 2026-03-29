@@ -147,14 +147,16 @@ mod tests {
         queue: Arc<AsyncMutex<VecDeque<NetworkChange>>>,
     }
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl NetworkChangeStream for MemoryStream {
         async fn next_change(&mut self) -> Result<Option<NetworkChange>, NetworkError> {
             Ok(self.queue.lock().await.pop_front())
         }
     }
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl NetworkChangeEffects for MemoryNetworkEffects {
         async fn subscribe_network_changes(
             &self,

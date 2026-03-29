@@ -1,0 +1,8 @@
+error: capability_boundary requires a capability-bearing signature or body
+ --> tests/boundaries/capability_boundary_non_capability_helper.rs:6:75
+  |
+6 |   fn issue_pending_invitation_consumed_proof(invitation_id: &str) -> String {
+  |  ___________________________________________________________________________^
+7 | |     invitation_id.to_string()
+8 | | }
+  | |_^

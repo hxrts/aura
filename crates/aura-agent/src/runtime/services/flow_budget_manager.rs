@@ -13,6 +13,18 @@ use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlowBudgetManagerCommand {
+    GetBudget,
+    Charge,
+    Replenish,
+    SetLimit,
+    ListBudgetsForContext,
+    ResetEpoch,
+    RemoveBudget,
+}
+
 /// A flow budget for a context-peer pair
 #[derive(Debug, Clone, Default)]
 pub struct FlowBudget {
@@ -60,6 +72,14 @@ pub enum BudgetError {
 }
 
 /// Flow budget manager service
+#[aura_macros::actor_owned(
+    owner = "flow_budget_manager",
+    domain = "flow_budget",
+    gate = "flow_budget_command_ingress",
+    command = FlowBudgetManagerCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 pub struct FlowBudgetManager {
     #[allow(dead_code)] // Will be used for flow budget configuration
     config: AgentConfig,

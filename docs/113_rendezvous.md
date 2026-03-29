@@ -57,7 +57,7 @@ Aura uses a relay-first, direct-upgrade model for NAT traversal:
 1. Start on relay as soon as both peers have a valid descriptor path.
 2. Exchange direct/reflexive candidates from descriptor facts.
 3. Launch bounded direct upgrade attempts (holepunch) in the background.
-4. Promote to direct when a recoverable direct path succeeds; otherwise remain on relay.
+4. Promote to direct when a recoverable direct path succeeds. Otherwise remain on relay.
 
 Retry state is tracked with typed generations (`CandidateGeneration`, `NetworkGeneration`) and bounded backoff (`AttemptBudget`, `BackoffWindow`) in `PeerConnectionActor`. Generation changes reset retry budgets, which avoids stale retry loops after interface/NAT changes.
 

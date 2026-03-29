@@ -5,14 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Threshold signature schemes and attestation types for Aura"
 
 [lints]
 workspace = true
 
 [dependencies]
 # Workspace crates
-aura-core = { path = "../aura-core" }
-aura-macros = { path = "../aura-macros" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
 
 # Serialization
 serde = { workspace = true }

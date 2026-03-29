@@ -1,6 +1,8 @@
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
@@ -9,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{
-    classify_screen_item_id, list_item_selector, nav_control_id_for_screen, screen_item_id,
+    classify_screen_item_id, list_item_selector, nav_control_id_for_screen,
     semantic_settings_section_item_id, ControlId, FieldId, ListId, UiSnapshot,
 };
 use aura_app::ui::scenarios::{
@@ -18,6 +20,8 @@ use aura_app::ui::scenarios::{
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_core::{AuthorityId, DeviceId};
 use nix::poll::{poll, PollFd, PollFlags};
+use nix::sys::signal;
+use nix::unistd::Pid;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -29,17 +33,20 @@ use crate::backend::{
     UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
-use crate::timeouts::blocking_sleep;
 use crate::tool_api::ToolKey;
 
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
 const DEFAULT_HARNESS_READY_TIMEOUT_MS: u64 = 90_000;
 const DEFAULT_RPC_TIMEOUT_MS: u64 = 15_000;
 const WAIT_RPC_TIMEOUT_MARGIN_MS: u64 = 5_000;
+const DIAGNOSTIC_DOM_RPC_TIMEOUT_MS: u64 = 2_000;
+const SUBMIT_SEMANTIC_COMMAND_RPC_TIMEOUT_MS: u64 = 60_000 + WAIT_RPC_TIMEOUT_MARGIN_MS;
+const STAGE_RUNTIME_IDENTITY_RPC_TIMEOUT_MS: u64 = 60_000 + WAIT_RPC_TIMEOUT_MARGIN_MS;
 const DEFAULT_START_MAX_ATTEMPTS: u32 = 3;
 const DEFAULT_START_RETRY_BACKOFF_MS: u64 = 1_200;
 const MAX_START_ATTEMPTS: u32 = 10;
 const MAX_TIMEOUT_MS: u64 = 600_000;
+const PLAYWRIGHT_DRIVER_OWNED_MARKER: &str = "--aura-harness-owned-playwright-driver";
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum BackendState {
@@ -51,6 +58,14 @@ enum BackendState {
 #[serde(deny_unknown_fields)]
 struct BrowserDiagnosticScreenPayload {
     authoritative_screen: String,
+    #[serde(default, rename = "screen")]
+    _screen: Option<String>,
+    #[serde(default, rename = "raw_screen")]
+    _raw_screen: Option<String>,
+    #[serde(default, rename = "normalized_screen")]
+    _normalized_screen: Option<String>,
+    #[serde(default, rename = "capture_consistency")]
+    _capture_consistency: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,12 +85,6 @@ struct BrowserTailLogPayload {
 #[serde(deny_unknown_fields)]
 struct BrowserClipboardPayload {
     text: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BrowserAuthorityIdPayload {
-    authority_id: String,
 }
 
 fn decode_rpc_payload<T: DeserializeOwned>(
@@ -350,7 +359,10 @@ impl PlaywrightBrowserBackend {
             .ok_or_else(|| anyhow!("invalid driver script path {}", driver_script.display()))?;
         Ok((
             "node".to_string(),
-            vec![driver_script.to_string_lossy().to_string()],
+            vec![
+                driver_script.to_string_lossy().to_string(),
+                PLAYWRIGHT_DRIVER_OWNED_MARKER.to_string(),
+            ],
             Some(driver_cwd),
         ))
     }
@@ -363,8 +375,7 @@ impl PlaywrightBrowserBackend {
 
         let mut session = session_mutex.into_inner();
         let _ = session.rpc_call("stop", json!({ "instance_id": self.config.id }));
-        let _ = session.child.kill();
-        let _ = session.child.wait();
+        terminate_owned_child(&mut session.child);
         if let Some(handle) = session.stderr_thread.take() {
             let _ = handle.join();
         }
@@ -383,12 +394,13 @@ impl PlaywrightBrowserBackend {
             serde_json::to_string(&BootstrapRuntimeIdentity::new(authority_id, device_id))
                 .context("failed to encode staged runtime identity")?;
         self.with_session(|session| {
-            session.rpc_call(
+            session.rpc_call_with_timeout(
                 "stage_runtime_identity",
                 json!({
                     "instance_id": self.config.id,
                     "runtime_identity_json": runtime_identity_json,
                 }),
+                STAGE_RUNTIME_IDENTITY_RPC_TIMEOUT_MS,
             )?;
             Ok(())
         })
@@ -398,46 +410,16 @@ impl PlaywrightBrowserBackend {
         &mut self,
         request: SemanticCommandRequest,
     ) -> Result<SemanticCommandResponse> {
-        match &request.intent {
-            IntentAction::OpenScreen(screen) => {
-                let screen = screen_item_id(*screen);
-                self.with_session(|session| {
-                    session.rpc_call(
-                        "navigate_screen",
-                        json!({
-                            "instance_id": self.config.id,
-                            "screen": screen,
-                        }),
-                    )?;
-                    Ok(())
-                })?;
-                return Ok(SemanticCommandResponse::accepted_without_value());
-            }
-            IntentAction::OpenSettingsSection(section) => {
-                let section = semantic_settings_section_item_id(*section);
-                self.with_session(|session| {
-                    session.rpc_call(
-                        "open_settings_section",
-                        json!({
-                            "instance_id": self.config.id,
-                            "section": section,
-                        }),
-                    )?;
-                    Ok(())
-                })?;
-                return Ok(SemanticCommandResponse::accepted_without_value());
-            }
-            _ => {}
-        }
         let payload = serde_json::to_value(&request)
             .context("failed to encode browser semantic command request")?;
         let response = self.with_session(|session| {
-            session.rpc_call(
+            session.rpc_call_with_timeout(
                 "submit_semantic_command",
                 json!({
                     "instance_id": self.config.id,
                     "request": payload,
                 }),
+                SUBMIT_SEMANTIC_COMMAND_RPC_TIMEOUT_MS,
             )
         })?;
         serde_json::from_value(response)
@@ -482,6 +464,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         child_command.stdout(Stdio::piped());
         child_command.stderr(Stdio::piped());
         child_command.env("AURA_HARNESS_BROWSER", "1");
+        configure_owned_process_group(&mut child_command);
         for entry in &self.config.env {
             if let Some((key, value)) = entry.split_once('=') {
                 child_command.env(key.trim(), value.trim());
@@ -542,8 +525,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         );
         if let Err(error) = start_result {
             let _ = session.rpc_call("stop", json!({ "instance_id": self.config.id }));
-            let _ = session.child.kill();
-            let _ = session.child.wait();
+            terminate_owned_child(&mut session.child);
             if let Some(handle) = session.stderr_thread.take() {
                 let _ = handle.join();
             }
@@ -594,23 +576,10 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn authority_id(&mut self) -> Result<Option<String>> {
-        self.with_session(|session| {
-            let payload = session.rpc_call(
-                "get_authority_id",
-                json!({
-                    "instance_id": self.config.id,
-                }),
-            )?;
-            let payload: BrowserAuthorityIdPayload = decode_rpc_payload(payload, || {
-                format!(
-                    "failed to decode browser authority_id payload for instance {}",
-                    self.config.id
-                )
-            })?;
-            let authority_id = payload.authority_id.trim().to_string();
-            let authority_id = (!authority_id.is_empty()).then_some(authority_id);
-            Ok(authority_id)
-        })
+        let snapshot = self.ui_snapshot()?;
+        Ok(snapshot
+            .selected_item_id(ListId::Authorities)
+            .map(str::to_string))
     }
 
     fn health_check(&self) -> Result<bool> {
@@ -627,16 +596,9 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
-        let deadline = Instant::now() + timeout;
-        let mut last_error: Option<String> = None;
-        loop {
-            match self.ui_snapshot() {
-                Ok(_) => return Ok(()),
-                Err(error) => {
-                    last_error.replace(error.to_string());
-                }
-            }
-            if Instant::now() >= deadline {
+        match self.wait_for_ui_snapshot_event(timeout, None) {
+            Some(Ok(_)) => Ok(()),
+            Some(Err(error)) => {
                 let stderr_tail = self
                     .stderr_log
                     .blocking_lock()
@@ -657,11 +619,14 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                     "browser instance {} did not reach semantic readiness within {:?} (last_error={}, stderr_tail=\n{})",
                     self.config.id,
                     timeout,
-                    last_error.as_deref().unwrap_or("none"),
+                    error,
                     stderr_block,
                 );
             }
-            blocking_sleep(Duration::from_millis(100));
+            None => bail!(
+                "browser instance {} does not expose a typed ui snapshot readiness event",
+                self.config.id
+            ),
         }
     }
 
@@ -692,7 +657,11 @@ impl DiagnosticBackend for PlaywrightBrowserBackend {
 
     fn diagnostic_dom_snapshot(&self) -> Result<String> {
         let payload = self.with_session(|session| {
-            session.rpc_call("dom_snapshot", json!({ "instance_id": self.config.id }))
+            session.rpc_call_with_timeout(
+                "dom_snapshot",
+                json!({ "instance_id": self.config.id }),
+                DIAGNOSTIC_DOM_RPC_TIMEOUT_MS.saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
+            )
         })?;
         let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
             format!(
@@ -819,6 +788,17 @@ impl DiagnosticBackend for PlaywrightBrowserBackend {
     }
 }
 
+fn ui_snapshot_event_timeout(error: &anyhow::Error) -> bool {
+    let message = error.to_string();
+    message.contains("wait_for_ui_state timed out")
+        || message.contains("request:wait_for_ui_state timed out")
+        || message.contains("Playwright driver wait_for_ui_state timed out")
+}
+
+fn fallback_ui_snapshot_event_version(after_version: Option<u64>) -> u64 {
+    after_version.unwrap_or(0).saturating_add(1)
+}
+
 impl ObservationBackend for PlaywrightBrowserBackend {
     fn ui_snapshot(&self) -> Result<UiSnapshot> {
         let payload = self.with_session(|session| {
@@ -837,32 +817,56 @@ impl ObservationBackend for PlaywrightBrowserBackend {
         timeout: Duration,
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>> {
-        Some(self.with_session(|session| {
-            let payload = session.rpc_call_with_timeout(
-                "wait_for_ui_state",
-                json!({
-                    "instance_id": self.config.id,
-                    "timeout_ms": timeout.as_millis(),
-                    "after_version": after_version,
-                }),
-                timeout
-                    .as_millis()
-                    .clamp(1, u128::from(u64::MAX))
-                    .try_into()
-                    .unwrap_or(u64::MAX)
-                    .saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
-            )?;
-            let payload: BrowserUiSnapshotEventPayload = decode_rpc_payload(payload, || {
-                format!(
-                    "failed to decode browser ui event payload for instance {}",
-                    self.config.id
-                )
-            })?;
-            Ok(UiSnapshotEvent {
-                snapshot: payload.snapshot,
-                version: payload.version,
-            })
-        }))
+        Some((|| {
+            let deadline = Instant::now() + timeout;
+            let slice = Duration::from_millis(750);
+
+            loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let wait_timeout = std::cmp::min(remaining, slice);
+                let payload = match self.with_session(|session| {
+                    session.rpc_call_with_timeout(
+                        "wait_for_ui_state",
+                        json!({
+                            "instance_id": self.config.id,
+                            "timeout_ms": wait_timeout.as_millis(),
+                            "after_version": after_version,
+                        }),
+                        wait_timeout
+                            .as_millis()
+                            .clamp(1, u128::from(u64::MAX))
+                            .try_into()
+                            .unwrap_or(u64::MAX)
+                            .saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
+                    )
+                }) {
+                    Ok(payload) => payload,
+                    Err(error)
+                        if ui_snapshot_event_timeout(&error) && Instant::now() < deadline =>
+                    {
+                        continue;
+                    }
+                    Err(error) if ui_snapshot_event_timeout(&error) => {
+                        let snapshot = self.ui_snapshot()?;
+                        return Ok(UiSnapshotEvent {
+                            version: fallback_ui_snapshot_event_version(after_version),
+                            snapshot,
+                        });
+                    }
+                    Err(error) => return Err(error),
+                };
+                let payload: BrowserUiSnapshotEventPayload = decode_rpc_payload(payload, || {
+                    format!(
+                        "failed to decode browser ui event payload for instance {}",
+                        self.config.id
+                    )
+                })?;
+                return Ok(UiSnapshotEvent {
+                    snapshot: payload.snapshot,
+                    version: payload.version,
+                });
+            }
+        })())
     }
 }
 
@@ -937,32 +941,23 @@ impl RawUiBackend for PlaywrightBrowserBackend {
         );
         if is_navigation_control {
             let target_screen = match control_id {
-                ControlId::NavNeighborhood => Some(screen_item_id(
-                    aura_app::ui::contract::ScreenId::Neighborhood,
-                )),
-                ControlId::NavChat => Some(screen_item_id(aura_app::ui::contract::ScreenId::Chat)),
-                ControlId::NavContacts => {
-                    Some(screen_item_id(aura_app::ui::contract::ScreenId::Contacts))
+                ControlId::NavNeighborhood => Some(aura_app::ui::contract::ScreenId::Neighborhood),
+                ControlId::NavChat => Some(aura_app::ui::contract::ScreenId::Chat),
+                ControlId::NavContacts => Some(aura_app::ui::contract::ScreenId::Contacts),
+                ControlId::NavNotifications => {
+                    Some(aura_app::ui::contract::ScreenId::Notifications)
                 }
-                ControlId::NavNotifications => Some(screen_item_id(
-                    aura_app::ui::contract::ScreenId::Notifications,
-                )),
-                ControlId::NavSettings => {
-                    Some(screen_item_id(aura_app::ui::contract::ScreenId::Settings))
-                }
+                ControlId::NavSettings => Some(aura_app::ui::contract::ScreenId::Settings),
                 _ => None,
             };
             if let Some(target_screen) = target_screen {
-                let navigate_result = self.with_session(|session| {
-                    session.rpc_call(
-                        "navigate_screen",
-                        json!({
-                            "instance_id": self.config.id,
-                            "screen": target_screen,
-                        }),
-                    )?;
-                    Ok(())
-                });
+                let navigate_result = self.submit_semantic_command(SemanticCommandRequest::new(
+                    IntentAction::OpenScreen {
+                        screen: target_screen,
+                        channel_id: None,
+                        context_id: None,
+                    },
+                ));
                 if navigate_result.is_ok() {
                     return Ok(());
                 }
@@ -1187,6 +1182,29 @@ fn default_driver_script_path() -> Result<PathBuf> {
     Ok(candidate)
 }
 
+fn configure_owned_process_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        command.process_group(0);
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+    }
+}
+
+fn terminate_owned_child(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as i32;
+        let _ = signal::kill(Pid::from_raw(-pid), signal::Signal::SIGKILL);
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn control_selector(control_id: ControlId) -> Result<String> {
     control_id
         .web_selector()
@@ -1240,6 +1258,7 @@ mod tests {
     use super::{
         browser_app_url, control_selector, field_selector, navigation_control_id,
         parse_bool_setting, parse_u64_setting, tool_key_name, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+        PLAYWRIGHT_DRIVER_OWNED_MARKER,
     };
     use crate::tool_api::ToolKey;
     use aura_app::ui::contract::{ControlId, FieldId};
@@ -1328,6 +1347,19 @@ mod tests {
     }
 
     #[test]
+    fn default_playwright_driver_command_keeps_owned_process_marker() {
+        let source = include_str!("playwright_browser.rs");
+        assert!(
+            source.contains("PLAYWRIGHT_DRIVER_OWNED_MARKER.to_string()"),
+            "default browser driver command should carry the owned-process marker argument"
+        );
+        assert_eq!(
+            PLAYWRIGHT_DRIVER_OWNED_MARKER,
+            "--aura-harness-owned-playwright-driver"
+        );
+    }
+
+    #[test]
     fn playwright_shared_intent_methods_use_semantic_bridge() {
         let source = include_str!("playwright_browser.rs");
         assert!(source.contains("fn submit_semantic_command("));
@@ -1407,7 +1439,18 @@ mod tests {
     fn playwright_shared_semantic_bridge_replaces_shortcut_bypasses() {
         let source = include_str!("playwright_browser.rs");
         assert!(source.contains("fn submit_semantic_command("));
-        assert!(source.contains("session.rpc_call(\n                \"submit_semantic_command\","));
+        assert!(
+            source.contains(
+                "session.rpc_call_with_timeout(\n                \"submit_semantic_command\","
+            ),
+            "browser backend should give semantic submissions an explicit long-lived RPC timeout because browser semantic execution still crosses an owned async bridge even after driver-side restart replay is removed"
+        );
+        assert!(
+            source.contains(
+                "session.rpc_call_with_timeout(\n                \"stage_runtime_identity\","
+            ),
+            "browser backend should give runtime-identity staging the explicit longer RPC timeout budget required by generation-changing bootstrap publication flows"
+        );
         assert!(!source.contains("session.rpc_call(\n                \"create_account\","));
         assert!(!source.contains("session.rpc_call(\n                \"create_home\","));
         assert!(
@@ -1437,6 +1480,25 @@ mod tests {
         let bridge_source =
             std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness_bridge.rs"))
                 .unwrap_or_else(|error| panic!("failed to read browser harness bridge: {error}"));
+        let install_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness/install.rs"))
+                .unwrap_or_else(|error| {
+                    panic!("failed to read browser harness installer: {error}")
+                });
+        let contract_source = std::fs::read_to_string(
+            workspace_root.join("crates/aura-web/src/harness/driver_contract.rs"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read browser harness driver contract: {error}"));
+        let queue_source = std::fs::read_to_string(
+            workspace_root.join("crates/aura-web/src/harness/page_owned_queue.rs"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read browser harness queue module: {error}"));
+        let commands_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness/commands.rs"))
+                .unwrap_or_else(|error| panic!("failed to read browser harness commands: {error}"));
+        let app_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/shell/app.rs"))
+                .unwrap_or_else(|error| panic!("failed to read web shell app: {error}"));
         let driver_source = std::fs::read_to_string(
             workspace_root.join("crates/aura-harness/playwright-driver/src/playwright_driver.ts"),
         )
@@ -1444,49 +1506,260 @@ mod tests {
         let backend_source = include_str!("playwright_browser.rs");
 
         assert!(
-            bridge_source.contains("invalid semantic command request"),
-            "browser bridge should reject malformed semantic requests with typed context"
+            commands_source.contains("BrowserSemanticBridgeRequest")
+                && commands_source.contains("invalid semantic command request")
+                && install_source.contains("BrowserSemanticBridgeRequest::from_json(&request_json)?"),
+            "browser bridge should reject malformed semantic requests with typed context through the shared typed bridge surface"
         );
         assert!(
-            bridge_source.contains("BootstrapHandoff::PendingAccountBootstrap {"),
+            commands_source.contains("BootstrapHandoff::PendingAccountBootstrap {")
+                || app_source.contains("BootstrapHandoff::PendingAccountBootstrap {"),
             "browser semantic bridge should stage create-account bootstrap through the owned bootstrap handoff"
         );
         assert!(
-            bridge_source.contains("&JsValue::from_str(\"stage_runtime_identity\")"),
+            install_source.contains("&JsValue::from_str(\"stage_runtime_identity\")"),
             "browser harness bridge should expose an explicit runtime identity staging entrypoint"
+        );
+        assert!(
+            install_source.contains("page_owned_queue::install(window)")
+                && !install_source.contains("Function::new_no_args(")
+                && !install_source.contains("include_str!(\"page_owned_mutation_queues.js\")"),
+            "browser harness install should stay a thin typed installer over the canonical Rust-owned page queue module"
         );
         assert!(
             !bridge_source.contains("&JsValue::from_str(\"submit_bootstrap_handoff\")"),
             "browser harness bridge must not expose a generic bootstrap trigger"
         );
         assert!(
-            bridge_source.contains("classify_screen_item_id(&screen_name)")
-                && bridge_source.contains("classify_semantic_settings_section_item_id(&section_name)"),
+            install_source.contains("classify_screen_item_id(&screen_name)")
+                && install_source
+                    .contains("classify_semantic_settings_section_item_id(&section_name)"),
             "browser bridge should classify screen and settings item ids through the shared ui contract helpers"
         );
         assert!(
-            !bridge_source.contains("unsupported semantic browser command"),
+            !commands_source.contains("unsupported semantic browser command"),
             "browser bridge should cover the typed semantic intent surface directly instead of keeping a generic unsupported-intent fallback"
         );
         assert!(
-            driver_source.contains("resetObservationState(session, \"submit_semantic_command\")"),
-            "browser driver should invalidate stale observation state after semantic submission"
+            driver_source.contains("markObservationMutation(session, \"submit_semantic_command\")")
+                || (driver_source.contains("ACTION_METHODS.has(method)")
+                    && driver_source.contains("markObservationMutation(getSession(instanceId), method);")),
+            "browser driver should advance the semantic observation baseline for semantic submissions, whether the mutation mark is owned directly by submitSemanticCommand or by the shared dispatch action boundary"
         );
         assert!(
-            driver_source.contains("window.__AURA_HARNESS__?.stage_runtime_identity"),
-            "browser driver should stage runtime identity through the explicit owned bridge entrypoint"
+            driver_source.contains("waitForUiStateVersion(")
+                && driver_source.contains("waitForSubmitQueueReady(")
+                && !driver_source.contains("waitForPageExecutionChannelReady(\n            session,\n            `startup_semantic:${instanceId}`")
+                && !driver_source.contains("waitForPageExecutionChannelReady(\n          session,\n          `startup_submit_ready:${instanceId}`"),
+            "browser driver startup and submit readiness must bind to observed UI/semantic publication; page execution checks are infrastructure-only and must not redefine semantic readiness"
+        );
+        assert!(
+            !driver_source.contains("submit_queue_probe:")
+                && !driver_source.contains("semantic_enqueue_callable_probe:")
+                && driver_source.contains("assert_semantic_enqueue_publication_ready:")
+                && driver_source.contains("semantic_enqueue_publication_ready instance="),
+            "browser driver should keep semantic enqueue preflight publication-owned; do not reintroduce a separate page-evaluate enqueue probe ahead of the real bounded enqueue attempt"
+        );
+        assert!(
+            driver_source.contains("submit_semantic_command_failed_closed")
+                && !driver_source.contains("stage_runtime_identity enqueue_restart")
+                && !driver_source.contains("pendingRuntimeStagePayload: enqueuePayload"),
+            "browser driver should keep runtime-stage work fail-closed and bound semantic-submit recovery with an explicit failed-closed boundary instead of replaying runtime-stage payloads through restart_page_session"
+        );
+        assert!(
+            contract_source.contains("pub(crate) const RUNTIME_STAGE_ENQUEUE_KEY")
+                && queue_source.contains("use crate::harness::driver_contract::{")
+                && queue_source.contains("crate::harness_bridge::stage_runtime_identity("),
+            "browser harness bridge should reuse the production-owned driver contract module and invoke the explicit runtime identity staging entrypoint inside the page"
+        );
+        assert!(
+            driver_source.contains("from \"./driver_contract.js\";")
+                && driver_source.contains("pendingRuntimeStageQueueSeedKey: PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY")
+                && driver_source.contains("wakeRuntimeStageQueueKey: WAKE_RUNTIME_STAGE_QUEUE_KEY")
+                && driver_source.contains("queue.push(payload);")
+                && driver_source.contains("window.setTimeout(() => {")
+                && !driver_source.contains("liveEnqueue(payload);")
+                && driver_source.contains("buildRuntimeStageQueuePayloadJson("),
+            "browser driver should submit runtime-identity staging through the dedicated driver contract module by seeding the page-owned queue and scheduling the wake on the browser turn instead of synchronously invoking the live page closure"
+        );
+        assert!(
+            !driver_source.contains("\"__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__\"")
+                && !driver_source.contains("\"__AURA_DRIVER_RUNTIME_STAGE_RESULTS__\"")
+                && !driver_source.contains("\"__AURA_DRIVER_RUNTIME_STAGE_DEBUG__\""),
+            "browser driver should not re-spell shared runtime-stage driver globals inline once the dedicated contract module owns them"
+        );
+        assert!(
+            !driver_source.contains("await stageRuntimeIdentity(serializedIdentity);"),
+            "browser driver should not hold a direct page-evaluate await open across a generation-changing runtime staging handoff"
         );
         assert!(
             !driver_source.contains("window.localStorage?.setItem"),
             "browser driver must not own browser runtime-identity storage layout"
         );
         assert!(
-            driver_source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__"),
-            "browser driver should submit semantic commands through the owned in-page semantic queue"
+            contract_source.contains("pub(crate) const SEMANTIC_ENQUEUE_KEY")
+                && contract_source.contains("pub(crate) struct SemanticQueuePayload")
+                && queue_source.contains("BrowserSemanticBridgeRequest::from_json")
+                && queue_source.contains("semantic_submit_surface_state().status() != PublicationStatus::Ready"),
+            "browser harness bridge should reuse the production-owned driver contract module and keep semantic replay ownership inside the generation-aware page queue"
+        );
+        assert!(
+            driver_source.contains("queue.push(payload);")
+                && driver_source.contains("pendingSemanticQueueSeedKey: PENDING_SEMANTIC_QUEUE_SEED_KEY")
+                && driver_source.contains("wakeSemanticQueueKey: WAKE_SEMANTIC_QUEUE_KEY")
+                && driver_source.contains("mode: \"seed_and_wake_scheduled\"")
+                && driver_source.contains("window.setTimeout(() => {")
+                && !driver_source.contains("liveEnqueue(payload);")
+                && !driver_source.contains("mode: \"live\"")
+                && driver_source.contains("buildSemanticQueuePayloadJson(")
+                && !driver_source.contains("request_json: requestJson"),
+            "browser driver should submit semantic commands through the dedicated driver contract module by seeding the page-owned queue and scheduling the wake on the browser turn instead of synchronously invoking the live page closure"
+        );
+        assert!(
+            !driver_source.contains("await ensureSemanticResultTracking(")
+                && !driver_source.contains("await ensureRuntimeStageResultTracking("),
+            "browser driver must not await semantic/runtime result tracking helpers before enqueue; those helpers must return tracking promises immediately so submission can issue before waiting for completion"
+        );
+        assert!(
+            !driver_source.contains("waitForPageExecutionChannelReady(\n            session,\n            `startup_semantic:${instanceId}`")
+                && !driver_source.contains("waitForPageExecutionChannelReady(\n          session,\n          `startup_submit_ready:${instanceId}`"),
+            "browser driver startup must derive semantic and submit readiness from product-owned publication rather than page-execution probes; execution-channel failures are handled only at actual command dispatch or infrastructure recovery boundaries"
+        );
+        assert!(
+            driver_source.contains("diagnostic_dom_observer deferred")
+                && !driver_source.contains("recover_semantic_queue dom_observer_optional_failure")
+                && !driver_source.contains(
+                    "await installDomObserver(session.page, session);\n    await assertRootStructure(session, `ui_state_after_navigation_${reason}`);"
+                )
+                && !driver_source.contains(
+                    "await installDomObserver(session.page, session);\n        await uiState({ instance_id: instanceId });"
+                ),
+            "browser driver shared-semantic startup and recovery must not eagerly install the diagnostic DOM mutation observer; keep that channel lazy and conformance-only so semantic enqueue/readiness do not compete with driver-owned DOM push traffic"
+        );
+        assert!(
+            driver_source.contains("await ensureDiagnosticDomObserver(session, \"wait_for_dom_patterns\");")
+                && driver_source.contains("await ensureDiagnosticDomObserver(session, `wait_for_selector:${selector}`);"),
+            "browser driver should install the DOM mutation observer only on explicit DOM-wait paths that are diagnostic or conformance-oriented"
+        );
+        assert!(
+            !driver_source.contains("\"__AURA_DRIVER_SEMANTIC_ENQUEUE__\"")
+                && !driver_source.contains("\"__AURA_DRIVER_SEMANTIC_RESULTS__\"")
+                && !driver_source.contains("\"__AURA_DRIVER_SEMANTIC_DEBUG__\""),
+            "browser driver should not re-spell shared semantic driver globals inline once the dedicated contract module owns them"
         );
         assert!(
             backend_source.contains("failed to decode browser semantic command response"),
             "browser backend should preserve semantic bridge decode failures diagnostically"
+        );
+        let submit_start = backend_source
+            .find("fn submit_semantic_command(")
+            .unwrap_or_else(|| panic!("missing submit_semantic_command"));
+        let submit_end = backend_source[submit_start..]
+            .find("impl InstanceBackend for PlaywrightBrowserBackend {")
+            .map(|offset| submit_start + offset)
+            .unwrap_or(backend_source.len());
+        let submit_block = &backend_source[submit_start..submit_end];
+        assert!(
+            !submit_block
+                .contains("session.rpc_call(\n                        \"navigate_screen\",")
+                && !submit_block.contains(
+                    "session.rpc_call(\n                        \"open_settings_section\","
+                ),
+            "browser shared semantic submission should use submit_semantic_command instead of bypassing the page-owned semantic queue for navigation intents"
+        );
+    }
+
+    #[test]
+    fn playwright_backend_ready_wait_uses_typed_ui_snapshot_event() {
+        let source = include_str!("playwright_browser.rs");
+        let (_, tail) = source
+            .split_once("fn wait_until_ready(&self, timeout: Duration) -> Result<()> {")
+            .unwrap_or_else(|| panic!("missing wait_until_ready"));
+        let body = tail
+            .split_once("\n    }\n\n    fn is_healthy")
+            .map(|(body, _)| body)
+            .unwrap_or_else(|| panic!("missing wait_until_ready terminator"));
+        assert!(
+            body.contains("self.wait_for_ui_snapshot_event(timeout, None)"),
+            "browser backend readiness should use the typed ui snapshot event contract"
+        );
+        assert!(
+            !body.contains("blocking_sleep(Duration::from_millis(100))"),
+            "browser backend readiness should not poll with fixed sleeps"
+        );
+    }
+
+    #[test]
+    fn playwright_backend_timeout_fallback_uses_monotonic_event_version() {
+        let source = include_str!("playwright_browser.rs");
+        let start = source
+            .find("Err(error) if ui_snapshot_event_timeout(&error) => {")
+            .unwrap_or_else(|| panic!("missing ui snapshot timeout fallback"));
+        let end = source[start..]
+            .find("\n                    }\n                    Err(error) =>")
+            .map(|offset| start + offset)
+            .unwrap_or_else(|| panic!("missing timeout fallback terminator"));
+        let block = &source[start..end];
+        assert!(
+            block.contains("version: fallback_ui_snapshot_event_version(after_version),"),
+            "browser ui snapshot timeout fallback should preserve the monotonic event contract instead of reusing semantic revision as the event version"
+        );
+        assert!(
+            !block.contains("version: snapshot.revision.semantic_seq,"),
+            "browser ui snapshot timeout fallback must not reuse semantic revision as the observation event version"
+        );
+    }
+
+    #[test]
+    fn playwright_backend_authority_id_reads_from_authoritative_snapshot() {
+        let source = include_str!("playwright_browser.rs");
+        let (_, tail) = source
+            .split_once("fn authority_id(&mut self) -> Result<Option<String>> {")
+            .unwrap_or_else(|| panic!("missing authority_id"));
+        let body = tail
+            .split_once("\n    }\n\n    fn health_check")
+            .map(|(body, _)| body)
+            .unwrap_or_else(|| panic!("missing authority_id terminator"));
+        assert!(
+            body.contains("self.ui_snapshot()?"),
+            "browser authority id should read from the authoritative shared projection"
+        );
+        assert!(
+            body.contains(".selected_item_id(ListId::Authorities)"),
+            "browser authority id should mirror the TUI selection-based authority lookup"
+        );
+        assert!(
+            !body.contains("\"get_authority_id\""),
+            "browser authority id should not depend on a separate driver RPC"
+        );
+    }
+
+    #[test]
+    fn playwright_driver_startup_and_navigation_avoid_timer_loops() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap_or_else(|| panic!("workspace root"));
+        let driver_source = std::fs::read_to_string(
+            workspace_root.join("crates/aura-harness/playwright-driver/src/playwright_driver.ts"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read Playwright driver: {error}"));
+
+        assert!(
+            driver_source.contains("resetPersistentProfileDir(dataDir);"),
+            "driver startup should reset the persistent profile before launch instead of doing in-page storage scrubs"
+        );
+        assert!(
+            !driver_source.contains("storage_reset start"),
+            "driver startup should not keep the in-page storage reset loop"
+        );
+        assert!(
+            driver_source.contains("window[wakePendingNavKey]?.();"),
+            "navigation should wake an explicit pending-nav runner through the shared driver contract"
+        );
+        assert!(
+            !driver_source.contains("window.setTimeout(drain, 16)"),
+            "driver should not keep a perpetual 16ms pending-nav timer loop"
         );
     }
 }

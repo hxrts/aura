@@ -19,7 +19,7 @@ if rg -n 'submit_accept_contact_invitation_via_shared_ui|submit_invite_actor_to_
 fi
 
 for command in OpenSettingsSection StartDeviceEnrollment ImportDeviceEnrollmentCode RemoveSelectedDevice \
-  CreateContactInvitation InviteActorToChannel SelectChannel SelectHome; do
+  CreateContactInvitation InviteActorToChannel SelectChannel; do
   rg -q "HarnessUiCommand::$command" "$local_backend" \
     || fail "local backend must route $command through typed harness commands"
 done

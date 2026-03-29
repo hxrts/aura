@@ -7,7 +7,9 @@ cd "$ROOT_DIR"
 run_pair() {
   local baseline="$1"
   local current="$2"
-  cargo run -q -p aura-testkit --example protocol_compat -- "$baseline" "$current"
+  AURA_PROTOCOL_COMPAT_BASELINE="$baseline" \
+    AURA_PROTOCOL_COMPAT_CURRENT="$current" \
+    cargo test -q -p aura-testkit protocol_compat_pair_from_env -- --ignored --exact --nocapture
 }
 
 has_dynamic_roles() {

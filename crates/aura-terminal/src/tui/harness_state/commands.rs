@@ -152,10 +152,6 @@ pub(super) fn push_list(
     }
 }
 
-pub(super) fn selected_by_index(items: &[String], index: usize) -> Option<String> {
-    items.get(index).cloned()
-}
-
 pub(crate) fn apply_harness_command(
     state: &mut TuiState,
     command: HarnessUiCommand,

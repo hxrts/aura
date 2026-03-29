@@ -1,61 +1,61 @@
 module session_patterns exposing (SimpleSessionChoreography)
 
 protocol SimpleSessionChoreography =
-  roles Coordinator, Participants[*]
+  roles Coordinator, Participant
 
-  -- Phase 1: Coordinator invites participants
+  -- Phase 1: Coordinator invites participant
   Coordinator { parallel = true
-              , guard_capability = "create_session"
+              , guard_capability = "example:create_session"
               , flow_cost = 100
               , journal_facts = "session_created" }
-    -> Participants[*] : SessionInvitation of crate.SessionInvitation
+    -> Participant : SessionInvitation of crate.SessionInvitation
 
-  -- Phase 2: Participants decide to accept or decline
-  choice at Participants[*]
+  -- Phase 2: Participant decides to accept or decline
+  choice at Participant
     | accept ->
-        Participants[*] { parallel = true
-                        , guard_capability = "join_session"
-                        , flow_cost = 50
-                        , journal_facts = "session_joined" }
+        Participant { parallel = true
+                    , guard_capability = "example:join_session"
+                    , flow_cost = 50
+                    , journal_facts = "session_joined" }
           -> Coordinator : SessionAccepted of crate.SessionAccepted
 
     | decline ->
-        Participants[*] { parallel = true
-                        , guard_capability = "decline_session"
-                        , flow_cost = 25
-                        , journal_facts = "session_declined" }
+        Participant { parallel = true
+                    , guard_capability = "example:decline_session"
+                    , flow_cost = 25
+                    , journal_facts = "session_declined" }
           -> Coordinator : SessionDeclined of crate.SessionDeclined
 
   -- Phase 3: Activate session
   Coordinator { parallel = true
-              , guard_capability = "activate_session"
+              , guard_capability = "example:activate_session"
               , flow_cost = 75
               , journal_facts = "session_activated" }
-    -> Participants[*] : SessionActivated of crate.SessionActivated
+    -> Participant : SessionActivated of crate.SessionActivated
 
   -- Phase 4: Session loop
   loop decide by Coordinator
     choice at Coordinator
       | broadcast ->
           Coordinator { parallel = true
-                       , guard_capability = "broadcast_message"
+                       , guard_capability = "example:broadcast_message"
                        , flow_cost = 25 }
-            -> Participants[*] : BroadcastMessage of crate.BroadcastMessage
+            -> Participant : BroadcastMessage of crate.BroadcastMessage
 
       | status_check ->
           Coordinator { parallel = true
-                       , guard_capability = "check_status"
+                       , guard_capability = "example:check_status"
                        , flow_cost = 10 }
-            -> Participants[*] : StatusCheck of crate.StatusCheck
+            -> Participant : StatusCheck of crate.StatusCheck
 
-          Participants[*] { parallel = true
-                          , guard_capability = "report_status"
-                          , flow_cost = 15 }
+          Participant { parallel = true
+                      , guard_capability = "example:report_status"
+                      , flow_cost = 15 }
             -> Coordinator : StatusReport of crate.StatusReport
 
       | end_session ->
           Coordinator { parallel = true
-                       , guard_capability = "end_session"
+                       , guard_capability = "example:end_session"
                        , flow_cost = 100
                        , journal_facts = "session_ended" }
-            -> Participants[*] : SessionEnded of crate.SessionEnded
+            -> Participant : SessionEnded of crate.SessionEnded

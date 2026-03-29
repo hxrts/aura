@@ -4,6 +4,7 @@
 //! All operations flow through the guard chain and return outcomes
 //! for the caller to execute effects.
 
+use crate::capabilities::RendezvousCapability;
 use crate::descriptor::{DescriptorBuilder, SelectedTransport, TransportSelector};
 use crate::facts::{RendezvousDescriptor, RendezvousFact, TransportHint};
 use crate::new_channel::{HandshakeConfig, Handshaker, SecureChannel};
@@ -286,10 +287,9 @@ impl RendezvousService {
         now_ms: u64,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = types::check_capability(
-            snapshot,
-            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH),
-        ) {
+        if let Some(outcome) =
+            types::check_capability(snapshot, &RendezvousCapability::Publish.as_name())
+        {
             return outcome;
         }
 
@@ -366,10 +366,9 @@ impl RendezvousService {
         effects: &E,
     ) -> AuraResult<GuardOutcome> {
         // Check capability
-        if let Some(outcome) = types::check_capability(
-            snapshot,
-            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
-        ) {
+        if let Some(outcome) =
+            types::check_capability(snapshot, &RendezvousCapability::Connect.as_name())
+        {
             return Ok(outcome);
         }
 
@@ -477,10 +476,9 @@ impl RendezvousService {
         effects: &E,
     ) -> AuraResult<(GuardOutcome, Option<SecureChannel>)> {
         // Check capability
-        if let Some(outcome) = types::check_capability(
-            snapshot,
-            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
-        ) {
+        if let Some(outcome) =
+            types::check_capability(snapshot, &RendezvousCapability::Connect.as_name())
+        {
             return Ok((outcome, None));
         }
 
@@ -637,10 +635,9 @@ impl RendezvousService {
         snapshot: &GuardSnapshot,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = types::check_capability(
-            snapshot,
-            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_RELAY),
-        ) {
+        if let Some(outcome) =
+            types::check_capability(snapshot, &RendezvousCapability::Relay.as_name())
+        {
             return outcome;
         }
 
@@ -695,8 +692,8 @@ mod tests {
             context_id: test_context(),
             flow_budget_remaining: FlowCost::new(100),
             capabilities: vec![
-                types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH),
-                types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
+                RendezvousCapability::Publish.as_name(),
+                RendezvousCapability::Connect.as_name(),
             ],
             epoch: 1,
         }

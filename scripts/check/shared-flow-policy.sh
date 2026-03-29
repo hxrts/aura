@@ -34,7 +34,7 @@ cargo run -q -p aura-macros --bin ownership_lints -- \
   harness-recovery-ownership \
   crates/aura-harness/src/tool_api.rs \
   crates/aura-terminal/src/tui/harness_state/snapshot.rs \
-  crates/aura-ui/src/model.rs \
+  crates/aura-ui/src/model/mod.rs \
   crates/aura-web/src/harness_bridge.rs
 bash scripts/check/harness-recovery-contract.sh
 bash scripts/check/harness-wait-contract.sh

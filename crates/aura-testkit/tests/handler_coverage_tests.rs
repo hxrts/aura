@@ -95,8 +95,7 @@ fn test_effect_coverage_completeness() {
     for &effect_type in &registered_effect_types {
         assert!(
             testing_handler.supports_effect(effect_type),
-            "Testing handler should support {:?}",
-            effect_type
+            "Testing handler should support {effect_type:?}"
         );
     }
 
@@ -104,8 +103,7 @@ fn test_effect_coverage_completeness() {
     for &effect_type in &registered_effect_types {
         assert!(
             simulation_handler.supports_effect(effect_type),
-            "Simulation handler should support {:?}",
-            effect_type
+            "Simulation handler should support {effect_type:?}"
         );
     }
 
@@ -250,8 +248,7 @@ fn test_comprehensive_effect_type_validation() {
         ) {
             assert!(
                 handler.supports_effect(*effect_type),
-                "Handler must support critical protocol effect {:?}",
-                effect_type
+                "Handler must support critical protocol effect {effect_type:?}"
             );
         }
     }
@@ -298,12 +295,12 @@ fn test_handler_coverage_metrics() {
     let coverage_percentage = (supported_count as f64 / total_effects as f64) * 100.0;
 
     println!("Effect Coverage Metrics:");
-    println!("  Total effect types: {}", total_effects);
-    println!("  Supported effect types: {}", supported_count);
-    println!("  Coverage percentage: {:.1}%", coverage_percentage);
+    println!("  Total effect types: {total_effects}");
+    println!("  Supported effect types: {supported_count}");
+    println!("  Coverage percentage: {coverage_percentage:.1}%");
 
     // List supported effects
-    println!("  Supported effects: {:?}", supported_effects);
+    println!("  Supported effects: {supported_effects:?}");
 
     // List unsupported effects
     let supported_set: HashSet<_> = supported_effects.into_iter().collect();
@@ -311,13 +308,12 @@ fn test_handler_coverage_metrics() {
         .into_iter()
         .filter(|effect| !supported_set.contains(effect))
         .collect();
-    println!("  Unsupported effects: {:?}", unsupported);
+    println!("  Unsupported effects: {unsupported:?}");
 
     // Validate minimum coverage threshold
     assert!(
         coverage_percentage >= 25.0,
-        "Handler coverage should be at least 25%. Got {:.1}%",
-        coverage_percentage
+        "Handler coverage should be at least 25%. Got {coverage_percentage:.1}%"
     );
 }
 

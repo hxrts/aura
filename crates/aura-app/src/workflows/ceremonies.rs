@@ -11,8 +11,8 @@ use async_lock::RwLock;
 use super::error::{ceremony_op, WorkflowError};
 use crate::runtime_bridge::KeyRotationCeremonyStatus;
 use crate::ui_contract::{
-    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
-    SemanticOperationKind, SemanticOperationPhase,
+    OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
 };
 use crate::workflows::runtime::timeout_runtime_call;
 use crate::workflows::semantic_facts::{
@@ -21,7 +21,7 @@ use crate::workflows::semantic_facts::{
 use crate::AppCore;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
-use aura_core::{AttemptBudget, AuraError};
+use aura_core::{AttemptBudget, AuraError, OperationContext, TraceContext};
 use std::future::Future;
 use std::time::Duration;
 
@@ -162,6 +162,36 @@ pub async fn start_device_enrollment_ceremony(
         None,
         SemanticOperationKind::StartDeviceEnrollment,
     );
+    start_device_enrollment_ceremony_owned(
+        app_core,
+        nickname_suggestion,
+        invitee_authority_id,
+        &owner,
+        None,
+    )
+    .await
+}
+
+#[aura_macros::semantic_owner(
+    owner = "start_device_enrollment_ceremony_owned",
+    wrapper = "start_device_enrollment_ceremony",
+    terminal = "publish_success_with",
+    postcondition = "device_enrollment_started",
+    proof = crate::workflows::semantic_facts::DeviceEnrollmentStartedProof,
+    authoritative_inputs = "runtime,authoritative_source",
+    depends_on = "runtime_device_enrollment_started",
+    child_ops = "",
+    category = "move_owned"
+)]
+async fn start_device_enrollment_ceremony_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    invitee_authority_id: AuthorityId,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<DeviceEnrollmentCeremonyStart, AuraError> {
     owner
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
         .await?;
@@ -183,14 +213,14 @@ pub async fn start_device_enrollment_ceremony(
         Ok(Ok(start)) => start,
         Ok(Err(error)) => {
             return fail_start_device_enrollment(
-                &owner,
+                owner,
                 ceremony_op("start device enrollment", error).to_string(),
             )
             .await;
         }
         Err(error) => {
             return fail_start_device_enrollment(
-                &owner,
+                owner,
                 ceremony_op("start device enrollment", error).to_string(),
             )
             .await;
@@ -214,6 +244,32 @@ pub async fn start_device_enrollment_ceremony(
         handle,
         status_handle,
     })
+}
+
+pub async fn start_device_enrollment_ceremony_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    invitee_authority_id: AuthorityId,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<DeviceEnrollmentCeremonyStart> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::device_enrollment(),
+        instance_id,
+        SemanticOperationKind::StartDeviceEnrollment,
+    );
+    let result = start_device_enrollment_ceremony_owned(
+        app_core,
+        nickname_suggestion,
+        invitee_authority_id,
+        &owner,
+        None,
+    )
+    .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
 }
 /// Start a device removal ("remove device") ceremony.
 pub async fn start_device_removal_ceremony(
@@ -344,6 +400,17 @@ pub async fn cancel_key_rotation_ceremony(
         .map_err(|e| ceremony_op("cancel ceremony", e).into())
 }
 
+/// Cancel a key-rotation ceremony using a stored ceremony id.
+pub async fn cancel_key_rotation_ceremony_by_id(
+    app_core: &Arc<RwLock<AppCore>>,
+    ceremony_id: CeremonyId,
+) -> Result<(), AuraError> {
+    let core = app_core.read().await;
+    core.cancel_key_rotation_ceremony(&ceremony_id)
+        .await
+        .map_err(|e| ceremony_op("cancel ceremony", e).into())
+}
+
 /// Poll a key rotation ceremony until completion or failure using a policy.
 ///
 /// This is a portable (frontend-agnostic) helper for driving ceremony progress UIs.
@@ -352,12 +419,12 @@ pub async fn monitor_key_rotation_ceremony_with_policy<SleepFn, SleepFut>(
     app_core: &Arc<RwLock<AppCore>>,
     handle: &CeremonyStatusHandle,
     policy: CeremonyPollPolicy,
-    mut on_update: impl FnMut(&KeyRotationCeremonyStatus) + Send,
+    mut on_update: impl FnMut(&KeyRotationCeremonyStatus),
     mut sleep_fn: SleepFn,
 ) -> Result<CeremonyLifecycle<KeyRotationCeremonyStatus>, AuraError>
 where
-    SleepFn: FnMut(Duration) -> SleepFut + Send,
-    SleepFut: Future<Output = ()> + Send,
+    SleepFn: FnMut(Duration) -> SleepFut,
+    SleepFut: Future<Output = ()>,
 {
     // Bounded polling to avoid infinite loops; UIs can re-invoke if desired.
     let mut attempts = AttemptBudget::new(policy.max_attempts);
@@ -446,12 +513,12 @@ pub async fn monitor_key_rotation_ceremony<SleepFn, SleepFut>(
     app_core: &Arc<RwLock<AppCore>>,
     handle: &CeremonyStatusHandle,
     poll_interval: Duration,
-    mut on_update: impl FnMut(&KeyRotationCeremonyStatus) + Send,
+    mut on_update: impl FnMut(&KeyRotationCeremonyStatus),
     mut sleep_fn: SleepFn,
 ) -> Result<KeyRotationCeremonyStatus, AuraError>
 where
-    SleepFn: FnMut(Duration) -> SleepFut + Send,
-    SleepFut: Future<Output = ()> + Send,
+    SleepFn: FnMut(Duration) -> SleepFut,
+    SleepFut: Future<Output = ()>,
 {
     let policy = CeremonyPollPolicy::with_interval(poll_interval);
     let lifecycle = monitor_key_rotation_ceremony_with_policy(

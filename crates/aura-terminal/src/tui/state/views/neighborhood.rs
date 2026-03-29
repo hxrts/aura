@@ -29,7 +29,7 @@ pub enum DetailFocus {
 }
 
 /// Neighborhood screen state
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct NeighborhoodViewState {
     /// Current mode (map vs detail)
     pub mode: NeighborhoodMode,
@@ -73,6 +73,32 @@ pub struct NeighborhoodViewState {
 
     /// Whether moderator actions are enabled for current user in this home
     pub moderator_actions_enabled: bool,
+}
+
+impl Default for NeighborhoodViewState {
+    fn default() -> Self {
+        Self {
+            mode: NeighborhoodMode::Map,
+            detail_focus: DetailFocus::Channels,
+            grid: GridNav::default(),
+            enter_depth: AccessLevel::Full,
+            selected_neighborhood: 0,
+            neighborhood_count: 0,
+            selected_home: 0,
+            home_count: 0,
+            entered_home_id: None,
+            selected_channel: 0,
+            channel_count: 0,
+            selected_member: 0,
+            member_count: 0,
+            insert_mode: false,
+            insert_mode_entry_char: None,
+            input_buffer: String::new(),
+            message_scroll: 0,
+            message_count: 0,
+            moderator_actions_enabled: false,
+        }
+    }
 }
 
 /// State for home creation modal

@@ -43,9 +43,14 @@ async fn test_authentication_status_via_agent() -> Result<(), Box<dyn std::error
 
     let auth = agent.auth()?;
 
-    let status = auth.authentication_status().await?;
-    assert_eq!(status.authority_id, authority_id);
-    assert_eq!(status.device_id, auth.device_id());
+    let error = match auth.authentication_status().await {
+        Ok(status) => panic!("authentication status should require authorization, got {status:?}"),
+        Err(error) => error,
+    };
+    assert!(
+        error.to_string().contains("Authorization denied"),
+        "expected authorization denial, got: {error}"
+    );
     Ok(())
 }
 

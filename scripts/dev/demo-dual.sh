@@ -239,13 +239,17 @@ start_web_server() {
   stop_port_listener "$web_port" "web"
 
   : >"$web_log"
+  printf "[demo] building web frontend... (0/? crates, 0s)" >&2
   ./scripts/web/serve-static.sh "$web_port" >"$web_log" 2>&1 &
   web_server_pid=$!
   echo "$web_server_pid" >"$web_pid_file"
 
   local ready="0"
-  for _ in $(seq 1 180); do
+  local elapsed=0
+  local total="?"
+  for _ in $(seq 1 600); do
     if ! kill -0 "$web_server_pid" 2>/dev/null; then
+      echo "" >&2
       echo "[demo] static web server exited before becoming reachable" >&2
       tail -n 200 "$web_log" >&2 || true
       exit 1
@@ -255,13 +259,26 @@ start_web_server() {
       break
     fi
     sleep 1
+    elapsed=$((elapsed + 1))
+    if (( elapsed % 5 == 0 )); then
+      local progress
+      progress="$(grep -c 'INFO Compiled' "$web_log" 2>/dev/null || echo 0)"
+      if [[ "$total" == "?" ]]; then
+        local last_entry
+        last_entry="$(grep -o 'Compiled \[[0-9]*/[0-9]*\]' "$web_log" 2>/dev/null | tail -1 | grep -o '/[0-9]*' | tr -d '/' || true)"
+        [[ -n "$last_entry" ]] && total="$last_entry"
+      fi
+      printf "\r[demo] building web frontend... (%s/%s crates, %ss)" "$progress" "$total" "$elapsed" >&2
+    fi
   done
 
   if [[ "$ready" != "1" ]]; then
+    echo "" >&2
     echo "[demo] timed out waiting for static web server at $web_url" >&2
     tail -n 200 "$web_log" >&2 || true
     exit 1
   fi
+  printf "\r[demo] web server ready at %s%s\n" "$web_url" "$(printf ' %.0s' {1..30})" >&2
 }
 
 set_manual_browser_command() {
@@ -328,10 +345,15 @@ launch_browser() {
   fi
 
   if ! select_browser; then
-    echo "[demo] failed to find a supported browser launcher for dedicated-profile mode" >&2
-    echo "[demo] manual browser launch:" >&2
-    echo "  $manual_browser_cmd" >&2
-    exit 1
+    echo "[demo] no Chrome/Chromium found; opening default browser" >&2
+    if [[ "$OSTYPE" == darwin* ]]; then
+      open "$web_url" >>"$browser_log" 2>&1 || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$web_url" >>"$browser_log" 2>&1 || true
+    else
+      echo "[demo] no browser opener found; open manually: $web_url" >&2
+    fi
+    return 0
   fi
 
   if [[ "$OSTYPE" == darwin* ]]; then

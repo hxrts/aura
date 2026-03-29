@@ -141,7 +141,7 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
             #(if !error.is_empty() {
                 Some(element! {
                     View(width: 100pct, padding: Spacing::PANEL_PADDING, background_color: Theme::ERROR) {
-                        Text(content: error.clone(), color: Theme::TEXT)
+                        Text(content: error, color: Theme::TEXT)
                     }
                 })
             } else {

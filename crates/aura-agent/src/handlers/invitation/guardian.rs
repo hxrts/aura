@@ -67,50 +67,69 @@ impl<'a> InvitationGuardianHandler<'a> {
                 to_vec(&confirm).map_err(|error| AgentError::internal(error.to_string()))?,
             );
 
-            let loop_result = loop {
-                let round = session
-                    .advance_round_until_receive(
-                        "Principal",
-                        &peer_roles,
-                        InvitationHandler::is_transport_no_message,
-                    )
-                    .await
-                    .map_err(|error| AgentError::internal(error.to_string()))?;
+            let budget = invitation_timeout_budget(
+                effects.as_ref(),
+                "guardian_invitation_principal_vm",
+                INVITATION_VM_LOOP_TIMEOUT_MS,
+            )
+            .await?;
 
-                if let Some(blocked) = round.blocked_receive {
-                    session
-                        .inject_blocked_receive(&blocked)
+            let loop_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
+                loop {
+                    let round = session
+                        .advance_round_until_receive(
+                            "Principal",
+                            &peer_roles,
+                            InvitationHandler::is_transport_no_message,
+                        )
+                        .await
                         .map_err(|error| AgentError::internal(error.to_string()))?;
-                    continue;
-                }
 
-                match round.host_wait_status {
-                    AuraVmHostWaitStatus::Deferred => break Ok(()),
-                    AuraVmHostWaitStatus::Idle => {}
-                    AuraVmHostWaitStatus::TimedOut => {
-                        break Err(AgentError::internal(
-                            "guardian principal VM timed out while waiting for receive".to_string(),
-                        ));
+                    if let Some(blocked) = round.blocked_receive {
+                        session
+                            .inject_blocked_receive(&blocked)
+                            .map_err(|error| AgentError::internal(error.to_string()))?;
+                        continue;
                     }
-                    AuraVmHostWaitStatus::Cancelled => {
-                        break Err(AgentError::internal(
-                            "guardian principal VM cancelled while waiting for receive".to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Delivered => {}
-                }
 
-                match round.step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(
-                            "guardian principal VM became stuck without a pending receive"
-                                .to_string(),
-                        ));
+                    match round.host_wait_status {
+                        AuraVmHostWaitStatus::Deferred => break Ok(()),
+                        AuraVmHostWaitStatus::Idle => {}
+                        AuraVmHostWaitStatus::TimedOut => {
+                            break Err(AgentError::internal(
+                                "guardian principal VM timed out while waiting for receive"
+                                    .to_string(),
+                            ));
+                        }
+                        AuraVmHostWaitStatus::Cancelled => {
+                            break Err(AgentError::internal(
+                                "guardian principal VM cancelled while waiting for receive"
+                                    .to_string(),
+                            ));
+                        }
+                        AuraVmHostWaitStatus::Delivered => {}
+                    }
+
+                    match round.step {
+                        StepResult::AllDone => break Ok(()),
+                        StepResult::Continue => {}
+                        StepResult::Stuck => {
+                            break Err(AgentError::internal(
+                                "guardian principal VM became stuck without a pending receive"
+                                    .to_string(),
+                            ));
+                        }
                     }
                 }
-            };
+            })
+            .await
+            .map_err(|error| match error {
+                TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
+                    "guardian principal VM exceeded {}ms overall timeout",
+                    budget.timeout_ms()
+                )),
+                TimeoutRunError::Operation(error) => error,
+            });
 
             let _ = session.close().await;
             loop_result
@@ -155,44 +174,61 @@ impl<'a> InvitationGuardianHandler<'a> {
                 to_vec(&accept).map_err(|error| AgentError::internal(error.to_string()))?,
             );
 
-            let loop_result = loop {
-                let round = session
-                    .advance_round("Guardian", &peer_roles)
-                    .await
-                    .map_err(|error| AgentError::internal(error.to_string()))?;
+            let budget = invitation_timeout_budget(
+                effects.as_ref(),
+                "guardian_invitation_guardian_vm",
+                INVITATION_VM_LOOP_TIMEOUT_MS,
+            )
+            .await?;
 
-                if let Some(blocked) = round.blocked_receive {
-                    session
-                        .inject_blocked_receive(&blocked)
+            let loop_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
+                loop {
+                    let round = session
+                        .advance_round("Guardian", &peer_roles)
+                        .await
                         .map_err(|error| AgentError::internal(error.to_string()))?;
-                    continue;
-                }
 
-                match round.host_wait_status {
-                    AuraVmHostWaitStatus::Idle => {}
-                    AuraVmHostWaitStatus::TimedOut => {
-                        break Err(AgentError::internal(
-                            "guardian VM timed out while waiting for receive".to_string(),
-                        ));
+                    if let Some(blocked) = round.blocked_receive {
+                        session
+                            .inject_blocked_receive(&blocked)
+                            .map_err(|error| AgentError::internal(error.to_string()))?;
+                        continue;
                     }
-                    AuraVmHostWaitStatus::Cancelled => {
-                        break Err(AgentError::internal(
-                            "guardian VM cancelled while waiting for receive".to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
-                }
 
-                match round.step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(
-                            "guardian VM became stuck without a pending receive".to_string(),
-                        ));
+                    match round.host_wait_status {
+                        AuraVmHostWaitStatus::Idle => {}
+                        AuraVmHostWaitStatus::TimedOut => {
+                            break Err(AgentError::internal(
+                                "guardian VM timed out while waiting for receive".to_string(),
+                            ));
+                        }
+                        AuraVmHostWaitStatus::Cancelled => {
+                            break Err(AgentError::internal(
+                                "guardian VM cancelled while waiting for receive".to_string(),
+                            ));
+                        }
+                        AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                    }
+
+                    match round.step {
+                        StepResult::AllDone => break Ok(()),
+                        StepResult::Continue => {}
+                        StepResult::Stuck => {
+                            break Err(AgentError::internal(
+                                "guardian VM became stuck without a pending receive".to_string(),
+                            ));
+                        }
                     }
                 }
-            };
+            })
+            .await
+            .map_err(|error| match error {
+                TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
+                    "guardian VM exceeded {}ms overall timeout",
+                    budget.timeout_ms()
+                )),
+                TimeoutRunError::Operation(error) => error,
+            });
 
             let _ = session.close().await;
             loop_result

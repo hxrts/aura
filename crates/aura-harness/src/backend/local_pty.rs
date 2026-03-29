@@ -5,8 +5,7 @@ use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::sync::Condvar;
+use std::sync::{Arc, Condvar};
 use std::thread;
 use std::time::Duration;
 
@@ -28,27 +27,17 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    latest_invitation_code, ChannelBinding, ContactInvitationCode, DiagnosticBackend,
-    InstanceBackend, ObservationBackend, RawUiBackend, SharedSemanticBackend, SubmittedAction,
-    UiOperationHandle, UiSnapshotEvent,
+    ChannelBinding, ContactInvitationCode, DiagnosticBackend, InstanceBackend, ObservationBackend,
+    RawUiBackend, SharedSemanticBackend, SubmittedAction, UiOperationHandle, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
 use crate::timeouts::blocking_sleep;
-use crate::workspace_root;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum BackendState {
     Stopped,
     Running,
-}
-
-fn selected_channel_ref(snapshot: &UiSnapshot) -> Option<String> {
-    snapshot
-        .selections
-        .iter()
-        .find(|selection| selection.list == ListId::Channels)
-        .map(|selection| selection.item_id.clone())
 }
 
 fn into_ui_operation_handle(
@@ -213,17 +202,42 @@ struct RunningSession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     parser: Arc<Mutex<vt100::Parser>>,
     parse_generation: Arc<AtomicU64>,
+    reader_status: Arc<BlockingStatusCell<Option<String>>>,
     reader_thread: Option<thread::JoinHandle<()>>,
     ui_snapshot_feed: Arc<UiSnapshotFeed>,
+    ui_snapshot_listener_status: Arc<BlockingStatusCell<Option<String>>>,
     ui_snapshot_thread: Option<thread::JoinHandle<()>>,
     ui_snapshot_stop: Arc<AtomicU64>,
+    transient_root: PathBuf,
+    socket_root: PathBuf,
     ui_snapshot_socket_path: PathBuf,
+    ui_snapshot_file_path: PathBuf,
+    command_socket_path: PathBuf,
+    clipboard_file_path: PathBuf,
+    child_pid_path: PathBuf,
 }
 
 #[derive(Default)]
 struct UiSnapshotFeedState {
     latest: Option<UiSnapshot>,
     version: u64,
+}
+
+#[allow(clippy::disallowed_types)]
+#[derive(Default)]
+struct BlockingStatusCell<T>(std::sync::Mutex<T>);
+
+impl<T> BlockingStatusCell<T> {
+    #[allow(clippy::disallowed_types)]
+    fn new(value: T) -> Self {
+        Self(std::sync::Mutex::new(value))
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, T> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 
 #[allow(clippy::disallowed_types)]
@@ -237,6 +251,7 @@ pub struct LocalPtyBackend {
     config: InstanceConfig,
     state: BackendState,
     session: Option<RunningSession>,
+    session_generation: u64,
     pty_rows: u16,
     pty_cols: u16,
     last_authoritative_screen: Arc<Mutex<Option<String>>>,
@@ -256,10 +271,26 @@ impl LocalPtyBackend {
         }
         let screen = Self::read_screen(&session.parser);
         let log_tail = self.tail_log(40).unwrap_or_default().join("\n");
+        let reader_alive = Self::reader_thread_alive(session);
+        let child_alive = Self::child_process_alive(session);
+        let child_status = Self::child_process_status(session);
+        let ui_snapshot_thread_alive = session
+            .ui_snapshot_thread
+            .as_ref()
+            .map_or(true, |thread| !thread.is_finished());
+        let reader_status = session.reader_status.lock().clone();
+        let ui_snapshot_listener_status = session.ui_snapshot_listener_status.lock().clone();
         anyhow::bail!(
-            "local PTY instance {} exited before {context}; last_screen={:?} log_tail={}",
+            "local PTY instance {} exited before {context}; last_screen={:?} reader_alive={} reader_status={reader_status:?} child_alive={} child_status={child_status:?} ui_snapshot_thread_alive={} ui_snapshot_listener_status={ui_snapshot_listener_status:?} command_socket_exists={} ui_snapshot_socket_exists={} ui_snapshot_file_exists={} child_pid_file_exists={} log_tail={}",
             self.config.id,
             self.select_authoritative_screen(screen),
+            reader_alive,
+            child_alive,
+            ui_snapshot_thread_alive,
+            session.command_socket_path.exists(),
+            session.ui_snapshot_socket_path.exists(),
+            session.ui_snapshot_file_path.exists(),
+            session.child_pid_path.exists(),
             log_tail,
         );
     }
@@ -283,6 +314,25 @@ impl LocalPtyBackend {
         }
     }
 
+    fn child_process_status(session: &RunningSession) -> Option<String> {
+        let Ok(mut child) = session.child.try_lock() else {
+            return Some("child mutex busy".to_string());
+        };
+        match child.try_wait() {
+            Ok(Some(status)) => Some(status.to_string()),
+            Ok(None) => {
+                let Some(pid) = child.process_id() else {
+                    return Some("running (no child pid available)".to_string());
+                };
+                match signal::kill(Pid::from_raw(pid as i32), None) {
+                    Ok(()) | Err(Errno::EPERM) => Some(format!("running (pid={pid})")),
+                    Err(error) => Some(format!("unreachable pid={pid}: {error}")),
+                }
+            }
+            Err(error) => Some(format!("try_wait failed: {error}")),
+        }
+    }
+
     fn is_cargo_program(program: &str) -> bool {
         std::path::Path::new(program)
             .file_name()
@@ -291,90 +341,44 @@ impl LocalPtyBackend {
             .unwrap_or(false)
     }
 
-    fn ui_state_socket_path(&self) -> PathBuf {
+    fn transient_root(&self) -> PathBuf {
+        Self::env_value("AURA_HARNESS_INSTANCE_TRANSIENT_ROOT", &self.config.env)
+            .map(PathBuf::from)
+            .map(Self::absolutize_path)
+            .unwrap_or_else(|| {
+                Self::absolutize_path(self.config.data_dir.join(".harness-transient"))
+            })
+    }
+
+    fn socket_root(&self) -> PathBuf {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.config.data_dir.hash(&mut hasher);
         self.config.id.hash(&mut hasher);
-        workspace_root()
-            .join(".tmp")
-            .join("harness-ui")
-            .join(format!("{:016x}.sock", hasher.finish()))
+        self.transient_root().hash(&mut hasher);
+        std::env::temp_dir().join(format!("aura-h-{:016x}", hasher.finish()))
     }
 
-    fn ui_state_file_path(&self) -> PathBuf {
-        Self::absolutize_path(self.config.data_dir.join(".harness-ui-state.json"))
+    fn ui_state_socket_path(&self, session_generation: u64) -> PathBuf {
+        self.socket_root()
+            .join(format!("u{session_generation:x}.sock"))
     }
 
-    fn command_socket_path(&self) -> PathBuf {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.config.data_dir.hash(&mut hasher);
-        self.config.id.hash(&mut hasher);
-        "command".hash(&mut hasher);
-        workspace_root()
-            .join(".tmp")
-            .join("harness-ui")
-            .join(format!("{:016x}.cmd.sock", hasher.finish()))
+    fn ui_state_file_path(&self, session_generation: u64) -> PathBuf {
+        self.transient_root()
+            .join(format!("ui-state-gen{session_generation}.json"))
     }
 
-    fn command_plane_ready(&self) -> Result<bool> {
-        let socket_path = Self::absolutize_path(self.command_socket_path());
-        let mut stream = match UnixStream::connect(&socket_path) {
-            Ok(stream) => stream,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    ErrorKind::NotFound | ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset
-                ) =>
-            {
-                return Ok(false);
-            }
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!(
-                        "failed to connect TUI harness command socket {}",
-                        socket_path.display()
-                    )
-                });
-            }
-        };
-        stream
-            .set_read_timeout(Some(Duration::from_millis(250)))
-            .context("failed to set harness command socket read timeout")?;
-        stream
-            .set_write_timeout(Some(Duration::from_millis(250)))
-            .context("failed to set harness command socket write timeout")?;
-        let payload = serde_json::to_vec(&HarnessUiCommand::Ping)
-            .context("failed to encode harness ping command")?;
-        stream
-            .write_all(&payload)
-            .context("failed to write harness ping command")?;
-        stream
-            .flush()
-            .context("failed to flush harness ping command")?;
-        stream
-            .shutdown(Shutdown::Write)
-            .context("failed to half-close harness ping socket")?;
-        let mut receipt = Vec::new();
-        match stream.read_to_end(&mut receipt) {
-            Ok(_) => {}
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::UnexpectedEof
-                ) =>
-            {
-                return Ok(false);
-            }
-            Err(error) => {
-                return Err(error).context("failed to read harness ping receipt");
-            }
-        }
-        if receipt.is_empty() {
-            return Ok(false);
-        }
-        let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt)
-            .context("failed to decode harness ping receipt")?;
-        Ok(matches!(receipt, HarnessUiCommandReceipt::Accepted { .. }))
+    fn command_socket_path(&self, session_generation: u64) -> PathBuf {
+        self.socket_root()
+            .join(format!("c{session_generation:x}.sock"))
+    }
+
+    fn clipboard_file_path(&self) -> PathBuf {
+        self.transient_root().join("clipboard.txt")
+    }
+
+    fn child_pid_path(&self, session_generation: u64) -> PathBuf {
+        self.transient_root()
+            .join(format!("child-gen{session_generation}.pid"))
     }
 
     pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
@@ -382,6 +386,7 @@ impl LocalPtyBackend {
             config,
             state: BackendState::Stopped,
             session: None,
+            session_generation: 0,
             pty_rows: pty_rows.unwrap_or(40),
             pty_cols: pty_cols.unwrap_or(120),
             last_authoritative_screen: Arc::new(Mutex::new(None)),
@@ -392,6 +397,7 @@ impl LocalPtyBackend {
         socket_path: &PathBuf,
         feed: &Arc<UiSnapshotFeed>,
         stop_flag: &Arc<AtomicU64>,
+        listener_status: &Arc<BlockingStatusCell<Option<String>>>,
     ) -> Result<thread::JoinHandle<()>> {
         let _ = fs::remove_file(socket_path);
         if let Some(parent) = socket_path.parent() {
@@ -411,22 +417,31 @@ impl LocalPtyBackend {
         let socket_path = socket_path.clone();
         let feed = Arc::clone(feed);
         let stop_flag = Arc::clone(stop_flag);
+        let listener_status = Arc::clone(listener_status);
         Ok(thread::spawn(move || {
+            let set_status = |status: String| {
+                *listener_status.lock() = Some(status);
+            };
             for stream in listener.incoming() {
                 if stop_flag.load(Ordering::Acquire) > 0 {
+                    set_status("stopped by harness request".to_string());
                     break;
                 }
                 let Ok(mut stream) = stream else {
+                    set_status("listener accept failed".to_string());
                     continue;
                 };
                 let mut payload = String::new();
-                if stream.read_to_string(&mut payload).is_err() {
+                if let Err(error) = stream.read_to_string(&mut payload) {
+                    set_status(format!("listener failed reading snapshot payload: {error}"));
                     continue;
                 }
                 if payload.trim() == "__AURA_UI_STATE_SHUTDOWN__" {
+                    set_status("received harness shutdown sentinel".to_string());
                     break;
                 }
                 let Ok(snapshot) = serde_json::from_str::<UiSnapshot>(&payload) else {
+                    set_status("listener failed decoding snapshot payload".to_string());
                     continue;
                 };
                 let mut guard = feed
@@ -436,6 +451,10 @@ impl LocalPtyBackend {
                 guard.version = guard.version.saturating_add(1);
                 guard.latest = Some(snapshot);
                 feed.ready.notify_all();
+            }
+            if listener_status.lock().is_none() {
+                *listener_status.lock() =
+                    Some("listener exited without explicit status".to_string());
             }
             let _ = fs::remove_file(socket_path);
         }))
@@ -563,10 +582,16 @@ impl LocalPtyBackend {
     }
 
     fn send_harness_command_receipt(
-        &mut self,
+        &self,
         command: &HarnessUiCommand,
     ) -> Result<HarnessUiCommandReceipt> {
-        let socket_path = Self::absolutize_path(self.command_socket_path());
+        let socket_path = self
+            .session
+            .as_ref()
+            .map(|session| session.command_socket_path.clone())
+            .unwrap_or_else(|| {
+                Self::absolutize_path(self.command_socket_path(self.session_generation))
+            });
         let payload = serde_json::to_vec(command).context("failed to encode harness UI command")?;
         let deadline = Instant::now() + Duration::from_secs(10);
 
@@ -700,6 +725,8 @@ impl InstanceBackend for LocalPtyBackend {
             return Ok(());
         }
         *self.last_authoritative_screen.blocking_lock() = None;
+        self.session_generation = self.session_generation.saturating_add(1);
+        let session_generation = self.session_generation;
 
         let (rows, cols) = self.parser_size();
         let pty_system = native_pty_system();
@@ -733,30 +760,45 @@ impl InstanceBackend for LocalPtyBackend {
         if Self::env_value("AURA_CLIPBOARD_MODE", &self.config.env).is_none() {
             command.env("AURA_CLIPBOARD_MODE", "file_only");
         }
+        let transient_root = self.transient_root();
+        fs::create_dir_all(&transient_root).with_context(|| {
+            format!(
+                "failed to create instance transient root {}",
+                transient_root.display()
+            )
+        })?;
+        let socket_root = self.socket_root();
+        fs::create_dir_all(&socket_root).with_context(|| {
+            format!(
+                "failed to create instance socket root {}",
+                socket_root.display()
+            )
+        })?;
         if Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env).is_none() {
-            let clipboard_file =
-                Self::absolutize_path(self.config.data_dir.join(".harness-clipboard.txt"));
+            let clipboard_file = Self::absolutize_path(self.clipboard_file_path());
             command.env(
                 "AURA_CLIPBOARD_FILE",
                 clipboard_file.to_string_lossy().to_string(),
             );
         }
         if Self::env_value("AURA_TUI_UI_STATE_SOCKET", &self.config.env).is_none() {
-            let ui_state_socket = Self::absolutize_path(self.ui_state_socket_path());
+            let ui_state_socket =
+                Self::absolutize_path(self.ui_state_socket_path(session_generation));
             command.env(
                 "AURA_TUI_UI_STATE_SOCKET",
                 ui_state_socket.to_string_lossy().to_string(),
             );
         }
         if Self::env_value("AURA_TUI_UI_STATE_FILE", &self.config.env).is_none() {
-            let ui_state_file = self.ui_state_file_path();
+            let ui_state_file = self.ui_state_file_path(session_generation);
             command.env(
                 "AURA_TUI_UI_STATE_FILE",
                 ui_state_file.to_string_lossy().to_string(),
             );
         }
         if Self::env_value("AURA_TUI_COMMAND_SOCKET", &self.config.env).is_none() {
-            let command_socket = Self::absolutize_path(self.command_socket_path());
+            let command_socket =
+                Self::absolutize_path(self.command_socket_path(session_generation));
             command.env(
                 "AURA_TUI_COMMAND_SOCKET",
                 command_socket.to_string_lossy().to_string(),
@@ -798,11 +840,20 @@ impl InstanceBackend for LocalPtyBackend {
         })?;
         let ui_snapshot_feed = Arc::new(UiSnapshotFeed::default());
         let ui_snapshot_stop = Arc::new(AtomicU64::new(0));
-        let ui_snapshot_socket_path = Self::absolutize_path(self.ui_state_socket_path());
+        let ui_snapshot_socket_path =
+            Self::absolutize_path(self.ui_state_socket_path(session_generation));
+        let ui_snapshot_file_path =
+            Self::absolutize_path(self.ui_state_file_path(session_generation));
+        let command_socket_path =
+            Self::absolutize_path(self.command_socket_path(session_generation));
+        let clipboard_file_path = Self::absolutize_path(self.clipboard_file_path());
+        let child_pid_path = Self::absolutize_path(self.child_pid_path(session_generation));
+        let ui_snapshot_listener_status = Arc::new(BlockingStatusCell::new(None));
         let ui_snapshot_thread = Self::spawn_ui_snapshot_listener(
             &ui_snapshot_socket_path,
             &ui_snapshot_feed,
             &ui_snapshot_stop,
+            &ui_snapshot_listener_status,
         )?;
         let child = match pair.slave.spawn_command(command) {
             Ok(child) => child,
@@ -831,30 +882,73 @@ impl InstanceBackend for LocalPtyBackend {
         let parse_generation = Arc::new(AtomicU64::new(0));
         let parser_for_thread = Arc::clone(&parser);
         let generation_for_thread = Arc::clone(&parse_generation);
+        let log_path_for_thread = self.config.log_path.clone();
+        let reader_status = Arc::new(BlockingStatusCell::new(None));
+        let reader_status_for_thread = Arc::clone(&reader_status);
         let reader_thread = thread::spawn(move || {
+            let set_status = |status: String| {
+                *reader_status_for_thread.lock() = Some(status);
+            };
+            let mut log_file = log_path_for_thread.and_then(|path| {
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .ok()
+            });
             let mut buffer = [0u8; 4096];
             loop {
                 match reader.read(&mut buffer) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        set_status("PTY reader reached EOF".to_string());
+                        break;
+                    }
                     Ok(read) => {
+                        if let Some(file) = log_file.as_mut() {
+                            let _ = file.write_all(&buffer[..read]);
+                            let _ = file.flush();
+                        }
                         parser_for_thread.blocking_lock().process(&buffer[..read]);
                         generation_for_thread.fetch_add(1, Ordering::Release);
                     }
-                    Err(_) => break,
+                    Err(error) => {
+                        set_status(format!("PTY reader error: {error}"));
+                        break;
+                    }
                 }
             }
         });
+
+        if let Some(pid) = child.process_id() {
+            fs::write(&child_pid_path, pid.to_string()).with_context(|| {
+                format!(
+                    "failed to persist local PTY child pid at {}",
+                    child_pid_path.display()
+                )
+            })?;
+        }
 
         self.session = Some(RunningSession {
             child: Mutex::new(child),
             writer: Arc::new(Mutex::new(writer)),
             parser,
             parse_generation,
+            reader_status,
             reader_thread: Some(reader_thread),
             ui_snapshot_feed,
+            ui_snapshot_listener_status,
             ui_snapshot_thread: Some(ui_snapshot_thread),
             ui_snapshot_stop,
+            transient_root,
+            socket_root,
             ui_snapshot_socket_path,
+            ui_snapshot_file_path,
+            command_socket_path,
+            clipboard_file_path,
+            child_pid_path,
         });
         self.state = BackendState::Running;
         Ok(())
@@ -885,6 +979,12 @@ impl InstanceBackend for LocalPtyBackend {
             if let Some(handle) = session.ui_snapshot_thread.take() {
                 let _ = handle.join();
             }
+            let _ = fs::remove_file(&session.child_pid_path);
+            let _ = fs::remove_file(&session.command_socket_path);
+            let _ = fs::remove_file(&session.ui_snapshot_socket_path);
+            let _ = fs::remove_file(&session.clipboard_file_path);
+            let _ = fs::remove_dir_all(&session.socket_root);
+            let _ = fs::remove_dir_all(&session.transient_root);
         }
 
         self.state = BackendState::Stopped;
@@ -910,21 +1010,9 @@ impl InstanceBackend for LocalPtyBackend {
 
     fn authority_id(&mut self) -> Result<Option<String>> {
         let snapshot = self.ui_snapshot()?;
-        if let Some(selection) = snapshot
-            .selections
-            .iter()
-            .find(|selection| selection.list == ListId::Authorities)
-        {
-            return Ok(Some(selection.item_id.clone()));
-        }
-
-        let authority_id = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Authorities)
-            .and_then(|list| list.items.iter().find(|item| item.selected))
-            .map(|item| item.id.clone());
-        Ok(authority_id)
+        Ok(snapshot
+            .selected_item_id(ListId::Authorities)
+            .map(str::to_string))
     }
 
     fn health_check(&self) -> Result<bool> {
@@ -957,10 +1045,23 @@ impl InstanceBackend for LocalPtyBackend {
         }
 
         let deadline = Instant::now() + timeout;
+        let mut last_ping_error: Option<String> = None;
         loop {
             if let Ok(snapshot) = self.ui_snapshot() {
-                if snapshot.readiness == UiReadiness::Ready && self.command_plane_ready()? {
-                    return Ok(());
+                if snapshot.readiness == UiReadiness::Ready {
+                    match self.send_harness_command_receipt(&HarnessUiCommand::Ping) {
+                        Ok(HarnessUiCommandReceipt::Accepted { .. })
+                        | Ok(HarnessUiCommandReceipt::AcceptedWithOperation { .. }) => {
+                            return Ok(());
+                        }
+                        Ok(HarnessUiCommandReceipt::Rejected { reason }) => {
+                            last_ping_error =
+                                Some(format!("command plane rejected readiness ping: {reason}"));
+                        }
+                        Err(error) => {
+                            last_ping_error = Some(error.to_string());
+                        }
+                    }
                 }
             }
             if self.session.as_ref().is_some_and(|session| {
@@ -982,7 +1083,7 @@ impl InstanceBackend for LocalPtyBackend {
             if Instant::now() >= deadline {
                 let readiness = self.ui_snapshot().ok().map(|snapshot| snapshot.readiness);
                 anyhow::bail!(
-                    "local PTY instance {} did not reach semantic readiness within {:?}; readiness={readiness:?}",
+                    "local PTY instance {} did not reach semantic readiness within {:?}; readiness={readiness:?}; command_plane={last_ping_error:?}",
                     self.config.id,
                     timeout,
                 );
@@ -1088,9 +1189,7 @@ impl DiagnosticBackend for LocalPtyBackend {
         let path = Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env)
             .map(PathBuf::from)
             .map(Self::absolutize_path)
-            .unwrap_or_else(|| {
-                Self::absolutize_path(self.config.data_dir.join(".harness-clipboard.txt"))
-            });
+            .unwrap_or_else(|| Self::absolutize_path(self.clipboard_file_path()));
         let mut text = fs::read_to_string(&path).map_err(|error| {
             anyhow::anyhow!(
                 "failed reading clipboard file {} for instance {}: {error}",
@@ -1114,6 +1213,7 @@ impl ObservationBackend for LocalPtyBackend {
             .session
             .as_ref()
             .with_context(|| format!("instance {} is not running", self.config.id))?;
+        self.ensure_session_alive(session, "reading authoritative UI snapshot")?;
         let guard = session
             .ui_snapshot_feed
             .state
@@ -1123,7 +1223,6 @@ impl ObservationBackend for LocalPtyBackend {
             return Ok(snapshot);
         }
         drop(guard);
-        self.ensure_session_alive(session, "reading authoritative UI snapshot")?;
         let guard = session
             .ui_snapshot_feed
             .state
@@ -1364,10 +1463,9 @@ impl RawUiBackend for LocalPtyBackend {
             .iter()
             .position(|item| item.id == item_id)
             .ok_or_else(|| anyhow::anyhow!("item {item_id} not found in list {list_id:?}"))?;
-        let current_index = list
-            .items
-            .iter()
-            .position(|item| item.selected)
+        let current_index = snapshot
+            .selected_item_id(list_id)
+            .and_then(|selected_id| list.items.iter().position(|item| item.id == selected_id))
             .unwrap_or(0);
         eprintln!(
             "[local_pty activate_list_item] instance={} list={:?} item_id={} current_index={} target_index={} focused_control={:?}",
@@ -1434,12 +1532,7 @@ impl RawUiBackend for LocalPtyBackend {
         let selection_deadline = Instant::now() + Duration::from_millis(1500);
         loop {
             let current_snapshot = self.ui_snapshot()?;
-            let selected_item = current_snapshot
-                .lists
-                .iter()
-                .find(|candidate| candidate.id == list_id)
-                .and_then(|candidate| candidate.items.iter().find(|item| item.selected))
-                .map(|item| item.id.as_str());
+            let selected_item = current_snapshot.selected_item_id(list_id);
             if selected_item == Some(item_id) {
                 return Ok(());
             }
@@ -1455,6 +1548,42 @@ impl RawUiBackend for LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
+    fn dismiss_contact_invitation_code_modal(&mut self, timeout: Duration) -> Result<()> {
+        const POLL_INTERVAL: Duration = Duration::from_millis(50);
+        let modal_visible = crate::timeouts::blocking_wait_until(timeout, POLL_INTERVAL, || {
+            let snapshot = self.ui_snapshot().ok()?;
+            (snapshot.open_modal == Some(ModalId::InvitationCode)).then_some(())
+        })
+        .is_some();
+        if !modal_visible {
+            eprintln!(
+                "[local_pty contact_invite] instance={} modal_not_visible_within_timeout",
+                self.config.id
+            );
+            return Ok(());
+        }
+
+        eprintln!(
+            "[local_pty contact_invite] instance={} dismiss_invitation_modal",
+            self.config.id
+        );
+        self.send_harness_command(&HarnessUiCommand::DismissTransient)?;
+        crate::timeouts::blocking_wait_until(timeout, POLL_INTERVAL, || {
+            let snapshot = self.ui_snapshot().ok()?;
+            (snapshot.open_modal != Some(ModalId::InvitationCode)).then_some(())
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "submit_create_contact_invitation did not dismiss the invitation code modal"
+            )
+        })?;
+        eprintln!(
+            "[local_pty contact_invite] instance={} invitation_modal_closed",
+            self.config.id
+        );
+        Ok(())
+    }
+
     fn submit_start_device_enrollment(
         &mut self,
         device_name: &str,
@@ -1499,7 +1628,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
         request: SemanticCommandRequest,
     ) -> Result<SemanticCommandResponse> {
         match request.intent {
-            IntentAction::OpenScreen(screen) => {
+            IntentAction::OpenScreen { screen, .. } => {
                 self.send_harness_command(&HarnessUiCommand::NavigateScreen { screen })?;
                 Ok(SemanticCommandResponse::accepted_without_value())
             }
@@ -1510,7 +1639,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             IntentAction::CreateAccount { account_name } => {
                 let handle = require_ui_operation_handle(
                     self.send_harness_command_receipt(&HarnessUiCommand::CreateAccount {
-                        account_name: account_name.to_string(),
+                        account_name,
                     })?,
                     "create_account",
                 )?;
@@ -1524,9 +1653,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
             IntentAction::CreateHome { home_name } => {
                 let handle = require_ui_operation_handle(
-                    self.send_harness_command_receipt(&HarnessUiCommand::CreateHome {
-                        home_name: home_name.to_string(),
-                    })?,
+                    self.send_harness_command_receipt(&HarnessUiCommand::CreateHome { home_name })?,
                     "create_home",
                 )?;
                 Ok(SemanticCommandResponse {
@@ -1570,24 +1697,12 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 receiver_authority_id,
                 ..
             } => {
-                let (handle, code) = require_contact_invitation_submission(
-                    self.send_harness_command_receipt(
-                        &HarnessUiCommand::CreateContactInvitation {
-                            receiver_authority_id: receiver_authority_id.to_string(),
-                        },
-                    )?,
-                    "create_contact_invitation",
-                )?;
+                let submitted = self.submit_create_contact_invitation(&receiver_authority_id)?;
                 Ok(SemanticCommandResponse {
-                    submission: SubmissionState::Accepted,
-                    handle: SemanticSubmissionHandle {
-                        ui_operation: Some(handle),
-                    },
-                    value: match code {
-                        Some(code) => {
-                            SemanticCommandValue::ContactInvitationCode { code: code.code }
-                        }
-                        None => SemanticCommandValue::None,
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::ContactInvitationCode {
+                        code: submitted.value.code,
                     },
                 })
             }
@@ -1602,9 +1717,15 @@ impl SharedSemanticBackend for LocalPtyBackend {
             IntentAction::InviteActorToChannel {
                 authority_id,
                 channel_id,
+                context_id: _,
+                channel_name: _,
             } => {
-                let submitted =
-                    self.submit_invite_actor_to_channel(&authority_id, channel_id.as_deref())?;
+                let submitted = self.submit_invite_actor_to_channel(
+                    &authority_id,
+                    channel_id.as_deref(),
+                    None,
+                    None,
+                )?;
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
@@ -1641,15 +1762,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     },
                 })
             }
-            IntentAction::SendChatMessage { message } => {
-                if selected_channel_ref(&self.ui_snapshot()?).is_none() {
-                    anyhow::bail!(
-                        "submit_send_chat_message requires an authoritative selected channel reference"
-                    );
-                }
+            IntentAction::SendChatMessage { message, .. } => {
                 let handle = require_ui_operation_handle(
                     self.send_harness_command_receipt(&HarnessUiCommand::SendChatMessage {
-                        content: message.to_string(),
+                        content: message,
                     })?,
                     "send_chat_message",
                 )?;
@@ -1702,32 +1818,19 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let (handle, exported_code) = require_contact_invitation_submission(
+        let (handle, code) = require_contact_invitation_submission(
             self.send_harness_command_receipt(&HarnessUiCommand::CreateContactInvitation {
                 receiver_authority_id: receiver_authority_id.to_string(),
             })?,
             "create_contact_invitation",
         )?;
-        if let Some(code) = exported_code {
-            return Ok(SubmittedAction::with_ui_operation(code, handle));
-        }
-        let code_deadline = Instant::now() + Duration::from_secs(5);
-        let code = loop {
-            let snapshot = self.ui_snapshot()?;
-            if let Some(code) = latest_invitation_code(&snapshot) {
-                break code;
-            }
-            if Instant::now() >= code_deadline {
-                anyhow::bail!(
-                    "submit_create_contact_invitation did not publish InvitationCodeReady"
-                );
-            }
-            blocking_sleep(Duration::from_millis(50));
-        };
-        Ok(SubmittedAction::with_ui_operation(
-            ContactInvitationCode { code },
-            handle,
-        ))
+        let code = code.ok_or_else(|| {
+            anyhow::anyhow!(
+                "create_contact_invitation accepted without an authoritative contact invitation code payload"
+            )
+        })?;
+        self.dismiss_contact_invitation_code_modal(Duration::from_secs(5))?;
+        Ok(SubmittedAction::with_ui_operation(code, handle))
     }
 
     fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>> {
@@ -1744,6 +1847,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         authority_id: &str,
         channel_id: Option<&str>,
+        _context_id: Option<&str>,
+        _channel_name: Option<&str>,
     ) -> Result<SubmittedAction<()>> {
         let channel_id = channel_id.map(ToOwned::to_owned).ok_or_else(|| {
             anyhow::anyhow!(
@@ -1779,13 +1884,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        let snapshot = self.ui_snapshot()?;
-        if selected_channel_ref(&snapshot).is_none() {
-            anyhow::bail!(
-                "submit_send_chat_message requires an authoritative selected channel reference"
-            );
-        }
-
         let handle = require_ui_operation_handle(
             self.send_harness_command_receipt(&HarnessUiCommand::SendChatMessage {
                 content: message.to_string(),
@@ -1924,6 +2022,13 @@ mod tests {
         assert!(source.contains(
             "self.send_harness_command_receipt(&HarnessUiCommand::CreateContactInvitation {"
         ));
+        assert!(source.contains(
+            "fn dismiss_contact_invitation_code_modal(&mut self, timeout: Duration) -> Result<()> {"
+        ));
+        assert!(invitation_branch
+            .contains("self.dismiss_contact_invitation_code_modal(Duration::from_secs(5))?;"));
+        assert!(!invitation_branch.contains("wait_for_contact_invitation_code"));
+        assert!(source.contains("self.send_harness_command(&HarnessUiCommand::DismissTransient)?;"));
         assert!(
             source.contains("self.send_harness_command(&HarnessUiCommand::StartDeviceEnrollment {")
         );
@@ -1940,8 +2045,6 @@ mod tests {
         );
         assert!(source.contains("self.send_harness_command(&HarnessUiCommand::SelectChannel {"));
         assert!(!invitation_branch
-            .contains("self.send_harness_command(&HarnessUiCommand::DismissTransient)?;"));
-        assert!(!invitation_branch
             .contains("self.activate_control(ControlId::ContactsCreateInvitationButton)?;"));
         assert!(
             !invitation_branch.contains("self.activate_control(ControlId::ModalCancelButton)?;")
@@ -1949,13 +2052,12 @@ mod tests {
         assert!(!invitation_branch.contains(
             "wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;"
         ));
-        assert!(!invitation_branch.contains("ModalId::InvitationCode"));
     }
 
     #[test]
     fn local_frontend_conformance_preserves_navigation_and_settings_semantics() {
         let source = include_str!("local_pty.rs");
-        assert!(source.contains("IntentAction::OpenScreen(screen) => {"));
+        assert!(source.contains("IntentAction::OpenScreen { screen, .. } => {"));
         assert!(source
             .contains("self.send_harness_command(&HarnessUiCommand::NavigateScreen { screen })?;"));
         assert!(source.contains("IntentAction::OpenSettingsSection(section) => {"));
@@ -2022,6 +2124,54 @@ mod tests {
                 .count(),
             1,
             "send_chat_message must not retry by issuing the semantic command twice"
+        );
+    }
+
+    #[test]
+    fn local_backend_selection_reads_use_canonical_snapshot_selections_only() {
+        let source = include_str!("local_pty.rs");
+        let authority_start = source
+            .find("fn authority_id(&mut self) -> Result<Option<String>> {")
+            .unwrap_or_else(|| panic!("missing authority_id"));
+        let health_check_start = source[authority_start..]
+            .find("fn health_check(&self) -> Result<bool> {")
+            .map(|offset| authority_start + offset)
+            .unwrap_or(source.len());
+        let authority_block = &source[authority_start..health_check_start];
+
+        assert!(
+            authority_block.contains(".selected_item_id(ListId::Authorities)"),
+            "authority_id must read the canonical exported authority selection"
+        );
+        assert!(
+            !authority_block.contains(".lists"),
+            "authority_id must not scan list rows as a fallback authority source"
+        );
+        assert!(
+            !authority_block.contains("item.selected"),
+            "authority_id must not infer selection from row highlight state"
+        );
+    }
+
+    #[test]
+    fn local_backend_send_message_issue_path_does_not_prevalidate_selected_channel_snapshot() {
+        let source = include_str!("local_pty.rs");
+        let send_start = source
+            .find("fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {")
+            .unwrap_or_else(|| panic!("missing submit_send_chat_message"));
+        let next_fn_after_send = source[send_start..]
+            .find("}\n}\n\n#[cfg(test)]")
+            .map(|offset| send_start + offset)
+            .unwrap_or(source.len());
+        let send_block = &source[send_start..next_fn_after_send];
+
+        assert!(
+            !send_block.contains("selected_channel_ref"),
+            "send_chat_message must not gate submission on harness-side snapshot repair logic"
+        );
+        assert!(
+            !send_block.contains("authoritative selected channel reference"),
+            "send_chat_message must defer selection validity to the command plane"
         );
     }
 

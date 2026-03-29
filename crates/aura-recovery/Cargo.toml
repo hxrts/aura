@@ -6,21 +6,23 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+description = "Guardian-based device recovery and key restoration protocols"
 include = ["src/**", "Cargo.toml"]
 
 [dependencies]
-aura-core = { path = "../aura-core" }
-aura-journal = { path = "../aura-journal" }
-aura-composition = { path = "../aura-composition" }
-aura-signature = { path = "../aura-signature" }
-aura-authentication = { path = "../aura-authentication" }
-aura-authorization = { path = "../aura-authorization" }
-aura-effects = { path = "../aura-effects" }
-aura-consensus = { path = "../aura-consensus" }
-aura-protocol = { path = "../aura-protocol" }
-aura-relational = { path = "../aura-relational" }
-aura-macros = { path = "../aura-macros" }
-aura-mpst = { path = "../aura-mpst" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-composition = { path = "../aura-composition", version = "0.1.0" }
+aura-signature = { path = "../aura-signature", version = "0.1.0" }
+aura-authentication = { path = "../aura-authentication", version = "0.1.0" }
+aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
+aura-effects = { path = "../aura-effects", version = "0.1.0" }
+aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
+aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
+aura-relational = { path = "../aura-relational", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
+aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
 
 # Choreography dependencies (required by aura-macros)
 telltale = { workspace = true }

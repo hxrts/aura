@@ -11,8 +11,8 @@ fail() {
 
 rg -q 'fn resolve_committed_selected_channel_id' crates/aura-terminal/src/tui/screens/app/shell/events.rs \
   || fail "missing committed TUI channel selection helper"
-rg -q 'RwLock<Option<String>>' crates/aura-terminal/src/tui/screens/app/shell.rs \
-  || fail "shared TUI channel selection must be tracked by channel identity"
+rg -q 'SharedCommittedChannelSelection|None::<CommittedChannelSelection>' crates/aura-terminal/src/tui/screens/app/shell.rs \
+  || fail "shared TUI channel selection must be tracked by canonical committed channel identity"
 if rg -q 'all_channels\(\)[[:space:]]*\.next\(' crates/aura-terminal/src/tui/screens/app/subscriptions.rs; then
   fail "message subscription may not fall back to first channel"
 fi

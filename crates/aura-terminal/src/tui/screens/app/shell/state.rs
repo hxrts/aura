@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::tui::screens::app::subscriptions::SharedNeighborhoodHomeMeta;
+
 /// Type-safe handle for TuiState that enforces proper reactivity patterns.
 ///
 /// # Reactivity Model

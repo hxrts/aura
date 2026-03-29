@@ -7,6 +7,9 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 
 use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
+use crate::tui::semantic_lifecycle::CeremonySubmissionOwner;
+use crate::tui::state::DeviceId;
+use crate::tui::updates::send_ui_update_required_blocking;
 
 async fn physical_sleep(duration: Duration) {
     let _ = PhysicalTimeHandler::new()
@@ -17,9 +20,9 @@ async fn physical_sleep(duration: Duration) {
 /// All callbacks for the settings screen
 #[derive(Clone)]
 pub struct SettingsCallbacks {
-    pub on_update_mfa: Arc<dyn Fn(MfaPolicy) + Send + Sync>,
-    pub on_update_nickname_suggestion: UpdateNicknameSuggestionCallback,
-    pub on_update_threshold: UpdateThresholdCallback,
+    pub(crate) on_update_mfa: UpdateMfaCallback,
+    pub(crate) on_update_nickname_suggestion: UpdateNicknameSuggestionCallback,
+    pub(crate) on_update_threshold: UpdateThresholdCallback,
     pub(crate) on_add_device: AddDeviceCallback,
     pub on_remove_device: RemoveDeviceCallback,
     pub(crate) on_import_device_enrollment_on_mobile: ImportDeviceEnrollmentCallback,
@@ -27,7 +30,9 @@ pub struct SettingsCallbacks {
 
 impl SettingsCallbacks {
     #[must_use]
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+    pub fn new(runtime: &CallbackFactoryRuntime) -> Self {
+        let ctx = runtime.ctx();
+        let tx = runtime.tx();
         Self {
             on_update_mfa: Self::make_update_mfa(ctx.clone(), tx.clone()),
             on_update_nickname_suggestion: Self::make_update_nickname_suggestion(
@@ -41,85 +46,134 @@ impl SettingsCallbacks {
         }
     }
 
-    fn make_update_mfa(
-        ctx: Arc<IoContext>,
-        tx: UiUpdateSender,
-    ) -> Arc<dyn Fn(MfaPolicy) + Send + Sync> {
-        Arc::new(move |policy: MfaPolicy| {
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::UpdateMfaPolicy {
-                    require_mfa: policy.requires_mfa(),
-                },
-                move |tx| async move {
-                    send_ui_update_required(&tx, UiUpdate::MfaPolicyChanged(policy)).await;
-                },
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
-                },
-            );
-        })
+    fn make_update_mfa(ctx: Arc<IoContext>, tx: UiUpdateSender) -> UpdateMfaCallback {
+        Arc::new(
+            move |policy: MfaPolicy, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "UpdateMfaPolicy callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        aura_app::ui::workflows::settings::update_mfa_policy(
+                            &app_core,
+                            policy.requires_mfa(),
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(&tx, UiUpdate::MfaPolicyChanged(policy)).await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "settings",
+                            format!("Update MFA policy failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_update_nickname_suggestion(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
     ) -> UpdateNicknameSuggestionCallback {
-        Arc::new(move |name: String| {
-            let name_clone = name.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::UpdateNickname { name },
-                move |tx| async move {
-                    send_ui_update_required(&tx, UiUpdate::NicknameSuggestionChanged(name_clone))
+        Arc::new(
+            move |name: String, operation: LocalTerminalOperationOwner| {
+                let name_clone = name.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "UpdateNicknameSuggestion callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        aura_app::ui::workflows::settings::update_nickname(&app_core, name)
+                            .await
+                            .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::NicknameSuggestionChanged(name_clone),
+                        )
                         .await;
-                },
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
-                },
-            );
-        })
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "settings",
+                            format!("Update nickname suggestion failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_update_threshold(ctx: Arc<IoContext>, tx: UiUpdateSender) -> UpdateThresholdCallback {
-        Arc::new(move |threshold_k: u8, threshold_n: u8| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let config = match crate::tui::effects::ThresholdConfig::new(threshold_k, threshold_n) {
-                Ok(config) => config,
-                Err(error) => {
-                    enqueue_ui_update_required(
-                        ctx,
-                        tx,
-                        UiUpdate::operation_failed(
-                            UiOperation::UpdateThreshold,
-                            crate::error::TerminalError::Input(error),
-                        ),
-                    );
-                    return;
-                }
-            };
-            spawn_observed_dispatch_callback(
-                ctx,
-                tx,
-                EffectCommand::UpdateThreshold { config },
-                move |tx| async move {
-                    send_ui_update_required(
-                        &tx,
-                        UiUpdate::ThresholdChanged {
-                            k: threshold_k,
-                            n: threshold_n,
-                        },
-                    )
-                    .await;
-                },
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
-                },
-            );
-        })
+        Arc::new(
+            move |threshold_k: u8, threshold_n: u8, operation: LocalTerminalOperationOwner| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let config =
+                    match crate::tui::effects::ThresholdConfig::new(threshold_k, threshold_n) {
+                        Ok(config) => config,
+                        Err(error) => {
+                            enqueue_ui_update_required(
+                                ctx,
+                                tx,
+                                UiUpdate::operation_failed(
+                                    UiOperation::UpdateThreshold,
+                                    crate::error::TerminalError::Input(error),
+                                ),
+                            );
+                            return;
+                        }
+                    };
+
+                spawn_local_terminal_result_callback(
+                    ctx,
+                    tx,
+                    operation,
+                    "UpdateThreshold callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        aura_app::ui::workflows::settings::update_threshold(
+                            &app_core,
+                            config.threshold_k(),
+                            config.threshold_n(),
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ThresholdChanged {
+                                k: threshold_k,
+                                n: threshold_n,
+                            },
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "settings",
+                            format!("Update threshold failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_add_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> AddDeviceCallback {
@@ -188,7 +242,7 @@ impl SettingsCallbacks {
                             &status_handle,
                             policy,
                             |status| {
-                                let _ = send_ui_update_lossy(
+                                let _ = send_ui_update_required_blocking(
                                     &tx_monitor,
                                     key_rotation_status_update(status),
                                 );
@@ -201,10 +255,11 @@ impl SettingsCallbacks {
                                 if lifecycle.state
                                     == aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::TimedOut
                                 {
-                                    let _ = send_ui_update_lossy(
+                                    send_ui_update_required(
                                         &tx_monitor,
                                         key_rotation_status_update(&lifecycle.status),
-                                    );
+                                    )
+                                    .await;
                                 }
                                 if let Some(toast) =
                                     key_rotation_lifecycle_toast(lifecycle.status.kind, lifecycle.state)
@@ -228,64 +283,68 @@ impl SettingsCallbacks {
     }
 
     fn make_remove_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RemoveDeviceCallback {
-        Arc::new(move |device_id| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let device_id_clone = device_id.to_string();
+        Arc::new(
+            move |device_id: DeviceId, operation: CeremonySubmissionOwner| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let device_id_clone = device_id.to_string();
 
-            spawn_ctx(ctx.clone(), async move {
-                let handle = match ctx.start_device_removal(&device_id_clone).await {
-                    Ok(handle) => handle,
-                    Err(error) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "device-removal-failed",
-                                format!("Device removal failed: {error}"),
-                            )),
-                        )
-                        .await;
-                        return;
-                    }
-                };
-                let status_handle = handle.status_handle();
-
-                send_ui_update_required(
-                    &tx,
-                    UiUpdate::ToastAdded(ToastMessage::info(
-                        "device-removal-started",
-                        "Device removal started",
-                    )),
-                )
-                .await;
-
-                ctx.remember_key_rotation_ceremony(handle).await;
-
-                #[cfg(feature = "development")]
-                {
-                    // In demo mode, make sure the simulated mobile device processes incoming
-                    // threshold key packages so the removal ceremony can reach completion.
-                    if device_id_clone == ctx.demo_mobile_device_id() {
-                        let demo_ctx = ctx.clone();
-                        spawn_ctx(ctx.clone(), async move {
-                            for _ in 0..6 {
-                                let _ = demo_ctx.process_demo_mobile_ceremony_acceptances().await;
-                                physical_sleep(Duration::from_millis(150)).await;
-                            }
-                        });
-                    }
-                }
-
-                // Best-effort: monitor completion and toast success/failure.
-                let tx_monitor = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
-                    let policy = aura_app::ui::workflows::ceremonies::CeremonyPollPolicy {
-                        interval: Duration::from_millis(250),
-                        max_attempts: 160,
-                        rollback_on_failure: true,
-                        refresh_settings_on_complete: true,
+                    let handle = match ctx.start_device_removal(&device_id_clone).await {
+                        Ok(handle) => handle,
+                        Err(error) => {
+                            operation.fail(error.to_string()).await;
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "device-removal-failed",
+                                    format!("Device removal failed: {error}"),
+                                )),
+                            )
+                            .await;
+                            return;
+                        }
                     };
-                    match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
+                    operation.monitor_started().await;
+                    let status_handle = handle.status_handle();
+
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::ToastAdded(ToastMessage::info(
+                            "device-removal-started",
+                            "Device removal started",
+                        )),
+                    )
+                    .await;
+
+                    ctx.remember_key_rotation_ceremony(handle).await;
+
+                    #[cfg(feature = "development")]
+                    {
+                        // In demo mode, make sure the simulated mobile device processes incoming
+                        // threshold key packages so the removal ceremony can reach completion.
+                        if device_id_clone == ctx.demo_mobile_device_id() {
+                            let demo_ctx = ctx.clone();
+                            spawn_ctx(ctx.clone(), async move {
+                                for _ in 0..6 {
+                                    let _ =
+                                        demo_ctx.process_demo_mobile_ceremony_acceptances().await;
+                                    physical_sleep(Duration::from_millis(150)).await;
+                                }
+                            });
+                        }
+                    }
+
+                    // Best-effort: monitor completion and toast success/failure.
+                    let tx_monitor = tx.clone();
+                    spawn_ctx(ctx.clone(), async move {
+                        let policy = aura_app::ui::workflows::ceremonies::CeremonyPollPolicy {
+                            interval: Duration::from_millis(250),
+                            max_attempts: 160,
+                            rollback_on_failure: true,
+                            refresh_settings_on_complete: true,
+                        };
+                        match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
                         ctx.app_core_raw(),
                         &status_handle,
                         policy,
@@ -335,9 +394,10 @@ impl SettingsCallbacks {
                             // monitor already emitted error via ERROR_SIGNAL on polling failures.
                         }
                     }
+                    });
                 });
-            });
-        })
+            },
+        )
     }
 
     fn make_import_device_enrollment(
@@ -422,16 +482,18 @@ pub struct NeighborhoodCallbacks {
     pub on_enter_home: Arc<dyn Fn(String, AccessLevel) + Send + Sync>,
     pub on_go_home: GoHomeCallback,
     pub on_back_to_limited: GoHomeCallback,
-    pub on_set_moderator: SetModeratorCallback,
-    pub on_create_home: CreateHomeCallback,
-    pub on_create_neighborhood: CreateNeighborhoodCallback,
-    pub on_add_home_to_neighborhood: NeighborhoodHomeCallback,
-    pub on_link_home_one_hop_link: NeighborhoodHomeCallback,
+    pub(crate) on_set_moderator: SetModeratorCallback,
+    pub(crate) on_create_home: CreateHomeCallback,
+    pub(crate) on_create_neighborhood: CreateNeighborhoodCallback,
+    pub(crate) on_add_home_to_neighborhood: NeighborhoodHomeCallback,
+    pub(crate) on_link_home_one_hop_link: NeighborhoodHomeCallback,
 }
 
 impl NeighborhoodCallbacks {
     #[must_use]
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+    pub fn new(runtime: &CallbackFactoryRuntime) -> Self {
+        let ctx = runtime.ctx();
+        let tx = runtime.tx();
         Self {
             on_enter_home: Self::make_enter_home(ctx.clone(), tx.clone()),
             on_go_home: Self::make_go_home(ctx.clone(), tx.clone()),
@@ -459,7 +521,7 @@ impl NeighborhoodCallbacks {
                 AccessLevel::Full => "Full",
             }
             .to_string();
-            spawn_observed_dispatch_callback(
+            spawn_observed_adaptation_dispatch_callback(
                 ctx.clone(),
                 tx.clone(),
                 EffectCommand::MovePosition {
@@ -485,7 +547,7 @@ impl NeighborhoodCallbacks {
 
     fn make_go_home(ctx: Arc<IoContext>, tx: UiUpdateSender) -> GoHomeCallback {
         Arc::new(move || {
-            spawn_observed_dispatch_callback(
+            spawn_observed_adaptation_dispatch_callback(
                 ctx.clone(),
                 tx.clone(),
                 EffectCommand::MovePosition {
@@ -505,7 +567,7 @@ impl NeighborhoodCallbacks {
 
     fn make_back_to_limited(ctx: Arc<IoContext>, tx: UiUpdateSender) -> GoHomeCallback {
         Arc::new(move || {
-            spawn_observed_dispatch_callback(
+            spawn_observed_adaptation_dispatch_callback(
                 ctx.clone(),
                 tx.clone(),
                 EffectCommand::MovePosition {
@@ -525,42 +587,51 @@ impl NeighborhoodCallbacks {
 
     fn make_set_moderator(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SetModeratorCallback {
         Arc::new(
-            move |home_id: Option<String>, target_id: String, assign: bool| {
-                let ctx = ctx.clone();
-                let tx = tx.clone();
-                let cmd = if assign {
-                    EffectCommand::GrantModerator {
-                        channel: home_id,
-                        target: target_id.clone(),
-                    }
-                } else {
-                    EffectCommand::RevokeModerator {
-                        channel: home_id,
-                        target: target_id.clone(),
-                    }
-                };
-                spawn_observed_dispatch_callback(
+            move |home_id: Option<String>,
+                  target_id: String,
+                  assign: bool,
+                  operation: LocalTerminalOperationOwner| {
+                let success_target_id = target_id.clone();
+                spawn_local_terminal_result_callback(
                     ctx.clone(),
                     tx.clone(),
-                    cmd,
-                    move |tx| async move {
+                    operation,
+                    "SetModerator callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        if assign {
+                            aura_app::ui::workflows::moderator::grant_moderator(
+                                &app_core,
+                                home_id.as_deref(),
+                                &target_id,
+                            )
+                            .await
+                        } else {
+                            aura_app::ui::workflows::moderator::revoke_moderator(
+                                &app_core,
+                                home_id.as_deref(),
+                                &target_id,
+                            )
+                            .await
+                        }
+                        .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
                         let action = if assign { "granted" } else { "revoked" };
                         send_ui_update_required(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::success(
                                 "moderation",
-                                format!("Moderator designation {action} for {target_id}"),
+                                format!("Moderator designation {action} for {success_target_id}"),
                             )),
                         )
                         .await;
                     },
-                    |error| async move {
-                        send_ui_update_required(
+                    |tx, error| async move {
+                        emit_error_toast(
                             &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "moderation",
-                                format!("Failed to update moderator designation: {error}"),
-                            )),
+                            "moderation",
+                            format!("Failed to update moderator designation: {error}"),
                         )
                         .await;
                     },
@@ -570,145 +641,178 @@ impl NeighborhoodCallbacks {
     }
 
     fn make_create_home(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateHomeCallback {
-        Arc::new(move |name: String, _description: Option<String>| {
-            let display_name = name.trim().to_string();
-            let failure_tx = tx.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::CreateHome {
-                    name: Some(display_name.clone()),
-                },
-                move |tx| async move {
-                    send_ui_update_required(
-                        &tx,
-                        UiUpdate::ToastAdded(ToastMessage::success(
-                            "home",
-                            format!("Home '{display_name}' created"),
-                        )),
-                    )
-                    .await;
-                },
-                move |error| async move {
-                    send_ui_update_required(
-                        &failure_tx,
-                        UiUpdate::ToastAdded(ToastMessage::error(
-                            "home",
-                            format!("Failed to create home: {error}"),
-                        )),
-                    )
-                    .await;
-                },
-            );
-        })
+        Arc::new(
+            move |name: String,
+                  description: Option<String>,
+                  operation: LocalTerminalOperationOwner| {
+                let display_name = name.trim().to_string();
+                let success_name = display_name.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "CreateHome callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        aura_app::ui::workflows::context::create_home(
+                            &app_core,
+                            Some(display_name.clone()),
+                            description,
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "home",
+                                format!("Home '{success_name}' created"),
+                            )),
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(&tx, "home", format!("Failed to create home: {error}"))
+                            .await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_create_neighborhood(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
     ) -> CreateNeighborhoodCallback {
-        Arc::new(move |name: String| {
-            let display_name = if name.trim().is_empty() {
-                "Neighborhood".to_string()
-            } else {
-                name.trim().to_string()
-            };
-            let failure_tx = tx.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::CreateNeighborhood {
-                    name: display_name.clone(),
-                },
-                move |tx| async move {
-                    send_ui_update_required(
-                        &tx,
-                        UiUpdate::ToastAdded(ToastMessage::success(
-                            "neighborhood",
-                            format!("Neighborhood '{display_name}' ready"),
-                        )),
-                    )
-                    .await;
-                },
-                move |error| async move {
-                    send_ui_update_required(
-                        &failure_tx,
-                        UiUpdate::ToastAdded(ToastMessage::error(
+        Arc::new(
+            move |name: String, operation: LocalTerminalOperationOwner| {
+                let display_name = if name.trim().is_empty() {
+                    "Neighborhood".to_string()
+                } else {
+                    name.trim().to_string()
+                };
+                let success_name = display_name.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "CreateNeighborhood callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        aura_app::ui::workflows::context::create_neighborhood(
+                            &app_core,
+                            display_name.clone(),
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "neighborhood",
+                                format!("Neighborhood '{success_name}' ready"),
+                            )),
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
                             "neighborhood",
                             format!("Failed to create neighborhood: {error}"),
-                        )),
-                    )
-                    .await;
-                },
-            );
-        })
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_add_home_to_neighborhood(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
     ) -> NeighborhoodHomeCallback {
-        Arc::new(move |home_id: String| {
-            let failure_tx = tx.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::AddHomeToNeighborhood { home_id },
-                |tx| async move {
-                    send_ui_update_required(
-                        &tx,
-                        UiUpdate::ToastAdded(ToastMessage::success(
-                            "neighborhood",
-                            "Home added to neighborhood",
-                        )),
-                    )
-                    .await;
-                },
-                move |error| async move {
-                    send_ui_update_required(
-                        &failure_tx,
-                        UiUpdate::ToastAdded(ToastMessage::error(
+        Arc::new(
+            move |home_id: String, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "AddHomeToNeighborhood callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        aura_app::ui::workflows::context::add_home_to_neighborhood(
+                            &app_core, &home_id,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "neighborhood",
+                                "Home added to neighborhood",
+                            )),
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
                             "neighborhood",
                             format!("Failed to add home to neighborhood: {error}"),
-                        )),
-                    )
-                    .await;
-                },
-            );
-        })
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_link_home_one_hop_link(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
     ) -> NeighborhoodHomeCallback {
-        Arc::new(move |home_id: String| {
-            let failure_tx = tx.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::LinkHomeOneHopLink { home_id },
-                |tx| async move {
-                    send_ui_update_required(
-                        &tx,
-                        UiUpdate::ToastAdded(ToastMessage::success(
-                            "neighborhood",
-                            "OneHopLink linked",
-                        )),
-                    )
-                    .await;
-                },
-                move |error| async move {
-                    send_ui_update_required(
-                        &failure_tx,
-                        UiUpdate::ToastAdded(ToastMessage::error(
+        Arc::new(
+            move |home_id: String, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "LinkHomeOneHopLink callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        aura_app::ui::workflows::context::link_home_one_hop_link(
+                            &app_core, &home_id,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "neighborhood",
+                                "OneHopLink linked",
+                            )),
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
                             "neighborhood",
                             format!("Failed to link one_hop_link: {error}"),
-                        )),
-                    )
-                    .await;
-                },
-            );
-        })
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 }

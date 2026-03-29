@@ -550,6 +550,6 @@ Annotations generate guard chain invocations. The Telltale compiler verifies ann
 
 ## Related Documentation
 
-- [Verification Guide](806_verification_guide.md) — Practical workflows, commands, and Quint-Lean correspondence tables
-- [Verification Coverage](998_verification_coverage.md) — Current metrics, file inventories, and CI gates
-- [Simulation Infrastructure Reference](119_simulator.md) — ITF trace format and generative simulation
+- [Verification Guide](806_verification_guide.md): practical workflows, commands, and Quint-Lean correspondence tables
+- [Verification Coverage](998_verification_coverage.md): current metrics, file inventories, and CI gates
+- [Simulation Infrastructure Reference](119_simulator.md): ITF trace format and generative simulation

@@ -11,7 +11,7 @@ fail() {
 
 rust_observation_files=(
   crates/aura-terminal/src/tui/harness_state/snapshot.rs
-  crates/aura-ui/src/model.rs
+  crates/aura-ui/src/model/mod.rs
   crates/aura-web/src/harness_bridge.rs
 )
 

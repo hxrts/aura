@@ -20,7 +20,7 @@
 //!
 //! ```ignore
 //! let guard_config = GuardConfig::new(context_id)
-//!     .with_message_guard::<MyMessage>("cap:my_capability", 100);
+//!     .with_message_guard::<MyMessage>(aura_core::capability_name!("amp:send"), 100);
 //!
 //! let adapter = AuraProtocolAdapter::new(effects, authority_id, self_role, role_map)
 //!     .with_guard_config(guard_config);
@@ -31,8 +31,9 @@ use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
-use aura_core::FlowCost;
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::TimeoutBudget;
+use aura_core::{CapabilityName, FlowCost};
 use aura_guards::guards::journal::JournalCoupler;
 use aura_guards::prelude::{GuardContextProvider, GuardEffects, SendGuardChain};
 use aura_guards::LeakageBudget;
@@ -56,8 +57,8 @@ use uuid::Uuid;
 /// Guard requirements for a specific message type.
 #[derive(Debug, Clone)]
 pub struct MessageGuardRequirements {
-    /// Required capability for sending this message (e.g., "cap:amp_send")
-    pub capability: String,
+    /// Required canonical capability for sending this message.
+    pub capability: CapabilityName,
     /// Flow cost for sending this message
     pub flow_cost: FlowCost,
     /// Optional leakage budget for this message
@@ -70,9 +71,9 @@ pub struct MessageGuardRequirements {
 
 impl MessageGuardRequirements {
     /// Create guard requirements with capability and flow cost.
-    pub fn new(capability: impl Into<String>, flow_cost: impl Into<FlowCost>) -> Self {
+    pub fn new(capability: CapabilityName, flow_cost: impl Into<FlowCost>) -> Self {
         Self {
-            capability: capability.into(),
+            capability,
             flow_cost: flow_cost.into(),
             leakage_budget: None,
             journal_facts: None,
@@ -129,7 +130,7 @@ impl GuardConfig {
     /// The type name is derived from `std::any::type_name::<M>()`.
     pub fn with_message_guard<M: 'static>(
         mut self,
-        capability: impl Into<String>,
+        capability: CapabilityName,
         flow_cost: impl Into<FlowCost>,
     ) -> Self {
         let type_name = std::any::type_name::<M>().to_string();
@@ -352,7 +353,7 @@ where
     ///
     /// ```ignore
     /// let guard_config = GuardConfig::new(context_id)
-    ///     .with_message_guard::<MyMessage>("cap:my_capability", 100);
+    ///     .with_message_guard::<MyMessage>(aura_core::capability_name!("amp:send"), 100);
     ///
     /// let adapter = AuraProtocolAdapter::new(effects, auth_id, role, role_map)
     ///     .with_guard_config(guard_config);
@@ -529,7 +530,7 @@ where
                 );
 
                 let mut guard = SendGuardChain::new(
-                    aura_guards::guards::CapabilityId::from(guard_req.capability.as_str()),
+                    guard_req.capability.clone(),
                     context_id,
                     peer,
                     guard_req.flow_cost,

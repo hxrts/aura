@@ -35,7 +35,7 @@ use crate::{InvitationOperation, InvitationType};
 // Guard Cost Constants
 // =============================================================================
 
-/// Guard cost and capability constants for invitation operations
+/// Guard cost constants for invitation operations
 pub mod costs {
     use aura_core::FlowCost;
 
@@ -50,27 +50,6 @@ pub mod costs {
 
     /// Flow cost for cancelling an invitation
     pub const INVITATION_CANCEL_COST: FlowCost = FlowCost::new(1);
-
-    /// Required capability for sending invitations
-    pub const CAP_INVITATION_SEND: &str = "invitation:send";
-
-    /// Required capability for accepting invitations
-    pub const CAP_INVITATION_ACCEPT: &str = "invitation:accept";
-
-    /// Required capability for declining invitations
-    pub const CAP_INVITATION_DECLINE: &str = "invitation:decline";
-
-    /// Required capability for cancelling invitations
-    pub const CAP_INVITATION_CANCEL: &str = "invitation:cancel";
-
-    /// Required capability for guardian invitations specifically
-    pub const CAP_GUARDIAN_INVITE: &str = "invitation:guardian";
-
-    /// Required capability for channel invitations specifically
-    pub const CAP_CHANNEL_INVITE: &str = "invitation:channel";
-
-    /// Required capability for device enrollment invitations specifically
-    pub const CAP_DEVICE_ENROLL: &str = "invitation:device";
 }
 
 // =============================================================================
@@ -276,6 +255,7 @@ impl types::FlowBudgetSnapshot for GuardSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capabilities::InvitationCapability;
     use aura_core::FlowCost;
 
     fn test_authority() -> AuthorityId {
@@ -292,8 +272,8 @@ mod tests {
             test_context(),
             FlowCost::new(100),
             vec![
-                types::CapabilityId::from(costs::CAP_INVITATION_SEND),
-                types::CapabilityId::from(costs::CAP_INVITATION_ACCEPT),
+                InvitationCapability::Send.as_name(),
+                InvitationCapability::Accept.as_name(),
             ],
             1,
             1000,
@@ -303,9 +283,9 @@ mod tests {
     #[test]
     fn test_guard_snapshot_has_capability() {
         let snapshot = test_snapshot();
-        assert!(snapshot.has_capability(&types::CapabilityId::from(costs::CAP_INVITATION_SEND)));
-        assert!(snapshot.has_capability(&types::CapabilityId::from(costs::CAP_INVITATION_ACCEPT)));
-        assert!(!snapshot.has_capability(&types::CapabilityId::from(costs::CAP_GUARDIAN_INVITE)));
+        assert!(snapshot.has_capability(&InvitationCapability::Send.as_name()));
+        assert!(snapshot.has_capability(&InvitationCapability::Accept.as_name()));
+        assert!(!snapshot.has_capability(&InvitationCapability::Guardian.as_name()));
     }
 
     #[test]
@@ -354,20 +334,14 @@ mod tests {
     #[test]
     fn test_check_capability_success() {
         let snapshot = test_snapshot();
-        let result = check_capability(
-            &snapshot,
-            &types::CapabilityId::from(costs::CAP_INVITATION_SEND),
-        );
+        let result = check_capability(&snapshot, &InvitationCapability::Send.as_name());
         assert!(result.is_none()); // None means check passed
     }
 
     #[test]
     fn test_check_capability_failure() {
         let snapshot = test_snapshot();
-        let result = check_capability(
-            &snapshot,
-            &types::CapabilityId::from(costs::CAP_GUARDIAN_INVITE),
-        );
+        let result = check_capability(&snapshot, &InvitationCapability::Guardian.as_name());
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());
     }
@@ -391,6 +365,9 @@ mod tests {
     fn test_guard_costs_defined() {
         assert_eq!(costs::INVITATION_SEND_COST.value(), 1);
         assert_eq!(costs::INVITATION_ACCEPT_COST.value(), 1);
-        assert_eq!(costs::CAP_INVITATION_SEND, "invitation:send");
+        assert_eq!(
+            InvitationCapability::Send.as_name().as_str(),
+            "invitation:send"
+        );
     }
 }

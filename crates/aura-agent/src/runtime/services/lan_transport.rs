@@ -10,6 +10,27 @@ cfg_if! {
         use std::sync::Arc;
         use tokio::sync::RwLock;
 
+        const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+
+        fn harness_browser_transport_addr() -> Option<String> {
+            let window = web_sys::window()?;
+            let search = window.location().search().ok()?;
+            let query = search.strip_prefix('?').unwrap_or(&search);
+            let harness_mode = query.split('&').any(|pair: &str| {
+                pair.split_once('=')
+                    .is_some_and(|(key, value)| key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty())
+            });
+            if !harness_mode {
+                return None;
+            }
+
+            let host = window.location().host().ok()?;
+            if host.is_empty() {
+                return None;
+            }
+            Some(host)
+        }
+
         #[derive(Debug)]
         struct LanTransportShared {
             metrics: Arc<RwLock<LanTransportMetrics>>,
@@ -17,6 +38,12 @@ cfg_if! {
 
         /// LAN transport service placeholder for wasm builds.
         #[derive(Debug)]
+        #[aura_macros::actor_root(
+            owner = "lan_transport_service",
+            domain = "lan_transport",
+            supervision = "lan_transport_task_root",
+            category = "actor_owned"
+        )]
         pub struct LanTransportService {
             advertised_addrs: Vec<String>,
             websocket_addrs: Vec<String>,
@@ -43,9 +70,12 @@ cfg_if! {
             /// WASM runtimes cannot bind TCP listeners directly, so this returns an empty
             /// transport placeholder.
             pub async fn bind(_bind_addr: &str) -> Result<Self, String> {
+                let websocket_addrs = harness_browser_transport_addr()
+                    .into_iter()
+                    .collect::<Vec<_>>();
                 Ok(Self {
                     advertised_addrs: Vec::new(),
-                    websocket_addrs: Vec::new(),
+                    websocket_addrs,
                     shared: Arc::new(LanTransportShared {
                         metrics: Arc::new(RwLock::new(LanTransportMetrics::default())),
                     }),
@@ -68,7 +98,7 @@ cfg_if! {
             }
         }
     } else {
-        use std::net::IpAddr;
+        use std::net::{IpAddr, SocketAddr};
         use std::sync::Arc;
 
         use get_if_addrs::{get_if_addrs, IfAddr};
@@ -83,6 +113,12 @@ cfg_if! {
 
         /// LAN transport service holding the listener and advertised addresses.
         #[derive(Debug)]
+        #[aura_macros::actor_root(
+            owner = "lan_transport_service",
+            domain = "lan_transport",
+            supervision = "lan_transport_task_root",
+            category = "actor_owned"
+        )]
         pub struct LanTransportService {
             listener: Arc<TcpListener>,
             advertised_addrs: Vec<String>,
@@ -131,11 +167,11 @@ cfg_if! {
                                     IfAddr::V6(v6) => IpAddr::V6(v6.ip),
                                 };
                                 if is_advertisable_ip(addr) {
-                                    advertised_addrs.push(format!("{addr}:{port}"));
+                                    advertised_addrs.push(format_transport_addr(addr, port));
                                     continue;
                                 }
                                 if addr.is_loopback() {
-                                    loopback_addrs.push(format!("{addr}:{port}"));
+                                    loopback_addrs.push(format_transport_addr(addr, port));
                                     continue;
                                 }
                             }
@@ -175,11 +211,13 @@ cfg_if! {
                                     IfAddr::V6(v6) => IpAddr::V6(v6.ip),
                                 };
                                 if is_advertisable_ip(addr) {
-                                    websocket_addrs.push(format!("{addr}:{websocket_port}"));
+                                    websocket_addrs
+                                        .push(format_transport_addr(addr, websocket_port));
                                     continue;
                                 }
                                 if addr.is_loopback() {
-                                    loopback_ws_addrs.push(format!("{addr}:{websocket_port}"));
+                                    loopback_ws_addrs
+                                        .push(format_transport_addr(addr, websocket_port));
                                 }
                             }
                         }
@@ -249,6 +287,10 @@ cfg_if! {
             }
         }
 
+        fn format_transport_addr(addr: IpAddr, port: u16) -> String {
+            SocketAddr::new(addr, port).to_string()
+        }
+
         fn is_advertisable_ip(addr: IpAddr) -> bool {
             match addr {
                 IpAddr::V4(v4) => {
@@ -263,6 +305,24 @@ cfg_if! {
                         && !v6.is_unspecified()
                         && (v6.segments()[0] & 0xffc0) != 0xfe80
                 }
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::format_transport_addr;
+            use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+            #[test]
+            fn format_transport_addr_preserves_ipv4_shape() {
+                let addr = format_transport_addr(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 4242);
+                assert_eq!(addr, "127.0.0.1:4242");
+            }
+
+            #[test]
+            fn format_transport_addr_brackets_ipv6_hosts() {
+                let addr = format_transport_addr(IpAddr::V6(Ipv6Addr::LOCALHOST), 4242);
+                assert_eq!(addr, "[::1]:4242");
             }
         }
     }

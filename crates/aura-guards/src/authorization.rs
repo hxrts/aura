@@ -22,7 +22,15 @@
 )]
 use aura_authorization::{BiscuitError, ResourceScope};
 use aura_core::types::identifiers::AuthorityId;
-use biscuit_auth::{macros::*, Biscuit, PublicKey};
+use aura_core::CapabilityName;
+use biscuit_auth::{macros::*, AuthorizerLimits, Biscuit, PublicKey};
+use std::time::Duration;
+
+const GUARD_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
+    max_facts: 10_000,
+    max_iterations: 1_000,
+    max_time: Duration::from_millis(100),
+};
 
 pub struct BiscuitAuthorizationBridge {
     root_public_key: PublicKey,
@@ -185,12 +193,23 @@ impl BiscuitAuthorizationBridge {
                     .map_err(BiscuitError::BiscuitLib)?;
             }
             _ => {
-                // Domain-specific operations (e.g., "rendezvous:publish_descriptor")
-                // require execute capability. The token carries generic capabilities
-                // (read/write/execute/admin/delegate), not per-operation names.
-                authorizer
-                    .add_check(check!("check if capability(\"execute\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
+                // Domain-specific operations use namespaced capabilities (e.g.,
+                // "invitation:send", "recovery:approve", "consensus:initiate").
+                // The token carries both generic (read/write/execute) and
+                // namespaced capability facts. Check the exact operation name
+                // first; fall back to "execute" only if the operation name
+                // doesn't contain a namespace separator.
+                if operation.contains(':') {
+                    // Namespaced capability — require exact match.
+                    authorizer
+                        .add_check(check!("check if capability({operation})"))
+                        .map_err(BiscuitError::BiscuitLib)?;
+                } else {
+                    // Unnamespaced non-standard operation — require "execute".
+                    authorizer
+                        .add_check(check!("check if capability(\"execute\")"))
+                        .map_err(BiscuitError::BiscuitLib)?;
+                }
             }
         }
 
@@ -201,7 +220,7 @@ impl BiscuitAuthorizationBridge {
         authorizer
             .add_policy(policy!("allow if true"))
             .map_err(BiscuitError::BiscuitLib)?;
-        let authorization_result = authorizer.authorize();
+        let authorization_result = authorizer.authorize_with_limits(GUARD_BISCUIT_LIMITS);
 
         let authorized = match authorization_result {
             Ok(_) => true,
@@ -234,6 +253,11 @@ impl BiscuitAuthorizationBridge {
         capability: &str,
         current_time_seconds: u64,
     ) -> Result<bool, BiscuitError> {
+        // Validate capability name before passing to Datalog evaluation.
+        let capability_name = CapabilityName::parse(capability)
+            .map_err(|error| BiscuitError::InvalidCapability(error.to_string()))?;
+        let capability = capability_name.as_str();
+
         // Create authorizer and verify token signature
         let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
 
@@ -261,7 +285,7 @@ impl BiscuitAuthorizationBridge {
             .map_err(BiscuitError::BiscuitLib)?;
 
         // Run Datalog evaluation
-        let result = authorizer.authorize();
+        let result = authorizer.authorize_with_limits(GUARD_BISCUIT_LIMITS);
 
         match result {
             Ok(_) => Ok(true),
@@ -330,4 +354,104 @@ pub struct AuthorizationResult {
     pub authorized: bool,
     pub delegation_depth: Option<u32>,
     pub token_facts: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::{capability_name, types::identifiers::AuthorityId};
+
+    fn test_bridge() -> (BiscuitAuthorizationBridge, Biscuit) {
+        let authority_id = AuthorityId::new_from_entropy([42u8; 32]);
+        let authority = aura_authorization::TokenAuthority::new(authority_id);
+        let token = authority
+            .create_token(
+                authority_id,
+                vec![
+                    capability_name!("execute"),
+                    capability_name!("invitation:send"),
+                ],
+            )
+            .unwrap_or_else(|err| panic!("failed to create token: {err:?}"));
+        let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), authority_id);
+        (bridge, token)
+    }
+
+    #[test]
+    fn namespaced_capability_authorized_through_bridge() {
+        let (bridge, token) = test_bridge();
+        let result = bridge.has_capability(&token, "invitation:send", 1000);
+        assert!(
+            result.unwrap_or_else(|err| panic!("capability check failed: {err:?}")),
+            "invitation:send should be authorized — token carries this capability"
+        );
+    }
+
+    #[test]
+    fn namespaced_capability_not_present_is_denied() {
+        let (bridge, token) = test_bridge();
+        let result = bridge.has_capability(&token, "recovery:initiate", 1000);
+        assert!(
+            !result.unwrap_or_else(|err| panic!("capability check failed: {err:?}")),
+            "recovery:initiate should be denied — token does not carry this capability"
+        );
+    }
+
+    #[test]
+    fn authorize_namespaced_operation_checks_exact_capability() {
+        let (bridge, token) = test_bridge();
+        let scope = aura_authorization::ResourceScope::Authority {
+            authority_id: AuthorityId::new_from_entropy([99u8; 32]),
+            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
+        };
+        // invitation:send is in the token and should match the namespaced check
+        let result = bridge
+            .authorize(&token, "invitation:send", &scope, 1000)
+            .unwrap_or_else(|err| panic!("authorize failed: {err:?}"));
+        assert!(
+            result.authorized,
+            "namespaced operation should match the exact capability in the token"
+        );
+    }
+
+    #[test]
+    fn authorize_namespaced_operation_denied_without_matching_capability() {
+        let (bridge, token) = test_bridge();
+        let scope = aura_authorization::ResourceScope::Authority {
+            authority_id: AuthorityId::new_from_entropy([99u8; 32]),
+            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
+        };
+        // recovery:initiate is NOT in the token
+        let result = bridge
+            .authorize(&token, "recovery:initiate", &scope, 1000)
+            .unwrap_or_else(|err| panic!("authorize failed: {err:?}"));
+        assert!(
+            !result.authorized,
+            "namespaced operation without matching capability should be denied"
+        );
+    }
+
+    #[test]
+    fn generic_execute_still_works_for_unnamespaced_operations() {
+        let (bridge, token) = test_bridge();
+        let scope = aura_authorization::ResourceScope::Authority {
+            authority_id: AuthorityId::new_from_entropy([99u8; 32]),
+            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
+        };
+        // "execute" is in the token as a generic capability
+        let result = bridge
+            .authorize(&token, "execute", &scope, 1000)
+            .unwrap_or_else(|err| panic!("authorize failed: {err:?}"));
+        assert!(result.authorized);
+    }
+
+    #[test]
+    fn capability_name_validation_rejects_uppercase() {
+        let (bridge, token) = test_bridge();
+        let result = bridge.has_capability(&token, "Invitation:Send", 1000);
+        assert!(
+            result.is_err(),
+            "uppercase capability names should be rejected by validation"
+        );
+    }
 }

@@ -53,6 +53,26 @@ impl ToastLevel {
     pub fn is_conflict(self) -> bool {
         matches!(self, Self::Conflict)
     }
+
+    #[must_use]
+    pub fn queue_level(self) -> crate::tui::state::ToastLevel {
+        match self {
+            Self::Info => crate::tui::state::ToastLevel::Info,
+            Self::Success => crate::tui::state::ToastLevel::Success,
+            Self::Warning => crate::tui::state::ToastLevel::Warning,
+            Self::Error | Self::Conflict => crate::tui::state::ToastLevel::Error,
+        }
+    }
+
+    #[must_use]
+    pub fn from_queue_level(level: crate::tui::state::ToastLevel) -> Self {
+        match level {
+            crate::tui::state::ToastLevel::Info => Self::Info,
+            crate::tui::state::ToastLevel::Success => Self::Success,
+            crate::tui::state::ToastLevel::Warning => Self::Warning,
+            crate::tui::state::ToastLevel::Error => Self::Error,
+        }
+    }
 }
 
 /// A toast message
@@ -112,6 +132,16 @@ impl ToastMessage {
     #[must_use]
     pub fn is_conflict(&self) -> bool {
         matches!(self.level, ToastLevel::Conflict)
+    }
+}
+
+impl From<&crate::tui::state::QueuedToast> for ToastMessage {
+    fn from(toast: &crate::tui::state::QueuedToast) -> Self {
+        Self {
+            id: toast.id.to_string(),
+            message: toast.message.clone(),
+            level: ToastLevel::from_queue_level(toast.level),
+        }
     }
 }
 

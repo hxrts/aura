@@ -7,10 +7,14 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::net::TcpListener;
 use std::net::TcpStream;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -19,7 +23,13 @@ use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use aura_app::ui::workflows::ids;
 use aura_core::{hash::hash, AuthorityId};
+use nix::errno::Errno;
+use nix::sys::signal;
+use nix::unistd::Pid;
+use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
+
+use crate::workspace_root;
 
 use crate::backend::{
     BackendHandle, DiagnosticObservationProbe,
@@ -40,10 +50,19 @@ const BACKEND_TEARDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const WEB_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(600);
 const WEB_SERVER_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const PLAYWRIGHT_DRIVER_OWNED_MARKER: &str = "--aura-harness-owned-playwright-driver";
+const OWNED_WEB_SERVER_MARKER: &str = "--aura-harness-owned-web-server";
 
 struct OwnedWebServer {
     child: Child,
     url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcessSnapshot {
+    pid: u32,
+    ppid: u32,
+    command: String,
 }
 
 pub enum DiagnosticObservationWait<'a> {
@@ -62,22 +81,54 @@ pub struct HarnessCoordinator {
     instance_modes: HashMap<String, InstanceMode>,
     instance_bind_addresses: HashMap<String, String>,
     instance_data_dirs: HashMap<String, PathBuf>,
+    instance_transient_dirs: HashMap<String, PathBuf>,
     runtime_substrate: RuntimeSubstrate,
     runtime_substrate_controller: RuntimeSubstrateController,
     owned_web_server: Option<OwnedWebServer>,
     owned_web_server_log_path: Option<PathBuf>,
     events: EventStream,
+    run_root: PathBuf,
+    run_token: Option<String>,
+    instance_claim_paths: HashMap<String, PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InstanceOwnershipManifest {
+    instance_id: String,
+    mode: String,
+    bind_address: String,
+    data_dir: String,
+    transient_dir: String,
+    claim_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RunOwnershipManifest {
+    run_token: Option<String>,
+    coordinator_pid: u32,
+    run_root: String,
+    instances: Vec<InstanceOwnershipManifest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InstanceClaim {
+    instance_id: String,
+    run_token: Option<String>,
+    coordinator_pid: u32,
+    run_root: String,
 }
 
 #[allow(clippy::disallowed_methods)] // Harness timeout enforcement requires wall-clock bounds.
 impl HarnessCoordinator {
     pub fn from_run_config(config: &RunConfig) -> Result<Self> {
+        reap_orphaned_harness_processes();
         let browser_app_url = provision_browser_app_url(config)?;
         let mut backends = HashMap::new();
         let mut instance_order = Vec::new();
         let mut instance_modes = HashMap::new();
         let mut instance_bind_addresses = HashMap::new();
         let mut instance_data_dirs = HashMap::new();
+        let mut instance_transient_dirs = HashMap::new();
         let pty_rows = config.run.pty_rows;
         let pty_cols = config.run.pty_cols;
         for instance in &config.instances {
@@ -94,14 +145,27 @@ impl HarnessCoordinator {
             let instance_mode = instance.mode.clone();
             let instance_bind_address = instance.bind_address.clone();
             let instance_data_dir = absolutize_path(instance.data_dir.clone());
+            let instance_transient_dir = instance
+                .env
+                .iter()
+                .find_map(|entry| {
+                    let (key, value) = entry.split_once('=')?;
+                    (key == "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT")
+                        .then(|| absolutize_path(PathBuf::from(value)))
+                })
+                .unwrap_or_else(|| instance_data_dir.join(".harness-transient"));
             let backend = BackendHandle::from_config(instance, pty_rows, pty_cols)?;
             instance_order.push(id.clone());
             instance_modes.insert(id.clone(), instance_mode);
             instance_bind_addresses.insert(id.clone(), instance_bind_address);
             instance_data_dirs.insert(id.clone(), instance_data_dir);
+            instance_transient_dirs.insert(id.clone(), instance_transient_dir);
             backends.insert(id, backend);
         }
         let artifact_dir = config.run.artifact_dir.clone().map(absolutize_path);
+        let run_root = artifact_dir
+            .clone()
+            .unwrap_or_else(|| absolutize_path(PathBuf::from(".tmp/harness")));
         let runtime_substrate_controller = RuntimeSubstrateController::new(
             config.run.runtime_substrate,
             config.run.seed.unwrap_or_default(),
@@ -109,21 +173,57 @@ impl HarnessCoordinator {
             artifact_dir,
         )?;
 
-        Ok(Self {
+        let run_token = std::env::var("AURA_HARNESS_RUN_TOKEN").ok();
+        let instance_claim_paths = instance_order
+            .iter()
+            .map(|instance_id| {
+                let mode = instance_modes
+                    .get(instance_id)
+                    .unwrap_or_else(|| panic!("missing instance mode for {instance_id}"));
+                let bind_address = instance_bind_addresses
+                    .get(instance_id)
+                    .unwrap_or_else(|| panic!("missing bind address for {instance_id}"));
+                let data_dir = instance_data_dirs
+                    .get(instance_id)
+                    .unwrap_or_else(|| panic!("missing data_dir for {instance_id}"));
+                let transient_dir = instance_transient_dirs
+                    .get(instance_id)
+                    .unwrap_or_else(|| panic!("missing transient_dir for {instance_id}"));
+                let claim_key =
+                    instance_claim_key(instance_id, mode, bind_address, data_dir, transient_dir);
+                (
+                    instance_id.clone(),
+                    workspace_root()
+                        .join(".tmp")
+                        .join("harness")
+                        .join("instance-claims")
+                        .join(format!("{claim_key}.json")),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        let coordinator = Self {
             backends,
             instance_order,
             instance_modes,
             instance_bind_addresses,
             instance_data_dirs,
+            instance_transient_dirs,
             runtime_substrate: config.run.runtime_substrate,
             runtime_substrate_controller,
             owned_web_server: browser_app_url.server,
             owned_web_server_log_path: browser_app_url.log_path,
             events: EventStream::new(),
-        })
+            run_root,
+            run_token,
+            instance_claim_paths,
+        };
+        coordinator.write_run_manifest()?;
+        Ok(coordinator)
     }
 
     pub fn start_all(&mut self) -> Result<()> {
+        self.acquire_instance_claims()?;
         self.clear_stale_local_state()?;
         if let Some(server) = &mut self.owned_web_server {
             wait_for_owned_web_server(
@@ -364,47 +464,62 @@ impl HarnessCoordinator {
                 .get(instance_id)
                 .ok_or_else(|| anyhow!("missing data_dir for instance_id: {instance_id}"))?;
             clear_directory_contents(data_dir)?;
+            if let Some(transient_dir) = self.instance_transient_dirs.get(instance_id) {
+                clear_directory_contents(transient_dir)?;
+            }
             self.events.push(
                 "lifecycle",
                 "clear_stale_state",
                 Some(instance_id.clone()),
-                event_details!({ "data_dir" => data_dir.display().to_string() }),
+                event_details!({
+                    "data_dir" => data_dir.display().to_string(),
+                    "transient_dir" => self.instance_transient_dirs
+                        .get(instance_id)
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_default()
+                }),
             );
         }
         Ok(())
     }
 
     pub fn stop_all(&mut self) -> Result<()> {
-        for id in self.instance_order.iter().rev() {
-            let backend_kind = {
-                let backend = self
-                    .backends
-                    .get_mut(id)
-                    .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
-                let backend_kind = backend.backend_kind();
-                backend.stop()?;
-                backend_kind
-            };
-            self.events.push(
-                "lifecycle",
-                "stop",
-                Some(id.clone()),
-                event_details!({ "backend" => backend_kind }),
-            );
-            self.wait_for_backend_stopped(id, BACKEND_TEARDOWN_TIMEOUT)?;
-            self.verify_bind_address_released(id)?;
-            self.events.push(
-                "lifecycle",
-                "cleanup_ok",
-                Some(id.clone()),
-                event_details!({ "timeout_ms" => BACKEND_TEARDOWN_TIMEOUT.as_millis() }),
-            );
-        }
-        self.runtime_substrate_controller.finish()?;
-        if let Some(server) = &mut self.owned_web_server {
-            let _ = server.child.kill();
-            let _ = server.child.wait();
-        }
+        let stop_result = (|| -> Result<()> {
+            for id in self.instance_order.iter().rev() {
+                let backend_kind = {
+                    let backend = self
+                        .backends
+                        .get_mut(id)
+                        .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
+                    let backend_kind = backend.backend_kind();
+                    backend.stop()?;
+                    backend_kind
+                };
+                self.events.push(
+                    "lifecycle",
+                    "stop",
+                    Some(id.clone()),
+                    event_details!({ "backend" => backend_kind }),
+                );
+                self.wait_for_backend_stopped(id, BACKEND_TEARDOWN_TIMEOUT)?;
+                self.verify_bind_address_released(id)?;
+                self.events.push(
+                    "lifecycle",
+                    "cleanup_ok",
+                    Some(id.clone()),
+                    event_details!({ "timeout_ms" => BACKEND_TEARDOWN_TIMEOUT.as_millis() }),
+                );
+            }
+            self.verify_post_run_cleanup()?;
+            self.runtime_substrate_controller.finish()?;
+            if let Some(server) = &mut self.owned_web_server {
+                terminate_owned_child(server.child.id(), &mut server.child);
+            }
+            Ok(())
+        })();
+        let release_result = self.release_instance_claims();
+        stop_result?;
+        release_result?;
         Ok(())
     }
 
@@ -424,6 +539,207 @@ impl HarnessCoordinator {
 
     pub fn apply_fault_tunnel_drop(&mut self, actor: &str) -> Result<()> {
         self.runtime_substrate_controller.fault_tunnel_drop(actor)
+    }
+
+    fn write_run_manifest(&self) -> Result<()> {
+        fs::create_dir_all(&self.run_root).with_context(|| {
+            format!(
+                "failed to create harness run root {}",
+                self.run_root.display()
+            )
+        })?;
+        let manifest = RunOwnershipManifest {
+            run_token: self.run_token.clone(),
+            coordinator_pid: process::id(),
+            run_root: self.run_root.display().to_string(),
+            instances: self
+                .instance_order
+                .iter()
+                .map(|instance_id| InstanceOwnershipManifest {
+                    instance_id: instance_id.clone(),
+                    mode: format!(
+                        "{:?}",
+                        self.instance_modes
+                            .get(instance_id)
+                            .unwrap_or_else(|| panic!("missing mode for {instance_id}"))
+                    )
+                    .to_ascii_lowercase(),
+                    bind_address: self
+                        .instance_bind_addresses
+                        .get(instance_id)
+                        .cloned()
+                        .unwrap_or_else(|| panic!("missing bind address for {instance_id}")),
+                    data_dir: self
+                        .instance_data_dirs
+                        .get(instance_id)
+                        .unwrap_or_else(|| panic!("missing data dir for {instance_id}"))
+                        .display()
+                        .to_string(),
+                    transient_dir: self
+                        .instance_transient_dirs
+                        .get(instance_id)
+                        .unwrap_or_else(|| panic!("missing transient dir for {instance_id}"))
+                        .display()
+                        .to_string(),
+                    claim_path: self
+                        .instance_claim_paths
+                        .get(instance_id)
+                        .unwrap_or_else(|| panic!("missing claim path for {instance_id}"))
+                        .display()
+                        .to_string(),
+                })
+                .collect(),
+        };
+        let manifest_path = self.run_root.join("ownership_manifest.json");
+        let body = serde_json::to_vec_pretty(&manifest)?;
+        fs::write(&manifest_path, body).with_context(|| {
+            format!(
+                "failed to write harness ownership manifest {}",
+                manifest_path.display()
+            )
+        })
+    }
+
+    fn acquire_instance_claims(&self) -> Result<()> {
+        for instance_id in &self.instance_order {
+            let mode = self
+                .instance_modes
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+            if !matches!(mode, InstanceMode::Local | InstanceMode::Browser) {
+                continue;
+            }
+            let claim_path = self
+                .instance_claim_paths
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("missing claim path for instance_id: {instance_id}"))?;
+            if let Some(parent) = claim_path.parent() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!(
+                        "failed to create harness claim directory {}",
+                        parent.display()
+                    )
+                })?;
+            }
+            self.acquire_instance_claim(instance_id, claim_path)?;
+        }
+        Ok(())
+    }
+
+    fn acquire_instance_claim(&self, instance_id: &str, claim_path: &Path) -> Result<()> {
+        let claim = InstanceClaim {
+            instance_id: instance_id.to_string(),
+            run_token: self.run_token.clone(),
+            coordinator_pid: process::id(),
+            run_root: self.run_root.display().to_string(),
+        };
+        let body = serde_json::to_vec_pretty(&claim)?;
+        loop {
+            match File::options()
+                .create_new(true)
+                .write(true)
+                .open(claim_path)
+            {
+                Ok(mut file) => {
+                    use std::io::Write as _;
+                    file.write_all(&body)?;
+                    return Ok(());
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let existing = fs::read(claim_path)
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice::<InstanceClaim>(&bytes).ok());
+                    if existing
+                        .as_ref()
+                        .is_some_and(|existing| process_alive(existing.coordinator_pid))
+                    {
+                        let existing = existing.unwrap_or_else(|| InstanceClaim {
+                            instance_id: instance_id.to_string(),
+                            run_token: None,
+                            coordinator_pid: 0,
+                            run_root: String::new(),
+                        });
+                        bail!(
+                            "instance {instance_id} is already claimed by live harness run token={:?} pid={} root={}; refer to docs/122_ownership_model.md best practices and clean the existing owner before starting a new run",
+                            existing.run_token,
+                            existing.coordinator_pid,
+                            existing.run_root,
+                        );
+                    }
+                    fs::remove_file(claim_path).with_context(|| {
+                        format!(
+                            "failed to remove stale harness claim {}",
+                            claim_path.display()
+                        )
+                    })?;
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "failed to create harness claim {} for instance {}",
+                            claim_path.display(),
+                            instance_id
+                        )
+                    });
+                }
+            }
+        }
+    }
+
+    fn release_instance_claims(&self) -> Result<()> {
+        for claim_path in self.instance_claim_paths.values() {
+            match fs::remove_file(claim_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("failed to remove harness claim {}", claim_path.display())
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_post_run_cleanup(&self) -> Result<()> {
+        for instance_id in &self.instance_order {
+            let mode = self
+                .instance_modes
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+            if !matches!(mode, InstanceMode::Local | InstanceMode::Browser) {
+                continue;
+            }
+            let transient_dir = self
+                .instance_transient_dirs
+                .get(instance_id)
+                .ok_or_else(|| anyhow!("missing transient_dir for instance_id: {instance_id}"))?;
+            if transient_dir.exists() {
+                let mut lingering = fs::read_dir(transient_dir)
+                    .with_context(|| {
+                        format!(
+                            "failed to inspect transient dir {}",
+                            transient_dir.display()
+                        )
+                    })?
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .collect::<Vec<_>>();
+                lingering.sort();
+                if !lingering.is_empty() {
+                    bail!(
+                        "instance {instance_id} left transient residue in {}: {}; refer to docs/122_ownership_model.md best practices and ensure owner death performs full cleanup",
+                        transient_dir.display(),
+                        lingering
+                            .iter()
+                            .map(|path| path.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     fn wait_for_backend_stopped(&self, instance_id: &str, timeout: Duration) -> Result<()> {
@@ -992,7 +1308,7 @@ impl HarnessCoordinator {
                     Some(instance_id.to_string()),
                     event_details!({
                         "authority_id" => authority_id.clone(),
-                        "device_id" => provisional_device_id.clone(),
+                        "device_id" => provisional_device_id,
                         "timeout_ms" => BACKEND_READY_TIMEOUT.as_millis()
                     }),
                 );
@@ -1092,9 +1408,11 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
     let log_file_err = log_file.try_clone()?;
     let child = Command::new(&script)
         .arg(port.to_string())
+        .arg(OWNED_WEB_SERVER_MARKER)
         .env("AURA_HARNESS_WEB_BUILD_PROFILE", "release")
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
+        .process_group(0)
         .spawn()
         .map_err(|error| {
             anyhow!(
@@ -1285,6 +1603,139 @@ fn absolutize_path(path: PathBuf) -> PathBuf {
     path
 }
 
+fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    match signal::kill(Pid::from_raw(pid as i32), None) {
+        Ok(()) => true,
+        Err(Errno::EPERM) => true,
+        Err(_) => false,
+    }
+}
+
+fn terminate_owned_child(pid: u32, child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let _ = signal::kill(Pid::from_raw(-(pid as i32)), signal::Signal::SIGKILL);
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn reap_orphaned_harness_processes() {
+    let snapshots = current_process_snapshots().unwrap_or_default();
+    let parent_commands = snapshots
+        .iter()
+        .map(|snapshot| (snapshot.pid, snapshot.command.clone()))
+        .collect::<HashMap<_, _>>();
+    for snapshot in snapshots {
+        let Some(kind) = classify_owned_harness_process(&snapshot.command) else {
+            continue;
+        };
+        if has_live_harness_parent(snapshot.ppid, &parent_commands) {
+            continue;
+        }
+        match kind {
+            OwnedHarnessProcessKind::MarkedProcessGroup => {
+                #[cfg(unix)]
+                let _ = signal::kill(
+                    Pid::from_raw(-(snapshot.pid as i32)),
+                    signal::Signal::SIGKILL,
+                );
+                #[cfg(not(unix))]
+                let _ = signal::kill(Pid::from_raw(snapshot.pid as i32), signal::Signal::SIGKILL);
+            }
+            OwnedHarnessProcessKind::LegacySingleProcess => {
+                let _ = signal::kill(Pid::from_raw(snapshot.pid as i32), signal::Signal::SIGKILL);
+            }
+        }
+    }
+}
+
+fn has_live_harness_parent(ppid: u32, parent_commands: &HashMap<u32, String>) -> bool {
+    if ppid == 0 || ppid == 1 || !process_alive(ppid) {
+        return false;
+    }
+    parent_commands
+        .get(&ppid)
+        .map(String::as_str)
+        .is_some_and(looks_like_live_harness_owner)
+}
+
+fn looks_like_live_harness_owner(command: &str) -> bool {
+    command.contains("tool_repl")
+        || command.contains("cargo run") && command.contains("aura-harness")
+        || command.contains("target/debug/aura-harness")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OwnedHarnessProcessKind {
+    MarkedProcessGroup,
+    LegacySingleProcess,
+}
+
+fn current_process_snapshots() -> Result<Vec<ProcessSnapshot>> {
+    let output = Command::new("ps")
+        .args(["-Ao", "pid=,ppid=,command="])
+        .output()
+        .context("failed to query process table for harness-owned cleanup")?;
+    if !output.status.success() {
+        bail!("process table query exited with status {}", output.status);
+    }
+    let stdout =
+        String::from_utf8(output.stdout).context("process table query returned non-utf8 output")?;
+    Ok(stdout
+        .lines()
+        .filter_map(parse_process_snapshot)
+        .collect::<Vec<_>>())
+}
+
+fn parse_process_snapshot(line: &str) -> Option<ProcessSnapshot> {
+    let mut parts = line.trim().splitn(3, char::is_whitespace);
+    let pid = parts.next()?.trim().parse::<u32>().ok()?;
+    let ppid = parts.next()?.trim().parse::<u32>().ok()?;
+    let command = parts.next()?.trim().to_string();
+    (!command.is_empty()).then_some(ProcessSnapshot { pid, ppid, command })
+}
+
+fn classify_owned_harness_process(command: &str) -> Option<OwnedHarnessProcessKind> {
+    let legacy_transport_poll_marker = [
+        "TRANSPORT_POLL_PATH = ",
+        "\"/__aura_harness_",
+        "transport__/poll\"",
+    ]
+    .concat();
+    if command.contains(PLAYWRIGHT_DRIVER_OWNED_MARKER) || command.contains(OWNED_WEB_SERVER_MARKER)
+    {
+        return Some(OwnedHarnessProcessKind::MarkedProcessGroup);
+    }
+    if command.contains("playwright_driver.mjs") {
+        return Some(OwnedHarnessProcessKind::LegacySingleProcess);
+    }
+    if command.contains(&legacy_transport_poll_marker) && command.contains("/target/dx/aura-web/") {
+        return Some(OwnedHarnessProcessKind::LegacySingleProcess);
+    }
+    None
+}
+
+fn instance_claim_key(
+    instance_id: &str,
+    mode: &InstanceMode,
+    bind_address: &str,
+    data_dir: &Path,
+    transient_dir: &Path,
+) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    instance_id.hash(&mut hasher);
+    format!("{mode:?}").hash(&mut hasher);
+    bind_address.hash(&mut hasher);
+    data_dir.hash(&mut hasher);
+    transient_dir.hash(&mut hasher);
+    format!("{instance_id}-{:016x}", hasher.finish())
+}
+
 fn clear_directory_contents(dir: &Path) -> Result<()> {
     fs::create_dir_all(dir)
         .map_err(|error| anyhow!("failed to create data_dir {}: {error}", dir.display()))?;
@@ -1340,7 +1791,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        clear_directory_contents, normalize_key_stream, wait_pattern_matches, HarnessCoordinator,
+        classify_owned_harness_process, clear_directory_contents, normalize_key_stream,
+        parse_process_snapshot, wait_pattern_matches, HarnessCoordinator, OwnedHarnessProcessKind,
     };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
     use std::net::TcpListener;
@@ -1384,6 +1836,63 @@ mod tests {
         let screen = "Neighborhood Chat Contacts Notifications Settings";
         assert!(wait_pattern_matches(screen, "Chat Contacts"));
         assert!(!wait_pattern_matches(screen, "Missing Token"));
+    }
+
+    #[test]
+    fn parse_process_snapshot_reads_pid_ppid_and_command() {
+        let snapshot =
+            parse_process_snapshot("123 1 node /tmp/playwright_driver.mjs --flag").unwrap();
+        assert_eq!(snapshot.pid, 123);
+        assert_eq!(snapshot.ppid, 1);
+        assert_eq!(snapshot.command, "node /tmp/playwright_driver.mjs --flag");
+    }
+
+    #[test]
+    fn owned_harness_process_classifier_matches_marked_and_legacy_processes() {
+        assert_eq!(
+            classify_owned_harness_process(
+                "node /repo/crates/aura-harness/playwright-driver/playwright_driver.mjs --aura-harness-owned-playwright-driver"
+            ),
+            Some(OwnedHarnessProcessKind::MarkedProcessGroup)
+        );
+        assert_eq!(
+            classify_owned_harness_process(
+                "node -e 'const TRANSPORT_POLL_PATH = \"/__aura_harness_transport__/poll\";' /Users/hxrts/projects/aura/target/dx/aura-web/release/web/public 4174 --aura-harness-owned-web-server"
+            ),
+            Some(OwnedHarnessProcessKind::MarkedProcessGroup)
+        );
+        assert_eq!(
+            classify_owned_harness_process(
+                "node /repo/crates/aura-harness/playwright-driver/playwright_driver.mjs"
+            ),
+            Some(OwnedHarnessProcessKind::LegacySingleProcess)
+        );
+        assert_eq!(
+            classify_owned_harness_process(
+                "node -e 'const TRANSPORT_POLL_PATH = \"/__aura_harness_transport__/poll\";' /Users/hxrts/projects/aura/target/dx/aura-web/release/web/public 4174"
+            ),
+            Some(OwnedHarnessProcessKind::LegacySingleProcess)
+        );
+        assert_eq!(
+            classify_owned_harness_process("node /tmp/other-script.js"),
+            None
+        );
+    }
+
+    #[test]
+    fn live_harness_owner_classifier_is_explicit() {
+        assert!(super::looks_like_live_harness_owner(
+            "target/debug/tool_repl --config scenarios/harness.toml"
+        ));
+        assert!(super::looks_like_live_harness_owner(
+            "cargo run -q -p aura-harness --bin tool_repl -- --config work/browser-loopback-interactive.toml"
+        ));
+        assert!(!super::looks_like_live_harness_owner(
+            "/bin/zsh -lc scripts/web/serve-static.sh"
+        ));
+        assert!(!super::looks_like_live_harness_owner(
+            "node /repo/crates/aura-harness/playwright-driver/playwright_driver.mjs"
+        ));
     }
 
     #[test]

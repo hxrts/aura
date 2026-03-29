@@ -9,9 +9,9 @@ fail() {
   exit 1
 }
 
-driver="crates/aura-harness/playwright-driver/playwright_driver.mjs"
-start_line="$(rg -n '^function resetObservationState' "$driver" | cut -d: -f1)"
-end_line="$(rg -n '^function markObservationMutation' "$driver" | cut -d: -f1)"
+driver="crates/aura-harness/playwright-driver/src/playwright_driver.ts"
+start_line="$(rg -n '^function resetUiObservationState' "$driver" | cut -d: -f1)"
+end_line="$(rg -n '^function resetObservationState' "$driver" | cut -d: -f1)"
 
 if [ -z "$start_line" ] || [ -z "$end_line" ]; then
   fail "could not locate browser cache owner function boundaries"
@@ -26,7 +26,7 @@ while IFS= read -r hit; do
   line="${hit%%:*}"
   if [ "$line" -lt "$start_line" ] || [ "$line" -ge "$end_line" ]; then
     echo "$hit" >&2
-    fail "browser cache reset logic must stay inside resetObservationState"
+    fail "browser cache reset logic must stay inside resetUiObservationState"
   fi
 done <<< "$hits"
 

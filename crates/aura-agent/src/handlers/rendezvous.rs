@@ -24,15 +24,18 @@ use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{FlowCost, Hash32, Prestate, Receipt};
 use aura_guards::chain::create_send_guard;
-use aura_guards::types::CapabilityId;
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::EffectApiEffects;
 use aura_protocol::effects::TreeEffects;
+use aura_rendezvous::capabilities::{
+    evaluation_candidates_for_rendezvous_guard, RendezvousCapability,
+};
 use aura_rendezvous::{
     EffectCommand, GuardOutcome, GuardSnapshot, RendezvousConfig, RendezvousDescriptor,
     RendezvousFact, RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
 };
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -81,6 +84,78 @@ pub struct RendezvousHandler {
 }
 
 impl RendezvousHandler {
+    fn decode_biscuit_frontier(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<
+        Option<(
+            aura_authorization::Biscuit,
+            aura_authorization::BiscuitAuthorizationBridge,
+        )>,
+    > {
+        let Some(cache) = effects.biscuit_cache() else {
+            return Ok(None);
+        };
+
+        let engine = base64::engine::general_purpose::STANDARD;
+        let token_bytes = engine
+            .decode(cache.token_b64)
+            .map_err(|error| AgentError::effects(format!("decode biscuit token cache: {error}")))?;
+        let root_pk_bytes = engine.decode(cache.root_pk_b64).map_err(|error| {
+            AgentError::effects(format!("decode biscuit root public key cache: {error}"))
+        })?;
+        let root_public_key =
+            aura_authorization::PublicKey::from_bytes(&root_pk_bytes).map_err(|error| {
+                AgentError::effects(format!("parse biscuit root public key cache: {error}"))
+            })?;
+        let biscuit = aura_authorization::Biscuit::from(&token_bytes, root_public_key)
+            .map_err(|error| AgentError::effects(format!("parse biscuit token cache: {error}")))?;
+        let bridge = aura_authorization::BiscuitAuthorizationBridge::new(
+            root_public_key,
+            self.context.authority.authority_id(),
+        );
+        Ok(Some((biscuit, bridge)))
+    }
+
+    async fn build_rendezvous_capabilities(
+        &self,
+        effects: &AuraEffectSystem,
+        now_ms: u64,
+    ) -> AgentResult<Vec<aura_guards::types::CapabilityId>> {
+        let Some((token, bridge)) = self.decode_biscuit_frontier(effects)? else {
+            tracing::debug!(
+                authority = %self.context.authority.authority_id(),
+                "no Biscuit frontier available for rendezvous guard snapshot"
+            );
+            return Ok(Vec::new());
+        };
+
+        let current_time_seconds = (now_ms != 0).then_some(now_ms / 1_000);
+        Ok(evaluation_candidates_for_rendezvous_guard()
+            .iter()
+            .filter_map(|capability| {
+                let capability_name = capability.as_name();
+                match bridge.has_capability_with_time(
+                    &token,
+                    capability_name.as_str(),
+                    current_time_seconds,
+                ) {
+                    Ok(true) => Some(capability_name),
+                    Ok(false) => None,
+                    Err(error) => {
+                        tracing::warn!(
+                            authority = %self.context.authority.authority_id(),
+                            capability = capability_name.as_str(),
+                            error = %error,
+                            "failed to evaluate rendezvous Biscuit capability"
+                        );
+                        None
+                    }
+                }
+            })
+            .collect())
+    }
+
     /// Create a new rendezvous handler
     pub fn new(authority: AuthorityContext) -> AgentResult<Self> {
         HandlerUtilities::validate_authority_context(&authority)?;
@@ -139,7 +214,7 @@ impl RendezvousHandler {
 
         // Enforce guard chain
         let guard = create_send_guard(
-            CapabilityId::from("rendezvous:publish_descriptor"),
+            RendezvousCapability::Publish.as_name(),
             context_id,
             self.context.authority.authority_id(),
             FlowCost::new(1), // Low cost for descriptor publication
@@ -247,7 +322,10 @@ impl RendezvousHandler {
         match self.cache_manager.get_descriptor(context_id, peer).await {
             Some(descriptor) => Some(descriptor),
             None => match self.rendezvous_manager.as_ref() {
-                Some(manager) => manager.get_descriptor(context_id, peer).await,
+                Some(manager) => match manager.get_descriptor(context_id, peer).await {
+                    Some(descriptor) => Some(descriptor),
+                    None => manager.get_any_descriptor_for_authority(peer).await,
+                },
                 None => None,
             },
         }
@@ -285,7 +363,7 @@ impl RendezvousHandler {
 
         // Enforce guard chain
         let guard = create_send_guard(
-            CapabilityId::from("rendezvous:initiate_channel"),
+            RendezvousCapability::Connect.as_name(),
             context_id,
             self.context.authority.authority_id(),
             FlowCost::new(2), // Handshake cost
@@ -309,16 +387,10 @@ impl RendezvousHandler {
         let psk = derive_channel_psk(context_id, self.context.authority.authority_id(), peer);
 
         // Prepare channel establishment
-        let peer_descriptor = match self.cache_manager.get_descriptor(context_id, peer).await {
-            Some(descriptor) => descriptor,
-            None => match self.rendezvous_manager.as_ref() {
-                Some(manager) => manager
-                    .get_descriptor(context_id, peer)
-                    .await
-                    .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?,
-                None => return Err(AgentError::invalid("Peer descriptor not found in cache")),
-            },
-        };
+        let peer_descriptor = self
+            .get_peer_descriptor(context_id, peer)
+            .await
+            .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
 
         // Retrieve identity keys
         let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;
@@ -430,7 +502,7 @@ impl RendezvousHandler {
 
         // Enforce guard chain
         let guard = create_send_guard(
-            CapabilityId::from("rendezvous:relay_request"),
+            RendezvousCapability::Relay.as_name(),
             context_id,
             self.context.authority.authority_id(),
             FlowCost::new(2), // Relay request cost
@@ -484,16 +556,13 @@ impl RendezvousHandler {
         effects: &AuraEffectSystem,
         context_id: ContextId,
     ) -> AgentResult<GuardSnapshot> {
+        let now_ms = effects.current_timestamp().await.unwrap_or(0);
         Ok(GuardSnapshot {
             authority_id: self.context.authority.authority_id(),
             context_id,
             flow_budget_remaining: FlowCost::new(1000), // Default budget
-            capabilities: vec![
-                CapabilityId::from("rendezvous:publish"),
-                CapabilityId::from("rendezvous:connect"),
-                CapabilityId::from("rendezvous:relay"),
-            ],
-            epoch: effects.current_timestamp().await.unwrap_or(0) / 1000, // Epoch in seconds
+            capabilities: self.build_rendezvous_capabilities(effects, now_ms).await?,
+            epoch: now_ms / 1000, // Epoch in seconds
         })
     }
 
@@ -976,11 +1045,30 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
+    use aura_core::CapabilityName;
+    use aura_guards::GuardContextProvider;
     use aura_rendezvous::GuardDecision;
+    use base64::Engine;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
         AuthorityContext::new(authority_id)
+    }
+
+    fn install_biscuit_cache(
+        effects: &std::sync::Arc<AuraEffectSystem>,
+        capabilities: Vec<CapabilityName>,
+    ) {
+        let authority = effects.authority_id();
+        let issuer = aura_authorization::TokenAuthority::new(authority);
+        let token = issuer
+            .create_token(authority, capabilities)
+            .expect("rendezvous test token should build");
+        let engine = base64::engine::general_purpose::STANDARD;
+        effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
+            token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
+        });
     }
 
     #[tokio::test]
@@ -989,6 +1077,45 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone());
 
         assert!(handler.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_create_snapshot_uses_evaluated_rendezvous_capability_frontier() {
+        let authority_context = create_test_authority(51);
+        let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let context_id = ContextId::new_from_entropy([151u8; 32]);
+
+        install_biscuit_cache(&effects, vec![RendezvousCapability::Publish.as_name()]);
+
+        let snapshot = handler
+            .create_snapshot(effects.as_ref(), context_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            snapshot.capabilities,
+            vec![RendezvousCapability::Publish.as_name()]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_snapshot_without_biscuit_frontier_has_empty_capabilities() {
+        let authority_context = create_test_authority(52);
+        let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let context_id = ContextId::new_from_entropy([152u8; 32]);
+
+        effects.clear_biscuit_cache();
+
+        let snapshot = handler
+            .create_snapshot(effects.as_ref(), context_id)
+            .await
+            .unwrap();
+
+        assert!(snapshot.capabilities.is_empty());
     }
 
     #[tokio::test]

@@ -9,7 +9,7 @@ mod remove_device_modal;
 mod screen;
 
 // Screen exports
-pub use screen::{run_settings_screen, MfaCallback, SettingsScreen};
+pub use screen::{run_settings_screen, SettingsScreen};
 
 // Modals
 pub use device_enrollment_modal::DeviceEnrollmentModal;

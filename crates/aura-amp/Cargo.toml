@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Aura Messaging Protocol: reliable async messaging with acknowledgment and ordering"
 include = ["src/**", "Cargo.toml"]
 
 [lints]
@@ -20,14 +23,14 @@ simulation = ["aura-core/simulation"]
 
 [dependencies]
 # Workspace crates
-aura-core = { path = "../aura-core" }
-aura-effects = { path = "../aura-effects" }
-aura-journal = { path = "../aura-journal" }
-aura-transport = { path = "../aura-transport" }
-aura-consensus = { path = "../aura-consensus" }
-aura-guards = { path = "../aura-guards" }
-aura-macros = { path = "../aura-macros" }
-aura-mpst = { path = "../aura-mpst" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-effects = { path = "../aura-effects", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-transport = { path = "../aura-transport", version = "0.1.0" }
+aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
+aura-guards = { path = "../aura-guards", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
+aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
 telltale = { workspace = true }
 
 # Serialization

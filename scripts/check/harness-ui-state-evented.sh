@@ -13,6 +13,8 @@ cargo test -p aura-harness wait_contract_refs_cover_all_parity_wait_kinds --quie
 cargo test -p aura-harness semantic_wait_helpers_do_not_use_raw_dom_or_text_fallbacks --quiet
 cargo test -p aura-harness raw_text_fallbacks_are_explicitly_diagnostic_only --quiet
 
+bash scripts/check/harness-browser-toolchain.sh
+
 cd crates/aura-harness/playwright-driver
 node ./playwright_driver.mjs --selftest
 cd "$repo_root"

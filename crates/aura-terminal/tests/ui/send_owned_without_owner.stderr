@@ -1,8 +1,5 @@
-error[E0593]: closure is expected to take 3 arguments, but it takes 2 arguments
- --> tests/ui/send_owned_without_owner.rs:6:41
+error[E0432]: unresolved import `aura_terminal::tui::callbacks::SendOwnedCallback`
+ --> tests/ui/send_owned_without_owner.rs:3:5
   |
-6 |     let _: SendOwnedCallback = Arc::new(|_channel_id: String, _content: String| {});
-  |                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  |                                         |
-  |                                         expected closure that takes 3 arguments
-  |                                         takes 2 arguments
+3 | use aura_terminal::tui::callbacks::SendOwnedCallback;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `SendOwnedCallback` in `tui::callbacks`

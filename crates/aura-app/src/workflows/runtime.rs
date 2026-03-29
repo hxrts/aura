@@ -376,6 +376,44 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
     }
 }
 
+/// Run one bounded harness/runtime upkeep pass and then republish observed
+/// account state from the authoritative workflow boundary.
+///
+/// This is the shared frontend-facing maintenance shape for harness-mode real
+/// runtime execution. Frontend shells may schedule when to run the pass, but
+/// they should not fork their own step ordering.
+pub async fn run_harness_runtime_maintenance_pass(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+) -> Result<(), AuraError> {
+    converge_runtime(runtime).await;
+    super::system::refresh_account(app_core).await
+}
+
+/// Process newly-delivered browser harness transport mailbox work without
+/// immediately re-running full discovery/sync convergence on the browser main
+/// thread.
+///
+/// Browser harness transport polling already delivers remote envelopes into the
+/// local runtime inbox. The immediate follow-up work is therefore limited to
+/// inbox/ceremony processing plus projection refresh so observed UI state can
+/// converge without creating a browser-owned discovery/sync feedback loop.
+pub async fn run_harness_runtime_mailbox_pass(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+) -> Result<(), AuraError> {
+    let _ = timeout_runtime_call(
+        runtime,
+        "web_harness_transport_tick",
+        "process_ceremony_messages",
+        Duration::from_secs(3),
+        || runtime.process_ceremony_messages(),
+    )
+    .await?;
+    cooperative_yield().await;
+    super::system::refresh_account(app_core).await
+}
+
 /// Validate that the runtime has at least one viable connectivity path before a
 /// shared-flow operation relies on remote convergence.
 pub async fn ensure_runtime_peer_connectivity(

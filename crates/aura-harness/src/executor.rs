@@ -108,7 +108,9 @@ struct ScenarioContext {
     vars: BTreeMap<String, String>,
     last_operation_handle: BTreeMap<String, UiOperationHandle>,
     current_channel_binding: BTreeMap<String, ChannelBinding>,
+    current_channel_name: BTreeMap<String, String>,
     pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
+    pending_projection_baseline_snapshot: BTreeMap<String, UiSnapshot>,
     canonical_trace: Vec<CanonicalTraceEvent>,
 }
 
@@ -149,6 +151,16 @@ fn record_current_channel_binding(
     context
         .current_channel_binding
         .insert(instance_id.to_string(), binding);
+}
+
+fn record_current_channel_name(
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    channel_name: &str,
+) {
+    context
+        .current_channel_name
+        .insert(instance_id.to_string(), channel_name.to_string());
 }
 
 impl Default for ExecutionBudgets {
@@ -209,6 +221,7 @@ impl ScenarioExecutor {
                 budgets,
             );
         }
+        #[allow(deprecated)]
         let compatibility_steps = scenario
             .compatibility_steps()
             .ok_or_else(|| anyhow!("non-semantic scenarios must expose compatibility steps"))?
@@ -709,15 +722,27 @@ fn execute_semantic_step(
             fault_rng,
             context,
         ),
-        SemanticAction::Intent(IntentAction::OpenScreen(screen_id)) => {
+        SemanticAction::Intent(IntentAction::OpenScreen { screen, .. }) => {
             let instance_id = resolve_required_semantic_instance(step)?;
             let metadata_step = semantic_metadata_step(step);
+            let explicit_binding = (*screen == ScreenId::Chat)
+                .then(|| context.current_channel_binding.get(&instance_id).cloned())
+                .flatten();
+            let open_intent = IntentAction::OpenScreen {
+                screen: *screen,
+                channel_id: explicit_binding
+                    .as_ref()
+                    .map(|binding| binding.channel_id.clone()),
+                context_id: explicit_binding
+                    .as_ref()
+                    .map(|binding| binding.context_id.clone()),
+            };
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
                 context,
                 &instance_id,
-                IntentAction::OpenScreen(*screen_id),
+                open_intent,
             )?;
             record_submission_handle(
                 context,
@@ -726,7 +751,7 @@ fn execute_semantic_step(
             );
             let timeout_ms = metadata_step.timeout_ms.unwrap_or(step_budget_ms);
             let mut wait_step = semantic_wait_step(&metadata_step);
-            wait_step.screen_id = Some(*screen_id);
+            wait_step.screen_id = Some(*screen);
             clear_projection_baseline_if_semantic_state_already_visible(
                 tool_api,
                 context,
@@ -1057,8 +1082,18 @@ fn execute_semantic_step(
                         step_budget_ms,
                     )
                 }
+                aura_app::scenario_contract::Expectation::DiagnosticScreenContains {
+                    text_contains,
+                } => wait_for_diagnostic_screen_contains_in_lane(
+                    tool_api,
+                    semantic_lane,
+                    &instance_id,
+                    &step.id,
+                    text_contains,
+                    step_budget_ms,
+                ),
                 _ => {
-                    let wait_step = semantic_expectation_wait_step(step, expectation)?;
+                    let wait_step = semantic_expectation_wait_step(step, expectation, context)?;
                     wait_for_semantic_state(
                         &wait_step,
                         tool_api,
@@ -1094,7 +1129,7 @@ fn execute_semantic_environment_action(
         EnvironmentAction::LaunchActors => Ok(()),
         EnvironmentAction::RestartActor { actor } => {
             let instance_id = actor.0.clone();
-            context.pending_projection_baseline.remove(&instance_id);
+            clear_projection_baseline(context, &instance_id);
             dispatch(tool_api, ToolRequest::Restart { instance_id })
         }
         EnvironmentAction::KillActor { actor } => {
@@ -1149,11 +1184,21 @@ fn execute_semantic_intent(
                 &instance_id,
                 intent.clone(),
             )?;
-            record_submission_handle(
+            let handle = require_semantic_unit_submission(&metadata_step, operation, response)?;
+            record_submission_handle(context, &instance_id, handle.clone());
+            wait_for_contract_barriers(
+                &metadata_step,
+                tool_api,
                 context,
                 &instance_id,
-                require_semantic_unit_submission(&metadata_step, operation, response)?,
-            );
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle,
+                    channel_binding: None,
+                    runtime_event_detail: None,
+                },
+            )?;
             Ok(())
         }
         IntentAction::CreateChannel { channel_name } => {
@@ -1169,6 +1214,7 @@ fn execute_semantic_intent(
             record_submission_handle(context, &instance_id, handle.clone());
             let _ = channel_name;
             record_current_channel_binding(context, &instance_id, channel_binding.clone());
+            record_current_channel_name(context, &instance_id, channel_name);
             wait_for_contract_barriers(
                 &metadata_step,
                 tool_api,
@@ -1363,8 +1409,8 @@ fn execute_semantic_intent(
                 response,
             )?;
             record_submission_handle(context, &instance_id, Some(handle.clone()));
-            let _ = channel_name;
             record_current_channel_binding(context, &instance_id, channel_binding.clone());
+            record_current_channel_name(context, &instance_id, channel_name);
             wait_for_contract_barriers(
                 &metadata_step,
                 tool_api,
@@ -1381,10 +1427,10 @@ fn execute_semantic_intent(
             Ok(())
         }
         IntentAction::InviteActorToChannel { authority_id, .. } => {
-            let explicit_channel_id = context
+            let explicit_binding = context
                 .current_channel_binding
                 .get(&instance_id)
-                .map(|binding| binding.channel_id.clone())
+                .cloned()
                 .ok_or_else(|| {
                     anyhow!(
                         "invite_actor_to_channel requires an authoritative current channel binding"
@@ -1392,7 +1438,9 @@ fn execute_semantic_intent(
                 })?;
             let invite_intent = IntentAction::InviteActorToChannel {
                 authority_id: authority_id.clone(),
-                channel_id: Some(explicit_channel_id),
+                channel_id: Some(explicit_binding.channel_id),
+                context_id: Some(explicit_binding.context_id),
+                channel_name: context.current_channel_name.get(&instance_id).cloned(),
             };
             let contract = invite_intent.contract();
             let response = submit_shared_intent(
@@ -1452,14 +1500,20 @@ fn execute_semantic_intent(
             )?;
             Ok(())
         }
-        IntentAction::SendChatMessage { message } => {
-            let response = submit_shared_intent(
-                &metadata_step,
-                tool_api,
-                context,
-                &instance_id,
-                intent.clone(),
-            )?;
+        IntentAction::SendChatMessage { message, .. } => {
+            let explicit_binding = context.current_channel_binding.get(&instance_id).cloned();
+            let send_intent = IntentAction::SendChatMessage {
+                message: message.clone(),
+                channel_id: explicit_binding
+                    .as_ref()
+                    .map(|binding| binding.channel_id.clone()),
+                context_id: explicit_binding
+                    .as_ref()
+                    .map(|binding| binding.context_id.clone()),
+            };
+            let contract = send_intent.contract();
+            let response =
+                submit_shared_intent(&metadata_step, tool_api, context, &instance_id, send_intent)?;
             record_submission_handle(
                 context,
                 &instance_id,
@@ -1478,13 +1532,13 @@ fn execute_semantic_intent(
                 &contract,
                 &SubmissionEvidence {
                     handle: context.last_operation_handle.get(&instance_id).cloned(),
-                    channel_binding: None,
+                    channel_binding: explicit_binding,
                     runtime_event_detail: Some(message.clone()),
                 },
             )?;
             Ok(())
         }
-        IntentAction::OpenScreen(_) | IntentAction::OpenSettingsSection(_) => unreachable!(),
+        IntentAction::OpenScreen { .. } | IntentAction::OpenSettingsSection(_) => unreachable!(),
     }
 }
 
@@ -1549,7 +1603,21 @@ fn resolve_intent_templates(
     context: &ScenarioContext,
 ) -> Result<IntentAction> {
     Ok(match intent {
-        IntentAction::OpenScreen(screen) => IntentAction::OpenScreen(*screen),
+        IntentAction::OpenScreen {
+            screen,
+            channel_id,
+            context_id,
+        } => IntentAction::OpenScreen {
+            screen: *screen,
+            channel_id: channel_id
+                .clone()
+                .map(|channel_id| resolve_template(&channel_id, context))
+                .transpose()?,
+            context_id: context_id
+                .clone()
+                .map(|context_id| resolve_template(&context_id, context))
+                .transpose()?,
+        },
         IntentAction::CreateAccount { account_name } => IntentAction::CreateAccount {
             account_name: resolve_template(account_name, context)?,
         },
@@ -1607,15 +1675,37 @@ fn resolve_intent_templates(
         IntentAction::InviteActorToChannel {
             authority_id,
             channel_id,
+            context_id,
+            channel_name,
         } => IntentAction::InviteActorToChannel {
             authority_id: resolve_template(authority_id, context)?,
             channel_id: channel_id
                 .clone()
                 .map(|channel_id| resolve_template(&channel_id, context))
                 .transpose()?,
+            context_id: context_id
+                .clone()
+                .map(|context_id| resolve_template(&context_id, context))
+                .transpose()?,
+            channel_name: channel_name
+                .clone()
+                .map(|channel_name| resolve_template(&channel_name, context))
+                .transpose()?,
         },
-        IntentAction::SendChatMessage { message } => IntentAction::SendChatMessage {
+        IntentAction::SendChatMessage {
+            message,
+            channel_id,
+            context_id,
+        } => IntentAction::SendChatMessage {
             message: resolve_template(message, context)?,
+            channel_id: channel_id
+                .clone()
+                .map(|channel_id| resolve_template(&channel_id, context))
+                .transpose()?,
+            context_id: context_id
+                .clone()
+                .map(|context_id| resolve_template(&context_id, context))
+                .transpose()?,
         },
     })
 }
@@ -1630,6 +1720,7 @@ fn resolve_required_semantic_instance(step: &SemanticStep) -> Result<String> {
 fn semantic_expectation_wait_step(
     step: &SemanticStep,
     expectation: &Expectation,
+    context: &ScenarioContext,
 ) -> Result<CompatibilityStep> {
     let mut wait_step = semantic_metadata_step(step);
     match expectation {
@@ -1649,6 +1740,12 @@ fn semantic_expectation_wait_step(
             wait_step.action = CompatibilityAction::MessageContains;
             wait_step.value = Some(message_contains.clone());
         }
+        Expectation::DiagnosticScreenContains { .. } => {
+            bail!(
+                "step {} diagnostic_screen_contains must use the explicit frontend-conformance diagnostic wait path",
+                step.id
+            );
+        }
         Expectation::ToastContains {
             kind,
             message_contains,
@@ -1660,7 +1757,7 @@ fn semantic_expectation_wait_step(
         Expectation::ListContains { list, item_id } => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.list_id = Some(*list);
-            wait_step.item_id = Some(item_id.clone());
+            wait_step.item_id = Some(resolve_template(item_id, context)?);
         }
         Expectation::ListCountIs { list, count } => {
             wait_step.action = CompatibilityAction::WaitFor;
@@ -1674,13 +1771,13 @@ fn semantic_expectation_wait_step(
         } => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.list_id = Some(*list);
-            wait_step.item_id = Some(item_id.clone());
+            wait_step.item_id = Some(resolve_template(item_id, context)?);
             wait_step.confirmation = Some(*confirmation);
         }
         Expectation::SelectionIs { list, item_id } => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.list_id = Some(*list);
-            wait_step.item_id = Some(item_id.clone());
+            wait_step.item_id = Some(resolve_template(item_id, context)?);
         }
         Expectation::ReadinessIs(readiness) => {
             wait_step.action = CompatibilityAction::WaitFor;
@@ -1733,8 +1830,8 @@ fn action_precondition_failures(
             ),
             ActionPrecondition::Quiescence(expected) if snapshot.quiescence.state != *expected => {
                 Some(format!(
-                    "quiescence={:?} expected={expected:?}",
-                    snapshot.quiescence.state
+                    "quiescence={:?} expected={expected:?} reasons={:?}",
+                    snapshot.quiescence.state, snapshot.quiescence.reason_codes
                 ))
             }
             ActionPrecondition::Screen(expected) if snapshot.screen != *expected => Some(format!(
@@ -1864,7 +1961,7 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             }
         },
         SemanticAction::Intent(intent) => match intent {
-            IntentAction::OpenScreen(_) => "open_screen",
+            IntentAction::OpenScreen { .. } => "open_screen",
             IntentAction::CreateAccount { .. } => "create_account",
             IntentAction::CreateHome { .. } => "create_home",
             IntentAction::CreateChannel { .. } => "create_channel",
@@ -1898,6 +1995,9 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             aura_app::scenario_contract::Expectation::ControlVisible(_) => "control_visible",
             aura_app::scenario_contract::Expectation::ModalOpen(_) => "modal_open",
             aura_app::scenario_contract::Expectation::MessageContains { .. } => "message_contains",
+            aura_app::scenario_contract::Expectation::DiagnosticScreenContains { .. } => {
+                "diagnostic_screen_contains"
+            }
             aura_app::scenario_contract::Expectation::ToastContains { .. } => "toast_contains",
             aura_app::scenario_contract::Expectation::ListContains { .. } => "list_contains",
             aura_app::scenario_contract::Expectation::ListCountIs { .. } => "list_count_is",
@@ -2721,6 +2821,28 @@ fn read_clipboard_value(
     )
 }
 
+fn wait_for_diagnostic_screen_contains_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    instance_id: &str,
+    step_id: &str,
+    text_contains: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    require_frontend_conformance_lane(lane, step_id, "diagnostic_screen_contains")?;
+    dispatch_in_lane(
+        tool_api,
+        lane,
+        ToolRequest::WaitFor {
+            instance_id: instance_id.to_string(),
+            pattern: text_contains.to_string(),
+            timeout_ms,
+            screen_source: ScreenSource::Default,
+            selector: None,
+        },
+    )
+}
+
 fn read_clipboard_value_in_lane(
     tool_api: &mut ToolApi,
     lane: ExecutionLane,
@@ -3152,14 +3274,28 @@ fn submit_shared_intent(
     intent: IntentAction,
 ) -> Result<SemanticCommandResponse> {
     if let Ok(snapshot) = fetch_ui_snapshot(tool_api, instance_id) {
-        context
-            .pending_projection_baseline
-            .insert(instance_id.to_string(), snapshot.revision);
+        set_projection_baseline(context, instance_id, snapshot);
     }
     issue_stage(
         step,
         tool_api.submit_semantic_command(instance_id, SemanticCommandRequest::new(intent)),
     )
+}
+
+fn set_projection_baseline(context: &mut ScenarioContext, instance_id: &str, snapshot: UiSnapshot) {
+    context
+        .pending_projection_baseline
+        .insert(instance_id.to_string(), snapshot.revision);
+    context
+        .pending_projection_baseline_snapshot
+        .insert(instance_id.to_string(), snapshot);
+}
+
+fn clear_projection_baseline(context: &mut ScenarioContext, instance_id: &str) {
+    context.pending_projection_baseline.remove(instance_id);
+    context
+        .pending_projection_baseline_snapshot
+        .remove(instance_id);
 }
 
 fn clear_projection_baseline_if_semantic_state_already_visible(
@@ -3172,7 +3308,7 @@ fn clear_projection_baseline_if_semantic_state_already_visible(
         return;
     };
     if semantic_wait_matches_for_instance(wait_step, &snapshot, context, instance_id) {
-        context.pending_projection_baseline.remove(instance_id);
+        clear_projection_baseline(context, instance_id);
     }
 }
 
@@ -3371,8 +3507,11 @@ fn wait_for_semantic_state_snapshot(
     let restart_handling = semantic_wait_restart_handling(step);
     let mut snapshot_version = None;
     let mut last_snapshot = loop {
-        match fetch_ui_snapshot(tool_api, instance_id) {
-            Ok(snapshot) => break snapshot,
+        match fetch_current_ui_snapshot_event(tool_api, instance_id, supports_ui_snapshot) {
+            Ok((snapshot, version)) => {
+                snapshot_version = version;
+                break snapshot;
+            }
             Err(error)
                 if matches!(
                     classify_browser_ui_snapshot_issue(&error),
@@ -3407,11 +3546,10 @@ fn wait_for_semantic_state_snapshot(
             Err(error) => return Err(error),
         }
     };
-    snapshot_version = Some(last_snapshot.revision.semantic_seq);
     match classify_projection_freshness(required_newer_than, &last_snapshot) {
         ProjectionFreshness::Satisfied => {
             if semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id) {
-                context.pending_projection_baseline.remove(instance_id);
+                clear_projection_baseline(context, instance_id);
                 return Ok(last_snapshot);
             }
         }
@@ -3435,7 +3573,19 @@ fn wait_for_semantic_state_snapshot(
                 return Ok(last_snapshot);
             }
         }
-        ProjectionFreshness::Pending => {}
+        ProjectionFreshness::Pending => {
+            if projection_wait_can_resume_from_matching_snapshot(
+                step,
+                &last_snapshot,
+                context,
+                instance_id,
+                required_newer_than,
+                restart_handling,
+            ) {
+                clear_projection_baseline(context, instance_id);
+                return Ok(last_snapshot);
+            }
+        }
     }
     loop {
         if Instant::now() >= deadline {
@@ -3509,7 +3659,7 @@ fn wait_for_semantic_state_snapshot(
         match classify_projection_freshness(required_newer_than, &snapshot) {
             ProjectionFreshness::Satisfied => {
                 if semantic_wait_matches_for_instance(step, &snapshot, context, instance_id) {
-                    context.pending_projection_baseline.remove(instance_id);
+                    clear_projection_baseline(context, instance_id);
                     return Ok(snapshot);
                 }
             }
@@ -3533,9 +3683,21 @@ fn wait_for_semantic_state_snapshot(
                     return Ok(snapshot);
                 }
             }
-            ProjectionFreshness::Pending => {}
+            ProjectionFreshness::Pending => {
+                if projection_wait_can_resume_from_matching_snapshot(
+                    step,
+                    &snapshot,
+                    context,
+                    instance_id,
+                    required_newer_than,
+                    restart_handling,
+                ) {
+                    clear_projection_baseline(context, instance_id);
+                    return Ok(snapshot);
+                }
+            }
         }
-        consume_projection_baseline(context, instance_id, &snapshot);
+        consume_projection_baseline(context, instance_id, &snapshot, &mut required_newer_than);
         last_snapshot = snapshot;
     }
     let diagnostic_screen =
@@ -3550,6 +3712,22 @@ fn wait_for_semantic_state_snapshot(
         Some(last_snapshot),
         diagnostic_screen
     )
+}
+
+fn fetch_current_ui_snapshot_event(
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    supports_ui_snapshot: bool,
+) -> Result<(UiSnapshot, Option<u64>)> {
+    if supports_ui_snapshot {
+        match tool_api.wait_for_ui_snapshot_event(instance_id, Duration::from_millis(1), None) {
+            Ok(Some(event)) => return Ok((event.snapshot, Some(event.version))),
+            Ok(None) => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok((fetch_ui_snapshot(tool_api, instance_id)?, None))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3588,9 +3766,26 @@ fn reset_semantic_wait_after_restart(
     required_newer_than: &mut Option<ProjectionRevision>,
     snapshot_version: &mut Option<u64>,
 ) {
-    context.pending_projection_baseline.remove(instance_id);
+    clear_projection_baseline(context, instance_id);
     *required_newer_than = None;
     *snapshot_version = None;
+}
+
+fn projection_wait_can_resume_from_matching_snapshot(
+    step: &CompatibilityStep,
+    snapshot: &UiSnapshot,
+    context: &ScenarioContext,
+    instance_id: &str,
+    required_newer_than: Option<ProjectionRevision>,
+    restart_handling: SemanticWaitRestartHandling,
+) -> bool {
+    restart_handling == SemanticWaitRestartHandling::ResumeAfterRestart
+        && required_newer_than.is_some()
+        && semantic_wait_matches_for_instance(step, snapshot, context, instance_id)
+        && context
+            .pending_projection_baseline_snapshot
+            .get(instance_id)
+            .is_some_and(|baseline_snapshot| baseline_snapshot != snapshot)
 }
 
 fn classify_projection_freshness(
@@ -3617,13 +3812,15 @@ fn consume_projection_baseline(
     context: &mut ScenarioContext,
     instance_id: &str,
     snapshot: &UiSnapshot,
+    required_newer_than: &mut Option<ProjectionRevision>,
 ) {
     if context
         .pending_projection_baseline
         .get(instance_id)
         .is_some_and(|baseline| snapshot.revision.is_newer_than(*baseline))
     {
-        context.pending_projection_baseline.remove(instance_id);
+        clear_projection_baseline(context, instance_id);
+        *required_newer_than = None;
     }
 }
 
@@ -3806,6 +4003,7 @@ fn shared_semantic_raw_ui_request(request: &ToolRequest) -> bool {
             | ToolRequest::ClickButton { .. }
             | ToolRequest::FillInput { .. }
             | ToolRequest::FillField { .. }
+            | ToolRequest::WaitFor { .. }
     )
 }
 
@@ -4106,7 +4304,7 @@ mod tests {
             .split_once("SemanticAction::Intent(IntentAction::OpenSettingsSection(section)) => {")
             .unwrap_or_else(|| panic!("missing open settings branch"));
         let open_screen_branch = open_screen_prefix
-            .split_once("SemanticAction::Intent(IntentAction::OpenScreen(screen_id)) => {")
+            .split_once("SemanticAction::Intent(IntentAction::OpenScreen { screen, .. }) => {")
             .map(|(_, branch)| branch)
             .unwrap_or_else(|| panic!("missing open screen branch"));
         let open_settings_branch = open_settings_and_rest
@@ -4114,7 +4312,7 @@ mod tests {
             .map(|(branch, _)| branch)
             .unwrap_or_else(|| panic!("missing variables branch after open settings"));
         assert!(
-            open_screen_branch.contains("IntentAction::OpenScreen(*screen_id)"),
+            open_screen_branch.contains("let open_intent = IntentAction::OpenScreen {"),
             "shared OpenScreen branch must submit the semantic intent"
         );
         assert!(
@@ -4218,10 +4416,14 @@ mod tests {
                     actor: ActorId("alice".to_string()),
                     intent: IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }
                     .kind(),
                     contract: IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }
                     .contract(),
                     baseline_revision: None,
@@ -4237,10 +4439,14 @@ mod tests {
                     actor: ActorId("bob".to_string()),
                     intent: IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }
                     .kind(),
                     contract: IntentAction::SendChatMessage {
                         message: "hello".to_string(),
+                        channel_id: None,
+                        context_id: None,
                     }
                     .contract(),
                     baseline_revision: None,
@@ -4262,6 +4468,8 @@ mod tests {
         let failures = unsatisfied_action_preconditions(
             &IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             }
             .contract(),
             &snapshot,
@@ -4358,6 +4566,37 @@ mod tests {
         };
 
         assert!(semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn semantic_expectation_wait_step_resolves_template_backed_selection_ids() {
+        let step = SemanticStep {
+            id: "wait-current-authority".to_string(),
+            action: ScenarioAction::Expect(Expectation::SelectionIs {
+                list: ListId::Authorities,
+                item_id: "${alice_authority_id}".to_string(),
+            }),
+            actor: Some(ActorId("alice".to_string())),
+            timeout_ms: Some(4000),
+        };
+        let mut context = ScenarioContext::default();
+        context.vars.insert(
+            "alice_authority_id".to_string(),
+            "authority-1234".to_string(),
+        );
+
+        let wait_step = semantic_expectation_wait_step(
+            &step,
+            match &step.action {
+                ScenarioAction::Expect(expectation) => expectation,
+                _ => unreachable!("test step uses an expectation action"),
+            },
+            &context,
+        )
+        .unwrap_or_else(|error| panic!("selection wait should resolve templates: {error}"));
+
+        assert_eq!(wait_step.list_id, Some(ListId::Authorities));
+        assert_eq!(wait_step.item_id.as_deref(), Some("authority-1234"));
     }
 
     #[test]
@@ -4649,7 +4888,7 @@ mod tests {
                 name: "executor-test".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(5),
@@ -4735,7 +4974,7 @@ mod tests {
                 name: "executor-determinism".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(11),
@@ -4803,7 +5042,7 @@ mod tests {
                 name: "executor-chat-command".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(7),
@@ -4992,7 +5231,7 @@ mod tests {
                 name: "executor-send-clipboard".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(8),
@@ -5072,7 +5311,7 @@ mod tests {
             panic!("start_all failed: {error}");
         }
 
-        let clipboard_path = alice_data.join(".harness-clipboard.txt");
+        let clipboard_path = alice_data.join(".harness-transient/clipboard.txt");
         let writer_thread = std::thread::spawn(move || {
             blocking_sleep(std::time::Duration::from_millis(200));
             let _ = std::fs::write(&clipboard_path, "invite-code-123\n");
@@ -5117,7 +5356,7 @@ mod tests {
                 name: "executor-send-clipboard-chunked".to_string(),
                 pty_rows: Some(40),
                 pty_cols: Some(120),
-                artifact_dir: None,
+                artifact_dir: Some(temp_root.join("artifacts")),
                 global_budget_ms: None,
                 step_budget_ms: None,
                 seed: Some(9),
@@ -5201,7 +5440,7 @@ mod tests {
             panic!("start_all failed: {error}");
         }
 
-        let clipboard_path = alice_data.join(".harness-clipboard.txt");
+        let clipboard_path = alice_data.join(".harness-transient/clipboard.txt");
         let _ = std::fs::write(&clipboard_path, format!("{long_payload}\n"));
 
         if let Err(error) =
@@ -5470,6 +5709,29 @@ mod tests {
     }
 
     #[test]
+    fn create_account_and_home_wait_for_declared_contract_barriers() {
+        let source = include_str!("executor.rs");
+        let production_source = source
+            .split("\n#[cfg(test)]\nmod tests {")
+            .next()
+            .unwrap_or(source);
+
+        let create_branch = production_source
+            .split("IntentAction::CreateAccount { .. } | IntentAction::CreateHome { .. } => {")
+            .nth(1)
+            .unwrap_or_else(|| panic!("create_account/create_home branch missing"));
+        let create_branch = create_branch
+            .split("IntentAction::CreateChannel { channel_name } => {")
+            .next()
+            .unwrap_or(create_branch);
+
+        assert!(
+            create_branch.contains("wait_for_contract_barriers("),
+            "create_account/create_home branch must converge on shared contract barriers"
+        );
+    }
+
+    #[test]
     fn projection_freshness_classifies_restart_explicitly() {
         let baseline = ProjectionRevision {
             semantic_seq: 7,
@@ -5574,6 +5836,92 @@ mod tests {
         assert!(required_newer_than.is_none());
         assert!(snapshot_version.is_none());
         assert!(!context.pending_projection_baseline.contains_key("alice"));
+    }
+
+    #[test]
+    fn consuming_projection_baseline_clears_live_required_newer_than_state() {
+        let baseline = ProjectionRevision {
+            semantic_seq: 7,
+            render_seq: Some(7),
+        };
+        let snapshot = UiSnapshot {
+            revision: ProjectionRevision {
+                semantic_seq: 8,
+                render_seq: Some(1),
+            },
+            ..UiSnapshot::loading(ScreenId::Settings)
+        };
+        let mut context = ScenarioContext::default();
+        context
+            .pending_projection_baseline
+            .insert("alice".to_string(), baseline);
+        let mut required_newer_than = Some(baseline);
+
+        consume_projection_baseline(&mut context, "alice", &snapshot, &mut required_newer_than);
+
+        assert!(required_newer_than.is_none());
+        assert!(!context.pending_projection_baseline.contains_key("alice"));
+    }
+
+    #[test]
+    fn projection_wait_can_resume_when_matching_snapshot_differs_from_baseline() {
+        let step = crate::config::CompatibilityStep {
+            id: "devices-count-one".to_string(),
+            action: crate::config::CompatibilityAction::WaitFor,
+            list_id: Some(ListId::Devices),
+            count: Some(1),
+            ..Default::default()
+        };
+        let baseline = UiSnapshot {
+            revision: ProjectionRevision {
+                semantic_seq: 12,
+                render_seq: Some(8),
+            },
+            screen: ScreenId::Settings,
+            lists: vec![ListSnapshot {
+                id: ListId::Devices,
+                items: vec![
+                    ListItemSnapshot {
+                        id: "device-a".to_string(),
+                        selected: false,
+                        confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
+                    },
+                    ListItemSnapshot {
+                        id: "device-b".to_string(),
+                        selected: false,
+                        confirmation: ConfirmationState::Confirmed,
+                        is_current: true,
+                    },
+                ],
+            }],
+            ..UiSnapshot::loading(ScreenId::Settings)
+        };
+        let matching_snapshot = UiSnapshot {
+            revision: baseline.revision,
+            screen: ScreenId::Settings,
+            lists: vec![ListSnapshot {
+                id: ListId::Devices,
+                items: vec![ListItemSnapshot {
+                    id: "device-b".to_string(),
+                    selected: false,
+                    confirmation: ConfirmationState::Confirmed,
+                    is_current: true,
+                }],
+            }],
+            ..UiSnapshot::loading(ScreenId::Settings)
+        };
+        let mut context = ScenarioContext::default();
+        set_projection_baseline(&mut context, "alice", baseline);
+
+        assert!(projection_wait_can_resume_from_matching_snapshot(
+            &step,
+            &matching_snapshot,
+            &context,
+            "alice",
+            Some(matching_snapshot.revision),
+            SemanticWaitRestartHandling::ResumeAfterRestart,
+        ));
     }
 
     #[test]

@@ -6,8 +6,11 @@
 
 use aura_authorization::biscuit_authorization::BiscuitAuthorizationBridge;
 use aura_authorization::{BiscuitTokenManager, ContextOp, ResourceScope, TokenAuthority};
-use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::types::scope::AuthorizationOp;
+use aura_core::{
+    capability_name,
+    types::identifiers::{AuthorityId, ContextId},
+};
 
 // ============================================================================
 // Cross-authority isolation
@@ -25,7 +28,7 @@ fn cross_authority_token_rejected() {
     let recipient = AuthorityId::new_from_entropy([3u8; 32]);
 
     let token = authority_a
-        .create_token(recipient)
+        .create_token(recipient, vec![capability_name!("read")])
         .unwrap_or_else(|err| panic!("token creation failed: {err:?}"));
 
     // Evaluated by B's bridge (different root key)
@@ -133,7 +136,10 @@ fn double_attenuation_cannot_restore_capabilities() {
 
     let authority = TokenAuthority::new(issuer);
     let token = authority
-        .create_token(recipient)
+        .create_token(
+            recipient,
+            vec![capability_name!("read"), capability_name!("write")],
+        )
         .unwrap_or_else(|err| panic!("failed to create base token: {err:?}"));
 
     // First attenuation: restrict to read only

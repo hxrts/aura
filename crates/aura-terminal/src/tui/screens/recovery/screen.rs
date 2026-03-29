@@ -411,74 +411,8 @@ pub struct RecoveryScreenProps {
     // === Callbacks ===
     /// Callback when starting recovery
     pub on_start_recovery: Option<RecoveryCallback>,
-    /// Callback when adding a guardian
-    pub on_add_guardian: Option<RecoveryCallback>,
     /// Callback when approving a pending request (takes request_id)
     pub on_submit_approval: Option<ApprovalCallback>,
-}
-
-/// Convert aura-app guardian status to TUI guardian status
-fn convert_guardian_status(status: aura_app::ui::types::GuardianStatus) -> GuardianStatus {
-    match status {
-        aura_app::ui::types::GuardianStatus::Active => GuardianStatus::Active,
-        aura_app::ui::types::GuardianStatus::Pending => GuardianStatus::Pending,
-        aura_app::ui::types::GuardianStatus::Revoked => GuardianStatus::Removed,
-        aura_app::ui::types::GuardianStatus::Offline => GuardianStatus::Offline,
-    }
-}
-
-/// Convert aura-app guardian to TUI guardian
-fn convert_guardian(g: &aura_app::ui::types::Guardian) -> Guardian {
-    Guardian {
-        id: g.id.to_string(),
-        name: g.name.clone(),
-        status: convert_guardian_status(g.status),
-        has_share: g.status == aura_app::ui::types::GuardianStatus::Active,
-    }
-}
-
-/// Convert aura-app recovery process status to TUI recovery state
-fn convert_recovery_state(status: aura_app::ui::types::RecoveryProcessStatus) -> RecoveryState {
-    match status {
-        aura_app::ui::types::RecoveryProcessStatus::Idle => RecoveryState::None,
-        aura_app::ui::types::RecoveryProcessStatus::Initiated => RecoveryState::Initiated,
-        aura_app::ui::types::RecoveryProcessStatus::WaitingForApprovals => RecoveryState::InProgress,
-        aura_app::ui::types::RecoveryProcessStatus::Approved => RecoveryState::ThresholdMet,
-        aura_app::ui::types::RecoveryProcessStatus::Completed => RecoveryState::Completed,
-        aura_app::ui::types::RecoveryProcessStatus::Failed => RecoveryState::Failed,
-    }
-}
-
-/// Convert aura-app recovery state to TUI recovery status
-fn convert_recovery_status(
-    state: &aura_app::ui::types::RecoveryState,
-    guardians: &[aura_app::ui::types::Guardian],
-) -> RecoveryStatus {
-    match state.active_recovery() {
-        Some(process) => {
-            // Build approvals list
-            let approvals: Vec<GuardianApproval> = guardians
-                .iter()
-                .map(|g| GuardianApproval {
-                    guardian_name: g.name.clone(),
-                    approved: process.approved_by.contains(&g.id),
-                })
-                .collect();
-
-            RecoveryStatus {
-                state: convert_recovery_state(process.status),
-                approvals_received: process.approvals_received,
-                threshold: process.approvals_required,
-                approvals,
-            }
-        }
-        None => RecoveryStatus {
-            state: RecoveryState::None,
-            approvals_received: 0,
-            threshold: state.threshold(),
-            approvals: vec![],
-        },
-    }
 }
 
 /// The recovery screen
@@ -520,14 +454,12 @@ pub fn RecoveryScreen(
         let mut reactive_pending_requests = reactive_pending_requests.clone();
         let app_core = app_ctx.app_core.clone();
         async move {
-            // Helper closure to convert RecoveryState to TUI types
             let convert_state = |recovery_state: &aura_app::ui::types::RecoveryState| {
                 let guardians_vec: Vec<aura_app::ui::types::Guardian> =
                     recovery_state.all_guardians().cloned().collect();
                 let tui_guardians: Vec<Guardian> =
-                    guardians_vec.iter().map(convert_guardian).collect();
-
-                let status = convert_recovery_status(recovery_state, &guardians_vec);
+                    guardians_vec.iter().map(Guardian::from).collect();
+                let status = RecoveryStatus::from_app_state(recovery_state, &guardians_vec);
 
                 let pending: Vec<PendingRequest> = recovery_state
                     .pending_requests()

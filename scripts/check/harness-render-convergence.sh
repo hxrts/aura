@@ -11,9 +11,9 @@ fail() {
 
 rg -q 'fn publish_ui_snapshot' crates/aura-web/src/harness_bridge.rs \
   || fail "missing web publish hook"
-rg -q 'requestAnimationFrame' crates/aura-web/src/harness_bridge.rs \
+rg -q 'requestAnimationFrame' crates/aura-web/src/harness/publication.rs \
   || fail "web publish hook must go through requestAnimationFrame"
-rg -q 'publish_render_heartbeat' crates/aura-web/src/harness_bridge.rs \
+rg -q 'publish_render_heartbeat' crates/aura-web/src/harness/publication.rs \
   || fail "web publish hook must emit render heartbeat"
 rg -q 'next_projection_revision' crates/aura-terminal/src/tui/harness_state/snapshot.rs \
   || fail "tui semantic snapshots must publish projection revisions"

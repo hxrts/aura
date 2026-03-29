@@ -81,9 +81,20 @@ pub fn default_artifacts_dir() -> PathBuf {
 
 /// Load a run configuration and validate all semantic constraints.
 pub fn load_and_validate_run_config(path: &Path) -> Result<RunConfig> {
+    load_and_validate_run_config_with_artifact_base(path, None)
+}
+
+pub fn load_and_validate_run_config_with_artifact_base(
+    path: &Path,
+    artifact_base_dir: Option<&Path>,
+) -> Result<RunConfig> {
     let config = config::load_run_config(path)?;
     config.validate()?;
-    let config = provisioning::materialize_run_config(config, path)?;
+    let config = provisioning::materialize_run_config_with_artifact_base(
+        config,
+        path,
+        artifact_base_dir.map(Path::to_path_buf),
+    )?;
     config.validate()?;
     Ok(config)
 }

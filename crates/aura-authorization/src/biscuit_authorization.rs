@@ -13,7 +13,7 @@
 
 use crate::BiscuitError;
 use aura_core::types::scope::{AuthorizationOp, ResourceScope};
-use aura_core::{hash::hash, types::identifiers::AuthorityId};
+use aura_core::{hash::hash, types::identifiers::AuthorityId, CapabilityName, CapabilityNameError};
 use biscuit_auth::{macros::*, AuthorizerLimits, Biscuit, PublicKey};
 use std::time::Duration;
 
@@ -92,7 +92,9 @@ impl BiscuitAuthorizationBridge {
             .map_err(BiscuitError::BiscuitLib)?;
 
         // Phase 2: Add ambient facts for authorization context
-        let operation_str = operation.as_str();
+        let operation_name =
+            CapabilityName::parse(operation.as_str()).map_err(invalid_capability_error)?;
+        let operation_str = operation_name.as_str();
         authorizer
             .add_fact(fact!("operation({operation_str})"))
             .map_err(BiscuitError::BiscuitLib)?;
@@ -197,7 +199,6 @@ impl BiscuitAuthorizationBridge {
             }
             _ => {
                 // For unknown operations, require explicit capability
-                validate_capability_name(operation_str)?;
                 authorizer
                     .add_policy(policy!("allow if capability({operation_str})"))
                     .map_err(BiscuitError::BiscuitLib)?;
@@ -232,7 +233,9 @@ impl BiscuitAuthorizationBridge {
         capability: &str,
         current_time_seconds: Option<u64>,
     ) -> Result<bool, BiscuitError> {
-        validate_capability_name(capability)?;
+        let capability_name =
+            CapabilityName::parse(capability).map_err(invalid_capability_error)?;
+        let capability = capability_name.as_str();
         // Create authorizer and verify token signature
         let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
 
@@ -317,21 +320,8 @@ impl BiscuitAuthorizationBridge {
     }
 }
 
-fn validate_capability_name(capability: &str) -> Result<(), BiscuitError> {
-    if capability.is_empty() {
-        return Err(BiscuitError::InvalidCapability(
-            "capability cannot be empty".to_string(),
-        ));
-    }
-    if !capability
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
-    {
-        return Err(BiscuitError::InvalidCapability(format!(
-            "invalid capability token: {capability}"
-        )));
-    }
-    Ok(())
+fn invalid_capability_error(error: CapabilityNameError) -> BiscuitError {
+    BiscuitError::InvalidCapability(error.to_string())
 }
 
 // ============================================================================

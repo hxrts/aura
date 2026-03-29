@@ -40,7 +40,7 @@ use crate::tui::props::ContactsViewProps;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
     short_id, Contact, ContactStatus, Invitation, InvitationDirection, InvitationStatus,
-    InvitationType,
+    InvitationType, ReadReceiptPolicyExt,
 };
 use aura_app::ui::signals::DiscoveredPeerMethod;
 use aura_app::ui::types::format_relative_time_from;
@@ -210,7 +210,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
 /// The `view` field is a required struct that embeds all view state from TuiState.
 /// This makes it a **compile-time error** to forget any view state field, because
 /// the entire `ContactsViewProps` struct must be passed - you can't accidentally
-/// omit individual fields like `nickname_modal_visible`.
+/// omit grouped modal state such as `view.modals.nickname.visible`.
 ///
 /// ## Reactive Data Model
 ///
@@ -229,9 +229,9 @@ pub struct ContactsScreenProps {
 
     // === Callbacks ===
     /// Callback when updating a contact's nickname
-    pub on_update_nickname: Option<UpdateNicknameCallback>,
+    pub(crate) on_update_nickname: Option<UpdateNicknameCallback>,
     /// Callback when starting a direct chat with a contact
-    pub on_start_chat: Option<StartChatCallback>,
+    pub(crate) on_start_chat: Option<StartChatCallback>,
     /// Callback when inviting a discovered LAN peer
     pub on_invite_lan_peer: Option<InvitePeerCallback>,
 }

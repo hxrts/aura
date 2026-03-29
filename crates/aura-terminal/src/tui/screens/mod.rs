@@ -17,17 +17,6 @@ mod recovery;
 mod router;
 mod settings;
 
-// Re-export callback types from centralized callbacks module
-pub use crate::tui::callbacks::{
-    ApprovalCallback, ChannelSelectCallback, ExportInvitationCallback, GoHomeCallback,
-    GuardianSelectCallback, InvitationCallback, RecoveryCallback, RemoveDeviceCallback,
-    RetryMessageCallback, SetTopicCallback, StartChatCallback, UpdateNicknameCallback,
-    UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
-};
-
-// Screen-specific callback types (use specialized types not in callbacks module)
-pub use settings::MfaCallback;
-
 // Screen components and runners
 pub use app::{run_app_with_context, IoApp};
 pub use chat::{run_chat_screen, ChatFocus, ChatScreen};

@@ -6,6 +6,15 @@ use aura_rendezvous::RendezvousDescriptor;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RendezvousCacheManagerCommand {
+    CacheDescriptor,
+    TrackPendingChannel,
+    RemovePendingChannel,
+    ClearContext,
+}
+
 #[derive(Debug, Clone)]
 struct PendingChannel {
     context_id: ContextId,
@@ -49,6 +58,14 @@ impl RendezvousCacheState {
 
 /// Manages rendezvous handler caches (descriptors + pending channels).
 #[derive(Default)]
+#[aura_macros::actor_owned(
+    owner = "rendezvous_cache_manager",
+    domain = "rendezvous_cache",
+    gate = "rendezvous_cache_command_ingress",
+    command = RendezvousCacheManagerCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 pub struct RendezvousCacheManager {
     state: RwLock<RendezvousCacheState>,
 }

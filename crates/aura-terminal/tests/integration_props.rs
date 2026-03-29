@@ -275,7 +275,7 @@ mod contacts_screen {
 
         let props = extract_contacts_view_props(&harness.state);
         assert!(
-            props.nickname_modal_visible,
+            props.modals.nickname.visible,
             "Nickname modal state must reach props"
         );
     }
@@ -317,23 +317,23 @@ mod contacts_screen {
 
         let props = extract_contacts_view_props(&state);
 
-        assert!(props.guardian_setup_modal_visible);
+        assert!(props.modals.guardian_setup.visible);
         assert_eq!(
-            props.guardian_setup_modal_step,
+            props.modals.guardian_setup.step,
             aura_terminal::tui::state::GuardianSetupStep::CeremonyInProgress
         );
         assert_eq!(
-            props.guardian_setup_modal_agreement_mode,
+            props.modals.guardian_setup.agreement_mode,
             AgreementMode::CoordinatorSoftSafe
         );
-        assert!(props.guardian_setup_modal_reversion_risk);
-        assert_eq!(props.guardian_setup_modal_ceremony_responses.len(), 2);
+        assert!(props.modals.guardian_setup.reversion_risk);
+        assert_eq!(props.modals.guardian_setup.ceremony_responses.len(), 2);
         assert_eq!(
-            props.guardian_setup_modal_ceremony_responses[0].2,
+            props.modals.guardian_setup.ceremony_responses[0].2,
             aura_terminal::tui::state::GuardianCeremonyResponse::Accepted
         );
         assert_eq!(
-            props.guardian_setup_modal_ceremony_responses[1].2,
+            props.modals.guardian_setup.ceremony_responses[1].2,
             aura_terminal::tui::state::GuardianCeremonyResponse::Pending
         );
     }
@@ -381,7 +381,7 @@ mod settings_screen {
 
         let props = extract_settings_view_props(&harness.state);
         assert!(
-            props.nickname_suggestion_modal_visible,
+            props.modals.nickname_suggestion.visible,
             "Nickname modal state must reach props"
         );
     }
@@ -428,18 +428,18 @@ mod settings_screen {
 
         let props = extract_settings_view_props(&state);
 
-        assert!(props.device_enrollment_modal_visible);
-        assert_eq!(props.device_enrollment_modal_ceremony_id, "ceremony-1");
-        assert_eq!(props.device_enrollment_modal_accepted_count, 1);
-        assert_eq!(props.device_enrollment_modal_total_count, 2);
-        assert_eq!(props.device_enrollment_modal_threshold, 2);
+        assert!(props.modals.device_enrollment.visible);
+        assert_eq!(props.modals.device_enrollment.ceremony_id, "ceremony-1");
+        assert_eq!(props.modals.device_enrollment.accepted_count, 1);
+        assert_eq!(props.modals.device_enrollment.total_count, 2);
+        assert_eq!(props.modals.device_enrollment.threshold, 2);
         assert_eq!(
-            props.device_enrollment_modal_agreement_mode,
+            props.modals.device_enrollment.agreement_mode,
             AgreementMode::CoordinatorSoftSafe
         );
-        assert!(props.device_enrollment_modal_reversion_risk);
-        assert!(!props.device_enrollment_modal_is_complete);
-        assert!(!props.device_enrollment_modal_has_failed);
+        assert!(props.modals.device_enrollment.reversion_risk);
+        assert!(!props.modals.device_enrollment.is_complete);
+        assert!(!props.modals.device_enrollment.has_failed);
     }
 
     #[test]
@@ -479,20 +479,22 @@ mod settings_screen {
 
         let props = extract_settings_view_props(&state);
 
-        assert!(props.mfa_setup_modal_visible);
+        assert!(props.modals.mfa_setup.visible);
         assert_eq!(
-            props.mfa_setup_modal_step,
+            props.modals.mfa_setup.step,
             aura_terminal::tui::state::GuardianSetupStep::CeremonyInProgress
         );
-        assert_eq!(props.mfa_setup_modal_threshold_k, 2);
-        assert_eq!(props.mfa_setup_modal_threshold_n, 2);
+        assert_eq!(props.modals.mfa_setup.threshold_k, 2);
+        assert_eq!(props.modals.mfa_setup.threshold_n, 2);
         assert_eq!(
-            props.mfa_setup_modal_agreement_mode,
+            props.modals.mfa_setup.agreement_mode,
             AgreementMode::ConsensusFinalized
         );
-        assert!(!props.mfa_setup_modal_reversion_risk);
+        assert!(!props.modals.mfa_setup.reversion_risk);
         assert!(props
-            .mfa_setup_modal_ceremony_responses
+            .modals
+            .mfa_setup
+            .ceremony_responses
             .iter()
             .all(|(_, _, response)| {
                 *response == aura_terminal::tui::state::GuardianCeremonyResponse::Accepted

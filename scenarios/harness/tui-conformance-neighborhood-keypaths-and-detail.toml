@@ -1,0 +1,209 @@
+# TUI frontend-conformance: neighborhood keypaths, rendered map/detail text, and toast wiring.
+#
+# This is intentionally not a shared semantic product-flow scenario.
+# It validates TUI-specific key mappings and rendered shell text through
+# frontend-conformance-only diagnostic screen assertions.
+#
+# Phase 1 - Setup:
+# 1. Launch alice and complete account setup.
+# 2. Wait for neighborhood map chrome and status text to be visible.
+#
+# Phase 2 - Neighborhood key-path commands:
+# 1. Use 'm' key for create/select neighborhood.
+# 2. Use 'v' key to add selected home.
+# 3. Use 'L' key to create one-hop link.
+#
+# Phase 3 - Map navigation:
+# 1. Use g/H/b key paths.
+# 2. Assert stable rendered map visibility.
+#
+# Phase 4 - Home detail:
+# 1. Enter home detail via Enter key; the TUI auto-selects the strongest
+#    available entry access.
+# 2. Send a message via insert mode.
+#
+# Success criteria: neighborhood keypath commands preserve the expected
+# rendered map/detail text, toast wiring, and state transitions.
+
+id = "tui-conformance-neighborhood-keypaths-and-detail"
+goal = "Exercise TUI neighborhood keypaths and verify rendered map/detail text, toast wiring, and state transitions."
+
+[[steps]]
+id = "launch"
+action = "launch_actors"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "control_visible"
+actor = "alice"
+control_id = "onboarding_root"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "create_account"
+actor = "alice"
+value = "Alice"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-neighborhood-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "neighborhood"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-neighborhood-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-neighborhood-map-visible"
+action = "diagnostic_screen_contains"
+actor = "alice"
+value = "Entry access:"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-neighborhood-state-indicator-visible"
+action = "diagnostic_screen_contains"
+actor = "alice"
+value = "M:Off"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-create-neighborhood-keypath"
+action = "input_text"
+actor = "alice"
+value = "m"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-neighborhood-created-toast"
+action = "toast_contains"
+actor = "alice"
+value = "Neighborhood"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-dismiss-neighborhood-toast"
+action = "press_key"
+actor = "alice"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-add-selected-home-keypath"
+action = "input_text"
+actor = "alice"
+value = "v"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-home-added-toast"
+action = "toast_contains"
+actor = "alice"
+value = "Home added to neighborhood"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-dismiss-home-added-toast"
+action = "press_key"
+actor = "alice"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-link-one-hop-keypath"
+action = "input_text"
+actor = "alice"
+value = "L"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-one-hop-link-toast"
+action = "toast_contains"
+actor = "alice"
+value = "link"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-dismiss-link-toast"
+action = "press_key"
+actor = "alice"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-go-home-key-g"
+action = "input_text"
+actor = "alice"
+value = "g"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-map-stable-after-g"
+action = "diagnostic_screen_contains"
+actor = "alice"
+value = "Entry access:"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-go-home-key-H"
+action = "input_text"
+actor = "alice"
+value = "H"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-map-stable-after-H"
+action = "diagnostic_screen_contains"
+actor = "alice"
+value = "Entry access:"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-back-to-limited-key-b"
+action = "input_text"
+actor = "alice"
+value = "b"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-map-stable-after-b"
+action = "diagnostic_screen_contains"
+actor = "alice"
+value = "Entry access:"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-enter-home-detail"
+action = "press_key"
+actor = "alice"
+key = "enter"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-home-detail-visible"
+action = "diagnostic_screen_contains"
+actor = "alice"
+value = "Entry access:"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-send-detail-message"
+action = "input_text"
+actor = "alice"
+value = "in7-map-detail-msg\n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-detail-still-visible-after-send"
+action = "diagnostic_screen_contains"
+actor = "alice"
+value = "Entry access:"
+timeout_ms = 8000

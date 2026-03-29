@@ -106,6 +106,8 @@ pub mod tree;
 
 /// Byzantine safety admission and attestation types
 pub mod byzantine;
+/// Canonical validated authorization capability names
+pub mod capability_name;
 /// Ceremony types for Category C operations (supersession, lifecycle)
 pub mod ceremony;
 /// Native/WASM conformance artifact schema and envelope classification registry
@@ -137,6 +139,7 @@ pub use byzantine::{
     ByzantineAdmissionRequirement, ByzantineSafetyAttestation, CapabilitySnapshot,
     CapabilitySnapshotEntry, BYZANTINE_ATTESTATION_SCHEMA_V1,
 };
+pub use capability_name::{CapabilityName, CapabilityNameError};
 #[doc = "stable: Core journal types with semver guarantees"]
 pub use domain::journal::{
     ActorId, AuthLevel, Cap, Fact, FactKey, FactOpId, FactTimestamp, FactValue, Journal,
@@ -158,19 +161,20 @@ pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
 pub use ownership::{
     actor_owned, capability_gated, issue_operation_context, issue_operation_handle,
     issue_owner_token, move_owned, ownership_capability_token_request_for, ActorDeclaration,
-    ActorIngressMutationCapability, AuthorizedActorIngressMutation, AuthorizedProgressPublication,
-    AuthorizedReadinessPublication, AuthorizedTerminalPublication, BestEffortBoundaryProtocol,
-    BoundaryDeclarationCategory, BoundedActorIngress, ChildOperationSpawner,
-    LifecyclePublicationCapability, OpaqueOperationHandle, OperationContext,
-    OperationContextCapability, OperationProgress, OperationTimeoutBudget, OwnedShutdownToken,
-    OwnedTaskHandle, OwnedTaskSpawner, OwnerAwait, OwnerEpoch, OwnerPublication, OwnerToken,
-    OwnershipCapability, OwnershipCategory, OwnershipError, OwnershipErrorDomain, OwnershipResult,
-    OwnershipTransfer, OwnershipTransferCapability, PostTerminalBestEffort,
-    PostconditionProofCapability, PublicationSequence, ReadinessPublicationCapability,
-    SemanticOwnerAuthoritativeInput, SemanticOwnerAwaitPolicy, SemanticOwnerBestEffortPolicy,
-    SemanticOwnerChildOperation, SemanticOwnerDependency, SemanticOwnerHandoffPolicy,
-    SemanticOwnerPostcondition, SemanticOwnerProtocol, SemanticSuccessProof,
-    SupervisionRegistration, TerminalOutcome, TerminalPublisher, Terminality, TraceContext,
+    ActorIngressMutationCapability, ActorRootDeclaration, ActorRootSupervisionRegistration,
+    AuthorizedActorIngressMutation, AuthorizedProgressPublication, AuthorizedReadinessPublication,
+    AuthorizedTerminalPublication, BestEffortBoundaryProtocol, BoundaryDeclarationCategory,
+    BoundedActorIngress, ChildOperationSpawner, LifecyclePublicationCapability,
+    OpaqueOperationHandle, OperationContext, OperationContextCapability, OperationProgress,
+    OperationTimeoutBudget, OwnedShutdownToken, OwnedTaskHandle, OwnedTaskSpawner, OwnerAwait,
+    OwnerEpoch, OwnerPublication, OwnerToken, OwnershipCapability, OwnershipCategory,
+    OwnershipError, OwnershipErrorDomain, OwnershipResult, OwnershipTransfer,
+    OwnershipTransferCapability, PostTerminalBestEffort, PostconditionProofCapability,
+    PublicationSequence, ReadinessPublicationCapability, SemanticOwnerAuthoritativeInput,
+    SemanticOwnerAwaitPolicy, SemanticOwnerBestEffortPolicy, SemanticOwnerChildOperation,
+    SemanticOwnerDependency, SemanticOwnerHandoffPolicy, SemanticOwnerPostcondition,
+    SemanticOwnerProtocol, SemanticSuccessProof, SupervisionRegistration, TerminalOutcome,
+    TerminalPublisher, Terminality, TraceContext,
 };
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,

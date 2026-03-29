@@ -25,6 +25,8 @@
 //! }
 //! ```
 
+#![allow(dead_code)]
+
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
@@ -34,7 +36,7 @@ use aura_terminal::tui::state::{transition, DispatchCommand, QueuedModal, TuiCom
 /// Provides convenient methods for sending events and asserting state,
 /// while collecting all emitted commands for verification.
 pub struct TestTui {
-    state: TuiState,
+    pub state: TuiState,
     commands: Vec<TuiCommand>,
 }
 
@@ -43,6 +45,14 @@ impl TestTui {
     pub fn new() -> Self {
         Self {
             state: TuiState::new(),
+            commands: Vec::new(),
+        }
+    }
+
+    /// Create a TestTui starting in account-setup mode.
+    pub fn with_account_setup() -> Self {
+        Self {
+            state: TuiState::with_account_setup(),
             commands: Vec::new(),
         }
     }
@@ -118,6 +128,11 @@ impl TestTui {
         }
     }
 
+    /// Alias used by older tests.
+    pub fn type_text(&mut self, text: &str) {
+        self.type_str(text);
+    }
+
     // ========================================================================
     // State Access
     // ========================================================================
@@ -179,6 +194,13 @@ impl TestTui {
             .any(|c| matches!(c, TuiCommand::Dispatch(d) if check(d)))
     }
 
+    /// Check whether an exit command was emitted.
+    pub fn has_exit(&self) -> bool {
+        self.commands
+            .iter()
+            .any(|command| matches!(command, TuiCommand::Exit))
+    }
+
     /// Clear collected commands.
     pub fn clear_commands(&mut self) {
         self.commands.clear();
@@ -231,6 +253,30 @@ impl TestTui {
     /// Assert no modal is shown.
     pub fn assert_no_modal(&self) {
         assert!(!self.has_modal(), "Expected no modal, but modal is present");
+    }
+
+    /// Assert the current modal matches a predicate.
+    pub fn assert_modal(&self, check: impl FnOnce(&QueuedModal) -> bool) {
+        let modal = self
+            .current_modal()
+            .expect("Expected modal to be shown, but none was present");
+        assert!(check(modal), "Modal did not match expected contract");
+    }
+
+    /// Assert a dispatch command was emitted.
+    pub fn assert_dispatch(&self, check: impl Fn(&DispatchCommand) -> bool) {
+        assert!(
+            self.has_dispatch(check),
+            "Expected dispatch command was not emitted"
+        );
+    }
+
+    /// Navigate directly to a screen using its numeric shortcut.
+    pub fn go_to_screen(&mut self, screen: Screen) {
+        let key = char::from_digit(screen.key_number() as u32, 10)
+            .unwrap_or_else(|| unreachable!("Screen::key_number returns 1..=5"));
+        self.send_char(key);
+        self.assert_screen(screen);
     }
 }
 

@@ -4,6 +4,7 @@ struct DemoProof;
 
 #[aura_macros::semantic_owner(
     owner = "demo-owner",
+    wrapper = "missing_terminal_path_wrapper",
     terminal = "publish_done",
     postcondition = "demo_done",
     proof = DemoProof,

@@ -27,6 +27,7 @@ use aura_terminal::handlers::tui::create_account;
 use aura_terminal::tui::context::InitializedAppCore;
 use aura_terminal::{handlers::tui::TuiMode, ids};
 
+#[allow(clippy::duplicate_mod)]
 #[path = "../support/mod.rs"]
 mod support;
 

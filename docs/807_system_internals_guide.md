@@ -13,7 +13,11 @@ Guards are pure: evaluation runs synchronously over a prepared `GuardSnapshot` a
 ```rust
 // Phase 1: Authorization via Biscuit + policy (async, cached)
 let token = effects.verify_biscuit(&request.token).await?;
-let capabilities = token.capabilities();
+let capabilities = evaluate_candidate_frontier(
+    &token,
+    evaluation_candidates_for_chat_guard(),
+    &policy,
+)?;
 
 // Phase 2: Prepare snapshot and evaluate guards (sync)
 let snapshot = GuardSnapshot {
@@ -50,15 +54,15 @@ No transport observable occurs until the interpreter executes commands in order.
 
 The guards execute in this order:
 
-1. **CapabilityGuard**: Validates Biscuit token capabilities
-2. **FlowBudgetGuard**: Checks and charges flow budget
-3. **LeakageTracker**: Records privacy leakage
-4. **JournalCoupler**: Commits facts to journal
-5. **TransportEffects**: Sends messages
+1. `CapabilityGuard` validates the evaluated Biscuit and policy frontier.
+2. `FlowBudgetGuard` checks and charges flow budget.
+3. `LeakageTracker` records privacy leakage.
+4. `JournalCoupler` commits facts to journal.
+5. `TransportEffects` sends messages.
 
 ### Security Patterns
 
-**Privacy Budget Enforcement**:
+Privacy budget enforcement supports three modes.
 
 ```rust
 // Secure default: denies undefined budgets
@@ -139,10 +143,7 @@ impl AuraAgent {
 }
 ```
 
-**Benefits**:
-- Domain crate stays pure (no tokio/RwLock)
-- Testable with mock effects
-- Consistent pattern across crates
+This pattern keeps the domain crate pure without Tokio-specific locking or runtime coupling. Domain logic is testable with mock effects. The pattern is consistent across crates.
 
 ### Core + Orchestrator Rule
 
@@ -185,9 +186,11 @@ The time domain system is specified in [Effect System](103_effect_system.md). Se
 
 The capability system uses multiple layers:
 
-- **Canonical types** in `aura-core`: Lightweight references
-- **Authorization layer** (`aura-authorization`): Policy enforcement
-- **Storage layer** (`aura-store`): Capability-based access control
+- Canonical types in `aura-core` provide validated `CapabilityName`.
+- Owning families in feature and domain crates provide typed first-party capability declarations.
+- The authorization layer in `aura-authorization` handles explicit issuance profiles and Biscuit and policy evaluation.
+- Guard snapshots in `aura-guards` plus runtime handlers carry evaluated frontiers only.
+- The storage layer in `aura-store` provides capability-based access control.
 
 Clear conversion paths enable inter-layer communication.
 
@@ -275,15 +278,17 @@ Application code must follow policies defined in [Project Structure](999_project
 
 All time, randomness, filesystem, and network operations must flow through effect traits.
 
-**Forbidden**:
+Direct system calls are forbidden because they break simulation and WASM compatibility.
+
 ```rust
-// Direct system calls break simulation and WASM
+// Forbidden: direct system calls
 let now = SystemTime::now();
 let random = thread_rng().gen();
 let file = File::open("path")?;
 ```
 
-**Required**:
+Use effect traits instead.
+
 ```rust
 // Use effect traits
 let now = effects.physical_time().await?;
@@ -320,14 +325,14 @@ Run `just check-arch` before submitting changes. The checker validates:
 
 Workflow operations in `aura-app` use `WorkflowError` (`aura-app::workflows::error`) for typed error propagation. The enum provides structured variants for common failure modes:
 
-- `RuntimeUnavailable` — runtime bridge not initialized
-- `RuntimeCall { operation, source }` — a named runtime bridge call failed
-- `ConnectivityRequired` — peer connectivity prerequisite not met
-- `Journal { operation, source }` — journal load/merge/persist failure
-- `FactEncoding { source }` — fact serialization failure
-- `Ceremony { operation, source }` — ceremony lifecycle failure
-- `DeliveryFailed { peer, attempts, detail }` — transport delivery exhausted retries
-- `Precondition` — static invariant violation
+- `RuntimeUnavailable`: runtime bridge not initialized
+- `RuntimeCall { operation, source }`: a named runtime bridge call failed
+- `ConnectivityRequired`: peer connectivity prerequisite not met
+- `Journal { operation, source }`: journal load/merge/persist failure
+- `FactEncoding { source }`: fact serialization failure
+- `Ceremony { operation, source }`: ceremony lifecycle failure
+- `DeliveryFailed { peer, attempts, detail }`: transport delivery exhausted retries
+- `Precondition`: static invariant violation
 
 `From<WorkflowError> for AuraError` enables workflows to keep `Result<T, AuraError>` signatures while constructing typed errors internally.
 

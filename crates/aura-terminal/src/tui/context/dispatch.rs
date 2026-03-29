@@ -21,6 +21,8 @@ use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 
+const BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME: &str = ".bootstrap-runtime-handoff-ready";
+
 /// File-based account operations used by the TUI.
 ///
 /// Note: These are currently implemented via the TUI handler helpers (disk I/O).
@@ -53,6 +55,46 @@ impl AccountFilesHelper {
     #[must_use]
     pub fn has_account(&self) -> bool {
         self.has_existing_account.load(Ordering::Relaxed)
+    }
+
+    #[must_use]
+    pub fn base_path(&self) -> &PathBuf {
+        &self.base_path
+    }
+
+    #[must_use]
+    pub fn bootstrap_runtime_handoff_committed(&self) -> bool {
+        self.base_path
+            .join(BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME)
+            .exists()
+    }
+
+    pub fn mark_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
+        std::fs::write(
+            self.base_path
+                .join(BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME),
+            b"ready",
+        )
+        .map_err(|error| {
+            TerminalError::structured_operation(
+                "TUI_BOOTSTRAP_HANDOFF_PERSIST_FAILED",
+                format!("failed to persist bootstrap runtime handoff marker: {error}"),
+            )
+        })
+    }
+
+    pub fn clear_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
+        let path = self
+            .base_path
+            .join(BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(TerminalError::structured_operation(
+                "TUI_BOOTSTRAP_HANDOFF_CLEAR_FAILED",
+                format!("failed to clear bootstrap runtime handoff marker: {error}"),
+            )),
+        }
     }
 
     pub fn set_account_created(&self) {
@@ -334,13 +376,6 @@ impl DispatchHelper {
             self.operational.emit_error(error.clone()).await;
             Err(error)
         }
-    }
-
-    /// Dispatch a command and wait for completion.
-    ///
-    /// This is an alias for `dispatch()` with more explicit semantics.
-    pub async fn dispatch_and_wait(&self, command: EffectCommand) -> TerminalResult<()> {
-        self.dispatch(command).await
     }
 
     async fn handle_op_response(&self, response: OpResponse) -> TerminalResult<()> {

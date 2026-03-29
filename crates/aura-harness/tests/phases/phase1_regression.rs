@@ -11,6 +11,26 @@ use aura_harness::config::{
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
 
+fn artifact_run_dir(artifact_root: &std::path::Path, run_name: &str) -> std::path::PathBuf {
+    let run_root = artifact_root.join("harness").join(run_name);
+    let runs_dir = run_root.join("runs");
+    if !runs_dir.exists() {
+        return run_root;
+    }
+    let mut entries = fs::read_dir(&runs_dir)
+        .unwrap_or_else(|error| panic!("failed to read runs dir {}: {error}", runs_dir.display()))
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    entries.sort();
+    entries.into_iter().next().unwrap_or_else(|| {
+        panic!(
+            "expected at least one artifact run dir under {}",
+            runs_dir.display()
+        )
+    })
+}
+
 #[test]
 fn two_local_instances_are_controllable() {
     let root = std::env::temp_dir().join("aura-harness-phase1-regression");
@@ -171,7 +191,7 @@ action = "launch_actors"
 
     assert!(status.success());
 
-    let run_dir = artifact_root.join("harness").join("phase1-artifacts");
+    let run_dir = artifact_run_dir(&artifact_root, "phase1-artifacts");
     assert!(run_dir.join("startup_summary.json").exists());
     assert!(run_dir.join("events.json").exists());
     assert!(run_dir.join("initial_screens.json").exists());

@@ -28,7 +28,11 @@ _harness action *ARGS:
     scripts/harness/cmd.sh {{ action }} {{ ARGS }}
 
 _ownership-lint mode *PATHS:
-    cargo run -q -p aura-macros --bin ownership_lints -- {{ mode }} {{ PATHS }}
+    if [ -x target/debug/ownership_lints ]; then \
+        target/debug/ownership_lints {{ mode }} {{ PATHS }}; \
+    else \
+        cargo run -q -p aura-macros --bin ownership_lints -- {{ mode }} {{ PATHS }}; \
+    fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Build
@@ -47,6 +51,7 @@ build-dev:
     cargo build -p aura-terminal --bin aura --features development --release
     mkdir -p bin
     cp target/release/aura bin/aura
+    codesign -s - bin/aura
     @echo "Binary available at: ./bin/aura"
 
 # Build Aura terminal in release mode without dev features
@@ -54,6 +59,7 @@ build-terminal-release:
     cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal
     mkdir -p bin
     cp target/release/aura bin/aura
+    codesign -s - bin/aura
     @echo "Binary available at: ./bin/aura"
 
 # Build app-host binary
@@ -66,8 +72,8 @@ build-app-host:
 
 # Check Aura web shell + shared UI core for the WASM target
 web-check:
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-ui
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-web --target wasm32-unknown-unknown --features web
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-ui
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-web --target wasm32-unknown-unknown --features web
 
 # Rebuild the local Tailwind bundle used by aura-web (no CDN)
 web-tailwind-build:
@@ -158,6 +164,9 @@ browser-driver-smoke:
 
 ci-harness-browser-driver-types:
     bash scripts/check/harness-browser-driver-types.sh
+
+ci-browser-driver-contract-sync:
+    bash scripts/check/browser-driver-contract-sync.sh
 
 harness-browser-install-check:
     bash scripts/check/harness-browser-install.sh
@@ -323,8 +332,15 @@ lint-arch-syntax:
     cargo run -q -p aura-macros --bin arch_lints -- effect-boundaries crates
     cargo run -q -p aura-macros --bin arch_lints -- impure-escapes crates
     cargo run -q -p aura-macros --bin arch_lints -- concurrency crates
+    cargo run -q -p aura-macros --bin arch_lints -- frontend-portability crates
+    cargo run -q -p aura-macros --bin arch_lints -- semantic-bridge-contracts crates
     cargo run -q -p aura-macros --bin arch_lints -- crypto-boundaries crates
+    cargo run -q -p aura-macros --bin arch_lints -- capability-boundaries crates
     cargo run -q -p aura-macros --bin arch_lints -- style crates
+
+ci-capability-model-audit:
+    cargo run -q -p aura-macros --bin arch_lints -- capability-boundaries crates
+    bash scripts/check/capability-model-audit.sh
 
 # Format code
 fmt:
@@ -543,8 +559,8 @@ ci-choreo-concurrency-contracts:
 
 # Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
 ci-agent-wasm:
-    cargo check -p aura-agent --target wasm32-unknown-unknown --features web
-    cargo check -p aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-vm"
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-agent --target wasm32-unknown-unknown --features web
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-vm"
 
 # WASM workspace test matrix for crates currently supported on WASM
 # Excludes native-only/runtime-heavy crates:
@@ -561,7 +577,7 @@ ci-workspace-wasm-test:
     set -euo pipefail
     : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen-runner.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
-      cargo test --workspace --target wasm32-unknown-unknown \
+      CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo test --workspace --target wasm32-unknown-unknown \
         --exclude aura-terminal \
         --exclude aura-simulator \
         --exclude aura-quint \
@@ -627,14 +643,25 @@ ci-harness-ownership-policy:
     bash scripts/check/ownership-category-declarations.sh
     bash scripts/check/harness-actor-vs-move-ownership.sh
     just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
+    just _ownership-lint terminal-shell-explicit-exit-intent crates/aura-terminal/src
     just _ownership-lint optional-owner-boundary crates/aura-app/src crates/aura-agent/src/runtime_bridge crates/aura-ui/src crates/aura-web/src crates/aura-testkit/src
     bash scripts/check/harness-typed-semantic-errors.sh
     bash scripts/check/harness-typed-json-boundary.sh
     just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness
     bash scripts/check/harness-authoritative-fact-boundary.sh
+    just ci-frontend-portability
+
+ci-frontend-portability:
+    cargo run -q -p aura-macros --bin arch_lints -- frontend-portability crates
+    cargo run -q -p aura-macros --bin arch_lints -- semantic-bridge-contracts crates
+    just web-check
+
+ci-testkit-exception-boundary:
+    bash scripts/check/testkit-exception-boundary.sh
 
 ci-ownership-policy:
     just ci-ownership-categories
+    just ci-annotation-ratchet
     just ci-actor-lifecycle
     just ci-async-session-ownership
     just ci-async-concurrency-envelope
@@ -644,9 +671,12 @@ ci-ownership-policy:
     just ci-authoritative-fact-boundary
     just ci-capability-boundaries
     just ci-typed-errors
+    just ci-browser-promise-bounded-awaits
+    just ci-browser-transport-single-owner
     just ci-semantic-owner-awaits
     just ci-semantic-owner-detached-continuation
     just ci-semantic-owner-no-spawn
+    just ci-semantic-owner-stable-wrapper
     just ci-semantic-owner-proof-success
     just ci-workflow-proof-bearing-success
     just ci-proof-issuer-authoritative-source
@@ -663,11 +693,35 @@ ci-ownership-policy:
     just ci-parity-critical-ignored-results
     just ci-optional-owner-boundary
     just ci-best-effort-side-effects
+    just ci-must-settle-boundary
+    just ci-owner-issued-readiness-boundary
     just ci-observed-layer-boundaries
     just ci-frontend-handoff-boundary
+    just ci-parity-critical-callback-settlement
     just ci-timeout-policy
     just ci-timeout-time-domains
     just ci-harness-ownership-policy
+    just ci-browser-semantic-restart-boundary
+    just ci-testkit-exception-boundary
+
+ci-ratchet-audit:
+    just clippy
+    just lint-arch-syntax
+    just ci-annotation-ratchet
+    just ci-ownership-policy
+    just ci-browser-driver-contract-sync
+    just web-check
+    just ci-agent-wasm
+    env CARGO_TARGET_DIR=target/ratchet just ci-workspace-wasm-test
+    cargo test -p aura-macros --test compile_fail -- --nocapture
+
+ci-browser-semantic-restart-boundary:
+    bash scripts/check/browser-semantic-restart-boundary.sh
+
+ci-annotation-ratchet:
+    bash scripts/check/ownership-annotation-ratchet.sh semantic-owner
+    bash scripts/check/ownership-annotation-ratchet.sh actor-owned
+    bash scripts/check/ownership-annotation-ratchet.sh capability-boundary
 
 ci-ownership-categories:
     bash scripts/check/ownership-category-declarations.sh
@@ -687,14 +741,23 @@ ci-capability-boundaries:
 ci-typed-errors:
     bash scripts/check/typed-error-boundary.sh
 
+ci-browser-promise-bounded-awaits:
+    just _ownership-lint browser-promise-bounded-awaits crates
+
+ci-browser-transport-single-owner:
+    just _ownership-lint browser-transport-single-owner crates
+
 ci-semantic-owner-awaits:
-    just _ownership-lint semantic-owner-bounded-awaits crates/aura-terminal/src/tui/callbacks
+    just _ownership-lint semantic-owner-bounded-awaits crates/aura-app/src/workflows crates/aura-terminal/src/tui/callbacks crates/aura-web/src
 
 ci-semantic-owner-detached-continuation:
     just _ownership-lint semantic-owner-detached-continuation crates/aura-app/src crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
 
 ci-semantic-owner-no-spawn:
     just _ownership-lint semantic-owner-no-spawn crates/aura-app/src crates/aura-terminal/src crates/aura-web/src
+
+ci-semantic-owner-stable-wrapper:
+    just _ownership-lint semantic-owner-stable-wrapper crates/aura-app/src/workflows
 
 ci-semantic-owner-proof-success:
     just _ownership-lint semantic-owner-proof-success crates/aura-app/src crates/aura-terminal/src crates/aura-web/src
@@ -744,11 +807,25 @@ ci-optional-owner-boundary:
 ci-best-effort-side-effects:
     just _ownership-lint best-effort-side-effect-boundary crates
 
+ci-must-settle-boundary:
+    just _ownership-lint must-settle-boundary crates/aura-agent/src crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src
+
+ci-owner-issued-readiness-boundary:
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-agent/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-app/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-terminal/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-ui/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-web/src
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-harness/src
+
 ci-observed-layer-boundaries:
     bash scripts/check/observed-layer-authorship.sh
 
 ci-frontend-handoff-boundary:
     just _ownership-lint frontend-semantic-handoff-boundary crates/aura-terminal crates/aura-web
+
+ci-parity-critical-callback-settlement:
+    just _ownership-lint parity-critical-callback-settlement crates/aura-terminal/src/tui/callbacks
 
 ci-timeout-policy:
     just _ownership-lint timeout-policy-boundary crates/aura-app/src/workflows crates/aura-agent/src/handlers/invitation crates/aura-agent/src/runtime_bridge crates/aura-agent/src/runtime/effects crates/aura-terminal/src/tui crates/aura-harness/src
@@ -1634,6 +1711,51 @@ metrics:
     fi
     echo "Number of crates:"
     ls -1 crates | wc -l
+
+# Run release validation and publish crates.
+# Usage:
+#   just release <version> [dry_run] [skip_ci] [skip_nix] [no_tag] [push] [allow_dirty] [no_require_main]
+# Example:
+#   just release 0.2.0
+#   just release 0.2.0 true                       # dry-run
+#   just release 0.2.0 false false false false true # publish + push
+release \
+  version="" \
+  dry_run="false" \
+  skip_ci="false" \
+  skip_nix="false" \
+  no_tag="false" \
+  push="false" \
+  allow_dirty="false" \
+  no_require_main="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=()
+    if [ -n "{{version}}" ]; then
+      args+=(--version "{{version}}")
+    fi
+    if [ "{{dry_run}}" = "true" ]; then
+      args+=(--dry-run)
+    fi
+    if [ "{{skip_ci}}" = "true" ]; then
+      args+=(--skip-ci)
+    fi
+    if [ "{{skip_nix}}" = "true" ]; then
+      args+=(--skip-nix)
+    fi
+    if [ "{{no_tag}}" = "true" ]; then
+      args+=(--no-tag)
+    fi
+    if [ "{{push}}" = "true" ]; then
+      args+=(--push)
+    fi
+    if [ "{{allow_dirty}}" = "true" ]; then
+      args+=(--allow-dirty)
+    fi
+    if [ "{{no_require_main}}" = "true" ]; then
+      args+=(--no-require-main)
+    fi
+    ./scripts/ops/release.sh "${args[@]}"
 
 # Install git hooks
 install-hooks:

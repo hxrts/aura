@@ -1,6 +1,8 @@
 # Journal
 
-This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes the reduction pipeline, flow budget semantics, and integration with the effect system. It defines the invariants that ensure correctness. See [Maintenance](116_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
+This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts.
+
+It describes the reduction pipeline, flow budget semantics, and integration with the effect system. It defines the invariants that ensure correctness. See [Maintenance](116_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
 
 ## Hybrid Journal Model (Facts + Capabilities)
 
@@ -318,7 +320,7 @@ Checks
 - Verify the threshold signature (`agg_sig`) using the two-phase verification model from `aura-core::tree::verification`:
   - `verify_attested_op()`: Cryptographic signature check against `BranchSigningKey` stored in TreeState
   - `check_attested_op()`: Full verification plus state consistency (epoch, parent commitment)
-- Ensure the referenced parent state exists locally; otherwise request missing facts.
+- Ensure the referenced parent state exists locally. Otherwise request missing facts.
 - Confirm the operation is well-formed (e.g., `AddLeaf` indexes a valid parent node).
 
 See [Tree Operation Verification](102_authority_and_identity.md#8-tree-operation-verification) for details on the verify/check model and binding message security.

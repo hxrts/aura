@@ -718,6 +718,7 @@ impl<S: StorageCoreEffects + StorageExtendedEffects + Send + Sync> StorageExtend
 mod tests {
     use super::*;
     use crate::TokenAuthority;
+    use aura_core::{capability_name, CapabilityName};
 
     fn setup_test_authority() -> (TokenAuthority, AuthorityId) {
         let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
@@ -728,6 +729,10 @@ mod tests {
     fn setup_test_evaluator() -> BiscuitStorageEvaluator {
         let (authority, authority_id) = setup_test_authority();
         BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id)
+    }
+
+    fn storage_test_capabilities() -> Vec<CapabilityName> {
+        vec![capability_name!("read"), capability_name!("write")]
     }
 
     /// Content resource converts to Storage scope with the evaluator's authority
@@ -828,7 +833,9 @@ mod tests {
     fn test_biscuit_access_request() {
         let (authority, _authority_id) = setup_test_authority();
         let recipient = AuthorityId::new_from_entropy([1u8; 32]);
-        let token = authority.create_token(recipient).unwrap();
+        let token = authority
+            .create_token(recipient, storage_test_capabilities())
+            .unwrap();
         let token_bytes = token.to_vec().unwrap();
 
         let request = BiscuitAccessRequest::new(
@@ -979,7 +986,9 @@ mod tests {
         let mock_storage = MockStorage::new();
         let (authority, authority_id) = setup_test_authority();
         let recipient = AuthorityId::new_from_entropy([1u8; 32]);
-        let token = authority.create_token(recipient).unwrap();
+        let token = authority
+            .create_token(recipient, storage_test_capabilities())
+            .unwrap();
         let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
         let budget = FlowBudget::new(10000, Epoch::initial());
 
@@ -1028,7 +1037,9 @@ mod tests {
         let mock_storage = MockStorage::new();
         let (authority, authority_id) = setup_test_authority();
         let recipient = AuthorityId::new_from_entropy([2u8; 32]);
-        let token = authority.create_token(recipient).unwrap();
+        let token = authority
+            .create_token(recipient, storage_test_capabilities())
+            .unwrap();
         let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
         let budget = FlowBudget::new(1000, Epoch::initial());
 

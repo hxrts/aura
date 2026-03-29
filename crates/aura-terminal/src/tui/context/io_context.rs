@@ -18,6 +18,8 @@
 //!     .build()?;
 //! ```
 
+mod builder;
+
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -42,6 +44,7 @@ use aura_app::ui::workflows::{
     ceremonies as ceremony_workflows, context as context_workflows, runtime as runtime_workflows,
     settings as settings_workflows, system as system_workflows,
 };
+use aura_app::ui_contract::OperationInstanceId;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
 use aura_core::AuthorityId;
@@ -59,226 +62,21 @@ use crate::tui::hooks::{
     ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot, HomeSnapshot,
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
+pub use builder::{ContextBuildError, IoContextBuilder};
 
 #[derive(Clone, Debug)]
-pub struct AuthoritySwitchRequest {
-    pub authority_id: aura_core::types::identifiers::AuthorityId,
-    pub nickname_suggestion: Option<String>,
+pub enum ShellExitIntent {
+    UserQuit,
+    BootstrapReload,
+    AuthoritySwitch {
+        authority_id: aura_core::types::identifiers::AuthorityId,
+        nickname_suggestion: Option<String>,
+    },
 }
 
 struct StoredCeremonyHandle {
     status_handle: CeremonyStatusHandle,
     cancel_handle: Option<CeremonyHandle>,
-}
-
-// ============================================================================
-// Builder
-// ============================================================================
-
-/// Error returned when IoContextBuilder cannot build an IoContext.
-#[derive(Debug, Clone)]
-pub enum ContextBuildError {
-    /// Required field was not set
-    MissingField(&'static str),
-}
-
-impl std::fmt::Display for ContextBuildError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ContextBuildError::MissingField(field) => {
-                write!(f, "IoContextBuilder: missing required field '{field}'")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ContextBuildError {}
-
-/// Builder for constructing IoContext with flexible configuration.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let ctx = IoContext::builder()
-///     .with_app_core(app_core)
-///     .with_base_path(PathBuf::from("./data"))
-///     .with_device_id("device-1".to_string())
-///     .with_mode(TuiMode::Production)
-///     .build()?;
-/// ```
-#[derive(Default)]
-pub struct IoContextBuilder {
-    app_core: Option<InitializedAppCore>,
-    base_path: Option<PathBuf>,
-    device_id: Option<String>,
-    mode: Option<TuiMode>,
-    has_existing_account: bool,
-    pending_runtime_bootstrap: bool,
-    #[cfg_attr(feature = "development", doc = "Demo configuration fields")]
-    #[cfg(feature = "development")]
-    demo_hints: Option<crate::demo::DemoHints>,
-    #[cfg(feature = "development")]
-    demo_bridge: Option<Arc<crate::demo::SimulatedBridge>>,
-    #[cfg(feature = "development")]
-    demo_mobile_agent: Option<Arc<AuraAgent>>,
-    #[cfg(feature = "development")]
-    demo_mobile_device_id: Option<String>,
-    #[cfg(feature = "development")]
-    demo_mobile_authority_id: Option<String>,
-}
-
-impl IoContextBuilder {
-    /// Create a new builder with default values.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set the initialized AppCore (required).
-    #[must_use]
-    pub fn with_app_core(mut self, app_core: InitializedAppCore) -> Self {
-        self.app_core = Some(app_core);
-        self
-    }
-
-    /// Set the base path for account files (required).
-    #[must_use]
-    pub fn with_base_path(mut self, path: PathBuf) -> Self {
-        self.base_path = Some(path);
-        self
-    }
-
-    /// Set the device ID string (required).
-    #[must_use]
-    pub fn with_device_id(mut self, id: String) -> Self {
-        self.device_id = Some(id);
-        self
-    }
-
-    /// Set the TUI mode (required).
-    #[must_use]
-    pub fn with_mode(mut self, mode: TuiMode) -> Self {
-        self.mode = Some(mode);
-        self
-    }
-
-    /// Set whether an existing account is present (default: false).
-    #[must_use]
-    pub fn with_existing_account(mut self, exists: bool) -> Self {
-        self.has_existing_account = exists;
-        self
-    }
-
-    #[must_use]
-    pub fn with_pending_runtime_bootstrap(mut self, pending: bool) -> Self {
-        self.pending_runtime_bootstrap = pending;
-        self
-    }
-
-    cfg_if! {
-        if #[cfg(feature = "development")] {
-            /// Set demo hints for development mode.
-            pub fn with_demo_hints(mut self, hints: crate::demo::DemoHints) -> Self {
-                self.demo_hints = Some(hints);
-                self
-            }
-
-            /// Set the demo bridge for routing commands to simulated agents.
-            pub fn with_demo_bridge(mut self, bridge: Arc<crate::demo::SimulatedBridge>) -> Self {
-                self.demo_bridge = Some(bridge);
-                self
-            }
-
-            /// Set the demo Mobile agent for device enrollment flows.
-            pub fn with_demo_mobile_agent(mut self, agent: Arc<AuraAgent>) -> Self {
-                self.demo_mobile_agent = Some(agent);
-                self
-            }
-
-            /// Set the demo Mobile device id for MFA shortcuts.
-            pub fn with_demo_mobile_device_id(mut self, device_id: String) -> Self {
-                self.demo_mobile_device_id = Some(device_id);
-                self
-            }
-
-            pub fn with_demo_mobile_authority_id(mut self, authority_id: String) -> Self {
-                self.demo_mobile_authority_id = Some(authority_id);
-                self
-            }
-        }
-    }
-
-    /// Build the IoContext, returning an error if required fields are missing.
-    pub fn build(self) -> Result<IoContext, ContextBuildError> {
-        let app_core = self
-            .app_core
-            .ok_or(ContextBuildError::MissingField("app_core"))?;
-        let base_path = self
-            .base_path
-            .ok_or(ContextBuildError::MissingField("base_path"))?;
-        let device_id = self
-            .device_id
-            .ok_or(ContextBuildError::MissingField("device_id"))?;
-        // Mode is required in the builder but no longer used here - mode isolation
-        // is achieved via mode-specific base_path directories. Keep the check to
-        // maintain the API contract.
-        let _mode = self.mode.ok_or(ContextBuildError::MissingField("mode"))?;
-
-        let tasks = Arc::new(UiTaskOwner::new());
-        let operational = Arc::new(OperationalHandler::new(
-            app_core.raw().clone(),
-            tasks.clone(),
-        ));
-        let snapshots = SnapshotHelper::new(app_core.raw().clone(), device_id.clone());
-        let toasts = ToastHelper::new();
-
-        let has_existing_account = Arc::new(std::sync::atomic::AtomicBool::new(
-            self.has_existing_account,
-        ));
-        let account_files = AccountFilesHelper::new(base_path, device_id, has_existing_account);
-
-        let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
-        let current_context = Arc::new(RwLock::new(None));
-        let channel_modes = Arc::new(RwLock::new(HashMap::new()));
-        let ceremony_handles = Arc::new(RwLock::new(HashMap::new()));
-        let requested_authority_switch = Arc::new(std::sync::Mutex::new(None));
-
-        let dispatch = DispatchHelper::new(
-            operational.clone(),
-            snapshots.clone(),
-            toasts.clone(),
-            account_files.clone(),
-            invited_lan_peers.clone(),
-            current_context.clone(),
-            channel_modes.clone(),
-        );
-
-        Ok(IoContext {
-            app_core,
-            operational,
-            dispatch,
-            snapshots,
-            toasts,
-            account_files,
-            #[cfg(feature = "development")]
-            demo_hints: self.demo_hints,
-            #[cfg(feature = "development")]
-            demo_bridge: self.demo_bridge,
-            #[cfg(feature = "development")]
-            demo_mobile_agent: self.demo_mobile_agent,
-            #[cfg(feature = "development")]
-            demo_mobile_device_id: self.demo_mobile_device_id,
-            #[cfg(feature = "development")]
-            demo_mobile_authority_id: self.demo_mobile_authority_id,
-            invited_lan_peers,
-            current_context,
-            channel_modes,
-            ceremony_handles,
-            tasks,
-            pending_runtime_bootstrap: self.pending_runtime_bootstrap,
-            requested_authority_switch,
-        })
-    }
 }
 
 // ============================================================================
@@ -314,7 +112,7 @@ pub struct IoContext {
     ceremony_handles: Arc<RwLock<HashMap<String, StoredCeremonyHandle>>>,
     tasks: Arc<UiTaskOwner>,
     pending_runtime_bootstrap: bool,
-    requested_authority_switch: Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>>,
+    requested_shell_exit: Arc<std::sync::Mutex<Option<ShellExitIntent>>>,
 }
 
 /// Lightweight TUI-facing result of starting device enrollment.
@@ -354,10 +152,23 @@ impl IoContext {
         self.tasks.clone()
     }
 
-    pub fn authority_switch_request_handle(
-        &self,
-    ) -> Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>> {
-        self.requested_authority_switch.clone()
+    pub fn take_shell_exit_intent(&self) -> Option<ShellExitIntent> {
+        self.requested_shell_exit
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
+    }
+
+    pub fn request_user_quit(&self) {
+        if let Ok(mut guard) = self.requested_shell_exit.lock() {
+            *guard = Some(ShellExitIntent::UserQuit);
+        }
+    }
+
+    pub fn request_bootstrap_reload(&self) {
+        if let Ok(mut guard) = self.requested_shell_exit.lock() {
+            *guard = Some(ShellExitIntent::BootstrapReload);
+        }
     }
 
     pub fn request_authority_switch(
@@ -365,8 +176,8 @@ impl IoContext {
         authority_id: aura_core::types::identifiers::AuthorityId,
         nickname_suggestion: Option<String>,
     ) {
-        if let Ok(mut guard) = self.requested_authority_switch.lock() {
-            *guard = Some(AuthoritySwitchRequest {
+        if let Ok(mut guard) = self.requested_shell_exit.lock() {
+            *guard = Some(ShellExitIntent::AuthoritySwitch {
                 authority_id,
                 nickname_suggestion,
             });
@@ -445,6 +256,21 @@ impl IoContext {
     #[must_use]
     pub fn has_account(&self) -> bool {
         self.account_files.has_account()
+    }
+
+    #[must_use]
+    pub fn bootstrap_runtime_handoff_committed(&self) -> bool {
+        self.account_files.bootstrap_runtime_handoff_committed()
+    }
+
+    pub fn mark_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
+        self.account_files
+            .mark_bootstrap_runtime_handoff_committed()
+    }
+
+    pub fn clear_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
+        self.account_files
+            .clear_bootstrap_runtime_handoff_committed()
     }
 
     pub fn set_account_created(&self) {
@@ -724,7 +550,7 @@ impl IoContext {
             }
         }
 
-        self.dispatch.dispatch_and_wait(command).await
+        self.dispatch.dispatch(command).await
     }
 
     pub async fn export_invitation_code(&self, invitation_id: &str) -> TerminalResult<String> {
@@ -757,6 +583,7 @@ impl IoContext {
         invitation_type: &str,
         message: Option<String>,
         ttl_secs: Option<u64>,
+        operation_instance_id: Option<OperationInstanceId>,
     ) -> TerminalResult<String> {
         match self
             .operational
@@ -765,6 +592,7 @@ impl IoContext {
                 invitation_type: invitation_type.to_string(),
                 message,
                 ttl_secs,
+                operation_instance_id,
             })
             .await
         {
@@ -896,43 +724,6 @@ impl IoContext {
         })?;
 
         Ok(())
-    }
-
-    pub async fn dispatch_send_message(
-        &self,
-        channel_id: &str,
-        content: &str,
-    ) -> TerminalResult<()> {
-        self.dispatch(EffectCommand::SendMessage {
-            channel: channel_id.to_string(),
-            content: content.to_string(),
-        })
-        .await
-    }
-
-    pub async fn dispatch_join_channel(&self, channel_id: &str) -> TerminalResult<()> {
-        self.dispatch(EffectCommand::JoinChannel {
-            channel: channel_id.to_string(),
-        })
-        .await
-    }
-
-    pub async fn dispatch_leave_channel(&self, channel_id: &str) -> TerminalResult<()> {
-        self.dispatch(EffectCommand::LeaveChannel {
-            channel: channel_id.to_string(),
-        })
-        .await
-    }
-
-    pub async fn dispatch_start_recovery(&self) -> TerminalResult<()> {
-        self.dispatch(EffectCommand::StartRecovery).await
-    }
-
-    pub async fn dispatch_submit_guardian_approval(&self, guardian_id: &str) -> TerminalResult<()> {
-        self.dispatch(EffectCommand::SubmitGuardianApproval {
-            guardian_id: guardian_id.to_string(),
-        })
-        .await
     }
 
     // =========================================================================

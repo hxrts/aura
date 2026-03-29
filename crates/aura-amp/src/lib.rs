@@ -34,6 +34,8 @@
 // Submodules
 // ============================================================================
 
+/// Typed capability families owned by AMP orchestration.
+pub mod capabilities;
 pub mod channel;
 pub mod choreography;
 pub mod config;

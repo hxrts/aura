@@ -43,6 +43,7 @@ use aura_journal::{
 };
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Message delivery lifecycle status exposed through chat facts/view reduction.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -215,6 +216,49 @@ pub enum ChatFact {
         /// Timestamp when message was deleted
         deleted_at: PhysicalTime,
     },
+}
+
+/// Pure lookup index from canonical channel identity to authoritative context.
+///
+/// Runtime code can seed this once from committed `ChatFact` history and then
+/// resolve channel invitation contexts in O(1) without replaying every chat
+/// fact on the hot path.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChannelContextIndex {
+    contexts: HashMap<(ChannelId, AuthorityId), ContextId>,
+}
+
+impl ChannelContextIndex {
+    /// Create an empty channel-context index.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Apply a chat fact to the index.
+    ///
+    /// Only `ChannelCreated` facts affect the authoritative channel/context
+    /// mapping used by invitation context resolution.
+    pub fn apply_fact(&mut self, fact: &ChatFact) {
+        if let ChatFact::ChannelCreated {
+            context_id,
+            channel_id,
+            creator_id,
+            ..
+        } = fact
+        {
+            self.contexts
+                .insert((*channel_id, *creator_id), *context_id);
+        }
+    }
+
+    /// Resolve the authoritative context for a channel created by `creator_id`.
+    pub fn context_for_channel(
+        &self,
+        channel_id: ChannelId,
+        creator_id: AuthorityId,
+    ) -> Option<ContextId> {
+        self.contexts.get(&(channel_id, creator_id)).copied()
+    }
 }
 
 impl ChatFact {
@@ -703,5 +747,25 @@ mod tests {
         // All facts should have the same context
         assert_eq!(sent.context_id(), context);
         assert_eq!(read.context_id(), context);
+    }
+
+    #[test]
+    fn channel_context_index_tracks_created_channels() {
+        let context = test_context_id();
+        let channel = test_channel_id();
+        let creator = test_authority_id();
+        let mut index = ChannelContextIndex::new();
+
+        index.apply_fact(&ChatFact::channel_created_ms(
+            context,
+            channel,
+            "general".to_string(),
+            None,
+            false,
+            1,
+            creator,
+        ));
+
+        assert_eq!(index.context_for_channel(channel, creator), Some(context));
     }
 }

@@ -160,6 +160,26 @@ pub enum SubmissionState {
     Accepted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubmissionValueContract {
+    None,
+    ContactInvitationCode,
+    AuthoritativeChannelBinding,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SubmissionContract {
+    Immediate {
+        value: SubmissionValueContract,
+    },
+    OperationHandle {
+        operation_id: OperationId,
+        value: SubmissionValueContract,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmittedAction<T> {
     pub value: T,
@@ -276,6 +296,7 @@ pub enum SelectionSemantics {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharedActionContract {
     pub intent: IntentKind,
+    pub submission: SubmissionContract,
     pub preconditions: Vec<ActionPrecondition>,
     pub barriers: SharedActionBarrierMetadata,
     pub post_operation_convergence: Option<PostOperationConvergenceContract>,
@@ -631,7 +652,13 @@ impl ScenarioAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IntentAction {
-    OpenScreen(ScreenId),
+    OpenScreen {
+        screen: ScreenId,
+        #[serde(default)]
+        channel_id: Option<String>,
+        #[serde(default)]
+        context_id: Option<String>,
+    },
     CreateAccount {
         account_name: String,
     },
@@ -672,9 +699,17 @@ pub enum IntentAction {
         authority_id: String,
         #[serde(default)]
         channel_id: Option<String>,
+        #[serde(default)]
+        context_id: Option<String>,
+        #[serde(default)]
+        channel_name: Option<String>,
     },
     SendChatMessage {
         message: String,
+        #[serde(default)]
+        channel_id: Option<String>,
+        #[serde(default)]
+        context_id: Option<String>,
     },
 }
 
@@ -682,7 +717,7 @@ impl IntentAction {
     #[must_use]
     pub fn kind(&self) -> IntentKind {
         match self {
-            Self::OpenScreen(_) => IntentKind::OpenScreen,
+            Self::OpenScreen { .. } => IntentKind::OpenScreen,
             Self::CreateAccount { .. } => IntentKind::CreateAccount,
             Self::CreateHome { .. } => IntentKind::CreateHome,
             Self::CreateChannel { .. } => IntentKind::CreateChannel,
@@ -703,8 +738,11 @@ impl IntentAction {
     #[must_use]
     pub fn contract(&self) -> SharedActionContract {
         match self {
-            Self::OpenScreen(screen) => SharedActionContract {
+            Self::OpenScreen { screen, .. } => SharedActionContract {
                 intent: IntentKind::OpenScreen,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Readiness(UiReadiness::Ready),
                     ActionPrecondition::Quiescence(QuiescenceState::Settled),
@@ -734,14 +772,13 @@ impl IntentAction {
             },
             Self::CreateAccount { .. } => SharedActionContract {
                 intent: IntentKind::CreateAccount,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![ActionPrecondition::Screen(ScreenId::Onboarding)],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![BarrierDeclaration::Screen(ScreenId::Onboarding)],
                     before_next_intent: vec![
-                        BarrierDeclaration::OperationState {
-                            operation_id: OperationId::account_create(),
-                            state: OperationState::Succeeded,
-                        },
                         BarrierDeclaration::Screen(ScreenId::Neighborhood),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                     ],
@@ -749,15 +786,11 @@ impl IntentAction {
                 post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Field(FieldId::AccountName),
                 selection_semantics: SelectionSemantics::None,
-                transitions: vec![
-                    AuthoritativeTransitionKind::Operation(OperationId::account_create()),
-                    AuthoritativeTransitionKind::Screen(ScreenId::Neighborhood),
-                ],
+                // Account creation reloads the bootstrap shell into the runtime-backed
+                // generation, so the authoritative postcondition is the new shell state
+                // rather than the pre-reload local operation handle.
+                transitions: vec![AuthoritativeTransitionKind::Screen(ScreenId::Neighborhood)],
                 terminal_success: vec![
-                    TerminalSuccessKind::OperationState {
-                        operation_id: OperationId::account_create(),
-                        state: OperationState::Succeeded,
-                    },
                     TerminalSuccessKind::Screen(ScreenId::Neighborhood),
                     TerminalSuccessKind::Readiness(UiReadiness::Ready),
                 ],
@@ -768,6 +801,9 @@ impl IntentAction {
             },
             Self::CreateHome { .. } => SharedActionContract {
                 intent: IntentKind::CreateHome,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Neighborhood),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -810,6 +846,9 @@ impl IntentAction {
             },
             Self::CreateChannel { .. } => SharedActionContract {
                 intent: IntentKind::CreateChannel,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::AuthoritativeChannelBinding,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Chat),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -851,6 +890,10 @@ impl IntentAction {
             },
             Self::StartDeviceEnrollment { .. } => SharedActionContract {
                 intent: IntentKind::StartDeviceEnrollment,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::device_enrollment(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -893,6 +936,9 @@ impl IntentAction {
             },
             Self::ImportDeviceEnrollmentCode { .. } => SharedActionContract {
                 intent: IntentKind::ImportDeviceEnrollmentCode,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![ActionPrecondition::Screen(ScreenId::Onboarding)],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![BarrierDeclaration::Screen(ScreenId::Onboarding)],
@@ -922,6 +968,9 @@ impl IntentAction {
             },
             Self::OpenSettingsSection(_) => SharedActionContract {
                 intent: IntentKind::OpenSettingsSection,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -953,6 +1002,9 @@ impl IntentAction {
             },
             Self::RemoveSelectedDevice { .. } => SharedActionContract {
                 intent: IntentKind::RemoveSelectedDevice,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -985,6 +1037,9 @@ impl IntentAction {
             },
             Self::SwitchAuthority { .. } => SharedActionContract {
                 intent: IntentKind::SwitchAuthority,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1016,6 +1071,10 @@ impl IntentAction {
             },
             Self::CreateContactInvitation { .. } => SharedActionContract {
                 intent: IntentKind::CreateContactInvitation,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::invitation_create(),
+                    value: SubmissionValueContract::ContactInvitationCode,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Contacts),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1055,6 +1114,10 @@ impl IntentAction {
             },
             Self::AcceptContactInvitation { .. } => SharedActionContract {
                 intent: IntentKind::AcceptContactInvitation,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::invitation_accept(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Contacts),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1096,6 +1159,10 @@ impl IntentAction {
             },
             Self::AcceptPendingChannelInvitation => SharedActionContract {
                 intent: IntentKind::AcceptPendingChannelInvitation,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::invitation_accept(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Readiness(UiReadiness::Ready),
                     ActionPrecondition::Quiescence(QuiescenceState::Settled),
@@ -1132,6 +1199,10 @@ impl IntentAction {
             },
             Self::JoinChannel { .. } => SharedActionContract {
                 intent: IntentKind::JoinChannel,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::join_channel(),
+                    value: SubmissionValueContract::AuthoritativeChannelBinding,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Chat),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1169,6 +1240,10 @@ impl IntentAction {
             },
             Self::InviteActorToChannel { .. } => SharedActionContract {
                 intent: IntentKind::InviteActorToChannel,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::invitation_create(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Contacts),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1183,18 +1258,10 @@ impl IntentAction {
                             operation_id: OperationId::invitation_create(),
                             state: OperationState::Succeeded,
                         },
-                        BarrierDeclaration::RuntimeEvent(
-                            RuntimeEventKind::PendingHomeInvitationReady,
-                        ),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                     ],
                 },
-                post_operation_convergence: Some(PostOperationConvergenceContract {
-                    required_before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
-                        RuntimeEventKind::PendingHomeInvitationReady,
-                    )],
-                    violation_code: "pending_home_invitation_convergence_required".to_string(),
-                }),
+                post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Screen(ScreenId::Contacts),
                 selection_semantics: SelectionSemantics::List(ListId::Contacts),
                 transitions: vec![AuthoritativeTransitionKind::Operation(
@@ -1205,7 +1272,6 @@ impl IntentAction {
                         operation_id: OperationId::invitation_create(),
                         state: OperationState::Succeeded,
                     },
-                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::PendingHomeInvitationReady),
                     TerminalSuccessKind::Readiness(UiReadiness::Ready),
                 ],
                 terminal_failure_codes: vec![
@@ -1215,6 +1281,10 @@ impl IntentAction {
             },
             Self::SendChatMessage { .. } => SharedActionContract {
                 intent: IntentKind::SendChatMessage,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::send_message(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Chat),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1343,6 +1413,9 @@ pub enum Expectation {
     MessageContains {
         message_contains: String,
     },
+    DiagnosticScreenContains {
+        text_contains: String,
+    },
     ToastContains {
         kind: Option<ToastKind>,
         message_contains: String,
@@ -1458,6 +1531,7 @@ pub enum SemanticActionKind {
     ControlVisible,
     ModalOpen,
     MessageContains,
+    DiagnosticScreenContains,
     ToastContains,
     ListContains,
     ListCountIs,
@@ -1534,9 +1608,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                     actor: required(value.actor, "actor", value.action)?,
                 })
             }
-            SemanticActionKind::OpenScreen => ScenarioAction::Intent(IntentAction::OpenScreen(
-                required(value.screen_id, "screen_id", value.action)?,
-            )),
+            SemanticActionKind::OpenScreen => ScenarioAction::Intent(IntentAction::OpenScreen {
+                screen: required(value.screen_id, "screen_id", value.action)?,
+                channel_id: None,
+                context_id: None,
+            }),
             SemanticActionKind::CreateAccount => {
                 ScenarioAction::Intent(IntentAction::CreateAccount {
                     account_name: required(value.value, "value", value.action)?,
@@ -1602,6 +1678,8 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 ScenarioAction::Intent(IntentAction::InviteActorToChannel {
                     authority_id: required(value.value, "value", value.action)?,
                     channel_id: None,
+                    context_id: None,
+                    channel_name: None,
                 })
             }
             SemanticActionKind::Navigate => ScenarioAction::Ui(UiAction::Navigate(required(
@@ -1640,6 +1718,8 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::SendChatMessage => {
                 ScenarioAction::Intent(IntentAction::SendChatMessage {
                     message: required(value.value, "value", value.action)?,
+                    channel_id: None,
+                    context_id: None,
                 })
             }
             SemanticActionKind::PasteClipboard => ScenarioAction::Ui(UiAction::PasteClipboard {
@@ -1664,6 +1744,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::MessageContains => {
                 ScenarioAction::Expect(Expectation::MessageContains {
                     message_contains: required(value.value, "value", value.action)?,
+                })
+            }
+            SemanticActionKind::DiagnosticScreenContains => {
+                ScenarioAction::Expect(Expectation::DiagnosticScreenContains {
+                    text_contains: required(value.value, "value", value.action)?,
                 })
             }
             SemanticActionKind::ToastContains => {
@@ -1999,7 +2084,11 @@ mod tests {
                 id: "open".to_string(),
                 actor: Some(super::ActorId("alice".to_string())),
                 timeout_ms: Some(1000),
-                action: ScenarioAction::Intent(IntentAction::OpenScreen(ScreenId::Chat)),
+                action: ScenarioAction::Intent(IntentAction::OpenScreen {
+                    screen: ScreenId::Chat,
+                    channel_id: None,
+                    context_id: None,
+                }),
             }],
         };
 
@@ -2052,7 +2141,11 @@ mod tests {
     #[test]
     fn every_intent_kind_has_a_matching_contract() {
         let samples = vec![
-            IntentAction::OpenScreen(ScreenId::Chat),
+            IntentAction::OpenScreen {
+                screen: ScreenId::Chat,
+                channel_id: None,
+                context_id: None,
+            },
             IntentAction::CreateAccount {
                 account_name: "alice".to_string(),
             },
@@ -2089,9 +2182,13 @@ mod tests {
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:peer".to_string(),
                 channel_id: None,
+                context_id: None,
+                channel_name: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             },
         ];
         assert_eq!(samples.len(), IntentKind::ALL.len());
@@ -2113,7 +2210,11 @@ mod tests {
     #[test]
     fn every_intent_kind_declares_barrier_metadata() {
         let actions = [
-            IntentAction::OpenScreen(ScreenId::Chat),
+            IntentAction::OpenScreen {
+                screen: ScreenId::Chat,
+                channel_id: None,
+                context_id: None,
+            },
             IntentAction::CreateAccount {
                 account_name: "alice".to_string(),
             },
@@ -2150,9 +2251,13 @@ mod tests {
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:peer".to_string(),
                 channel_id: None,
+                context_id: None,
+                channel_name: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             },
         ];
         for action in actions {
@@ -2173,7 +2278,11 @@ mod tests {
     #[test]
     fn every_intent_kind_declares_focus_and_selection_semantics() {
         let actions = [
-            IntentAction::OpenScreen(ScreenId::Chat),
+            IntentAction::OpenScreen {
+                screen: ScreenId::Chat,
+                channel_id: None,
+                context_id: None,
+            },
             IntentAction::CreateAccount {
                 account_name: "alice".to_string(),
             },
@@ -2210,9 +2319,13 @@ mod tests {
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:peer".to_string(),
                 channel_id: None,
+                context_id: None,
+                channel_name: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             },
         ];
         for action in actions {
@@ -2239,16 +2352,13 @@ mod tests {
         let invite_contract = IntentAction::InviteActorToChannel {
             authority_id: "authority:peer".to_string(),
             channel_id: None,
+            context_id: None,
+            channel_name: None,
         }
         .contract();
-        let invite_convergence = invite_contract
-            .post_operation_convergence
-            .expect("invite_actor_to_channel must declare convergence");
-        assert_eq!(
-            invite_convergence.required_before_next_intent,
-            vec![BarrierDeclaration::RuntimeEvent(
-                RuntimeEventKind::PendingHomeInvitationReady,
-            )]
+        assert!(
+            invite_contract.post_operation_convergence.is_none(),
+            "invite_actor_to_channel convergence belongs to the invitee-facing follow-up step, not the inviter-facing action"
         );
 
         let accept_pending_contract = IntentAction::AcceptPendingChannelInvitation.contract();
@@ -2263,6 +2373,8 @@ mod tests {
 
         let send_message_contract = IntentAction::SendChatMessage {
             message: "hello".to_string(),
+            channel_id: None,
+            context_id: None,
         }
         .contract();
         assert!(send_message_contract.post_operation_convergence.is_none());
@@ -2279,10 +2391,6 @@ mod tests {
         assert_eq!(
             request.contract.barriers.before_next_intent,
             vec![
-                BarrierDeclaration::OperationState {
-                    operation_id: OperationId::account_create(),
-                    state: OperationState::Succeeded,
-                },
                 BarrierDeclaration::Screen(ScreenId::Neighborhood),
                 BarrierDeclaration::Readiness(UiReadiness::Ready),
             ]
@@ -2345,6 +2453,8 @@ mod tests {
     fn send_chat_message_requires_delivery_ready_before_issue() {
         let contract = IntentAction::SendChatMessage {
             message: "hello".to_string(),
+            channel_id: None,
+            context_id: None,
         }
         .contract();
 
@@ -2385,9 +2495,13 @@ mod tests {
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:test".to_string(),
                 channel_id: None,
+                context_id: None,
+                channel_name: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
+                channel_id: None,
+                context_id: None,
             },
         ] {
             let contract = intent.contract();

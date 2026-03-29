@@ -7,6 +7,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Social topology (blocks and neighborhoods) for the Aura threshold identity platform"
 keywords = ["social", "topology", "blocks", "neighborhoods", "relay"]
 categories = ["cryptography"]
@@ -16,11 +17,11 @@ workspace = true
 
 [dependencies]
 # Layer 1 - Foundation
-aura-core = { path = "../aura-core" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
 
 # Layer 2 - Domain crates (aura-social builds ON these)
-aura-journal = { path = "../aura-journal" }
-aura-macros = { path = "../aura-macros" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
 
 # External
 async-trait = { workspace = true }

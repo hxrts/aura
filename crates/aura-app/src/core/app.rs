@@ -420,7 +420,7 @@ impl AppCore {
             .map_err(|error| IntentError::internal_error(error.to_string()))?
             .is_none()
             {
-                let _ = timeout_runtime_call_bounded(
+                let bootstrap = timeout_runtime_call_bounded(
                     runtime,
                     "init_signals",
                     "bootstrap_signing_keys",
@@ -428,10 +428,19 @@ impl AppCore {
                     || runtime.bootstrap_signing_keys(),
                 )
                 .await
-                .map_err(|error| IntentError::internal_error(error.to_string()))?
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Failed to bootstrap signing keys: {e}"))
-                })?;
+                .map_err(|error| IntentError::internal_error(error.to_string()))?;
+                match bootstrap {
+                    Ok(_public_key) => {}
+                    Err(IntentError::NoAgent { .. }) => {
+                        // Offline/test runtimes may expose runtime-backed hooks without an
+                        // attached agent. Signal registration must still succeed there.
+                    }
+                    Err(error) => {
+                        return Err(IntentError::internal_error(format!(
+                            "Failed to bootstrap signing keys: {error}"
+                        )));
+                    }
+                }
             }
         }
 
@@ -481,6 +490,26 @@ impl AppCore {
             .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
 
         Ok(())
+    }
+
+    /// Detach the runtime bridge from one AppCore instance.
+    ///
+    /// This is a teardown-only escape hatch for frontend generation shutdown.
+    /// Long-lived tasks may still hold `Arc<RwLock<AppCore>>`; clearing the
+    /// shared runtime pointer breaks the `AppCore -> RuntimeBridge -> runtime
+    /// task -> AppCore` retention cycle so the owned runtime can be shut down.
+    pub async fn detach_runtime(app_core: &Arc<RwLock<AppCore>>) -> bool {
+        let mut core = app_core.write().await;
+        let had_runtime = core.runtime.take().is_some();
+        if had_runtime {
+            core.contacts_refresh_hook_installed = false;
+            core.chat_refresh_hook_installed = false;
+            #[cfg(feature = "signals")]
+            {
+                core.authoritative_readiness_hook_installed = false;
+            }
+        }
+        had_runtime
     }
 
     // ==================== Threshold Signing Operations ====================

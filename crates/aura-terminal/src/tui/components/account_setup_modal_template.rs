@@ -107,12 +107,12 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     let can_import = !device_import_code.trim().is_empty() && !creating;
 
     // Input field props
-    let input_props = LabeledInputProps::new("Display Name *", "Enter your name...")
+    let input_props = LabeledInputProps::new("Create a new account", "Enter your nickname...")
         .with_value(nickname_suggestion)
         .with_focused(props.name_focused);
     let import_props = LabeledInputProps::new(
-        "Device Enrollment Code",
-        "Paste the device enrollment code...",
+        "Join an existing account",
+        "Enter device enrollment code...",
     )
     .with_value(device_import_code)
     .with_focused(props.import_code_focused);
@@ -123,10 +123,10 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
             border_style: Borders::PRIMARY,
             border_color: Some(Theme::PRIMARY),
         ) {
-            // Welcome header
+            // Header
             View(
                 width: 100pct,
-                height: 4,
+                height: 3,
                 flex_shrink: 0.0,
                 padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Column,
@@ -137,16 +137,10 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 overflow: Overflow::Hidden,
             ) {
                 Text(
-                    content: "Welcome to Aura",
+                    content: "Aura",
                     weight: Weight::Bold,
                     color: Theme::PRIMARY,
                 )
-                View(margin_top: Spacing::XS) {
-                    Text(
-                        content: "Create your identity",
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
             }
 
             // Form content
@@ -156,20 +150,12 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 flex_direction: FlexDirection::Column,
                 overflow: Overflow::Hidden,
             ) {
-                // Description
-                View(width: 100pct, align_items: AlignItems::Center) {
-                    Text(
-                        content: "Create a new account or import an existing device enrollment.",
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
-
-                // Display name input
+                // Nickname input
                 View(margin_top: Spacing::SM) {
                     #(Some(labeled_input(&input_props).into()))
                 }
 
-                // Device import input
+                // Device enrollment code input
                 View(margin_top: Spacing::SM) {
                     #(Some(labeled_input(&import_props).into()))
                 }
@@ -201,31 +187,31 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                     },
                 ) {
                     #(if creating && props.show_spinner {
-                        // Show spinner (debounced - only after 300ms)
                         Some(element! {
                             View(flex_direction: FlexDirection::Row) {
                                 Text(
-                                    content: "Creating...",
+                                    content: if props.import_code_focused { "Joining Account..." } else { "Creating Account..." },
                                     color: Theme::SECONDARY,
                                 )
                             }
                         })
                     } else if creating {
-                        // Creating but spinner not yet visible (under 300ms)
                         Some(element! {
                             View(flex_direction: FlexDirection::Row) {
                                 Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
-                                Text(content: " to Create Account", color: Theme::TEXT_MUTED)
+                                Text(
+                                    content: if props.import_code_focused { " to Join Account" } else { " to Create Account" },
+                                    color: Theme::TEXT_MUTED,
+                                )
                             }
                         })
                     } else {
-                        // Normal state - "Enter to Create Account" with Enter in yellow
                         Some(element! {
                             View(flex_direction: FlexDirection::Row) {
                                 Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
                                 Text(
                                     content: if props.import_code_focused {
-                                        " to Import Device"
+                                        " to Join Account"
                                     } else {
                                         " to Create Account"
                                     },
@@ -241,16 +227,9 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                         })
                     })
                 }
-                // Hint about settings
                 View(margin_top: 1) {
                     Text(
-                        content: "Tab switches between account creation and device import.",
-                        color: Theme::TEXT_MUTED,
-                    )
-                }
-                View(margin_top: 1) {
-                    Text(
-                        content: "Use Display Name for a new account or Device Enrollment Code to join an existing one.",
+                        content: "Tab to switch fields.",
                         color: Theme::TEXT_MUTED,
                     )
                 }

@@ -30,6 +30,7 @@ pub mod form;
 mod handlers;
 pub mod ids;
 pub mod modal_queue;
+mod operations;
 pub mod toast;
 mod transition;
 pub mod views;
@@ -54,161 +55,9 @@ use aura_app::ui::contract::{
     OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
     RuntimeEventKind, RuntimeEventSnapshot,
 };
-use aura_app::ui_contract::{RuntimeFact, SemanticOperationCausality};
+use aura_app::ui_contract::{ProjectionRevision, RuntimeFact, SemanticOperationCausality};
+use operations::OperationTracker;
 use std::collections::HashMap;
-
-#[derive(Clone, Debug)]
-struct TrackedOperation {
-    instance_id: OperationInstanceId,
-    causality: Option<SemanticOperationCausality>,
-    state: OperationState,
-}
-
-#[derive(Clone, Debug, Default)]
-struct OperationTracker {
-    next_instance_nonce: u64,
-    entries: HashMap<OperationId, TrackedOperation>,
-}
-
-impl OperationTracker {
-    fn instance_generation(instance_id: &OperationInstanceId) -> Option<u64> {
-        instance_id.0.rsplit('-').next()?.parse::<u64>().ok()
-    }
-
-    fn incoming_instance_is_older(
-        current: &OperationInstanceId,
-        incoming: &OperationInstanceId,
-    ) -> bool {
-        match (
-            Self::instance_generation(current),
-            Self::instance_generation(incoming),
-        ) {
-            (Some(current_generation), Some(incoming_generation)) => {
-                incoming_generation < current_generation
-            }
-            _ => false,
-        }
-    }
-
-    fn incoming_causality_is_older(
-        current: Option<SemanticOperationCausality>,
-        incoming: Option<SemanticOperationCausality>,
-    ) -> bool {
-        match (current, incoming) {
-            (Some(current), Some(incoming)) => incoming.is_older_than(current),
-            _ => false,
-        }
-    }
-
-    fn terminal_transition_requires_new_instance(
-        existing: OperationState,
-        next: OperationState,
-    ) -> bool {
-        !existing.can_transition_to(next)
-    }
-
-    fn set_state(&mut self, operation_id: OperationId, state: OperationState) {
-        let needs_new_instance = self.entries.get(&operation_id).is_some_and(|entry| {
-            Self::terminal_transition_requires_new_instance(entry.state, state)
-        }) || matches!(state, OperationState::Submitting)
-            || !self.entries.contains_key(&operation_id);
-        if needs_new_instance {
-            let instance_id = self.next_instance_id(&operation_id);
-            self.entries.insert(
-                operation_id,
-                TrackedOperation {
-                    instance_id,
-                    causality: None,
-                    state,
-                },
-            );
-            return;
-        }
-
-        if let Some(entry) = self.entries.get_mut(&operation_id) {
-            entry.state = state;
-        }
-    }
-
-    fn set_authoritative_state(
-        &mut self,
-        operation_id: OperationId,
-        instance_id: Option<OperationInstanceId>,
-        causality: Option<SemanticOperationCausality>,
-        state: OperationState,
-    ) {
-        if let Some(instance_id) = instance_id {
-            match self.entries.get_mut(&operation_id) {
-                Some(entry) if entry.instance_id == instance_id => {
-                    if Self::incoming_causality_is_older(entry.causality, causality) {
-                        return;
-                    }
-                    if Self::terminal_transition_requires_new_instance(entry.state, state) {
-                        return;
-                    }
-                    entry.causality = causality;
-                    entry.state = state;
-                    return;
-                }
-                Some(entry) if Self::incoming_causality_is_older(entry.causality, causality) => {
-                    return;
-                }
-                Some(entry)
-                    if Self::incoming_instance_is_older(&entry.instance_id, &instance_id) =>
-                {
-                    return;
-                }
-                _ => {
-                    self.entries.insert(
-                        operation_id,
-                        TrackedOperation {
-                            instance_id,
-                            causality,
-                            state,
-                        },
-                    );
-                    return;
-                }
-            }
-        }
-        let needs_new_instance = self.entries.get(&operation_id).is_some_and(|entry| {
-            Self::terminal_transition_requires_new_instance(entry.state, state)
-        });
-        if needs_new_instance {
-            self.set_state(operation_id, state);
-            return;
-        }
-        if let Some(entry) = self.entries.get_mut(&operation_id) {
-            entry.causality = causality;
-            entry.state = state;
-            return;
-        }
-        self.set_state(operation_id, state);
-    }
-
-    fn state(&self, operation_id: &OperationId) -> Option<OperationState> {
-        self.entries.get(operation_id).map(|entry| entry.state)
-    }
-
-    fn exported_snapshots(&self) -> Vec<OperationSnapshot> {
-        self.entries
-            .iter()
-            .map(|(id, tracked)| OperationSnapshot {
-                id: id.clone(),
-                instance_id: tracked.instance_id.clone(),
-                state: tracked.state,
-            })
-            .collect()
-    }
-
-    fn next_instance_id(&mut self, operation_id: &OperationId) -> OperationInstanceId {
-        self.next_instance_nonce += 1;
-        OperationInstanceId(format!(
-            "tui-op-{}-{}",
-            operation_id.0, self.next_instance_nonce
-        ))
-    }
-}
 
 /// Complete TUI state
 ///
@@ -294,6 +143,9 @@ pub struct TuiState {
 
     /// Runtime facts exported from owned TUI transitions.
     pub runtime_facts: Vec<RuntimeFact>,
+
+    /// Latest authoritative runtime-fact revision applied to state.
+    pub last_authoritative_runtime_facts_revision: ProjectionRevision,
 }
 
 impl TuiState {
@@ -441,6 +293,25 @@ impl TuiState {
     pub fn clear_runtime_fact_kind(&mut self, kind: RuntimeEventKind) {
         self.runtime_facts
             .retain(|existing| existing.kind() != kind);
+    }
+
+    pub fn apply_runtime_facts_update(
+        &mut self,
+        revision: ProjectionRevision,
+        replace_kinds: Vec<RuntimeEventKind>,
+        facts: Vec<RuntimeFact>,
+    ) -> bool {
+        if revision.is_stale_against(self.last_authoritative_runtime_facts_revision) {
+            return false;
+        }
+        self.last_authoritative_runtime_facts_revision = revision;
+        for kind in replace_kinds {
+            self.clear_runtime_fact_kind(kind);
+        }
+        for fact in facts {
+            self.upsert_runtime_fact(fact);
+        }
+        true
     }
 
     #[must_use]
@@ -723,6 +594,86 @@ mod tests {
         let third = state.exported_operation_snapshots();
         assert_eq!(third[0].state, OperationState::Submitting);
         assert_ne!(third[0].instance_id, first_instance);
+    }
+
+    #[test]
+    fn stale_authoritative_runtime_fact_updates_are_rejected() {
+        let mut state = TuiState::new();
+        let channel = aura_app::ui_contract::ChannelFactKey {
+            id: Some("channel-alpha".to_string()),
+            name: Some("alpha".to_string()),
+        };
+
+        assert!(state.apply_runtime_facts_update(
+            ProjectionRevision {
+                semantic_seq: 2,
+                render_seq: None,
+            },
+            vec![RuntimeEventKind::ChannelMembershipReady],
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel: channel.clone(),
+                member_count: Some(2),
+            }],
+        ));
+        assert!(!state.apply_runtime_facts_update(
+            ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: None,
+            },
+            vec![RuntimeEventKind::ChannelMembershipReady],
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel: channel.clone(),
+                member_count: Some(1),
+            }],
+        ));
+
+        assert_eq!(
+            state.runtime_facts,
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel,
+                member_count: Some(2),
+            }]
+        );
+    }
+
+    #[test]
+    fn newer_authoritative_runtime_fact_updates_replace_fact_kinds() {
+        let mut state = TuiState::new();
+        let channel = aura_app::ui_contract::ChannelFactKey {
+            id: Some("channel-alpha".to_string()),
+            name: Some("alpha".to_string()),
+        };
+
+        assert!(state.apply_runtime_facts_update(
+            ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: None,
+            },
+            vec![RuntimeEventKind::ChannelMembershipReady],
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel: channel.clone(),
+                member_count: Some(1),
+            }],
+        ));
+        assert!(state.apply_runtime_facts_update(
+            ProjectionRevision {
+                semantic_seq: 2,
+                render_seq: None,
+            },
+            vec![RuntimeEventKind::ChannelMembershipReady],
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel: channel.clone(),
+                member_count: Some(3),
+            }],
+        ));
+
+        assert_eq!(
+            state.runtime_facts,
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel,
+                member_count: Some(3),
+            }]
+        );
     }
 
     #[test]

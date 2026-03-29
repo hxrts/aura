@@ -114,10 +114,10 @@ impl<'a> InvitationCacheHandler<'a> {
     pub(super) async fn persist_imported_invitation(
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
-        shareable: &ShareableInvitation,
+        invitation: &StoredImportedInvitation,
     ) -> AgentResult<()> {
-        let key = Self::imported_invitation_key(authority_id, &shareable.invitation_id);
-        let bytes = serde_json::to_vec(shareable)
+        let key = Self::imported_invitation_key(authority_id, &invitation.invitation_id);
+        let bytes = serde_json::to_vec(invitation)
             .map_err(|e| crate::core::AgentError::internal(e.to_string()))?;
         effects
             .store(&key, bytes)
@@ -130,12 +130,20 @@ impl<'a> InvitationCacheHandler<'a> {
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
         invitation_id: &InvitationId,
-    ) -> Option<ShareableInvitation> {
+        preserved: Option<&Invitation>,
+    ) -> Option<StoredImportedInvitation> {
         let key = Self::imported_invitation_key(authority_id, invitation_id);
         let Ok(Some(bytes)) = effects.retrieve(&key).await else {
             return None;
         };
-        serde_json::from_slice::<ShareableInvitation>(&bytes).ok()
+        Self::parse_imported_invitation_bytes(&bytes, preserved)
+    }
+
+    pub(super) fn parse_imported_invitation_bytes(
+        bytes: &[u8],
+        _preserved: Option<&Invitation>,
+    ) -> Option<StoredImportedInvitation> {
+        serde_json::from_slice::<StoredImportedInvitation>(bytes).ok()
     }
 
     pub(super) async fn get_invitation(&self, invitation_id: &InvitationId) -> Option<Invitation> {
@@ -164,9 +172,12 @@ impl<'a> InvitationCacheHandler<'a> {
             }
         }
 
-        if let Some(shareable) =
-            Self::load_imported_invitation(effects, own_id, invitation_id).await
+        if let Some(stored) =
+            Self::load_imported_invitation(effects, own_id, invitation_id, best.as_ref()).await
         {
+            let status = stored.status.clone();
+            let created_at = stored.created_at;
+            let shareable = stored.shareable;
             let context_id = match &shareable.invitation_type {
                 InvitationType::Channel { .. } => {
                     match require_channel_invitation_context(
@@ -194,8 +205,8 @@ impl<'a> InvitationCacheHandler<'a> {
                 sender_id: shareable.sender_id,
                 receiver_id: own_id,
                 invitation_type: shareable.invitation_type,
-                status: InvitationStatus::Pending,
-                created_at: 0,
+                status,
+                created_at,
                 expires_at: shareable.expires_at,
                 message: shareable.message,
             };

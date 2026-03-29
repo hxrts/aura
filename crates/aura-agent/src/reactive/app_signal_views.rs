@@ -73,6 +73,14 @@ async fn read_registered_homes_state(reactive: &ReactiveHandler) -> Result<Homes
     })
 }
 
+async fn read_registered_invitations_state(
+    reactive: &ReactiveHandler,
+) -> Result<InvitationsState, String> {
+    reactive.read(&*INVITATIONS_SIGNAL).await.map_err(|error| {
+        format!("invitation signal materialization requires registered invitations signal: {error}")
+    })
+}
+
 pub(crate) async fn materialize_home_signal_for_channel_invitation(
     reactive: &ReactiveHandler,
     own_authority: AuthorityId,
@@ -225,6 +233,56 @@ pub(crate) async fn materialize_home_signal_for_channel_acceptance(
     Ok(())
 }
 
+pub(crate) async fn materialize_pending_invitation_signal(
+    reactive: &ReactiveHandler,
+    own_authority: AuthorityId,
+    invitation_id: &str,
+    sender_id: AuthorityId,
+    receiver_id: AuthorityId,
+    invitation_type: &DomainInvitationType,
+    created_at: u64,
+    expires_at: Option<u64>,
+    message: Option<String>,
+) -> Result<(), String> {
+    let mut invitations = match read_registered_invitations_state(reactive).await {
+        Ok(invitations) => invitations,
+        Err(error) if error.contains("Signal not found") => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if invitations.invitation(invitation_id).is_some() {
+        return Ok(());
+    }
+
+    let direction = if sender_id == own_authority {
+        InvitationDirection::Sent
+    } else {
+        InvitationDirection::Received
+    };
+    let (home_id, home_name) = InvitationsSignalView::map_channel_metadata(invitation_type);
+    invitations.add_invitation(Invitation {
+        id: invitation_id.to_string(),
+        invitation_type: InvitationsSignalView::map_invitation_type(invitation_type),
+        status: InvitationStatus::Pending,
+        direction,
+        from_id: sender_id,
+        from_name: "Unknown".to_string(),
+        to_id: (direction == InvitationDirection::Sent).then_some(receiver_id),
+        to_name: (direction == InvitationDirection::Sent).then_some("Unknown".to_string()),
+        created_at,
+        expires_at,
+        message,
+        home_id,
+        home_name,
+    });
+
+    reactive
+        .emit(&*INVITATIONS_SIGNAL, invitations)
+        .await
+        .map_err(|error| format!("emit invitations signal: {error}"))?;
+
+    Ok(())
+}
+
 // =============================================================================
 // Invitations
 // =============================================================================
@@ -232,7 +290,7 @@ pub(crate) async fn materialize_home_signal_for_channel_acceptance(
 pub struct InvitationsSignalView {
     own_authority: AuthorityId,
     reactive: ReactiveHandler,
-    state: Mutex<InvitationsState>,
+    update_gate: Mutex<()>,
 }
 
 impl InvitationsSignalView {
@@ -240,7 +298,7 @@ impl InvitationsSignalView {
         Self {
             own_authority,
             reactive,
-            state: Mutex::new(InvitationsState::default()),
+            update_gate: Mutex::new(()),
         }
     }
 
@@ -277,7 +335,14 @@ impl InvitationsSignalView {
 impl ReactiveView for InvitationsSignalView {
     fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
         Box::pin(async move {
-            let mut state = self.state.lock().await;
+            let _update_gate = self.update_gate.lock().await;
+            let mut state = match read_registered_invitations_state(&self.reactive).await {
+                Ok(state) => state,
+                Err(error) => {
+                    emit_internal_error(&self.reactive, error).await;
+                    return;
+                }
+            };
             let mut changed = false;
 
             for fact in facts {
@@ -429,7 +494,6 @@ impl ReactiveView for InvitationsSignalView {
             }
 
             let snapshot = state.clone();
-            drop(state);
 
             if let Err(e) = self.reactive.emit(&*INVITATIONS_SIGNAL, snapshot).await {
                 emit_internal_error(

@@ -58,6 +58,7 @@ use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RE
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_terminal::tui::effects::EffectCommand;
 
+#[allow(clippy::duplicate_mod)]
 mod support;
 
 use support::{generate_demo_invite_code, MockRuntimeTestEnv};

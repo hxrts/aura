@@ -3,11 +3,11 @@ error: semantic_owner requires `authoritative_inputs = "a,b,..."` (use empty str
    |
 13 | / #[aura_macros::semantic_owner(
 14 | |     owner = "demo-owner",
-15 | |     terminal = "publish_done",
-16 | |     postcondition = "demo_done",
+15 | |     wrapper = "missing_authoritative_inputs_wrapper",
+16 | |     terminal = "publish_done",
 ...  |
-20 | |     category = "move_owned"
-21 | | )]
+21 | |     category = "move_owned"
+22 | | )]
    | |__^
    |
    = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)

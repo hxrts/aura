@@ -29,6 +29,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use aura_terminal::tui::effects::EffectCommand;
 
+#[allow(clippy::duplicate_mod)]
 #[path = "../support/mod.rs"]
 mod support;
 
@@ -659,6 +660,7 @@ async fn test_update_contact_nickname() {
             invitation_type: "contact".to_string(),
             message: Some("Test invitation".to_string()),
             ttl_secs: None,
+            operation_instance_id: None,
         })
         .await;
 
@@ -877,6 +879,7 @@ async fn test_invitation_accept_decline() {
             invitation_type: "contact".to_string(),
             message: Some("Join me!".to_string()),
             ttl_secs: Some(3600),
+            operation_instance_id: None,
         })
         .await;
 
@@ -1261,6 +1264,7 @@ async fn test_complete_contact_to_guardian_flow() {
             invitation_type: "contact".to_string(),
             message: Some("Let's connect!".to_string()),
             ttl_secs: None,
+            operation_instance_id: None,
         })
         .await;
 

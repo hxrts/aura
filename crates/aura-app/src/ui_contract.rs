@@ -8,6 +8,7 @@
 use aura_core::{OwnerEpoch, PublicationSequence};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::scenario_contract::SemanticCommandValue;
@@ -206,9 +207,15 @@ impl ChannelBindingWitness {
 pub struct AcceptedPendingChannelBinding {
     pub invitation_id: String,
     pub binding: ChannelBindingWitness,
+    pub channel_name: Option<String>,
 }
 
 impl ModalId {
+    #[must_use]
+    pub const fn blocks_quiescence(self) -> bool {
+        !matches!(self, Self::InvitationCode)
+    }
+
     #[must_use]
     pub const fn web_dom_id(self) -> &'static str {
         match self {
@@ -617,10 +624,12 @@ pub enum ControlId {
     NeighborhoodAcceptInvitationButton,
     ContactsCreateInvitationButton,
     ContactsInviteToChannelButton,
+    ContactsAddGuardianButton,
     ContactsEditNicknameButton,
     ContactsRemoveContactButton,
-    NeighborhoodEnterAsButton,
     ChatNewGroupButton,
+    ChatCloseChannelButton,
+    ChatRetryMessageButton,
     ContactsStartChatButton,
     SettingsEditNicknameButton,
     SettingsConfigureThresholdButton,
@@ -667,10 +676,12 @@ impl ControlId {
             Self::NeighborhoodAcceptInvitationButton => Some("aura-neighborhood-accept-invitation"),
             Self::ContactsCreateInvitationButton => Some("aura-contacts-create-invitation"),
             Self::ContactsInviteToChannelButton => Some("aura-contacts-invite-channel"),
+            Self::ContactsAddGuardianButton => Some("aura-contacts-add-guardian"),
             Self::ContactsEditNicknameButton => Some("aura-contacts-edit-nickname"),
             Self::ContactsRemoveContactButton => Some("aura-contacts-remove-contact"),
-            Self::NeighborhoodEnterAsButton => Some("aura-neighborhood-enter-as"),
             Self::ChatNewGroupButton => Some("aura-chat-new-group"),
+            Self::ChatCloseChannelButton => Some("aura-chat-close-channel"),
+            Self::ChatRetryMessageButton => Some("aura-chat-retry-message"),
             Self::ContactsStartChatButton => Some("aura-contacts-start-chat"),
             Self::SettingsEditNicknameButton => Some("aura-settings-edit-nickname"),
             Self::SettingsConfigureThresholdButton => Some("aura-settings-configure-threshold"),
@@ -722,8 +733,10 @@ impl ControlId {
             Self::NeighborhoodAcceptInvitationButton => Some("a"),
             Self::ContactsCreateInvitationButton => Some("n"),
             Self::ContactsInviteToChannelButton => Some("i"),
-            Self::NeighborhoodEnterAsButton => Some("d"),
+            Self::ContactsAddGuardianButton => Some("g"),
             Self::ChatNewGroupButton => Some("n"),
+            Self::ChatCloseChannelButton => Some("x"),
+            Self::ChatRetryMessageButton => Some("r"),
             Self::ContactsStartChatButton => Some("c"),
             Self::SettingsEditNicknameButton => Some("e"),
             Self::SettingsConfigureThresholdButton => Some("t"),
@@ -844,15 +857,51 @@ pub enum InvitationFactKind {
 pub enum SemanticOperationKind {
     CreateAccount,
     CreateHome,
+    CreateNeighborhood,
     CreateChannel,
+    StartGuardianCeremony,
+    StartMultifactorCeremony,
+    CancelGuardianCeremony,
+    CancelKeyRotationCeremony,
     StartDeviceEnrollment,
+    RemoveDevice,
     ImportDeviceEnrollmentCode,
     CreateContactInvitation,
+    CreateHomeInvitation,
+    CreateGuardianInvitation,
+    ExportInvitation,
     AcceptContactInvitation,
+    AcceptPendingHomeInvitation,
+    DeclineInvitation,
+    RevokeInvitation,
     InviteActorToChannel,
     AcceptPendingChannelInvitation,
     JoinChannel,
     SendChatMessage,
+    RetryChatMessage,
+    SetChannelTopic,
+    SetChannelMode,
+    CloseChannel,
+    KickActor,
+    BanActor,
+    UnbanActor,
+    MuteActor,
+    UnmuteActor,
+    PinMessage,
+    UnpinMessage,
+    UpdateContactNickname,
+    StartDirectChat,
+    UpdateNicknameSuggestion,
+    UpdateMfaPolicy,
+    UpdateThreshold,
+    GrantModerator,
+    RevokeModerator,
+    AddHomeToNeighborhood,
+    LinkHomeOneHopLink,
+    MovePosition,
+    RemoveContact,
+    StartRecovery,
+    SubmitGuardianApproval,
 }
 
 #[aura_macros::ownership_lifecycle(
@@ -1003,6 +1052,7 @@ impl SemanticOperationCausality {
 #[serde(rename_all = "snake_case")]
 pub enum AuthoritativeSemanticFactKind {
     OperationStatus,
+    InvitationAccepted,
     ContactLinkReady,
     PendingHomeInvitationReady,
     ChannelMembershipReady,
@@ -1020,6 +1070,11 @@ pub enum AuthoritativeSemanticFact {
         instance_id: Option<OperationInstanceId>,
         causality: Option<SemanticOperationCausality>,
         status: SemanticOperationStatus,
+    },
+    InvitationAccepted {
+        invitation_kind: InvitationFactKind,
+        authority_id: Option<String>,
+        operation_state: Option<OperationState>,
     },
     ContactLinkReady {
         authority_id: String,
@@ -1054,6 +1109,7 @@ impl AuthoritativeSemanticFact {
     pub fn kind(&self) -> AuthoritativeSemanticFactKind {
         match self {
             Self::OperationStatus { .. } => AuthoritativeSemanticFactKind::OperationStatus,
+            Self::InvitationAccepted { .. } => AuthoritativeSemanticFactKind::InvitationAccepted,
             Self::ContactLinkReady { .. } => AuthoritativeSemanticFactKind::ContactLinkReady,
             Self::PendingHomeInvitationReady => {
                 AuthoritativeSemanticFactKind::PendingHomeInvitationReady
@@ -1086,6 +1142,14 @@ impl AuthoritativeSemanticFact {
                     .as_ref()
                     .map(|value| value.0.as_str())
                     .unwrap_or("*")
+            ),
+            Self::InvitationAccepted {
+                invitation_kind,
+                authority_id,
+                ..
+            } => format!(
+                "invitation_accepted:{invitation_kind:?}:{}",
+                authority_id.as_deref().unwrap_or("*")
             ),
             Self::ContactLinkReady { authority_id, .. } => {
                 format!("contact_link_ready:{authority_id}")
@@ -1142,6 +1206,18 @@ impl AuthoritativeSemanticFact {
     #[must_use]
     pub fn runtime_fact_bridge(&self) -> Option<(RuntimeEventKind, RuntimeFact)> {
         match self {
+            Self::InvitationAccepted {
+                invitation_kind,
+                authority_id,
+                operation_state,
+            } => Some((
+                RuntimeEventKind::InvitationAccepted,
+                RuntimeFact::InvitationAccepted {
+                    invitation_kind: *invitation_kind,
+                    authority_id: authority_id.clone(),
+                    operation_state: *operation_state,
+                },
+            )),
             Self::ContactLinkReady {
                 authority_id,
                 contact_count,
@@ -1275,8 +1351,33 @@ impl OperationId {
     }
 
     #[must_use]
+    pub fn start_guardian_ceremony() -> Self {
+        Self("start_guardian_ceremony".to_string())
+    }
+
+    #[must_use]
+    pub fn start_multifactor_ceremony() -> Self {
+        Self("start_multifactor_ceremony".to_string())
+    }
+
+    #[must_use]
+    pub fn cancel_guardian_ceremony() -> Self {
+        Self("cancel_guardian_ceremony".to_string())
+    }
+
+    #[must_use]
+    pub fn cancel_key_rotation_ceremony() -> Self {
+        Self("cancel_key_rotation_ceremony".to_string())
+    }
+
+    #[must_use]
     pub fn invitation_create() -> Self {
         Self("invitation_create".to_string())
+    }
+
+    #[must_use]
+    pub fn home_invitation_create() -> Self {
+        Self("home_invitation_create".to_string())
     }
 
     #[must_use]
@@ -1285,8 +1386,23 @@ impl OperationId {
     }
 
     #[must_use]
+    pub fn home_invitation_accept() -> Self {
+        Self("home_invitation_accept".to_string())
+    }
+
+    #[must_use]
+    pub fn invitation_export() -> Self {
+        Self("invitation_export".to_string())
+    }
+
+    #[must_use]
     pub fn device_enrollment() -> Self {
         Self("device_enrollment".to_string())
+    }
+
+    #[must_use]
+    pub fn remove_device() -> Self {
+        Self("remove_device".to_string())
     }
 
     #[must_use]
@@ -1297,6 +1413,141 @@ impl OperationId {
     #[must_use]
     pub fn join_channel() -> Self {
         Self("join_channel".to_string())
+    }
+
+    #[must_use]
+    pub fn invitation_decline() -> Self {
+        Self("invitation_decline".to_string())
+    }
+
+    #[must_use]
+    pub fn invitation_revoke() -> Self {
+        Self("invitation_revoke".to_string())
+    }
+
+    #[must_use]
+    pub fn remove_contact() -> Self {
+        Self("remove_contact".to_string())
+    }
+
+    #[must_use]
+    pub fn retry_message() -> Self {
+        Self("retry_message".to_string())
+    }
+
+    #[must_use]
+    pub fn set_channel_topic() -> Self {
+        Self("set_channel_topic".to_string())
+    }
+
+    #[must_use]
+    pub fn set_channel_mode() -> Self {
+        Self("set_channel_mode".to_string())
+    }
+
+    #[must_use]
+    pub fn close_channel() -> Self {
+        Self("close_channel".to_string())
+    }
+
+    #[must_use]
+    pub fn kick_actor() -> Self {
+        Self("kick_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn ban_actor() -> Self {
+        Self("ban_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn unban_actor() -> Self {
+        Self("unban_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn mute_actor() -> Self {
+        Self("mute_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn unmute_actor() -> Self {
+        Self("unmute_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn pin_message() -> Self {
+        Self("pin_message".to_string())
+    }
+
+    #[must_use]
+    pub fn unpin_message() -> Self {
+        Self("unpin_message".to_string())
+    }
+
+    #[must_use]
+    pub fn update_contact_nickname() -> Self {
+        Self("update_contact_nickname".to_string())
+    }
+
+    #[must_use]
+    pub fn start_direct_chat() -> Self {
+        Self("start_direct_chat".to_string())
+    }
+
+    #[must_use]
+    pub fn update_nickname_suggestion() -> Self {
+        Self("update_nickname_suggestion".to_string())
+    }
+
+    #[must_use]
+    pub fn update_mfa_policy() -> Self {
+        Self("update_mfa_policy".to_string())
+    }
+
+    #[must_use]
+    pub fn update_threshold() -> Self {
+        Self("update_threshold".to_string())
+    }
+
+    #[must_use]
+    pub fn grant_moderator() -> Self {
+        Self("grant_moderator".to_string())
+    }
+
+    #[must_use]
+    pub fn revoke_moderator() -> Self {
+        Self("revoke_moderator".to_string())
+    }
+
+    #[must_use]
+    pub fn create_neighborhood() -> Self {
+        Self("create_neighborhood".to_string())
+    }
+
+    #[must_use]
+    pub fn add_home_to_neighborhood() -> Self {
+        Self("add_home_to_neighborhood".to_string())
+    }
+
+    #[must_use]
+    pub fn link_home_one_hop_link() -> Self {
+        Self("link_home_one_hop_link".to_string())
+    }
+
+    #[must_use]
+    pub fn move_position() -> Self {
+        Self("move_position".to_string())
+    }
+
+    #[must_use]
+    pub fn start_recovery() -> Self {
+        Self("start_recovery".to_string())
+    }
+
+    #[must_use]
+    pub fn submit_guardian_approval() -> Self {
+        Self("submit_guardian_approval".to_string())
     }
 }
 
@@ -1668,7 +1919,7 @@ pub struct HarnessShellStructureSnapshot {
     pub active_screen_root_count: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProjectionRevision {
     pub semantic_seq: u64,
     pub render_seq: Option<u64>,
@@ -1708,6 +1959,20 @@ pub fn next_projection_revision(render_seq: Option<u64>) -> ProjectionRevision {
     ProjectionRevision {
         semantic_seq: counter,
         render_seq,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AuthoritativeSemanticFactsSnapshot {
+    pub revision: ProjectionRevision,
+    pub facts: Vec<AuthoritativeSemanticFact>,
+}
+
+impl Deref for AuthoritativeSemanticFactsSnapshot {
+    type Target = [AuthoritativeSemanticFact];
+
+    fn deref(&self) -> &Self::Target {
+        &self.facts
     }
 }
 
@@ -1807,7 +2072,9 @@ impl QuiescenceSnapshot {
             reason_codes.push("readiness_loading".to_string());
         }
         if let Some(modal_id) = open_modal {
-            reason_codes.push(format!("modal_open:{modal_id:?}").to_ascii_lowercase());
+            if modal_id.blocks_quiescence() {
+                reason_codes.push(format!("modal_open:{modal_id:?}").to_ascii_lowercase());
+            }
         }
         for operation in operations {
             if operation.state == OperationState::Submitting {
@@ -2179,6 +2446,12 @@ pub const HARNESS_MODE_ALLOWLIST: &[HarnessModeAllowance] = &[
         owner: "aura-web-main",
         design_ref: "docs/804_testing_guide.md",
     },
+    HarnessModeAllowance {
+        path: "crates/aura-web/src/shell/maintenance.rs",
+        kind: HarnessModeChangeKind::TimingDiscipline,
+        owner: "aura-web-browser-maintenance",
+        design_ref: "crates/aura-web/ARCHITECTURE.md",
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2502,42 +2775,42 @@ pub const SHARED_SCREEN_MODULE_MAP: &[SharedScreenModuleMap] = &[
     SharedScreenModuleMap {
         screen: ScreenId::Onboarding,
         web_symbol: "OnboardingScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/mod.rs",
         tui_symbol: "AccountSetupModal",
         tui_path: "crates/aura-terminal/src/tui/components/account_setup_modal_template.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Neighborhood,
         web_symbol: "NeighborhoodScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/neighborhood.rs",
         tui_symbol: "NeighborhoodScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/neighborhood/screen.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Chat,
         web_symbol: "ChatScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/chat.rs",
         tui_symbol: "ChatScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/chat/screen.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Contacts,
         web_symbol: "ContactsScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/contacts.rs",
         tui_symbol: "ContactsScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/contacts/screen.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Notifications,
         web_symbol: "NotificationsScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/notifications.rs",
         tui_symbol: "NotificationsScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/notifications/screen.rs",
     },
     SharedScreenModuleMap {
         screen: ScreenId::Settings,
         web_symbol: "SettingsScreen",
-        web_path: "crates/aura-ui/src/app.rs",
+        web_path: "crates/aura-ui/src/app/screens/settings.rs",
         tui_symbol: "SettingsScreen",
         tui_path: "crates/aura-terminal/src/tui/screens/settings/screen.rs",
     },
@@ -2614,6 +2887,10 @@ pub const SHARED_FLOW_SUPPORT: &[SharedFlowSupport] = &[
 /// Keep `docs/997_flow_coverage.md` aligned with this canonical shared-flow mapping.
 // Coverage metadata stays co-located with the shared flow contract so CI can
 // ratchet flow-relevant source changes against reviewed scenario coverage.
+// Current anchors:
+// - startup smoke owns shared neighborhood navigation and onboarding coverage
+// - scenario13 owns chat/contacts plus invitation, home-create, join, and send coverage
+// - scenario12 owns add/remove-device coverage
 pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::NavigateNeighborhood,
@@ -2680,7 +2957,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateNeighborhood,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/neighborhood.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateNeighborhood,
@@ -2696,7 +2973,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateChat,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/chat.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateChat,
@@ -2712,7 +2989,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateContacts,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/contacts.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateContacts,
@@ -2728,7 +3005,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateNotifications,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/notifications.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateNotifications,
@@ -2744,7 +3021,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateSettings,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/settings.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::NavigateSettings,
@@ -2760,7 +3037,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::CreateInvitation,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/contacts.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::CreateInvitation,
@@ -2780,7 +3057,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::AcceptInvitation,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/contacts.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::AcceptInvitation,
@@ -2796,7 +3073,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::CreateHome,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/neighborhood.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::CreateHome,
@@ -2812,7 +3089,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::JoinChannel,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/chat.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::JoinChannel,
@@ -2828,7 +3105,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::SendChatMessage,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/chat.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::SendChatMessage,
@@ -2844,7 +3121,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::AddDevice,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/settings.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::AddDevice,
@@ -2860,7 +3137,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::RemoveDevice,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/settings.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::RemoveDevice,
@@ -2876,7 +3153,7 @@ pub const SHARED_FLOW_SOURCE_AREAS: &[SharedFlowSourceArea] = &[
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::SwitchAuthority,
-        path: "crates/aura-ui/src/app.rs",
+        path: "crates/aura-ui/src/app/screens/settings.rs",
     },
     SharedFlowSourceArea {
         flow: SharedFlowId::SwitchAuthority,
@@ -3026,6 +3303,34 @@ impl UiSnapshot {
                     list.id
                 ));
             }
+
+            let selected_row = list.items.iter().find(|item| item.selected);
+            let exported_selection = self
+                .selections
+                .iter()
+                .find(|selection| selection.list == list.id);
+            match (selected_row, exported_selection) {
+                (Some(row), Some(selection)) if row.id == selection.item_id => {}
+                (Some(row), Some(selection)) => {
+                    return Err(format!(
+                        "list {:?} selected row {} diverges from exported selection {}",
+                        list.id, row.id, selection.item_id
+                    ));
+                }
+                (Some(row), None) => {
+                    return Err(format!(
+                        "list {:?} selected row {} without exported selection",
+                        list.id, row.id
+                    ));
+                }
+                (None, Some(selection)) => {
+                    return Err(format!(
+                        "list {:?} exported selection {} without matching selected row",
+                        list.id, selection.item_id
+                    ));
+                }
+                (None, None) => {}
+            }
         }
 
         for selection in &self.selections {
@@ -3088,6 +3393,14 @@ impl UiSnapshot {
         self.messages
             .iter()
             .any(|message| message.content.contains(needle))
+    }
+
+    #[must_use]
+    pub fn selected_item_id(&self, list: ListId) -> Option<&str> {
+        self.selections
+            .iter()
+            .find(|selection| selection.list == list)
+            .map(|selection| selection.item_id.as_str())
     }
 
     #[must_use]
@@ -3405,10 +3718,10 @@ mod tests {
         validate_render_convergence, AuthoritativeSemanticFact, AuthoritativeSemanticFactKind,
         BrowserHarnessBridgeMethodKind, ChannelFactKey, ConfirmationState, ControlId, FieldId,
         FlowAvailability, FrontendExecutionBoundaryKind, FrontendSpecificSettingsSectionId,
-        HarnessModeChangeKind, HarnessShellMode, HarnessShellStructureSnapshot, ListId,
-        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
-        OperationSnapshot, OperationState, ParityUiIdentity, ProjectionRevision,
-        QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventKind,
+        HarnessModeChangeKind, HarnessShellMode, HarnessShellStructureSnapshot, InvitationFactKind,
+        ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId,
+        OperationInstanceId, OperationSnapshot, OperationState, ParityUiIdentity,
+        ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventKind,
         RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot, SemanticFailureCode,
         SemanticFailureDomain, SemanticOperationCausality, SemanticOperationError,
         SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
@@ -3550,6 +3863,114 @@ mod tests {
             .validate_invariants()
             .expect_err("row-index ids must be rejected")
             .contains("row-index item"));
+    }
+
+    #[test]
+    fn snapshot_selected_item_id_reads_canonical_selection_only() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(8)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: vec![SelectionSnapshot {
+                list: ListId::Channels,
+                item_id: "channel:canonical".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Channels,
+                items: vec![ListItemSnapshot {
+                    id: "channel:canonical".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                    is_current: false,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert_eq!(
+            snapshot.selected_item_id(ListId::Channels),
+            Some("channel:canonical")
+        );
+        assert_eq!(snapshot.selected_item_id(ListId::Authorities), None);
+    }
+
+    #[test]
+    fn snapshot_invariants_reject_selected_row_without_exported_selection() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(9)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: vec![ListSnapshot {
+                id: ListId::Channels,
+                items: vec![ListItemSnapshot {
+                    id: "channel:canonical".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                    is_current: false,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert!(snapshot
+            .validate_invariants()
+            .expect_err("selected row without exported selection must be rejected")
+            .contains("without exported selection"));
+    }
+
+    #[test]
+    fn snapshot_invariants_reject_mismatched_selected_row_and_exported_selection() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(10)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: vec![SelectionSnapshot {
+                list: ListId::Channels,
+                item_id: "channel:canonical".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Channels,
+                items: vec![
+                    ListItemSnapshot {
+                        id: "channel:canonical".to_string(),
+                        selected: false,
+                        confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
+                    },
+                    ListItemSnapshot {
+                        id: "channel:other".to_string(),
+                        selected: true,
+                        confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
+                    },
+                ],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert!(snapshot
+            .validate_invariants()
+            .expect_err("mismatched selected row must be rejected")
+            .contains("diverges from exported selection"));
     }
 
     #[test]
@@ -3717,6 +4138,27 @@ mod tests {
                 RuntimeFact::MessageDeliveryReady {
                     channel: ChannelFactKey::named("shared"),
                     member_count: 2,
+                },
+            ))
+        );
+    }
+
+    #[test]
+    fn authoritative_semantic_fact_runtime_fact_bridge_maps_invitation_acceptance() {
+        let fact = AuthoritativeSemanticFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: Some("authority:peer".to_string()),
+            operation_state: Some(OperationState::Succeeded),
+        };
+
+        assert_eq!(
+            fact.runtime_fact_bridge(),
+            Some((
+                RuntimeEventKind::InvitationAccepted,
+                RuntimeFact::InvitationAccepted {
+                    invitation_kind: InvitationFactKind::Contact,
+                    authority_id: Some("authority:peer".to_string()),
+                    operation_state: Some(OperationState::Succeeded),
                 },
             ))
         );
@@ -4148,14 +4590,15 @@ mod tests {
             .and_then(Path::parent)
             .expect("workspace root");
         let web_source =
-            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness_bridge.rs"))
-                .unwrap_or_else(|error| panic!("failed to read harness bridge source: {error}"));
-        let ui_source = std::fs::read_to_string(workspace_root.join("crates/aura-ui/src/app.rs"))
-            .unwrap_or_else(|error| panic!("failed to read aura-ui source: {error}"));
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/shell/app.rs"))
+                .unwrap_or_else(|error| panic!("failed to read aura-web source: {error}"));
+        let ui_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-ui/src/components.rs"))
+                .unwrap_or_else(|error| panic!("failed to read aura-ui source: {error}"));
 
         assert!(
-            web_source.contains(".web_dom_id()"),
-            "web harness bridge must reference shared contract DOM id helpers"
+            web_source.contains(".required_dom_id(") || web_source.contains(".web_dom_id()"),
+            "aura-web must reference shared contract DOM id helpers"
         );
         assert!(
             ui_source.contains("list_item_dom_id(") && ui_source.contains(".web_dom_id()"),
@@ -4201,10 +4644,6 @@ mod tests {
         assert_eq!(
             ControlId::ModalConfirmButton.web_selector().as_deref(),
             Some("#aura-modal-confirm-button")
-        );
-        assert_eq!(
-            ControlId::NeighborhoodEnterAsButton.web_dom_id(),
-            Some("aura-neighborhood-enter-as")
         );
         assert_eq!(
             ControlId::ChatNewGroupButton.web_dom_id(),
@@ -4301,8 +4740,10 @@ mod tests {
             ControlId::NeighborhoodAcceptInvitationButton,
             ControlId::ContactsCreateInvitationButton,
             ControlId::ContactsInviteToChannelButton,
-            ControlId::NeighborhoodEnterAsButton,
+            ControlId::ContactsAddGuardianButton,
             ControlId::ChatNewGroupButton,
+            ControlId::ChatCloseChannelButton,
+            ControlId::ChatRetryMessageButton,
             ControlId::ContactsStartChatButton,
             ControlId::SettingsEditNicknameButton,
             ControlId::SettingsConfigureThresholdButton,
@@ -4671,8 +5112,8 @@ mod tests {
     #[test]
     fn frontend_settings_sources_use_shared_section_ids() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let web_model_path = repo_root.join("crates/aura-ui/src/model.rs");
-        let tui_types_path = repo_root.join("crates/aura-terminal/src/tui/types.rs");
+        let web_model_path = repo_root.join("crates/aura-ui/src/model/settings.rs");
+        let tui_types_path = repo_root.join("crates/aura-terminal/src/tui/types/settings.rs");
         let tui_export_path =
             repo_root.join("crates/aura-terminal/src/tui/harness_state/snapshot.rs");
 
@@ -4710,7 +5151,9 @@ mod tests {
         );
 
         assert!(
-            tui_export.contains("settings_section_item_id(section.surface_id()).to_string()"),
+            tui_export.contains("section.parity_item_id().to_string()")
+                || tui_export
+                    .contains("settings_section_item_id(section.surface_id()).to_string()"),
             "tui settings export must use the canonical parity item id"
         );
         assert!(
@@ -4855,7 +5298,9 @@ mod tests {
         let chat = shared_screen_module_map(ScreenId::Chat);
         assert_eq!(chat.web_symbol, "ChatScreen");
         assert_eq!(chat.tui_symbol, "ChatScreen");
-        assert!(chat.web_path.ends_with("crates/aura-ui/src/app.rs"));
+        assert!(chat
+            .web_path
+            .ends_with("crates/aura-ui/src/app/screens/chat.rs"));
         assert!(chat
             .tui_path
             .ends_with("crates/aura-terminal/src/tui/screens/chat/screen.rs"));

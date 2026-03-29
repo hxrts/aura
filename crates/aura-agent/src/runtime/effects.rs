@@ -47,7 +47,7 @@ use aura_journal::fact::{
 };
 use aura_mpst::CompositionManifest;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
-use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
+use biscuit_auth::{Biscuit, PublicKey};
 use parking_lot::RwLock;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -127,6 +127,7 @@ pub struct AuraEffectSystem {
     config: AgentConfig,
     authority_id: AuthorityId,
     execution_mode: ExecutionMode,
+    harness_mode_enabled: bool,
 
     // === Subsystems (grouped related fields) ===
     /// Cryptographic operations subsystem
@@ -304,6 +305,7 @@ impl AuraEffectSystem {
         let device_id = config.device_id();
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
         let test_mode = execution_mode.is_deterministic();
+        let harness_mode_enabled = std::env::var_os("AURA_HARNESS_MODE").is_some();
 
         // === Build CryptoSubsystem ===
         let crypto_handler = match crypto_seed {
@@ -391,7 +393,10 @@ impl AuraEffectSystem {
             use base64::Engine;
             let engine = base64::engine::general_purpose::STANDARD;
             let token_authority = aura_authorization::TokenAuthority::new(authority);
-            match token_authority.create_token(authority) {
+            match token_authority.create_token(
+                authority,
+                crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+            ) {
                 Ok(biscuit) => match biscuit.to_vec() {
                     Ok(token_bytes) => {
                         let root_pk_bytes = token_authority.root_public_key().to_bytes();
@@ -410,6 +415,7 @@ impl AuraEffectSystem {
             config,
             authority_id: authority,
             execution_mode,
+            harness_mode_enabled,
             crypto,
             transport,
             journal,
@@ -454,6 +460,11 @@ impl AuraEffectSystem {
     /// Check if the effect system is in explicit test mode (not simulation).
     pub fn is_test_mode(&self) -> bool {
         matches!(self.execution_mode, ExecutionMode::Testing)
+    }
+
+    /// Check whether harness diagnostics are enabled for this runtime instance.
+    pub fn harness_mode_enabled(&self) -> bool {
+        self.harness_mode_enabled
     }
 
     fn ensure_mock_network(&self) -> Result<(), NetworkError> {
@@ -725,7 +736,7 @@ impl AuraEffectSystem {
             }
         };
 
-        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+        if self.harness_mode_enabled() {
             let time = PhysicalTimeHandler::new();
             if let Ok(started_at) = time.physical_time().await {
                 if let Ok(budget) = TimeoutBudget::from_start_and_timeout(
@@ -836,6 +847,11 @@ impl AuraEffectSystem {
         *self.biscuit_cache.write() = Some(cache);
     }
 
+    #[cfg(test)]
+    pub(crate) fn clear_biscuit_cache(&self) {
+        *self.biscuit_cache.write() = None;
+    }
+
     /// Get the current biscuit cache (for guard chain metadata).
     pub fn biscuit_cache(&self) -> Option<BiscuitCache> {
         self.biscuit_cache.read().clone()
@@ -853,7 +869,10 @@ impl AuraEffectSystem {
 
         let token_authority = aura_authorization::TokenAuthority::new(*authority);
         let biscuit = token_authority
-            .create_token(*authority)
+            .create_token(
+                *authority,
+                crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+            )
             .map_err(|e| AuraError::internal(format!("Failed to create Biscuit token: {e}")))?;
 
         let token_bytes = biscuit
@@ -1516,26 +1535,17 @@ impl AuraEffectSystem {
         Option<(Biscuit, BiscuitAuthorizationBridge)>,
         Option<Vec<u8>>,
     ) {
-        let keypair = KeyPair::new();
-        let authority = authority_id.to_string();
-        let token = biscuit!(
-            r#"
-            authority({authority});
-            role("member");
-            capability("read");
-            capability("write");
-            capability("execute");
-            capability("delegate");
-            capability("moderator");
-            capability("flow_charge");
-        "#
-        )
-        .build(&keypair);
+        let issuer = aura_authorization::TokenAuthority::new(authority_id);
+        let token = issuer.create_token(
+            authority_id,
+            crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+        );
 
         match token {
             Ok(token) => {
-                let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
-                let verifying_key = keypair.public().to_bytes().to_vec();
+                let bridge =
+                    BiscuitAuthorizationBridge::new(issuer.root_public_key(), authority_id);
+                let verifying_key = issuer.root_public_key().to_bytes().to_vec();
                 (Some((token, bridge)), Some(verifying_key))
             }
             Err(_) => (None, None),

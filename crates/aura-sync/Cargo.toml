@@ -6,6 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+description = "Journal synchronization and peer-to-peer fact exchange"
 include = ["src/**", "Cargo.toml"]
 
 [features]
@@ -16,17 +18,17 @@ default = []
 crdt-sync = ["aura-protocol/crdt-sync"]
 
 [dependencies]
-aura-core = { path = "../aura-core" }
-aura-protocol = { path = "../aura-protocol" }
-aura-guards = { path = "../aura-guards" }
-aura-journal = { path = "../aura-journal" }
-aura-authorization = { path = "../aura-authorization" }
-aura-maintenance = { path = "../aura-maintenance" }
-aura-rendezvous = { path = "../aura-rendezvous" }
-aura-effects = { path = "../aura-effects" }
-aura-anti-entropy = { path = "../aura-anti-entropy" }
-aura-macros = { path = "../aura-macros" }
-aura-mpst = { path = "../aura-mpst" }
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
+aura-guards = { path = "../aura-guards", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
+aura-maintenance = { path = "../aura-maintenance", version = "0.1.0" }
+aura-rendezvous = { path = "../aura-rendezvous", version = "0.1.0" }
+aura-effects = { path = "../aura-effects", version = "0.1.0" }
+aura-anti-entropy = { path = "../aura-anti-entropy", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
+aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
 telltale = { workspace = true }
 
 serde = { workspace = true }

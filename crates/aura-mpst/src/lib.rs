@@ -37,7 +37,7 @@
 //!     choreography Example {
 //!         roles: Alice, Bob;
 //!
-//!         Alice[guard_capability = "send_message", flow_cost = 100]
+//!         Alice[guard_capability = "chat:message:send", flow_cost = 100]
 //!         -> Bob: Message;
 //!
 //!         Bob[journal_facts = "message_received"]
@@ -75,8 +75,9 @@ pub mod composition;
 
 use async_trait::async_trait;
 pub use composition::{
-    startup_defaults_for_qualified_name, CompositionDelegationConstraint, CompositionLinkSpec,
-    CompositionManifest,
+    startup_defaults_for_qualified_name, AdmittedModuleGuardCapabilities,
+    CompositionDelegationConstraint, CompositionLinkSpec, CompositionManifest,
+    GuardCapabilityAdmission, GuardCapabilityAdmissionError, ModuleGuardCapabilityError,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -285,7 +286,8 @@ pub fn init_aura_extensions() -> telltale_choreography::extensions::ExtensionReg
 }
 
 pub use ast_extraction::{
-    extract_aura_annotations, generate_aura_choreography_code, AuraEffect, AuraExtractionError,
+    extract_aura_annotations, generate_aura_choreography_code, parse_choreography_capability,
+    AuraEffect, AuraExtractionError, ChoreographyCapabilityError,
 };
 /// Full-featured choreography! macro with Telltale features + Aura extensions
 ///
@@ -294,7 +296,7 @@ pub use ast_extraction::{
 /// - Parameterized roles: `Worker[N]`, `Signer[*]`
 /// - Choice constructs: `choice at Role { ... }`
 /// - Loop constructs: `loop { ... }`
-/// - Aura capability guards: `[guard_capability = "capability_name"]`
+/// - Aura capability guards: `[guard_capability = "namespace:capability"]`
 /// - Aura flow costs: `[flow_cost = 100]`
 /// - Aura journal facts: `[journal_facts = "description"]`
 /// - Aura audit logging: `[audit_log = "action:metadata"]`
@@ -311,11 +313,11 @@ pub use ast_extraction::{
 ///   roles Coordinator, Signer[3]
 ///   case choose Coordinator of
 ///     start_ceremony ->
-///       Coordinator[guard_capability = "coordinate_signing",
+///       Coordinator[guard_capability = "consensus:initiate",
 ///                  flow_cost = 200,
 ///                  journal_facts = "ceremony_started"]
 ///         -> Signer[*] : StartRequest
-///       Signer[*][guard_capability = "participate_signing",
+///       Signer[*][guard_capability = "consensus:witness_sign",
 ///                flow_cost = 150]
 ///         -> Coordinator : Commitment
 ///     abort ->

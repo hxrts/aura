@@ -43,7 +43,6 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
 
     let reply_to = props.reply_to.clone();
     let has_reply = reply_to.is_some();
-    let sending = props.sending;
 
     element! {
         View(
@@ -80,7 +79,7 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
                 padding_right: Spacing::LIST_ITEM_PADDING,
                 align_items: AlignItems::Center,
             ) {
-                Text(content: if sending { "> " } else { "> " }, color: Theme::PRIMARY)
+                Text(content: "> ", color: Theme::PRIMARY)
                 Text(content: display_text, color: text_color, wrap: TextWrap::NoWrap)
             }
             // Hint bar - border color matches focus state

@@ -19,10 +19,9 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 
 | Direction | Crate | What is consumed / produced |
 |-----------|-------|-----------------------------|
-| Consumes | `aura-app` | `AppCore`, `Intent`, `ViewState`, `ui_contract`, `workflows::semantic_facts` |
+| Consumes | `aura-app` | `AppCore`, `Intent`, `ViewState`, `ui_contract`, `workflows::semantic_facts`, shared frontend primitives (`frontend_primitives`) |
 | Consumes | `aura-agent` | `AuraAgent`, `EffectContext`, services |
 | Consumes | `aura-core` | Types only: errors, identifiers, execution modes |
-| Consumes | `aura-ui` | Shared Layer 7 frontend operation labels used for user-facing failure metadata |
 | Produces | — | CLI handlers, TUI screens, terminal rendering |
 
 ## Invariants
@@ -31,10 +30,18 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - Parity-critical IDs, focus semantics, and action metadata must come from `aura-app::ui_contract`, not frontend-local derivation.
 - Harness mode may add instrumentation or render-stability hooks but must not bypass normal execution semantics for parity-critical flows.
 - The TUI must expose shared semantic command ingress through its real update/event loop; command handling may not depend on render-time polling.
+- `src/tui/screens/app/shell/dispatch.rs` is the sanctioned event-loop-owned command ingress boundary for shell dispatch preparation, local owner allocation, and shell-state coordination.
+- Direct semantic owner allocation stays behind the sanctioned submit helpers in
+  `src/tui/screens/app/shell/dispatch.rs` and `src/tui/semantic_lifecycle.rs`;
+  callback factories must call those helpers instead of allocating
+  `LocalTerminalOperationOwner` or `WorkflowHandoffOperationOwner` ad hoc.
+- Owner-typed callback families may invoke upstream `aura-app::ui::workflows::*` directly only when the callback API itself requires the correct ownership token at the boundary and the callback does not create a parallel terminal-owned semantic lifecycle path.
+- Observed callbacks and ownerless helper utilities must not become alternate semantic ingress paths. If a flow is parity-critical and does not already enter through an owner-typed callback boundary, ownership allocation and submission must stay in the event-loop path rather than moving into render helpers or callback-free utility modules.
 - Parity-critical semantic export must not depend on placeholder IDs, override-backed lists, or heuristic runtime-event inference.
 - The TUI is an `Observed` plus command-ingress surface for shared semantic flows. It may submit commands and render lifecycle, but it must not own terminal semantic truth for parity-critical operations.
 - Parity-critical callback families must require the appropriate owner type at the API boundary; ownerless callbacks are observed-only.
 - Snapshot contention must be surfaced explicitly on parity-relevant paths; the shell may not treat lock contention as an empty authoritative state.
+- Best-effort snapshot helpers may return defaults only for explicitly observed-only, non-authoritative reads such as deterministic tests or narrow display-only helpers. They must not be reused as an authoritative input surface for parity-critical decisions.
 - Long-lived subscription exhaustion must become structural degraded state, not a log-only event.
 - Selected-channel bindings may only reflect the current authoritative channel projection; the shell must not preserve a missing `context_id` from prior UI state.
 - Parity-relevant terminal updates must choose an explicit publication class. Ordered-required and required-unordered updates must backpressure instead of silently degrading to best-effort `try_send`, while lossy publication is restricted to observed-only UI maintenance.
@@ -79,12 +86,14 @@ For shared semantic flows, `aura-terminal` uses `Observed` for render state, pro
 |------|----------|---------------------|------------|--------------|
 | TUI command ingress queue and wakeup path | `ActorOwned` | TUI update/event loop | ingress/update-loop code | shell render code, harness |
 | Shell-rendered semantic operation lifecycle | `Observed` | authoritative semantic facts from `aura-app` | local UI presentation state only | harness, user-visible rendering |
-| Callback/subscription bridges for parity-critical flows | `Observed` | upstream workflow/runtime coordinators | local UI adaptation only; never terminal semantic truth | harness, shell |
+| Owner-typed callback bridges for parity-critical flows | `Observed` shell over upstream `MoveOwned` / `ActorOwned` coordination | upstream workflow/runtime coordinators | local adaptation and owned handoff only; never terminal semantic truth | harness, shell |
+| Observed callback and subscription bridges | `Observed` | upstream workflow/runtime coordinators | local UI adaptation only; never terminal semantic truth | harness, shell |
 | Local focus/selection and nonsemantic view state | `Observed` | TUI shell/model | shell/update-loop code | harness snapshots |
 
 ### Capability-Gated Points
 
 - Shared semantic command ingress and receipt handling through the real TUI update/event loop.
+- Owner-typed callback handoff into upstream `aura-app::ui::workflows::*` where the callback boundary already carries the required owner token and does not fork semantic lifecycle ownership.
 - Authoritative semantic lifecycle/readiness mirroring consumed from `aura-app::ui_contract` and `aura-app::workflows::semantic_facts`, never authored locally.
 - Callback factories and subscription bridges that may adapt authoritative operation state for rendering, but may not publish terminal semantic truth.
 - Explicit shell-owned degraded-state publication for permanently failed frontend subscriptions.
@@ -98,6 +107,7 @@ For shared semantic flows, `aura-terminal` uses `Observed` for render state, pro
 - `just ci-observed-layer-boundaries`
 - `just ci-frontend-handoff-boundary`
 - `just ci-actor-lifecycle`
+- `just ci-ownership-policy`
 
 ## Testing
 

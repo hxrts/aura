@@ -23,9 +23,9 @@ use aura_core::effects::{
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 use aura_rendezvous::{
+    capabilities::RendezvousCapability,
     facts::{RendezvousDescriptor, RendezvousFact, TransportHint},
     new_channel::{ChannelManager, HandshakeConfig, Handshaker, SecureChannel},
-    protocol::guards,
     service::{EffectCommand, GuardDecision, GuardSnapshot, RendezvousConfig, RendezvousService},
 };
 
@@ -47,9 +47,9 @@ fn test_snapshot(authority: AuthorityId, context: ContextId) -> GuardSnapshot {
         context_id: context,
         flow_budget_remaining: FlowCost::new(1000),
         capabilities: vec![
-            aura_guards::types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH),
-            aura_guards::types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
-            aura_guards::types::CapabilityId::from(guards::CAP_RENDEZVOUS_RELAY),
+            RendezvousCapability::Publish.as_name(),
+            RendezvousCapability::Connect.as_name(),
+            RendezvousCapability::Relay.as_name(),
         ],
         epoch: 1,
     }
@@ -570,9 +570,7 @@ async fn test_missing_capability_blocks_connect() {
 
     // Snapshot WITHOUT connect capability
     let mut snapshot = test_snapshot(alice, context);
-    snapshot.capabilities = vec![aura_guards::types::CapabilityId::from(
-        guards::CAP_RENDEZVOUS_PUBLISH,
-    )]; // Only publish
+    snapshot.capabilities = vec![RendezvousCapability::Publish.as_name()]; // Only publish
     let mock_effects = MockNoise;
 
     let result = service

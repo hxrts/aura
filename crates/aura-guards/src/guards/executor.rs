@@ -345,7 +345,17 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
             }
         };
 
-        let capability = CapabilityId::from(request.operation.to_string());
+        let capability = match CapabilityId::try_from(request.operation.to_string()) {
+            Ok(capability) => capability,
+            Err(err) => {
+                warn!(
+                    operation = %request.operation,
+                    error = %err,
+                    "Invalid guard capability name"
+                );
+                return false;
+            }
+        };
         match evaluator.check_guard(&token, &capability, &resource, now_secs) {
             Ok(authorized) => authorized,
             Err(err) => {
@@ -569,7 +579,7 @@ pub fn convert_send_guard_to_request(
     send_guard: &SendGuardChain,
     authority: AuthorityId,
 ) -> Result<GuardRequest> {
-    let operation = GuardOperationId::from(send_guard.authorization_requirement());
+    let operation = GuardOperationId::from(send_guard.authorization_requirement().as_str());
     let cost = send_guard.cost();
 
     let request = GuardRequest::new(authority, operation, cost)
@@ -850,7 +860,8 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
     impl EffectInterpreter for MockInterpreter {
         async fn execute(&self, cmd: EffectCommand) -> Result<EffectResult> {
             self.executed_commands.lock().await.push(cmd.clone());
@@ -897,7 +908,8 @@ mod tests {
         let cost = FlowCost::new(42);
 
         let guard = SendGuardChain::new(
-            CapabilityId::from(message_authorization),
+            CapabilityId::try_from(message_authorization)
+                .expect("send guard authorization uses valid capability grammar"),
             context,
             peer,
             cost,

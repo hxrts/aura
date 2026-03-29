@@ -104,18 +104,29 @@ pub async fn list_peers(
     app_core: &Arc<RwLock<AppCore>>,
     timestamp_ms: u64,
 ) -> Result<Vec<String>, AuraError> {
+    let runtime = super::runtime::require_runtime(app_core).await?;
+
     // Get sync peers (DeviceIds)
-    let app_core_guard = app_core.read().await;
-    let sync_peers = app_core_guard
-        .sync_peers()
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("query sync peers", e)))?;
+    let sync_peers = timeout_runtime_call(
+        &runtime,
+        "list_peers",
+        "try_get_sync_peers",
+        Duration::from_millis(5_000),
+        || runtime.try_get_sync_peers(),
+    )
+    .await?
+    .map_err(|e| AuraError::from(super::error::runtime_call("query sync peers", e)))?;
 
     // Get discovered peers (AuthorityIds from rendezvous)
-    let discovered_peers = app_core_guard
-        .discover_peers()
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("query discovered peers", e)))?;
+    let discovered_peers = timeout_runtime_call(
+        &runtime,
+        "list_peers",
+        "try_get_discovered_peers",
+        Duration::from_millis(5_000),
+        || runtime.try_get_discovered_peers(),
+    )
+    .await?
+    .map_err(|e| AuraError::from(super::error::runtime_call("query discovered peers", e)))?;
 
     // Combine into a list of strings
     let mut peer_list: Vec<String> = sync_peers.iter().map(|d| format!("sync:{d}")).collect();
@@ -141,12 +152,17 @@ pub async fn discover_peers(
     app_core: &Arc<RwLock<AppCore>>,
     timestamp_ms: u64,
 ) -> Result<usize, AuraError> {
-    let app_core_guard = app_core.read().await;
-    let discovered_count = app_core_guard
-        .discover_peers()
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("discover peers", e)))?
-        .len();
+    let runtime = super::runtime::require_runtime(app_core).await?;
+    let discovered_count = timeout_runtime_call(
+        &runtime,
+        "discover_peers",
+        "try_get_discovered_peers",
+        Duration::from_millis(5_000),
+        || runtime.try_get_discovered_peers(),
+    )
+    .await?
+    .map_err(|e| AuraError::from(super::error::runtime_call("discover peers", e)))?
+    .len();
 
     // Emit discovered peers signal
     emit_discovered_peers_signal(app_core, timestamp_ms).await?;
@@ -167,11 +183,16 @@ pub async fn list_lan_peers(
     app_core: &Arc<RwLock<AppCore>>,
     timestamp_ms: u64,
 ) -> Result<Vec<String>, AuraError> {
-    let app_core_guard = app_core.read().await;
-    let lan_peers = app_core_guard
-        .get_lan_peers()
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("list lan peers", e)))?;
+    let runtime = super::runtime::require_runtime(app_core).await?;
+    let lan_peers = timeout_runtime_call(
+        &runtime,
+        "list_lan_peers",
+        "try_get_lan_peers",
+        Duration::from_millis(5_000),
+        || runtime.try_get_lan_peers(),
+    )
+    .await?
+    .map_err(|e| AuraError::from(super::error::runtime_call("list lan peers", e)))?;
 
     let peer_list: Vec<String> = lan_peers
         .iter()
@@ -263,33 +284,39 @@ async fn emit_discovered_peers_signal(
     app_core: &Arc<RwLock<AppCore>>,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let app_core_guard = app_core.read().await;
-    // Get both rendezvous and LAN peers
-    let rendezvous_peers = app_core_guard
-        .discover_peers()
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("refresh discovered peers", e)))?;
-    let lan_peers = app_core_guard
-        .get_lan_peers()
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("refresh lan peers", e)))?;
+    let runtime = super::runtime::require_runtime(app_core).await?;
+    // Get both rendezvous and LAN peers without holding the app-core lock across awaits.
+    let rendezvous_peers = timeout_runtime_call(
+        &runtime,
+        "emit_discovered_peers_signal",
+        "try_get_discovered_peers",
+        Duration::from_millis(5_000),
+        || runtime.try_get_discovered_peers(),
+    )
+    .await?
+    .map_err(|e| AuraError::from(super::error::runtime_call("refresh discovered peers", e)))?;
+    let lan_peers = timeout_runtime_call(
+        &runtime,
+        "emit_discovered_peers_signal",
+        "try_get_lan_peers",
+        Duration::from_millis(5_000),
+        || runtime.try_get_lan_peers(),
+    )
+    .await?
+    .map_err(|e| AuraError::from(super::error::runtime_call("refresh lan peers", e)))?;
 
     // Get invited peer IDs to mark peers as invited
-    let invited_ids: HashSet<AuthorityId> = if let Some(runtime) = app_core_guard.runtime() {
-        timeout_runtime_call(
-            runtime,
-            "emit_discovered_peers_signal",
-            "try_get_invited_peer_ids",
-            Duration::from_millis(5_000),
-            || runtime.try_get_invited_peer_ids(),
-        )
-        .await?
-        .map_err(|e| AuraError::from(super::error::runtime_call("get invited peers", e)))?
-        .into_iter()
-        .collect()
-    } else {
-        HashSet::new()
-    };
+    let invited_ids: HashSet<AuthorityId> = timeout_runtime_call(
+        &runtime,
+        "emit_discovered_peers_signal",
+        "try_get_invited_peer_ids",
+        Duration::from_millis(5_000),
+        || runtime.try_get_invited_peer_ids(),
+    )
+    .await?
+    .map_err(|e| AuraError::from(super::error::runtime_call("get invited peers", e)))?
+    .into_iter()
+    .collect();
 
     // Combine into discovered peers state
     let mut peers = Vec::new();

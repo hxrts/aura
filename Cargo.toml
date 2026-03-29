@@ -38,6 +38,7 @@ members = [
     "crates/aura-harness",
     "examples/hello-crdt",
     "examples/hello-choreo",
+    "examples/session-choreography",
 ]
 
 
@@ -46,8 +47,9 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["Sam Hart"]
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/aura-project/aura"
+license = "Apache-2.0"
+repository = "https://github.com/hxrts/aura"
+homepage = "https://hxrts.com/aura"
 
 [workspace.dependencies]
 # Cryptography
@@ -87,7 +89,8 @@ tokio = { version = "1.49", default-features = false, features = [
     "sync",
     "time",
 ] }
-futures = "0.3"
+# Pin to 0.3.31 — 0.3.32 has ambiguous Self::Error in into_sink.rs on Rust 1.93
+futures = "=0.3.31"
 async-trait = "0.1"
 async-lock = "3"
 
@@ -116,7 +119,8 @@ glob = "0.3"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 subtle = "2.6"
 getrandom = { version = "0.2", features = ["js"] }
-futures-util = { version = "0.3", features = ["alloc"] }
+# Pin to 0.3.31 — 0.3.32 has ambiguous Self::Error in into_sink.rs on Rust 1.93
+futures-util = { version = "=0.3.31", features = ["alloc"] }
 futures-signals = "0.3"
 socket2 = { version = "0.5", features = ["all"] }
 

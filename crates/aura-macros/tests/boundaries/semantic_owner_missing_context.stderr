@@ -3,11 +3,11 @@ error: semantic_owner requires a parameter typed as OperationContext or containi
    |
  5 | / #[aura_macros::semantic_owner(
  6 | |     owner = "demo-owner",
- 7 | |     terminal = "publish_done",
- 8 | |     postcondition = "demo_done",
+ 7 | |     wrapper = "missing_context_wrapper",
+ 8 | |     terminal = "publish_done",
 ...  |
-13 | |     category = "move_owned"
-14 | | )]
+14 | |     category = "move_owned"
+15 | | )]
    | |__^
    |
    = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)

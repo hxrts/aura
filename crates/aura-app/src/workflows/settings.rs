@@ -31,24 +31,42 @@ const SETTINGS_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 async fn refresh_settings_signal_from_runtime(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let (settings, devices, authorities, authority_id) = {
+    let (runtime, authority_id) = {
         let core = app_core.read().await;
-        let authority_id = core
+        let runtime = core
             .runtime()
-            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
-            .authority_id()
-            .to_string();
-        match core.settings_snapshot().await {
-            Ok(Some(snapshot)) => (snapshot.0, snapshot.1, snapshot.2, authority_id),
-            Ok(None) => return Ok(()),
-            Err(error) => {
-                return Err(AuraError::from(super::error::runtime_call(
-                    "refresh settings snapshot",
-                    error,
-                )));
-            }
-        }
+            .cloned()
+            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?;
+        let authority_id = runtime.authority_id().to_string();
+        (runtime, authority_id)
     };
+    let settings = timeout_runtime_call(
+        &runtime,
+        "refresh_settings_from_runtime",
+        "try_get_settings",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.try_get_settings(),
+    )
+    .await?
+    .map_err(|error| super::error::runtime_call("refresh settings", error))?;
+    let devices = timeout_runtime_call(
+        &runtime,
+        "refresh_settings_from_runtime",
+        "try_list_devices",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.try_list_devices(),
+    )
+    .await?
+    .map_err(|error| super::error::runtime_call("list devices", error))?;
+    let authorities = timeout_runtime_call(
+        &runtime,
+        "refresh_settings_from_runtime",
+        "try_list_authorities",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.try_list_authorities(),
+    )
+    .await?
+    .map_err(|error| super::error::runtime_call("list authorities", error))?;
     let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
     state.nickname_suggestion = settings.nickname_suggestion.clone();
     state.mfa_policy = settings.mfa_policy;

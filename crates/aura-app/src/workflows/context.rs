@@ -6,8 +6,8 @@
 pub use crate::workflows::time::current_time_ms;
 use crate::{
     ui_contract::{
-        OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
-        SemanticOperationKind, SemanticOperationPhase,
+        OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
+        SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
     },
     views::{
         home::{HomeState, HomesState},
@@ -25,7 +25,7 @@ use async_lock::RwLock;
 use aura_core::{
     crypto::hash::hash,
     types::{AuthorityId, ChannelId, ContextId},
-    AuraError,
+    AuraError, OperationContext, TraceContext,
 };
 use std::sync::Arc;
 
@@ -475,6 +475,42 @@ async fn fail_create_home<T>(
     ))
 }
 
+#[aura_macros::semantic_owner(
+    owner = "create_home_owned",
+    wrapper = "create_home",
+    terminal = "publish_success_with",
+    postcondition = "home_created",
+    proof = crate::workflows::semantic_facts::HomeCreatedProof,
+    authoritative_inputs = "homes,authoritative_source",
+    depends_on = "home_projection_published",
+    child_ops = "",
+    category = "move_owned"
+)]
+async fn create_home_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    creator: AuthorityId,
+    name: Option<String>,
+    description: Option<String>,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<ChannelId, AuraError> {
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+
+    let home_id = match create_home_with_creator(app_core, creator, name, description).await {
+        Ok(home_id) => home_id,
+        Err(error) => return fail_create_home(owner, error.to_string()).await,
+    };
+
+    owner
+        .publish_success_with(prove_home_created(app_core, home_id).await?)
+        .await?;
+    Ok(home_id)
+}
+
 /// Create a home for the active authority and return its channel id.
 pub async fn create_home(
     app_core: &Arc<RwLock<AppCore>>,
@@ -487,9 +523,6 @@ pub async fn create_home(
         None,
         SemanticOperationKind::CreateHome,
     );
-    owner
-        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
-        .await?;
     let creator = {
         let core = app_core.read().await;
         core.runtime()
@@ -502,16 +535,7 @@ pub async fn create_home(
         Ok(creator) => creator,
         Err(error) => return fail_create_home(&owner, error.to_string()).await,
     };
-
-    let home_id = match create_home_with_creator(app_core, creator, name, description).await {
-        Ok(home_id) => home_id,
-        Err(error) => return fail_create_home(&owner, error.to_string()).await,
-    };
-
-    owner
-        .publish_success_with(prove_home_created(app_core, home_id).await?)
-        .await?;
-    Ok(home_id)
+    create_home_owned(app_core, creator, name, description, &owner, None).await
 }
 
 /// Create a home for a specific authority and return its channel id.

@@ -3,9 +3,25 @@
 //! Provides token issuance, attenuation, and serialization using the authority
 //! model where authorities are the cryptographic actors managing tokens.
 
-use aura_core::types::identifiers::AuthorityId;
-use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
+use aura_core::{types::identifiers::AuthorityId, CapabilityName};
+use biscuit_auth::{builder::BiscuitBuilder, macros::*, Biscuit, KeyPair, PublicKey};
 use serde::{Deserialize, Serialize};
+
+pub trait TokenGrantProfile {
+    fn extend_profile_grants(&self, out: &mut Vec<CapabilityName>);
+}
+
+impl TokenGrantProfile for &[CapabilityName] {
+    fn extend_profile_grants(&self, out: &mut Vec<CapabilityName>) {
+        out.extend(self.iter().cloned());
+    }
+}
+
+impl TokenGrantProfile for Vec<CapabilityName> {
+    fn extend_profile_grants(&self, out: &mut Vec<CapabilityName>) {
+        out.extend(self.iter().cloned());
+    }
+}
 
 /// Token authority for issuing Biscuit tokens.
 ///
@@ -31,26 +47,32 @@ impl TokenAuthority {
     /// Create a token for a subordinate authority or derived identity.
     ///
     /// The token includes the issuing authority and recipient authority facts,
-    /// along with default member/moderator capabilities.
-    pub fn create_token(&self, recipient: AuthorityId) -> Result<Biscuit, BiscuitError> {
+    /// along with the explicit capability grants provided by `profile`.
+    pub fn create_token<P>(
+        &self,
+        recipient: AuthorityId,
+        profile: P,
+    ) -> Result<Biscuit, BiscuitError>
+    where
+        P: TokenGrantProfile,
+    {
         let issuer = self.authority_id.to_string();
         let recipient_str = recipient.to_string();
+        let mut granted_capabilities = Vec::new();
+        profile.extend_profile_grants(&mut granted_capabilities);
 
-        let token = biscuit!(
-            r#"
-            issuer({issuer});
-            authority({recipient_str});
-            role("member");
-            capability("read");
-            capability("write");
-            capability("execute");
-            capability("delegate");
-            capability("moderator");
-        "#
-        )
-        .build(&self.root_keypair)?;
+        let mut builder = BiscuitBuilder::new();
+        builder.add_fact(fact!("issuer({issuer})"))?;
+        builder.add_fact(fact!("authority({recipient_str})"))?;
+        builder.add_fact(fact!("role(\"member\")"))?;
+        for capability in granted_capabilities {
+            let capability = capability.as_str();
+            builder.add_fact(fact!("capability({capability})"))?;
+        }
 
-        Ok(token)
+        builder
+            .build(&self.root_keypair)
+            .map_err(BiscuitError::BiscuitLib)
     }
 
     /// Get the public key for token verification.

@@ -12,7 +12,7 @@ fn guard_capability_annotation_emits_effect() {
     let choreography = r#"
         choreography Guarded {
             roles: Alice, Bob;
-            Alice[guard_capability = "send_message"] -> Bob: Message;
+            Alice[guard_capability = "chat:message:send"] -> Bob: Message;
         }
     "#;
 
@@ -21,7 +21,7 @@ fn guard_capability_annotation_emits_effect() {
         matches!(
             effect,
             AuraEffect::GuardCapability { capability, role }
-                if capability == "send_message" && role == &RoleId::new("Alice")
+                if capability.as_str() == "chat:message:send" && role == &RoleId::new("Alice")
         )
     });
 
@@ -61,7 +61,7 @@ fn multiple_annotations_preserve_document_order() {
     let choreography = r#"
         choreography MultiAnnotated {
             roles: Alice, Bob;
-            Alice[guard_capability = "send", flow_cost = 10, leak: (External)] -> Bob: Msg;
+            Alice[guard_capability = "chat:message:send", flow_cost = 10, leak: (External)] -> Bob: Msg;
         }
     "#;
 
@@ -90,5 +90,22 @@ fn multiple_annotations_preserve_document_order() {
     assert!(
         cost_idx.unwrap() < leak_idx.unwrap(),
         "flow_cost must appear before leak (guard chain ordering)"
+    );
+}
+
+/// Legacy or unnamespaced guard_capability values must fail at the DSL boundary.
+#[test]
+fn legacy_guard_capability_annotation_fails() {
+    let choreography = r#"
+        choreography Guarded {
+            roles: Alice, Bob;
+            Alice[guard_capability = "send_message"] -> Bob: Message;
+        }
+    "#;
+
+    let err = extract_aura_annotations(choreography).expect_err("legacy name must fail");
+    assert!(
+        err.to_string().contains("canonical namespaced"),
+        "error should explain the canonical namespace requirement"
     );
 }

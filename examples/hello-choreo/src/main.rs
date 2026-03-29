@@ -55,12 +55,15 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let mut end_metadata = HashMap::new();
     end_metadata.insert("status".to_string(), "success".to_string());
 
+    let alice_guard = aura_core::capability_name!("hello_world:send_ping");
+    let bob_guard = aura_core::capability_name!("hello_world:send_pong");
+
     let ping_pong_protocol = builder()
         .audit_log("protocol_start", start_metadata)
-        .validate_guard(AuraRole::Alice, "send_ping", "network")
+        .validate_guard(AuraRole::Alice, alice_guard.as_str(), "network")
         .charge_flow_cost(AuraRole::Alice, 150)
         .send(AuraRole::Alice, AuraRole::Bob, "ping_message")
-        .validate_guard(AuraRole::Bob, "send_pong", "network")
+        .validate_guard(AuraRole::Bob, bob_guard.as_str(), "network")
         .charge_flow_cost(AuraRole::Bob, 100)
         .send(AuraRole::Bob, AuraRole::Alice, "pong_message")
         .audit_log("protocol_complete", end_metadata)

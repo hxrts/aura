@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::tui::screens::app::subscriptions::SharedNeighborhoodHomeMeta;
+
 pub(super) struct InputTransition {
     pub(super) current: TuiState,
     pub(super) new_state: TuiState,

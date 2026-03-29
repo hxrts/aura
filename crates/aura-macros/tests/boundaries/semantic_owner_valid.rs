@@ -15,6 +15,7 @@ fn publish_done() {}
 
 #[aura_macros::semantic_owner(
     owner = "demo-owner",
+    wrapper = "valid_owner_wrapper",
     terminal = "publish_done",
     postcondition = "demo_done",
     proof = DemoProof,
@@ -27,6 +28,10 @@ async fn valid_owner(
     _context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
 ) {
     publish_done();
+}
+
+async fn valid_owner_wrapper(context: Option<&mut OperationContext<&'static str, u64, TraceContext>>) {
+    valid_owner(context).await;
 }
 
 fn main() {

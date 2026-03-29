@@ -134,6 +134,41 @@ impl InvitationServiceApi {
         }
     }
 
+    fn spawn_device_enrollment_accept_follow_up(&self, invitation: &Invitation) {
+        let invitation = invitation.clone();
+        let handler = self.handler.clone();
+        let effects = self.effects.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.device_enrollment_accept.{}",
+            invitation.invitation_id
+        ));
+        let invitation_id = invitation.invitation_id.clone();
+        let sender_id = invitation.sender_id;
+        let receiver_id = invitation.receiver_id;
+        let fut = async move {
+            if let Err(error) = handler
+                .execute_device_enrollment_invitee(effects, &invitation)
+                .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation_id,
+                    sender_id = %sender_id,
+                    receiver_id = %receiver_id,
+                    error = %error,
+                    "device enrollment accept follow-up failed after local acceptance settlement"
+                );
+            }
+        };
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _task_handle = tasks.spawn_local_named("device_enrollment_accept", fut);
+            } else {
+                let _task_handle = tasks.spawn_named("device_enrollment_accept", fut);
+            }
+        }
+    }
+
     fn spawn_deferred_invitation_delivery(
         &self,
         invitation: &Invitation,
@@ -387,8 +422,31 @@ impl InvitationServiceApi {
             )
             .await?;
         let invitation = prepared.invitation;
+        let deferred_network_effects = prepared.deferred_network_effects;
+        #[cfg(target_arch = "wasm32")]
+        if self.effects.harness_mode_enabled() {
+            if let Err(error) = execute_invitation_effect_commands(
+                deferred_network_effects.into_commands(),
+                self.handler.authority_context(),
+                self.effects.as_ref(),
+                true,
+            )
+            .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation.invitation_id,
+                    sender_id = %invitation.sender_id,
+                    receiver_id = %invitation.receiver_id,
+                    error = %error,
+                    "Inline harness channel invitation delivery failed"
+                );
+            }
+        } else {
+            self.spawn_deferred_invitation_delivery(&invitation, deferred_network_effects);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.spawn_deferred_invitation_delivery(&invitation, deferred_network_effects);
         self.spawn_invitation_ceremony_registration(&invitation);
-        self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         self.spawn_channel_invitation_exchange(&invitation);
         Ok(invitation)
     }
@@ -457,6 +515,28 @@ impl InvitationServiceApi {
             .await?;
         let invitation = prepared.invitation;
         self.spawn_invitation_ceremony_registration(&invitation);
+        #[cfg(target_arch = "wasm32")]
+        if self.effects.harness_mode_enabled() {
+            if let Err(error) = execute_invitation_effect_commands(
+                prepared.deferred_network_effects.into_commands(),
+                self.handler.authority_context(),
+                self.effects.as_ref(),
+                true,
+            )
+            .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation.invitation_id,
+                    sender_id = %invitation.sender_id,
+                    receiver_id = %invitation.receiver_id,
+                    error = %error,
+                    "Inline harness contact invitation delivery failed"
+                );
+            }
+        } else {
+            self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         Ok(invitation)
     }
@@ -529,6 +609,12 @@ impl InvitationServiceApi {
             if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
                 self.spawn_contact_acceptance_notification(invitation.invitation_id.clone());
             }
+            if matches!(
+                invitation.invitation_type,
+                InvitationType::DeviceEnrollment { .. }
+            ) {
+                self.spawn_device_enrollment_accept_follow_up(&invitation);
+            }
             if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
                 self.spawn_invitation_acceptance_ceremony_progress(ceremony_id, &invitation);
             }
@@ -576,7 +662,7 @@ impl InvitationServiceApi {
     pub async fn cancel(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
         let result = self
             .handler
-            .cancel_invitation(&self.effects, invitation_id)
+            .cancel_invitation(self.effects.clone(), invitation_id)
             .await?;
 
         if let Some(invitation) = self
@@ -675,7 +761,7 @@ impl InvitationServiceApi {
             .unwrap_or_else(|| URL_SAFE_NO_PAD.encode("".as_bytes()));
         let encoded_device_id =
             URL_SAFE_NO_PAD.encode(self.effects.device_id().to_string().as_bytes());
-        if sender_hint.is_some() || std::env::var_os("AURA_HARNESS_MODE").is_some() {
+        if sender_hint.is_some() || self.effects.harness_mode_enabled() {
             code = format!("{code}:{sender_hint_segment}:{encoded_device_id}");
         }
 
@@ -685,14 +771,13 @@ impl InvitationServiceApi {
     /// Export an invitation as a shareable code string (compile-time safe)
     ///
     /// This is the preferred method when you already have the `Invitation` object.
-    /// It cannot fail since no lookup is required.
     ///
     /// # Arguments
     /// * `invitation` - The invitation to export
     ///
     /// # Returns
     /// A shareable code string (format: `aura:v1:<base64>`)
-    pub fn export_invitation(invitation: &Invitation) -> String {
+    pub fn export_invitation(invitation: &Invitation) -> Result<String, ShareableInvitationError> {
         let shareable = ShareableInvitation::from(invitation);
         shareable.to_code()
     }
@@ -701,8 +786,11 @@ impl InvitationServiceApi {
     ///
     /// This should be used for codes that will be imported by another runtime
     /// and may need a direct sender websocket hint for the first return path.
-    pub fn export_invitation_with_sender_hint(&self, invitation: &Invitation) -> String {
-        self.append_sender_hint(Self::export_invitation(invitation))
+    pub fn export_invitation_with_sender_hint(
+        &self,
+        invitation: &Invitation,
+    ) -> Result<String, ShareableInvitationError> {
+        Self::export_invitation(invitation).map(|code| self.append_sender_hint(code))
     }
 
     /// Export an invitation by ID as a shareable code string
@@ -733,7 +821,8 @@ impl InvitationServiceApi {
             invitation_id = %invitation_id,
             "export invitation sender websocket hint"
         );
-        Ok(self.export_invitation_with_sender_hint(&invitation))
+        self.export_invitation_with_sender_hint(&invitation)
+            .map_err(|error| AgentError::invalid(error.to_string()))
     }
 
     /// Import an invitation from a shareable code string
@@ -772,7 +861,9 @@ mod tests {
     use crate::runtime::services::ceremony_runner::CeremonyRunner;
     use crate::runtime::services::CeremonyTracker;
     use crate::runtime::TaskSupervisor;
+    use aura_core::effects::amp::ChannelCreateParams;
     use aura_core::effects::time::PhysicalTimeEffects;
+    use aura_effects::AmpChannelEffects;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -904,15 +995,25 @@ mod tests {
     async fn test_invite_to_channel() {
         let authority_context = create_test_authority(115);
         let effects = effects_for(&authority_context);
-        let service = service_for(authority_context, effects);
+        let service = service_for(authority_context, effects.clone());
 
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
-        let home_id = ChannelId::from_bytes([116u8; 32]).to_string();
+        let context_id = ContextId::new_from_entropy([117u8; 32]);
+        let home_id = ChannelId::from_bytes([116u8; 32]);
+        effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(home_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .unwrap();
         let invitation = service
             .invite_to_channel(
                 receiver_id,
-                home_id,
-                None,
+                home_id.to_string(),
+                Some(context_id),
                 Some("shared-parity-lab".to_string()),
                 None,
                 None,
@@ -929,6 +1030,25 @@ mod tests {
             } => assert_eq!(nickname_suggestion.as_deref(), Some("shared-parity-lab")),
             _ => panic!("expected channel invitation"),
         }
+    }
+
+    #[test]
+    fn invite_to_channel_defers_best_effort_delivery() {
+        let source = include_str!("invitation_service.rs");
+        let start = source
+            .find("pub async fn invite_to_channel(")
+            .expect("invite_to_channel definition");
+        let body = &source[start..];
+        assert!(
+            body.contains(
+                "self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);"
+            ),
+            "channel invites must defer best-effort delivery instead of blocking terminal settlement"
+        );
+        assert!(
+            !body.contains("execute_invitation_effect_commands(\n            prepared.deferred_network_effects.into_commands(),"),
+            "channel invites must not execute deferred network effects inline"
+        );
     }
 
     #[tokio::test]
@@ -951,13 +1071,11 @@ mod tests {
 
         // Accept one
         let accept_result = service.accept(&inv1.invitation_id).await.unwrap();
-        assert!(accept_result.success);
-        assert_eq!(accept_result.new_status, Some(InvitationStatus::Accepted));
+        assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
 
         // Decline the other
         let decline_result = service.decline(&inv2.invitation_id).await.unwrap();
-        assert!(decline_result.success);
-        assert_eq!(decline_result.new_status, Some(InvitationStatus::Declined));
+        assert_eq!(decline_result.new_status, InvitationStatus::Declined);
 
         // Check pending is empty
         let pending = service.list_pending().await;

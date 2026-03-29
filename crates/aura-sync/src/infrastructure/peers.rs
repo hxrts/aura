@@ -38,6 +38,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::capabilities::SyncCapability;
 use crate::core::{sync_config_error, sync_peer_error, SyncResult};
 use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
@@ -56,7 +57,6 @@ fn test_time_now() -> PhysicalTime {
         uncertainty: None,
     }
 }
-use aura_guards::types::CapabilityId;
 use aura_guards::BiscuitGuardEvaluator;
 
 // =============================================================================
@@ -559,7 +559,7 @@ impl PeerManager {
         };
 
         // Check if the token grants sync capability using the guard evaluator
-        let capability = CapabilityId::from("sync:read");
+        let capability = SyncCapability::RequestDigest.as_name();
         match evaluator.check_guard_default_time(&biscuit_token, &capability, &sync_resource) {
             Ok(has_permission) => {
                 tracing::debug!(

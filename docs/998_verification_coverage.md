@@ -268,6 +268,54 @@ Deterministic parity validation infrastructure in `aura-testkit`.
 | `InvariantObserverHierarchyMaintained` | leakage.qnt |
 | `InvariantBudgetsPositive` | leakage.qnt |
 
+## Contract Coverage Mapping
+
+This section maps the contract clauses in [Privacy and Information Flow Contract](003_information_flow_contract.md) and [Distributed Systems Contract](004_distributed_systems_contract.md) to the current verification and assurance evidence.
+
+Coverage status uses three classes:
+
+- `Verified`: directly covered by Quint invariants, Lean proofs, or both
+- `Conformance-backed`: covered by replay, parity, or deterministic conformance lanes rather than domain theorem proofs
+- `Specified only`: documented as a contract requirement, but not yet directly mapped to a proof or conformance artifact in this report
+
+### Privacy and Information Flow Contract Coverage
+
+| Contract Area | Status | Evidence |
+|---------------|--------|----------|
+| Context-specific identity separation | `Verified` | `Aura.Proofs.KeyDerivation`, `Aura.Proofs.ContextIsolation` |
+| Budgeted send invariant | `Verified` | `authorization.qnt`, `transport.qnt`, `Aura.Proofs.FlowBudget`, `Aura.Proofs.GuardChain` |
+| Epoch-scoped receipt validity | `Verified` | `epochs.qnt` |
+| Observer-budgeted metadata leakage | `Verified` | `leakage.qnt` |
+| Cross-context isolation | `Verified` | `Aura.Proofs.ContextIsolation`, `transport.qnt` |
+| Physical vs logical time privacy boundary | `Verified` | `time_system.qnt`, `Aura.Proofs.TimeSystem` |
+| Error-channel privacy boundary | `Specified only` | No direct proof or conformance mapping recorded here |
+| Retrieval not identity-addressed | `Specified only` | No direct proof or conformance mapping recorded here |
+| Custody remains opaque and non-authoritative | `Specified only` | No direct proof or conformance mapping recorded here |
+| Accountability evidence verified before local consequences | `Specified only` | No direct proof or conformance mapping recorded here |
+| External observer protection level varies by deployment mode | `Specified only` | No direct proof or conformance mapping recorded here |
+
+### Distributed Systems Contract Coverage
+
+| Contract Area | Status | Evidence |
+|---------------|--------|----------|
+| Journal CRDT laws | `Verified` | `journal/core.qnt`, `Aura.Proofs.Journal` |
+| Consensus agreement and validity | `Verified` | `consensus/core.qnt`, `Aura.Proofs.Consensus.Agreement`, `Aura.Proofs.Consensus.Validity` |
+| Fault-bound consensus safety assumptions | `Verified` | `consensus/adversary.qnt`, `Aura.Proofs.Consensus.Adversary` |
+| Evidence CRDT laws | `Verified` | `Aura.Proofs.Consensus.Evidence` |
+| Equivocation detection | `Verified` | `consensus/adversary.qnt`, `Aura.Proofs.Consensus.Equivocation` |
+| FROST threshold safety | `Verified` | `consensus/frost.qnt`, `Aura.Proofs.Consensus.Frost` |
+| Context isolation | `Verified` | `transport.qnt`, `Aura.Proofs.ContextIsolation` |
+| Anti-entropy convergence | `Verified` | `journal/anti_entropy.qnt` |
+| Fast-path and fallback liveness under assumptions | `Verified` | `consensus/liveness.qnt`, `Aura.Proofs.Consensus.Liveness` |
+| Invitation lifecycle safety | `Verified` | `invitation.qnt` |
+| Cross-protocol deadlock freedom | `Verified` | `interaction.qnt` |
+| Operation-scoped and journal consistency model | `Verified` | `journal/core.qnt`, `journal/anti_entropy.qnt`, `consensus/core.qnt` |
+| Runtime conformance against formal artifacts | `Conformance-backed` | ITF trace replay, Telltale parity, conformance fixtures |
+| Onion accountability witness return and verification | `Specified only` | No direct proof or conformance mapping recorded here |
+| Hold availability and custody-failure boundaries | `Specified only` | No direct proof or conformance mapping recorded here |
+| Failure-class boundaries and local-only failure | `Specified only` | No direct proof or conformance mapping recorded here |
+| Error-channel privacy requirements | `Specified only` | No direct proof or conformance mapping recorded here |
+
 ## CI Verification Gates
 
 Automated verification lanes wired into CI pipelines.

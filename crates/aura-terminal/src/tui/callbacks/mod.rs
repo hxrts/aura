@@ -13,29 +13,27 @@
 //! use crate::tui::callbacks::{CallbackRegistry, IdCallback};
 //!
 //! // Create all callbacks at once
-//! let registry = CallbackRegistry::new(ctx, tx, app_core);
+//! let registry = CallbackRegistry::new(ctx, tx);
 //!
 //! // Use individual callbacks
-//! let on_send = registry.chat.on_send.clone();
+//! let on_run_slash_command = registry.chat.on_run_slash_command.clone();
 //! ```
 
 mod factories;
 mod types;
 
 // Re-export types
-pub(crate) use types::SendCallback;
+pub(crate) use types::SlashCommandCallback;
 #[doc(hidden)]
+pub use types::{AddDeviceCallback, CreateChannelCallback};
 pub use types::{
-    AddDeviceCallback, CreateAccountCallback, CreateChannelCallback, SendOwnedCallback,
+    ApprovalCallback, ChannelSelectCallback, ExportInvitationCallback, GoHomeCallback, IdCallback,
+    InvitationCallback, NoArgCallback, RecoveryCallback, RemoveDeviceCallback,
+    StringOptStringCallback, ThreeStringCallback, ThresholdCallback, TwoStringCallback,
 };
-pub use types::{
-    ApprovalCallback, ChannelSelectCallback, CreateHomeCallback, CreateNeighborhoodCallback,
-    ExportInvitationCallback, GoHomeCallback, GuardianSelectCallback, IdCallback,
-    InvitationCallback, NeighborhoodHomeCallback, NoArgCallback, RecoveryCallback,
-    RemoveDeviceCallback, RetryMessageCallback, SetModeratorCallback, SetTopicCallback,
-    StartChatCallback, StringOptStringCallback, ThreeStringCallback, ThresholdCallback,
-    TwoStringCallback, UpdateNicknameCallback, UpdateNicknameSuggestionCallback,
-    UpdateThresholdCallback,
+pub(crate) use types::{
+    RetryMessageCallback, SetTopicCallback, StartChatCallback, UpdateMfaCallback,
+    UpdateNicknameCallback, UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
 };
 
 // Re-export factories

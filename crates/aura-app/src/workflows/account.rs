@@ -8,24 +8,68 @@
 //! Account backup operations (encode/decode/validate) are portable business
 //! logic. The actual file I/O for export/import remains in aura-terminal.
 
+use crate::ui_contract::{
+    OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
+};
 use crate::views::PendingAccountBootstrap;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workflows::runtime::{execute_with_runtime_retry_budget, workflow_retry_policy};
 use crate::workflows::{
     context,
     runtime::{
-        execute_with_runtime_retry_budget, require_runtime, timeout_runtime_call,
-        workflow_retry_policy,
+        execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
+        warn_workflow_timeout, workflow_timeout_budget,
     },
+    semantic_facts::SemanticWorkflowOwner,
     settings, system,
 };
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_core::{AuraError, RetryRunError};
+#[cfg(not(target_arch = "wasm32"))]
+use aura_core::RetryRunError;
+use aura_core::{AuraError, OperationContext, TimeoutBudgetError, TimeoutRunError, TraceContext};
 use std::sync::Arc;
 use std::time::Duration;
 
 const ACCOUNT_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(5_000);
 const ACCOUNT_RUNTIME_OPERATION_TIMEOUT: Duration = Duration::from_millis(30_000);
+
+async fn run_account_bootstrap_stage<T, F, Fut>(
+    app_core: &Arc<RwLock<AppCore>>,
+    stage: &'static str,
+    duration: Duration,
+    operation: F,
+) -> Result<T, AuraError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T, AuraError>>,
+{
+    let runtime = require_runtime(app_core).await?;
+    let budget = workflow_timeout_budget(&runtime, duration)
+        .await
+        .map_err(AuraError::from)?;
+    match execute_with_runtime_timeout_budget(&runtime, &budget, operation).await {
+        Ok(value) => Ok(value),
+        Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
+            warn_workflow_timeout(
+                "finalize_runtime_account_bootstrap",
+                stage,
+                budget.timeout_ms(),
+            );
+            Err(AuraError::from(
+                crate::workflows::error::WorkflowError::TimedOut {
+                    operation: "finalize_runtime_account_bootstrap",
+                    stage,
+                    timeout_ms: budget.timeout_ms(),
+                },
+            ))
+        }
+        Err(TimeoutRunError::Timeout(error)) => Err(AuraError::from(error)),
+        Err(TimeoutRunError::Operation(error)) => Err(error),
+    }
+}
 
 /// Threshold configuration for account setup
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,9 +366,11 @@ pub async fn has_runtime_account_config(
 pub async fn has_runtime_bootstrapped_account(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<bool, AuraError> {
-    Ok(crate::workflows::context::current_home_context(app_core)
-        .await
-        .is_ok())
+    match crate::workflows::context::current_home_context(app_core).await {
+        Ok(_) => Ok(true),
+        Err(AuraError::NotFound { .. }) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// Persist first-run account configuration for the current runtime authority.
@@ -332,9 +378,56 @@ pub async fn initialize_runtime_account(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
 ) -> Result<(), AuraError> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::account_create(),
+        None,
+        SemanticOperationKind::CreateAccount,
+    );
+    initialize_runtime_account_owned(app_core, nickname_suggestion, &owner, None).await
+}
+
+async fn fail_initialize_runtime_account<T>(
+    owner: &SemanticWorkflowOwner,
+    detail: impl Into<String>,
+) -> Result<T, AuraError> {
+    let error = SemanticOperationError::new(
+        SemanticFailureDomain::Internal,
+        SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into());
+    owner.publish_failure(error.clone()).await?;
+    Err(AuraError::agent(error.detail.unwrap_or_else(|| {
+        "initialize runtime account failed".to_string()
+    })))
+}
+
+#[aura_macros::semantic_owner(
+    owner = "initialize_runtime_account_owned",
+    wrapper = "initialize_runtime_account",
+    terminal = "publish_success_with",
+    postcondition = "account_created",
+    proof = crate::workflows::semantic_facts::AccountCreatedProof,
+    authoritative_inputs = "runtime,home_projection_published",
+    depends_on = "home_created,settings_refreshed,account_refreshed",
+    child_ops = "create_home",
+    category = "move_owned"
+)]
+async fn initialize_runtime_account_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<(), AuraError> {
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+
     let pending_bootstrap = prepare_pending_account_bootstrap(&nickname_suggestion)?;
     let runtime = require_runtime(app_core).await?;
-    timeout_runtime_call(
+    let init_result = timeout_runtime_call(
         &runtime,
         "initialize_runtime_account",
         "initialize_account",
@@ -342,9 +435,31 @@ pub async fn initialize_runtime_account(
         || runtime.initialize_account(&pending_bootstrap.nickname_suggestion),
     )
     .await
-    .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))?
-    .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))?;
-    finalize_runtime_account_bootstrap(app_core, pending_bootstrap.nickname_suggestion).await
+    .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))
+    .and_then(|result| {
+        result.map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))
+    })
+    .map_err(|error| AuraError::agent(error.to_string()));
+    if let Err(error) = init_result {
+        return fail_initialize_runtime_account(owner, error.to_string()).await;
+    }
+
+    let home_id = match finalize_runtime_account_bootstrap_inner(
+        app_core,
+        pending_bootstrap.nickname_suggestion,
+    )
+    .await
+    {
+        Ok(home_id) => home_id,
+        Err(error) => return fail_initialize_runtime_account(owner, error.to_string()).await,
+    };
+
+    owner
+        .publish_success_with(
+            crate::workflows::semantic_facts::issue_account_created_proof(home_id),
+        )
+        .await?;
+    Ok(())
 }
 
 /// Reconcile pending first-run runtime bootstrap metadata against the current runtime state.
@@ -381,6 +496,15 @@ pub async fn finalize_runtime_account_bootstrap(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
 ) -> Result<(), AuraError> {
+    finalize_runtime_account_bootstrap_inner(app_core, nickname_suggestion)
+        .await
+        .map(|_| ())
+}
+
+async fn finalize_runtime_account_bootstrap_inner(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+) -> Result<aura_core::ChannelId, AuraError> {
     let nickname_suggestion = validate_nickname_suggestion(&nickname_suggestion)
         .map_err(|error| AuraError::invalid(error.to_string()))?;
     let home_name = format!("{nickname_suggestion}'s Home");
@@ -391,7 +515,13 @@ pub async fn finalize_runtime_account_bootstrap(
             .or_else(|| core.authority().copied())
     }
     .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
-    let home_id = context::create_home(app_core, Some(home_name.clone()), None).await?;
+    let home_id = run_account_bootstrap_stage(
+        app_core,
+        "create_home",
+        ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
+        || async { context::create_home(app_core, Some(home_name.clone()), None).await },
+    )
+    .await?;
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -459,10 +589,30 @@ pub async fn finalize_runtime_account_bootstrap(
         }
     }
 
-    settings::refresh_settings_from_runtime(app_core).await?;
-    system::refresh_account(app_core).await?;
-    context::ensure_local_home_projection(app_core, home_id, home_name, authority_id).await?;
-    Ok(())
+    run_account_bootstrap_stage(
+        app_core,
+        "refresh_settings_from_runtime",
+        ACCOUNT_RUNTIME_QUERY_TIMEOUT,
+        || async { settings::refresh_settings_from_runtime(app_core).await },
+    )
+    .await?;
+    run_account_bootstrap_stage(
+        app_core,
+        "refresh_account",
+        ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
+        || async { system::refresh_account(app_core).await },
+    )
+    .await?;
+    run_account_bootstrap_stage(
+        app_core,
+        "ensure_local_home_projection",
+        ACCOUNT_RUNTIME_QUERY_TIMEOUT,
+        || async {
+            context::ensure_local_home_projection(app_core, home_id, home_name, authority_id).await
+        },
+    )
+    .await?;
+    Ok(home_id)
 }
 
 // =============================================================================
