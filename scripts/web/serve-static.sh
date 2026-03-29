@@ -45,16 +45,28 @@ fi
 
 case "$build_profile" in
     release)
-        NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web
         public_dir="$repo_root/target/dx/aura-web/release/web/public"
         if [[ ! -f "$public_dir/index.html" ]]; then
-            NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
+            NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web
+        else
+            echo "[serve-web-static] reusing prebuilt release web assets at $public_dir"
+        fi
+        if [[ ! -f "$public_dir/index.html" ]]; then
             public_dir="$repo_root/target/dx/aura-web/debug/web/public"
+            if [[ ! -f "$public_dir/index.html" ]]; then
+                NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
+            else
+                echo "[serve-web-static] reusing prebuilt debug web assets at $public_dir"
+            fi
         fi
         ;;
     debug)
-        NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
         public_dir="$repo_root/target/dx/aura-web/debug/web/public"
+        if [[ ! -f "$public_dir/index.html" ]]; then
+            NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
+        else
+            echo "[serve-web-static] reusing prebuilt debug web assets at $public_dir"
+        fi
         ;;
     *)
         echo "[serve-web-static] unsupported AURA_HARNESS_WEB_BUILD_PROFILE=$build_profile" >&2

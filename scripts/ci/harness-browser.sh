@@ -22,6 +22,7 @@ prepare_browser_web_assets() {
 }
 
 mkdir -p artifacts/harness/browser
+mkdir -p "$repo_root/target/aura-web-tools"
 
 (
   cd crates/aura-harness/playwright-driver
@@ -33,6 +34,7 @@ mkdir -p artifacts/harness/browser
 bash scripts/check/harness-browser-install.sh
 export AURA_HARNESS_WEB_BUILD_PROFILE=release
 export AURA_HARNESS_WEB_SERVER_READY_TIMEOUT_SECS=1800
+export AURA_WEB_TOOLS_CACHE_ROOT="$repo_root/target/aura-web-tools"
 
 prepare_browser_web_assets
 
