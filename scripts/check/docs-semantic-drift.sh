@@ -460,8 +460,8 @@ check_type_references() {
             # Documentation domain terms (roles, states, modes) - single words only
             Member|Participant|Moderator|Observer|Admin|Guest|Owner|User|Role|Level|Mode)
                 ((skipped++)) || true; continue ;;
-            # Service family and observer class names (design concepts, not code types yet)
-            Establish|Move|Hold|Custody|Verified)
+            # Service family, observer class, and protocol design names (not code types yet)
+            Establish|Move|Hold|Custody|Verified|ChannelBaseKey|AmpChannelBootstrap)
                 ((skipped++)) || true; continue ;;
             # Access level terms
             Full|Partial|Limited|Restricted|Public|Private|Internal)
