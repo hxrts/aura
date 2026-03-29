@@ -328,10 +328,15 @@ launch_browser() {
   fi
 
   if ! select_browser; then
-    echo "[demo] failed to find a supported browser launcher for dedicated-profile mode" >&2
-    echo "[demo] manual browser launch:" >&2
-    echo "  $manual_browser_cmd" >&2
-    exit 1
+    echo "[demo] no Chrome/Chromium found; opening default browser" >&2
+    if [[ "$OSTYPE" == darwin* ]]; then
+      open "$web_url" >>"$browser_log" 2>&1 || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$web_url" >>"$browser_log" 2>&1 || true
+    else
+      echo "[demo] no browser opener found; open manually: $web_url" >&2
+    fi
+    return 0
   fi
 
   if [[ "$OSTYPE" == darwin* ]]; then
