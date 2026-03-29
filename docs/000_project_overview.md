@@ -102,6 +102,8 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Distributed Maintenance Guide](808_maintenance_guide.md) covers operational concerns including snapshots and system upgrades.
 
+[Capability Vocabulary Inventory](809_capability_vocabulary_inventory.md) inventories authorization capability strings and their migration targets.
+
 ### 4. Project Meta
 
 [UX Flow Coverage Report](997_flow_coverage.md) tracks harness and scenario coverage for user-visible flows.

@@ -20,7 +20,7 @@ run_group() {
       "$pattern" "$@" || true
   )"
   output="$(
-    printf '%s\n' "$output" | rg -v '^docs/809_capability_vocabulary_inventory\.md:' || true
+    printf '%s\n' "$output" | rg -v '^docs/809_capability_vocabulary_inventory[.]md:' || true
   )"
   if [[ -n "$output" ]]; then
     had_hits=1
