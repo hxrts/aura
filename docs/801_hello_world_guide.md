@@ -50,20 +50,9 @@ See [Project Structure](999_project_structure.md) for details on the 8-layer arc
 Before adding a new parity-critical module or workflow, declare its ownership
 category in the crate `ARCHITECTURE.md`.
 
-Use this rule:
+Use `Pure` for reducers, validators, and typed contracts. Use `MoveOwned` for handles, owner tokens, and ownership transfer. Use `ActorOwned` for long-lived mutable async state and coordinators. Use `Observed` for rendering, harness reads, and diagnostics.
 
-- `Pure` for reducers, validators, and typed contracts
-- `MoveOwned` for handles, owner tokens, and ownership transfer/handoff
-- `ActorOwned` for long-lived mutable async state and coordinators
-- `Observed` for rendering, harness reads, and diagnostics
-
-Also declare:
-
-- which capability gates parity-critical mutation/publication
-- which module owns terminal lifecycle
-- which timeout/backoff policy the owner consumes
-
-If those points are not explicit, the new module is not ready to land.
+Also declare which capability gates parity-critical mutation and publication, which module owns terminal lifecycle, and which timeout and backoff policy the owner consumes. If those points are not explicit, the new module is not ready to land.
 
 ## Hello World Protocol
 

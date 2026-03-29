@@ -119,7 +119,7 @@ pub fn ceremony_status(facts: &[InvitationFact]) -> CeremonyStatus {
 }
 ```
 
-**Definition of Done**:
+Definition of Done:
 - [ ] Operation category declared (A/B/C)
 - [ ] Facts defined with reducer and schema version
 - [ ] Choreography specified with roles/messages documented
@@ -214,7 +214,7 @@ Each phase uses results from previous phases. Failed phases abort the entire wor
 
 ### Parallel Composition
 
-Execute independent protocols concurrently:
+Independent protocols can execute concurrently using `try_join_all`.
 
 ```rust
 pub async fn execute_distributed_computation(
@@ -237,9 +237,11 @@ pub async fn execute_distributed_computation(
 }
 ```
 
+Worker futures launch in parallel and are joined with a timeout. Results are then aggregated into a single computation result.
+
 ### Effect Program Composition
 
-Compose protocols through effect programs:
+Protocols can also be composed through effect programs using a builder pattern.
 
 ```rust
 let composed_protocol = Program::new()
@@ -255,11 +257,13 @@ let composed_protocol = Program::new()
     .end();
 ```
 
+The builder chains validation, protocol execution, and logging into a single composed program.
+
 ## 5. Error Handling and Resilience
 
 ### Timeout and Retry
 
-Implement robust timeout handling with exponential backoff:
+Implement timeout handling with exponential backoff.
 
 ```rust
 pub async fn execute_with_resilience<T>(
@@ -289,9 +293,11 @@ pub async fn execute_with_resilience<T>(
 }
 ```
 
+The function retries on transient errors with exponential backoff and jitter. Non-retryable errors fail immediately.
+
 ### Compensation and Rollback
 
-For multi-phase protocols, implement compensation for partial failures:
+For multi-phase protocols, implement compensation for partial failures.
 
 ```rust
 pub async fn execute_compensating_transaction(
@@ -320,9 +326,11 @@ pub async fn execute_compensating_transaction(
 }
 ```
 
+On failure, completed operations are compensated in reverse order. This ensures partial state is cleaned up before the error is returned.
+
 ### Circuit Breakers
 
-Prevent cascading failures with circuit breakers:
+Circuit breakers prevent cascading failures by tracking error rates.
 
 ```rust
 pub enum CircuitState {
@@ -360,6 +368,8 @@ pub async fn execute_with_circuit_breaker<T>(
     }
 }
 ```
+
+The breaker transitions through closed, open, and half-open states based on failure thresholds and recovery timeouts.
 
 ## 6. Guard Chain Integration
 
@@ -426,7 +436,7 @@ impl ChatService {
 }
 ```
 
-Benefits: Domain crate stays pure (no tokio/RwLock), testable with mock effects, consistent pattern across crates.
+This keeps the domain crate pure without tokio or `RwLock`. It is testable with mock effects and consistent across crates.
 
 ## 8. Testing Choreographies
 

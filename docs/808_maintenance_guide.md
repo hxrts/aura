@@ -433,8 +433,8 @@ Use snapshots regularly for garbage collection. Plan upgrades carefully with suf
 
 ## Implementation References
 
-- **Maintenance Service**: `aura-sync/src/services/maintenance.rs`
-- **Snapshot Protocol**: `aura-sync/src/protocols/snapshots.rs`
-- **OTA Protocol**: `aura-sync/src/protocols/ota.rs`
-- **Cache Management**: `aura-sync/src/infrastructure/cache_manager.rs`
-- **Integration Examples**: `aura-agent/src/handlers/maintenance.rs`
+- Maintenance Service: `aura-sync/src/services/maintenance.rs`
+- Snapshot Protocol: `aura-sync/src/protocols/snapshots.rs`
+- OTA Protocol: `aura-sync/src/protocols/ota.rs`
+- Cache Management: `aura-sync/src/infrastructure/cache_manager.rs`
+- Integration Examples: `aura-agent/src/handlers/maintenance.rs`
