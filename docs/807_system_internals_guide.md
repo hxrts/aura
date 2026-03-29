@@ -143,7 +143,7 @@ impl AuraAgent {
 }
 ```
 
-This pattern keeps the domain crate pure without tokio or `RwLock` dependencies. Domain logic is testable with mock effects. The pattern is consistent across crates.
+This pattern keeps the domain crate pure without Tokio-specific locking or runtime coupling. Domain logic is testable with mock effects. The pattern is consistent across crates.
 
 ### Core + Orchestrator Rule
 

@@ -146,13 +146,13 @@ Use this as the authoritative ownership map for the shared semantic stack. If co
 |-----------|---------------|-----------|---------------------|------------|-------------|
 | Semantic command / handle contract | `aura-app::ui_contract`, `aura-app::scenario_contract` | `Pure` + `MoveOwned` | `aura-app` contract surfaces | `aura-app` contract and workflow modules | `aura-terminal`, `aura-web`, `aura-harness` |
 | Semantic operation lifecycle | `aura-app::workflows::*` | `MoveOwned` | authoritative workflow coordinator | workflow and coordinator modules in `aura-app` | frontend render crates, harness |
-| Readiness coordinators | `aura-app::workflows::*` | `ActorOwned` | single-owner readiness coordinator | coordinator modules and sanctioned hooks | shell, subscription, render, harness |
-| Runtime async services | `aura-agent::runtime::*`, `aura-agent::handlers::*` | `ActorOwned` | runtime service actor | actor and sanctioned commands | `aura-app`, frontends, harness |
+| Channel / invitation / delivery readiness | `aura-app::workflows::*` | `ActorOwned` | single-owner readiness coordinator | coordinator modules and sanctioned hooks | shell, subscription, render, harness |
+| Runtime-facing async service state | `aura-agent::runtime::*`, `aura-agent::handlers::*` | `ActorOwned` | runtime service actor | actor and sanctioned commands | `aura-app`, frontends, harness |
 | TUI command ingress | `aura-terminal::tui::harness_state`, update loop | `ActorOwned` ingress + `Observed` rendering | TUI update and event loop | ingress and update-loop code only | shell render, harness |
-| TUI shell and subscriptions | `aura-terminal::tui::screens`, `callbacks` | `Observed` | downstream of authoritative state | local UI state only | harness, rendering |
+| TUI shell / callbacks / subscriptions | `aura-terminal::tui::screens`, `callbacks` | `Observed` | downstream of authoritative state | local UI state only | harness, rendering |
 | Browser harness bridge | `aura-web::harness_bridge` | `ActorOwned` bridge + `Observed` publication | browser bridge module | bridge module only | Playwright, harness, render |
-| Harness executor | `aura-harness::executor`, `backend::*` | `Observed` + orchestration `ActorOwned` | harness coordinator | harness orchestration state only | scenario authors, CI |
-| Ownership transfer | operation handles, owner tokens | `MoveOwned` | current token holder | sanctioned transfer APIs only | projections, render, diagnostics |
+| Harness executor / wait model | `aura-harness::executor`, `backend::*` | `Observed` + orchestration `ActorOwned` | harness coordinator | harness orchestration state only | scenario authors, CI |
+| Ownership transfer / stale-owner invalidation | operation handles, owner tokens | `MoveOwned` | current token holder | sanctioned transfer APIs only | projections, render, diagnostics |
 
 The required split is that actor-owned subsystems own long-lived mutable async state and lifecycle. Move-owned surfaces own exclusive right-to-act and ownership transfer. Observed surfaces render, wait, and diagnose without authoring semantic truth.
 

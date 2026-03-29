@@ -436,7 +436,7 @@ impl ChatService {
 }
 ```
 
-This keeps the domain crate pure without tokio or `RwLock`. It is testable with mock effects and consistent across crates.
+This keeps the domain crate pure without Tokio-specific locking or runtime coupling. It is testable with mock effects and consistent across crates.
 
 ## 8. Testing Choreographies
 
