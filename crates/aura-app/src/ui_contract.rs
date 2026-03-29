@@ -4587,15 +4587,15 @@ mod tests {
             .and_then(Path::parent)
             .expect("workspace root");
         let web_source =
-            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness_bridge.rs"))
-                .unwrap_or_else(|error| panic!("failed to read harness bridge source: {error}"));
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/shell/app.rs"))
+                .unwrap_or_else(|error| panic!("failed to read aura-web source: {error}"));
         let ui_source =
             std::fs::read_to_string(workspace_root.join("crates/aura-ui/src/components.rs"))
                 .unwrap_or_else(|error| panic!("failed to read aura-ui source: {error}"));
 
         assert!(
-            web_source.contains(".web_dom_id()"),
-            "web harness bridge must reference shared contract DOM id helpers"
+            web_source.contains(".required_dom_id(") || web_source.contains(".web_dom_id()"),
+            "aura-web must reference shared contract DOM id helpers"
         );
         assert!(
             ui_source.contains("list_item_dom_id(") && ui_source.contains(".web_dom_id()"),
@@ -5115,7 +5115,7 @@ mod tests {
     fn frontend_settings_sources_use_shared_section_ids() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let web_model_path = repo_root.join("crates/aura-ui/src/model/settings.rs");
-        let tui_types_path = repo_root.join("crates/aura-terminal/src/tui/types.rs");
+        let tui_types_path = repo_root.join("crates/aura-terminal/src/tui/types/settings.rs");
         let tui_export_path =
             repo_root.join("crates/aura-terminal/src/tui/harness_state/snapshot.rs");
 
@@ -5300,7 +5300,9 @@ mod tests {
         let chat = shared_screen_module_map(ScreenId::Chat);
         assert_eq!(chat.web_symbol, "ChatScreen");
         assert_eq!(chat.tui_symbol, "ChatScreen");
-        assert!(chat.web_path.ends_with("crates/aura-ui/src/app/screens/chat.rs"));
+        assert!(chat
+            .web_path
+            .ends_with("crates/aura-ui/src/app/screens/chat.rs"));
         assert!(chat
             .tui_path
             .ends_with("crates/aura-terminal/src/tui/screens/chat/screen.rs"));
