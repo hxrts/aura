@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+autoexamples = false
 
 [lints]
 workspace = true
@@ -102,3 +103,15 @@ criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 telltale-vm = { workspace = true }
+
+[[bench]]
+name = "context_propagation"
+harness = false
+
+[[bench]]
+name = "effect_system"
+harness = false
+
+[[bench]]
+name = "handler_performance"
+harness = false
