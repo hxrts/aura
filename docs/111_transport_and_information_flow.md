@@ -127,14 +127,14 @@ A sync round begins by loading the local `Journal` and operation log, then compu
 ```rust
 pub struct JournalDigest {
     pub operation_count: u64,
-    pub last_epoch: Epoch,
+    pub last_epoch: Option<u64>,
     pub operation_hash: Hash32,
     pub fact_hash: Hash32,
     pub caps_hash: Hash32,
 }
 ```
 
-The `operation_count` is the number of operations in the local op log. The `last_epoch` is the max parent_epoch observed. The `operation_hash` is computed by streaming op fingerprints in deterministic order. The `fact_hash` and `caps_hash` use canonical serialization (DAG-CBOR) then hash.
+The `operation_count` is the number of operations in the local op log. The `last_epoch` is the max parent_epoch observed, or `None` if the log is empty. The `operation_hash` is computed by streaming op fingerprints in deterministic order. The `fact_hash` and `caps_hash` use canonical serialization (DAG-CBOR) then hash.
 
 ### 11.3 Reconciliation Actions
 
