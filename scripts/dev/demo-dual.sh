@@ -239,13 +239,16 @@ start_web_server() {
   stop_port_listener "$web_port" "web"
 
   : >"$web_log"
+  echo "[demo] building web frontend (this may take several minutes)..." >&2
   ./scripts/web/serve-static.sh "$web_port" >"$web_log" 2>&1 &
   web_server_pid=$!
   echo "$web_server_pid" >"$web_pid_file"
 
   local ready="0"
-  for _ in $(seq 1 180); do
+  local elapsed=0
+  for _ in $(seq 1 600); do
     if ! kill -0 "$web_server_pid" 2>/dev/null; then
+      echo "" >&2
       echo "[demo] static web server exited before becoming reachable" >&2
       tail -n 200 "$web_log" >&2 || true
       exit 1
@@ -255,13 +258,21 @@ start_web_server() {
       break
     fi
     sleep 1
+    elapsed=$((elapsed + 1))
+    if (( elapsed % 15 == 0 )); then
+      local progress
+      progress="$(grep -c 'INFO Compiled' "$web_log" 2>/dev/null || echo 0)"
+      echo "[demo] web build in progress... (${progress} crates compiled, ${elapsed}s elapsed)" >&2
+    fi
   done
 
   if [[ "$ready" != "1" ]]; then
+    echo "" >&2
     echo "[demo] timed out waiting for static web server at $web_url" >&2
     tail -n 200 "$web_log" >&2 || true
     exit 1
   fi
+  echo "[demo] web server ready at $web_url" >&2
 }
 
 set_manual_browser_command() {
