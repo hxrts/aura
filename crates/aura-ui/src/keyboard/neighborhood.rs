@@ -1,7 +1,7 @@
 use super::set_toast;
 use crate::model::{
-    AccessDepth, AccessOverrideModalState, ActiveModal, CapabilityConfigModalState, SelectedHome,
-    TextModalState, UiModel,
+    AccessDepth, AccessOverrideModalState, ActiveModal, CapabilityConfigModalState,
+    SelectedHome, TextModalState, UiModel,
 };
 
 pub(super) fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
@@ -13,14 +13,6 @@ pub(super) fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
         'a' => {
             model.modal_hint = "Accept Invitation".to_string();
             model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState::default()));
-        }
-        'd' => {
-            model.access_depth = model.access_depth.next();
-            set_toast(
-                model,
-                'ℹ',
-                format!("Access depth set to {} access", model.access_depth.label()),
-            );
         }
         'm' => {}
         'v' => {}

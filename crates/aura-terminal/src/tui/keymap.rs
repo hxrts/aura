@@ -193,14 +193,6 @@ const NEIGHBORHOOD_BINDINGS: &[KeyBinding] = &[
         "Neighborhood",
         true,
     ),
-    KeyBinding::new(
-        "d",
-        "d",
-        "Depth",
-        "Cycle traversal depth",
-        "Neighborhood",
-        true,
-    ),
     KeyBinding::new("n", "n", "New", "Create home", "Neighborhood", true),
     KeyBinding::new(
         "m",

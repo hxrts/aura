@@ -296,12 +296,9 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn complete_runtime_enter_home(&self, name: &str, depth: AccessDepth) {
+    pub fn complete_runtime_enter_home(&self, home_id: &str, name: &str, depth: AccessDepth) {
         let mut model = write_model(&self.model);
-        model.select_home(
-            format!("home-{}", name.to_lowercase().replace(' ', "-")),
-            name.to_string(),
-        );
+        model.select_home(home_id.to_string(), name.to_string());
         model.access_depth = depth;
         model.neighborhood_mode = NeighborhoodMode::Detail;
         model.selected_neighborhood_member_key = None;

@@ -239,7 +239,7 @@ start_web_server() {
   stop_port_listener "$web_port" "web"
 
   : >"$web_log"
-  echo "[demo] building web frontend (this may take several minutes)..." >&2
+  printf "[demo] building web frontend... (0 crates, 0s)" >&2
   ./scripts/web/serve-static.sh "$web_port" >"$web_log" 2>&1 &
   web_server_pid=$!
   echo "$web_server_pid" >"$web_pid_file"
@@ -259,10 +259,10 @@ start_web_server() {
     fi
     sleep 1
     elapsed=$((elapsed + 1))
-    if (( elapsed % 15 == 0 )); then
+    if (( elapsed % 5 == 0 )); then
       local progress
       progress="$(grep -c 'INFO Compiled' "$web_log" 2>/dev/null || echo 0)"
-      echo "[demo] web build in progress... (${progress} crates compiled, ${elapsed}s elapsed)" >&2
+      printf "\r[demo] building web frontend... (%s crates, %ss)" "$progress" "$elapsed" >&2
     fi
   done
 
@@ -272,7 +272,7 @@ start_web_server() {
     tail -n 200 "$web_log" >&2 || true
     exit 1
   fi
-  echo "[demo] web server ready at $web_url" >&2
+  printf "\r[demo] web server ready at %s%s\n" "$web_url" "$(printf ' %.0s' {1..30})" >&2
 }
 
 set_manual_browser_command() {

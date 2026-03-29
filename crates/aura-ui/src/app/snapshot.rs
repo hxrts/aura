@@ -88,13 +88,22 @@ pub(in crate::app) fn runtime_semantic_snapshot(
         );
     }
 
-    let selected_home_id = model.selected_home_id().map(str::to_string).or_else(|| {
-        neighborhood_runtime
-            .homes
-            .iter()
-            .find(|home| home.name == neighborhood_runtime.active_home_name)
-            .map(|home| home.id.clone())
-    });
+    let selected_home_id = model
+        .selected_home_id()
+        .filter(|selected_id| {
+            neighborhood_runtime
+                .homes
+                .iter()
+                .any(|home| home.id == *selected_id)
+        })
+        .map(str::to_string)
+        .or_else(|| {
+            neighborhood_runtime
+                .homes
+                .iter()
+                .find(|home| home.name == neighborhood_runtime.active_home_name)
+                .map(|home| home.id.clone())
+        });
     let homes = neighborhood_runtime
         .homes
         .iter()

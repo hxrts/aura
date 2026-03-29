@@ -53,12 +53,17 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
 
     let (depth_icon, depth_label) = (enter_depth.icon().to_string(), enter_depth.label());
 
-    let can_enter_full = homes.get(selected).map(|b| b.can_enter).unwrap_or(false);
-
-    let can_enter_line = format!(
-        "Can enter: Limited ✔ Partial ✔ Full {}",
-        if can_enter_full { "✔" } else { "✖" }
-    );
+    let strongest_access_label = homes
+        .get(selected)
+        .map(|home| {
+            if home.can_enter {
+                AccessLevel::Full.label()
+            } else {
+                AccessLevel::Partial.label()
+            }
+        })
+        .unwrap_or("--");
+    let can_enter_line = format!("Entry access: {strongest_access_label}");
 
     element! {
         View(

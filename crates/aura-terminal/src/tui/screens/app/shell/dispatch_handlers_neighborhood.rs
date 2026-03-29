@@ -3,6 +3,7 @@ use super::*;
 
 use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui_contract::SemanticOperationKind;
+use crate::tui::types::AccessLevel;
 
 pub(super) fn handle_neighborhood_dispatch(
     dispatch_cmd: DispatchCommand,
@@ -27,20 +28,19 @@ pub(super) fn handle_neighborhood_dispatch(
                     // Keep entered_home_id authoritative as a real home ID.
                     // The state-machine layer sets an index sentinel first.
                     new_state.neighborhood.entered_home_id = Some(home_id.clone());
-                    // Default to Limited-level traversal depth
-                    (cb.neighborhood.on_enter_home)(
-                        home_id.clone(),
-                        new_state.neighborhood.enter_depth,
-                    );
+                    new_state.neighborhood.enter_depth = AccessLevel::Full;
+                    (cb.neighborhood.on_enter_home)(home_id.clone(), AccessLevel::Full);
                 } else {
                     new_state.toast_error("No home selected");
                 }
             }
         }
         DispatchCommand::GoHome => {
+            new_state.neighborhood.enter_depth = AccessLevel::Full;
             (cb.neighborhood.on_go_home)();
         }
         DispatchCommand::BackToLimited => {
+            new_state.neighborhood.enter_depth = AccessLevel::Limited;
             (cb.neighborhood.on_back_to_limited)();
         }
         DispatchCommand::OpenHomeCreate => {

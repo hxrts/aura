@@ -525,7 +525,7 @@ fn help_modal_content(screen: ScreenId) -> (Vec<String>, Vec<(String, String)>) 
         ],
         ScreenId::Neighborhood => vec![
             "Neighborhood reference".to_string(),
-            "Browse homes, access depth, and neighborhood detail views.".to_string(),
+            "Browse homes and neighborhood detail views.".to_string(),
         ],
         ScreenId::Chat => vec![
             "Chat reference".to_string(),
@@ -562,7 +562,6 @@ fn help_modal_content(screen: ScreenId) -> (Vec<String>, Vec<(String, String)>) 
             ("enter".to_string(), "Toggle map/detail view".to_string()),
             ("a".to_string(), "Accept home invitation".to_string()),
             ("n".to_string(), "Create home".to_string()),
-            ("d".to_string(), "Cycle access depth".to_string()),
             ("esc".to_string(), "Close modal / back out".to_string()),
         ],
         ScreenId::Chat => vec![

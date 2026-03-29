@@ -110,31 +110,11 @@ fn keyboard_binding_to_help_command(binding: &KeyBinding) -> HelpCommand {
     )
 }
 
-fn neighborhood_depth_descriptions() -> Vec<HelpCommand> {
-    vec![
-        HelpCommand::new("Limited", "", "View blocks, no interaction", "Neighborhood"),
-        HelpCommand::new(
-            "Partial",
-            "",
-            "Limited interaction, request entry",
-            "Neighborhood",
-        ),
-        HelpCommand::new(
-            "Full",
-            "",
-            "Full access to member/channel views",
-            "Neighborhood",
-        ),
-    ]
-}
-
 /// Get all keyboard shortcuts organized by category
 #[must_use]
 pub fn get_help_commands() -> Vec<HelpCommand> {
-    let mut commands: Vec<HelpCommand> = keyboard_help_bindings_for_screen(None)
+    keyboard_help_bindings_for_screen(None)
         .iter()
         .map(keyboard_binding_to_help_command)
-        .collect();
-    commands.extend(neighborhood_depth_descriptions());
-    commands
+        .collect()
 }

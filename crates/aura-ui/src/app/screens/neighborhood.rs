@@ -26,13 +26,6 @@ pub(super) fn NeighborhoodScreen(
             }
         })
         .unwrap_or_else(|| "Neighborhood".to_string());
-    let access_label = model.access_depth.label().to_string();
-    let access_tone = match model.access_depth.label() {
-        "Full" => PillTone::Success,
-        "Partial" => PillTone::Info,
-        _ => PillTone::Neutral,
-    };
-    let hop_hint = neighborhood_hop_hint(model.access_depth.label());
     let show_detail_lists = is_detail && matches!(model.access_depth, AccessDepth::Full);
     let mut home_rows = runtime.homes.clone();
     if home_rows.is_empty() {
@@ -192,15 +185,23 @@ pub(super) fn NeighborhoodScreen(
     let can_enter_selected_home = selected_runtime_home
         .map(|home| home.can_enter)
         .unwrap_or_else(|| enter_target_home_id.is_some());
+    let strongest_access_label = if can_enter_selected_home {
+        "Full"
+    } else {
+        "Partial"
+    };
+    let strongest_access_tone = if can_enter_selected_home {
+        PillTone::Success
+    } else {
+        PillTone::Info
+    };
     let detail_back_controller = controller.clone();
-    let detail_depth_controller = controller.clone();
     let detail_moderator_controller = controller.clone();
     let detail_access_override_controller = controller.clone();
     let detail_capability_controller = controller.clone();
     let map_enter_controller = controller.clone();
     let map_new_home_controller = controller.clone();
     let map_accept_invitation_controller = controller.clone();
-    let map_depth_controller = controller.clone();
 
     rsx! {
         div {
@@ -208,7 +209,7 @@ pub(super) fn NeighborhoodScreen(
             UiCard {
                 title: if is_detail { "Home".to_string() } else { "Map".to_string() },
                 subtitle: Some(if is_detail {
-                    format!("Access: {access_label} ({hop_hint})")
+                    format!("Entry access: {strongest_access_label}")
                 } else {
                     "Explore your neighboring network".to_string()
                 }),
@@ -222,7 +223,7 @@ pub(super) fn NeighborhoodScreen(
                             p { class: "m-0 mt-1 text-sm text-foreground", "Name: {selected_home}" }
                             p {
                                 class: "m-0 mt-1 text-xs text-muted-foreground",
-                                "Members/Participants: {member_count} • Access: {access_label} • Mode: {social_mode_label}"
+                                "Members/Participants: {member_count} • Entry access: {strongest_access_label} • Mode: {social_mode_label}"
                             }
                         }
                         if show_detail_lists {
@@ -333,15 +334,6 @@ pub(super) fn NeighborhoodScreen(
                                         render_tick.set(render_tick() + 1);
                                     }
                                 }
-                                UiButton {
-                                    label: format!("Enter As: {access_label}"),
-                                    variant: ButtonVariant::Secondary,
-                                    width_class: Some("w-[9rem]".to_string()),
-                                    onclick: move |_| {
-                                        detail_depth_controller.send_action_keys("d");
-                                        render_tick.set(render_tick() + 1);
-                                    }
-                                }
                                 if show_detail_lists {
                                     UiButton {
                                         label: if selected_runtime_member.as_ref().map(|member| member.is_moderator).unwrap_or(false) {
@@ -380,7 +372,7 @@ pub(super) fn NeighborhoodScreen(
                     UiCardBody {
                         extra_class: Some("gap-3".to_string()),
                         div { class: "flex flex-wrap gap-2",
-                            UiPill { label: format!("Access: {access_label}"), tone: access_tone }
+                            UiPill { label: format!("Entry access: {strongest_access_label}"), tone: strongest_access_tone }
                             UiPill {
                                 label: if home_rows.is_empty() {
                                     "Known Homes: 0".to_string()
@@ -440,19 +432,42 @@ pub(super) fn NeighborhoodScreen(
                         }
                         div {
                             class: "rounded-sm bg-background/60 px-3 py-3",
-                            p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Traversal" }
+                            p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Access" }
                             p {
                                 class: "m-0 mt-1 text-sm text-foreground",
-                                "Can enter: Limited, Partial, Full"
+                                "Entry access: {strongest_access_label}"
                             }
                             p {
                                 class: "m-0 mt-1 text-xs text-muted-foreground",
-                                "Current depth is {access_label} ({hop_hint}). Select a home, then enter it."
+                                "Select a home, then enter it. Aura uses the strongest available access automatically."
                             }
                         }
                         UiCardFooter {
                             extra_class: None,
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
+                                UiButton {
+                                    id: Some(ControlId::NeighborhoodNewHomeButton.web_dom_id().required_dom_id("ControlId::NeighborhoodNewHomeButton must define a web DOM id").to_string()),
+                                    label: "New Home".to_string(),
+                                    variant: ButtonVariant::Primary,
+                                    onclick: move |_| {
+                                        map_new_home_controller.send_action_keys("n");
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                }
+                                UiButton {
+                                    id: Some(
+                                        ControlId::NeighborhoodAcceptInvitationButton
+                                            .web_dom_id()
+                                            .required_dom_id("ControlId::NeighborhoodAcceptInvitationButton must define a web DOM id")
+                                            .to_string(),
+                                    ),
+                                    label: "Accept Invitation".to_string(),
+                                    variant: ButtonVariant::Secondary,
+                                    onclick: move |_| {
+                                        map_accept_invitation_controller.send_action_keys("a");
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                }
                                 if can_enter_selected_home {
                                     UiButton {
                                         label: "Enter Home".to_string(),
@@ -460,7 +475,7 @@ pub(super) fn NeighborhoodScreen(
                                         onclick: {
                                             let controller = map_enter_controller;
                                             let home_name = selected_home.clone();
-                                            let depth = model.access_depth;
+                                            let depth = AccessDepth::Full;
                                             let target_home_id = enter_target_home_id;
                                             move |_| {
                                                 let Some(target_home_id) = target_home_id.clone() else {
@@ -488,6 +503,7 @@ pub(super) fn NeighborhoodScreen(
                                                         Ok(_) => {
                                                             operation.succeed(None);
                                                             controller.complete_runtime_enter_home(
+                                                                &target_home_id,
                                                                 &home_name,
                                                                 depth,
                                                             );
@@ -509,44 +525,6 @@ pub(super) fn NeighborhoodScreen(
                                                 });
                                             }
                                         }
-                                    }
-                                }
-                                UiButton {
-                                    id: Some(ControlId::NeighborhoodNewHomeButton.web_dom_id().required_dom_id("ControlId::NeighborhoodNewHomeButton must define a web DOM id").to_string()),
-                                    label: "New Home".to_string(),
-                                    variant: ButtonVariant::Primary,
-                                    onclick: move |_| {
-                                        map_new_home_controller.send_action_keys("n");
-                                        render_tick.set(render_tick() + 1);
-                                    }
-                                }
-                                UiButton {
-                                    id: Some(
-                                        ControlId::NeighborhoodAcceptInvitationButton
-                                            .web_dom_id()
-                                            .required_dom_id("ControlId::NeighborhoodAcceptInvitationButton must define a web DOM id")
-                                            .to_string(),
-                                    ),
-                                    label: "Accept Invitation".to_string(),
-                                    variant: ButtonVariant::Secondary,
-                                    onclick: move |_| {
-                                        map_accept_invitation_controller.send_action_keys("a");
-                                        render_tick.set(render_tick() + 1);
-                                    }
-                                }
-                                UiButton {
-                                    id: Some(
-                                        ControlId::NeighborhoodEnterAsButton
-                                            .web_dom_id()
-                                            .required_dom_id("ControlId::NeighborhoodEnterAsButton must define a web DOM id")
-                                            .to_string(),
-                                    ),
-                                    label: format!("Enter As: {access_label}"),
-                                    variant: ButtonVariant::Secondary,
-                                    width_class: Some("w-[9rem]".to_string()),
-                                    onclick: move |_| {
-                                        map_depth_controller.send_action_keys("d");
-                                        render_tick.set(render_tick() + 1);
                                     }
                                 }
                             }
@@ -572,10 +550,9 @@ pub(super) fn NeighborhoodScreen(
                         active: false,
                     }
                     UiListItem {
-                        label: format!("Access: {access_label} ({hop_hint})"),
+                        label: format!("Entry access: {strongest_access_label}"),
                         secondary: Some(format!(
-                            "{social_mode_label} • {} access",
-                            model.access_depth.label()
+                            "{social_mode_label} view"
                         )),
                         active: false,
                     }
@@ -625,13 +602,5 @@ pub(crate) fn neighborhood_member_selection_key(
         NeighborhoodMemberSelectionKey(format!("authority:{}", member.authority_id))
     } else {
         NeighborhoodMemberSelectionKey(format!("name:{}", member.name))
-    }
-}
-
-fn neighborhood_hop_hint(access_label: &str) -> &'static str {
-    match access_label {
-        "Full" => "0-hop",
-        "Partial" => "1-hop",
-        _ => "2+ hops/disconnected",
     }
 }

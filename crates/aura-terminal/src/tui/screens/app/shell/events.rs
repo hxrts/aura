@@ -193,21 +193,20 @@ mod tests {
         let source = std::fs::read_to_string(&chat_callbacks_path).unwrap_or_else(|error| {
             panic!("failed to read {}: {error}", chat_callbacks_path.display())
         });
-        let parsed_start = source
-            .find(
-                "let parsed = match aura_app::ui::workflows::strong_command::ParsedCommand::parse(",
-            )
-            .unwrap_or_else(|| panic!("missing slash-command parse path"));
-        let join_callback_start = source[parsed_start..]
+        let join_start = source
             .find("fn make_join_channel(")
-            .map(|offset| parsed_start + offset)
             .unwrap_or_else(|| panic!("missing join-channel callback factory"));
-        let slash_command_branch = &source[parsed_start..join_callback_start];
+        let join_end = source[join_start..]
+            .find("fn make_list_participants(")
+            .map(|offset| join_start + offset)
+            .unwrap_or_else(|| panic!("missing list-participants callback factory"));
+        let join_branch = &source[join_start..join_end];
 
-        assert!(!slash_command_branch.contains("joined_channel_name"));
-        assert!(!slash_command_branch.contains("get_chat_state("));
-        assert!(!slash_command_branch.contains("candidate.name.eq_ignore_ascii_case"));
-        assert!(!slash_command_branch.contains("UiUpdate::ChannelSelected("));
+        assert!(join_branch.contains("join_channel_by_name_with_binding_terminal_status"));
+        assert!(join_branch.contains("UiUpdate::ChannelSelected(binding)"));
+        assert!(!join_branch.contains("joined_channel_name"));
+        assert!(!join_branch.contains("get_chat_state("));
+        assert!(!join_branch.contains("candidate.name.eq_ignore_ascii_case"));
     }
 
     #[test]
@@ -333,7 +332,7 @@ mod tests {
         assert!(source.contains("ui::workflows::slash_commands::prepare_and_execute("));
         assert!(source.contains("let report ="));
         assert!(source.contains(".and_then(|metadata| metadata.semantic_operation.clone())"));
-        assert!(source.contains("LocalTerminalOperationOwner::submit("));
+        assert!(source.contains("submit_local_terminal_operation("));
         assert!(!source.contains("ui::workflows::slash_commands::prepare("));
         assert!(!source.contains("ui::workflows::slash_commands::execute("));
         assert!(!source.contains("parse_chat_command(trimmed)"));

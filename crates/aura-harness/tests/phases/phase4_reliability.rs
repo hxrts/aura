@@ -7,6 +7,24 @@ use std::process::Command;
 
 use aura_harness::screen_normalization::normalize_screen;
 
+fn artifact_run_dir(artifact_root: &std::path::Path, run_name: &str) -> std::path::PathBuf {
+    let run_root = artifact_root.join("harness").join(run_name);
+    let runs_dir = run_root.join("runs");
+    if !runs_dir.exists() {
+        return run_root;
+    }
+    let mut entries = fs::read_dir(&runs_dir)
+        .unwrap_or_else(|error| panic!("failed to read runs dir {}: {error}", runs_dir.display()))
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    entries.sort();
+    entries
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("expected at least one artifact run dir under {}", runs_dir.display()))
+}
+
 #[test]
 fn screen_normalization_removes_volatile_tokens() {
     let raw = "tick 12:34:56 / #99";
@@ -134,7 +152,7 @@ timeout_ms = 10
 
     assert!(!status.success());
 
-    let run_dir = artifacts_path.join("harness").join("timeout-diagnostics");
+    let run_dir = artifact_run_dir(&artifacts_path, "timeout-diagnostics");
     assert!(run_dir.join("failure_diagnostics.json").exists());
     assert!(run_dir
         .join("failure_diagnostics__wait-never.json")

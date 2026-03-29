@@ -79,7 +79,8 @@ mod tests {
         assert!(source.contains("RENDER_HEARTBEAT_PUBLICATION_STATE_KEY"));
         assert!(source.contains("\"degraded\""));
         assert!(source.contains("\"unavailable\""));
-        assert!(source.contains("driver_push_failed"));
+        assert!(source.contains("cache_publish_failed"));
+        assert!(source.contains("heartbeat_publish_failed"));
     }
 
     #[test]
@@ -121,16 +122,11 @@ mod tests {
         });
 
         assert!(source.contains("pub(crate) fn spawn_browser_maintenance_loop<"));
+        assert!(source.contains("fn spawn_generation_maintenance_supervisor("));
         assert!(source.contains("_controller.runtime_error_toast(_pause_message);"));
-
-        let helper_start = source
-            .find("pub(crate) fn spawn_background_sync_loop")
-            .unwrap_or_else(|| panic!("missing spawn_background_sync_loop"));
-        let helper = &source[helper_start..];
-
-        assert!(helper.contains("spawn_browser_maintenance_loop("));
-        assert!(helper.contains("\"Background sync paused; refresh to resume\""));
-        assert!(helper.contains("\"WEB_BACKGROUND_SYNC_SLEEP_FAILED\""));
+        assert!(source.contains("run_background_sync_pass(tick_app_core).await;"));
+        assert!(source.contains("\"Browser maintenance paused; refresh to resume\""));
+        assert!(source.contains("\"WEB_GENERATION_MAINTENANCE_SLEEP_FAILED\""));
     }
 
     #[test]
@@ -145,9 +141,9 @@ mod tests {
             .find("pub(crate) fn spawn_browser_maintenance_loop<")
             .unwrap_or_else(|| panic!("missing spawn_browser_maintenance_loop"));
         let helper_end = source[helper_start..]
-            .find("pub(crate) fn spawn_background_sync_loop(")
+            .find("async fn run_background_sync_pass(")
             .map(|offset| helper_start + offset)
-            .unwrap_or_else(|| panic!("missing spawn_background_sync_loop"));
+            .unwrap_or_else(|| panic!("missing run_background_sync_pass"));
         let helper = &source[helper_start..helper_end];
         let sleep_index = helper
             .find("browser_sleep_ms(")
@@ -170,17 +166,19 @@ mod tests {
         });
 
         let helper_start = source
-            .find("pub(crate) fn spawn_background_sync_loop(")
-            .unwrap_or_else(|| panic!("missing spawn_background_sync_loop"));
+            .find("async fn run_background_sync_pass(")
+            .unwrap_or_else(|| panic!("missing run_background_sync_pass"));
         let helper_end = source[helper_start..]
-            .find("fn spawn_ceremony_acceptance_loop(")
+            .find("async fn run_ceremony_acceptance_pass(")
             .map(|offset| helper_start + offset)
-            .unwrap_or_else(|| panic!("missing spawn_ceremony_acceptance_loop"));
+            .unwrap_or_else(|| panic!("missing run_ceremony_acceptance_pass"));
         let helper = &source[helper_start..helper_end];
 
         assert!(source.contains("async fn yield_browser_maintenance_step("));
         assert!(helper.contains("\"background sync before trigger_discovery\""));
+        assert!(helper.contains("\"background sync before process_ceremony_messages_before_sync\""));
         assert!(helper.contains("\"background sync before trigger_sync\""));
+        assert!(helper.contains("\"background sync before process_ceremony_messages_after_sync\""));
         assert!(helper.contains("\"background sync before refresh_account\""));
         assert!(helper.contains("\"background sync before refresh_discovered_peers\""));
         assert!(helper.contains("\"WEB_BACKGROUND_SYNC_YIELD_FAILED\""));
@@ -194,14 +192,13 @@ mod tests {
             panic!("failed to read {}: {error}", maintenance_path.display())
         });
 
-        let helper_start = source
-            .find("fn spawn_ceremony_acceptance_loop")
-            .unwrap_or_else(|| panic!("missing spawn_ceremony_acceptance_loop"));
-        let helper = &source[helper_start..];
-
-        assert!(helper.contains("spawn_browser_maintenance_loop("));
-        assert!(helper.contains("\"Ceremony acceptance paused; refresh to resume\""));
-        assert!(helper.contains("\"WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED\""));
+        assert!(source.contains("async fn run_ceremony_acceptance_pass(agent: Arc<AuraAgent>)"));
+        assert!(source.contains("\"WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED\""));
+        assert!(source.contains("let run_ceremony = agent.is_some() &&"));
+        assert!(source.contains("if run_ceremony {"));
+        assert!(source.contains("run_ceremony_acceptance_pass(agent).await;"));
+        assert!(source.contains("\"Browser maintenance paused; refresh to resume\""));
+        assert!(source.contains("\"WEB_GENERATION_MAINTENANCE_SLEEP_FAILED\""));
     }
 
     #[test]

@@ -372,18 +372,11 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                 class: "grid place-items-center px-6",
                 div {
                     id: "aura-onboarding-card",
-                    class: "w-full max-w-md rounded-3xl border border-border bg-card px-6 py-8 shadow-sm",
-                    div {
-                        class: "space-y-2",
-                        h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
-                        h2 { class: "text-2xl font-semibold", "Welcome to Aura" }
-                        p {
-                            class: "text-sm text-muted-foreground",
-                            "Create the local account profile for this browser before entering the app."
-                        }
-                    }
+                    class: "w-full max-w-md rounded-sm border border-border bg-card px-6 py-8 shadow-sm",
+                    h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
                     div {
                         class: "mt-6 space-y-4",
+                        h2 { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Create a new account" }
                         label {
                             class: "block space-y-2",
                             span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Nickname" }
@@ -420,6 +413,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                             span { class: "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground", "or" }
                             div { class: "h-px flex-1 bg-border" }
                         }
+                        h2 { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Join existing account" }
                         label {
                             class: "block space-y-2",
                             span { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Device Enrollment Code" }
@@ -441,13 +435,13 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         button {
                             id: ControlId::OnboardingImportDeviceButton
                                 .required_dom_id("ControlId::OnboardingImportDeviceButton"),
-                            class: "inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50",
+                            class: "inline-flex h-10 w-full items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
                             disabled: importing_code() || import_code().trim().is_empty(),
                             onclick: submit_import,
                             if importing_code() {
-                                "Importing Device..."
+                                "Joining Account..."
                             } else {
-                                "Import Device"
+                                "Join Account"
                             }
                         }
                     }

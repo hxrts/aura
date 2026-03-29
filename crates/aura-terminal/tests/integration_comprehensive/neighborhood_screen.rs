@@ -1,4 +1,5 @@
 use super::*;
+use aura_terminal::tui::types::AccessLevel;
 
 #[test]
 fn test_neighborhood_grid_navigation() {
@@ -27,8 +28,10 @@ fn test_neighborhood_enter_home() {
     let mut tui = TestTui::new();
     tui.go_to_screen(Screen::Neighborhood);
     tui.state.neighborhood.home_count = 1;
+    tui.state.neighborhood.enter_depth = AccessLevel::Limited;
     tui.clear_commands();
     tui.send_enter();
+    assert_eq!(tui.state.neighborhood.enter_depth, AccessLevel::Full);
     tui.assert_dispatch(|d| matches!(d, DispatchCommand::EnterHome { .. }));
 }
 
@@ -45,8 +48,10 @@ fn test_neighborhood_go_home() {
 fn test_neighborhood_back_to_limited() {
     let mut tui = TestTui::new();
     tui.go_to_screen(Screen::Neighborhood);
+    tui.state.neighborhood.enter_depth = AccessLevel::Full;
     tui.clear_commands();
     tui.send_char('b');
+    assert_eq!(tui.state.neighborhood.enter_depth, AccessLevel::Limited);
     tui.assert_dispatch(|d| matches!(d, DispatchCommand::BackToLimited));
 }
 

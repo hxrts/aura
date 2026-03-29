@@ -627,7 +627,6 @@ pub enum ControlId {
     ContactsAddGuardianButton,
     ContactsEditNicknameButton,
     ContactsRemoveContactButton,
-    NeighborhoodEnterAsButton,
     ChatNewGroupButton,
     ChatCloseChannelButton,
     ChatRetryMessageButton,
@@ -680,7 +679,6 @@ impl ControlId {
             Self::ContactsAddGuardianButton => Some("aura-contacts-add-guardian"),
             Self::ContactsEditNicknameButton => Some("aura-contacts-edit-nickname"),
             Self::ContactsRemoveContactButton => Some("aura-contacts-remove-contact"),
-            Self::NeighborhoodEnterAsButton => Some("aura-neighborhood-enter-as"),
             Self::ChatNewGroupButton => Some("aura-chat-new-group"),
             Self::ChatCloseChannelButton => Some("aura-chat-close-channel"),
             Self::ChatRetryMessageButton => Some("aura-chat-retry-message"),
@@ -736,7 +734,6 @@ impl ControlId {
             Self::ContactsCreateInvitationButton => Some("n"),
             Self::ContactsInviteToChannelButton => Some("i"),
             Self::ContactsAddGuardianButton => Some("g"),
-            Self::NeighborhoodEnterAsButton => Some("d"),
             Self::ChatNewGroupButton => Some("n"),
             Self::ChatCloseChannelButton => Some("x"),
             Self::ChatRetryMessageButton => Some("r"),
@@ -4643,10 +4640,6 @@ mod tests {
             Some("#aura-modal-confirm-button")
         );
         assert_eq!(
-            ControlId::NeighborhoodEnterAsButton.web_dom_id(),
-            Some("aura-neighborhood-enter-as")
-        );
-        assert_eq!(
             ControlId::ChatNewGroupButton.web_dom_id(),
             Some("aura-chat-new-group")
         );
@@ -4742,7 +4735,6 @@ mod tests {
             ControlId::ContactsCreateInvitationButton,
             ControlId::ContactsInviteToChannelButton,
             ControlId::ContactsAddGuardianButton,
-            ControlId::NeighborhoodEnterAsButton,
             ControlId::ChatNewGroupButton,
             ControlId::ChatCloseChannelButton,
             ControlId::ChatRetryMessageButton,

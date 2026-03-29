@@ -574,6 +574,56 @@ mod tests {
     }
 
     #[test]
+    fn runtime_semantic_snapshot_ignores_stale_local_home_selection_without_matching_runtime_row(
+    ) -> Result<(), &'static str> {
+        let mut model = UiModel::new("authority-test".to_string());
+        model.select_home("home-sam's-home", "Sam's Home");
+        let neighborhood_runtime = NeighborhoodRuntimeView {
+            loaded: true,
+            active_home_name: "Shared Home".to_string(),
+            active_home_id: "channel:home-1".to_string(),
+            homes: vec![NeighborhoodRuntimeHome {
+                id: "channel:home-1".to_string(),
+                name: "Shared Home".to_string(),
+                member_count: Some(1),
+                can_enter: true,
+                is_local: true,
+            }],
+            ..NeighborhoodRuntimeView::default()
+        };
+
+        let snapshot = runtime_semantic_snapshot(
+            &model,
+            &neighborhood_runtime,
+            &ChatRuntimeView::default(),
+            &ContactsRuntimeView::default(),
+            &SettingsRuntimeView::default(),
+            &NotificationsRuntimeView::default(),
+        );
+
+        snapshot
+            .validate_invariants()
+            .map_err(|_| "stale local home selection must not violate list-selection invariants")?;
+        let homes = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Homes)
+            .ok_or("homes list should be exported")?;
+        assert!(
+            homes
+                .items
+                .iter()
+                .any(|item| item.id == "channel:home-1" && item.selected),
+            "runtime active home should become the selected exported row when local selection is stale"
+        );
+        assert_eq!(
+            snapshot.selected_item_id(ListId::Homes),
+            Some("channel:home-1")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn runtime_semantic_snapshot_keeps_current_device_distinct_from_selection(
     ) -> Result<(), &'static str> {
         let model = UiModel::new("authority-test".to_string());
@@ -684,5 +734,18 @@ mod tests {
             &NotificationsRuntimeView::default(),
         );
         assert_eq!(ready_snapshot.readiness, UiReadiness::Ready);
+    }
+
+    #[test]
+    fn neighborhood_screen_uses_automatic_full_access_and_no_enter_as_control() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let neighborhood_path = repo_root.join("crates/aura-ui/src/app/screens/neighborhood.rs");
+        let source = std::fs::read_to_string(&neighborhood_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", neighborhood_path.display()));
+
+        assert!(source.contains("let depth = AccessDepth::Full;"));
+        assert!(!source.contains("NeighborhoodEnterAsButton"));
+        assert!(!source.contains("Enter As:"));
+        assert!(!source.contains("send_action_keys(\"d\")"));
     }
 }

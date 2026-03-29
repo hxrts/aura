@@ -10,7 +10,7 @@ use aura_core::effects::terminal::{KeyCode, KeyEvent};
 use crate::tui::layout::dim;
 use crate::tui::navigation::{navigate_list, NavKey, TwoPanelFocus};
 use crate::tui::state::ContactsListFocus;
-use crate::tui::types::SettingsSection;
+use crate::tui::types::{AccessLevel, SettingsSection};
 
 use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::QueuedModal;
@@ -254,16 +254,10 @@ pub fn handle_neighborhood_key(
             KeyCode::Right | KeyCode::Char('l') => {
                 state.neighborhood.grid.navigate(NavKey::Right);
             }
-            KeyCode::Char('d') => {
-                state.neighborhood.enter_depth = state.neighborhood.enter_depth.next();
-                state.toast_info(format!(
-                    "Enter as: {}",
-                    state.neighborhood.enter_depth.label()
-                ));
-            }
             KeyCode::Enter => {
                 if state.neighborhood.home_count > 0 {
                     state.neighborhood.mode = NeighborhoodMode::Detail;
+                    state.neighborhood.enter_depth = AccessLevel::Full;
                     state.neighborhood.entered_home_id =
                         Some(state.neighborhood.selected_home.to_string());
                     commands.push(TuiCommand::Dispatch(DispatchCommand::EnterHome));
@@ -301,6 +295,7 @@ pub fn handle_neighborhood_key(
                 commands.push(TuiCommand::Dispatch(DispatchCommand::GoHome));
             }
             KeyCode::Char('b') | KeyCode::Esc | KeyCode::Backspace => {
+                state.neighborhood.enter_depth = AccessLevel::Limited;
                 commands.push(TuiCommand::Dispatch(DispatchCommand::BackToLimited));
             }
             _ => {}
@@ -308,6 +303,7 @@ pub fn handle_neighborhood_key(
         NeighborhoodMode::Detail => match key.code {
             KeyCode::Esc => {
                 state.neighborhood.mode = NeighborhoodMode::Map;
+                state.neighborhood.enter_depth = AccessLevel::Limited;
                 state.neighborhood.insert_mode = false;
                 state.neighborhood.insert_mode_entry_char = None;
                 state.neighborhood.entered_home_id = None;
