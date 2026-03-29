@@ -76,7 +76,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
         with:
-          cache-name: semantic-drift
+          cache-name: semantic-drift-v2
       - run: nix develop .#ci --command just ci-docs-semantic-drift
       - name: Failure bundle
         if: failure()
