@@ -36,7 +36,6 @@ use aura_relational::ContactFact;
 
 use super::identities::{demo_authority_id, demo_context_id, demo_device_id, GuardianAcceptance};
 use crate::error::TerminalResult;
-use crate::ids;
 use crate::tui::tasks::UiTaskOwner;
 
 const EXTENDED_DEMO_PEER_NAMES: [&str; 13] = [

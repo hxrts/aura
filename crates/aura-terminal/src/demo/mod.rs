@@ -40,7 +40,6 @@ use crate::error::{TerminalError, TerminalResult};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
-use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, Mutex};
@@ -270,8 +269,8 @@ impl SimulatedAgent {
         shared_inbox: Option<Arc<parking_lot::RwLock<Vec<aura_core::effects::TransportEnvelope>>>>,
     ) -> TerminalResult<Self> {
         // Create deterministic identifiers derived from seed and name
-        let device_id = demo_device_id(config.seed, name);
-        let authority_id = demo_authority_id(config.seed, name);
+        let device_id = demo_device_id(config.seed, &name);
+        let authority_id = demo_authority_id(config.seed, &name);
 
         // Create simulation environment with optional shared transport
         // IMPORTANT: the simulator transport inbox is addressed by AuthorityId (not DeviceId).
