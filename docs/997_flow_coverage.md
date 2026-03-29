@@ -151,6 +151,7 @@ Every parity-critical shared flow should have, in code and metadata:
 - semantic action contracts with preconditions and terminal success/failure conditions
 - an authoritative readiness, event, or quiescence owner for waits
 - any parity exception recorded as typed metadata in `aura-app::ui_contract`
+  with a reason code, scope, affected surface, and authoritative doc reference
 - at least one canonical scenario reference in this report
 
 Shared-flow scenarios must not rely on raw PTY keys, raw selector clicks, raw label matching, or incidental focus-stepping as their primary mechanics. Those behaviors belong in frontend-conformance coverage instead.
