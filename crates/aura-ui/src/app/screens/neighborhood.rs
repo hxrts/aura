@@ -190,7 +190,7 @@ pub(super) fn NeighborhoodScreen(
     } else {
         "Partial"
     };
-    let strongest_access_tone = if can_enter_selected_home {
+    let _strongest_access_tone = if can_enter_selected_home {
         PillTone::Success
     } else {
         PillTone::Info

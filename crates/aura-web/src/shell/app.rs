@@ -225,6 +225,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                     }
                     .await;
 
+                    // Guard signal writes — component may have unmounted during async work.
                     match result {
                         Ok(result) => {
                             if result.accepted {
@@ -239,7 +240,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                                 scheduled_controller
                                     .info_toast("Switching runtime to finish import");
                             }
-                            importing_code.set(false);
+                            let _ = importing_code.try_write().map(|mut v| *v = false);
                         }
                         Err(error) => {
                             let message = error.user_message();
@@ -248,8 +249,8 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                                 "",
                                 Some(message.clone()),
                             );
-                            import_error.set(Some(error));
-                            importing_code.set(false);
+                            let _ = import_error.try_write().map(|mut v| *v = Some(error));
+                            let _ = importing_code.try_write().map(|mut v| *v = false);
                         }
                     }
                 });
@@ -260,8 +261,8 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                     format!("{error:?}"),
                 );
                 controller.set_account_setup_state(false, "", Some(error.user_message()));
-                import_error.set(Some(error));
-                importing_code.set(false);
+                let _ = import_error.try_write().map(|mut v| *v = Some(error));
+                let _ = importing_code.try_write().map(|mut v| *v = false);
             }
         }
     });
@@ -306,6 +307,8 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                 }
                 .await;
 
+                // Guard signal writes — the component may have unmounted during
+                // the async bootstrap handoff (e.g., on timeout + re-bootstrap).
                 match result {
                     Ok(result) => {
                         web_sys::console::log_1(&"[web-onboarding] submit_account ok".into());
@@ -314,7 +317,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         } else {
                             controller.info_toast("Finishing account bootstrap");
                         }
-                        creating_account.set(false);
+                        let _ = creating_account.try_write().map(|mut v| *v = false);
                     }
                     Err(error) => {
                         log_web_error("error", &error);
@@ -324,8 +327,8 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                             nickname.clone(),
                             Some(message.clone()),
                         );
-                        account_error.set(Some(error));
-                        creating_account.set(false);
+                        let _ = account_error.try_write().map(|mut v| *v = Some(error));
+                        let _ = creating_account.try_write().map(|mut v| *v = false);
                     }
                 }
             });
@@ -369,7 +372,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
             div {
                 id: ControlId::OnboardingRoot
                     .required_dom_id("ControlId::OnboardingRoot"),
-                class: "grid place-items-center px-6",
+                class: "w-full max-w-xl",
                 div {
                     id: "aura-onboarding-card",
                     class: "w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl",
