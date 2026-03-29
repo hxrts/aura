@@ -345,6 +345,9 @@
             # WASM tools (for agent-wasm CI)
             wasm-pack
             wasm-bindgen-cli
+
+            # Browser/build tooling used by harness and web checks
+            nodejs_20
           ];
 
           shellHook = ''

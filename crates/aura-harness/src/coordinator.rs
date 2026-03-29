@@ -16,7 +16,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 use std::process::{Child, Command, Stdio};
-use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -381,7 +380,7 @@ impl HarnessCoordinator {
             let instance_id = id.clone();
             handles.push((
                 instance_id.clone(),
-                thread::spawn(move || {
+                std::thread::spawn(move || {
                     let mut backend = backend;
                     let backend_kind = backend.backend_kind();
                     let result = (|| -> Result<()> {

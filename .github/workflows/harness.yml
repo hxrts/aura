@@ -121,7 +121,7 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: harness-browser
-      - run: nix develop --command just ci-harness-browser
+      - run: nix develop .#ci --command just ci-harness-browser
         env:
           PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1"
       - name: Upload browser harness artifacts
@@ -136,7 +136,7 @@ jobs:
         uses: ./.github/actions/failure-bundle
         with:
           name: harness-deep
-          replay-command: nix develop --command just ci-harness-browser
+          replay-command: nix develop .#ci --command just ci-harness-browser
 
   matrix-tui:
     name: Harness Matrix TUI
@@ -164,7 +164,7 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: harness-matrix-web
-      - run: nix develop --command just ci-harness-matrix-web
+      - run: nix develop .#ci --command just ci-harness-matrix-web
         env:
           PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS: "1"
       - name: Upload browser harness artifacts
@@ -179,4 +179,4 @@ jobs:
         uses: ./.github/actions/failure-bundle
         with:
           name: harness-deep
-          replay-command: nix develop --command just ci-harness-matrix-web
+          replay-command: nix develop .#ci --command just ci-harness-matrix-web

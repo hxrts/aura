@@ -45,13 +45,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: crate-links
-      - run: nix develop --command just ci-crates-doc-links
+      - run: nix develop .#ci --command just ci-crates-doc-links
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: docs
-          replay-command: nix develop --command just ci-crates-doc-links
+          replay-command: nix develop .#ci --command just ci-crates-doc-links
 
   text-formatting:
     name: Text Formatting Check
@@ -61,13 +61,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: text-formatting
-      - run: nix develop --command just ci-text-formatting
+      - run: nix develop .#ci --command just ci-text-formatting
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: docs
-          replay-command: nix develop --command just ci-text-formatting
+          replay-command: nix develop .#ci --command just ci-text-formatting
 
   semantic-drift:
     name: Semantic Drift Check
@@ -77,13 +77,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: semantic-drift
-      - run: nix develop --command just ci-docs-semantic-drift
+      - run: nix develop .#ci --command just ci-docs-semantic-drift
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: docs
-          replay-command: nix develop --command just ci-docs-semantic-drift
+          replay-command: nix develop .#ci --command just ci-docs-semantic-drift
 
   build:
     name: Docs Build

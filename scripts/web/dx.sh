@@ -2,11 +2,42 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/../.." && pwd)"
-lockfile="$repo_root/Cargo.lock"
 
-if [[ ! -f "$lockfile" ]]; then
-  echo "[dx-runner] ERROR: missing Cargo.lock at $lockfile" >&2
+find_workspace_root() {
+  local candidate=""
+
+  if [[ -n "${AURA_WORKSPACE_ROOT:-}" && -f "${AURA_WORKSPACE_ROOT}/Cargo.lock" ]]; then
+    printf '%s\n' "${AURA_WORKSPACE_ROOT}"
+    return 0
+  fi
+
+  if candidate="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)" && [[ -f "$candidate/Cargo.lock" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  for candidate in "$script_dir" "$PWD"; do
+    while [[ "$candidate" != "/" ]]; do
+      if [[ -f "$candidate/Cargo.lock" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+      candidate="$(dirname "$candidate")"
+    done
+  done
+
+  return 1
+}
+
+repo_root="$(find_workspace_root || true)"
+lockfile="${repo_root:+$repo_root/Cargo.lock}"
+
+if [[ -z "$repo_root" || ! -f "$lockfile" ]]; then
+  echo "[dx-runner] ERROR: failed to locate workspace Cargo.lock" >&2
+  echo "[dx-runner] cwd=$PWD" >&2
+  echo "[dx-runner] script_dir=$script_dir" >&2
+  echo "[dx-runner] AURA_WORKSPACE_ROOT=${AURA_WORKSPACE_ROOT:-<unset>}" >&2
+  echo "[dx-runner] last_candidate=${lockfile:-<none>}" >&2
   exit 1
 fi
 
