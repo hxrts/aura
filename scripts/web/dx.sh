@@ -101,6 +101,7 @@ binaryen_root="$cache_root/binaryen/$binaryen_version"
 dx_bin="$dx_root/bin/dx"
 wasm_bin="$wasm_root/bin/wasm-bindgen"
 wasm_opt_bin="$binaryen_root/bin/wasm-opt"
+web_node_bin="$repo_root/crates/aura-web/node_modules/.bin"
 
 if [[ -f Dioxus.toml ]]; then
   mkdir -p public/assets
@@ -135,6 +136,10 @@ if [[ ! -x "$wasm_opt_bin" ]]; then
   if [[ -d "$archive_root/lib" ]]; then
     cp -R "$archive_root/lib/." "$binaryen_root/lib/"
   fi
+fi
+
+if [[ -d "$web_node_bin" ]]; then
+  export PATH="$web_node_bin:$PATH"
 fi
 
 export PATH="$dx_root/bin:$wasm_root/bin:$binaryen_root/bin:$PATH"
