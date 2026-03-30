@@ -883,7 +883,7 @@ ci-lean-build:
 ci-lean-check-sorry:
     #!/usr/bin/env bash
     set -euo pipefail
-    if grep -r "sorry" verification/lean/Aura --include="*.lean" 2>/dev/null; then
+    if bash scripts/check/lean-sorry-check.sh verification/lean/Aura; then
         echo "::warning::Found incomplete proofs (sorry)"
     else
         echo "All proofs complete"
@@ -1359,15 +1359,17 @@ verify-lean jobs="2": lean-init
     #!/usr/bin/env bash
     set -euo pipefail
     GREEN='\033[0;32m' YELLOW='\033[1;33m' NC='\033[0m'
+    sorry_report="$(mktemp)"
+    trap 'rm -f "$sorry_report"' EXIT
     echo "Lean Formal Verification"
     echo "========================"
     echo "Building Lean verification modules (threads={{ jobs }})..."
     cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{ jobs }}
     cd ../..
-    if grep -r "sorry" verification/lean/Aura --include="*.lean" > /tmp/sorry-check.txt 2>/dev/null; then
-        count=$(wc -l < /tmp/sorry-check.txt | tr -d ' ')
+    if bash scripts/check/lean-sorry-check.sh verification/lean/Aura > "$sorry_report"; then
+        count=$(wc -l < "$sorry_report" | tr -d ' ')
         echo -e "${YELLOW}⚠ Found $count incomplete proofs (sorry)${NC}"
-        head -10 /tmp/sorry-check.txt | sed 's/^/  /'
+        head -10 "$sorry_report" | sed 's/^/  /'
     else
         echo -e "${GREEN}✓ All proofs complete${NC}"
     fi

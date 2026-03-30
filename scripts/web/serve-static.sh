@@ -35,6 +35,30 @@ for profile in debug release; do
     ln -s "$source_css" "$target_css"
 done
 
+# Check if any web-relevant source is newer than the build output.
+# If so, clear the dx cache so the next build picks up changes.
+web_sources_stale() {
+    local build_output="$1"
+    if [[ ! -f "$build_output" ]]; then
+        return 0
+    fi
+    local newest_src
+    newest_src="$(find "$repo_root/crates/aura-web/src" "$repo_root/crates/aura-ui/src" "$repo_root/crates/aura-app/src" -name '*.rs' -newer "$build_output" -print -quit 2>/dev/null || true)"
+    [[ -n "$newest_src" ]]
+}
+
+for profile in debug release; do
+    build_output="$repo_root/target/dx/aura-web/$profile/web/public/index.html"
+    if web_sources_stale "$build_output"; then
+        echo "[serve-web-static] source files changed, clearing $profile dx cache"
+        rm -rf "$repo_root/target/dx/aura-web/$profile"
+        mkdir -p "$repo_root/target/dx/aura-web/$profile/web/public/assets" \
+                 "$repo_root/target/dx/aura-web/$profile/web/public/fonts"
+        rm -f "$repo_root/target/dx/aura-web/$profile/web/public/assets/tailwind.css"
+        ln -s "$source_css" "$repo_root/target/dx/aura-web/$profile/web/public/assets/tailwind.css"
+    fi
+done
+
 if [[ -f "$dioxus_config" ]]; then
     config_backup="$(mktemp)"
     cp "$dioxus_config" "$config_backup"

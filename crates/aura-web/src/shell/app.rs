@@ -378,12 +378,12 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                     class: "w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl",
                     // Header
                     div {
-                        class: "bg-card px-4 py-3 border-b border-border text-center",
+                        class: "bg-card px-4 py-3 border-b border-border text-left",
                         h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
                     }
                     // Body
                     div {
-                        class: "px-4 py-4 space-y-4",
+                        class: "px-4 py-6 space-y-4",
                         // Create a new account
                         label {
                             class: "block space-y-2",
@@ -405,7 +405,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         if let Some(error) = account_error() {
                             p { class: "text-sm text-destructive", "{error.user_message()}" }
                         }
-                        div { class: "flex justify-center",
+                        div { class: "flex justify-end",
                             button {
                                 id: ControlId::OnboardingCreateAccountButton
                                     .required_dom_id("ControlId::OnboardingCreateAccountButton"),
@@ -420,7 +420,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                             }
                         }
                         // Divider
-                        div { class: "flex items-center gap-3 py-1",
+                        div { class: "flex items-center gap-3 py-3",
                             div { class: "h-px flex-1 bg-border" }
                             span { class: "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground", "or" }
                             div { class: "h-px flex-1 bg-border" }
@@ -445,7 +445,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                         if let Some(error) = import_error() {
                             p { class: "text-sm text-destructive", "{error.user_message()}" }
                         }
-                        div { class: "flex justify-center",
+                        div { class: "flex justify-end",
                             button {
                                 id: ControlId::OnboardingImportDeviceButton
                                     .required_dom_id("ControlId::OnboardingImportDeviceButton"),
