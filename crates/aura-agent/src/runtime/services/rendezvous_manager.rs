@@ -23,6 +23,7 @@ use aura_core::effects::secure::{
 };
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{CryptoEffects, NoiseEffects};
+use aura_core::service::{EstablishPath, LinkProtocol};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{AuraError, OwnershipCategory};
 use aura_rendezvous::{
@@ -796,7 +797,8 @@ impl RendezvousManager {
                 context_id: descriptor.context_id,
             });
         }
-        let establish_descriptor = Self::relay_first_initial_descriptor(&descriptor);
+        let establish_path = Self::relay_first_initial_path(&descriptor)
+            .ok_or(RendezvousManagerError::PeerDescriptorNotFound { peer })?;
 
         // Retrieve identity keys
         let keys = retrieve_identity_keys(effects, &self.authority_id).await;
@@ -809,11 +811,12 @@ impl RendezvousManager {
                 snapshot,
                 context_id,
                 peer,
+                &establish_path,
                 psk,
                 &local_private_key,
                 &remote_public_key,
                 now_ms,
-                &establish_descriptor,
+                &descriptor,
                 effects,
             )
             .await
@@ -907,18 +910,24 @@ impl RendezvousManager {
         context_id: ContextId,
         peer: AuthorityId,
         interfaces: &LocalInterfaces,
-    ) -> Vec<TransportHint> {
+    ) -> Vec<EstablishPath> {
         let descriptor = self.get_descriptor(context_id, peer).await;
         let Some(descriptor) = descriptor else {
             return Vec::new();
         };
 
         descriptor
-            .transport_hints
+            .advertised_establish_paths()
             .into_iter()
-            .filter(|hint| {
-                !matches!(hint, TransportHint::WebSocketRelay { .. })
-                    && hint.is_recoverable(interfaces)
+            .filter(|path| {
+                path.route.hops.is_empty()
+                    && path
+                        .route
+                        .destination
+                        .address
+                        .as_deref()
+                        .is_some_and(|_| path.route.destination.protocol != LinkProtocol::WebSocketRelay)
+                    && descriptor_supports_local_recovery(&path.route.destination, interfaces)
             })
             .collect()
     }
@@ -1226,20 +1235,13 @@ impl RendezvousManager {
         &self.config
     }
 
-    fn relay_first_initial_descriptor(descriptor: &RendezvousDescriptor) -> RendezvousDescriptor {
-        let relay_hints: Vec<_> = descriptor
-            .transport_hints
-            .iter()
-            .filter(|hint| matches!(hint, TransportHint::WebSocketRelay { .. }))
-            .cloned()
-            .collect();
-        if relay_hints.is_empty() {
-            return descriptor.clone();
-        }
-
-        let mut relay_first = descriptor.clone();
-        relay_first.transport_hints = relay_hints;
-        relay_first
+    fn relay_first_initial_path(descriptor: &RendezvousDescriptor) -> Option<EstablishPath> {
+        let mut paths = descriptor.advertised_establish_paths();
+        paths.sort_by_key(|path| match path.route.destination.protocol {
+            LinkProtocol::WebSocketRelay => 0u8,
+            _ => 1u8,
+        });
+        paths.into_iter().next()
     }
 
     fn relay_first_order(mut hints: Vec<TransportHint>) -> Vec<TransportHint> {
@@ -1253,6 +1255,24 @@ impl RendezvousManager {
     /// Get the authority ID
     pub fn authority_id(&self) -> AuthorityId {
         self.authority_id
+    }
+}
+
+fn descriptor_supports_local_recovery(
+    endpoint: &aura_core::LinkEndpoint,
+    interfaces: &LocalInterfaces,
+) -> bool {
+    match endpoint.protocol {
+        LinkProtocol::WebSocketRelay => false,
+        LinkProtocol::Quic | LinkProtocol::Tcp | LinkProtocol::WebSocket | LinkProtocol::QuicReflexive => {
+            endpoint.address.as_deref().is_some_and(|address| {
+                TransportHint::tcp_direct(address)
+                    .or_else(|_| TransportHint::quic_direct(address))
+                    .or_else(|_| TransportHint::websocket_direct(address))
+                    .map(|hint| hint.is_recoverable(interfaces))
+                    .unwrap_or(false)
+            })
+        }
     }
 }
 
@@ -1817,7 +1837,8 @@ mod tests {
             .direct_upgrade_candidates(test_context(), test_peer(), &interfaces)
             .await;
         assert_eq!(candidates.len(), 1);
-        assert!(matches!(candidates[0], TransportHint::QuicDirect { .. }));
+        assert!(candidates[0].is_direct());
+        assert_eq!(candidates[0].route.destination.protocol, LinkProtocol::Quic);
 
         let interfaces = LocalInterfaces::new();
         let none = manager

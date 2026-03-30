@@ -4,9 +4,9 @@
 //! These facts are stored in context journals and propagated via `aura-sync`.
 
 use aura_core::service::{
-    EstablishDescriptor, LinkEndpoint, LinkProtocol, MoveDescriptor,
-    ServiceDescriptor as AdvertisedServiceDescriptor, ServiceDescriptorHeader,
-    ServiceDescriptorKind, ServiceFamily, ServiceLimits, ServiceProfile,
+    EstablishDescriptor, EstablishPath, LinkEndpoint, LinkProtocol, MoveDescriptor, MovePath,
+    ServiceDescriptor as AdvertisedServiceDescriptor, ServiceDescriptorHeader, ServiceDescriptorKind,
+    ServiceFamily, ServiceLimits, ServiceProfile,
 };
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_journal::extensibility::FactReducer;
@@ -186,6 +186,28 @@ impl RendezvousDescriptor {
             .iter()
             .map(TransportHint::to_link_endpoint)
             .collect()
+    }
+
+    /// Explicit establish paths derived from the advertised establish surface.
+    pub fn advertised_establish_paths(&self) -> Vec<EstablishPath> {
+        self.advertised_service_descriptors()
+            .into_iter()
+            .find_map(|descriptor| match descriptor.kind {
+                ServiceDescriptorKind::Establish(establish) => Some(establish.advertised_paths()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// Explicit move paths derived from the advertised move surface.
+    pub fn advertised_move_paths(&self) -> Vec<MovePath> {
+        self.advertised_service_descriptors()
+            .into_iter()
+            .find_map(|descriptor| match descriptor.kind {
+                ServiceDescriptorKind::Move(mv) => Some(mv.advertised_paths()),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// Service-family advertisements derived from the rendezvous discovery data.
@@ -902,8 +924,12 @@ mod tests {
         };
 
         let endpoints = descriptor.advertised_link_endpoints();
+        let establish_paths = descriptor.advertised_establish_paths();
+        let move_paths = descriptor.advertised_move_paths();
         let services = descriptor.advertised_service_descriptors();
         assert_eq!(endpoints.len(), 2);
+        assert_eq!(establish_paths.len(), 2);
+        assert_eq!(move_paths.len(), 2);
         assert_eq!(services.len(), 2);
         assert!(descriptor.supports_family(ServiceFamily::Establish));
         assert!(descriptor.supports_family(ServiceFamily::Move));

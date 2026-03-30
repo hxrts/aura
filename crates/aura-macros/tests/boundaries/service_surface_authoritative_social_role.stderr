@@ -1,0 +1,5 @@
+error: Establish/Move service_surface objects must stay social-role-neutral
+  --> tests/boundaries/service_surface_authoritative_social_role.rs:10:21
+   |
+10 |     authoritative = "NeighborhoodMoveDescriptor",
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -5,12 +5,13 @@
 //! for the caller to execute effects.
 
 use crate::capabilities::RendezvousCapability;
-use crate::descriptor::{DescriptorBuilder, SelectedTransport, TransportSelector};
+use crate::descriptor::DescriptorBuilder;
 use crate::facts::{RendezvousDescriptor, RendezvousFact, TransportHint};
 use crate::new_channel::{HandshakeConfig, Handshaker, SecureChannel};
 use crate::protocol::{guards, HandshakeComplete, HandshakeInit, NoiseHandshake};
 use aura_core::effects::noise::NoiseEffects;
 use aura_core::effects::CryptoEffects;
+use aura_core::service::EstablishPath;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 use aura_core::{AuraError, AuraResult};
@@ -85,7 +86,7 @@ pub enum GuardRequest {
     /// Establishing a channel with a peer
     EstablishChannel {
         peer: AuthorityId,
-        transport: SelectedTransport,
+        path: EstablishPath,
     },
     /// Handling an incoming handshake
     IncomingHandshake {
@@ -139,7 +140,7 @@ pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
     transfer = "rendezvous_handler_and_transport_effects",
     select = "rendezvous_manager_runtime_cache",
     authoritative = "RendezvousDescriptor,RendezvousFact::ChannelEstablished",
-    runtime_local = "descriptor_snapshot,selected_transport,retry_budget,handshake_registry",
+    runtime_local = "descriptor_snapshot,selected_establish_path,retry_budget,handshake_registry",
     category = "service_surface"
 )]
 pub struct RendezvousService {
@@ -147,8 +148,6 @@ pub struct RendezvousService {
     authority_id: AuthorityId,
     /// Service configuration
     config: RendezvousConfig,
-    /// Transport selector for choosing transports
-    transport_selector: TransportSelector,
     /// Descriptor builder
     descriptor_builder: DescriptorBuilder,
     /// Active handshake state machines (waiting for response or processing init)
@@ -159,7 +158,6 @@ pub struct RendezvousService {
 impl RendezvousService {
     /// Create a new rendezvous service
     pub fn new(authority_id: AuthorityId, config: RendezvousConfig) -> Self {
-        let transport_selector = TransportSelector::new(config.probe_timeout_ms);
         let descriptor_builder = DescriptorBuilder::new(
             authority_id,
             config.descriptor_validity_ms,
@@ -169,7 +167,6 @@ impl RendezvousService {
         Self {
             authority_id,
             config,
-            transport_selector,
             descriptor_builder,
             handshakers: RwLock::new(HashMap::new()),
         }
@@ -270,6 +267,7 @@ impl RendezvousService {
         snapshot: &GuardSnapshot,
         context_id: ContextId,
         peer: AuthorityId,
+        path: &EstablishPath,
         psk: &[u8; 32],
         local_private_key: &[u8], // Ed25519 seed
         remote_public_key: &[u8], // Ed25519 public
@@ -299,7 +297,15 @@ impl RendezvousService {
         }
 
         // Select transport
-        let _transport = self.transport_selector.select(peer_descriptor)?;
+        if !peer_descriptor
+            .advertised_establish_paths()
+            .iter()
+            .any(|candidate| candidate == path)
+        {
+            return Err(AuraError::invalid(
+                "Establish path is not advertised by the peer descriptor",
+            ));
+        }
 
         // Compute PSK commitment
         let psk_commitment = compute_psk_commitment(psk);
@@ -768,12 +774,18 @@ mod tests {
             nonce: [0u8; 32],
             nickname_suggestion: None,
         };
+        let establish_path = descriptor
+            .advertised_establish_paths()
+            .into_iter()
+            .next()
+            .expect("establish path");
 
         let outcome = service
             .prepare_establish_channel(
                 &snapshot,
                 test_context(),
                 peer,
+                &establish_path,
                 &psk,
                 &[0u8; 32], // local private key
                 &[0u8; 32], // remote public key

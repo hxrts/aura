@@ -505,107 +505,109 @@ This phase exists specifically to keep onion routing from being the first and on
 
 ### 3.1 Normalize `Establish` semantics
 
-- [ ] Make path objects explicit in the relevant descriptor and runtime APIs
-- [ ] Ensure establish flows consume path objects rather than overloaded transport hints
-- [ ] Keep live runtime channels actor-owned even when path objects are first-class
-- [ ] Add tests for establish semantics and path-object lifecycle
-- [ ] Remove legacy establish flows that still depend on overloaded transport hints or mixed route-policy descriptor fields
+- [x] Make path objects explicit in the relevant descriptor and runtime APIs
+- [x] Ensure establish flows consume path objects rather than overloaded transport hints
+- [x] Keep live runtime channels actor-owned even when path objects are first-class
+- [x] Add tests for establish semantics and path-object lifecycle
+- [x] Remove legacy establish flows that still depend on overloaded transport hints or mixed route-policy descriptor fields
 
 **Success**: `Establish` acts on explicit path objects and no longer feels like a conceptual outlier.
 
 ### 3.2 Implement bounded `Move` primitives
 
-- [ ] Add enqueue, batch-close, shuffle, flush, replay-window expiry, and bounded eviction primitives
-- [ ] Keep them infrastructure-local and free of semantic routing policy
-- [ ] Use `RandomEffects` for shuffling so simulation remains deterministic
-- [ ] Add tests for bounded memory, deterministic shuffle, duplicate suppression, and replay-window expiration
-- [ ] Remove legacy movement helpers that bundle queueing, policy, and social-role assumptions together once the bounded primitives exist
+- [x] Add enqueue, batch-close, shuffle, flush, replay-window expiry, and bounded eviction primitives
+- [x] Keep them infrastructure-local and free of semantic routing policy
+- [x] Use `RandomEffects` for shuffling so simulation remains deterministic
+- [x] Add tests for bounded memory, deterministic shuffle, duplicate suppression, and replay-window expiration
+- [x] Remove legacy movement helpers that bundle queueing, policy, and social-role assumptions together once the bounded primitives exist
 
 **Success**: move primitives are reusable and bounded before onion routing exists.
 
 ### 3.3 Add runtime-owned `Move` actor
 
-- [ ] Add an `ActorOwned` move actor in `aura-agent`
-- [ ] Ensure it owns:
+- [x] Add an `ActorOwned` move actor in `aura-agent`
+- [x] Ensure it owns:
       bounded relay buffer state
       replay window state
       flush scheduling
       congestion and backpressure state
-- [ ] Ensure UI, harness, and social layers only interact through sanctioned ingress and observed projections
-- [ ] Remove legacy ad hoc movement ownership paths once the move actor is canonical
+- [x] Ensure UI, harness, and social layers only interact through sanctioned ingress and observed projections
+- [x] Remove legacy ad hoc movement ownership paths once the move actor is canonical
 
 **Success**: movement has a single runtime owner and bounded state on current operations.
 
 ### 3.4 Roll current bootstrap and direct-path flows onto `Establish`
 
-- [ ] Route current rendezvous/bootstrap paths through explicit path objects and establish interfaces
-- [ ] Update direct upgrade and direct-connect helpers to consume `Establish` contracts instead of legacy descriptor hints
-- [ ] Add tests covering zero-hop and direct-upgrade establishment on the new path-object model
-- [ ] Remove call sites that bypass `Establish` and still interpret descriptor fields as immediate connect instructions
+- [x] Route current rendezvous/bootstrap paths through explicit path objects and establish interfaces
+- [x] Update direct upgrade and direct-connect helpers to consume `Establish` contracts instead of legacy descriptor hints
+- [x] Add tests covering zero-hop and direct-upgrade establishment on the new path-object model
+- [x] Remove call sites that bypass `Establish` and still interpret descriptor fields as immediate connect instructions
 
 **Success**: current non-onion path creation already uses the new family boundary.
 
 ### 3.5 Roll current relay and transit flows onto `Move`
 
-- [ ] Route current relay-like transport paths through the new move actor and bounded move primitives
-- [ ] Keep receipts, budgets, and leakage accounting attached to move operations rather than legacy relay helpers
-- [ ] Add tests proving current relay behavior runs through `Move` without requiring transparent onion envelopes
-- [ ] Remove legacy relay helper paths that own queueing or next-hop movement outside the move actor
+- [x] Route current relay-like transport paths through the new move actor and bounded move primitives
+- [x] Keep receipts, budgets, and leakage accounting attached to move operations rather than legacy relay helpers
+- [x] Add tests proving current relay behavior runs through `Move` without requiring transparent onion envelopes
+- [x] Remove legacy relay helper paths that own queueing or next-hop movement outside the move actor
 
 **Success**: today's movement paths already exercise `Move`.
 
 ### 3.6 Roll current object movement onto `Move`
 
-- [ ] Route existing cache-seeding, retained-object handoff, or similar object-movement paths through `Move`
-- [ ] Keep movement separate from custody so this phase does not absorb `Hold` semantics prematurely
-- [ ] Add tests for object handoff through `Move` without mailbox or cache-specific type shapes
-- [ ] Remove legacy object-movement helpers that preserve cache- or mailbox-specific transport APIs
+- [x] Route existing cache-seeding, retained-object handoff, or similar object-movement paths through `Move`
+- [x] Keep movement separate from custody so this phase does not absorb `Hold` semantics prematurely
+- [x] Add tests for object handoff through `Move` without mailbox or cache-specific type shapes
+- [x] Remove legacy object-movement helpers that preserve cache- or mailbox-specific transport APIs
 
 **Success**: `Move` is proven on current object movement before it is used as part of onion routing.
 
 ### 3.7 Define `LocalRoutingProfile::passthrough()` and prove behavioral equivalence
 
-- [ ] Add a named `passthrough()` preset: mixing depth 0, delay 0, cover rate 0, path diversity 1 (Hold is a service family, always active after migration, not a routing profile parameter)
-- [ ] Add simulation or integration tests proving that passthrough produces identical observable routing behavior to the pre-migration system
-- [ ] Passthrough is the pre-privacy production default — it ships in the first deployment stage before the adaptive privacy policy is tuned
-- [ ] Once privacy ships, passthrough remains available for development and simulation but is replaced in production by the fixed adaptive policy
+- [x] Add a named `passthrough()` preset: mixing depth 0, delay 0, cover rate 0, path diversity 1 (Hold is a service family, always active after migration, not a routing profile parameter)
+- [x] Add simulation or integration tests proving that passthrough produces identical observable routing behavior to the pre-migration system
+- [x] Passthrough is the pre-privacy production default — it ships in the first deployment stage before the adaptive privacy policy is tuned
+- [x] Once privacy ships, passthrough remains available for development and simulation but is replaced in production by the fixed adaptive policy
 
 **Success**: passthrough is proven equivalent to pre-migration routing behavior and serves as the first production deployment policy.
 
 ### 3.8 Add leak-oriented regression checks
 
-- [ ] Add tests or architectural checks showing that topology changes affect permit and select behavior without changing interface type shape
-- [ ] Add checks that establish and move schemas do not directly hardcode home, neighborhood, or guardian roles
-- [ ] Add explicit checks for removal of legacy social-role-specific fields from path and move-surface schemas and related helper types
+- [x] Add tests or architectural checks showing that topology changes affect permit and select behavior without changing interface type shape
+- [x] Add checks that establish and move schemas do not directly hardcode home, neighborhood, or guardian roles
+- [x] Add explicit checks for removal of legacy social-role-specific fields from path and move-surface schemas and related helper types
 
 **Success**: the original leak shape is tested against explicitly, not just assumed to be fixed.
 
 ### 3.9 Enforce abstract `Establish` and `Move` schemas
 
-- [ ] Add lint or compile-fail coverage proving that establish-surface and move-surface types do not encode social-role-specific fields directly
-- [ ] Add proc-macro declarations for establish and move boundaries so receipt, budget, and ownership points are explicit in code
-- [ ] Add CI wiring so establish/move schema checks run by default on future changes
-- [ ] Remove transitional adapter types that preserve old social-role-shaped schema fields once callers are migrated
+- [x] Add lint or compile-fail coverage proving that establish-surface and move-surface types do not encode social-role-specific fields directly
+- [x] Add proc-macro declarations for establish and move boundaries so receipt, budget, and ownership points are explicit in code
+- [x] Add CI wiring so establish/move schema checks run by default on future changes
+- [x] Remove transitional adapter types that preserve old social-role-shaped schema fields once callers are migrated
 
 **Success**: social-graph leakage does not re-enter the new family model through schema drift.
 
 ### 3.10 Phase 3 legacy cleanup
 
-- [ ] Re-run the legacy sweep for overloaded path hints, relay helpers, direct-connect shortcuts, and mailbox/cache-shaped movement APIs
-- [ ] Delete any remaining non-onion movement helpers or schema adapters that bypass `Establish` or `Move`
-- [ ] Remove stale tests, fixtures, and helper names that still describe the pre-family transport model
-- [ ] Record every surviving pre-family movement path with an explicit owner and removal phase before Phase 4 begins
+- [x] Re-run the legacy sweep for overloaded path hints, relay helpers, direct-connect shortcuts, and mailbox/cache-shaped movement APIs
+- [x] Delete any remaining non-onion movement helpers or schema adapters that bypass `Establish` or `Move`
+- [x] Remove stale tests, fixtures, and helper names that still describe the pre-family transport model
+- [x] Record every surviving pre-family movement path with an explicit owner and removal phase before Phase 4 begins
+
+Surviving pre-family movement paths before Phase 4: none.
 
 ### Phase 3 verification and closeout
 
-- [ ] `cargo check -p aura-core -p aura-rendezvous -p aura-sync -p aura-agent`
-- [ ] `cargo test -p aura-core -p aura-rendezvous -p aura-sync -p aura-agent`
-- [ ] `just check-arch`
-- [ ] `just lint-arch-syntax`
-- [ ] `just ci-ownership-policy`
-- [ ] Update docs and any affected crate `ARCHITECTURE.md` files for path objects, establish semantics, and move semantics on current operations, following [style_guide_docs.md](/Users/hxrts/projects/aura/work/style_guide_docs.md)
-- [ ] Stage non-gitignored files touched in this phase
-- [ ] Commit with a focused message, for example:
+- [x] `cargo check -p aura-core -p aura-rendezvous -p aura-sync -p aura-agent`
+- [x] `cargo test -p aura-core -p aura-rendezvous -p aura-sync -p aura-agent`
+- [x] `just check-arch`
+- [x] `just lint-arch-syntax`
+- [x] `just ci-ownership-policy`
+- [x] Update docs and any affected crate `ARCHITECTURE.md` files for path objects, establish semantics, and move semantics on current operations, following [style_guide_docs.md](/Users/hxrts/projects/aura/work/style_guide_docs.md)
+- [x] Stage non-gitignored files touched in this phase
+- [x] Commit with a focused message, for example:
       `git commit -m "adaptive-privacy: roll establish and move onto current operations"`
 
 ## Checkpoint — Service Shapes Stable Before Hold

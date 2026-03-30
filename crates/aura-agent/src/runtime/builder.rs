@@ -242,6 +242,16 @@ impl EffectSystemBuilder {
             .social_config
             .map(|social_config| super::services::SocialManager::new(authority_id, social_config));
 
+        let move_manager = Some(super::services::MoveManager::new(
+            super::services::MoveManagerConfig::default(),
+            rendezvous_manager
+                .as_ref()
+                .map(|manager| manager.registry())
+                .unwrap_or_else(|| {
+                    Arc::new(super::services::ServiceRegistry::new())
+                }),
+        ));
+
         // Create optional LAN transport service (used for LAN advertising + future TCP ingress)
         let lan_transport: Option<Arc<super::services::LanTransportService>> = {
             #[cfg(target_arch = "wasm32")]
@@ -307,6 +317,9 @@ impl EffectSystemBuilder {
         if let Some(rendezvous_manager) = rendezvous_manager.as_ref() {
             effect_system.attach_rendezvous_manager(rendezvous_manager.clone());
         }
+        if let Some(move_manager) = move_manager.as_ref() {
+            effect_system.attach_move_manager(move_manager.clone());
+        }
         if let Some(lan_transport) = lan_transport.as_ref() {
             effect_system.attach_lan_transport(lan_transport.clone());
         }
@@ -327,6 +340,7 @@ impl EffectSystemBuilder {
             lifecycle_manager,
             sync_manager,
             rendezvous_manager,
+            move_manager,
             rendezvous_handler,
             lan_transport,
             social_manager,

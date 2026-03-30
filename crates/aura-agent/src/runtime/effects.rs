@@ -16,7 +16,9 @@ use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
 use crate::database::IndexedJournalHandler;
 use crate::fact_registry::build_fact_registry;
-use crate::runtime::services::{LanTransportService, LogicalClockManager, RendezvousManager};
+use crate::runtime::services::{
+    LanTransportService, LogicalClockManager, MoveManager, RendezvousManager,
+};
 use crate::runtime::subsystems::choreography::RuntimeChoreographySessionId;
 use crate::runtime::subsystems::{
     crypto::CryptoRng, ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem,
@@ -176,6 +178,9 @@ pub struct AuraEffectSystem {
 
     /// Rendezvous manager (optional, for address resolution)
     rendezvous_manager: parking_lot::RwLock<Option<RendezvousManager>>,
+
+    /// Move manager (optional, for bounded movement planning and replay windows).
+    move_manager: parking_lot::RwLock<Option<MoveManager>>,
 
     /// Cached Biscuit token for guard chain authorization.
     biscuit_cache: parking_lot::RwLock<Option<BiscuitCache>>,
@@ -433,6 +438,7 @@ impl AuraEffectSystem {
             vm_fragment_registry: parking_lot::RwLock::new(VmFragmentRegistry::default()),
             lan_transport: parking_lot::RwLock::new(None),
             rendezvous_manager: parking_lot::RwLock::new(None),
+            move_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
             #[cfg(not(target_arch = "wasm32"))]
             network_connections: parking_lot::RwLock::new(HashMap::new()),
@@ -802,6 +808,14 @@ impl AuraEffectSystem {
 
     pub fn rendezvous_manager(&self) -> Option<RendezvousManager> {
         self.rendezvous_manager.read().clone()
+    }
+
+    pub fn attach_move_manager(&self, manager: MoveManager) {
+        *self.move_manager.write() = Some(manager);
+    }
+
+    pub fn move_manager(&self) -> Option<MoveManager> {
+        self.move_manager.read().clone()
     }
 
     /// Load persisted Biscuit tokens from secure storage into the in-memory cache.

@@ -1,9 +1,9 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
-#[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
 use aura_core::effects::{TransportEffects, TransportError};
+use aura_core::service::{LinkEndpoint, LinkProtocol, Route};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_core::{AuthorityId, ContextId};
@@ -58,43 +58,63 @@ where
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl TransportEffects for AuraEffectSystem {
     async fn send_envelope(&self, envelope: TransportEnvelope) -> Result<(), TransportError> {
-        let payload_len = envelope.payload.len();
-        if let Some(shared) = self.transport.shared_transport() {
-            shared.route_envelope(envelope);
-            self.transport.record_send(payload_len);
-            return Ok(());
-        }
-
-        let self_device_id = self.config.device_id.to_string();
-        let destination_device_id = envelope.metadata.get("aura-destination-device-id");
-        let is_local = if envelope.destination == self.authority_id {
-            match destination_device_id {
-                Some(dst) => dst == &self_device_id,
-                None => true,
-            }
-        } else {
-            destination_device_id.is_some_and(|dst| dst == &self_device_id)
-        };
-        if is_local {
-            self.queue_runtime_envelope(envelope);
-            self.transport.record_send(payload_len);
-            return Ok(());
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        if let Some(url) = current_browser_harness_enqueue_url() {
-            send_harness_browser_envelope(&url, &envelope)?;
-            self.transport.record_send(payload_len);
-            return Ok(());
-        }
-
-        let addr = resolve_peer_addr(self, envelope.context, envelope.destination)
+        let now_ms = self
+            .time_effects()
+            .physical_time()
             .await
-            .ok_or(TransportError::DestinationUnreachable {
-                destination: envelope.destination,
-            })?;
+            .map(|time| time.ts_ms)
+            .unwrap_or(0);
 
-        match send_envelope_tcp(&addr, &envelope).await {
+        let route = resolve_move_route(self, envelope.context, envelope.destination)
+            .await
+            .unwrap_or_else(|| fallback_direct_route(&envelope));
+
+        if let Some(move_manager) = self.move_manager() {
+            let batch = move_manager
+                .enqueue_for_delivery(envelope, route, now_ms, self)
+                .await
+                .map_err(|error| TransportError::ProtocolError {
+                    details: error.to_string(),
+                })?;
+
+            for plan in batch {
+                let payload_len = plan.envelope.payload.len();
+                let context = plan.envelope.context;
+                let destination = plan.envelope.destination;
+                match send_planned_envelope(self, plan.envelope, &plan.route).await {
+                    Ok(()) => {
+                        self.transport.record_send(payload_len);
+                        move_manager
+                            .record_delivery_result(
+                                plan.replay_marker,
+                                context,
+                                destination,
+                                true,
+                                now_ms,
+                            )
+                            .await;
+                    }
+                    Err(error) => {
+                        self.transport.record_send_failure();
+                        move_manager
+                            .record_delivery_result(
+                                plan.replay_marker,
+                                context,
+                                destination,
+                                false,
+                                now_ms,
+                            )
+                            .await;
+                        return Err(error);
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        let payload_len = envelope.payload.len();
+        let fallback_route = fallback_direct_route(&envelope);
+        match send_planned_envelope(self, envelope, &fallback_route).await {
             Ok(()) => {
                 self.transport.record_send(payload_len);
                 Ok(())
@@ -211,35 +231,86 @@ async fn resolve_peer_addr(
     context: ContextId,
     peer: AuthorityId,
 ) -> Option<String> {
-    let manager = effects.rendezvous_manager()?;
-    manager
-        .get_descriptor(context, peer)
+    resolve_move_route(effects, context, peer)
         .await
-        .and_then(descriptor_transport_addr)
+        .and_then(|route| route_destination_addr(&route.destination))
 }
 
-fn descriptor_transport_addr(descriptor: aura_rendezvous::RendezvousDescriptor) -> Option<String> {
-    #[cfg(target_arch = "wasm32")]
-    for endpoint in descriptor.advertised_link_endpoints() {
-        if endpoint.protocol == aura_core::LinkProtocol::WebSocket {
-            return endpoint.address;
+async fn resolve_move_route(
+    effects: &AuraEffectSystem,
+    context: ContextId,
+    peer: AuthorityId,
+) -> Option<Route> {
+    let manager = effects.rendezvous_manager()?;
+    let descriptor = manager.get_descriptor(context, peer).await?;
+    descriptor.advertised_move_paths().into_iter().map(|path| path.route).next()
+}
+
+async fn send_planned_envelope(
+    effects: &AuraEffectSystem,
+    envelope: TransportEnvelope,
+    _route: &Route,
+) -> Result<(), TransportError> {
+    if let Some(shared) = effects.transport.shared_transport() {
+        shared.route_envelope(envelope);
+        return Ok(());
+    }
+
+    let self_device_id = effects.config.device_id.to_string();
+    let destination_device_id = envelope.metadata.get("aura-destination-device-id");
+    let is_local = if envelope.destination == effects.authority_id {
+        match destination_device_id {
+            Some(dst) => dst == &self_device_id,
+            None => true,
         }
+    } else {
+        destination_device_id.is_some_and(|dst| dst == &self_device_id)
+    };
+    if is_local {
+        effects.queue_runtime_envelope(envelope);
+        return Ok(());
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    if let Some(url) = current_browser_harness_enqueue_url() {
+        send_harness_browser_envelope(&url, &envelope)?;
+        return Ok(());
+    }
+
+    let addr = resolve_peer_addr(effects, envelope.context, envelope.destination)
+        .await
+        .ok_or(TransportError::DestinationUnreachable {
+            destination: envelope.destination,
+        })?;
+    send_envelope_tcp(&addr, &envelope).await
+}
+
+fn fallback_direct_route(envelope: &TransportEnvelope) -> Route {
+    Route::direct(LinkEndpoint::direct(
+        LinkProtocol::Tcp,
+        format!("runtime://{}", envelope.destination),
+    ))
+}
+
+fn route_destination_addr(endpoint: &LinkEndpoint) -> Option<String> {
+    match endpoint.protocol {
+        LinkProtocol::Tcp | LinkProtocol::WebSocket => {}
+        _ => return None,
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    if endpoint.protocol == LinkProtocol::WebSocket {
+        return endpoint.address.clone();
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    for endpoint in descriptor.advertised_link_endpoints() {
-        if endpoint.protocol == aura_core::LinkProtocol::WebSocket {
-            return endpoint.address.map(|addr| format!("ws://{}", addr));
-        }
+    if endpoint.protocol == LinkProtocol::WebSocket {
+        return endpoint.address.as_ref().map(|addr| format!("ws://{}", addr));
     }
 
-    for endpoint in descriptor.advertised_link_endpoints() {
-        if endpoint.protocol == aura_core::LinkProtocol::Tcp {
-            return endpoint.address;
-        }
-    }
-    None
+    endpoint.address.clone()
 }
+
 
 async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(), TransportError> {
     cfg_if! {
@@ -606,10 +677,14 @@ mod tests {
     use crate::core::default_context_id_for_authority;
     use crate::core::AgentConfig;
     use crate::runtime::services::{
-        RendezvousManager, RendezvousManagerConfig, RuntimeService, RuntimeServiceContext,
+        MoveManager, MoveManagerConfig, RendezvousManager, RendezvousManagerConfig,
+        RuntimeService, RuntimeServiceContext, ServiceRegistry,
     };
     use crate::runtime::TaskSupervisor;
+    use aura_core::effects::TransportEffects;
+    use aura_core::effects::transport::TransportEnvelope;
     use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     fn descriptor(
@@ -689,5 +764,86 @@ mod tests {
         let resolved = resolve_peer_addr(&effects, primary_context, peer).await;
         assert!(resolved.is_none());
         RuntimeService::stop(&manager).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn move_passthrough_preserves_opaque_envelope_delivery() {
+        let config = AgentConfig::default();
+        let sender = AuthorityId::new_from_entropy([220u8; 32]);
+        let receiver = AuthorityId::new_from_entropy([221u8; 32]);
+        let context = ContextId::new_from_entropy([222u8; 32]);
+
+        let plain_shared = crate::runtime::SharedTransport::new();
+        let plain_sender = AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+            &config,
+            sender,
+            plain_shared.clone(),
+        )
+        .unwrap();
+        let plain_receiver =
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver,
+                plain_shared,
+            )
+            .unwrap();
+
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            "application/aura-opaque-object".to_string(),
+        );
+        let envelope = TransportEnvelope {
+            destination: receiver,
+            source: sender,
+            context,
+            payload: vec![9, 4, 2, 7, 1],
+            metadata,
+            receipt: None,
+        };
+
+        plain_sender.send_envelope(envelope.clone()).await.unwrap();
+        let baseline = plain_receiver.receive_envelope().await.unwrap();
+
+        let move_shared = crate::runtime::SharedTransport::new();
+        let move_sender = AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+            &config,
+            sender,
+            move_shared.clone(),
+        )
+        .unwrap();
+        let move_receiver =
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver,
+                move_shared,
+            )
+            .unwrap();
+        let move_manager = MoveManager::new(
+            MoveManagerConfig::for_testing(),
+            Arc::new(ServiceRegistry::new()),
+        );
+        move_sender.attach_move_manager(move_manager.clone());
+
+        move_sender.send_envelope(envelope.clone()).await.unwrap();
+        let migrated = move_receiver.receive_envelope().await.unwrap();
+
+        assert_eq!(baseline.destination, envelope.destination);
+        assert_eq!(baseline.source, envelope.source);
+        assert_eq!(baseline.context, envelope.context);
+        assert_eq!(baseline.payload, envelope.payload);
+        assert_eq!(baseline.metadata, envelope.metadata);
+        assert!(baseline.receipt.is_none());
+
+        assert_eq!(migrated.destination, baseline.destination);
+        assert_eq!(migrated.source, baseline.source);
+        assert_eq!(migrated.context, baseline.context);
+        assert_eq!(migrated.payload, baseline.payload);
+        assert_eq!(migrated.metadata, baseline.metadata);
+        assert!(migrated.receipt.is_none());
+
+        let projection = move_manager.projection().await;
+        assert_eq!(projection.queued_envelopes, 0);
+        assert_eq!(projection.replay_window_entries, 0);
     }
 }

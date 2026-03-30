@@ -199,6 +199,59 @@ impl Route {
     pub fn is_direct(&self) -> bool {
         self.hops.is_empty()
     }
+
+    /// Return all endpoints touched by this route in traversal order.
+    pub fn traversal_endpoints(&self) -> Vec<LinkEndpoint> {
+        let mut endpoints = self
+            .hops
+            .iter()
+            .map(|hop| hop.link_endpoint.clone())
+            .collect::<Vec<_>>();
+        endpoints.push(self.destination.clone());
+        endpoints
+    }
+}
+
+/// Explicit establish-family path object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EstablishPath {
+    /// Route used to bootstrap or upgrade the usable path.
+    pub route: Route,
+}
+
+impl EstablishPath {
+    /// Construct a direct establish path.
+    pub fn direct(destination: LinkEndpoint) -> Self {
+        Self {
+            route: Route::direct(destination),
+        }
+    }
+
+    /// Return whether the establish path is direct.
+    pub fn is_direct(&self) -> bool {
+        self.route.is_direct()
+    }
+}
+
+/// Explicit move-family path object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MovePath {
+    /// Route used to move the opaque object.
+    pub route: Route,
+}
+
+impl MovePath {
+    /// Construct a direct move path.
+    pub fn direct(destination: LinkEndpoint) -> Self {
+        Self {
+            route: Route::direct(destination),
+        }
+    }
+
+    /// Return whether the move path is direct.
+    pub fn is_direct(&self) -> bool {
+        self.route.is_direct()
+    }
 }
 
 /// Descriptor-wide quantitative limits.
@@ -270,6 +323,17 @@ pub struct EstablishDescriptor {
     pub link_endpoints: Vec<LinkEndpoint>,
 }
 
+impl EstablishDescriptor {
+    /// Materialize explicit establish paths from advertised endpoints.
+    pub fn advertised_paths(&self) -> Vec<EstablishPath> {
+        self.link_endpoints
+            .iter()
+            .cloned()
+            .map(EstablishPath::direct)
+            .collect()
+    }
+}
+
 /// Move-family descriptor details.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MoveDescriptor {
@@ -279,6 +343,27 @@ pub struct MoveDescriptor {
     /// Route-layer material for relayed transport when known.
     #[serde(default)]
     pub route: Option<Route>,
+}
+
+impl MoveDescriptor {
+    /// Materialize explicit move paths from advertised route material.
+    pub fn advertised_paths(&self) -> Vec<MovePath> {
+        let mut paths = self
+            .link_endpoints
+            .iter()
+            .cloned()
+            .map(MovePath::direct)
+            .collect::<Vec<_>>();
+        if let Some(route) = &self.route {
+            let candidate = MovePath {
+                route: route.clone(),
+            };
+            if !paths.iter().any(|path| path == &candidate) {
+                paths.push(candidate);
+            }
+        }
+        paths
+    }
 }
 
 /// Hold-family descriptor details.
@@ -344,12 +429,37 @@ impl ServiceDescriptor {
 /// Opaque movement object used across relay, retrieval-in-flight, and cache seeding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MoveEnvelope {
-    /// Route selected for the envelope, if already bound.
+    /// Move path selected for the envelope, if already bound.
     #[serde(default)]
-    pub route: Option<Route>,
+    pub path: Option<MovePath>,
     /// Opaque application/protocol payload bytes.
     #[serde(with = "serde_bytes")]
     pub payload: Vec<u8>,
+}
+
+/// Runtime-local routing profile derived from local conditions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalRoutingProfile {
+    /// Number of privacy-motivated intermediate hops to request.
+    pub mixing_depth: u8,
+    /// Added delay budget for privacy shaping.
+    pub delay_ms: u64,
+    /// Synthetic cover target rate.
+    pub cover_rate_per_second: u32,
+    /// Desired path diversity floor.
+    pub path_diversity: u8,
+}
+
+impl LocalRoutingProfile {
+    /// Named routing preset matching pre-privacy behavior.
+    pub fn passthrough() -> Self {
+        Self {
+            mixing_depth: 0,
+            delay_ms: 0,
+            cover_rate_per_second: 0,
+            path_diversity: 1,
+        }
+    }
 }
 
 /// Opaque held object used by the shared `Hold` custody substrate.
@@ -453,6 +563,7 @@ mod tests {
         let direct = Route::direct(destination.clone());
         assert!(direct.is_direct());
         assert_eq!(direct.hops.len(), 0);
+        assert_eq!(direct.traversal_endpoints(), vec![destination.clone()]);
 
         let routed = Route {
             hops: vec![RelayHop {
@@ -463,6 +574,7 @@ mod tests {
         };
         assert!(!routed.is_direct());
         assert_eq!(routed.hops.len(), 1);
+        assert_eq!(routed.traversal_endpoints().len(), 2);
     }
 
     #[test]
@@ -510,7 +622,9 @@ mod tests {
         };
 
         let envelope = MoveEnvelope {
-            route: Some(route.clone()),
+            path: Some(MovePath {
+                route: route.clone(),
+            }),
             payload: vec![1, 2, 3, 4],
         };
         let held = HeldObject {
@@ -539,6 +653,7 @@ mod tests {
             epoch: Some(3),
             bounded_residency_remaining: Some(2),
         };
+        let passthrough = LocalRoutingProfile::passthrough();
 
         let envelope_json = serde_json::to_vec(&envelope).expect("serialize move envelope");
         let held_json = serde_json::to_vec(&held).expect("serialize held object");
@@ -566,6 +681,41 @@ mod tests {
             serde_json::from_slice::<SelectionState>(&state_json).expect("deserialize"),
             state
         );
-        assert_eq!(envelope.route, Some(route));
+        assert_eq!(
+            envelope.path,
+            Some(MovePath {
+                route: route.clone(),
+            })
+        );
+        assert_eq!(passthrough.mixing_depth, 0);
+        assert_eq!(passthrough.delay_ms, 0);
+        assert_eq!(passthrough.cover_rate_per_second, 0);
+        assert_eq!(passthrough.path_diversity, 1);
+    }
+
+    #[test]
+    fn descriptors_materialize_explicit_path_objects() {
+        let establish = EstablishDescriptor {
+            link_endpoints: vec![endpoint("127.0.0.1:7000")],
+        };
+        let move_descriptor = MoveDescriptor {
+            link_endpoints: vec![endpoint("127.0.0.1:8000")],
+            route: Some(Route {
+                hops: vec![RelayHop {
+                    authority_id: authority(2),
+                    link_endpoint: LinkEndpoint::relay(authority(3)),
+                }],
+                destination: endpoint("127.0.0.1:9000"),
+            }),
+        };
+
+        let establish_paths = establish.advertised_paths();
+        let move_paths = move_descriptor.advertised_paths();
+
+        assert_eq!(establish_paths.len(), 1);
+        assert!(establish_paths[0].is_direct());
+        assert_eq!(move_paths.len(), 2);
+        assert!(move_paths.iter().any(MovePath::is_direct));
+        assert!(move_paths.iter().any(|path| !path.is_direct()));
     }
 }

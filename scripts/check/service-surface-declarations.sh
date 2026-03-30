@@ -6,11 +6,28 @@ cd "$repo_root"
 
 required_files=(
   "crates/aura-rendezvous/src/service.rs"
+  "crates/aura-agent/src/runtime/services/move_manager.rs"
 )
 
 for file in "${required_files[@]}"; do
   if ! rg -q '#\[aura_macros::service_surface\(' "$file"; then
     echo "missing #[aura_macros::service_surface(...)] declaration in $file" >&2
+    exit 1
+  fi
+done
+
+social_role_neutral_files=(
+  "crates/aura-core/src/service.rs"
+  "crates/aura-rendezvous/src/facts.rs"
+  "crates/aura-rendezvous/src/descriptor.rs"
+  "crates/aura-rendezvous/src/service.rs"
+  "crates/aura-agent/src/runtime/services/move_manager.rs"
+)
+
+for file in "${social_role_neutral_files[@]}"; do
+  if rg -n '\b(home|neighborhood|guardian|friend|fof)\b' "$file" >/dev/null; then
+    echo "social-role-specific vocabulary is forbidden in Establish/Move surface files: $file" >&2
+    rg -n '\b(home|neighborhood|guardian|friend|fof)\b' "$file" >&2
     exit 1
   fi
 done

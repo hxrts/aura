@@ -11,6 +11,7 @@ Peer discovery and channel establishment protocol including descriptor exchange,
 | Descriptor facts, reducers, and validation | Transport-level connections (aura-transport) |
 | Channel establishment and handshake protocol | Runtime descriptor cache (aura-agent) |
 | Flood propagation and replay protection | Network effect implementations (aura-effects) |
+| Path-object establishment inputs (`EstablishPath`) derived from descriptor views | Runtime move buffering or object transport ownership |
 | LAN discovery | |
 
 ## Dependencies
@@ -31,6 +32,7 @@ Peer discovery and channel establishment protocol including descriptor exchange,
 
 - Descriptor facts must reduce under their matching `ContextId`.
 - Channel establishment requires valid, non-expired descriptors.
+- Establish flows consume explicit path objects rather than overloaded transport hints.
 - Flood packets use nonce-based replay protection.
 
 ### InvariantSecureChannelLifecycle
@@ -69,7 +71,7 @@ Contract alignment:
 | Surface | Category | Notes |
 |---------|----------|-------|
 | descriptor facts/reducers and validation logic | `Pure` | Deterministic descriptor semantics and reduction. |
-| channel establishment, handshake, and protocol state | `MoveOwned` | Exclusive channel-establishment authority remains explicit and typed. |
+| channel establishment, handshake, and path-object selection inputs | `MoveOwned` | Exclusive channel-establishment authority remains explicit and typed even when `EstablishPath` is first-class. |
 | `RendezvousService` handshake registry | local service-owned mutation | Handshake state is service-local. Long-lived descriptor caches live in `aura-agent`. |
 | `FloodPropagation` topology/budget/nonce state | bounded coordination state | Uses injected topology references and local flood bookkeeping. |
 | long-lived discovery runtime ownership | none local | Ongoing peer/discovery ownership belongs in higher-layer runtime services. |

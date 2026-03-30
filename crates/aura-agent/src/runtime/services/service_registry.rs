@@ -7,7 +7,7 @@
 
 use super::invariant::InvariantViolation;
 use super::state::with_state_mut_validated;
-use aura_core::service::{SelectionState, ServiceFamily};
+use aura_core::service::{Route, SelectionState, ServiceFamily};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_rendezvous::RendezvousDescriptor;
 use std::collections::HashMap;
@@ -49,6 +49,8 @@ pub struct HoldObservation {
 pub struct PendingRouteState {
     pub scope: ContextId,
     pub authority_id: AuthorityId,
+    pub family: ServiceFamily,
+    pub route: Option<Route>,
     pub initiated_at_ms: u64,
 }
 
@@ -382,6 +384,8 @@ impl ServiceRegistryService {
         &self,
         scope: ContextId,
         authority_id: AuthorityId,
+        family: ServiceFamily,
+        route: Option<Route>,
         initiated_at_ms: u64,
     ) {
         with_state_mut_validated(
@@ -392,6 +396,8 @@ impl ServiceRegistryService {
                     PendingRouteState {
                         scope,
                         authority_id,
+                        family,
+                        route,
                         initiated_at_ms,
                     },
                 );
@@ -692,7 +698,9 @@ mod tests {
         registry
             .record_hold_observation(ctx, peer, 55, Some(100))
             .await;
-        registry.track_pending_route(ctx, peer, 40).await;
+        registry
+            .track_pending_route(ctx, peer, ServiceFamily::Move, None, 40)
+            .await;
 
         registry.invalidate_scope_epoch(ctx, 11).await;
 

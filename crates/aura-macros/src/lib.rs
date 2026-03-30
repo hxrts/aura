@@ -1374,6 +1374,28 @@ fn validate_service_surface_struct(
         }
     }
 
+    let forbid_social_role_terms = config
+        .families
+        .iter()
+        .any(|family| matches!(family.value().as_str(), "Establish" | "Move"));
+    if forbid_social_role_terms {
+        for literal in config
+            .authoritative
+            .iter()
+            .chain(config.runtime_local.iter())
+        {
+            let value = literal.value().to_ascii_lowercase();
+            for forbidden in ["home", "neighborhood", "guardian", "friend", "fof"] {
+                if value.contains(forbidden) {
+                    return Err(Error::new_spanned(
+                        literal,
+                        "Establish/Move service_surface objects must stay social-role-neutral",
+                    ));
+                }
+            }
+        }
+    }
+
     for field in [
         &config.discover,
         &config.permit,

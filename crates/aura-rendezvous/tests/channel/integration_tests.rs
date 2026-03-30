@@ -230,6 +230,11 @@ async fn test_channel_establishment_flow() {
     let service = RendezvousService::new(alice, config);
 
     let bob_descriptor = test_descriptor(bob, context);
+    let establish_path = bob_descriptor
+        .advertised_establish_paths()
+        .into_iter()
+        .next()
+        .expect("establish path");
 
     let snapshot = test_snapshot(alice, context);
     let mock_effects = MockNoise;
@@ -240,6 +245,7 @@ async fn test_channel_establishment_flow() {
             &snapshot,
             context,
             bob,
+            &establish_path,
             &psk,
             &[0u8; 32],
             &[0u8; 32],
@@ -274,6 +280,11 @@ async fn test_channel_establishment_uses_explicit_context_over_descriptor_contex
     let snapshot = test_snapshot(alice, context);
     let other_context = test_context(101);
     let mismatched_descriptor = test_descriptor(bob, other_context);
+    let mismatched_path = mismatched_descriptor
+        .advertised_establish_paths()
+        .into_iter()
+        .next()
+        .expect("establish path");
     let mock_effects = MockNoise;
 
     let result = service
@@ -281,6 +292,7 @@ async fn test_channel_establishment_uses_explicit_context_over_descriptor_contex
             &snapshot,
             context,
             bob,
+            &mismatched_path,
             &psk,
             &[0u8; 32],
             &[0u8; 32],
@@ -320,6 +332,11 @@ async fn test_channel_establishment_rejects_expired_descriptor() {
 
     let mut expired_descriptor = test_descriptor(bob, context);
     expired_descriptor.valid_until = 900;
+    let expired_path = expired_descriptor
+        .advertised_establish_paths()
+        .into_iter()
+        .next()
+        .expect("establish path");
     let mock_effects = MockNoise;
 
     let result = service
@@ -327,6 +344,7 @@ async fn test_channel_establishment_rejects_expired_descriptor() {
             &snapshot,
             context,
             bob,
+            &expired_path,
             &psk,
             &[0u8; 32],
             &[0u8; 32],
@@ -571,6 +589,11 @@ async fn test_missing_capability_blocks_connect() {
     // Snapshot WITHOUT connect capability
     let mut snapshot = test_snapshot(alice, context);
     snapshot.capabilities = vec![RendezvousCapability::Publish.as_name()]; // Only publish
+    let establish_path = bob_descriptor
+        .advertised_establish_paths()
+        .into_iter()
+        .next()
+        .expect("establish path");
     let mock_effects = MockNoise;
 
     let result = service
@@ -578,6 +601,7 @@ async fn test_missing_capability_blocks_connect() {
             &snapshot,
             context,
             bob,
+            &establish_path,
             &psk,
             &[0u8; 32],
             &[0u8; 32],
@@ -627,6 +651,11 @@ async fn test_complete_discovery_to_channel_flow() {
 
     // Step 2: Alice receives Bob's descriptor (simulated journal sync)
     let bob_descriptor = test_descriptor(bob, context);
+    let establish_path = bob_descriptor
+        .advertised_establish_paths()
+        .into_iter()
+        .next()
+        .expect("establish path");
 
     // Step 3: Alice initiates channel establishment
     // Requires mutable service for Alice
@@ -637,6 +666,7 @@ async fn test_complete_discovery_to_channel_flow() {
             &alice_snapshot,
             context,
             bob,
+            &establish_path,
             &psk,
             &[0u8; 32],
             &[0u8; 32],

@@ -43,4 +43,6 @@ fn service_surface_validation() {
     t.compile_fail("tests/boundaries/service_surface_missing_select.rs");
     t.compile_fail("tests/boundaries/service_surface_invalid_family.rs");
     t.compile_fail("tests/boundaries/service_surface_authoritative_cache.rs");
+    t.compile_fail("tests/boundaries/service_surface_authoritative_social_role.rs");
+    t.compile_fail("tests/boundaries/service_surface_runtime_local_social_role.rs");
 }

@@ -54,6 +54,7 @@ Summary:
 - Mode-aware execution: production, testing, and simulation use same API.
 - For shared semantic flows, `aura-agent` is the primary `ActorOwned` crate. It may own long-lived mutable async runtime state, but it must not leak that ownership into frontend-local semantic lifecycle authorship.
 - Mutable runtime service views such as rendezvous descriptors, provider health, selector state, and hold observations are owned by the actor-owned service registry in `src/runtime/services/service_registry.rs`.
+- The actor-owned runtime service set includes rendezvous descriptor selection for `Establish` and the bounded `MoveManager` for current movement queues, replay suppression, flush scheduling, and congestion state.
 - Contacts/friend projections derive `ContactRelationshipState` from relational facts inside `aura-agent`; frontend shells consume the emitted projection and do not keep separate friendship state machines.
 - Runtime-owned service declarations should prefer the `#[actor_owned(...)]` layer where a service exposes a stable long-lived command/ingress boundary; changed-files ratchets in `just ci-ownership-policy` enforce this incrementally.
 - Task-supervision service roots that do not expose a stable command-ingress surface should use `#[actor_root(...)]` instead of forcing the store-style `#[actor_owned(...)]` command-enum pattern.
@@ -191,6 +192,7 @@ Rules:
 - Child tasks belong to exactly one task group.
 - Detached fire-and-forget tasks are forbidden in production runtime code.
 - Shutdown is hierarchical and parent-driven.
+- Current `Move` traffic uses the shared transport envelope family plus the actor-owned `MoveManager`; social topology may influence admission and selection, but not the schema of the moved envelope itself.
 
 See [Runtime](../../docs/104_runtime.md) §Service Actor Patterns for the actor struct examples, command/reply pattern, and async primitive preferred/forbidden lists.
 

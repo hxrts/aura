@@ -1,0 +1,5 @@
+error: Establish/Move service_surface objects must stay social-role-neutral
+  --> tests/boundaries/service_surface_runtime_local_social_role.rs:11:21
+   |
+11 |     runtime_local = "guardian_retry_budget",
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^

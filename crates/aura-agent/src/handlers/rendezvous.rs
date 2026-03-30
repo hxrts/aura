@@ -20,6 +20,7 @@ use aura_core::effects::{
     FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportError, TransportReceipt,
 };
 use aura_core::hash::hash;
+use aura_core::service::{EstablishPath, ServiceFamily};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{FlowCost, Hash32, Prestate, Receipt};
@@ -404,12 +405,19 @@ impl RendezvousHandler {
         // Retrieve remote public key from descriptor
         let remote_public_key = peer_descriptor.public_key;
 
+        let establish_path = peer_descriptor
+            .advertised_establish_paths()
+            .into_iter()
+            .next()
+            .ok_or_else(|| AgentError::invalid("Peer descriptor has no establish path"))?;
+
         let outcome = self
             .service
             .prepare_establish_channel(
                 &snapshot,
                 context_id,
                 peer,
+                &establish_path,
                 &psk,
                 &local_private_key,
                 &remote_public_key,
@@ -434,7 +442,13 @@ impl RendezvousHandler {
 
         // Track pending channel
         self.registry
-            .track_pending_route(context_id, peer, current_time)
+            .track_pending_route(
+                context_id,
+                peer,
+                ServiceFamily::Establish,
+                Some(establish_path.route.clone()),
+                current_time,
+            )
             .await;
 
         // Execute all effect commands via the bridge (includes SendHandshake)
@@ -445,7 +459,7 @@ impl RendezvousHandler {
             context_id,
             peer,
             channel_id: None, // Will be set after handshake completion
-            transport: Some("pending".to_string()), // Transport determined by effects
+            transport: Some(describe_establish_path(&establish_path)),
             error: None,
         })
     }
@@ -757,6 +771,18 @@ fn derive_channel_psk(
     material.extend_from_slice(&b);
 
     hash(&material)
+}
+
+fn describe_establish_path(path: &EstablishPath) -> String {
+    if path.route.is_direct() {
+        path.route
+            .destination
+            .address
+            .clone()
+            .unwrap_or_else(|| format!("{:?}", path.route.destination.protocol))
+    } else {
+        format!("{}-hop route", path.route.hops.len())
+    }
 }
 
 // =============================================================================

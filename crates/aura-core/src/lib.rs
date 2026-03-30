@@ -182,10 +182,11 @@ pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,
 };
 pub use service::{
-    EstablishDescriptor, HeldObject, HoldDescriptor, LinkEndpoint, LinkProtocol, MoveDescriptor,
-    MoveEnvelope, PolicySurface, ProviderCandidate, ProviderEvidence, RelayHop, RetrievalCapability,
-    Route, SelectionState, ServiceDescriptor, ServiceDescriptorHeader, ServiceDescriptorKind,
-    ServiceFamily, ServiceLimits, ServiceObjectCategory, ServiceProfile, ServiceQualityHints,
+    EstablishDescriptor, EstablishPath, HeldObject, HoldDescriptor, LinkEndpoint, LinkProtocol,
+    LocalRoutingProfile, MoveDescriptor, MoveEnvelope, MovePath, PolicySurface,
+    ProviderCandidate, ProviderEvidence, RelayHop, RetrievalCapability, Route, SelectionState,
+    ServiceDescriptor, ServiceDescriptorHeader, ServiceDescriptorKind, ServiceFamily,
+    ServiceLimits, ServiceObjectCategory, ServiceProfile, ServiceQualityHints,
 };
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{

@@ -50,7 +50,7 @@ Rendezvous descriptors carry two kinds of information. One surface describes con
 
 Connectivity endpoints describe how a peer may be reached. Service advertisements describe what the peer is willing to provide. Runtime policy combines both surfaces with local permit state, health, and trust evidence. Descriptor publication itself does not commit the final route choice.
 
-The current implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data. That compatibility layer is temporary. New code should consume `LinkEndpoint` and `ServiceDescriptor` views rather than treating transport hints as final routing policy.
+The current implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data. That compatibility layer is temporary. New code should consume `LinkEndpoint`, `ServiceDescriptor`, `EstablishPath`, and `MovePath` views rather than treating transport hints as final routing policy.
 
 ### 3.1 Holepunching and Upgrade Policy
 
@@ -140,9 +140,19 @@ pub struct ServiceDescriptor {
     pub header: ServiceDescriptorHeader,
     pub kind: ServiceDescriptorKind,
 }
+
+pub struct EstablishPath {
+    pub route: Route,
+}
+
+pub struct MovePath {
+    pub route: Route,
+}
 ```
 
 `LinkEndpoint` answers how a peer may be reached. `ServiceDescriptor` answers what service family is being advertised. Runtime-owned selection state combines these views with local policy and social inputs. The selected provider should observe only the generic service action, not the social reason it was chosen.
+
+`EstablishPath` and `MovePath` are the explicit path objects consumed by current bootstrap and movement flows. They are derived from descriptor views plus runtime-local policy, but they remain socially neutral: home, neighborhood, guardian, friend, and similar provider roles must not appear in the path schema itself.
 
 ## 5. MPST Choreographies
 
