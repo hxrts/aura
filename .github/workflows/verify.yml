@@ -64,7 +64,7 @@ jobs:
 
   kani:
     name: Kani Proofs
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
