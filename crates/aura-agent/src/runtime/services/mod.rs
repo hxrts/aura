@@ -25,8 +25,8 @@ pub mod reactive_pipeline_service;
 pub mod receipt_manager;
 pub mod reconfiguration_manager;
 pub mod recovery_manager;
-pub mod rendezvous_cache_manager;
 pub mod rendezvous_manager;
+pub mod service_registry;
 mod service_actor;
 pub mod session_manager;
 pub mod social_manager;
@@ -56,8 +56,12 @@ pub use reconfiguration_manager::{
     SessionDelegationOutcome, SessionDelegationTransfer,
 };
 pub(crate) use recovery_manager::RecoveryManager;
-pub(crate) use rendezvous_cache_manager::RendezvousCacheManager;
 pub use rendezvous_manager::{RendezvousManager, RendezvousManagerConfig};
+#[allow(unused_imports)] // Re-exported for runtime/app integration as the registry surface lands.
+pub use service_registry::{
+    HoldObservation, PendingRouteState, ProviderHealthSnapshot, ServiceRegistry,
+    ServiceRegistryProjection,
+};
 pub(crate) use session_manager::SessionManager;
 pub use social_manager::{SocialManager, SocialManagerConfig, SocialManagerState};
 pub use sync_manager::{SyncManagerConfig, SyncManagerState, SyncServiceManager};

@@ -7,6 +7,10 @@ use super::*;
 pub struct ContactsCallbacks {
     pub(crate) on_update_nickname: UpdateNicknameCallback,
     pub(crate) on_start_chat: StartChatCallback,
+    pub(crate) on_send_friend_request: IdLocalOwnedCallback,
+    pub(crate) on_accept_friend_request: IdLocalOwnedCallback,
+    pub(crate) on_decline_friend_request: IdLocalOwnedCallback,
+    pub(crate) on_revoke_friendship: IdLocalOwnedCallback,
     pub(crate) on_invite_to_channel: TwoStringContextHandoffCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
     pub(crate) on_remove_contact: IdLocalOwnedCallback,
@@ -20,6 +24,10 @@ impl ContactsCallbacks {
         Self {
             on_update_nickname: Self::make_update_nickname(ctx.clone(), tx.clone()),
             on_start_chat: Self::make_start_chat(ctx.clone(), tx.clone()),
+            on_send_friend_request: Self::make_send_friend_request(ctx.clone(), tx.clone()),
+            on_accept_friend_request: Self::make_accept_friend_request(ctx.clone(), tx.clone()),
+            on_decline_friend_request: Self::make_decline_friend_request(ctx.clone(), tx.clone()),
+            on_revoke_friendship: Self::make_revoke_friendship(ctx.clone(), tx.clone()),
             on_invite_to_channel: Self::make_invite_to_channel(ctx.clone(), tx.clone()),
             on_invite_lan_peer: Self::make_invite_lan_peer(ctx.clone(), tx.clone()),
             on_remove_contact: Self::make_remove_contact(ctx, tx),
@@ -113,6 +121,160 @@ impl ContactsCallbacks {
                     },
                     |tx, error| async move {
                         emit_error_toast(&tx, "chat", format!("Start chat failed: {error}")).await;
+                    },
+                );
+            },
+        )
+    }
+
+    fn make_send_friend_request(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {
+        Arc::new(
+            move |contact_id: String, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "SendFriendRequest callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::contacts::send_friend_request(
+                            &app_core,
+                            &contact_id,
+                            timestamp_ms,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    |_tx, ()| async {},
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "contacts",
+                            format!("Send friend request failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
+    }
+
+    fn make_accept_friend_request(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> IdLocalOwnedCallback {
+        Arc::new(
+            move |contact_id: String, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "AcceptFriendRequest callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::contacts::accept_friend_request(
+                            &app_core,
+                            &contact_id,
+                            timestamp_ms,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    |_tx, ()| async {},
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "contacts",
+                            format!("Accept friend request failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
+    }
+
+    fn make_decline_friend_request(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> IdLocalOwnedCallback {
+        Arc::new(
+            move |contact_id: String, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "DeclineFriendRequest callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::contacts::decline_friend_request(
+                            &app_core,
+                            &contact_id,
+                            timestamp_ms,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    |_tx, ()| async {},
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "contacts",
+                            format!("Decline friend request failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
+    }
+
+    fn make_revoke_friendship(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {
+        Arc::new(
+            move |contact_id: String, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "RevokeFriendship callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::contacts::revoke_friendship(
+                            &app_core,
+                            &contact_id,
+                            timestamp_ms,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    |_tx, ()| async {},
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "contacts",
+                            format!("Remove friend failed: {error}"),
+                        )
+                        .await;
                     },
                 );
             },

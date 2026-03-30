@@ -1,5 +1,6 @@
 use super::*;
 use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
+use aura_app::ui::types::ContactRelationshipState;
 use aura_core::types::identifiers::CeremonyId;
 
 impl UiModel {
@@ -57,7 +58,7 @@ impl UiController {
 
     pub fn publish_runtime_contacts_projection(
         &self,
-        contacts: Vec<(AuthorityId, String, bool)>,
+        contacts: Vec<(AuthorityId, String, bool, ContactRelationshipState)>,
         facts: Vec<RuntimeFact>,
     ) {
         self.try_update_model(|model| {
@@ -77,9 +78,10 @@ impl UiController {
         authority_id: AuthorityId,
         name: String,
         is_guardian: bool,
+        relationship_state: ContactRelationshipState,
     ) {
         self.try_update_model(|model| {
-            model.ensure_runtime_contact(authority_id, name, is_guardian);
+            model.ensure_runtime_contact(authority_id, name, is_guardian, relationship_state);
         });
         self.request_rerender();
     }
@@ -121,7 +123,12 @@ impl UiController {
         display_name: String,
     ) {
         let mut model = write_model(&self.model);
-        model.ensure_runtime_contact(authority_id, display_name, false);
+        model.ensure_runtime_contact(
+            authority_id,
+            display_name,
+            false,
+            ContactRelationshipState::Contact,
+        );
         model.push_runtime_fact(RuntimeFact::InvitationAccepted {
             invitation_kind: InvitationFactKind::Contact,
             authority_id: Some(authority_id.to_string()),

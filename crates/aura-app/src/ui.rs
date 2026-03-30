@@ -63,8 +63,9 @@ pub mod signals {
 pub mod contract {
     pub use crate::ui_contract::{
         classify_screen_item_id, classify_semantic_settings_section_item_id,
-        classify_settings_section_item_id, compare_ui_snapshots_for_parity, list_item_dom_id,
-        list_item_selector, nav_control_id_for_screen, screen_item_id,
+        classify_settings_section_item_id, compare_ui_snapshots_for_parity,
+        contacts_friend_action_controls, list_item_dom_id, list_item_selector,
+        nav_control_id_for_screen, screen_item_id,
         semantic_settings_section_item_id, semantic_settings_section_surface_id,
         settings_section_item_id, shared_flow_scenarios, shared_flow_support, shared_list_support,
         shared_modal_support, shared_screen_support, AuthoritativeSemanticFact, ConfirmationState,
@@ -187,13 +188,14 @@ pub mod types {
         classify_threshold_security, format_recovery_status, security_level_hint, AccountBackup,
         AccountConfig, BanRecord, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,
         BootstrapSurface, CeremonyProgress, Channel, ChannelType, ChatState, Contact,
-        ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeMember, HomeRole, HomeState,
-        HomesState, InvitationDirection, InvitationStatus, InvitationsState, KickRecord, Message,
-        MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome, NeighborhoodState,
-        OneHopLinkType, PendingAccountBootstrap, RecoveryApproval, RecoveryProcess,
-        RecoveryProcessStatus, RecoveryState, SecurityLevel, SuggestionPolicy, TraversalPosition,
-        BACKUP_PREFIX, BACKUP_VERSION,
+        ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeMember, HomeRole,
+        HomeState, HomesState, InvitationDirection, InvitationStatus, InvitationsState,
+        KickRecord, Message, MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome,
+        NeighborhoodState, OneHopLinkType, PendingAccountBootstrap, RecoveryApproval,
+        RecoveryProcess, RecoveryProcessStatus, RecoveryState, SecurityLevel, SuggestionPolicy,
+        TraversalPosition, BACKUP_PREFIX, BACKUP_VERSION,
     };
+    pub use crate::views::contacts::ContactRelationshipState;
     pub use crate::workflows::account::{
         can_submit_account_setup, is_valid_nickname_suggestion, prepare_pending_account_bootstrap,
         validate_nickname_suggestion, NicknameSuggestionError, MAX_NICKNAME_SUGGESTION_LENGTH,

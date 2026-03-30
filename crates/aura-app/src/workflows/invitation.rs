@@ -1460,9 +1460,28 @@ async fn reconcile_accepted_channel_invitation_authoritative(
         stage_tracker,
         "reconcile_channel_invitation:ensure_runtime_channel_state",
     );
-    if !crate::workflows::messaging::runtime_channel_state_exists(runtime, authoritative_channel)
-        .await?
-    {
+    let mut resolved_runtime_context = None;
+    let mut runtime_state_ready =
+        crate::workflows::messaging::runtime_channel_state_exists(runtime, authoritative_channel)
+            .await?;
+    if !runtime_state_ready {
+        resolved_runtime_context = timeout_runtime_call(
+            runtime,
+            "reconcile_accepted_channel_invitation_authoritative",
+            "resolve_amp_channel_context",
+            INVITATION_RUNTIME_QUERY_TIMEOUT,
+            || runtime.resolve_amp_channel_context(local_channel_id),
+        )
+        .await
+        .map_err(|error| super::error::runtime_call("resolve channel context", error))
+        .map(|result| {
+            result.map_err(|error| super::error::runtime_call("resolve channel context", error))
+        })
+        .unwrap_or_else(|_| Ok(None))?;
+        runtime_state_ready = resolved_runtime_context == Some(authoritative_context);
+    }
+
+    if !runtime_state_ready {
         update_accept_reconcile_stage(
             stage_tracker,
             "reconcile_channel_invitation:amp_join_channel",
@@ -1489,20 +1508,57 @@ async fn reconcile_accepted_channel_invitation_authoritative(
                 );
             }
         }
+        runtime_state_ready = crate::workflows::messaging::runtime_channel_state_exists(
+            runtime,
+            authoritative_channel,
+        )
+        .await?;
+        if !runtime_state_ready {
+            resolved_runtime_context = timeout_runtime_call(
+                runtime,
+                "reconcile_accepted_channel_invitation_authoritative",
+                "resolve_amp_channel_context",
+                INVITATION_RUNTIME_QUERY_TIMEOUT,
+                || runtime.resolve_amp_channel_context(local_channel_id),
+            )
+            .await
+            .map_err(|error| super::error::runtime_call("resolve channel context", error))
+            .map(|result| {
+                result.map_err(|error| super::error::runtime_call("resolve channel context", error))
+            })
+            .unwrap_or_else(|_| Ok(None))?;
+            runtime_state_ready = resolved_runtime_context == Some(authoritative_context);
+        }
     }
     update_accept_reconcile_stage(
         stage_tracker,
         "reconcile_channel_invitation:wait_for_runtime_channel_state",
     );
-    if !crate::workflows::messaging::runtime_channel_state_exists(runtime, authoritative_channel)
-        .await?
-    {
+    if !runtime_state_ready {
         crate::workflows::messaging::wait_for_runtime_channel_state(
             app_core,
             runtime,
             authoritative_channel,
         )
         .await?;
+        runtime_state_ready =
+            crate::workflows::messaging::runtime_channel_state_exists(runtime, authoritative_channel)
+                .await?;
+        if !runtime_state_ready {
+            resolved_runtime_context = timeout_runtime_call(
+                runtime,
+                "reconcile_accepted_channel_invitation_authoritative",
+                "resolve_amp_channel_context",
+                INVITATION_RUNTIME_QUERY_TIMEOUT,
+                || runtime.resolve_amp_channel_context(local_channel_id),
+            )
+            .await
+            .map_err(|error| super::error::runtime_call("resolve channel context", error))
+            .map(|result| {
+                result.map_err(|error| super::error::runtime_call("resolve channel context", error))
+            })
+            .unwrap_or_else(|_| Ok(None))?;
+        }
     }
     crate::workflows::messaging::publish_authoritative_channel_membership_ready(
         app_core,
@@ -1511,30 +1567,13 @@ async fn reconcile_accepted_channel_invitation_authoritative(
         1,
     )
     .await?;
-    if let Ok(Some(resolved_context)) = timeout_runtime_call(
-        runtime,
-        "reconcile_accepted_channel_invitation_authoritative",
-        "resolve_amp_channel_context",
-        INVITATION_RUNTIME_QUERY_TIMEOUT,
-        || runtime.resolve_amp_channel_context(local_channel_id),
-    )
-    .await
-    .map_err(|error| super::error::runtime_call("resolve channel context", error))
-    .map(|result| {
-        result.map_err(|error| super::error::runtime_call("resolve channel context", error))
-    })
-    .unwrap_or_else(|_| Ok(None))
-    {
-        if resolved_context == authoritative_context {
-            update_accept_reconcile_stage(
-                stage_tracker,
-                "reconcile_channel_invitation:refresh_channel_membership_readiness",
-            );
-            crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(
-                app_core,
-            )
+    if resolved_runtime_context == Some(authoritative_context) {
+        update_accept_reconcile_stage(
+            stage_tracker,
+            "reconcile_channel_invitation:refresh_channel_membership_readiness",
+        );
+        crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(app_core)
             .await?;
-        }
     }
     Ok(())
 }
@@ -4332,6 +4371,7 @@ mod tests {
             last_interaction: None,
             is_online: false,
             read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
+            relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
         };
 
         emit_signal(
@@ -4388,6 +4428,7 @@ mod tests {
                     last_interaction: None,
                     is_online: false,
                     read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
+                    relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
                 },
             ]),
             crate::signal_defs::CONTACTS_SIGNAL_NAME,
@@ -4877,6 +4918,7 @@ mod tests {
                     last_interaction: None,
                     is_online: false,
                     read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
+                    relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
                 },
             ]),
             CONTACTS_SIGNAL_NAME,

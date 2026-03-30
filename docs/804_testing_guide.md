@@ -49,6 +49,8 @@ Shared scenarios must submit typed semantic commands through the frontend bridge
 
 Command submission must enter the frontend through its real update and event path. It must not use render-coupled polling or ad hoc harness shims.
 
+Contacts friend management is part of that shared UX contract. The canonical relationship states are `contact`, `pending_outbound`, `pending_inbound`, and `friend`, and they must be projected from runtime-owned relational facts rather than shell-local heuristics. The shared contract owns the parity-critical contacts controls for `send friend request`, `accept friend request`, `decline friend request`, and `remove friend`, and both TUI and web tests should assert those actions through the same semantic surface.
+
 ### Shared Semantic Ownership Model
 
 Parity-critical shared semantic flows must use one explicit ownership category. Do not mix categories casually inside the same flow. The four ownership categories (`Pure`, `MoveOwned`, `ActorOwned`, `Observed`) are defined in [Ownership Model](122_ownership_model.md).
@@ -134,7 +136,7 @@ Browser-owned semantic snapshot publication should flow through one helper align
 The canonical shared-flow coverage anchors for the current parity-critical user flows are listed below.
 
 - `real-runtime-mixed-startup-smoke.toml` for startup, onboarding, and shared neighborhood navigation
-- `scenario13-mixed-contact-channel-message-e2e.toml` for chat, contacts, invitation, home creation, channel join, and message-send flows
+- `scenario13-mixed-contact-channel-message-e2e.toml` for chat, contacts, unilateral-contact to bilateral-friend transitions, invitation, home creation, channel join, and message-send flows
 - `scenario12-mixed-device-enrollment-removal-e2e.toml` for device add and remove
 - `shared-notifications-and-authority.toml` and `shared-settings-parity.toml` for the remaining shared settings, authority, and navigation flows
 

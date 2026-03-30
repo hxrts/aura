@@ -54,6 +54,16 @@ pub(super) fn handle_confirm_modal_key_queue(
                             contact_id,
                         }));
                     }
+                    ConfirmAction::RevokeFriendship => {
+                        commands.push(TuiCommand::Dispatch(
+                            DispatchCommand::RevokeSelectedFriendship,
+                        ));
+                    }
+                    ConfirmAction::DeclineFriendRequest => {
+                        commands.push(TuiCommand::Dispatch(
+                            DispatchCommand::DeclineSelectedFriendRequest,
+                        ));
+                    }
                     ConfirmAction::RevokeInvitation { invitation_id } => {
                         commands.push(TuiCommand::Dispatch(DispatchCommand::RevokeInvitation {
                             invitation_id,

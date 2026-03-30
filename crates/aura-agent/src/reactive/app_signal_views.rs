@@ -16,7 +16,7 @@ use aura_app::views::{
     chat::{
         note_to_self_channel_id, Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
     },
-    contacts::{Contact, ContactError, ContactsState},
+    contacts::{Contact, ContactError, ContactRelationshipState, ContactsState},
     home::{
         BanRecord, HomeMember, HomeRole, HomeState, HomesState, KickRecord, MuteRecord,
         PinnedMessageMeta,
@@ -47,7 +47,10 @@ use aura_invitation::{
     InvitationFact, InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID,
 };
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
-use aura_relational::{ContactFact, ReadReceiptPolicy, CONTACT_FACT_TYPE_ID};
+use aura_relational::{
+    ContactFact, FriendshipFact, ReadReceiptPolicy, CONTACT_FACT_TYPE_ID,
+    FRIENDSHIP_FACT_TYPE_ID,
+};
 use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
@@ -515,16 +518,35 @@ impl ReactiveView for InvitationsSignalView {
 // =============================================================================
 
 pub struct ContactsSignalView {
+    own_authority: AuthorityId,
     reactive: ReactiveHandler,
     state: Mutex<ContactsState>,
 }
 
 impl ContactsSignalView {
-    pub fn new(reactive: ReactiveHandler) -> Self {
+    pub fn new(own_authority: AuthorityId, reactive: ReactiveHandler) -> Self {
         Self {
+            own_authority,
             reactive,
             state: Mutex::new(ContactsState::default()),
         }
+    }
+
+    fn apply_friendship_fact(&self, state: &mut ContactsState, fact: &FriendshipFact) -> bool {
+        let Some(other) = fact.other_participant(self.own_authority) else {
+            return false;
+        };
+
+        let relationship_state = match fact {
+            FriendshipFact::Proposed { requester, .. } if *requester == self.own_authority => {
+                ContactRelationshipState::PendingOutbound
+            }
+            FriendshipFact::Proposed { .. } => ContactRelationshipState::PendingInbound,
+            FriendshipFact::Accepted { .. } => ContactRelationshipState::Friend,
+            FriendshipFact::Revoked { .. } => ContactRelationshipState::Contact,
+        };
+        state.set_relationship_state(other, relationship_state);
+        true
     }
 }
 
@@ -597,6 +619,7 @@ impl ReactiveView for ContactsSignalView {
                                         last_interaction: Some(added_at.ts_ms),
                                         is_online: false,
                                         read_receipt_policy: ReadReceiptPolicy::default(),
+                                        relationship_state: ContactRelationshipState::Contact,
                                     });
                                 }
                                 changed = true;
@@ -624,6 +647,22 @@ impl ReactiveView for ContactsSignalView {
                                 changed = true;
                             }
                         }
+                    }
+                    FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                        if envelope.type_id.as_str() == FRIENDSHIP_FACT_TYPE_ID =>
+                    {
+                        let Some(friendship_fact) = FriendshipFact::from_envelope(envelope) else {
+                            emit_internal_error(
+                                &self.reactive,
+                                format!(
+                                    "Failed to decode FriendshipFact envelope (payload len={})",
+                                    envelope.payload.len()
+                                ),
+                            )
+                            .await;
+                            continue;
+                        };
+                        changed |= self.apply_friendship_fact(&mut state, &friendship_fact);
                     }
                     FactContent::Relational(RelationalFact::Protocol(
                         aura_journal::ProtocolRelationalFact::GuardianBinding {
@@ -1696,12 +1735,13 @@ mod tests {
     use super::*;
     use crate::runtime::effects::AuraEffectSystem;
     use crate::AgentConfig;
-    use aura_app::signal_defs::{register_app_signals, CHAT_SIGNAL, HOMES_SIGNAL};
+    use aura_app::signal_defs::{register_app_signals, CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL};
     use aura_app::views::chat::ChatState;
     use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
+    use aura_relational::{ContactFact, FriendshipFact};
     use aura_social::moderation::facts::{
         HomeGrantModeratorFact, HomePinFact, HomeRevokeModeratorFact, HomeUnpinFact,
     };
@@ -2089,6 +2129,127 @@ mod tests {
         assert!(
             chat.channel(&channel_id).is_none(),
             "membership-only facts must not fabricate channel projection without canonical metadata"
+        );
+    }
+
+    #[tokio::test]
+    async fn contacts_signal_view_projects_friendship_states_from_relational_facts() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([51u8; 32]);
+        let peer = AuthorityId::new_from_entropy([52u8; 32]);
+        let inbound_peer = AuthorityId::new_from_entropy([53u8; 32]);
+        let contact_context = ContextId::new_from_entropy([54u8; 32]);
+        let friendship_context = ContextId::new_from_entropy([55u8; 32]);
+        let inbound_friendship_context = ContextId::new_from_entropy([56u8; 32]);
+        let view = ContactsSignalView::new(own_authority, reactive.clone());
+
+        let contact_added = ContactFact::Added {
+            context_id: contact_context,
+            owner_id: own_authority,
+            contact_id: peer,
+            nickname: "Peer".to_string(),
+            added_at: PhysicalTime {
+                ts_ms: 10,
+                uncertainty: None,
+            },
+        }
+        .to_generic();
+        view.update(&[fact_from_relational(contact_added)]).await;
+
+        let contacts = reactive
+            .read(&*CONTACTS_SIGNAL)
+            .await
+            .expect("contacts signal should be published");
+        assert_eq!(
+            contacts.contact(&peer).map(|contact| contact.relationship_state),
+            Some(ContactRelationshipState::Contact)
+        );
+
+        let outbound_proposed = FriendshipFact::Proposed {
+            context_id: friendship_context,
+            requester: own_authority,
+            accepter: peer,
+            proposed_at: PhysicalTime {
+                ts_ms: 11,
+                uncertainty: None,
+            },
+        }
+        .to_generic();
+        view.update(&[fact_from_relational(outbound_proposed)]).await;
+
+        let contacts = reactive
+            .read(&*CONTACTS_SIGNAL)
+            .await
+            .expect("contacts signal should remain published");
+        assert_eq!(
+            contacts.contact(&peer).map(|contact| contact.relationship_state),
+            Some(ContactRelationshipState::PendingOutbound)
+        );
+
+        let accepted = FriendshipFact::Accepted {
+            context_id: friendship_context,
+            requester: own_authority,
+            accepter: peer,
+            accepted_at: PhysicalTime {
+                ts_ms: 12,
+                uncertainty: None,
+            },
+        }
+        .to_generic();
+        view.update(&[fact_from_relational(accepted)]).await;
+
+        let contacts = reactive
+            .read(&*CONTACTS_SIGNAL)
+            .await
+            .expect("contacts signal should remain published");
+        assert_eq!(
+            contacts.contact(&peer).map(|contact| contact.relationship_state),
+            Some(ContactRelationshipState::Friend)
+        );
+
+        let revoked = FriendshipFact::Revoked {
+            context_id: friendship_context,
+            requester: own_authority,
+            accepter: peer,
+            revoked_at: PhysicalTime {
+                ts_ms: 13,
+                uncertainty: None,
+            },
+        }
+        .to_generic();
+        view.update(&[fact_from_relational(revoked)]).await;
+
+        let contacts = reactive
+            .read(&*CONTACTS_SIGNAL)
+            .await
+            .expect("contacts signal should remain published");
+        assert_eq!(
+            contacts.contact(&peer).map(|contact| contact.relationship_state),
+            Some(ContactRelationshipState::Contact)
+        );
+
+        let inbound_proposed = FriendshipFact::Proposed {
+            context_id: inbound_friendship_context,
+            requester: inbound_peer,
+            accepter: own_authority,
+            proposed_at: PhysicalTime {
+                ts_ms: 14,
+                uncertainty: None,
+            },
+        }
+        .to_generic();
+        view.update(&[fact_from_relational(inbound_proposed)]).await;
+
+        let contacts = reactive
+            .read(&*CONTACTS_SIGNAL)
+            .await
+            .expect("contacts signal should remain published");
+        assert_eq!(
+            contacts
+                .contact(&inbound_peer)
+                .map(|contact| contact.relationship_state),
+            Some(ContactRelationshipState::PendingInbound)
         );
     }
 }

@@ -12,6 +12,7 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::scenario_contract::SemanticCommandValue;
+use crate::views::contacts::ContactRelationshipState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -623,6 +624,10 @@ pub enum ControlId {
     NeighborhoodNewHomeButton,
     NeighborhoodAcceptInvitationButton,
     ContactsCreateInvitationButton,
+    ContactsSendFriendRequestButton,
+    ContactsAcceptFriendRequestButton,
+    ContactsDeclineFriendRequestButton,
+    ContactsRemoveFriendButton,
     ContactsInviteToChannelButton,
     ContactsAddGuardianButton,
     ContactsEditNicknameButton,
@@ -675,6 +680,14 @@ impl ControlId {
             Self::NeighborhoodNewHomeButton => Some("aura-neighborhood-new-home"),
             Self::NeighborhoodAcceptInvitationButton => Some("aura-neighborhood-accept-invitation"),
             Self::ContactsCreateInvitationButton => Some("aura-contacts-create-invitation"),
+            Self::ContactsSendFriendRequestButton => Some("aura-contacts-send-friend-request"),
+            Self::ContactsAcceptFriendRequestButton => {
+                Some("aura-contacts-accept-friend-request")
+            }
+            Self::ContactsDeclineFriendRequestButton => {
+                Some("aura-contacts-decline-friend-request")
+            }
+            Self::ContactsRemoveFriendButton => Some("aura-contacts-remove-friend"),
             Self::ContactsInviteToChannelButton => Some("aura-contacts-invite-channel"),
             Self::ContactsAddGuardianButton => Some("aura-contacts-add-guardian"),
             Self::ContactsEditNicknameButton => Some("aura-contacts-edit-nickname"),
@@ -732,6 +745,10 @@ impl ControlId {
             Self::NeighborhoodNewHomeButton => Some("n"),
             Self::NeighborhoodAcceptInvitationButton => Some("a"),
             Self::ContactsCreateInvitationButton => Some("n"),
+            Self::ContactsSendFriendRequestButton => Some("f"),
+            Self::ContactsAcceptFriendRequestButton => Some("y"),
+            Self::ContactsDeclineFriendRequestButton => Some("x"),
+            Self::ContactsRemoveFriendButton => Some("r"),
             Self::ContactsInviteToChannelButton => Some("i"),
             Self::ContactsAddGuardianButton => Some("g"),
             Self::ChatNewGroupButton => Some("n"),
@@ -757,6 +774,21 @@ impl ControlId {
             Self::SettingsRemoveDeviceButton => Some("r"),
             _ => None,
         }
+    }
+}
+
+#[must_use]
+pub fn contacts_friend_action_controls(
+    relationship_state: ContactRelationshipState,
+) -> &'static [ControlId] {
+    match relationship_state {
+        ContactRelationshipState::Contact => &[ControlId::ContactsSendFriendRequestButton],
+        ContactRelationshipState::PendingOutbound => &[ControlId::ContactsRemoveFriendButton],
+        ContactRelationshipState::PendingInbound => &[
+            ControlId::ContactsAcceptFriendRequestButton,
+            ControlId::ContactsDeclineFriendRequestButton,
+        ],
+        ContactRelationshipState::Friend => &[ControlId::ContactsRemoveFriendButton],
     }
 }
 
@@ -867,6 +899,10 @@ pub enum SemanticOperationKind {
     RemoveDevice,
     ImportDeviceEnrollmentCode,
     CreateContactInvitation,
+    SendFriendRequest,
+    AcceptFriendRequest,
+    DeclineFriendRequest,
+    RevokeFriendship,
     CreateHomeInvitation,
     CreateGuardianInvitation,
     ExportInvitation,
@@ -1428,6 +1464,26 @@ impl OperationId {
     #[must_use]
     pub fn remove_contact() -> Self {
         Self("remove_contact".to_string())
+    }
+
+    #[must_use]
+    pub fn send_friend_request() -> Self {
+        Self("send_friend_request".to_string())
+    }
+
+    #[must_use]
+    pub fn accept_friend_request() -> Self {
+        Self("accept_friend_request".to_string())
+    }
+
+    #[must_use]
+    pub fn decline_friend_request() -> Self {
+        Self("decline_friend_request".to_string())
+    }
+
+    #[must_use]
+    pub fn revoke_friendship() -> Self {
+        Self("revoke_friendship".to_string())
     }
 
     #[must_use]
@@ -3733,8 +3789,9 @@ mod tests {
         PARITY_CRITICAL_SETTINGS_SECTIONS, PARITY_EXCEPTION_METADATA,
         SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SOURCE_AREAS, SHARED_FLOW_SUPPORT,
         SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
-        TUI_OBSERVATION_SURFACE_METHODS,
+        TUI_OBSERVATION_SURFACE_METHODS, contacts_friend_action_controls,
     };
+    use crate::views::contacts::ContactRelationshipState;
     use aura_core::{OwnerEpoch, PublicationSequence};
     use std::collections::HashSet;
     use std::path::Path;
@@ -4678,6 +4735,29 @@ mod tests {
             Some("aura-contacts-remove-contact")
         );
         assert_eq!(ControlId::ModalInput.web_dom_id(), Some("aura-modal-input"));
+    }
+
+    #[test]
+    fn contacts_friend_action_controls_follow_relationship_state() {
+        assert_eq!(
+            contacts_friend_action_controls(ContactRelationshipState::Contact),
+            &[ControlId::ContactsSendFriendRequestButton]
+        );
+        assert_eq!(
+            contacts_friend_action_controls(ContactRelationshipState::PendingOutbound),
+            &[ControlId::ContactsRemoveFriendButton]
+        );
+        assert_eq!(
+            contacts_friend_action_controls(ContactRelationshipState::PendingInbound),
+            &[
+                ControlId::ContactsAcceptFriendRequestButton,
+                ControlId::ContactsDeclineFriendRequestButton,
+            ]
+        );
+        assert_eq!(
+            contacts_friend_action_controls(ContactRelationshipState::Friend),
+            &[ControlId::ContactsRemoveFriendButton]
+        );
     }
 
     #[test]

@@ -239,6 +239,18 @@ pub(crate) fn apply_harness_command(
             ControlId::ContactsInviteToChannelButton => Ok(vec![TuiCommand::Dispatch(
                 DispatchCommand::InviteSelectedContactToChannel,
             )]),
+            ControlId::ContactsSendFriendRequestButton => Ok(vec![TuiCommand::Dispatch(
+                DispatchCommand::SendSelectedFriendRequest,
+            )]),
+            ControlId::ContactsAcceptFriendRequestButton => Ok(vec![TuiCommand::Dispatch(
+                DispatchCommand::AcceptSelectedFriendRequest,
+            )]),
+            ControlId::ContactsDeclineFriendRequestButton => Ok(vec![TuiCommand::Dispatch(
+                DispatchCommand::DeclineSelectedFriendRequest,
+            )]),
+            ControlId::ContactsRemoveFriendButton => Ok(vec![TuiCommand::Dispatch(
+                DispatchCommand::RevokeSelectedFriendship,
+            )]),
             _ => Ok(Vec::new()),
         },
         HarnessUiCommand::ActivateListItem { list_id, item_id } => match list_id {
@@ -440,5 +452,96 @@ pub(crate) fn apply_harness_command(
         HarnessUiCommand::SendChatMessage { content } => Ok(vec![TuiCommand::Dispatch(
             DispatchCommand::SendChatMessage { content },
         )]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_app::ui::contract::ControlId;
+    use aura_app::ui::types::StateSnapshot;
+
+    fn semantic_inputs<'a>(
+        app_snapshot: &'a StateSnapshot,
+        contacts: &'a [TuiContact],
+    ) -> TuiSemanticInputs<'a> {
+        TuiSemanticInputs {
+            app_snapshot,
+            contacts,
+            settings_devices: &[],
+            chat_channels: &[],
+            chat_messages: &[],
+        }
+    }
+
+    #[test]
+    fn friend_controls_dispatch_expected_commands() {
+        let snapshot = StateSnapshot::default();
+        let contacts = Vec::<TuiContact>::new();
+        let mut state = TuiState::default();
+
+        let send = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::ActivateControl {
+                control_id: ControlId::ContactsSendFriendRequestButton,
+            },
+            semantic_inputs(&snapshot, &contacts),
+        )
+        .expect("send control should map");
+        assert!(
+            matches!(
+                send.as_slice(),
+                [TuiCommand::Dispatch(DispatchCommand::SendSelectedFriendRequest)]
+            ),
+            "unexpected send mapping: {send:?}"
+        );
+
+        let accept = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::ActivateControl {
+                control_id: ControlId::ContactsAcceptFriendRequestButton,
+            },
+            semantic_inputs(&snapshot, &contacts),
+        )
+        .expect("accept control should map");
+        assert!(
+            matches!(
+                accept.as_slice(),
+                [TuiCommand::Dispatch(DispatchCommand::AcceptSelectedFriendRequest)]
+            ),
+            "unexpected accept mapping: {accept:?}"
+        );
+
+        let decline = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::ActivateControl {
+                control_id: ControlId::ContactsDeclineFriendRequestButton,
+            },
+            semantic_inputs(&snapshot, &contacts),
+        )
+        .expect("decline control should map");
+        assert!(
+            matches!(
+                decline.as_slice(),
+                [TuiCommand::Dispatch(DispatchCommand::DeclineSelectedFriendRequest)]
+            ),
+            "unexpected decline mapping: {decline:?}"
+        );
+
+        let revoke = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::ActivateControl {
+                control_id: ControlId::ContactsRemoveFriendButton,
+            },
+            semantic_inputs(&snapshot, &contacts),
+        )
+        .expect("remove control should map");
+        assert!(
+            matches!(
+                revoke.as_slice(),
+                [TuiCommand::Dispatch(DispatchCommand::RevokeSelectedFriendship)]
+            ),
+            "unexpected revoke mapping: {revoke:?}"
+        );
     }
 }

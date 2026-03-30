@@ -6,6 +6,7 @@ use aura_app::ui::workflows::ceremonies::{
     monitor_key_rotation_ceremony_with_policy, start_device_threshold_ceremony,
     start_guardian_ceremony, CeremonyLifecycleState, CeremonyPollPolicy,
 };
+use aura_app::ui::types::ContactRelationshipState;
 use aura_app::ui_contract::SemanticOperationKind;
 use aura_core::types::FrostThreshold;
 
@@ -1034,6 +1035,123 @@ pub(super) fn handle_dispatch_command_match(
                 }
             }
         }
+        DispatchCommand::SendSelectedFriendRequest => {
+            let idx = new_state.contacts.selected_index;
+            let contact = {
+                let guard = shared_contacts_for_dispatch.read();
+                guard.get(idx).cloned()
+            };
+            let Some(contact) = contact else {
+                new_state.toast_error("No contact selected");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            if !matches!(contact.relationship_state, ContactRelationshipState::Contact) {
+                new_state.toast_error("Selected contact is not eligible for a new friend request");
+                return EventCommandLoopAction::ContinueCommand;
+            }
+            let Some(update_tx) = update_tx_for_events else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_local_terminal_operation(
+                app_core_for_events,
+                tasks_for_events,
+                update_tx,
+                OperationId::send_friend_request(),
+                SemanticOperationKind::SendFriendRequest,
+            );
+            (cb.contacts.on_send_friend_request)(contact.id.clone(), operation);
+        }
+        DispatchCommand::AcceptSelectedFriendRequest => {
+            let idx = new_state.contacts.selected_index;
+            let contact = {
+                let guard = shared_contacts_for_dispatch.read();
+                guard.get(idx).cloned()
+            };
+            let Some(contact) = contact else {
+                new_state.toast_error("No contact selected");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            if !matches!(
+                contact.relationship_state,
+                ContactRelationshipState::PendingInbound
+            ) {
+                new_state.toast_error("Selected contact has no inbound friend request");
+                return EventCommandLoopAction::ContinueCommand;
+            }
+            let Some(update_tx) = update_tx_for_events else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_local_terminal_operation(
+                app_core_for_events,
+                tasks_for_events,
+                update_tx,
+                OperationId::accept_friend_request(),
+                SemanticOperationKind::AcceptFriendRequest,
+            );
+            (cb.contacts.on_accept_friend_request)(contact.id.clone(), operation);
+        }
+        DispatchCommand::DeclineSelectedFriendRequest => {
+            let idx = new_state.contacts.selected_index;
+            let contact = {
+                let guard = shared_contacts_for_dispatch.read();
+                guard.get(idx).cloned()
+            };
+            let Some(contact) = contact else {
+                new_state.toast_error("No contact selected");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            if !matches!(
+                contact.relationship_state,
+                ContactRelationshipState::PendingInbound
+            ) {
+                new_state.toast_error("Selected contact has no inbound friend request");
+                return EventCommandLoopAction::ContinueCommand;
+            }
+            let Some(update_tx) = update_tx_for_events else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_local_terminal_operation(
+                app_core_for_events,
+                tasks_for_events,
+                update_tx,
+                OperationId::decline_friend_request(),
+                SemanticOperationKind::DeclineFriendRequest,
+            );
+            (cb.contacts.on_decline_friend_request)(contact.id.clone(), operation);
+        }
+        DispatchCommand::RevokeSelectedFriendship => {
+            let idx = new_state.contacts.selected_index;
+            let contact = {
+                let guard = shared_contacts_for_dispatch.read();
+                guard.get(idx).cloned()
+            };
+            let Some(contact) = contact else {
+                new_state.toast_error("No contact selected");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            if !matches!(
+                contact.relationship_state,
+                ContactRelationshipState::PendingOutbound | ContactRelationshipState::Friend
+            ) {
+                new_state.toast_error("Selected contact has no active friendship to remove");
+                return EventCommandLoopAction::ContinueCommand;
+            }
+            let Some(update_tx) = update_tx_for_events else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_local_terminal_operation(
+                app_core_for_events,
+                tasks_for_events,
+                update_tx,
+                OperationId::revoke_friendship(),
+                SemanticOperationKind::RevokeFriendship,
+            );
+            (cb.contacts.on_revoke_friendship)(contact.id.clone(), operation);
+        }
         DispatchCommand::InviteSelectedContactToChannel => {
             let contact_idx = new_state.contacts.selected_index;
             let channel_idx = new_state.chat.selected_channel;
@@ -1151,15 +1269,41 @@ pub(super) fn handle_dispatch_command_match(
                         format!("{short}...")
                     };
 
-                    // Show confirmation modal
+                    let (title, message, on_confirm) = match contact.relationship_state {
+                        ContactRelationshipState::Contact => (
+                            "Remove Contact".to_string(),
+                            format!("Are you sure you want to remove \"{display_name}\"?"),
+                            Some(crate::tui::state::ConfirmAction::RemoveContact {
+                                contact_id: contact.id.clone().into(),
+                            }),
+                        ),
+                        ContactRelationshipState::PendingOutbound => (
+                            "Cancel Friend Request".to_string(),
+                            format!(
+                                "Are you sure you want to cancel the friend request to \"{display_name}\"?"
+                            ),
+                            Some(crate::tui::state::ConfirmAction::RevokeFriendship),
+                        ),
+                        ContactRelationshipState::PendingInbound => (
+                            "Decline Friend Request".to_string(),
+                            format!(
+                                "Are you sure you want to decline the friend request from \"{display_name}\"?"
+                            ),
+                            Some(crate::tui::state::ConfirmAction::DeclineFriendRequest),
+                        ),
+                        ContactRelationshipState::Friend => (
+                            "Remove Friend".to_string(),
+                            format!("Are you sure you want to remove \"{display_name}\" as a friend?"),
+                            Some(crate::tui::state::ConfirmAction::RevokeFriendship),
+                        ),
+                    };
+
                     new_state
                         .modal_queue
                         .enqueue(crate::tui::state::QueuedModal::Confirm {
-                            title: "Remove Contact".to_string(),
-                            message: format!("Are you sure you want to remove \"{display_name}\"?"),
-                            on_confirm: Some(crate::tui::state::ConfirmAction::RemoveContact {
-                                contact_id: contact.id.clone().into(),
-                            }),
+                            title,
+                            message,
+                            on_confirm,
                         });
                 } else {
                     new_state.toast_error("No contact selected");

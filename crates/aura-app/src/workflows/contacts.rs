@@ -12,14 +12,37 @@ use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_chat::ChatFact;
+use aura_core::hash::hash;
+use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::types::identifiers::ChannelId;
 use aura_core::AuraError;
 use aura_journal::DomainFact;
-use aura_relational::ContactFact;
+use aura_relational::{ContactFact, FriendshipFact};
 use std::sync::Arc;
 use std::time::Duration;
 
 const CONTACTS_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
+
+fn friendship_context(local: AuthorityId, peer: AuthorityId) -> ContextId {
+    let mut left = local.to_bytes();
+    let mut right = peer.to_bytes();
+    if left > right {
+        std::mem::swap(&mut left, &mut right);
+    }
+
+    let mut seed = b"friendship-context:v1".to_vec();
+    seed.extend_from_slice(&left);
+    seed.extend_from_slice(&right);
+    ContextId::new_from_entropy(hash(&seed))
+}
+
+fn physical_time(timestamp_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms: timestamp_ms,
+        uncertainty: None,
+    }
+}
 
 /// Add a contact to the local contact list.
 ///
@@ -193,6 +216,130 @@ pub async fn remove_contact(
     )
     .await?
     .map_err(|e| runtime_call("remove contact", e))?;
+
+    Ok(())
+}
+
+/// Send a bilateral friend request for an existing unilateral contact.
+pub async fn send_friend_request(
+    app_core: &Arc<RwLock<AppCore>>,
+    contact_id: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    let target = parse_authority_id(contact_id)?;
+    let owner_id = runtime.authority_id();
+    let fact = FriendshipFact::Proposed {
+        context_id: friendship_context(owner_id, target),
+        requester: owner_id,
+        accepter: target,
+        proposed_at: physical_time(timestamp_ms),
+    }
+    .to_generic();
+    let facts = vec![fact];
+
+    timeout_runtime_call(
+        &runtime,
+        "send_friend_request",
+        "commit_relational_facts",
+        CONTACTS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(&facts),
+    )
+    .await?
+    .map_err(|e| runtime_call("send friend request", e))?;
+
+    Ok(())
+}
+
+/// Accept an inbound bilateral friend request.
+pub async fn accept_friend_request(
+    app_core: &Arc<RwLock<AppCore>>,
+    contact_id: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    let target = parse_authority_id(contact_id)?;
+    let owner_id = runtime.authority_id();
+    let fact = FriendshipFact::Accepted {
+        context_id: friendship_context(owner_id, target),
+        requester: target,
+        accepter: owner_id,
+        accepted_at: physical_time(timestamp_ms),
+    }
+    .to_generic();
+    let facts = vec![fact];
+
+    timeout_runtime_call(
+        &runtime,
+        "accept_friend_request",
+        "commit_relational_facts",
+        CONTACTS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(&facts),
+    )
+    .await?
+    .map_err(|e| runtime_call("accept friend request", e))?;
+
+    Ok(())
+}
+
+/// Decline an inbound bilateral friend request.
+pub async fn decline_friend_request(
+    app_core: &Arc<RwLock<AppCore>>,
+    contact_id: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    let target = parse_authority_id(contact_id)?;
+    let owner_id = runtime.authority_id();
+    let fact = FriendshipFact::Revoked {
+        context_id: friendship_context(owner_id, target),
+        requester: target,
+        accepter: owner_id,
+        revoked_at: physical_time(timestamp_ms),
+    }
+    .to_generic();
+    let facts = vec![fact];
+
+    timeout_runtime_call(
+        &runtime,
+        "decline_friend_request",
+        "commit_relational_facts",
+        CONTACTS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(&facts),
+    )
+    .await?
+    .map_err(|e| runtime_call("decline friend request", e))?;
+
+    Ok(())
+}
+
+/// Revoke an existing bilateral friendship or cancel an outbound request.
+pub async fn revoke_friendship(
+    app_core: &Arc<RwLock<AppCore>>,
+    contact_id: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    let target = parse_authority_id(contact_id)?;
+    let owner_id = runtime.authority_id();
+    let fact = FriendshipFact::Revoked {
+        context_id: friendship_context(owner_id, target),
+        requester: owner_id,
+        accepter: target,
+        revoked_at: physical_time(timestamp_ms),
+    }
+    .to_generic();
+    let facts = vec![fact];
+
+    timeout_runtime_call(
+        &runtime,
+        "revoke_friendship",
+        "commit_relational_facts",
+        CONTACTS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(&facts),
+    )
+    .await?
+    .map_err(|e| runtime_call("revoke friendship", e))?;
 
     Ok(())
 }

@@ -40,6 +40,7 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - Parity-critical semantic export must not depend on placeholder IDs, override-backed lists, or heuristic runtime-event inference.
 - The TUI is an `Observed` plus command-ingress surface for shared semantic flows. It may submit commands and render lifecycle, but it must not own terminal semantic truth for parity-critical operations.
 - Parity-critical callback families must require the appropriate owner type at the API boundary; ownerless callbacks are observed-only.
+- Contacts-screen friend-management affordances and dispatch rules must consume shared `ContactRelationshipState` and shared contact-action contracts from `aura-app`; the TUI may not keep a separate friendship state machine.
 - Snapshot contention must be surfaced explicitly on parity-relevant paths; the shell may not treat lock contention as an empty authoritative state.
 - Best-effort snapshot helpers may return defaults only for explicitly observed-only, non-authoritative reads such as deterministic tests or narrow display-only helpers. They must not be reused as an authoritative input surface for parity-critical decisions.
 - Long-lived subscription exhaustion must become structural degraded state, not a log-only event.

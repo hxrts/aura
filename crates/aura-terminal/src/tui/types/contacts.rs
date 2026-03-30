@@ -1,4 +1,4 @@
-use aura_app::ui::types::Contact as AppContact;
+use aura_app::ui::types::{Contact as AppContact, ContactRelationshipState};
 use iocraft::prelude::Color;
 
 use crate::tui::theme::Theme;
@@ -66,6 +66,7 @@ pub struct Contact {
     pub nickname_suggestion: Option<String>,
     pub status: ContactStatus,
     pub is_guardian: bool,
+    pub relationship_state: ContactRelationshipState,
     /// Read receipt policy for this contact.
     pub read_receipt_policy: ReadReceiptPolicy,
 }
@@ -109,12 +110,15 @@ impl From<&AppContact> for Contact {
             id: c.id.to_string(),
             nickname,
             nickname_suggestion: c.nickname_suggestion.clone(),
-            status: if c.is_online {
+            status: if c.relationship_state.is_pending() {
+                ContactStatus::Pending
+            } else if c.is_online {
                 ContactStatus::Active
             } else {
                 ContactStatus::Offline
             },
             is_guardian: c.is_guardian,
+            relationship_state: c.relationship_state,
             read_receipt_policy: c.read_receipt_policy,
         }
     }

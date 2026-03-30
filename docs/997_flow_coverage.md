@@ -65,6 +65,10 @@ The two TUI-only conformance scenarios are retained as frontend-conformance cove
 | Navigate neighborhood | `real-runtime-mixed-startup-smoke.toml` | TUI Neighborhood Keypaths/Detail | TUI + Web |
 | Navigate chat | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Navigate contacts | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Send friend request | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Accept inbound friend request | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Decline inbound friend request | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Remove friend / revoke outbound friendship | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Navigate notifications | `shared-notifications-and-authority.toml` | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Navigate settings | `shared-settings-parity.toml` | `shared-notifications-and-authority.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | TUI + Web |
 | Create invitation | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
@@ -84,8 +88,8 @@ and continue to map to the same canonical coverage anchors:
 
 - Neighborhood navigation stays anchored by
   `real-runtime-mixed-startup-smoke.toml`
-- Chat/contact navigation plus invitation, home creation, channel join, and
-  message-send flows stay anchored by
+- Chat/contact navigation, the contact-to-friend lifecycle, invitation, home
+  creation, channel join, and message-send flows stay anchored by
   `scenario13-mixed-contact-channel-message-e2e.toml`
 
 ## Frontend-Conformance Coverage
@@ -163,17 +167,18 @@ Frontend-specific flows may still have scenario coverage, but they are not part 
 1. Changes to global navigation, settings, chat, contacts, neighborhood, or ceremonies should have at least one impacted canonical scenario updated or re-validated.
 2. Changes that affect both TUI and web behavior should be validated against parity-critical scenarios in the shared semantic lane on both runtimes.
 3. Changes to mixed-instance behavior should include scenario 12 and/or 13 coverage.
-4. Mixed-runtime code exchange and chat routing changes should preserve the
+4. Contacts-surface changes that alter relationship state or action availability must preserve the shared semantic lifecycle for `contact`, `pending_outbound`, `pending_inbound`, and `friend`, and they must stay anchored to Scenario 13 rather than shell-specific smoke coverage.
+5. Mixed-runtime code exchange and chat routing changes should preserve the
    event-driven contract used by scenarios 12 and 13: invitation/device codes
    come from typed runtime-event payloads, and chat assertions bind to the
    selected shared channel rather than frontend-specific ordering.
-5. Browser shared-flow bridge changes should preserve the explicit runtime
+6. Browser shared-flow bridge changes should preserve the explicit runtime
    identity staging handoff and the page-owned semantic command queue used by
    the Playwright lane. Coverage remains anchored in the shared semantic
    scenarios rather than DOM-driving fallback mechanics.
-6. Changes to renderer-specific control wiring should add or update
+7. Changes to renderer-specific control wiring should add or update
    frontend-conformance coverage rather than weakening the shared semantic lane.
-7. Changes to OTA or module release/update architecture should update the
+8. Changes to OTA or module release/update architecture should update the
    planned release/update matrix above when they add, remove, or reorder
    mechanism-validation or release-rehearsal coverage.
 

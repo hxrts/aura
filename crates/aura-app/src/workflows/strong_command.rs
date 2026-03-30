@@ -2049,6 +2049,7 @@ mod tests {
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
+            relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
         };
 
         {
@@ -2081,6 +2082,7 @@ mod tests {
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
+            relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
         };
         let bobby = Contact {
             id: AuthorityId::new_from_entropy([3u8; 32]),
@@ -2091,6 +2093,7 @@ mod tests {
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
+            relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
         };
 
         {
@@ -2142,6 +2145,7 @@ mod tests {
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
+            relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
         };
 
         {
@@ -2514,6 +2518,7 @@ mod tests {
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
+            relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
         };
         let replacement = Contact {
             id: AuthorityId::new_from_entropy([22u8; 32]),
@@ -2524,6 +2529,7 @@ mod tests {
             last_interaction: None,
             is_online: true,
             read_receipt_policy: Default::default(),
+            relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
         };
 
         {

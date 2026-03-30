@@ -31,6 +31,7 @@ Portable, platform-agnostic application core containing pure business logic (int
 - **Frontend agnostic**: works with multiple platform frontends.
 - **Shared-flow contract authority**: semantic UI ids, flow support declarations, typed command-plane metadata, and typed diagnostics are defined here.
 - **Shared semantic ownership authority**: parity-critical semantic operation categories, typed terminal lifecycle, and owner-routed handles/tokens are defined here rather than in frontend-local crates.
+- **Contacts relationship authority**: `ContactRelationshipState` and shared friend-management control availability are defined here and derived from runtime-fed projections rather than frontend-local state machines.
 - Platform-specific code isolated behind feature flags (`native`, `ios`, `android`, `web-js`).
 
 ### InvariantAppWorkflowPurity

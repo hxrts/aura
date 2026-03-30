@@ -195,6 +195,21 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::OpenCreateInvitationModal,
             ));
         }
+        KeyCode::Char('f') => {
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::SendSelectedFriendRequest,
+            ));
+        }
+        KeyCode::Char('y') => {
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::AcceptSelectedFriendRequest,
+            ));
+        }
+        KeyCode::Char('x') => {
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::DeclineSelectedFriendRequest,
+            ));
+        }
         KeyCode::Char('i') => {
             commands.push(TuiCommand::Dispatch(
                 DispatchCommand::InviteSelectedContactToChannel,

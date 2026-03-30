@@ -28,6 +28,7 @@ use aura_app::{
         OperationState, RuntimeEventId, RuntimeEventSnapshot, SelectionSnapshot, ToastId,
         ToastKind, ToastSnapshot, UiSnapshot,
     },
+    ui::types::ContactRelationshipState,
     AppCore,
 };
 use aura_core::types::identifiers::AuthorityId;
@@ -111,6 +112,7 @@ pub struct ContactRow {
     pub name: String,
     pub selected: bool,
     pub is_guardian: bool,
+    pub relationship_state: ContactRelationshipState,
     pub confirmation: ConfirmationState,
 }
 
@@ -445,6 +447,7 @@ impl UiModel {
             name: name.to_string(),
             selected: self.contacts.is_empty(),
             is_guardian: false,
+            relationship_state: ContactRelationshipState::Contact,
             confirmation: ConfirmationState::Confirmed,
         });
         if self.contacts.len() == 1 {
@@ -457,6 +460,7 @@ impl UiModel {
         authority_id: AuthorityId,
         name: String,
         is_guardian: bool,
+        relationship_state: ContactRelationshipState,
     ) {
         if let Some(existing) = self
             .contacts
@@ -465,7 +469,11 @@ impl UiModel {
         {
             existing.name = name;
             existing.is_guardian = is_guardian;
-            existing.confirmation = ConfirmationState::Confirmed;
+            existing.relationship_state = relationship_state;
+            existing.confirmation = match relationship_state {
+                ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
+                _ => ConfirmationState::Confirmed,
+            };
             return;
         }
 
@@ -474,7 +482,11 @@ impl UiModel {
             name,
             selected: self.contacts.is_empty(),
             is_guardian,
-            confirmation: ConfirmationState::PendingLocal,
+            relationship_state,
+            confirmation: match relationship_state {
+                ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
+                _ => ConfirmationState::Confirmed,
+            },
         });
 
         if self.selected_contact_id.is_none() {
@@ -636,16 +648,23 @@ impl UiModel {
         self.select_channel_id(Some(&selected_id));
     }
 
-    pub fn replace_contacts(&mut self, contacts: Vec<(AuthorityId, String, bool)>) {
+    pub fn replace_contacts(
+        &mut self,
+        contacts: Vec<(AuthorityId, String, bool, ContactRelationshipState)>,
+    ) {
         let previous = self.selected_contact_id;
         self.contacts = contacts
             .into_iter()
-            .map(|(authority_id, name, is_guardian)| ContactRow {
+            .map(|(authority_id, name, is_guardian, relationship_state)| ContactRow {
                 authority_id,
                 name,
                 selected: false,
                 is_guardian,
-                confirmation: ConfirmationState::Confirmed,
+                relationship_state,
+                confirmation: match relationship_state {
+                    ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
+                    _ => ConfirmationState::Confirmed,
+                },
             })
             .collect();
 

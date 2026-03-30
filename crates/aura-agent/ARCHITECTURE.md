@@ -53,6 +53,8 @@ Summary:
 - Lazy composition: effects assembled on-demand.
 - Mode-aware execution: production, testing, and simulation use same API.
 - For shared semantic flows, `aura-agent` is the primary `ActorOwned` crate. It may own long-lived mutable async runtime state, but it must not leak that ownership into frontend-local semantic lifecycle authorship.
+- Mutable runtime service views such as rendezvous descriptors, provider health, selector state, and hold observations are owned by the actor-owned service registry in `src/runtime/services/service_registry.rs`.
+- Contacts/friend projections derive `ContactRelationshipState` from relational facts inside `aura-agent`; frontend shells consume the emitted projection and do not keep separate friendship state machines.
 - Runtime-owned service declarations should prefer the `#[actor_owned(...)]` layer where a service exposes a stable long-lived command/ingress boundary; changed-files ratchets in `just ci-ownership-policy` enforce this incrementally.
 - Task-supervision service roots that do not expose a stable command-ingress surface should use `#[actor_root(...)]` instead of forcing the store-style `#[actor_owned(...)]` command-enum pattern.
 

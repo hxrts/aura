@@ -3,7 +3,7 @@
 //! This module contains guardian recovery operations that are portable
 //! across all frontends. Uses typed reactive signals for state reads/writes.
 
-use crate::views::contacts::{Contact, ReadReceiptPolicy};
+use crate::views::contacts::{Contact, ContactRelationshipState, ReadReceiptPolicy};
 use crate::workflows::ceremonies::{
     CeremonyLifecycle, CeremonyLifecycleState, CeremonyPollPolicy, CeremonyStatusLike,
 };
@@ -271,6 +271,7 @@ pub async fn toggle_guardian_contact(
                 last_interaction: Some(timestamp_ms),
                 is_online: false,
                 read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::Contact,
             });
         }
     })

@@ -72,12 +72,16 @@ async fn create_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>>
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
     let device_id = DeviceId::new_from_entropy([seed.wrapping_add(0x40); 32]);
     let ctx = test_context(authority_id);
+    let temp_dir = std::env::temp_dir().join(format!("aura-lan-test-{seed}-{lan_port}"));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    let _ = std::fs::create_dir_all(&temp_dir);
 
     let mut config = AgentConfig {
         device_id,
         ..Default::default()
     };
     config.network.bind_address = "0.0.0.0:0".to_string();
+    config.storage.base_path = temp_dir;
     config.lan_discovery = LanDiscoveryConfig {
         port: lan_port,
         announce_interval_ms: 200,

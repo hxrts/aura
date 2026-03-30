@@ -32,7 +32,9 @@ use aura_app::runtime_bridge::{
     RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::CONTACTS_SIGNAL;
-use aura_app::views::contacts::{Contact, ContactsState, ReadReceiptPolicy};
+use aura_app::views::contacts::{
+    Contact, ContactRelationshipState, ContactsState, ReadReceiptPolicy,
+};
 use aura_app::IntentError;
 use aura_app::ReactiveHandler;
 use aura_core::domain::Hash32;
@@ -318,6 +320,7 @@ impl MockRuntimeBridge {
                         last_interaction: Some(self.now_ms()),
                         is_online: false,
                         read_receipt_policy: ReadReceiptPolicy::default(),
+                        relationship_state: ContactRelationshipState::Contact,
                     });
                 }
                 true
@@ -346,6 +349,7 @@ impl MockRuntimeBridge {
                     last_interaction: Some(self.now_ms()),
                     is_online: false,
                     read_receipt_policy: ReadReceiptPolicy::default(),
+                    relationship_state: ContactRelationshipState::Contact,
                 });
                 true
             }
@@ -1263,6 +1267,7 @@ impl RuntimeBridge for MockRuntimeBridge {
                 last_interaction: Some(self.now_ms()),
                 is_online: false,
                 read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::Contact,
             };
 
             // Add to contacts list, avoiding duplicates

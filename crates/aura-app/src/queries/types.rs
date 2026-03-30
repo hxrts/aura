@@ -731,7 +731,9 @@ impl Query for ContactsQuery {
     }
 
     fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        use crate::views::contacts::{Contact, ContactsState, ReadReceiptPolicy};
+        use crate::views::contacts::{
+            Contact, ContactRelationshipState, ContactsState, ReadReceiptPolicy,
+        };
 
         let contacts: Vec<Contact> = bindings
             .rows
@@ -755,6 +757,7 @@ impl Query for ContactsQuery {
                     last_interaction,
                     is_online: get_bool(&row, "is_online"),
                     read_receipt_policy: ReadReceiptPolicy::default(),
+                    relationship_state: ContactRelationshipState::Contact,
                 })
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;

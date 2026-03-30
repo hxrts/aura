@@ -25,6 +25,7 @@
 
 use iocraft::prelude::*;
 
+use aura_app::ui::contract::{contacts_friend_action_controls, ControlId};
 use aura_app::ui::signals::{
     CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL, SETTINGS_SIGNAL,
 };
@@ -43,8 +44,56 @@ use crate::tui::types::{
     InvitationType, ReadReceiptPolicyExt,
 };
 use aura_app::ui::signals::DiscoveredPeerMethod;
+use aura_app::ui::types::ContactRelationshipState;
 use aura_app::ui::types::format_relative_time_from;
 use std::collections::HashSet;
+
+fn contact_relationship_label(state: ContactRelationshipState) -> &'static str {
+    match state {
+        ContactRelationshipState::Contact => "Contact",
+        ContactRelationshipState::PendingOutbound => "Pending outbound",
+        ContactRelationshipState::PendingInbound => "Pending inbound",
+        ContactRelationshipState::Friend => "Friend",
+    }
+}
+
+fn contact_friend_action_hint(state: ContactRelationshipState) -> Option<String> {
+    let controls = contacts_friend_action_controls(state);
+    if controls.is_empty() {
+        return None;
+    }
+
+    let labels = controls
+        .iter()
+        .filter_map(|control| match control {
+            ControlId::ContactsSendFriendRequestButton => {
+                Some(format!("{} send friend request", control.activation_key()?))
+            }
+            ControlId::ContactsAcceptFriendRequestButton => {
+                Some(format!("{} accept friend request", control.activation_key()?))
+            }
+            ControlId::ContactsDeclineFriendRequestButton => {
+                Some(format!("{} decline friend request", control.activation_key()?))
+            }
+            ControlId::ContactsRemoveFriendButton => match state {
+                ContactRelationshipState::PendingOutbound => {
+                    Some(format!("{} cancel friend request", control.activation_key()?))
+                }
+                ContactRelationshipState::Friend => {
+                    Some(format!("{} remove friend", control.activation_key()?))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    if labels.is_empty() {
+        None
+    } else {
+        Some(labels.join(", "))
+    }
+}
 
 /// Props for ContactItem
 #[derive(Default, Props)]
@@ -88,7 +137,14 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
         let short = id.chars().take(8).collect::<String>();
         format!("{short}...")
     };
-    let guardian_badge = if c.is_guardian { " [guardian]" } else { "" }.to_string();
+    let relationship_badge = match c.relationship_state {
+        ContactRelationshipState::Friend => " [friend]",
+        ContactRelationshipState::PendingOutbound => " [pending→]",
+        ContactRelationshipState::PendingInbound => " [pending←]",
+        ContactRelationshipState::Contact if c.is_guardian => " [guardian]",
+        _ => "",
+    }
+    .to_string();
 
     // Selection indicator: triangle when selected, space otherwise
     let indicator = if props.is_selected { "➤" } else { " " };
@@ -110,7 +166,7 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
             View(margin_left: Spacing::XS) {
                 Text(content: name, color: text_color, wrap: TextWrap::NoWrap)
             }
-            Text(content: guardian_badge, color: Theme::SECONDARY)
+            Text(content: relationship_badge, color: Theme::SECONDARY)
         }
     }
 }
@@ -176,11 +232,14 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
         };
         let guardian = if c.is_guardian { "Yes" } else { "No" };
         let read_receipts = c.read_receipt_policy.label();
+        let friend_actions = contact_friend_action_hint(c.relationship_state);
 
-        vec![
+        let mut content = vec![
             element! { KeyValue(label: "Nickname".to_string(), value: c.nickname.clone()) }
                 .into_any(),
             element! { KeyValue(label: "Status".to_string(), value: status_label.to_string()) }
+                .into_any(),
+            element! { KeyValue(label: "Relationship".to_string(), value: contact_relationship_label(c.relationship_state).to_string()) }
                 .into_any(),
             element! { KeyValue(label: "Authority".to_string(), value: "User/Home/Neighborhood".to_string()) }
                 .into_any(),
@@ -188,7 +247,14 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
                 .into_any(),
             element! { KeyValue(label: "Read Receipts".to_string(), value: read_receipts.to_string()) }
                 .into_any(),
-        ]
+        ];
+        if let Some(friend_actions) = friend_actions {
+            content.push(
+                element! { KeyValue(label: "Friend Actions".to_string(), value: friend_actions) }
+                    .into_any(),
+            );
+        }
+        content
     } else {
         vec![]
     };

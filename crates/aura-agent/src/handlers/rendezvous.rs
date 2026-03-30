@@ -9,7 +9,7 @@ use super::shared::{
 };
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::consensus::build_consensus_params;
-use crate::runtime::services::{RendezvousCacheManager, RendezvousManager};
+use crate::runtime::services::{RendezvousManager, ServiceRegistry};
 use crate::runtime::AuraEffectSystem;
 use aura_consensus::protocol::run_consensus;
 use aura_core::crypto::single_signer::SingleSignerKeyPackage;
@@ -77,8 +77,8 @@ pub struct RendezvousHandler {
     context: HandlerContext,
     /// Inner rendezvous service for guard chain operations
     service: Arc<RendezvousService>,
-    /// Rendezvous cache manager (descriptors + pending channels)
-    cache_manager: Arc<RendezvousCacheManager>,
+    /// Canonical local runtime service registry surface.
+    registry: Arc<ServiceRegistry>,
     /// Optional rendezvous manager for shared descriptor cache
     rendezvous_manager: Option<RendezvousManager>,
 }
@@ -166,7 +166,7 @@ impl RendezvousHandler {
         Ok(Self {
             context: HandlerContext::new(authority),
             service,
-            cache_manager: Arc::new(RendezvousCacheManager::new()),
+            registry: Arc::new(ServiceRegistry::new()),
             rendezvous_manager: None,
         })
     }
@@ -181,13 +181,14 @@ impl RendezvousHandler {
         Ok(Self {
             context: HandlerContext::new(authority),
             service,
-            cache_manager: Arc::new(RendezvousCacheManager::new()),
+            registry: Arc::new(ServiceRegistry::new()),
             rendezvous_manager: None,
         })
     }
 
     /// Attach a rendezvous manager for shared descriptor cache access.
     pub fn with_rendezvous_manager(mut self, manager: RendezvousManager) -> Self {
+        self.registry = manager.registry();
         self.rendezvous_manager = Some(manager);
         self
     }
@@ -276,7 +277,7 @@ impl RendezvousHandler {
                 fact: RendezvousFact::Descriptor(desc),
             } = effect
             {
-                self.cache_manager.cache_descriptor(desc.clone()).await;
+                self.registry.cache_descriptor(desc.clone()).await;
                 if let Some(manager) = self.rendezvous_manager.as_ref() {
                     if let Err(err) = manager.cache_descriptor(desc.clone()).await {
                         tracing::debug!(
@@ -308,7 +309,7 @@ impl RendezvousHandler {
                 tracing::debug!(error = %err, "Failed to cache descriptor in rendezvous manager");
             }
         } else {
-            self.cache_manager.cache_descriptor(descriptor).await;
+            self.registry.cache_descriptor(descriptor).await;
         }
     }
 
@@ -324,7 +325,10 @@ impl RendezvousHandler {
                 None => manager.get_any_descriptor_for_authority(peer).await,
             }
         } else {
-            self.cache_manager.get_descriptor(context_id, peer).await
+            match self.registry.get_descriptor(context_id, peer).await {
+                Some(descriptor) => Some(descriptor),
+                None => self.registry.get_any_descriptor_for_authority(peer).await,
+            }
         }
     }
 
@@ -338,14 +342,14 @@ impl RendezvousHandler {
         if let Some(manager) = self.rendezvous_manager.as_ref() {
             manager.needs_refresh(context_id, now_ms).await
         } else {
-            self.cache_manager
-                .get_descriptor(context_id, self.context.authority.authority_id())
+            self.registry
+                .descriptor_needs_refresh(
+                    context_id,
+                    self.context.authority.authority_id(),
+                    refresh_window_ms,
+                    now_ms,
+                )
                 .await
-                .map(|desc| {
-                    let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
-                    now_ms >= refresh_threshold
-                })
-                .unwrap_or(true)
         }
     }
 
@@ -429,8 +433,8 @@ impl RendezvousHandler {
         }
 
         // Track pending channel
-        self.cache_manager
-            .track_pending_channel(context_id, peer, current_time)
+        self.registry
+            .track_pending_route(context_id, peer, current_time)
             .await;
 
         // Execute all effect commands via the bridge (includes SendHandshake)
@@ -458,8 +462,8 @@ impl RendezvousHandler {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Remove from pending
-        self.cache_manager
-            .remove_pending_channel(context_id, peer)
+        self.registry
+            .remove_pending_route(context_id, peer)
             .await;
 
         // Create channel established fact
@@ -567,6 +571,15 @@ impl RendezvousHandler {
         })
     }
 
+    async fn cleanup_registry_state(&self, now_ms: u64, pending_max_age_ms: u64) -> (usize, usize) {
+        let removed_desc = self.registry.cleanup_expired_descriptors(now_ms).await;
+        let removed_pending = self
+            .registry
+            .cleanup_stale_pending_routes(now_ms, pending_max_age_ms)
+            .await;
+        (removed_desc, removed_pending)
+    }
+
     /// Cleanup expired descriptors and stale pending channels.
     ///
     /// Removes descriptors that are no longer valid and pending channels
@@ -576,8 +589,7 @@ impl RendezvousHandler {
         const PENDING_CHANNEL_MAX_AGE_MS: u64 = 300_000;
 
         let (removed_desc, removed_pending) = self
-            .cache_manager
-            .cleanup_expired(now_ms, PENDING_CHANNEL_MAX_AGE_MS)
+            .cleanup_registry_state(now_ms, PENDING_CHANNEL_MAX_AGE_MS)
             .await;
         if removed_desc > 0 {
             tracing::debug!(removed = removed_desc, "Cleaned up expired descriptors");
@@ -716,8 +728,8 @@ impl RendezvousHandler {
             .await
             .map_err(|e| AgentError::effects(format!("handle completion failed: {e}")))?;
 
-        self.cache_manager
-            .remove_pending_channel(context_id, peer)
+        self.registry
+            .remove_pending_route(context_id, peer)
             .await;
 
         Ok(())
@@ -1046,8 +1058,10 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
+    use crate::runtime::services::{RendezvousManager, RendezvousManagerConfig};
     use aura_core::CapabilityName;
     use aura_guards::GuardContextProvider;
+    use aura_effects::time::PhysicalTimeHandler;
     use aura_rendezvous::GuardDecision;
     use base64::Engine;
 
@@ -1281,6 +1295,45 @@ mod tests {
         let cached = handler.get_peer_descriptor(context_id, peer).await;
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().authority_id, peer);
+    }
+
+    #[tokio::test]
+    async fn test_handler_and_manager_share_descriptor_registry() {
+        let authority_context = create_test_authority(53);
+        let manager = RendezvousManager::new_with_default_udp(
+            authority_context.authority_id(),
+            RendezvousManagerConfig::for_testing(),
+            Arc::new(PhysicalTimeHandler::new()),
+        );
+        let handler = RendezvousHandler::new(authority_context).unwrap()
+            .with_rendezvous_manager(manager.clone());
+
+        let context_id = ContextId::new_from_entropy([153u8; 32]);
+        let peer = AuthorityId::new_from_entropy([54u8; 32]);
+        let descriptor = RendezvousDescriptor {
+            authority_id: peer,
+            device_id: None,
+            context_id,
+            transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
+            handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
+            valid_from: 0,
+            valid_until: u64::MAX,
+            nonce: [0u8; 32],
+            nickname_suggestion: None,
+        };
+
+        handler.cache_peer_descriptor(descriptor.clone()).await;
+
+        let cached = manager
+            .get_descriptor(context_id, peer)
+            .await
+            .expect("descriptor should be visible through manager registry");
+        assert_eq!(cached.authority_id, peer);
+        assert_eq!(
+            manager.registry().projection(Some(context_id), 1).await.descriptors.len(),
+            1
+        );
     }
 
     #[tokio::test]

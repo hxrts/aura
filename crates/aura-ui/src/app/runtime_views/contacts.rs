@@ -2,7 +2,7 @@ use crate::model::UiController;
 use aura_app::signal_defs::DiscoveredPeersState;
 use aura_app::ui::contract::ConfirmationState;
 use aura_app::ui::signals::{CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL};
-use aura_app::ui::types::ContactsState;
+use aura_app::ui::types::{ContactRelationshipState, ContactsState};
 use aura_app::ui_contract::RuntimeFact;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::AuthorityId;
@@ -16,6 +16,7 @@ pub(in crate::app) struct ContactsRuntimeContact {
     pub(in crate::app) is_guardian: bool,
     pub(in crate::app) is_member: bool,
     pub(in crate::app) is_online: bool,
+    pub(in crate::app) relationship_state: ContactRelationshipState,
     pub(in crate::app) confirmation: ConfirmationState,
 }
 
@@ -63,7 +64,11 @@ fn build_contacts_runtime_view(
             is_guardian: contact.is_guardian,
             is_member: contact.is_member,
             is_online: contact.is_online,
-            confirmation: ConfirmationState::Confirmed,
+            relationship_state: contact.relationship_state,
+            confirmation: match contact.relationship_state {
+                ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
+                _ => ConfirmationState::Confirmed,
+            },
         })
         .collect();
     rows.sort_by(|left, right| left.name.cmp(&right.name));
@@ -118,10 +123,137 @@ pub(in crate::app) async fn load_contacts_runtime_view(
                     contact.authority_id,
                     contact.name.clone(),
                     contact.is_guardian,
+                    contact.relationship_state,
                 )
             })
             .collect(),
         runtime_facts,
     );
     runtime
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_app::signal_defs::{DiscoveredPeer, DiscoveredPeerMethod};
+    use aura_app::ui::types::{Contact, ContactRelationshipState};
+    use aura_app::views::ReadReceiptPolicy;
+
+    #[test]
+    fn build_contacts_runtime_view_preserves_relationship_projection() {
+        let alice = AuthorityId::new_from_entropy([1u8; 32]);
+        let bob = AuthorityId::new_from_entropy([2u8; 32]);
+        let carol = AuthorityId::new_from_entropy([3u8; 32]);
+        let dave = AuthorityId::new_from_entropy([4u8; 32]);
+
+        let contacts = ContactsState::from_contacts([
+            Contact {
+                id: alice,
+                nickname: "Alice".to_string(),
+                nickname_suggestion: None,
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: true,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::Contact,
+            },
+            Contact {
+                id: bob,
+                nickname: "Bob".to_string(),
+                nickname_suggestion: None,
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: false,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::PendingOutbound,
+            },
+            Contact {
+                id: carol,
+                nickname: "Carol".to_string(),
+                nickname_suggestion: None,
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: false,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::PendingInbound,
+            },
+            Contact {
+                id: dave,
+                nickname: "Dave".to_string(),
+                nickname_suggestion: None,
+                is_guardian: true,
+                is_member: false,
+                last_interaction: None,
+                is_online: true,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::Friend,
+            },
+        ]);
+        let discovered = DiscoveredPeersState {
+            peers: vec![
+                DiscoveredPeer {
+                    authority_id: bob,
+                    address: "192.0.2.2:9000".to_string(),
+                    method: DiscoveredPeerMethod::Lan,
+                    invited: false,
+                },
+                DiscoveredPeer {
+                    authority_id: carol,
+                    address: String::new(),
+                    method: DiscoveredPeerMethod::Rendezvous,
+                    invited: false,
+                },
+            ],
+            last_updated_ms: 0,
+        };
+
+        let runtime = build_contacts_runtime_view(contacts, discovered);
+
+        assert_eq!(runtime.contacts.len(), 4);
+        assert_eq!(runtime.lan_peers.len(), 1);
+        assert_eq!(
+            runtime
+                .contacts
+                .iter()
+                .find(|contact| contact.authority_id == alice)
+                .map(|contact| (contact.relationship_state, contact.confirmation)),
+            Some((
+                ContactRelationshipState::Contact,
+                ConfirmationState::Confirmed,
+            ))
+        );
+        assert_eq!(
+            runtime
+                .contacts
+                .iter()
+                .find(|contact| contact.authority_id == bob)
+                .map(|contact| (contact.relationship_state, contact.confirmation)),
+            Some((
+                ContactRelationshipState::PendingOutbound,
+                ConfirmationState::PendingLocal,
+            ))
+        );
+        assert_eq!(
+            runtime
+                .contacts
+                .iter()
+                .find(|contact| contact.authority_id == carol)
+                .map(|contact| (contact.relationship_state, contact.confirmation)),
+            Some((
+                ContactRelationshipState::PendingInbound,
+                ConfirmationState::Confirmed,
+            ))
+        );
+        assert_eq!(
+            runtime
+                .contacts
+                .iter()
+                .find(|contact| contact.authority_id == dave)
+                .map(|contact| (contact.relationship_state, contact.is_guardian)),
+            Some((ContactRelationshipState::Friend, true))
+        );
+    }
 }

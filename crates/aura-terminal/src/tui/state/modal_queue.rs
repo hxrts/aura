@@ -142,6 +142,10 @@ pub enum ConfirmAction {
     DeleteChannel { channel_id: ChannelId },
     /// Remove a contact
     RemoveContact { contact_id: ContactId },
+    /// Revoke an existing friendship or cancel an outbound friendship request
+    RevokeFriendship,
+    /// Decline an inbound friendship request
+    DeclineFriendRequest,
     /// Revoke an invitation
     RevokeInvitation { invitation_id: InvitationId },
 }

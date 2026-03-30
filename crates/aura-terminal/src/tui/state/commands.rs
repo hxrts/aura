@@ -203,6 +203,10 @@ pub enum DispatchCommand {
     /// The shell populates the modal with the selected receiver (contact/peer)
     /// from reactive subscriptions.
     OpenCreateInvitationModal,
+    SendSelectedFriendRequest,
+    AcceptSelectedFriendRequest,
+    DeclineSelectedFriendRequest,
+    RevokeSelectedFriendship,
     InviteSelectedContactToChannel,
     InviteActorToChannel {
         authority_id: AuthorityId,

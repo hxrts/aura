@@ -582,6 +582,7 @@ mod tests {
                 last_interaction: None,
                 is_online: true,
                 read_receipt_policy: Default::default(),
+                relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
             });
             core.views_mut().set_contacts(contacts);
         }

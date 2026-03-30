@@ -38,8 +38,11 @@ use aura_recovery::{RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
     ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
     GuardianRequestFact, GuardianRequestFactReducer, RecoveryGrantDetailsFact,
-    RecoveryGrantDetailsFactReducer, CONTACT_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
+    RecoveryGrantDetailsFactReducer, FriendshipFact, FriendshipFactReducer,
+    TrustIntroductionFact, TrustIntroductionFactReducer, CONTACT_FACT_TYPE_ID,
+    FRIENDSHIP_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
     GUARDIAN_REQUEST_FACT_TYPE_ID, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
+    TRUST_INTRODUCTION_FACT_TYPE_ID,
 };
 use aura_rendezvous::{RendezvousFact, RendezvousFactReducer, RENDEZVOUS_FACT_TYPE_ID};
 use aura_social::moderation::register_moderation_facts;
@@ -58,6 +61,11 @@ pub fn build_fact_registry() -> FactRegistry {
     registry.register::<ConsensusFact>(CONSENSUS_FACT_TYPE_ID, Box::new(ConsensusFactReducer));
     registry.register::<InvitationFact>(INVITATION_FACT_TYPE_ID, Box::new(InvitationFactReducer));
     registry.register::<ContactFact>(CONTACT_FACT_TYPE_ID, Box::new(ContactFactReducer));
+    registry.register::<FriendshipFact>(FRIENDSHIP_FACT_TYPE_ID, Box::new(FriendshipFactReducer));
+    registry.register::<TrustIntroductionFact>(
+        TRUST_INTRODUCTION_FACT_TYPE_ID,
+        Box::new(TrustIntroductionFactReducer),
+    );
     registry.register::<GuardianRequestFact>(
         GUARDIAN_REQUEST_FACT_TYPE_ID,
         Box::new(GuardianRequestFactReducer),
@@ -91,6 +99,8 @@ mod tests {
         assert!(registry.is_registered(CONSENSUS_FACT_TYPE_ID));
         assert!(registry.is_registered(INVITATION_FACT_TYPE_ID));
         assert!(registry.is_registered(CONTACT_FACT_TYPE_ID));
+        assert!(registry.is_registered(FRIENDSHIP_FACT_TYPE_ID));
+        assert!(registry.is_registered(TRUST_INTRODUCTION_FACT_TYPE_ID));
         assert!(registry.is_registered(GUARDIAN_REQUEST_FACT_TYPE_ID));
         assert!(registry.is_registered(GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID));
         assert!(registry.is_registered(RECOVERY_GRANT_DETAILS_FACT_TYPE_ID));

@@ -66,6 +66,29 @@ pub struct MySuggestion {
 // =============================================================================
 
 /// A contact
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum ContactRelationshipState {
+    /// Unilateral reachability or identification only.
+    #[default]
+    Contact,
+    /// Outbound friendship request awaiting acceptance.
+    PendingOutbound,
+    /// Inbound friendship request awaiting a local decision.
+    PendingInbound,
+    /// Bilateral accepted friendship.
+    Friend,
+}
+
+impl ContactRelationshipState {
+    /// Returns true when the relationship is awaiting acceptance or decline.
+    #[must_use]
+    pub const fn is_pending(self) -> bool {
+        matches!(self, Self::PendingOutbound | Self::PendingInbound)
+    }
+}
+
+/// A contact
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Contact {
@@ -85,6 +108,10 @@ pub struct Contact {
     pub is_online: bool,
     /// Read receipt policy for this contact (privacy-first: disabled by default)
     pub read_receipt_policy: ReadReceiptPolicy,
+    /// Minimal user-facing relationship state derived from unilateral contact
+    /// facts plus bilateral friendship facts.
+    #[serde(default)]
+    pub relationship_state: ContactRelationshipState,
 }
 
 impl EffectiveName for Contact {
@@ -331,6 +358,7 @@ impl ContactsState {
                     last_interaction: None,
                     is_online: false,
                     read_receipt_policy: ReadReceiptPolicy::default(),
+                    relationship_state: ContactRelationshipState::Contact,
                 },
             );
             false
@@ -347,6 +375,33 @@ impl ContactsState {
         policy: ReadReceiptPolicy,
     ) -> bool {
         self.update_contact(contact_id, |c| c.read_receipt_policy = policy)
+    }
+
+    /// Set relationship state for a contact, creating a minimal contact entry if needed.
+    pub fn set_relationship_state(
+        &mut self,
+        contact_id: AuthorityId,
+        relationship_state: ContactRelationshipState,
+    ) {
+        if let Some(contact) = self.contacts.get_mut(&contact_id) {
+            contact.relationship_state = relationship_state;
+            return;
+        }
+
+        self.contacts.insert(
+            contact_id,
+            Contact {
+                id: contact_id,
+                nickname: String::new(),
+                nickname_suggestion: None,
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: false,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state,
+            },
+        );
     }
 
     /// Clear all contacts.

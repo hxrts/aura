@@ -130,7 +130,10 @@ impl ReactivePipeline {
             own_authority,
             reactive.clone(),
         )));
-        scheduler.register_view(Arc::new(ContactsSignalView::new(reactive.clone())));
+        scheduler.register_view(Arc::new(ContactsSignalView::new(
+            own_authority,
+            reactive.clone(),
+        )));
         scheduler.register_view(Arc::new(RecoverySignalView::new(reactive.clone())));
         scheduler.register_view(Arc::new(HomeSignalView::new(own_authority, reactive)));
 
