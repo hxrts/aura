@@ -14,6 +14,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   AURA_SUPPRESS_NIX_WELCOME: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   lean:
@@ -24,6 +25,7 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: lean
+          enable-store-cache: false
       - name: Build proofs
         run: nix develop --command just ci-lean-build
       - name: Check for incomplete proofs
@@ -43,6 +45,7 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: lean-quint-bridge
+          enable-store-cache: false
       - name: Bridge cross-validation
         run: nix develop --command just ci-lean-quint-bridge
       - name: Upload bridge artifacts

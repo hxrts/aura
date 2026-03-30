@@ -6,6 +6,10 @@ inputs:
     description: Cache key suffix for Nix store
     required: false
     default: default
+  enable-store-cache:
+    description: Whether to restore/save the shared /nix/store cache
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -57,6 +61,7 @@ runs:
           keep-outputs = false
 
     - name: Cache Nix store
+      if: inputs.enable-store-cache == 'true'
       uses: actions/cache@v4
       with:
         path: /nix/store
