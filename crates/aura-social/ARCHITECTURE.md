@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Social topology and moderation layer providing home management, neighborhood discovery, relay selection, and content moderation for the social graph.
+Neighborhood-plane topology and moderation layer providing home management, neighborhood discovery, permit classification, and neighborhood-derived candidate production.
 
 ## Scope
 
@@ -11,7 +11,7 @@ Social topology and moderation layer providing home management, neighborhood dis
 | Social facts, reducers, and topology derivation | Chat message handling (aura-chat) |
 | Home and neighborhood management | Transport coordination (aura-protocol) |
 | Moderation policy and actions | Runtime social state (aura-agent) |
-| Relay candidate selection and reachability | |
+| Neighborhood-derived candidate production and reachability | Final route or retrieval selection |
 | Access level computation and role enforcement | |
 
 ## Dependencies
@@ -25,7 +25,7 @@ Social topology and moderation layer providing home management, neighborhood dis
 | Outgoing | — | `SocialTopology`, `DiscoveryLayer` for graph traversal |
 | Outgoing | — | `TraversalService` for path finding |
 | Outgoing | — | `ModerationPolicy`, `ModerationAction` for content moderation |
-| Outgoing | — | `RelayCandidateBuilder`, `ReachabilityChecker` for relay selection |
+| Outgoing | — | `RelayCandidateBuilder`, `ReachabilityChecker` for neighborhood candidate production |
 | Outgoing | — | `HomeAvailability`, `NeighborhoodAvailability` for availability tracking |
 | Outgoing | — | `StorageService` for social data persistence |
 

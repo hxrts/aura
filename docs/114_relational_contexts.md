@@ -2,7 +2,7 @@
 
 This document describes the architecture of relational contexts in Aura. It explains how cross-authority relationships are represented using dedicated context namespaces. It defines the structure of relational facts and the role of [Aura Consensus](108_consensus.md) in producing agreed relational state. It also describes privacy boundaries and the interpretation of relational data by participating authorities.
 
-Relational contexts are distinct from authority types. In particular, `Neighborhood` is modeled as an authority type (see [Social Architecture](115_social_architecture.md)), not as a relational-context type.
+Relational contexts are distinct from authority types. In particular, `Neighborhood` is modeled as an authority type in the `Neighborhood Plane` as described in [Social Architecture](115_social_architecture.md). Bilateral trust in the `Web of Trust Plane` is modeled as relational-context state, not as a new authority type.
 
 ## 1. RelationalContext Abstraction
 
@@ -57,6 +57,12 @@ This hash represents the commitments of the authorities and the current context.
 Several categories of relational contexts appear in Aura. Each fact type carries a well-defined schema to ensure deterministic reduction.
 
 Neighborhood governance and home-membership state are recorded in neighborhood authority journals, not in relational context journals. Relational contexts are still used for pairwise and small-group cross-authority relationships such as guardian bindings, recovery grants, and application-specific collaboration contexts.
+
+### WebOfTrustContext
+
+Direct friendship is modeled as a bilateral relational context between authorities. `Contact` remains unilateral reachability or identification state. `Friend` requires explicit bilateral acceptance. Friendship is not represented as a new authority object.
+
+The context stores lifecycle facts such as proposal, acceptance, and revocation. It may also store bounded trust-introduction artifacts. Those artifacts carry expiry, remaining depth, and fan-out limits. Runtime policy may use the resulting evidence as permit input, but the shared facts do not hard-code runtime policy tiers.
 
 ### GuardianConfigContext
 
@@ -177,11 +183,15 @@ Authorities interpret relational state by reading the relational context journal
 
 Other relational contexts follow similar patterns. Each context defines its own interpretation rules. No context affects authority internal structure. Context rules remain confined to the specific relationship.
 
+For web-of-trust contexts, direct-friend state is authoritative shared state. Friend-of-friend state is not. Runtime components derive introduced or transitive trust locally from direct-friend edges plus bounded introduction artifacts. This avoids turning the transitive social graph into canonical shared state.
+
 ## 8. Privacy and Isolation
 
 A relational context does not reveal its participants. The `ContextId` is opaque. Only participating authorities know the relationship. No external party can infer connections between authorities based on context identifiers.
 
 Profile information shared inside a context stays local to that context. Nickname suggestions and contact attributes do not leave the context journal. Each context forms a separate identity boundary. Authorities can maintain many unrelated relationships without cross linking.
+
+Trust evidence must follow the same boundary rule. Shared facts may record bilateral friend lifecycle state and bounded introductions. They must not expose wire-visible service classes such as `direct_friend_relay` or `introduced_hold`. Any coarse policy tier is derived locally in the runtime from evidence provenance.
 
 ## 9. Implementation Patterns
 

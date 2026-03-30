@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Contact and relationship management providing cross-authority relationship facts, guardian request handling, and consensus-backed relationship establishment.
+Relational-context domain logic for cross-authority relationships including unilateral contacts, bilateral friend state, bounded trust introductions, guardian request handling, and consensus-backed relationship establishment.
 
 ## Scope
 
 | Belongs here | Does not belong here |
 |-------------|---------------------|
-| Contact and guardian binding facts and reducers | Recovery protocol logic (aura-recovery) |
+| Contact, friend, introduction, and guardian binding facts and reducers | Recovery protocol logic (aura-recovery) |
 | Guardian request handling and service | Consensus coordination (aura-consensus) |
 | Cross-authority relational context | Runtime relationship cache (aura-agent) |
 
@@ -20,6 +20,7 @@ Contact and relationship management providing cross-authority relationship facts
 | Incoming | aura-journal | Fact infrastructure, reduction |
 | Incoming | aura-consensus | Cross-authority agreement |
 | Outgoing | — | `ContactFact`, `ContactFactReducer` for contact relationship facts |
+| Outgoing | — | `FriendshipFact`, `TrustIntroductionFact`, `WebOfTrustIndex` for web-of-trust evidence |
 | Outgoing | — | `GuardianRequest`, `GuardianRequestState` for guardian binding requests |
 | Outgoing | — | `GuardianService` for guardian relationship management |
 | Outgoing | — | `RelationalContext` for cross-authority context |

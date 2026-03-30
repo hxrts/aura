@@ -44,9 +44,9 @@ This structure defines the snapshot type from `aura_core::tree`. Devices fetch t
 
 ## 3. Cache Invalidation
 
-State mutations publish `CacheInvalidated` facts. A cache invalidation fact contains cache keys and an epoch floor. Devices maintain local maps from keys to epoch floors. A cache entry is valid only when the current epoch exceeds its floor.
+State mutations publish `CacheInvalidated` facts. A cache invalidation fact contains cache keys and an epoch floor. Devices maintain local actor-owned maps from keys to epoch floors. A cache entry is valid only when the current epoch exceeds its floor.
 
-Cache invalidation is local. No CRDT cache is replicated. Devices compute validity using meet predicates on epoch constraints.
+Cache invalidation is local. No CRDT cache is replicated. Devices compute validity using meet predicates on epoch constraints. Service caches such as rendezvous descriptor registries remain runtime-local mutable state in `aura-agent`. Facts invalidate them, but facts do not materialize them.
 
 ```rust
 pub struct CacheKey(pub String);
@@ -199,7 +199,7 @@ Automatic synchronization implements periodic journal replication between device
 
 ### 8.1 Peer Discovery and Selection
 
-Devices discover sync peers through the rendezvous system described in [Rendezvous](113_rendezvous.md). The peer manager maintains metadata for each discovered peer. This metadata includes connection state, trust level, sync success rate, and active session count.
+Devices discover sync peers through the rendezvous system described in [Rendezvous](113_rendezvous.md). The peer manager consumes runtime-owned rendezvous descriptor snapshots. The peer manager maintains metadata for each discovered peer. This metadata includes connection state, trust level, sync success rate, and active session count.
 
 ```rust
 pub struct PeerMetadata {

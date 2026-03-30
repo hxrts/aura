@@ -1,6 +1,6 @@
 # Social Architecture
 
-This document defines Aura's social organization model using a digital urban metaphor. The system layers social organization, privacy, consent, and governance into three tiers: messages, homes, and neighborhoods.
+This document defines Aura's social organization model using two social planes plus the message contexts that run on top of them. The system layers privacy, consent, and governance into a `Neighborhood Plane`, a `Web of Trust Plane`, and the message contexts that consume their outputs.
 
 ## 1. Overview
 
@@ -8,13 +8,13 @@ This document defines Aura's social organization model using a digital urban met
 
 The model produces human-scaled social structures with natural scarcity based on physical analogs. Organic community dynamics emerge from bottom-up governance. The design aligns with Aura's consent-based privacy guarantees and capability-based authorization.
 
-### 1.2 Three-Tier Structure
+### 1.2 Social Planes
 
-Messages are communication contexts. Direct messages are private relational contexts. Home messages are semi-public messaging for home members and participants.
+The `Neighborhood Plane` models homes, neighborhoods, membership, moderation, and locality-scoped infrastructure. It answers who shares a local social space and which neighborhood-scoped providers are admissible.
 
-Homes are semi-public communities capped by storage constraints. Each home has a 10 MB total allocation. Members and participants allocate storage to participate.
+The `Web of Trust Plane` models bilateral friend relationships and bounded introductions. It answers which providers have direct or introduced trust evidence. It does not own final route selection. It does not materialize the transitive trust graph as shared state.
 
-Neighborhoods are authority-level collections of homes connected via 1-hop links and access policies. Homes allocate storage to neighborhood infrastructure.
+Messages are communication contexts built on top of those planes. Direct messages are private relational contexts. Home messages are semi-public messaging for home members and participants.
 
 ### 1.3 Terminology
 
@@ -118,9 +118,9 @@ Homes allocate 1 MB of their budget per neighborhood joined. In v1, each home ma
 
 ## 5. Position and Traversal
 
-### 5.1 Discovery Layers
+### 5.1 Neighborhood Discovery Layers
 
-Discovery is represented through the `DiscoveryLayer` enum, which indicates the best strategy to reach a target based on social relationships:
+Neighborhood-scoped discovery is represented through the `DiscoveryLayer` enum. It indicates the best neighborhood strategy to reach a target based on locality relationships:
 
 ```rust
 pub enum DiscoveryLayer {
@@ -135,7 +135,7 @@ pub enum DiscoveryLayer {
 }
 ```
 
-The discovery layer determines routing strategy and flow costs. `Direct` has minimal cost. `Home` relays through same-home participants. `Neighborhood` uses multi-hop traversal. `Rendezvous` requires global flooding and has the highest cost.
+The discovery layer determines locality-aware discovery strategy and flow costs. `aura-social` may classify neighborhood candidates using these layers, but it does not own the final route choice. Runtime policy in `aura-agent` fuses neighborhood candidates with web-of-trust evidence and descriptor views.
 
 ### 5.2 Movement Rules
 
@@ -295,55 +295,54 @@ Each home may join a maximum of 4 neighborhoods. This limits 1-hop graph complex
 
 ## 12. Infrastructure Roles
 
-Homes and neighborhoods provide infrastructure services beyond social organization. The `aura-social` crate implements these roles through materialized views and relay selection.
+Homes and neighborhoods provide infrastructure services beyond social organization. The `aura-social` crate implements neighborhood facts, materialized views, and neighborhood-derived candidate production. Final route or retrieval choice belongs to the runtime.
 
-### 12.1 Home Infrastructure
+### 12.1 Neighborhood Plane Responsibilities
 
-Homes provide data availability and relay services for members and participants:
+The `Neighborhood Plane` provides broad locality-scoped candidate pools:
 
-- **Data Replication**: Home members and participants replicate pinned data across available devices. The `HomeAvailability` type coordinates replication factor and failover.
-- **Message Relay**: 0-hop relays serve as first-hop relays for unknown destinations. Social topology queries return currently reachable relays.
-- **Storage Coordination**: The `StorageService` enforces storage budgets per participant and tracks usage facts.
+- neighborhood-derived `Establish` and `Move` candidates
+- neighborhood-only `Hold` candidates for availability and deferred delivery
+- locality-scoped storage and relay budgeting
+- governance and moderation state for homes and neighborhoods
 
-### 12.2 Neighborhood Infrastructure
+These outputs are permit and candidate inputs. They are not route commitments.
 
-Neighborhoods enable multi-hop routing and cross-home coordination:
+### 12.2 Web of Trust Plane Responsibilities
 
-- **Descriptor Propagation**: Neighborhood 1-hop links define descriptor propagation paths. Connected homes exchange routing information.
-- **Access Capabilities**: `TraversalAllowedFact` grants movement between homes. Access-level limits constrain routing overhead.
-- **Multi-Hop Relay**: When home-level relay fails, neighborhood traversal provides alternate paths.
+The `Web of Trust Plane` provides trust evidence:
 
-### 12.3 Progressive Discovery Layers
+- bilateral `Friend` state as relational-context facts
+- bounded introduction evidence for introduced candidates
+- permit input for `Establish` and `Move`
+- bootstrap and accountability weight for trusted providers
 
-The `aura-social` crate implements a four-layer discovery model:
+Direct friendship is authoritative shared state. Friend-of-friend is local derivation or bounded introduction evidence. It is not canonical shared graph state.
 
-| Layer | Priority | Resources Required | Flow Cost |
-|-------|----------|-------------------|-----------|
-| Direct | 0 | Known peer relationship | Minimal |
-| Home | 1 | 0-hop relays available | Low |
-| Neighborhood | 2 | 1-hop/2-hop routes | Medium |
-| Rendezvous | 3 | Global flooding | High |
+### 12.3 Plane Fusion
 
-Discovery layer selection uses `SocialTopology::discovery_layer()`:
+The runtime fuses neighborhood candidates, web-of-trust evidence, descriptor views, and health data into provider selection:
 
-```rust
-let topology = SocialTopology::new(local_authority, home, neighborhoods);
-let layer = topology.discovery_layer(&target);
-```
+| Input | Owned by | Purpose |
+|-------|----------|---------|
+| Neighborhood facts and locality classification | `aura-social` | neighborhood-scoped permit and candidate production |
+| Friend lifecycle and introduction evidence | `aura-relational` | trust evidence provenance |
+| Descriptor snapshots | `aura-agent` runtime cache | connectivity and service advertisements |
+| Final provider selection | `aura-agent` | runtime-local `Permit` view and route choice |
 
-Lower priority layers are preferred when available. This creates economic incentives to establish social relationships before communication.
+This split prevents social-role labels from becoming wire-visible service classes.
 
 ### 12.4 Relay Selection
 
-The `SocialTopology` provides relay candidate generation:
+The `SocialTopology` provides neighborhood-derived relay candidate generation:
 
 ```rust
 let topology = SocialTopology::new(local_authority, home, neighborhoods);
 let candidates = topology.build_relay_candidates(&destination, |peer| is_reachable(peer));
 ```
 
-Candidates are returned in priority order: same-home relays first, then 1-hop and 2-hop neighborhood relays, then guardians. Reachability checks filter unreachable peers. Each candidate includes relay-relationship metadata indicating same-home, neighborhood-hop, or guardian routing.
+Reachability checks filter unreachable peers. Candidate provenance may record same-home, neighborhood-hop, or guardian evidence. The runtime may use that provenance during local permit evaluation, but `aura-social` does not own the final route decision.
 
 ## See Also
 
-[Database Architecture](107_database.md) describes fact storage and queries. [Transport and Information Flow](111_transport_and_information_flow.md) covers AMP messaging. [Authorization](106_authorization.md) describes capability evaluation. [Rendezvous Architecture](113_rendezvous.md) details the four-layer discovery model integration.
+[Database Architecture](107_database.md) describes fact storage and queries. [Transport and Information Flow](111_transport_and_information_flow.md) covers AMP messaging. [Authorization](106_authorization.md) describes capability evaluation. [Rendezvous Architecture](113_rendezvous.md) describes rendezvous advertisement and selection boundaries.

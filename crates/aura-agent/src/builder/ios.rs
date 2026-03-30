@@ -181,10 +181,10 @@ impl IosPresetBuilder {
 
         #[cfg(feature = "ios")]
         {
-            // `ios` feature stub status:
+            // `ios` feature status:
             // the preset type and configuration contract are compiled so callers
             // can bind to the shape now, but the platform handlers below are
-            // still intentionally unimplemented:
+            // not wired into this target yet:
             // - KeychainCryptoHandler / KeychainSecureStorageHandler
             // - AppContainerStorageHandler
             // - IOSTimeHandler
@@ -220,7 +220,7 @@ impl IosPresetBuilder {
 
             Err(BuildError::EffectInit {
                 effect: "ios",
-                message: "iOS handlers not yet implemented. This is a placeholder for future development.".to_string(),
+                message: "iOS preset support requires platform handlers that are not available in this build yet.".to_string(),
             }.into())
         }
     }

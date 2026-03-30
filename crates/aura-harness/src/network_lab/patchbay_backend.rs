@@ -21,7 +21,7 @@ use super::{
 #[derive(Debug)]
 #[cfg_attr(
     not(all(target_os = "linux", feature = "patchbay-backend")),
-    allow(dead_code) // The stub struct shape is retained so non-linux/default builds keep the backend type without compiling the linux-only lab implementation.
+    allow(dead_code) // Retain the type shape so non-linux/default builds keep the backend API without compiling the linux-only lab implementation.
 )]
 pub struct PatchbayBackend {
     artifact_root: PathBuf,

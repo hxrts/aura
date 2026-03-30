@@ -58,7 +58,10 @@ pub struct RendezvousManagerConfig {
     /// Cleanup interval (default: 60s)
     pub cleanup_interval: Duration,
 
-    /// Default transport hints for this node
+    /// Default legacy `TransportHint` compatibility input for this node.
+    ///
+    /// Migration owner: `adaptive_privacy_phase1`
+    /// Earliest removal phase: `Phase 2`
     pub default_transport_hints: Vec<TransportHint>,
 
     /// LAN discovery configuration
@@ -218,6 +221,11 @@ enum RendezvousCommand {
     ListCachedPeers {
         owner: AuthorityId,
         reply: oneshot::Sender<Vec<AuthorityId>>,
+    },
+    ListDescriptorsInContext {
+        context_id: ContextId,
+        now_ms: u64,
+        reply: oneshot::Sender<Vec<RendezvousDescriptor>>,
     },
     ListCachedPeerDevices {
         owner: AuthorityId,
@@ -534,6 +542,24 @@ impl RendezvousManager {
                             .into_iter()
                             .collect();
                         let _ = reply.send(peers);
+                    }
+                    RendezvousCommand::ListDescriptorsInContext {
+                        context_id,
+                        now_ms,
+                        reply,
+                    } => {
+                        let mut descriptors = state
+                            .descriptor_cache
+                            .values()
+                            .filter(|descriptor| {
+                                descriptor.context_id == context_id && descriptor.is_valid(now_ms)
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        descriptors.sort_by_key(|descriptor| {
+                            (descriptor.context_id, descriptor.authority_id, descriptor.device_id)
+                        });
+                        let _ = reply.send(descriptors);
                     }
                     RendezvousCommand::ListCachedPeerDevices { owner, reply } => {
                         let devices = state
@@ -1109,6 +1135,28 @@ impl RendezvousManager {
             Ok(commands) => commands
                 .request(|reply| RendezvousCommand::ListCachedPeers {
                     owner: self.authority_id,
+                    reply,
+                })
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Return the valid cached descriptors for a single context.
+    ///
+    /// This is the runtime-owned descriptor snapshot consumed by Layer 5 views
+    /// such as sync peer discovery.
+    pub async fn list_descriptors_in_context(
+        &self,
+        context_id: ContextId,
+        now_ms: u64,
+    ) -> Vec<RendezvousDescriptor> {
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::ListDescriptorsInContext {
+                    context_id,
+                    now_ms,
                     reply,
                 })
                 .await
@@ -1934,6 +1982,55 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cached.authority_id, test_peer());
+
+        RuntimeService::stop(&manager).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_list_descriptors_in_context_returns_runtime_snapshot() {
+        let config = RendezvousManagerConfig::manual_only();
+        let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
+        let context = test_service_context();
+        RuntimeService::start(&manager, &context).await.unwrap();
+
+        let valid_descriptor = RendezvousDescriptor {
+            authority_id: test_peer(),
+            device_id: None,
+            context_id: test_context(),
+            transport_hints: vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()],
+            handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
+            valid_from: 0,
+            valid_until: 10_000,
+            nonce: [0u8; 32],
+            nickname_suggestion: None,
+        };
+        let expired_descriptor = RendezvousDescriptor {
+            authority_id: AuthorityId::new_from_entropy([9u8; 32]),
+            context_id: test_context(),
+            valid_until: 100,
+            ..valid_descriptor.clone()
+        };
+        let other_context_descriptor = RendezvousDescriptor {
+            authority_id: AuthorityId::new_from_entropy([10u8; 32]),
+            context_id: ContextId::new_from_entropy([11u8; 32]),
+            ..valid_descriptor.clone()
+        };
+
+        manager.cache_descriptor(valid_descriptor.clone()).await.unwrap();
+        manager
+            .cache_descriptor(expired_descriptor)
+            .await
+            .unwrap();
+        manager
+            .cache_descriptor(other_context_descriptor)
+            .await
+            .unwrap();
+
+        let descriptors = manager.list_descriptors_in_context(test_context(), 1_000).await;
+        assert_eq!(descriptors.len(), 1);
+        assert_eq!(descriptors[0].authority_id, valid_descriptor.authority_id);
+        assert_eq!(descriptors[0].context_id, valid_descriptor.context_id);
 
         RuntimeService::stop(&manager).await.unwrap();
     }

@@ -4,6 +4,7 @@
 //! and transport probing for peer discovery.
 
 use crate::facts::{RendezvousDescriptor, TransportAddress, TransportHint};
+use aura_core::service::{LinkEndpoint, LinkProtocol};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
 use sha2::{Digest, Sha256};
@@ -35,7 +36,7 @@ pub enum SelectedTransport {
 // Transport Selector
 // =============================================================================
 
-/// Selects the best transport from a descriptor's hints
+/// Selects the best transport from a descriptor's split connectivity view
 ///
 /// Priority order:
 /// 1. Direct QUIC (lowest latency)
@@ -60,61 +61,16 @@ impl TransportSelector {
 
     /// Select best transport from descriptor
     ///
-    /// This performs a quick selection based on hint type priority.
+    /// This performs a quick selection based on link-endpoint priority.
     /// For actual connectivity testing, use `TransportProber`.
     pub fn select(&self, descriptor: &RendezvousDescriptor) -> AuraResult<SelectedTransport> {
-        // Priority: QuicDirect > QuicReflexive > TcpDirect > WebSocketDirect > WebSocketRelay
-        let mut best_direct: Option<&TransportAddress> = None;
-        let mut best_reflexive: Option<&TransportAddress> = None;
-        let mut best_tcp: Option<&TransportAddress> = None;
-        let mut best_websocket: Option<&TransportAddress> = None;
-        let mut relay: Option<AuthorityId> = None;
+        let mut endpoints = descriptor.advertised_link_endpoints();
+        endpoints.sort_by_key(endpoint_priority);
 
-        for hint in &descriptor.transport_hints {
-            match hint {
-                TransportHint::QuicDirect { addr, .. } => {
-                    if best_direct.is_none() {
-                        best_direct = Some(addr);
-                    }
-                }
-                TransportHint::QuicReflexive { addr, .. } => {
-                    if best_reflexive.is_none() {
-                        best_reflexive = Some(addr);
-                    }
-                }
-                TransportHint::TcpDirect { addr, .. } => {
-                    if best_tcp.is_none() {
-                        best_tcp = Some(addr);
-                    }
-                }
-                TransportHint::WebSocketDirect { addr, .. } => {
-                    if best_websocket.is_none() {
-                        best_websocket = Some(addr);
-                    }
-                }
-                TransportHint::WebSocketRelay { relay_authority } => {
-                    if relay.is_none() {
-                        relay = Some(*relay_authority);
-                    }
-                }
+        for endpoint in endpoints {
+            if let Some(selected) = endpoint_to_selected_transport(&endpoint) {
+                return Ok(selected);
             }
-        }
-
-        // Select in priority order
-        if let Some(addr) = best_direct {
-            return Ok(SelectedTransport::Direct(addr.to_string()));
-        }
-        if let Some(addr) = best_reflexive {
-            return Ok(SelectedTransport::Direct(addr.to_string()));
-        }
-        if let Some(addr) = best_tcp {
-            return Ok(SelectedTransport::Direct(addr.to_string()));
-        }
-        if let Some(addr) = best_websocket {
-            return Ok(SelectedTransport::Direct(addr.to_string()));
-        }
-        if let Some(relay_authority) = relay {
-            return Ok(SelectedTransport::Relayed(relay_authority));
         }
 
         Err(AuraError::not_found("No reachable transport in descriptor"))
@@ -128,38 +84,34 @@ impl TransportSelector {
         descriptor: &RendezvousDescriptor,
         prober: &TransportProber,
     ) -> AuraResult<SelectedTransport> {
-        // Try each hint in priority order with actual probing
-        for hint in &descriptor.transport_hints {
-            match hint {
-                TransportHint::QuicDirect { addr, .. } => {
-                    if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
-                        return Ok(SelectedTransport::Direct(addr.to_string()));
+        let mut endpoints = descriptor.advertised_link_endpoints();
+        endpoints.sort_by_key(endpoint_priority);
+
+        for endpoint in endpoints {
+            match endpoint.protocol {
+                LinkProtocol::Quic | LinkProtocol::Tcp | LinkProtocol::WebSocket => {
+                    if let Some(address) = endpoint.address.as_deref() {
+                        if prober.probe_endpoint(address).await.is_ok() {
+                            return Ok(SelectedTransport::Direct(address.to_string()));
+                        }
                     }
                 }
-                TransportHint::QuicReflexive {
-                    addr, stun_server, ..
-                } => {
-                    if let Ok(reflexive_addr) = prober.stun_probe(&stun_server.to_string()).await {
-                        // Use the reflexive address discovered via STUN
-                        return Ok(SelectedTransport::Direct(reflexive_addr));
-                    } else if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
-                        // Fall back to the advertised address
-                        return Ok(SelectedTransport::Direct(addr.to_string()));
+                LinkProtocol::QuicReflexive => {
+                    if let Some(stun_server) = endpoint.stun_server.as_deref() {
+                        if let Ok(reflexive_addr) = prober.stun_probe(stun_server).await {
+                            return Ok(SelectedTransport::Direct(reflexive_addr));
+                        }
+                    }
+                    if let Some(address) = endpoint.address.as_deref() {
+                        if prober.probe_endpoint(address).await.is_ok() {
+                            return Ok(SelectedTransport::Direct(address.to_string()));
+                        }
                     }
                 }
-                TransportHint::TcpDirect { addr, .. } => {
-                    if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
-                        return Ok(SelectedTransport::Direct(addr.to_string()));
+                LinkProtocol::WebSocketRelay => {
+                    if let Some(relay_authority) = endpoint.relay_authority {
+                        return Ok(SelectedTransport::Relayed(relay_authority));
                     }
-                }
-                TransportHint::WebSocketDirect { addr, .. } => {
-                    if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
-                        return Ok(SelectedTransport::Direct(addr.to_string()));
-                    }
-                }
-                TransportHint::WebSocketRelay { relay_authority } => {
-                    // Relay is always assumed reachable as fallback
-                    return Ok(SelectedTransport::Relayed(*relay_authority));
                 }
             }
         }
@@ -337,33 +289,38 @@ impl TransportProber {
         ))
     }
 
-    /// Probe all hints in a descriptor and return reachable ones
+    /// Probe all split connectivity endpoints in a descriptor and return reachable ones
     pub async fn probe_descriptor(
         &self,
         descriptor: &RendezvousDescriptor,
-    ) -> Vec<(TransportHint, bool)> {
+    ) -> Vec<(LinkEndpoint, bool)> {
         let mut results = Vec::new();
 
-        for hint in &descriptor.transport_hints {
-            let reachable = match hint {
-                TransportHint::QuicDirect { addr, .. }
-                | TransportHint::TcpDirect { addr, .. }
-                | TransportHint::WebSocketDirect { addr, .. } => {
-                    self.probe_endpoint(&addr.to_string()).await.is_ok()
+        for endpoint in descriptor.advertised_link_endpoints() {
+            let reachable = match endpoint.protocol {
+                LinkProtocol::Quic | LinkProtocol::Tcp | LinkProtocol::WebSocket => {
+                    if let Some(address) = endpoint.address.as_deref() {
+                        self.probe_endpoint(address).await.is_ok()
+                    } else {
+                        false
+                    }
                 }
-                TransportHint::QuicReflexive {
-                    addr, stun_server, ..
-                } => {
-                    // Try STUN first, then direct
-                    self.stun_probe(&stun_server.to_string()).await.is_ok()
-                        || self.probe_endpoint(&addr.to_string()).await.is_ok()
+                LinkProtocol::QuicReflexive => {
+                    let stun_ok = if let Some(stun_server) = endpoint.stun_server.as_deref() {
+                        self.stun_probe(stun_server).await.is_ok()
+                    } else {
+                        false
+                    };
+                    let direct_ok = if let Some(address) = endpoint.address.as_deref() {
+                        self.probe_endpoint(address).await.is_ok()
+                    } else {
+                        false
+                    };
+                    stun_ok || direct_ok
                 }
-                TransportHint::WebSocketRelay { .. } => {
-                    // Relay is assumed reachable
-                    true
-                }
+                LinkProtocol::WebSocketRelay => true,
             };
-            results.push((hint.clone(), reachable));
+            results.push((endpoint, reachable));
         }
 
         results
@@ -399,6 +356,31 @@ fn compute_psk_commitment(context_id: ContextId, authority_id: &AuthorityId) -> 
     let mut commitment = [0u8; 32];
     commitment.copy_from_slice(&result);
     commitment
+}
+
+fn endpoint_priority(endpoint: &LinkEndpoint) -> u8 {
+    match endpoint.protocol {
+        LinkProtocol::Quic => 0,
+        LinkProtocol::QuicReflexive => 1,
+        LinkProtocol::Tcp => 2,
+        LinkProtocol::WebSocket => 3,
+        LinkProtocol::WebSocketRelay => 4,
+    }
+}
+
+fn endpoint_to_selected_transport(endpoint: &LinkEndpoint) -> Option<SelectedTransport> {
+    match endpoint.protocol {
+        LinkProtocol::Quic
+        | LinkProtocol::QuicReflexive
+        | LinkProtocol::Tcp
+        | LinkProtocol::WebSocket => endpoint
+            .address
+            .as_ref()
+            .map(|address| SelectedTransport::Direct(address.clone())),
+        LinkProtocol::WebSocketRelay => endpoint
+            .relay_authority
+            .map(SelectedTransport::Relayed),
+    }
 }
 
 // =============================================================================

@@ -179,9 +179,9 @@ impl AndroidPresetBuilder {
 
         #[cfg(feature = "android")]
         {
-            // `android` feature stub status:
+            // `android` feature status:
             // the preset contract is compiled, but the platform handlers below
-            // are still intentionally unimplemented:
+            // are not wired into this target yet:
             // - KeystoreCryptoHandler
             // - EncryptedSharedPreferencesStorageHandler
             // - AndroidTimeHandler
@@ -217,7 +217,7 @@ impl AndroidPresetBuilder {
 
             Err(BuildError::EffectInit {
                 effect: "android",
-                message: "Android handlers not yet implemented. This is a placeholder for future development.".to_string(),
+                message: "Android preset support requires platform handlers that are not available in this build yet.".to_string(),
             }.into())
         }
     }

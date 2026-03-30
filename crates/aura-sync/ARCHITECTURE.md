@@ -11,6 +11,7 @@ Synchronization protocol providing fact exchange, merkle verification, anti-entr
 | Sync core types and protocol definitions | Fact storage (aura-journal) |
 | Merkle verification and integrity checks | Transport effects (aura-effects) |
 | Writer fence semantics | Runtime sync manager (aura-agent) |
+| Pure peer-discovery views over runtime-owned rendezvous descriptor snapshots | Runtime descriptor cache ownership |
 | Maintenance service for background sync | |
 
 ## Dependencies

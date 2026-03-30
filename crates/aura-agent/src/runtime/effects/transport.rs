@@ -11,7 +11,6 @@ use aura_core::{AuthorityId, ContextId};
 use aura_effects::time::PhysicalTimeHandler;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_effects::transport::TransportConfig;
-use aura_rendezvous::TransportHint;
 #[cfg(target_arch = "wasm32")]
 use base64::{engine::general_purpose::STANDARD, Engine};
 use cfg_if::cfg_if;
@@ -221,22 +220,22 @@ async fn resolve_peer_addr(
 
 fn descriptor_transport_addr(descriptor: aura_rendezvous::RendezvousDescriptor) -> Option<String> {
     #[cfg(target_arch = "wasm32")]
-    for hint in &descriptor.transport_hints {
-        if let TransportHint::WebSocketDirect { addr, .. } = hint {
-            return Some(addr.to_string());
+    for endpoint in descriptor.advertised_link_endpoints() {
+        if endpoint.protocol == aura_core::LinkProtocol::WebSocket {
+            return endpoint.address;
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    for hint in &descriptor.transport_hints {
-        if let TransportHint::WebSocketDirect { addr, .. } = hint {
-            return Some(format!("ws://{}", addr));
+    for endpoint in descriptor.advertised_link_endpoints() {
+        if endpoint.protocol == aura_core::LinkProtocol::WebSocket {
+            return endpoint.address.map(|addr| format!("ws://{}", addr));
         }
     }
 
-    for hint in descriptor.transport_hints {
-        if let TransportHint::TcpDirect { addr, .. } = hint {
-            return Some(addr.to_string());
+    for endpoint in descriptor.advertised_link_endpoints() {
+        if endpoint.protocol == aura_core::LinkProtocol::Tcp {
+            return endpoint.address;
         }
     }
     None
@@ -610,7 +609,7 @@ mod tests {
         RendezvousManager, RendezvousManagerConfig, RuntimeService, RuntimeServiceContext,
     };
     use crate::runtime::TaskSupervisor;
-    use aura_rendezvous::RendezvousDescriptor;
+    use aura_rendezvous::{RendezvousDescriptor, TransportHint};
     use std::sync::Arc;
 
     fn descriptor(

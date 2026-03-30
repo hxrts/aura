@@ -3,6 +3,11 @@
 //! Fact types for peer discovery and channel establishment.
 //! These facts are stored in context journals and propagated via `aura-sync`.
 
+use aura_core::service::{
+    EstablishDescriptor, LinkEndpoint, LinkProtocol, MoveDescriptor,
+    ServiceDescriptor as AdvertisedServiceDescriptor, ServiceDescriptorHeader,
+    ServiceDescriptorKind, ServiceFamily, ServiceLimits, ServiceProfile,
+};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_journal::extensibility::FactReducer;
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
@@ -170,6 +175,76 @@ impl RendezvousDescriptor {
         let validity_window = self.valid_until.saturating_sub(self.valid_from);
         let refresh_threshold = self.valid_until.saturating_sub(validity_window / 10);
         now_ms >= refresh_threshold
+    }
+
+    /// Connectivity endpoints derived from the legacy hint surface.
+    ///
+    /// Callers that only need connectivity should prefer this split view over
+    /// reading `transport_hints` directly.
+    pub fn advertised_link_endpoints(&self) -> Vec<LinkEndpoint> {
+        self.transport_hints
+            .iter()
+            .map(TransportHint::to_link_endpoint)
+            .collect()
+    }
+
+    /// Service-family advertisements derived from the rendezvous discovery data.
+    ///
+    /// Phase 1 keeps rendezvous as the shared discovery surface and projects the
+    /// data into explicit `Establish` and `Move` advertisements so transport
+    /// reachability no longer doubles as service-policy vocabulary.
+    pub fn advertised_service_descriptors(&self) -> Vec<AdvertisedServiceDescriptor> {
+        let endpoints = self.advertised_link_endpoints();
+        if endpoints.is_empty() {
+            return Vec::new();
+        }
+
+        vec![
+            AdvertisedServiceDescriptor {
+                header: self.service_descriptor_header(ServiceFamily::Establish),
+                profile: ServiceProfile::DirectBootstrap,
+                kind: ServiceDescriptorKind::Establish(EstablishDescriptor {
+                    link_endpoints: endpoints.clone(),
+                }),
+            },
+            AdvertisedServiceDescriptor {
+                header: self.service_descriptor_header(ServiceFamily::Move),
+                profile: ServiceProfile::RelayTransport,
+                kind: ServiceDescriptorKind::Move(MoveDescriptor {
+                    link_endpoints: endpoints,
+                    route: None,
+                }),
+            },
+        ]
+    }
+
+    /// Return whether this descriptor advertises a specific family.
+    pub fn supports_family(&self, family: ServiceFamily) -> bool {
+        self.advertised_service_descriptors()
+            .iter()
+            .any(|descriptor| descriptor.header.family == family)
+    }
+
+    fn service_descriptor_header(&self, family: ServiceFamily) -> ServiceDescriptorHeader {
+        ServiceDescriptorHeader {
+            provider_authority: self.authority_id,
+            provider_device: self.device_id,
+            service_scope: self.context_id,
+            valid_from: self.valid_from,
+            valid_until: self.valid_until,
+            epoch: 0,
+            family,
+            limits: match family {
+                ServiceFamily::Establish => ServiceLimits::default(),
+                ServiceFamily::Move => ServiceLimits {
+                    max_payload_bytes: None,
+                    max_hops: Some(3),
+                    retention_ms: None,
+                },
+                ServiceFamily::Hold => ServiceLimits::default(),
+            },
+            quality_hints: None,
+        }
     }
 }
 
@@ -438,7 +513,13 @@ impl LocalInterfaces {
     }
 }
 
-/// Transport endpoint hint
+/// Legacy transport connectivity hint kept during the Phase 1 migration.
+///
+/// Migration owner: `adaptive_privacy_phase1`
+/// Earliest removal phase: `Phase 2`
+///
+/// New code should prefer the split `LinkEndpoint` connectivity view plus
+/// family-specific `ServiceDescriptor` advertisements.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TransportHint {
     /// Direct QUIC connection
@@ -510,6 +591,93 @@ impl TransportHint {
     /// Create a WebSocketRelay hint.
     pub fn websocket_relay(relay_authority: AuthorityId) -> Self {
         TransportHint::WebSocketRelay { relay_authority }
+    }
+
+    /// Convert the legacy hint into the split connectivity endpoint model.
+    pub fn to_link_endpoint(&self) -> LinkEndpoint {
+        match self {
+            TransportHint::QuicDirect { addr, bound_local } => LinkEndpoint {
+                protocol: LinkProtocol::Quic,
+                address: Some(addr.to_string()),
+                relay_authority: None,
+                stun_server: None,
+                bound_local: bound_local.as_ref().map(|bound| bound.0.to_string()),
+            },
+            TransportHint::QuicReflexive {
+                addr,
+                stun_server,
+                bound_local,
+            } => LinkEndpoint {
+                protocol: LinkProtocol::QuicReflexive,
+                address: Some(addr.to_string()),
+                relay_authority: None,
+                stun_server: Some(stun_server.to_string()),
+                bound_local: bound_local.as_ref().map(|bound| bound.0.to_string()),
+            },
+            TransportHint::WebSocketRelay { relay_authority } => LinkEndpoint::relay(*relay_authority),
+            TransportHint::WebSocketDirect { addr, bound_local } => LinkEndpoint {
+                protocol: LinkProtocol::WebSocket,
+                address: Some(addr.to_string()),
+                relay_authority: None,
+                stun_server: None,
+                bound_local: bound_local.as_ref().map(|bound| bound.0.to_string()),
+            },
+            TransportHint::TcpDirect { addr, bound_local } => LinkEndpoint {
+                protocol: LinkProtocol::Tcp,
+                address: Some(addr.to_string()),
+                relay_authority: None,
+                stun_server: None,
+                bound_local: bound_local.as_ref().map(|bound| bound.0.to_string()),
+            },
+        }
+    }
+
+    /// Rebuild a legacy hint from the split connectivity endpoint.
+    pub fn from_link_endpoint(endpoint: &LinkEndpoint) -> Result<Self, TransportAddressError> {
+        match endpoint.protocol {
+            LinkProtocol::Quic => {
+                let address = endpoint.address.as_deref().ok_or_else(|| TransportAddressError {
+                    input: String::new(),
+                    reason: "quic endpoint missing address".to_string(),
+                })?;
+                Self::quic_direct(address)
+            }
+            LinkProtocol::QuicReflexive => {
+                let address = endpoint.address.as_deref().ok_or_else(|| TransportAddressError {
+                    input: String::new(),
+                    reason: "reflexive endpoint missing address".to_string(),
+                })?;
+                let stun_server =
+                    endpoint
+                        .stun_server
+                        .as_deref()
+                        .ok_or_else(|| TransportAddressError {
+                            input: address.to_string(),
+                            reason: "reflexive endpoint missing STUN server".to_string(),
+                        })?;
+                Self::quic_reflexive(address, stun_server)
+            }
+            LinkProtocol::Tcp => {
+                let address = endpoint.address.as_deref().ok_or_else(|| TransportAddressError {
+                    input: String::new(),
+                    reason: "tcp endpoint missing address".to_string(),
+                })?;
+                Self::tcp_direct(address)
+            }
+            LinkProtocol::WebSocket => {
+                let address = endpoint.address.as_deref().ok_or_else(|| TransportAddressError {
+                    input: String::new(),
+                    reason: "websocket endpoint missing address".to_string(),
+                })?;
+                Self::websocket_direct(address)
+            }
+            LinkProtocol::WebSocketRelay => endpoint.relay_authority.map(Self::websocket_relay).ok_or_else(
+                || TransportAddressError {
+                    input: String::new(),
+                    reason: "relay endpoint missing relay authority".to_string(),
+                },
+            ),
+        }
     }
 
     /// Get the primary address for this hint, if any.
@@ -704,6 +872,41 @@ mod tests {
         assert!(!descriptor.needs_refresh(800));
         assert!(descriptor.needs_refresh(900));
         assert!(descriptor.needs_refresh(950));
+    }
+
+    #[test]
+    fn test_transport_hint_roundtrips_through_link_endpoint() {
+        let hint = TransportHint::quic_reflexive("10.0.0.1:7443", "10.0.0.2:3478")
+            .expect("valid reflexive hint");
+        let endpoint = hint.to_link_endpoint();
+        let restored = TransportHint::from_link_endpoint(&endpoint).expect("roundtrip");
+        assert_eq!(restored, hint);
+    }
+
+    #[test]
+    fn test_descriptor_advertises_split_connectivity_and_services() {
+        let descriptor = RendezvousDescriptor {
+            authority_id: test_authority(),
+            context_id: test_context(),
+            transport_hints: vec![
+                TransportHint::tcp_direct("127.0.0.1:8080").unwrap(),
+                TransportHint::websocket_relay(AuthorityId::new_from_entropy([9u8; 32])),
+            ],
+            handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
+            device_id: None,
+            valid_from: 1000,
+            valid_until: 2000,
+            nonce: [42u8; 32],
+            nickname_suggestion: None,
+        };
+
+        let endpoints = descriptor.advertised_link_endpoints();
+        let services = descriptor.advertised_service_descriptors();
+        assert_eq!(endpoints.len(), 2);
+        assert_eq!(services.len(), 2);
+        assert!(descriptor.supports_family(ServiceFamily::Establish));
+        assert!(descriptor.supports_family(ServiceFamily::Move));
     }
 
     #[test]

@@ -1,16 +1,17 @@
 //! Rendezvous Integration for Peer Discovery
 //!
-//! This module bridges `aura-sync` peer discovery with `aura-rendezvous`
-//! for fact-based peer discovery. Instead of custom flooding, peer descriptors
-//! are propagated as `RendezvousFact` through the journal sync mechanism.
+//! This module adapts runtime-owned rendezvous descriptor snapshots into the
+//! peer-discovery view used by sync. Instead of custom flooding, peer
+//! descriptors are propagated as `RendezvousFact` through the journal sync
+//! mechanism and cached by the runtime.
 //!
 //! # Architecture
 //!
 //! ```text
-//! ┌───────────────────┐     ┌───────────────────────┐
-//! │  RendezvousService │     │       PeerManager     │
-//! │   (descriptor cache)│<───│   (sync peer tracking)│
-//! └───────────────────┘     └───────────────────────┘
+//! ┌───────────────────────┐     ┌───────────────────────┐
+//! │ Runtime Descriptor     │     │       PeerManager     │
+//! │ Registry (aura-agent)  │────▶│   (sync peer tracking)│
+//! └───────────────────────┘     └───────────────────────┘
 //!           ↓                          ↓
 //! ┌───────────────────────────────────────────────┐
 //! │             Context Journal                    │
@@ -22,33 +23,34 @@
 //!
 //! ```rust,ignore
 //! use aura_sync::infrastructure::{PeerManager, RendezvousAdapter};
-//! use aura_rendezvous::service::RendezvousService;
+//! use aura_rendezvous::facts::RendezvousDescriptor;
 //!
-//! // Create adapter linking rendezvous to sync
-//! let adapter = RendezvousAdapter::new(&rendezvous_service);
+//! // Create adapter from the local authority identity.
+//! let adapter = RendezvousAdapter::new(local_authority);
 //!
-//! // Discover peers from cached descriptors
-//! let peers = adapter.discover_context_peers(context_id, 1000);
+//! // Discover peers from a runtime-provided descriptor snapshot.
+//! let peers = adapter.discover_context_peers(&descriptors, context_id, 1000);
 //! ```
 
 use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_rendezvous::facts::TransportHint;
-use aura_rendezvous::service::RendezvousService;
+use aura_core::{LinkEndpoint, ServiceDescriptor};
+use aura_rendezvous::RendezvousDescriptor;
 use std::collections::HashMap;
 
-/// Adapter for integrating rendezvous discovery with sync peer management
+/// Adapter for integrating runtime-owned rendezvous descriptor snapshots with
+/// sync peer management.
 ///
-/// This adapter queries `RendezvousService` for cached descriptors and
-/// provides peer information suitable for sync operations.
-pub struct RendezvousAdapter<'a> {
-    /// Reference to the rendezvous service
-    service: &'a RendezvousService,
+/// This adapter does not own or mutate the descriptor cache. The runtime owns
+/// the long-lived registry and passes descriptor snapshots into these helpers.
+pub struct RendezvousAdapter {
+    /// Local authority so self-descriptors can be filtered out of discovery.
+    local_authority: AuthorityId,
 }
 
-impl<'a> RendezvousAdapter<'a> {
+impl RendezvousAdapter {
     /// Create a new rendezvous adapter
-    pub fn new(service: &'a RendezvousService) -> Self {
-        Self { service }
+    pub fn new(local_authority: AuthorityId) -> Self {
+        Self { local_authority }
     }
 
     /// Discover peers available for sync in a given context
@@ -61,21 +63,25 @@ impl<'a> RendezvousAdapter<'a> {
     /// * `now_ms` - Current time for validity checking
     ///
     /// # Returns
-    /// A map of AuthorityId to DiscoveredPeer containing transport hints
+    /// A map of AuthorityId to DiscoveredPeer containing split connectivity and
+    /// service-surface advertisements.
     pub fn discover_context_peers(
         &self,
+        descriptors: &[RendezvousDescriptor],
         context_id: ContextId,
         now_ms: u64,
     ) -> HashMap<AuthorityId, DiscoveredPeer> {
-        let local_authority = self.service.authority_id();
-
-        self.service
-            .iter_descriptors_in_context(context_id)
-            .filter(|d| d.is_valid(now_ms) && d.authority_id != local_authority)
+        descriptors
+            .iter()
+            .filter(|descriptor| descriptor.context_id == context_id)
+            .filter(|descriptor| {
+                descriptor.is_valid(now_ms) && descriptor.authority_id != self.local_authority
+            })
             .map(|d| {
                 let peer = DiscoveredPeer {
                     authority_id: d.authority_id,
-                    transport_hints: d.transport_hints.clone(),
+                    link_endpoints: d.advertised_link_endpoints(),
+                    service_descriptors: d.advertised_service_descriptors(),
                     valid_until: d.valid_until,
                     context_id: d.context_id,
                 };
@@ -89,15 +95,22 @@ impl<'a> RendezvousAdapter<'a> {
     /// Queries the descriptor cache for a specific peer's descriptor.
     pub fn get_peer_info(
         &self,
+        descriptors: &[RendezvousDescriptor],
         context_id: ContextId,
         peer: AuthorityId,
         now_ms: u64,
     ) -> Option<DiscoveredPeer> {
-        self.service
-            .get_cached_descriptor(context_id, peer, now_ms)
+        descriptors
+            .iter()
+            .find(|descriptor| {
+                descriptor.context_id == context_id
+                    && descriptor.authority_id == peer
+                    && descriptor.is_valid(now_ms)
+            })
             .map(|d| DiscoveredPeer {
                 authority_id: d.authority_id,
-                transport_hints: d.transport_hints.clone(),
+                link_endpoints: d.advertised_link_endpoints(),
+                service_descriptors: d.advertised_service_descriptors(),
                 valid_until: d.valid_until,
                 context_id: d.context_id,
             })
@@ -106,19 +119,39 @@ impl<'a> RendezvousAdapter<'a> {
     /// Get peers that need descriptor refresh
     ///
     /// Returns authorities whose descriptors will expire within the refresh window.
-    pub fn peers_needing_refresh(&self, context_id: ContextId, now_ms: u64) -> Vec<AuthorityId> {
-        self.service.peers_needing_refresh(context_id, now_ms)
+    pub fn peers_needing_refresh(
+        &self,
+        descriptors: &[RendezvousDescriptor],
+        context_id: ContextId,
+        now_ms: u64,
+    ) -> Vec<AuthorityId> {
+        descriptors
+            .iter()
+            .filter(|descriptor| descriptor.context_id == context_id)
+            .filter(|descriptor| descriptor.authority_id != self.local_authority)
+            .filter(|descriptor| descriptor.is_valid(now_ms) && descriptor.needs_refresh(now_ms))
+            .map(|descriptor| descriptor.authority_id)
+            .collect()
     }
 
     /// Check if our own descriptor needs refresh
     pub fn needs_own_refresh(
         &self,
+        descriptors: &[RendezvousDescriptor],
         context_id: ContextId,
         now_ms: u64,
         refresh_window_ms: u64,
     ) -> bool {
-        self.service
-            .needs_own_refresh(context_id, now_ms, refresh_window_ms)
+        match descriptors.iter().find(|descriptor| {
+            descriptor.context_id == context_id && descriptor.authority_id == self.local_authority
+        }) {
+            None => true,
+            Some(descriptor) if !descriptor.is_valid(now_ms) => true,
+            Some(descriptor) => {
+                let time_until_expiry = descriptor.valid_until.saturating_sub(now_ms);
+                time_until_expiry <= refresh_window_ms
+            }
+        }
     }
 }
 
@@ -127,8 +160,10 @@ impl<'a> RendezvousAdapter<'a> {
 pub struct DiscoveredPeer {
     /// The peer's authority ID
     pub authority_id: AuthorityId,
-    /// Available transport endpoints for reaching this peer
-    pub transport_hints: Vec<TransportHint>,
+    /// Connectivity endpoints decoupled from service-family policy.
+    pub link_endpoints: Vec<LinkEndpoint>,
+    /// Family-specific service-surface advertisements.
+    pub service_descriptors: Vec<ServiceDescriptor>,
     /// When the descriptor expires
     pub valid_until: u64,
     /// Context this peer was discovered in
@@ -148,26 +183,23 @@ impl DiscoveredPeer {
         now_ms >= refresh_threshold
     }
 
-    /// Get the preferred transport hint (first in priority order)
-    pub fn preferred_transport(&self) -> Option<&TransportHint> {
-        self.transport_hints.first()
+    /// Get the preferred connectivity endpoint (first in priority order).
+    pub fn preferred_link_endpoint(&self) -> Option<&LinkEndpoint> {
+        self.link_endpoints.first()
     }
 
     /// Check if peer has any direct transport options
     pub fn has_direct_transport(&self) -> bool {
-        self.transport_hints.iter().any(|h| {
-            matches!(
-                h,
-                TransportHint::QuicDirect { .. } | TransportHint::TcpDirect { .. }
-            )
-        })
+        self.link_endpoints
+            .iter()
+            .any(|endpoint| endpoint.relay_authority.is_none())
     }
 
     /// Check if peer requires relay
     pub fn requires_relay(&self) -> bool {
-        self.transport_hints
+        self.link_endpoints
             .iter()
-            .all(|h| matches!(h, TransportHint::WebSocketRelay { .. }))
+            .all(|endpoint| endpoint.relay_authority.is_some())
     }
 }
 
@@ -203,8 +235,7 @@ pub type RendezvousEventCallback = Box<dyn Fn(RendezvousEvent) + Send + Sync>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_rendezvous::facts::RendezvousDescriptor;
-    use aura_rendezvous::service::RendezvousConfig;
+    use aura_rendezvous::facts::{RendezvousDescriptor, TransportHint};
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
@@ -237,18 +268,19 @@ mod tests {
     #[test]
     fn test_adapter_creation() {
         let alice = test_authority(1);
-        let config = RendezvousConfig::default();
-        let service = RendezvousService::new(alice, config);
-
-        let adapter = RendezvousAdapter::new(&service);
-        assert_eq!(adapter.service.authority_id(), alice);
+        let adapter = RendezvousAdapter::new(alice);
+        assert_eq!(adapter.local_authority, alice);
     }
 
     #[test]
     fn test_discovered_peer_validity() {
         let peer = DiscoveredPeer {
             authority_id: test_authority(2),
-            transport_hints: vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()],
+            link_endpoints: vec![LinkEndpoint::direct(
+                aura_core::LinkProtocol::Quic,
+                "10.0.0.1:8443",
+            )],
+            service_descriptors: Vec::new(),
             valid_until: 10_000,
             context_id: test_context(100),
         };
@@ -262,10 +294,11 @@ mod tests {
     fn test_discovered_peer_transport_checks() {
         let direct_peer = DiscoveredPeer {
             authority_id: test_authority(2),
-            transport_hints: vec![
-                TransportHint::quic_direct("10.0.0.1:8443").unwrap(),
-                TransportHint::websocket_relay(test_authority(99)),
+            link_endpoints: vec![
+                LinkEndpoint::direct(aura_core::LinkProtocol::Quic, "10.0.0.1:8443"),
+                LinkEndpoint::relay(test_authority(99)),
             ],
+            service_descriptors: Vec::new(),
             valid_until: 10_000,
             context_id: test_context(100),
         };
@@ -275,7 +308,8 @@ mod tests {
 
         let relay_only_peer = DiscoveredPeer {
             authority_id: test_authority(3),
-            transport_hints: vec![TransportHint::websocket_relay(test_authority(99))],
+            link_endpoints: vec![LinkEndpoint::relay(test_authority(99))],
+            service_descriptors: Vec::new(),
             valid_until: 10_000,
             context_id: test_context(100),
         };
@@ -289,29 +323,25 @@ mod tests {
         let alice = test_authority(1);
         let bob = test_authority(2);
         let context = test_context(100);
-
-        let config = RendezvousConfig::default();
-        let mut service = RendezvousService::new(alice, config);
-
-        // Cache Bob's descriptor
         let bob_descriptor = test_descriptor(bob, context, 0, 10_000);
-        service.cache_descriptor(bob_descriptor);
+        let descriptors = vec![bob_descriptor];
 
-        let adapter = RendezvousAdapter::new(&service);
+        let adapter = RendezvousAdapter::new(alice);
 
-        // Should find Bob's cached descriptor
-        let peer_info = adapter.get_peer_info(context, bob, 5000);
+        let peer_info = adapter.get_peer_info(&descriptors, context, bob, 5000);
         assert!(peer_info.is_some());
         let peer = peer_info.unwrap();
         assert_eq!(peer.authority_id, bob);
         assert_eq!(peer.valid_until, 10_000);
 
-        // Should not find unknown peer
         let unknown = test_authority(99);
-        assert!(adapter.get_peer_info(context, unknown, 5000).is_none());
+        assert!(adapter
+            .get_peer_info(&descriptors, context, unknown, 5000)
+            .is_none());
 
-        // Should not find expired descriptor
-        assert!(adapter.get_peer_info(context, bob, 15_000).is_none());
+        assert!(adapter
+            .get_peer_info(&descriptors, context, bob, 15_000)
+            .is_none());
     }
 
     #[test]
@@ -321,31 +351,22 @@ mod tests {
         let carol = test_authority(3);
         let context = test_context(100);
         let other_context = test_context(200);
+        let descriptors = vec![
+            test_descriptor(bob, context, 0, 10_000),
+            test_descriptor(carol, context, 0, 10_000),
+            test_descriptor(test_authority(4), other_context, 0, 10_000),
+            test_descriptor(alice, context, 0, 10_000),
+        ];
+        let adapter = RendezvousAdapter::new(alice);
 
-        let config = RendezvousConfig::default();
-        let mut service = RendezvousService::new(alice, config);
+        let peers = adapter.discover_context_peers(&descriptors, context, 5000);
 
-        // Cache descriptors for Bob and Carol in the same context
-        service.cache_descriptor(test_descriptor(bob, context, 0, 10_000));
-        service.cache_descriptor(test_descriptor(carol, context, 0, 10_000));
-        // Cache a descriptor in a different context
-        service.cache_descriptor(test_descriptor(test_authority(4), other_context, 0, 10_000));
-        // Cache Alice's own descriptor (should be excluded)
-        service.cache_descriptor(test_descriptor(alice, context, 0, 10_000));
-
-        let adapter = RendezvousAdapter::new(&service);
-
-        // Discover peers in the context
-        let peers = adapter.discover_context_peers(context, 5000);
-
-        // Should find Bob and Carol, but not Alice (self) or the other context peer
         assert_eq!(peers.len(), 2);
         assert!(peers.contains_key(&bob));
         assert!(peers.contains_key(&carol));
-        assert!(!peers.contains_key(&alice)); // Self excluded
+        assert!(!peers.contains_key(&alice));
 
-        // Expired descriptors should be filtered
-        let peers_after_expiry = adapter.discover_context_peers(context, 15_000);
+        let peers_after_expiry = adapter.discover_context_peers(&descriptors, context, 15_000);
         assert!(peers_after_expiry.is_empty());
     }
 
@@ -354,21 +375,13 @@ mod tests {
         let alice = test_authority(1);
         let bob = test_authority(2);
         let context = test_context(100);
+        let descriptors = vec![test_descriptor(bob, context, 0, 10_000)];
+        let adapter = RendezvousAdapter::new(alice);
 
-        let config = RendezvousConfig::default();
-        let mut service = RendezvousService::new(alice, config);
-
-        // Bob's descriptor valid from 0 to 10_000, refresh window starts at 9000 (10% before expiry)
-        service.cache_descriptor(test_descriptor(bob, context, 0, 10_000));
-
-        let adapter = RendezvousAdapter::new(&service);
-
-        // At 5000, Bob doesn't need refresh yet
-        let needing_refresh = adapter.peers_needing_refresh(context, 5000);
+        let needing_refresh = adapter.peers_needing_refresh(&descriptors, context, 5000);
         assert!(needing_refresh.is_empty());
 
-        // At 9500 (within 10% of expiry), Bob needs refresh
-        let needing_refresh = adapter.peers_needing_refresh(context, 9500);
+        let needing_refresh = adapter.peers_needing_refresh(&descriptors, context, 9500);
         assert_eq!(needing_refresh.len(), 1);
         assert_eq!(needing_refresh[0], bob);
     }
@@ -377,27 +390,30 @@ mod tests {
     fn test_needs_own_refresh() {
         let alice = test_authority(1);
         let context = test_context(100);
+        let adapter = RendezvousAdapter::new(alice);
+        let mut descriptors = Vec::new();
 
-        let config = RendezvousConfig::default();
-        let mut service = RendezvousService::new(alice, config);
+        assert!(adapter.needs_own_refresh(&descriptors, context, 5000, 1000));
 
-        let adapter = RendezvousAdapter::new(&service);
+        descriptors.push(test_descriptor(alice, context, 0, 10_000));
 
-        // No cached descriptor - needs refresh
-        assert!(adapter.needs_own_refresh(context, 5000, 1000));
+        assert!(!adapter.needs_own_refresh(&descriptors, context, 5000, 1000));
+        assert!(adapter.needs_own_refresh(&descriptors, context, 9500, 1000));
+        assert!(adapter.needs_own_refresh(&descriptors, context, 15_000, 1000));
+    }
 
-        // Cache Alice's own descriptor
-        service.cache_descriptor(test_descriptor(alice, context, 0, 10_000));
+    #[test]
+    fn test_discovery_view_does_not_mutate_descriptor_registry() {
+        let alice = test_authority(1);
+        let bob = test_authority(2);
+        let context = test_context(100);
+        let descriptors = vec![test_descriptor(bob, context, 0, 10_000)];
 
-        let adapter = RendezvousAdapter::new(&service);
+        let adapter = RendezvousAdapter::new(alice);
+        let _ = adapter.discover_context_peers(&descriptors, context, 5000);
+        let _ = adapter.get_peer_info(&descriptors, context, bob, 5000);
 
-        // At 5000 with 1000ms window - doesn't need refresh (expiry is 10_000)
-        assert!(!adapter.needs_own_refresh(context, 5000, 1000));
-
-        // At 9500 with 1000ms window - needs refresh (within window)
-        assert!(adapter.needs_own_refresh(context, 9500, 1000));
-
-        // After expiry - needs refresh
-        assert!(adapter.needs_own_refresh(context, 15_000, 1000));
+        assert_eq!(descriptors.len(), 1);
+        assert_eq!(descriptors[0].authority_id, bob);
     }
 }

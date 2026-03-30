@@ -1,0 +1,5 @@
+error: service_surface families must be drawn from `Establish`, `Move`, or `Hold`
+ --> tests/boundaries/service_surface_invalid_family.rs:4:16
+  |
+4 |     families = "NeighborhoodRelay",
+  |                ^^^^^^^^^^^^^^^^^^^

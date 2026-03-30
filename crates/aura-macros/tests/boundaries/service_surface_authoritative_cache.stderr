@@ -1,0 +1,5 @@
+error: service_surface authoritative shared objects must not include runtime-local caches
+  --> tests/boundaries/service_surface_authoritative_cache.rs:10:21
+   |
+10 |     authoritative = "descriptor_cache",
+   |                     ^^^^^^^^^^^^^^^^^^

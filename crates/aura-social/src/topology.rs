@@ -7,6 +7,7 @@ use crate::facts::HomeId;
 use crate::{Home, Neighborhood};
 use aura_core::{
     effects::relay::{RelayCandidate, RelayRelationship},
+    service::{ProviderCandidate, ProviderEvidence, ServiceFamily},
     types::identifiers::AuthorityId,
 };
 use serde::{Deserialize, Serialize};
@@ -199,6 +200,36 @@ impl SocialTopology {
         candidates.sort_by_key(|c| c.relationship.priority());
 
         candidates
+    }
+
+    /// Build neighborhood-plane provider candidates without owning selection.
+    ///
+    /// This is the split service-model input exported by `aura-social`: pure
+    /// candidate production with provenance, no final route or retrieval choice.
+    pub fn build_provider_candidates<F>(
+        &self,
+        family: ServiceFamily,
+        destination: &AuthorityId,
+        reachability: F,
+    ) -> Vec<ProviderCandidate>
+    where
+        F: FnMut(&AuthorityId) -> bool,
+    {
+        self.build_relay_candidates(destination, reachability)
+            .into_iter()
+            .map(|candidate| ProviderCandidate {
+                authority_id: candidate.authority_id,
+                device_id: None,
+                family,
+                evidence: vec![match candidate.relationship {
+                    RelayRelationship::Guardian => ProviderEvidence::Guardian,
+                    RelayRelationship::SameHome { .. }
+                    | RelayRelationship::NeighborhoodHop { .. } => ProviderEvidence::Neighborhood,
+                }],
+                link_endpoints: Vec::new(),
+                reachable: candidate.reachable,
+            })
+            .collect()
     }
 
     /// Get the count of peers by relationship type.
@@ -474,6 +505,28 @@ mod tests {
             .relationship_with(&peer)
             .unwrap()
             .is_same_home_member());
+    }
+
+    #[test]
+    fn build_provider_candidates_exposes_neighborhood_plane_inputs_only() {
+        let local = AuthorityId::new_from_entropy([1u8; 32]);
+        let peer = AuthorityId::new_from_entropy([2u8; 32]);
+        let target = AuthorityId::new_from_entropy([3u8; 32]);
+        let home_id = HomeId::from_bytes([4u8; 32]);
+
+        let mut topology = SocialTopology::empty(local);
+        topology.add_peer(
+            peer,
+            RelayRelationship::SameHome {
+                home_id: *home_id.as_bytes(),
+            },
+        );
+
+        let candidates =
+            topology.build_provider_candidates(ServiceFamily::Move, &target, |_| true);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].family, ServiceFamily::Move);
+        assert_eq!(candidates[0].evidence, vec![ProviderEvidence::Neighborhood]);
     }
 
     #[test]

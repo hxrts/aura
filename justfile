@@ -661,6 +661,7 @@ ci-testkit-exception-boundary:
 
 ci-ownership-policy:
     just ci-ownership-categories
+    just ci-service-surface-policy
     just ci-annotation-ratchet
     just ci-actor-lifecycle
     just ci-async-session-ownership
@@ -725,6 +726,11 @@ ci-annotation-ratchet:
 
 ci-ownership-categories:
     bash scripts/check/ownership-category-declarations.sh
+
+ci-service-surface-policy:
+    mkdir -p target/tmp
+    TMPDIR={{invocation_directory()}}/target/tmp cargo test -p aura-macros --test service_surface_compile_fail -- --nocapture
+    bash scripts/check/service-surface-declarations.sh
 
 ci-actor-lifecycle:
     just _ownership-lint actor-owned-task-spawn crates/aura-agent/src crates/aura-app/src crates/aura-core/src crates/aura-effects/src crates/aura-harness/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src

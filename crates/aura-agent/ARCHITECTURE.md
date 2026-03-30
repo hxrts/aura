@@ -13,6 +13,7 @@ Production runtime composition and effect system assembly for authority-based id
 | Session ownership and ingress routing | Application-level workflow logic (aura-app) |
 | Choreography adapter wiring | Bridge schema transformations (aura-quint) |
 | Builder infrastructure (CLI, iOS, Android, Web) | Stateless single-party handlers (aura-effects) |
+| Runtime-owned service caches and plane fusion such as rendezvous descriptors and provider candidate fusion | Layer 5 fact semantics or route-free candidate derivation |
 | Structured concurrency and task supervision | Imports from Layers 1-5 back into this crate |
 
 ## Dependencies

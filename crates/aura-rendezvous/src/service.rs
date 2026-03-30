@@ -130,14 +130,18 @@ pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 // Rendezvous Service
 // =============================================================================
 
-/// Cache key for descriptor storage
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct DescriptorCacheKey {
-    context_id: ContextId,
-    authority_id: AuthorityId,
-}
-
 /// Rendezvous service coordinating peer discovery and channel establishment
+#[aura_macros::service_surface(
+    families = "Establish",
+    object_categories = "authoritative_shared,transport_protocol,runtime_derived_local,proof_accounting",
+    discover = "journal_descriptor_publication",
+    permit = "runtime_capability_and_budget_checks",
+    transfer = "rendezvous_handler_and_transport_effects",
+    select = "rendezvous_manager_runtime_cache",
+    authoritative = "RendezvousDescriptor,RendezvousFact::ChannelEstablished",
+    runtime_local = "descriptor_snapshot,selected_transport,retry_budget,handshake_registry",
+    category = "service_surface"
+)]
 pub struct RendezvousService {
     /// Local authority
     authority_id: AuthorityId,
@@ -147,8 +151,6 @@ pub struct RendezvousService {
     transport_selector: TransportSelector,
     /// Descriptor builder
     descriptor_builder: DescriptorBuilder,
-    /// Cached descriptors indexed by (context, authority)
-    descriptor_cache: HashMap<DescriptorCacheKey, RendezvousDescriptor>,
     /// Active handshake state machines (waiting for response or processing init)
     /// Key: (ContextId, Peer)
     handshakers: RwLock<HashMap<(ContextId, AuthorityId), Handshaker>>,
@@ -169,7 +171,6 @@ impl RendezvousService {
             config,
             transport_selector,
             descriptor_builder,
-            descriptor_cache: HashMap::new(),
             handshakers: RwLock::new(HashMap::new()),
         }
     }
@@ -182,95 +183,6 @@ impl RendezvousService {
     /// Get the service configuration
     pub fn config(&self) -> &RendezvousConfig {
         &self.config
-    }
-
-    // =========================================================================
-    // Descriptor Cache Access
-    // =========================================================================
-
-    /// Cache a descriptor received from the journal or network.
-    pub fn cache_descriptor(&mut self, descriptor: RendezvousDescriptor) {
-        let key = DescriptorCacheKey {
-            context_id: descriptor.context_id,
-            authority_id: descriptor.authority_id,
-        };
-        self.descriptor_cache.insert(key, descriptor);
-    }
-
-    /// Get a cached descriptor for a specific peer in a context.
-    pub fn get_cached_descriptor(
-        &self,
-        context_id: ContextId,
-        authority_id: AuthorityId,
-        now_ms: u64,
-    ) -> Option<&RendezvousDescriptor> {
-        let key = DescriptorCacheKey {
-            context_id,
-            authority_id,
-        };
-        self.descriptor_cache
-            .get(&key)
-            .filter(|d| d.is_valid(now_ms))
-    }
-
-    /// Iterate over all cached descriptors in a context.
-    pub fn iter_descriptors_in_context(
-        &self,
-        context_id: ContextId,
-    ) -> impl Iterator<Item = &RendezvousDescriptor> {
-        self.descriptor_cache
-            .iter()
-            .filter(move |(k, _)| k.context_id == context_id)
-            .map(|(_, v)| v)
-    }
-
-    /// Get authorities whose descriptors need refresh in a context.
-    pub fn peers_needing_refresh(&self, context_id: ContextId, now_ms: u64) -> Vec<AuthorityId> {
-        self.descriptor_cache
-            .iter()
-            .filter(|(k, d)| {
-                k.context_id == context_id
-                    && k.authority_id != self.authority_id
-                    && d.is_valid(now_ms)
-                    && d.needs_refresh(now_ms)
-            })
-            .map(|(k, _)| k.authority_id)
-            .collect()
-    }
-
-    /// Check if our own descriptor needs refresh in a context.
-    pub fn needs_own_refresh(
-        &self,
-        context_id: ContextId,
-        now_ms: u64,
-        refresh_window_ms: u64,
-    ) -> bool {
-        let key = DescriptorCacheKey {
-            context_id,
-            authority_id: self.authority_id,
-        };
-
-        match self.descriptor_cache.get(&key) {
-            None => true, // No descriptor cached, need to publish
-            Some(descriptor) => {
-                if !descriptor.is_valid(now_ms) {
-                    return true; // Descriptor expired
-                }
-                let time_until_expiry = descriptor.valid_until.saturating_sub(now_ms);
-                time_until_expiry <= refresh_window_ms
-            }
-        }
-    }
-
-    /// Remove expired descriptors from the cache.
-    pub fn evict_expired_descriptors(&mut self, now_ms: u64) {
-        self.descriptor_cache.retain(|_, d| d.is_valid(now_ms));
-    }
-
-    /// Clear all cached descriptors for a context.
-    pub fn clear_context_cache(&mut self, context_id: ContextId) {
-        self.descriptor_cache
-            .retain(|k, _| k.context_id != context_id);
     }
 
     // =========================================================================

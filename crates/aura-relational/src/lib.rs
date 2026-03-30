@@ -85,6 +85,7 @@ pub mod facts;
 pub mod guardian;
 pub mod guardian_request;
 pub mod guardian_service;
+pub mod wot;
 
 /// Operation category map (A/B/C) for protocol gating and review.
 pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
@@ -116,6 +117,11 @@ pub use guardian_request::{
     GuardianRequestPayload, GUARDIAN_REQUEST_FACT_TYPE_ID,
 };
 pub use guardian_service::GuardianService;
+pub use wot::{
+    FriendshipFact, FriendshipFactReducer, FriendshipState, TrustIntroductionFact,
+    TrustIntroductionFactReducer, WebOfTrustEvidence, WebOfTrustIndex, FRIENDSHIP_FACT_TYPE_ID,
+    TRUST_INTRODUCTION_FACT_TYPE_ID,
+};
 
 /// RelationalContext manages cross-authority relationships
 ///

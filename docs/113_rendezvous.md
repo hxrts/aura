@@ -1,10 +1,12 @@
 # Rendezvous Architecture
 
-This document describes the rendezvous architecture in Aura. It explains peer discovery, descriptor propagation, transport selection, channel establishment, and relay-to-direct holepunch upgrades. It aligns with the authority and context model. It scopes all rendezvous behavior to relational contexts.
+This document describes the rendezvous architecture in Aura. It explains peer discovery, descriptor propagation, service-surface advertisement, connectivity selection, channel establishment, and relay-to-direct holepunch upgrades. It aligns with the authority and context model. It scopes all rendezvous behavior to relational contexts.
 
 ## 1. Overview
 
 Rendezvous establishes secure channels between authorities. The `RendezvousService` exposes `prepare_publish_descriptor()` and `prepare_establish_channel()` methods. The service returns guard outcomes that the caller executes through an effect interpreter. Rendezvous operates inside a relational context and uses the context key for encryption. Descriptors appear as facts in the context journal. Propagation uses journal synchronization (`aura-sync`), not custom flooding.
+
+Rendezvous owns descriptor semantics, publication, validation, and establish bootstrap. It does not own the long-lived mutable descriptor cache. The runtime in `aura-agent` owns that cache and passes descriptor snapshots into peer-discovery views.
 
 Rendezvous does not establish global identity. All operations are scoped to a `ContextId`. A context defines which authorities may see descriptors. Only participating authorities have the keys required to decrypt descriptor payloads.
 
@@ -42,13 +44,13 @@ aura-rendezvous/
 │   └── new_channel.rs   # SecureChannel, ChannelManager, Handshaker
 ```
 
-## 3. Transport Strategy
+## 3. Connectivity and Service Advertisement
 
-The transport layer uses a priority sequence of connection attempts. Direct QUIC is attempted first. QUIC using reflexive addresses via STUN is attempted next. TCP direct is attempted next. WebSocket relay is attempted last. The first successful connection is used.
+Rendezvous descriptors carry two kinds of information. One surface describes concrete connectivity endpoints. The other surface describes abstract service families such as `Establish`, `Move`, and `Hold`. These surfaces must remain separate.
 
-Aura uses relay-first fallback. Relays use guardians or peers designated to provide relay services. Relay traffic uses end-to-end encryption. Relay capabilities must be valid for the context.
+Connectivity endpoints describe how a peer may be reached. Service advertisements describe what the peer is willing to provide. Runtime policy combines both surfaces with local permit state, health, and trust evidence. Descriptor publication itself does not commit the final route choice.
 
-STUN discovery identifies the external address of each participant. Devices query STUN servers periodically. The reflexive address appears in rendezvous descriptors as a transport hint. STUN failure does not prevent rendezvous because relay is always available.
+The current implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data. That compatibility layer is temporary. New code should consume `LinkEndpoint` and `ServiceDescriptor` views rather than treating transport hints as final routing policy.
 
 ### 3.1 Holepunching and Upgrade Policy
 
@@ -97,16 +99,16 @@ pub enum RendezvousFact {
 }
 ```
 
-### 4.2 Transport Descriptors
+### 4.2 Rendezvous Descriptors
 
 ```rust
-/// Transport descriptor for peer discovery
+/// Rendezvous descriptor for peer discovery
 pub struct RendezvousDescriptor {
     /// Authority publishing this descriptor
     pub authority_id: AuthorityId,
     /// Context this descriptor is for
     pub context_id: ContextId,
-    /// Available transport endpoints
+    /// Legacy connectivity hints used to derive split views
     pub transport_hints: Vec<TransportHint>,
     /// Handshake PSK commitment (hash of PSK derived from context)
     pub handshake_psk_commitment: [u8; 32],
@@ -123,21 +125,24 @@ pub struct RendezvousDescriptor {
 }
 ```
 
-### 4.3 Transport Hints
+`RendezvousDescriptor` is the authoritative shared object in the journal. Callers derive `LinkEndpoint` and `ServiceDescriptor` views from it. This keeps the fact schema stable during migration while preventing route policy from hardening into the fact format.
+
+### 4.3 Split Connectivity and Service Surfaces
 
 ```rust
-/// Transport endpoint hint
-pub enum TransportHint {
-    /// Direct QUIC connection
-    QuicDirect { addr: TransportAddress },
-    /// QUIC via STUN-discovered reflexive address
-    QuicReflexive { addr: TransportAddress, stun_server: TransportAddress },
-    /// WebSocket relay through a relay authority
-    WebSocketRelay { relay_authority: AuthorityId },
-    /// TCP direct connection
-    TcpDirect { addr: TransportAddress },
+pub struct LinkEndpoint {
+    pub protocol: LinkProtocol,
+    pub address: Option<String>,
+    pub relay_authority: Option<AuthorityId>,
+}
+
+pub struct ServiceDescriptor {
+    pub header: ServiceDescriptorHeader,
+    pub kind: ServiceDescriptorKind,
 }
 ```
+
+`LinkEndpoint` answers how a peer may be reached. `ServiceDescriptor` answers what service family is being advertised. Runtime-owned selection state combines these views with local policy and social inputs. The selected provider should observe only the generic service action, not the social reason it was chosen.
 
 ## 5. MPST Choreographies
 
@@ -215,59 +220,32 @@ This model provides:
 
 ### 6.1 aura-sync Integration
 
-The `aura-sync` crate provides a `RendezvousAdapter` that bridges peer discovery with rendezvous descriptors:
+The `aura-sync` crate provides a `RendezvousAdapter` that bridges peer discovery with runtime-owned descriptor snapshots:
 
 ```rust
 use aura_sync::infrastructure::RendezvousAdapter;
 
-// Create adapter linking rendezvous to sync
-let adapter = RendezvousAdapter::new(&rendezvous_service);
+// Create adapter using the local authority identity.
+let adapter = RendezvousAdapter::new(local_authority);
 
-// Query peer info from cached descriptors
-if let Some(peer_info) = adapter.get_peer_info(context_id, peer, now_ms) {
+// Query peer info from a runtime-owned descriptor snapshot.
+if let Some(peer_info) = adapter.get_peer_info(&descriptors, context_id, peer, now_ms) {
     if peer_info.has_direct_transport() {
         // Use direct connection
     }
 }
 
 // Check which peers need descriptor refresh
-let stale_peers = adapter.peers_needing_refresh(context_id, now_ms);
+let stale_peers = adapter.peers_needing_refresh(&descriptors, context_id, now_ms);
 ```
 
-### 6.2 Four-Layer Discovery Model
+The adapter is a pure view helper. It does not own or mutate the cache. The runtime cache stays in `aura-agent`.
 
-Aura uses a progressive disclosure model for peer discovery. The `aura-social` crate provides `SocialTopology` which determines the appropriate discovery layer based on the caller's social relationships. The four layers in priority order:
+### 6.2 Social Inputs and Route Selection
 
-1. **Direct** (priority 0): Target is a known peer with existing relationship. Directly accessible with minimal cost.
-2. **Home** (priority 1): Target is unknown but reachable through 0-hop home relays. Home relays can forward messages.
-3. **Neighborhood** (priority 2): Target is unknown but reachable through neighborhood traversal. Multiple hops across 1-hop linked homes.
-4. **Rendezvous** (priority 3): No social presence - requires global flooding through rendezvous infrastructure.
+Rendezvous may consume socially rooted provider inputs, but it does not own social topology or trust evaluation. The `Neighborhood Plane` and `Web of Trust Plane` produce permit and candidate inputs. The runtime combines those inputs with descriptor views and local policy.
 
-```rust
-use aura_social::{DiscoveryLayer, SocialTopology};
-
-let topology = SocialTopology::new(local_authority, home, neighborhoods);
-
-// Determine discovery strategy for target
-match topology.discovery_layer(&target) {
-    DiscoveryLayer::Direct => {
-        // Direct connection, minimal cost
-    }
-    DiscoveryLayer::Home => {
-        // Relay through available 0-hop relays
-        let (_, relays) = topology.discovery_context(&target);
-    }
-    DiscoveryLayer::Neighborhood => {
-        // Multi-hop through neighborhood
-        let (layer, peers) = topology.discovery_context(&target);
-    }
-    DiscoveryLayer::Rendezvous => {
-        // Global rendezvous flooding required
-    }
-}
-```
-
-The discovery layer determines flow budget costs. Direct has minimal cost. Rendezvous has highest cost due to global propagation. This creates economic incentives to establish social relationships before communication.
+This separation is required for privacy. Shared descriptor facts must not expose route classes such as "friend relay" or "neighborhood hold". The selected provider should observe only the generic service action. See [Social Architecture](115_social_architecture.md) for the plane split.
 
 ## 7. Protocol Flow
 

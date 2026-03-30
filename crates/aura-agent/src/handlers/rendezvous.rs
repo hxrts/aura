@@ -303,13 +303,12 @@ impl RendezvousHandler {
 
     /// Cache a peer's descriptor received via journal sync
     pub async fn cache_peer_descriptor(&self, descriptor: RendezvousDescriptor) {
-        self.cache_manager
-            .cache_descriptor(descriptor.clone())
-            .await;
         if let Some(manager) = self.rendezvous_manager.as_ref() {
             if let Err(err) = manager.cache_descriptor(descriptor).await {
                 tracing::debug!(error = %err, "Failed to cache descriptor in rendezvous manager");
             }
+        } else {
+            self.cache_manager.cache_descriptor(descriptor).await;
         }
     }
 
@@ -319,15 +318,13 @@ impl RendezvousHandler {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> Option<RendezvousDescriptor> {
-        match self.cache_manager.get_descriptor(context_id, peer).await {
-            Some(descriptor) => Some(descriptor),
-            None => match self.rendezvous_manager.as_ref() {
-                Some(manager) => match manager.get_descriptor(context_id, peer).await {
-                    Some(descriptor) => Some(descriptor),
-                    None => manager.get_any_descriptor_for_authority(peer).await,
-                },
-                None => None,
-            },
+        if let Some(manager) = self.rendezvous_manager.as_ref() {
+            match manager.get_descriptor(context_id, peer).await {
+                Some(descriptor) => Some(descriptor),
+                None => manager.get_any_descriptor_for_authority(peer).await,
+            }
+        } else {
+            self.cache_manager.get_descriptor(context_id, peer).await
         }
     }
 
@@ -338,14 +335,18 @@ impl RendezvousHandler {
         now_ms: u64,
         refresh_window_ms: u64,
     ) -> bool {
-        self.cache_manager
-            .get_descriptor(context_id, self.context.authority.authority_id())
-            .await
-            .map(|desc| {
-                let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
-                now_ms >= refresh_threshold
-            })
-            .unwrap_or(true)
+        if let Some(manager) = self.rendezvous_manager.as_ref() {
+            manager.needs_refresh(context_id, now_ms).await
+        } else {
+            self.cache_manager
+                .get_descriptor(context_id, self.context.authority.authority_id())
+                .await
+                .map(|desc| {
+                    let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
+                    now_ms >= refresh_threshold
+                })
+                .unwrap_or(true)
+        }
     }
 
     // ========================================================================

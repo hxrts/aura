@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Peer discovery and channel establishment protocol including descriptor exchange, flood propagation, and LAN discovery for P2P connectivity.
+Peer discovery and channel establishment protocol including descriptor exchange, service-surface advertisement, and LAN discovery for P2P connectivity.
 
 ## Scope
 
@@ -70,7 +70,7 @@ Contract alignment:
 |---------|----------|-------|
 | descriptor facts/reducers and validation logic | `Pure` | Deterministic descriptor semantics and reduction. |
 | channel establishment, handshake, and protocol state | `MoveOwned` | Exclusive channel-establishment authority remains explicit and typed. |
-| `RendezvousService` local caches/handshakers | local service-owned mutation | Local descriptor cache and handshake registry are service-local state. |
+| `RendezvousService` handshake registry | local service-owned mutation | Handshake state is service-local. Long-lived descriptor caches live in `aura-agent`. |
 | `FloodPropagation` topology/budget/nonce state | bounded coordination state | Uses injected topology references and local flood bookkeeping. |
 | long-lived discovery runtime ownership | none local | Ongoing peer/discovery ownership belongs in higher-layer runtime services. |
 

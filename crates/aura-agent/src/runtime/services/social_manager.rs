@@ -7,9 +7,12 @@ use super::config_profiles::impl_service_config_profiles;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use async_trait::async_trait;
 use aura_core::effects::relay::{RelayCandidate, RelayContext, RelaySelector};
+use aura_core::service::{ProviderCandidate, ServiceFamily};
 use aura_core::types::identifiers::AuthorityId;
+use aura_relational::WebOfTrustEvidence;
 use aura_social::{DiscoveryLayer, Home, Neighborhood, SocialTopology};
 use aura_transport::relay::DeterministicRandomSelector;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -215,6 +218,50 @@ impl SocialManager {
             .build_relay_candidates(destination, reachability)
     }
 
+    /// Build fused runtime-local provider candidates from neighborhood and WoT inputs.
+    ///
+    /// `aura-social` and `aura-relational` stay authoritative for their own
+    /// facts and pure derivations; `aura-agent` owns the final fused permit view.
+    pub async fn build_provider_candidates<F>(
+        &self,
+        family: ServiceFamily,
+        destination: &AuthorityId,
+        reachability: F,
+        trust_evidence: &[WebOfTrustEvidence],
+    ) -> Vec<ProviderCandidate>
+    where
+        F: Fn(&AuthorityId) -> bool + Copy,
+    {
+        let neighborhood_candidates = self
+            .topology
+            .read()
+            .await
+            .build_provider_candidates(family, destination, reachability);
+
+        let mut merged: BTreeMap<AuthorityId, ProviderCandidate> = neighborhood_candidates
+            .into_iter()
+            .map(|candidate| (candidate.authority_id, candidate))
+            .collect();
+
+        for evidence in trust_evidence {
+            let entry = merged
+                .entry(evidence.authority_id)
+                .or_insert_with(|| ProviderCandidate {
+                    authority_id: evidence.authority_id,
+                    device_id: None,
+                    family,
+                    evidence: Vec::new(),
+                    link_endpoints: Vec::new(),
+                    reachable: reachability(&evidence.authority_id),
+                });
+            if !entry.evidence.contains(&evidence.evidence) {
+                entry.evidence.push(evidence.evidence.clone());
+            }
+        }
+
+        merged.into_values().collect()
+    }
+
     /// Get the relay selector
     pub fn relay_selector(&self) -> Arc<DeterministicRandomSelector> {
         self.relay_selector.clone()
@@ -301,6 +348,8 @@ impl SocialManager {
 mod tests {
     use super::*;
     use aura_core::effects::relay::RelayRelationship;
+    use aura_core::service::ProviderEvidence;
+    use aura_core::time::PhysicalTime;
     use aura_social::facts::HomeId;
 
     fn test_authority(seed: u8) -> AuthorityId {
@@ -348,6 +397,81 @@ mod tests {
         let peers = manager.same_home_members().await;
         assert_eq!(peers.len(), 1);
         assert!(peers.contains(&peer));
+    }
+
+    #[tokio::test]
+    async fn build_provider_candidates_fuses_neighborhood_and_wot_inputs() {
+        let local = test_authority(1);
+        let neighborhood_peer = test_authority(2);
+        let introduced_peer = test_authority(3);
+        let target = test_authority(9);
+        let manager = SocialManager::with_defaults(local);
+
+        manager
+            .add_peer(
+                neighborhood_peer,
+                RelayRelationship::SameHome {
+                    home_id: *HomeId::from_bytes([4u8; 32]).as_bytes(),
+                },
+            )
+            .await;
+
+        let trust = vec![WebOfTrustEvidence {
+            authority_id: introduced_peer,
+            evidence: ProviderEvidence::IntroducedFof,
+            context_id: aura_core::ContextId::new_from_entropy([5u8; 32]),
+            introduced_by: Some(neighborhood_peer),
+            expires_at: Some(PhysicalTime {
+                ts_ms: 1000,
+                uncertainty: None,
+            }),
+            remaining_depth: 1,
+            max_fanout: 1,
+        }];
+
+        let candidates = manager
+            .build_provider_candidates(ServiceFamily::Move, &target, |_| true, &trust)
+            .await;
+
+        assert!(candidates.iter().any(|candidate| {
+            candidate.authority_id == neighborhood_peer
+                && candidate.evidence.contains(&ProviderEvidence::Neighborhood)
+        }));
+        assert!(candidates.iter().any(|candidate| {
+            candidate.authority_id == introduced_peer
+                && candidate.evidence.contains(&ProviderEvidence::IntroducedFof)
+        }));
+    }
+
+    #[tokio::test]
+    async fn build_provider_candidates_keeps_family_shape_neutral() {
+        let local = test_authority(1);
+        let peer = test_authority(2);
+        let target = test_authority(9);
+        let manager = SocialManager::with_defaults(local);
+
+        manager
+            .add_peer(
+                peer,
+                RelayRelationship::SameHome {
+                    home_id: *HomeId::from_bytes([4u8; 32]).as_bytes(),
+                },
+            )
+            .await;
+
+        for family in [
+            ServiceFamily::Establish,
+            ServiceFamily::Move,
+            ServiceFamily::Hold,
+        ] {
+            let candidates = manager
+                .build_provider_candidates(family, &target, |_| true, &[])
+                .await;
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(candidates[0].family, family);
+            assert_eq!(candidates[0].evidence, vec![ProviderEvidence::Neighborhood]);
+            assert!(candidates[0].link_endpoints.is_empty());
+        }
     }
 
     #[tokio::test]

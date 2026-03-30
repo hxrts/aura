@@ -379,6 +379,64 @@ pub fn owner_issued_proof(attr: TokenStream, item: TokenStream) -> TokenStream {
     transform_owner_issued_proof(item, config)
 }
 
+/// Marker attribute for concrete service-boundary declarations.
+#[proc_macro_attribute]
+pub fn service_surface(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = match syn::parse::<ServiceSurfaceAttr>(attr) {
+        Ok(config) => config,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    let strukt = match syn::parse::<ItemStruct>(item.clone()) {
+        Ok(strukt) => strukt,
+        Err(_) => {
+            return Error::new(
+                proc_macro2::Span::call_site(),
+                "#[service_surface] may only be applied to structs",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    if let Err(error) = validate_service_surface_struct(&strukt, &config) {
+        return error.to_compile_error().into();
+    }
+
+    let ident = &strukt.ident;
+    let service_name = LitStr::new(&ident.to_string(), ident.span());
+    let families = service_family_tokens(&config.families);
+    let object_categories = service_object_category_tokens(&config.object_categories);
+    let discover = &config.discover;
+    let permit = &config.permit;
+    let transfer = &config.transfer;
+    let select = &config.select;
+    let authoritative = &config.authoritative;
+    let runtime_local = &config.runtime_local;
+    let category = &config.category;
+
+    quote! {
+        #strukt
+
+        impl #ident {
+            pub const SERVICE_SURFACE_DECLARATION_CATEGORY_LITERAL: &'static str = #category;
+            pub const SERVICE_SURFACE_DECLARATION:
+                ::aura_core::service::ServiceSurfaceDeclaration<Self> =
+                ::aura_core::service::ServiceSurfaceDeclaration::new(
+                    #service_name,
+                    &[#(#families),*],
+                    &[#(#object_categories),*],
+                    #discover,
+                    #permit,
+                    #transfer,
+                    #select,
+                    &[#(#authoritative),*],
+                    &[#(#runtime_local),*],
+                );
+        }
+    }
+    .into()
+}
+
 #[proc_macro_attribute]
 pub fn actor_owned(attr: TokenStream, item: TokenStream) -> TokenStream {
     let config = match syn::parse::<ActorOwnedAttr>(attr) {
@@ -577,6 +635,18 @@ struct OwnershipLifecycleAttr {
     terminals: Vec<LitStr>,
 }
 
+struct ServiceSurfaceAttr {
+    families: Vec<LitStr>,
+    object_categories: Vec<LitStr>,
+    discover: LitStr,
+    permit: LitStr,
+    transfer: LitStr,
+    select: LitStr,
+    authoritative: Vec<LitStr>,
+    runtime_local: Vec<LitStr>,
+    category: LitStr,
+}
+
 impl Parse for ActorOwnedAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
         let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
@@ -643,6 +713,121 @@ impl Parse for ActorOwnedAttr {
                 Error::new(
                     proc_macro2::Span::call_site(),
                     "actor_owned requires `category = \"actor_owned\"`",
+                )
+            })?,
+        })
+    }
+}
+
+impl Parse for ServiceSurfaceAttr {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let mut families = None;
+        let mut object_categories = None;
+        let mut discover = None;
+        let mut permit = None;
+        let mut transfer = None;
+        let mut select = None;
+        let mut authoritative = None;
+        let mut runtime_local = None;
+        let mut category = None;
+
+        for meta in metas {
+            if meta.path.is_ident("families") {
+                families = Some(parse_required_list_literal(&expect_string_literal(
+                    &meta,
+                    "families",
+                    "service_surface",
+                )?)?);
+            } else if meta.path.is_ident("object_categories") {
+                object_categories = Some(parse_required_list_literal(&expect_string_literal(
+                    &meta,
+                    "object_categories",
+                    "service_surface",
+                )?)?);
+            } else if meta.path.is_ident("discover") {
+                discover = Some(expect_string_literal(&meta, "discover", "service_surface")?);
+            } else if meta.path.is_ident("permit") {
+                permit = Some(expect_string_literal(&meta, "permit", "service_surface")?);
+            } else if meta.path.is_ident("transfer") {
+                transfer = Some(expect_string_literal(&meta, "transfer", "service_surface")?);
+            } else if meta.path.is_ident("select") {
+                select = Some(expect_string_literal(&meta, "select", "service_surface")?);
+            } else if meta.path.is_ident("authoritative") {
+                authoritative = Some(parse_required_list_literal(&expect_string_literal(
+                    &meta,
+                    "authoritative",
+                    "service_surface",
+                )?)?);
+            } else if meta.path.is_ident("runtime_local") {
+                runtime_local = Some(parse_required_list_literal(&expect_string_literal(
+                    &meta,
+                    "runtime_local",
+                    "service_surface",
+                )?)?);
+            } else if meta.path.is_ident("category") {
+                category = Some(expect_string_literal(&meta, "category", "service_surface")?);
+            } else {
+                return Err(Error::new_spanned(
+                    meta,
+                    "unsupported service_surface attribute key; expected `families`, `object_categories`, `discover`, `permit`, `transfer`, `select`, `authoritative`, `runtime_local`, or `category`",
+                ));
+            }
+        }
+
+        Ok(Self {
+            families: families.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "service_surface requires `families = \"A,B,...\"`",
+                )
+            })?,
+            object_categories: object_categories.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "service_surface requires `object_categories = \"a,b,...\"`",
+                )
+            })?,
+            discover: discover.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "service_surface requires `discover = \"...\"`",
+                )
+            })?,
+            permit: permit.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "service_surface requires `permit = \"...\"`",
+                )
+            })?,
+            transfer: transfer.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "service_surface requires `transfer = \"...\"`",
+                )
+            })?,
+            select: select.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "service_surface requires `select = \"...\"`",
+                )
+            })?,
+            authoritative: authoritative.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "service_surface requires `authoritative = \"a,b,...\"`",
+                )
+            })?,
+            runtime_local: runtime_local.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "service_surface requires `runtime_local = \"a,b,...\"`",
+                )
+            })?,
+            category: category.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "service_surface requires `category = \"service_surface\"`",
                 )
             })?,
         })
@@ -1135,6 +1320,117 @@ fn parse_optional_list_literal(list: &LitStr) -> SynResult<Vec<LitStr>> {
         return Ok(Vec::new());
     }
     parse_list_literal(list)
+}
+
+fn parse_required_list_literal(list: &LitStr) -> SynResult<Vec<LitStr>> {
+    parse_list_literal(list)
+}
+
+fn validate_service_surface_struct(
+    strukt: &ItemStruct,
+    config: &ServiceSurfaceAttr,
+) -> SynResult<()> {
+    if config.category.value() != "service_surface" {
+        return Err(Error::new_spanned(
+            &config.category,
+            "service_surface category must be `service_surface`",
+        ));
+    }
+
+    for family in &config.families {
+        match family.value().as_str() {
+            "Establish" | "Move" | "Hold" => {}
+            _ => {
+                return Err(Error::new_spanned(
+                    family,
+                    "service_surface families must be drawn from `Establish`, `Move`, or `Hold`",
+                ));
+            }
+        }
+    }
+
+    for category in &config.object_categories {
+        match category.value().as_str() {
+            "authoritative_shared"
+            | "transport_protocol"
+            | "runtime_derived_local"
+            | "proof_accounting" => {}
+            _ => {
+                return Err(Error::new_spanned(
+                    category,
+                    "service_surface object_categories must be drawn from `authoritative_shared`, `transport_protocol`, `runtime_derived_local`, or `proof_accounting`",
+                ));
+            }
+        }
+    }
+
+    for authoritative in &config.authoritative {
+        let value = authoritative.value();
+        if value.to_ascii_lowercase().contains("cache") {
+            return Err(Error::new_spanned(
+                authoritative,
+                "service_surface authoritative shared objects must not include runtime-local caches",
+            ));
+        }
+    }
+
+    for field in [
+        &config.discover,
+        &config.permit,
+        &config.transfer,
+        &config.select,
+    ] {
+        if field.value().trim().is_empty() {
+            return Err(Error::new_spanned(
+                field,
+                "service_surface ownership points must be non-empty",
+            ));
+        }
+    }
+
+    if !matches_actor_owned_name(&strukt.ident.to_string())
+        && !strukt.ident.to_string().ends_with("Workflow")
+    {
+        return Err(Error::new_spanned(
+            &strukt.ident,
+            "service_surface is reserved for concrete service/workflow boundary types",
+        ));
+    }
+
+    Ok(())
+}
+
+fn service_family_tokens(values: &[LitStr]) -> Vec<proc_macro2::TokenStream> {
+    values
+        .iter()
+        .map(|family| match family.value().as_str() {
+            "Establish" => quote!(::aura_core::service::ServiceFamily::Establish),
+            "Move" => quote!(::aura_core::service::ServiceFamily::Move),
+            "Hold" => quote!(::aura_core::service::ServiceFamily::Hold),
+            _ => unreachable!("validated above"),
+        })
+        .collect()
+}
+
+fn service_object_category_tokens(values: &[LitStr]) -> Vec<proc_macro2::TokenStream> {
+    values
+        .iter()
+        .map(|category| match category.value().as_str() {
+            "authoritative_shared" => {
+                quote!(::aura_core::service::ServiceObjectCategory::AuthoritativeShared)
+            }
+            "transport_protocol" => {
+                quote!(::aura_core::service::ServiceObjectCategory::TransportProtocol)
+            }
+            "runtime_derived_local" => {
+                quote!(::aura_core::service::ServiceObjectCategory::RuntimeDerivedLocal)
+            }
+            "proof_accounting" => {
+                quote!(::aura_core::service::ServiceObjectCategory::ProofAccounting)
+            }
+            _ => unreachable!("validated above"),
+        })
+        .collect()
 }
 
 fn transform_authoritative_source(

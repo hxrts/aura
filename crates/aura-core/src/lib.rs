@@ -120,6 +120,8 @@ pub mod faults;
 pub mod prelude;
 /// Protocol types for version negotiation and capabilities
 pub mod protocol;
+/// Shared service-family vocabulary and canonical service/object anchor types.
+pub mod service;
 
 pub use crypto::hash;
 pub use domain::journal;
@@ -178,6 +180,12 @@ pub use ownership::{
 };
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,
+};
+pub use service::{
+    EstablishDescriptor, HeldObject, HoldDescriptor, LinkEndpoint, LinkProtocol, MoveDescriptor,
+    MoveEnvelope, PolicySurface, ProviderCandidate, ProviderEvidence, RelayHop, RetrievalCapability,
+    Route, SelectionState, ServiceDescriptor, ServiceDescriptorHeader, ServiceDescriptorKind,
+    ServiceFamily, ServiceLimits, ServiceObjectCategory, ServiceProfile, ServiceQualityHints,
 };
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{
