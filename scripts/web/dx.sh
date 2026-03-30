@@ -8,30 +8,23 @@ find_workspace_root() {
   local candidate=""
 
   if [[ -n "${AURA_WORKSPACE_ROOT:-}" && -d "${AURA_WORKSPACE_ROOT}" ]]; then
-    if [[ -f "${AURA_WORKSPACE_ROOT}/Cargo.lock" ]]; then
-      printf '%s\n' "${AURA_WORKSPACE_ROOT}"
-      return 0
-    fi
-  fi
-
-  if [[ -f "$script_repo_root/Cargo.lock" ]]; then
-    printf '%s\n' "$script_repo_root"
-    return 0
-  fi
-
-  if [[ -n "${AURA_WORKSPACE_ROOT:-}" && -d "${AURA_WORKSPACE_ROOT}" ]]; then
     printf '%s\n' "${AURA_WORKSPACE_ROOT}"
     return 0
   fi
 
-  if candidate="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)" && [[ -f "$candidate/Cargo.lock" ]]; then
+  if [[ -f "$script_repo_root/Cargo.toml" && -d "$script_repo_root/crates" ]]; then
+    printf '%s\n' "$script_repo_root"
+    return 0
+  fi
+
+  if candidate="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)" && [[ -f "$candidate/Cargo.toml" && -d "$candidate/crates" ]]; then
     printf '%s\n' "$candidate"
     return 0
   fi
 
   for candidate in "$script_dir" "$PWD"; do
     while [[ "$candidate" != "/" ]]; do
-      if [[ -f "$candidate/Cargo.lock" ]]; then
+      if [[ -f "$candidate/Cargo.toml" && -d "$candidate/crates" ]]; then
         printf '%s\n' "$candidate"
         return 0
       fi
@@ -43,40 +36,35 @@ find_workspace_root() {
 }
 
 repo_root="$(find_workspace_root || true)"
-lockfile="${repo_root:+$repo_root/Cargo.lock}"
+manifest_path="${repo_root:+$repo_root/crates/aura-web/Cargo.toml}"
 
-if [[ -z "$repo_root" || ! -f "$lockfile" ]]; then
-  echo "[dx-runner] ERROR: failed to locate workspace Cargo.lock" >&2
+if [[ -z "$repo_root" || ! -f "$manifest_path" ]]; then
+  echo "[dx-runner] ERROR: failed to locate workspace root or aura-web manifest" >&2
   echo "[dx-runner] cwd=$PWD" >&2
   echo "[dx-runner] script_dir=$script_dir" >&2
   echo "[dx-runner] script_repo_root=$script_repo_root" >&2
   echo "[dx-runner] AURA_WORKSPACE_ROOT=${AURA_WORKSPACE_ROOT:-<unset>}" >&2
-  if [[ -n "${AURA_WORKSPACE_ROOT:-}" ]]; then
-    echo "[dx-runner] AURA_WORKSPACE_ROOT/Cargo.lock=$(test -f "${AURA_WORKSPACE_ROOT}/Cargo.lock" && echo present || echo missing)" >&2
-  fi
-  echo "[dx-runner] script_repo_root/Cargo.lock=$(test -f "$script_repo_root/Cargo.lock" && echo present || echo missing)" >&2
-  echo "[dx-runner] last_candidate=${lockfile:-<none>}" >&2
+  echo "[dx-runner] manifest_path=${manifest_path:-<none>}" >&2
+  echo "[dx-runner] AURA_WORKSPACE_ROOT/Cargo.toml=$(test -n "${AURA_WORKSPACE_ROOT:-}" && test -f "${AURA_WORKSPACE_ROOT}/Cargo.toml" && echo present || echo missing)" >&2
+  echo "[dx-runner] script_repo_root/Cargo.toml=$(test -f "$script_repo_root/Cargo.toml" && echo present || echo missing)" >&2
   exit 1
 fi
 
-resolve_lock_version() {
+resolve_package_version() {
   local package_name="$1"
-  awk -v pkg="$package_name" '
-    $0 ~ "^name = \"" pkg "\"$" { in_pkg=1; next }
-    in_pkg && $0 ~ /^version = / {
-      gsub(/"/, "", $3);
-      print $3;
-      exit 0;
-    }
-    in_pkg && $0 ~ /^\[\[package\]\]$/ { in_pkg=0 }
-  ' "$lockfile"
+  cargo metadata --manifest-path "$manifest_path" --format-version 1 2>/dev/null |
+    jq -r --arg pkg "$package_name" '.packages[] | select(.name == $pkg) | .version' |
+    head -n 1
 }
 
-dioxus_version="$(resolve_lock_version dioxus)"
-wasm_bindgen_version="$(resolve_lock_version wasm-bindgen)"
+dioxus_version="$(resolve_package_version dioxus)"
+wasm_bindgen_version="$(resolve_package_version wasm-bindgen)"
 
 if [[ -z "$dioxus_version" || -z "$wasm_bindgen_version" ]]; then
-  echo "[dx-runner] ERROR: failed to resolve tool versions from Cargo.lock" >&2
+  echo "[dx-runner] ERROR: failed to resolve tool versions from cargo metadata" >&2
+  echo "[dx-runner] manifest_path=$manifest_path" >&2
+  echo "[dx-runner] dioxus_version=${dioxus_version:-<missing>}" >&2
+  echo "[dx-runner] wasm_bindgen_version=${wasm_bindgen_version:-<missing>}" >&2
   exit 1
 fi
 
