@@ -5,10 +5,11 @@
 use super::services::ceremony_runner::CeremonyRunner;
 use super::services::{
     AuthorityManager, AuthorityStatus, CeremonyTracker, ContextManager, FlowBudgetManager,
-    LanTransportListenerService, LanTransportService, MoveManager, ReactivePipelineService,
-    ReceiptManager, ReconfigurationManager, RendezvousManager, RuntimeMaintenanceService,
-    RuntimeService, RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth,
-    SocialManager, SyncServiceManager, ThresholdSigningService,
+    HoldManager, LanTransportListenerService, LanTransportService, MoveManager,
+    ReactivePipelineService, ReceiptManager, ReconfigurationManager, RendezvousManager,
+    RuntimeMaintenanceService, RuntimeService, RuntimeServiceContext, ServiceError,
+    ServiceErrorKind, ServiceHealth, SocialManager, SyncServiceManager,
+    ThresholdSigningService,
 };
 use super::{
     AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager, RuntimeDiagnosticSink,
@@ -186,6 +187,9 @@ pub struct RuntimeSystem {
     /// Move manager for bounded movement planning and delivery.
     move_manager: Option<MoveManager>,
 
+    /// Hold manager for shared custody and selector-based retrieval.
+    hold_manager: Option<HoldManager>,
+
     /// Social manager (optional, for social topology and relay selection)
     social_manager: Option<SocialManager>,
 
@@ -272,6 +276,7 @@ impl RuntimeSystem {
             sync_manager: None,
             rendezvous_manager: None,
             move_manager: None,
+            hold_manager: None,
             social_manager: None,
             ceremony_tracker,
             ceremony_runner,
@@ -333,6 +338,7 @@ impl RuntimeSystem {
             sync_manager: Some(sync_manager),
             rendezvous_manager: None,
             move_manager: None,
+            hold_manager: None,
             social_manager: None,
             ceremony_tracker,
             ceremony_runner,
@@ -394,6 +400,7 @@ impl RuntimeSystem {
             sync_manager: None,
             rendezvous_manager: Some(rendezvous_manager),
             move_manager: None,
+            hold_manager: None,
             social_manager: None,
             ceremony_tracker,
             ceremony_runner,
@@ -423,6 +430,7 @@ impl RuntimeSystem {
         sync_manager: Option<SyncServiceManager>,
         rendezvous_manager: Option<RendezvousManager>,
         move_manager: Option<MoveManager>,
+        hold_manager: Option<HoldManager>,
         rendezvous_handler: Option<RendezvousHandler>,
         lan_transport: Option<Arc<LanTransportService>>,
         social_manager: Option<SocialManager>,
@@ -462,6 +470,7 @@ impl RuntimeSystem {
             sync_manager,
             rendezvous_manager,
             move_manager,
+            hold_manager,
             social_manager,
             ceremony_tracker,
             ceremony_runner,
@@ -626,6 +635,9 @@ impl RuntimeSystem {
         }
         if let Some(move_manager) = &self.move_manager {
             services.push(move_manager);
+        }
+        if let Some(hold_manager) = &self.hold_manager {
+            services.push(hold_manager);
         }
         if let Some(sync_manager) = &self.sync_manager {
             services.push(sync_manager);
@@ -795,6 +807,16 @@ impl RuntimeSystem {
     /// Get the social manager (if enabled)
     pub fn social(&self) -> Option<&SocialManager> {
         self.social_manager.as_ref()
+    }
+
+    /// Get the hold service manager (if enabled).
+    pub fn hold(&self) -> Option<&HoldManager> {
+        self.hold_manager.as_ref()
+    }
+
+    /// Check if hold service is enabled.
+    pub fn has_hold(&self) -> bool {
+        self.hold_manager.is_some()
     }
 
     /// Check if social service is enabled

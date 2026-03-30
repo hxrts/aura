@@ -13,6 +13,7 @@ pub mod ceremony_tracker;
 mod config_profiles;
 pub mod context_manager;
 pub mod flow_budget_manager;
+pub mod hold_manager;
 pub mod invariant;
 pub mod invitation_manager;
 pub mod lan_discovery;
@@ -42,6 +43,12 @@ pub use authority_state::AuthorityStatus;
 pub use ceremony_tracker::CeremonyTracker;
 pub use context_manager::ContextManager;
 pub use flow_budget_manager::FlowBudgetManager;
+pub use hold_manager::{
+    AccountabilityWitness, AccountabilityWitnessKind, HoldBudgetSnapshot, HoldDepositOutcome,
+    HoldGcOutcome, HoldLocalIndexEntry, HoldManager, HoldManagerConfig, HoldProjection,
+    HoldRetrievalOutcome, HoldRetrievalStatus, HoldSelectionPlan, HoldSyncBatch,
+    QueuedAccountabilityReply, QueuedSyncRetrieval, VerifierRole, VerifiedServiceWitness,
+};
 pub(crate) use invitation_manager::InvitationManager;
 pub use lan_listener_service::LanTransportListenerService;
 pub use lan_transport::LanTransportService;

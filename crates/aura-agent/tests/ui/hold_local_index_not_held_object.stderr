@@ -1,0 +1,7 @@
+error[E0308]: mismatched types
+  --> tests/ui/hold_local_index_not_held_object.rs:13:29
+   |
+13 |     let _held: HeldObject = index;
+   |                ----------   ^^^^^ expected `HeldObject`, found `HoldLocalIndexEntry`
+   |                |
+   |                expected due to this

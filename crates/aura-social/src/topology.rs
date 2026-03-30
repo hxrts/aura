@@ -217,6 +217,14 @@ impl SocialTopology {
     {
         self.build_relay_candidates(destination, reachability)
             .into_iter()
+            .filter(|candidate| {
+                family != ServiceFamily::Hold
+                    || matches!(
+                        candidate.relationship,
+                        RelayRelationship::SameHome { .. }
+                            | RelayRelationship::NeighborhoodHop { .. }
+                    )
+            })
             .map(|candidate| ProviderCandidate {
                 authority_id: candidate.authority_id,
                 device_id: None,
@@ -526,6 +534,31 @@ mod tests {
             topology.build_provider_candidates(ServiceFamily::Move, &target, |_| true);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].family, ServiceFamily::Move);
+        assert_eq!(candidates[0].evidence, vec![ProviderEvidence::Neighborhood]);
+    }
+
+    #[test]
+    fn hold_provider_candidates_exclude_non_neighborhood_relationships() {
+        let local = AuthorityId::new_from_entropy([1u8; 32]);
+        let neighborhood_peer = AuthorityId::new_from_entropy([2u8; 32]);
+        let guardian_peer = AuthorityId::new_from_entropy([3u8; 32]);
+        let target = AuthorityId::new_from_entropy([4u8; 32]);
+        let home_id = HomeId::from_bytes([4u8; 32]);
+
+        let mut topology = SocialTopology::empty(local);
+        topology.add_peer(
+            neighborhood_peer,
+            RelayRelationship::SameHome {
+                home_id: *home_id.as_bytes(),
+            },
+        );
+        topology.add_peer(guardian_peer, RelayRelationship::Guardian);
+
+        let candidates =
+            topology.build_provider_candidates(ServiceFamily::Hold, &target, |_| true);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].authority_id, neighborhood_peer);
         assert_eq!(candidates[0].evidence, vec![ProviderEvidence::Neighborhood]);
     }
 

@@ -73,6 +73,7 @@ Contract alignment:
 |---------|----------|-------|
 | `src/ownership.rs` | `MoveOwned` + capability-gated vocabulary | `OperationContext`, `TerminalPublisher`, publication wrappers, owner tokens, handoff records, `actor_owned`/`move_owned`/`capability_gated` module layout. |
 | `src/time/timeout.rs` | `MoveOwned` | Typed timeout budgets, attempt budgets, retry/backoff policy. `OperationTimeoutBudget` is the workflow-facing wrapper. |
+| `src/service.rs` | `Pure` | Canonical family/object vocabulary including `Establish`, `Move`, shared `Hold` custody types, selector capabilities, and typed reply-block contracts. |
 | `src/effects/` | `Pure` | Effect traits and trait-level helper surfaces only. |
 | `src/domain/`, `src/types/`, `src/query.rs`, `src/messages/`, `src/tree/`, `src/crypto/` | `Pure` | Value-level domain/state/query/message/crypto contracts. |
 

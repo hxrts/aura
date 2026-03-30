@@ -66,7 +66,7 @@ Contract alignment:
 | sync-session identifiers, fence guards, and proposal/ceremony transitions | `MoveOwned` | Invalidate stale owners on handoff. |
 | `SyncService` and `MaintenanceService` local mutable state | `ActorOwned` | Service-local mutable state behind a single service-owned lock boundary. |
 | health, metrics, verification outputs, and status inspection | `Observed` | Downstream inspection surfaces. |
-| rendezvous adapter peer views | `Pure` | Derives `LinkEndpoint` and `ServiceDescriptor` views from runtime snapshots without turning descriptor compatibility data into routing policy. |
+| rendezvous adapter peer views | `Pure` | Derives `LinkEndpoint` and `ServiceDescriptor` views from runtime snapshots without turning descriptor compatibility data into routing policy. Includes sync-blended `Hold` retrieval batching over selector-based requests and bounded reply windows. |
 
 ### Capability-Gated Points
 

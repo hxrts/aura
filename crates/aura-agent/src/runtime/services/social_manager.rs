@@ -238,6 +238,10 @@ impl SocialManager {
             .await
             .build_provider_candidates(family, destination, reachability);
 
+        if family == ServiceFamily::Hold {
+            return neighborhood_candidates;
+        }
+
         let mut merged: BTreeMap<AuthorityId, ProviderCandidate> = neighborhood_candidates
             .into_iter()
             .map(|candidate| (candidate.authority_id, candidate))
@@ -472,6 +476,45 @@ mod tests {
             assert_eq!(candidates[0].evidence, vec![ProviderEvidence::Neighborhood]);
             assert!(candidates[0].link_endpoints.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn hold_provider_candidates_ignore_wot_overlays() {
+        let local = test_authority(1);
+        let neighborhood_peer = test_authority(2);
+        let introduced_peer = test_authority(3);
+        let target = test_authority(9);
+        let manager = SocialManager::with_defaults(local);
+
+        manager
+            .add_peer(
+                neighborhood_peer,
+                RelayRelationship::SameHome {
+                    home_id: *HomeId::from_bytes([4u8; 32]).as_bytes(),
+                },
+            )
+            .await;
+
+        let trust = vec![WebOfTrustEvidence {
+            authority_id: introduced_peer,
+            evidence: ProviderEvidence::IntroducedFof,
+            context_id: aura_core::ContextId::new_from_entropy([5u8; 32]),
+            introduced_by: Some(neighborhood_peer),
+            expires_at: Some(PhysicalTime {
+                ts_ms: 1000,
+                uncertainty: None,
+            }),
+            remaining_depth: 1,
+            max_fanout: 1,
+        }];
+
+        let candidates = manager
+            .build_provider_candidates(ServiceFamily::Hold, &target, |_| true, &trust)
+            .await;
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].authority_id, neighborhood_peer);
+        assert_eq!(candidates[0].evidence, vec![ProviderEvidence::Neighborhood]);
     }
 
     #[tokio::test]

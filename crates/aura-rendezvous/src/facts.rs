@@ -4,9 +4,9 @@
 //! These facts are stored in context journals and propagated via `aura-sync`.
 
 use aura_core::service::{
-    EstablishDescriptor, EstablishPath, LinkEndpoint, LinkProtocol, MoveDescriptor, MovePath,
-    ServiceDescriptor as AdvertisedServiceDescriptor, ServiceDescriptorHeader, ServiceDescriptorKind,
-    ServiceFamily, ServiceLimits, ServiceProfile,
+    EstablishDescriptor, EstablishPath, HoldDescriptor, LinkEndpoint, LinkProtocol,
+    MoveDescriptor, MovePath, ServiceDescriptor as AdvertisedServiceDescriptor,
+    ServiceDescriptorHeader, ServiceDescriptorKind, ServiceFamily, ServiceLimits, ServiceProfile,
 };
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_journal::extensibility::FactReducer;
@@ -237,6 +237,22 @@ impl RendezvousDescriptor {
                     route: None,
                 }),
             },
+            AdvertisedServiceDescriptor {
+                header: self.service_descriptor_header(ServiceFamily::Hold),
+                profile: ServiceProfile::DeferredDeliveryHold,
+                kind: ServiceDescriptorKind::Hold(HoldDescriptor {
+                    link_endpoints: self.advertised_link_endpoints(),
+                    selector_epoch: Some(0),
+                }),
+            },
+            AdvertisedServiceDescriptor {
+                header: self.service_descriptor_header(ServiceFamily::Hold),
+                profile: ServiceProfile::CacheReplicaHold,
+                kind: ServiceDescriptorKind::Hold(HoldDescriptor {
+                    link_endpoints: self.advertised_link_endpoints(),
+                    selector_epoch: Some(0),
+                }),
+            },
         ]
     }
 
@@ -263,7 +279,11 @@ impl RendezvousDescriptor {
                     max_hops: Some(3),
                     retention_ms: None,
                 },
-                ServiceFamily::Hold => ServiceLimits::default(),
+                ServiceFamily::Hold => ServiceLimits {
+                    max_payload_bytes: None,
+                    max_hops: None,
+                    retention_ms: Some(0),
+                },
             },
             quality_hints: None,
         }
@@ -537,8 +557,8 @@ impl LocalInterfaces {
 
 /// Legacy transport connectivity hint kept during the Phase 1 migration.
 ///
-/// Migration owner: `adaptive_privacy_phase1`
-/// Earliest removal phase: `Phase 2`
+/// Migration owner: `adaptive_privacy_phase4_transport_hint_quarantine`
+/// Earliest removal phase: `Phase 5`
 ///
 /// New code should prefer the split `LinkEndpoint` connectivity view plus
 /// family-specific `ServiceDescriptor` advertisements.
@@ -930,9 +950,18 @@ mod tests {
         assert_eq!(endpoints.len(), 2);
         assert_eq!(establish_paths.len(), 2);
         assert_eq!(move_paths.len(), 2);
-        assert_eq!(services.len(), 2);
+        assert_eq!(services.len(), 4);
         assert!(descriptor.supports_family(ServiceFamily::Establish));
         assert!(descriptor.supports_family(ServiceFamily::Move));
+        assert!(descriptor.supports_family(ServiceFamily::Hold));
+        assert!(services.iter().any(|descriptor| {
+            descriptor.profile == ServiceProfile::DeferredDeliveryHold
+                && matches!(descriptor.kind, ServiceDescriptorKind::Hold(_))
+        }));
+        assert!(services.iter().any(|descriptor| {
+            descriptor.profile == ServiceProfile::CacheReplicaHold
+                && matches!(descriptor.kind, ServiceDescriptorKind::Hold(_))
+        }));
     }
 
     #[test]

@@ -50,7 +50,7 @@ Rendezvous descriptors carry two kinds of information. One surface describes con
 
 Connectivity endpoints describe how a peer may be reached. Service advertisements describe what the peer is willing to provide. Runtime policy combines both surfaces with local permit state, health, and trust evidence. Descriptor publication itself does not commit the final route choice.
 
-The current implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data. That compatibility layer is temporary. New code should consume `LinkEndpoint`, `ServiceDescriptor`, `EstablishPath`, and `MovePath` views rather than treating transport hints as final routing policy.
+The current implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data. That compatibility layer is explicitly quarantined and slated for removal after the pre-onion `Hold` rollout is complete. New code should consume `LinkEndpoint`, `ServiceDescriptor`, `EstablishPath`, `MovePath`, and `HoldDescriptor` views rather than treating transport hints as final routing policy.
 
 ### 3.1 Holepunching and Upgrade Policy
 
@@ -255,7 +255,7 @@ The adapter is a pure view helper. It does not own or mutate the cache. The runt
 
 Rendezvous may consume socially rooted provider inputs, but it does not own social topology or trust evaluation. The `Neighborhood Plane` and `Web of Trust Plane` produce permit and candidate inputs. The runtime combines those inputs with descriptor views and local policy.
 
-This separation is required for privacy. Shared descriptor facts must not expose route classes such as "friend relay" or "neighborhood hold". The selected provider should observe only the generic service action. See [Social Architecture](115_social_architecture.md) for the plane split.
+This separation is required for privacy. Shared descriptor facts must not expose route classes such as "friend relay" or "neighborhood hold". The selected provider should observe only the generic service action. The current descriptor view therefore advertises generic `Hold` surfaces for `DeferredDeliveryHold` and `CacheReplicaHold`, while selector issuance, holder rotation, and retrieval policy remain runtime-local. See [Social Architecture](115_social_architecture.md) for the plane split.
 
 ## 7. Protocol Flow
 

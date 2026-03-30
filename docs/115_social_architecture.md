@@ -306,7 +306,7 @@ The `Neighborhood Plane` provides broad locality-scoped candidate pools:
 - locality-scoped storage and relay budgeting
 - governance and moderation state for homes and neighborhoods
 
-These outputs are permit and candidate inputs. They are not route commitments.
+These outputs are permit and candidate inputs. They are not route commitments. For `Hold`, the neighborhood scope is the whole admissible interface while the runtime chooses a bounded rotating subset of holders inside that scope and keeps retention treatment uniform across deposits.
 
 ### 12.2 Web of Trust Plane Responsibilities
 
@@ -331,6 +331,8 @@ The runtime fuses neighborhood candidates, web-of-trust evidence, descriptor vie
 | Final provider selection | `aura-agent` | runtime-local `Permit` view and route choice |
 
 This split prevents social-role labels from becoming wire-visible service classes.
+
+Neighborhood-only and WoT-assisted candidate production must therefore emit the same `Establish` and `Move` descriptor, path, and envelope shapes. The only allowed differences are trust-evidence provenance and runtime-local weighting or selection state. Shared schemas must not grow neighborhood-, friend-, or FoF-specific variants.
 
 ### 12.4 Relay Selection
 

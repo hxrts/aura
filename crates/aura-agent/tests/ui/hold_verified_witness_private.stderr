@@ -1,0 +1,8 @@
+error[E0451]: field `_sealed` of struct `VerifiedServiceWitness` is private
+  --> tests/ui/hold_verified_witness_private.rs:11:9
+   |
+ 5 |     let _ = VerifiedServiceWitness {
+   |             ---------------------- in this type
+...
+11 |         _sealed: (),
+   |         ^^^^^^^ private field

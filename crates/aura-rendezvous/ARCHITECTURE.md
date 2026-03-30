@@ -12,6 +12,7 @@ Peer discovery and channel establishment protocol including descriptor exchange,
 | Channel establishment and handshake protocol | Runtime descriptor cache (aura-agent) |
 | Flood propagation and replay protection | Network effect implementations (aura-effects) |
 | Path-object establishment inputs (`EstablishPath`) derived from descriptor views | Runtime move buffering or object transport ownership |
+| Generic `Hold` service advertisement over descriptor surfaces | Runtime selector issuance, holder rotation, or custody state |
 | LAN discovery | |
 
 ## Dependencies
@@ -33,6 +34,7 @@ Peer discovery and channel establishment protocol including descriptor exchange,
 - Descriptor facts must reduce under their matching `ContextId`.
 - Channel establishment requires valid, non-expired descriptors.
 - Establish flows consume explicit path objects rather than overloaded transport hints.
+- Descriptor views may advertise generic `Hold` service profiles, but they must not encode mailbox identity, trust-tier role fields, or runtime-local selector policy.
 - Flood packets use nonce-based replay protection.
 
 ### InvariantSecureChannelLifecycle

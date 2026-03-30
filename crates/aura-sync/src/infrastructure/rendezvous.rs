@@ -32,6 +32,7 @@
 //! let peers = adapter.discover_context_peers(&descriptors, context_id, 1000);
 //! ```
 
+use aura_core::service::{HoldRetrievalRequest, ServiceFamily};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{LinkEndpoint, ServiceDescriptor};
 use aura_rendezvous::RendezvousDescriptor;
@@ -45,6 +46,28 @@ use std::collections::HashMap;
 pub struct RendezvousAdapter {
     /// Local authority so self-descriptors can be filtered out of discovery.
     local_authority: AuthorityId,
+}
+
+/// Sync-blended retrieval request scheduled into an ordinary sync window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncBlendedRetrieval {
+    pub request: HoldRetrievalRequest,
+    pub deadline_ms: u64,
+}
+
+/// Sync-blended accountability reply scheduled into the same window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncBlendedReply {
+    pub scope: ContextId,
+    pub token: [u8; 32],
+    pub deadline_ms: u64,
+}
+
+/// Combined retrieval and accountability work for a single sync turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncBlendedHoldWindow {
+    pub retrievals: Vec<SyncBlendedRetrieval>,
+    pub replies: Vec<SyncBlendedReply>,
 }
 
 impl RendezvousAdapter {
@@ -87,6 +110,19 @@ impl RendezvousAdapter {
                 };
                 (d.authority_id, peer)
             })
+            .collect()
+    }
+
+    /// Discover peers in a context that advertise at least one hold-family surface.
+    pub fn discover_hold_peers(
+        &self,
+        descriptors: &[RendezvousDescriptor],
+        context_id: ContextId,
+        now_ms: u64,
+    ) -> HashMap<AuthorityId, DiscoveredPeer> {
+        self.discover_context_peers(descriptors, context_id, now_ms)
+            .into_iter()
+            .filter(|(_, peer)| peer.supports_hold())
             .collect()
     }
 
@@ -153,6 +189,33 @@ impl RendezvousAdapter {
             }
         }
     }
+
+    /// Batch selector retrievals and compatible replies into one sync-blended window.
+    pub fn plan_sync_blended_hold_window(
+        &self,
+        retrievals: &[SyncBlendedRetrieval],
+        replies: &[SyncBlendedReply],
+        now_ms: u64,
+        max_batch: usize,
+    ) -> SyncBlendedHoldWindow {
+        let mut retrievals = retrievals
+            .iter()
+            .filter(|entry| entry.deadline_ms >= now_ms)
+            .cloned()
+            .collect::<Vec<_>>();
+        retrievals.sort_by_key(|entry| entry.deadline_ms);
+        retrievals.truncate(max_batch);
+
+        let mut replies = replies
+            .iter()
+            .filter(|entry| entry.deadline_ms >= now_ms)
+            .cloned()
+            .collect::<Vec<_>>();
+        replies.sort_by_key(|entry| entry.deadline_ms);
+        replies.truncate(max_batch);
+
+        SyncBlendedHoldWindow { retrievals, replies }
+    }
 }
 
 /// A discovered peer with transport information
@@ -200,6 +263,13 @@ impl DiscoveredPeer {
         self.link_endpoints
             .iter()
             .all(|endpoint| endpoint.relay_authority.is_some())
+    }
+
+    /// Return whether the peer advertises any hold-family service surface.
+    pub fn supports_hold(&self) -> bool {
+        self.service_descriptors
+            .iter()
+            .any(|descriptor| descriptor.header.family == ServiceFamily::Hold)
     }
 }
 
@@ -415,5 +485,56 @@ mod tests {
 
         assert_eq!(descriptors.len(), 1);
         assert_eq!(descriptors[0].authority_id, bob);
+    }
+
+    #[test]
+    fn discover_hold_peers_filters_to_hold_surfaces() {
+        let alice = test_authority(1);
+        let bob = test_authority(2);
+        let context = test_context(100);
+        let descriptors = vec![test_descriptor(bob, context, 0, 10_000)];
+        let adapter = RendezvousAdapter::new(alice);
+
+        let peers = adapter.discover_hold_peers(&descriptors, context, 5000);
+
+        assert_eq!(peers.len(), 1);
+        assert!(peers.get(&bob).expect("bob").supports_hold());
+    }
+
+    #[test]
+    fn sync_blended_hold_window_orders_by_deadline_without_poll_loop() {
+        let adapter = RendezvousAdapter::new(test_authority(1));
+        let context = test_context(5);
+        let window = adapter.plan_sync_blended_hold_window(
+            &[
+                SyncBlendedRetrieval {
+                    request: HoldRetrievalRequest {
+                        profile: aura_core::ServiceProfile::DeferredDeliveryHold,
+                        scope: context,
+                        selector: [2; 32],
+                    },
+                    deadline_ms: 200,
+                },
+                SyncBlendedRetrieval {
+                    request: HoldRetrievalRequest {
+                        profile: aura_core::ServiceProfile::DeferredDeliveryHold,
+                        scope: context,
+                        selector: [1; 32],
+                    },
+                    deadline_ms: 150,
+                },
+            ],
+            &[SyncBlendedReply {
+                scope: context,
+                token: [9; 32],
+                deadline_ms: 175,
+            }],
+            100,
+            4,
+        );
+
+        assert_eq!(window.retrievals.len(), 2);
+        assert_eq!(window.retrievals[0].request.selector, [1; 32]);
+        assert_eq!(window.replies.len(), 1);
     }
 }

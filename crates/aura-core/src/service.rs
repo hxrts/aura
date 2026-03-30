@@ -6,6 +6,7 @@
 //! local selection inputs.
 
 use crate::domain::content::ContentId;
+use crate::types::epochs::Epoch;
 use crate::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -490,6 +491,188 @@ pub struct RetrievalCapability {
     pub valid_until: u64,
 }
 
+impl RetrievalCapability {
+    /// Return whether the retrieval capability is valid for the provided epoch and time.
+    pub fn is_valid_for(&self, now_ms: u64, epoch: Epoch) -> bool {
+        self.epoch == epoch.value() && now_ms < self.valid_until
+    }
+
+    /// Validate the retrieval capability under the provided epoch and time.
+    pub fn validate_for(&self, now_ms: u64, epoch: Epoch) -> Result<(), RetrievalCapabilityError> {
+        if self.epoch != epoch.value() {
+            return Err(RetrievalCapabilityError::EpochMismatch {
+                expected: epoch,
+                actual: Epoch::new(self.epoch),
+            });
+        }
+        if now_ms >= self.valid_until {
+            return Err(RetrievalCapabilityError::Expired {
+                valid_until: self.valid_until,
+                now_ms,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Requested and accepted retention metadata for a held object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HoldRetentionMetadata {
+    /// Requested retention duration in milliseconds.
+    pub requested_ms: u64,
+    /// Accepted bounded retention duration in milliseconds.
+    pub accepted_ms: u64,
+    /// Epoch this deposit is scoped to.
+    pub deposit_epoch: Epoch,
+    /// Deposit timestamp in milliseconds.
+    pub deposited_at_ms: u64,
+    /// Expiration timestamp in milliseconds.
+    pub expires_at_ms: u64,
+}
+
+impl HoldRetentionMetadata {
+    /// Return whether the metadata is expired at the provided time.
+    pub fn is_expired(&self, now_ms: u64) -> bool {
+        now_ms >= self.expires_at_ms
+    }
+}
+
+/// Metadata coupling a moved object to a later hold deposit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveToHoldHandoff {
+    /// Scope the handoff belongs to.
+    pub scope: ContextId,
+    /// Source move path that delivered the object into custody, when known.
+    #[serde(default)]
+    pub source_path: Option<MovePath>,
+    /// Timestamp when the handoff was initiated.
+    pub moved_at_ms: u64,
+}
+
+/// Typed request to deposit an opaque held object under the shared custody substrate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HoldDepositRequest {
+    /// Named hold profile layered over the shared substrate.
+    pub profile: ServiceProfile,
+    /// Opaque held object to retain.
+    pub held_object: HeldObject,
+    /// Requested retention duration in milliseconds.
+    pub requested_retention_ms: u64,
+    /// Epoch fence for this deposit.
+    pub deposit_epoch: Epoch,
+    /// Optional movement handoff metadata when the object arrived via `Move`.
+    #[serde(default)]
+    pub handoff: Option<MoveToHoldHandoff>,
+}
+
+impl HoldDepositRequest {
+    /// Validate the request uses a hold profile rather than a non-hold profile.
+    pub fn validate_profile(&self) -> Result<(), HoldRequestError> {
+        if self.profile.is_hold_profile() {
+            Ok(())
+        } else {
+            Err(HoldRequestError::InvalidProfile {
+                profile: self.profile.clone(),
+            })
+        }
+    }
+}
+
+/// Typed selector-based retrieval request over the shared hold substrate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HoldRetrievalRequest {
+    /// Named hold profile layered over the shared substrate.
+    pub profile: ServiceProfile,
+    /// Scope the retrieval is bound to.
+    pub scope: ContextId,
+    /// Opaque selector token derived from one or more retrieval capabilities.
+    pub selector: [u8; 32],
+}
+
+impl HoldRetrievalRequest {
+    /// Validate the request uses a hold profile and does not encode mailbox identity.
+    pub fn validate_profile(&self) -> Result<(), HoldRequestError> {
+        if self.profile.is_hold_profile() {
+            Ok(())
+        } else {
+            Err(HoldRequestError::InvalidProfile {
+                profile: self.profile.clone(),
+            })
+        }
+    }
+}
+
+/// Common anonymous reply-block envelope for bounded accountability callbacks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountabilityReplyBlock {
+    /// Scope the reply block is bound to.
+    pub scope: ContextId,
+    /// Opaque single-use reply token.
+    pub token: [u8; 32],
+    /// Opaque command binding preventing replay across commands.
+    pub command_scope: [u8; 32],
+    /// Reply-block expiry timestamp.
+    pub valid_until: u64,
+}
+
+impl AccountabilityReplyBlock {
+    /// Validate the reply block against the current time.
+    pub fn validate_at(&self, now_ms: u64) -> Result<(), ReplyBlockError> {
+        if now_ms >= self.valid_until {
+            return Err(ReplyBlockError::Expired {
+                valid_until: self.valid_until,
+                now_ms,
+            });
+        }
+        Ok(())
+    }
+}
+
+macro_rules! define_reply_block {
+    ($name:ident) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+        pub struct $name {
+            /// Anonymous reply-block payload.
+            pub inner: AccountabilityReplyBlock,
+        }
+
+        impl $name {
+            /// Validate the reply block against the current time.
+            pub fn validate_at(&self, now_ms: u64) -> Result<(), ReplyBlockError> {
+                self.inner.validate_at(now_ms)
+            }
+        }
+    };
+}
+
+define_reply_block!(MoveReceiptReplyBlock);
+define_reply_block!(HoldDepositReplyBlock);
+define_reply_block!(HoldRetrievalReplyBlock);
+define_reply_block!(HoldAuditReplyBlock);
+
+/// Shared hold request validation errors.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum HoldRequestError {
+    #[error("invalid hold profile for shared hold request: {profile:?}")]
+    InvalidProfile { profile: ServiceProfile },
+}
+
+/// Retrieval capability validation errors.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RetrievalCapabilityError {
+    #[error("retrieval capability expired at {valid_until}, now {now_ms}")]
+    Expired { valid_until: u64, now_ms: u64 },
+    #[error("retrieval capability epoch mismatch: expected {expected}, got {actual}")]
+    EpochMismatch { expected: Epoch, actual: Epoch },
+}
+
+/// Reply-block validation errors.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ReplyBlockError {
+    #[error("reply block expired at {valid_until}, now {now_ms}")]
+    Expired { valid_until: u64, now_ms: u64 },
+}
+
 /// Provenance for a provider candidate without baking in a canonical policy tier.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderEvidence {
@@ -534,6 +717,16 @@ pub struct SelectionState {
     /// Remaining bounded residency budget, when tracked.
     #[serde(default)]
     pub bounded_residency_remaining: Option<u32>,
+}
+
+impl ServiceProfile {
+    /// Return whether this profile is layered over the shared `Hold` substrate.
+    pub fn is_hold_profile(&self) -> bool {
+        matches!(
+            self,
+            Self::DeferredDeliveryHold | Self::CacheReplicaHold
+        )
+    }
 }
 
 #[cfg(test)]
@@ -717,5 +910,94 @@ mod tests {
         assert_eq!(move_paths.len(), 2);
         assert!(move_paths.iter().any(MovePath::is_direct));
         assert!(move_paths.iter().any(|path| !path.is_direct()));
+    }
+
+    #[test]
+    fn hold_requests_require_hold_profiles() {
+        let deposit = HoldDepositRequest {
+            profile: ServiceProfile::DeferredDeliveryHold,
+            held_object: HeldObject {
+                content_id: ContentId::from_bytes(b"held-object"),
+                scope: context(2),
+                retention_until: None,
+                ciphertext: vec![1, 2, 3],
+            },
+            requested_retention_ms: 500,
+            deposit_epoch: Epoch::new(4),
+            handoff: Some(MoveToHoldHandoff {
+                scope: context(2),
+                source_path: None,
+                moved_at_ms: 10,
+            }),
+        };
+        let retrieval = HoldRetrievalRequest {
+            profile: ServiceProfile::CacheReplicaHold,
+            scope: context(2),
+            selector: [9; 32],
+        };
+
+        assert!(deposit.validate_profile().is_ok());
+        assert!(retrieval.validate_profile().is_ok());
+        assert!(ServiceProfile::DirectBootstrap
+            .is_hold_profile()
+            .eq(&false));
+        assert_eq!(
+            HoldRetrievalRequest {
+                profile: ServiceProfile::RelayTransport,
+                ..retrieval
+            }
+            .validate_profile()
+            .unwrap_err(),
+            HoldRequestError::InvalidProfile {
+                profile: ServiceProfile::RelayTransport
+            }
+        );
+    }
+
+    #[test]
+    fn retrieval_capability_validation_is_epoch_scoped() {
+        let capability = RetrievalCapability {
+            scope: context(3),
+            selector: [3; 32],
+            epoch: 5,
+            valid_until: 200,
+        };
+
+        assert!(capability.validate_for(150, Epoch::new(5)).is_ok());
+        assert_eq!(
+            capability.validate_for(250, Epoch::new(5)).unwrap_err(),
+            RetrievalCapabilityError::Expired {
+                valid_until: 200,
+                now_ms: 250
+            }
+        );
+        assert_eq!(
+            capability.validate_for(150, Epoch::new(6)).unwrap_err(),
+            RetrievalCapabilityError::EpochMismatch {
+                expected: Epoch::new(6),
+                actual: Epoch::new(5)
+            }
+        );
+    }
+
+    #[test]
+    fn reply_blocks_expire_cleanly() {
+        let reply_block = HoldRetrievalReplyBlock {
+            inner: AccountabilityReplyBlock {
+                scope: context(7),
+                token: [4; 32],
+                command_scope: [5; 32],
+                valid_until: 100,
+            },
+        };
+
+        assert!(reply_block.validate_at(99).is_ok());
+        assert_eq!(
+            reply_block.validate_at(100).unwrap_err(),
+            ReplyBlockError::Expired {
+                valid_until: 100,
+                now_ms: 100
+            }
+        );
     }
 }

@@ -62,8 +62,8 @@ pub struct RendezvousManagerConfig {
 
     /// Default legacy `TransportHint` compatibility input for this node.
     ///
-    /// Migration owner: `adaptive_privacy_phase1`
-    /// Earliest removal phase: `Phase 2`
+    /// Migration owner: `adaptive_privacy_phase4_transport_hint_quarantine`
+    /// Earliest removal phase: `Phase 5`
     pub default_transport_hints: Vec<TransportHint>,
 
     /// LAN discovery configuration

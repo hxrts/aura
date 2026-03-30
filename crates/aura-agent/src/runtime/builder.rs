@@ -251,6 +251,14 @@ impl EffectSystemBuilder {
                     Arc::new(super::services::ServiceRegistry::new())
                 }),
         ));
+        let hold_manager = Some(super::services::HoldManager::new(
+            authority_id,
+            super::services::HoldManagerConfig::default(),
+            rendezvous_manager
+                .as_ref()
+                .map(|manager| manager.registry())
+                .unwrap_or_else(|| Arc::new(super::services::ServiceRegistry::new())),
+        ));
 
         // Create optional LAN transport service (used for LAN advertising + future TCP ingress)
         let lan_transport: Option<Arc<super::services::LanTransportService>> = {
@@ -341,6 +349,7 @@ impl EffectSystemBuilder {
             sync_manager,
             rendezvous_manager,
             move_manager,
+            hold_manager,
             rendezvous_handler,
             lan_transport,
             social_manager,
