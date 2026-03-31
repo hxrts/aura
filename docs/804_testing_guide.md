@@ -140,6 +140,8 @@ The canonical shared-flow coverage anchors for the current parity-critical user 
 - `scenario12-mixed-device-enrollment-removal-e2e.toml` for device add and remove
 - `shared-notifications-and-authority.toml` and `shared-settings-parity.toml` for the remaining shared settings, authority, and navigation flows
 
+The notifications shared-flow anchor remains navigation-only. Parity coverage for notifications navigation requires the TUI and web shells to expose the same semantic screen transition and detail-view contract, but notification empty-state copy is informational only and must not introduce parity-critical invitation or recovery actions outside the canonical shared workflows.
+
 ### Shared Semantic Ownership Inventory
 
 Use this as the authoritative ownership map for the shared semantic stack. If code does not match this table, treat it as ownership cleanup debt rather than as an acceptable alternate pattern.

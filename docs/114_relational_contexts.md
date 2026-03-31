@@ -60,7 +60,7 @@ Neighborhood governance and home-membership state are recorded in neighborhood a
 
 ### WebOfTrustContext
 
-Direct friendship is modeled as a bilateral relational context between authorities. `Contact` remains unilateral reachability or identification state. `Friend` requires explicit bilateral acceptance. Friendship is not represented as a new authority object.
+Direct friendship is modeled as a bilateral relational context between authorities. Contact remains unilateral reachability or identification state. Friendship requires explicit bilateral acceptance. Friendship is not represented as a new authority object.
 
 The context stores lifecycle facts such as proposal, acceptance, and revocation. It may also store bounded trust-introduction artifacts. Those artifacts carry expiry, remaining depth, and fan-out limits. Runtime policy may use the resulting evidence as permit input, but the shared facts do not hard-code runtime policy tiers.
 

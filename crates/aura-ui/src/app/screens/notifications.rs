@@ -39,7 +39,7 @@ pub(super) fn NotificationsScreen(
                         class: Some("h-full border-0 bg-background".to_string()),
                         EmptyHeader {
                             EmptyTitle { "No notifications" }
-                            EmptyDescription { "Runtime events will appear here." }
+                            EmptyDescription { "Activity from the peer network will appear here." }
                         }
                     }
                 } else {
@@ -446,15 +446,7 @@ pub(super) fn NotificationsScreen(
                         class: Some("h-full border-0 bg-background".to_string()),
                         EmptyHeader {
                             EmptyTitle { "No notification selected" }
-                            EmptyDescription { "Select an item from the list to inspect the latest invitation or recovery activity." }
-                        }
-                        UiButton {
-                            label: "Import Invitation".to_string(),
-                            variant: ButtonVariant::Primary,
-                            onclick: move |_| {
-                                controller.send_action_keys("a");
-                                render_tick.set(render_tick() + 1);
-                            }
+                            EmptyDescription { "Select an item from the list to view details." }
                         }
                     }
                 }

@@ -255,7 +255,7 @@ The adapter is a pure view helper. It does not own or mutate the cache. The runt
 
 Rendezvous may consume socially rooted provider inputs, but it does not own social topology or trust evaluation. The `Neighborhood Plane` and `Web of Trust Plane` produce permit and candidate inputs. The runtime combines those inputs with descriptor views and local policy.
 
-This separation is required for privacy. Shared descriptor facts must not expose route classes such as "friend relay" or "neighborhood hold". The selected provider should observe only the generic service action. The current descriptor view therefore advertises generic `Hold` surfaces for `DeferredDeliveryHold` and `CacheReplicaHold`, while selector issuance, holder rotation, and retrieval policy remain runtime-local. See [Social Architecture](115_social_architecture.md) for the plane split.
+This separation is required for privacy. Shared descriptor facts must not expose route classes such as "friend relay" or "neighborhood hold". The selected provider should observe only the generic service action. The current descriptor view therefore advertises generic `Hold` surfaces for deferred-delivery and cache-replica retention, while selector issuance, holder rotation, and retrieval policy remain runtime-local. See [Social Architecture](115_social_architecture.md) for the plane split.
 
 ## 7. Protocol Flow
 

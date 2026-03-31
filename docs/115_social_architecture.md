@@ -312,7 +312,7 @@ These outputs are permit and candidate inputs. They are not route commitments. F
 
 The `Web of Trust Plane` provides trust evidence:
 
-- bilateral `Friend` state as relational-context facts
+- bilateral friendship state as relational-context facts
 - bounded introduction evidence for introduced candidates
 - permit input for `Establish` and `Move`
 - bootstrap and accountability weight for trusted providers
@@ -328,7 +328,7 @@ The runtime fuses neighborhood candidates, web-of-trust evidence, descriptor vie
 | Neighborhood facts and locality classification | `aura-social` | neighborhood-scoped permit and candidate production |
 | Friend lifecycle and introduction evidence | `aura-relational` | trust evidence provenance |
 | Descriptor snapshots | `aura-agent` runtime cache | connectivity and service advertisements |
-| Final provider selection | `aura-agent` | runtime-local `Permit` view and route choice |
+| Final provider selection | `aura-agent` | runtime-local permit view and route choice |
 
 This split prevents social-role labels from becoming wire-visible service classes.
 

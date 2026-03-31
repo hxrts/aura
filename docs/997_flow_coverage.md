@@ -86,6 +86,14 @@ The two TUI-only conformance scenarios are retained as frontend-conformance cove
 Current parity-critical source changes touched the following shared-flow areas
 and continue to map to the same canonical coverage anchors:
 
+- Notifications navigation remains anchored by
+  `shared-notifications-and-authority.toml`, with
+  `semantic-observation-browser-smoke.toml` and
+  `semantic-observation-tui-smoke.toml` as secondary observation coverage.
+  The current notifications-screen change is limited to neutral empty-state
+  copy and detail text, and the coverage expectation remains that
+  notifications navigation exercises shared semantic navigation only rather than
+  frontend-specific invitation or recovery actions.
 - Neighborhood navigation stays anchored by
   `real-runtime-mixed-startup-smoke.toml`
 - Chat/contact navigation, the contact-to-friend lifecycle, invitation, home
