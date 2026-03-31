@@ -74,7 +74,7 @@ Files implementing Quint-Rust correspondence and model-based testing.
 - `evaluator.rs` - `QuintEvaluator` subprocess wrapper for Quint CLI
 - `handler.rs` - Effect handler integration
 
-#### Lean-Quint Bridge (`aura-quint`)
+#### Telltale Bridge (`aura-quint`)
 
 Cross-validation modules for Lean↔Quint correspondence:
 

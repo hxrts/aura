@@ -1,4 +1,4 @@
-//! Telltale VM-backed choreography engine for Aura runtime integration.
+//! Telltale protocol-machine choreography engine for Aura runtime integration.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -24,8 +24,7 @@ use telltale_machine::runtime::loader::CodeImage as ProtocolMachineCodeImage;
 use telltale_machine::{
     canonical_effect_trace, enforce_protocol_machine_runtime_gates, normalize_trace, obs_session,
     EffectTraceEntry, ObsEvent, ProtocolMachine, ProtocolMachineConfig, ProtocolMachineError,
-    RunStatus, RuntimeContracts, RuntimeGateResult, SessionId, StepResult,
-    ThreadedProtocolMachine,
+    RunStatus, RuntimeContracts, RuntimeGateResult, SessionId, StepResult, ThreadedProtocolMachine,
 };
 use telltale_vm::envelope_diff::EnvelopeDiffArtifactV1;
 use telltale_vm::vm::VMConfig;
@@ -34,12 +33,11 @@ use tracing::warn;
 use super::vm_effect_handler::AuraVmEffectHandler;
 use super::vm_hardening::{
     build_vm_config, configured_guard_capacity, policy_requires_envelope_artifact,
-    required_runtime_capabilities_for_policy,
-    scheduler_control_input_for_protocol_machine_image, validate_determinism_profile,
-    validate_envelope_artifact_for_policy, validate_protocol_execution_policy,
-    validate_scheduler_execution_policy, vm_config_for_profile, AuraVmHardeningProfile,
-    AuraVmParityProfile, AuraVmProtocolExecutionPolicy, AuraVmRuntimeMode, AuraVmRuntimeSelector,
-    AuraVmSchedulerSignalsProvider,
+    required_runtime_capabilities_for_policy, scheduler_control_input_for_protocol_machine_image,
+    validate_determinism_profile, validate_envelope_artifact_for_policy,
+    validate_protocol_execution_policy, validate_scheduler_execution_policy, vm_config_for_profile,
+    AuraVmHardeningProfile, AuraVmParityProfile, AuraVmProtocolExecutionPolicy, AuraVmRuntimeMode,
+    AuraVmRuntimeSelector, AuraVmSchedulerSignalsProvider,
 };
 
 /// Errors raised by [`AuraChoreoEngine`].
@@ -131,9 +129,10 @@ where
     T: Serialize + ?Sized,
     U: DeserializeOwned,
 {
-    let payload = serde_json::to_value(value).map_err(|error| AuraChoreoEngineError::Interpreter {
-        message: format!("{context} serialization failed: {error}"),
-    })?;
+    let payload =
+        serde_json::to_value(value).map_err(|error| AuraChoreoEngineError::Interpreter {
+            message: format!("{context} serialization failed: {error}"),
+        })?;
     serde_json::from_value(payload).map_err(|error| AuraChoreoEngineError::Interpreter {
         message: format!("{context} deserialization failed: {error}"),
     })
@@ -223,12 +222,12 @@ impl AuraVmBackend {
                 Self::Cooperative(Box::new(ProtocolMachine::new(config.clone())))
             }
             AuraVmRuntimeMode::ThreadedReplayDeterministic
-            | AuraVmRuntimeMode::ThreadedEnvelopeBounded => Self::Threaded(Box::new(
-                ThreadedProtocolMachine::with_workers(
+            | AuraVmRuntimeMode::ThreadedEnvelopeBounded => {
+                Self::Threaded(Box::new(ThreadedProtocolMachine::with_workers(
                     config.clone(),
                     selector.threaded_workers.max(1),
-                ),
-            )),
+                )))
+            }
         }
     }
 
@@ -530,7 +529,7 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
         &mut self,
         image: &ProtocolMachineCodeImage,
     ) -> Result<SessionId, AuraChoreoEngineError> {
-        let sid = self.backend.load_choreography(&image)?;
+        let sid = self.backend.load_choreography(image)?;
         self.active_sessions.insert(sid);
         self.session_protocol_classes
             .entry(sid)
@@ -1208,12 +1207,13 @@ mod tests {
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
         let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
-        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
-            &runtime_image,
-            policy.protocol_class,
-            super::super::vm_hardening::configured_guard_capacity(&config),
-            super::super::vm_hardening::AuraVmSchedulerSignals::default(),
-        );
+        let scheduler_input =
+            super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
+                &runtime_image,
+                policy.protocol_class,
+                super::super::vm_hardening::configured_guard_capacity(&config),
+                super::super::vm_hardening::AuraVmSchedulerSignals::default(),
+            );
         let scheduler_policy =
             super::super::vm_hardening::scheduler_policy_for_input(scheduler_input);
         super::super::vm_hardening::apply_scheduler_execution_policy(
@@ -1229,11 +1229,7 @@ mod tests {
         .expect("engine");
 
         let sid = engine
-            .open_protocol_machine_session_for_policy_admitted(
-                &runtime_image,
-                policy,
-                &[],
-            )
+            .open_protocol_machine_session_for_policy_admitted(&runtime_image, policy, &[])
             .await
             .expect("admission succeeds");
 
@@ -1277,12 +1273,13 @@ mod tests {
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
         let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
-        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
-            &runtime_image,
-            policy.protocol_class,
-            super::super::vm_hardening::configured_guard_capacity(&config),
-            super::super::vm_hardening::AuraVmSchedulerSignals::default(),
-        );
+        let scheduler_input =
+            super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
+                &runtime_image,
+                policy.protocol_class,
+                super::super::vm_hardening::configured_guard_capacity(&config),
+                super::super::vm_hardening::AuraVmSchedulerSignals::default(),
+            );
         let scheduler_policy =
             super::super::vm_hardening::scheduler_policy_for_input(scheduler_input);
         super::super::vm_hardening::apply_scheduler_execution_policy(
@@ -1331,12 +1328,13 @@ mod tests {
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
         let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
-        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
-            &runtime_image,
-            policy.protocol_class,
-            super::super::vm_hardening::configured_guard_capacity(&config),
-            super::super::vm_hardening::AuraVmSchedulerSignals::default(),
-        );
+        let scheduler_input =
+            super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
+                &runtime_image,
+                policy.protocol_class,
+                super::super::vm_hardening::configured_guard_capacity(&config),
+                super::super::vm_hardening::AuraVmSchedulerSignals::default(),
+            );
         let scheduler_policy =
             super::super::vm_hardening::scheduler_policy_for_input(scheduler_input);
         super::super::vm_hardening::apply_scheduler_execution_policy(

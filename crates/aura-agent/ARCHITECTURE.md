@@ -85,18 +85,18 @@ External events reach session state only through typed ingress and the current o
 
 Enforcement locus:
 - `SessionHandle` provides the only ingress path.
-- Session actors consume ingress and drive VM work.
+- Session actors consume ingress and drive protocol-machine work.
 
 Failure mode:
 - Direct session mutation from arbitrary tasks.
-- VM/session state diverges from canonical execution.
+- Protocol-machine/session state diverges from canonical execution.
 
 Verification hooks:
 - `just ci-async-session-ownership`
 - `just ci-choreo-parity`
 
 Contract alignment:
-- [Effect System](../../docs/103_effect_system.md) defines session-local VM bridge.
+- [Effect System](../../docs/103_effect_system.md) defines the session-local protocol-machine bridge.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines canonical execution.
 - Session ownership is explicit and singular; delegation is modeled as a move, not as ambient access through a service actor.
 
@@ -146,7 +146,7 @@ Runtime telltale integration consumes bridge artifacts but does not redefine bri
 
 Enforcement locus:
 - `src/runtime/choreo_engine.rs` and `src/runtime/choreography_adapter.rs` enforce runtime capability admission.
-- `tests/telltale_vm_parity.rs` and `tests/telltale_vm_scenario_contracts.rs` run runtime parity and contract lanes.
+- `tests/telltale_vm_parity.rs` and `tests/telltale_vm_scenario_contracts.rs` run runtime parity and contract lanes for the admitted protocol-machine path.
 
 Failure mode:
 - Runtime layer duplicates schema translation code and drifts from `aura-quint`.
@@ -167,7 +167,7 @@ Certain conditions are fatal runtime invariant violations:
 - Ambiguous active session ownership.
 - Delegated endpoint still usable by old owner after commit.
 - Session-bound effect executed by non-owner.
-- VM/session mutation from outside canonical ingress.
+- Protocol-machine/session mutation from outside canonical ingress.
 - Runtime proceeding in a concurrency mode that has not been admitted.
 - Teardown that leaves owned tasks mutating torn-down resources.
 - Impossible typed state combinations.
@@ -239,7 +239,7 @@ The current owner may be hosted by an actor, but ownership itself remains a sing
 Three ownership classes for runtime effect paths:
 
 - `service-owned`: lifecycle, maintenance, discovery, shutdown, reactive scheduling.
-- `session-owned`: VM/session mutation, blocked-receive injection, owner-routed round advancement.
+- `session-owned`: protocol-machine/session mutation, blocked-receive injection, owner-routed round advancement.
 - `capability-gated trust-boundary APIs`: commands crossing subsystem or authority boundaries requiring capability validation.
 
 Service-owned effects never mutate session state directly. Session-owned effects require both current owner record and current owner capability. Capability-gated trust-boundary APIs fail closed on stale owner, stale capability, or wrong-boundary routing.
@@ -326,19 +326,19 @@ Runtime bridge lookup follows the same strong-ref rule:
   sync or ceremony-processing errors; it may not suppress post-initiation
   failures and still report channel setup success
 
-## Canonical Host/VM Boundary
+## Canonical Host/Protocol-Machine Boundary
 
 `aura-agent` aligns with Telltale's canonical execution model. The only legal path from external async input to session mutation:
 
 1. External event received by host runtime.
 2. Host runtime converts it to typed ingress.
 3. Ingress routed to the current authoritative owner.
-4. Owner drives VM/session work at the sanctioned boundary.
+4. Owner drives protocol-machine/session work at the sanctioned boundary.
 
 Enforcement notes:
 
-- Raw VM admission helpers stay inside the runtime boundary; higher layers use owned ingress/session wrappers.
-- VM fragment ownership mutation stays inside runtime-owned surfaces.
+- Raw protocol-machine admission helpers stay inside the runtime boundary; higher layers use owned ingress/session wrappers.
+- Protocol fragment ownership mutation stays inside runtime-owned surfaces.
 - Link/delegate orchestration uses `ReconfigurationManager`; `ReconfigurationController` remains an internal runtime primitive.
 
 See [Runtime](../../docs/104_runtime.md) §Link and Delegate Boundaries for the full link/delegate boundary contract, delegation bundle composition, and theorem-pack alignment rules.
@@ -456,11 +456,11 @@ cargo test -p aura-agent --test compile_fail   # compile-fail boundary tests
 |---------------------|-----------|--------------|--------|
 | Runtime missing required effect handler | InvariantRuntimeCompositionBoundary | `tests/ui/missing_*.rs` (6 compile-fail) | Covered |
 | Private runtime internals accessible | InvariantCanonicalIngress | `tests/ui/*_private.rs` (4 compile-fail) | Covered |
-| VM fragment registry leaked | InvariantSessionOwnership | `tests/ui/vm_fragment_registry_private.rs` | Covered |
+| Protocol fragment registry leaked | InvariantSessionOwnership | `tests/ui/vm_fragment_registry_private.rs` | Covered |
 | Service actor handle leaked | InvariantStructuredConcurrency | `tests/ui/service_actor_handle_private.rs` | Covered |
-| VM concurrent contract violated | InvariantStructuredConcurrency | `tests/telltale_vm_concurrent_contracts.rs` | Covered |
-| VM parity diverges across profiles | InvariantBridgeOwnershipAgent | `tests/telltale_vm_parity.rs` | Covered |
-| VM scenario contract fails | InvariantBridgeOwnershipAgent | `tests/telltale_vm_scenario_contracts.rs` | Covered |
+| Protocol-machine concurrent contract violated | InvariantStructuredConcurrency | `tests/telltale_vm_concurrent_contracts.rs` | Covered |
+| Protocol-machine parity diverges across profiles | InvariantBridgeOwnershipAgent | `tests/telltale_vm_parity.rs` | Covered |
+| Protocol-machine scenario contract fails | InvariantBridgeOwnershipAgent | `tests/telltale_vm_scenario_contracts.rs` | Covered |
 | Production manifest fails admission | InvariantRuntimeCompositionBoundary | `tests/production_manifest_admission.rs` | Covered |
 | FRP scheduler glitches | — | `tests/frp_glitch_freedom_test.rs` | Covered |
 | Journal integration roundtrip | — | `tests/journal_integration_test.rs` | Covered |

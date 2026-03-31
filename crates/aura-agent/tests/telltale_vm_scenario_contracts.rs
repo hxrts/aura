@@ -1,4 +1,4 @@
-//! CI scenario-contract gate for telltale VM execution profiles.
+//! CI scenario-contract gate for Telltale protocol-machine execution profiles.
 #![cfg(feature = "choreo-backend-telltale-vm")]
 #![allow(clippy::expect_used, clippy::disallowed_methods)]
 
@@ -10,12 +10,11 @@ use aura_agent::{
     build_vm_config, AuraChoreoEngine, AuraVmEffectHandler, AuraVmHardeningProfile,
     AuraVmParityProfile,
 };
+use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
-use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
 use telltale_machine::{
-    runtime::loader::CodeImage as ProtocolMachineCodeImage,
-    RunStatus as ProtocolMachineRunStatus,
+    runtime::loader::CodeImage as ProtocolMachineCodeImage, RunStatus as ProtocolMachineRunStatus,
     TopologyPerturbation as ProtocolMachineTopologyPerturbation,
 };
 use telltale_vm::coroutine::Value;
@@ -164,7 +163,10 @@ fn invitation_exchange_global_from_source() -> GlobalType {
     .expect("transcode current global type to VM-aligned global type")
 }
 
-fn protocol_machine_image(global: &GlobalType, locals: &BTreeMap<String, LocalTypeR>) -> ProtocolMachineCodeImage {
+fn protocol_machine_image(
+    global: &GlobalType,
+    locals: &BTreeMap<String, LocalTypeR>,
+) -> ProtocolMachineCodeImage {
     let protocol_machine_global: telltale_types_v9::GlobalType =
         serde_json::from_value(serde_json::to_value(global).expect("serialize global type"))
             .expect("decode protocol-machine global type");

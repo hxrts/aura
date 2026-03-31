@@ -32,7 +32,7 @@ impl AuraEffectTraceEncoding {
     }
 }
 
-/// Capture granularity mapped to Telltale VM capture modes.
+/// Capture granularity mapped to Telltale protocol-machine capture modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuraEffectTraceGranularity {
     /// Capture all effect kinds.

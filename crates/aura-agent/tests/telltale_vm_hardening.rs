@@ -7,18 +7,18 @@ use std::sync::Arc;
 
 use aura_agent::{
     apply_protocol_execution_policy, apply_scheduler_execution_policy,
-    aura_output_predicate_allow_list, build_vm_config, configured_guard_capacity, policy_for_protocol,
-    scheduler_control_input_for_protocol_machine_image, scheduler_policy_for_input, AuraChoreoEngine,
-    AuraChoreoEngineError, AuraVmEffectHandler, AuraVmHardeningProfile, AuraVmParityProfile,
-    AuraVmRuntimeSelector, AuraVmSchedulerSignals, AURA_VM_SCHED_PRIORITY_AGING,
-    AURA_VM_SCHED_PROGRESS_AWARE,
+    aura_output_predicate_allow_list, build_vm_config, configured_guard_capacity,
+    policy_for_protocol, scheduler_control_input_for_protocol_machine_image,
+    scheduler_policy_for_input, AuraChoreoEngine, AuraChoreoEngineError, AuraVmEffectHandler,
+    AuraVmHardeningProfile, AuraVmParityProfile, AuraVmRuntimeSelector, AuraVmSchedulerSignals,
+    AURA_VM_SCHED_PRIORITY_AGING, AURA_VM_SCHED_PROGRESS_AWARE,
 };
 use aura_mpst::upstream::types::{GlobalType, Label};
 use telltale_machine::{
     model::effects::{EffectFailure, EffectHandler, EffectResult},
     runtime::loader::CodeImage as ProtocolMachineCodeImage,
-    ObsEvent, OutputConditionHint, RunStatus, SessionId,
-    RuntimeContracts, TopologyPerturbation as ProtocolMachineTopologyPerturbation, Value,
+    ObsEvent, OutputConditionHint, RunStatus, RuntimeContracts, SessionId,
+    TopologyPerturbation as ProtocolMachineTopologyPerturbation, Value,
 };
 use telltale_vm::loader::CodeImage;
 
@@ -117,9 +117,7 @@ impl EffectHandler for UnknownPredicateHandler {
             .cloned()
             .map(EffectResult::success)
             .unwrap_or_else(|| {
-                EffectResult::failure(EffectFailure::contract_violation(
-                    "no labels available",
-                ))
+                EffectResult::failure(EffectFailure::contract_violation("no labels available"))
             })
     }
 

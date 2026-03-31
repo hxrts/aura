@@ -1,4 +1,4 @@
-//! Canonical host-side ingress for owned Telltale VM sessions.
+//! Canonical host-side ingress for owned Telltale protocol-machine sessions.
 
 #![allow(clippy::result_large_err, clippy::incompatible_msrv)]
 

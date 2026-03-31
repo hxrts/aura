@@ -1,4 +1,4 @@
-//! Telltale VM effect handler adapter for Aura runtime integration.
+//! Telltale protocol-machine effect handler adapter for Aura runtime integration.
 //!
 //! This handler is intentionally deterministic and session-local. It can be used as
 //! the VM host boundary while Aura routes protocol semantics through existing
@@ -59,7 +59,7 @@ pub enum AuraVmEffectEvent {
     },
 }
 
-/// Effect-command envelope emitted from VM callbacks.
+/// Effect-command envelope emitted from protocol-machine callbacks.
 #[derive(Debug, Clone)]
 pub struct AuraVmEffectEnvelope {
     /// Source VM callback event.
@@ -265,7 +265,7 @@ impl AuraVmEffectHandler {
         lock_unpoisoned(&self.events).clone()
     }
 
-    /// Drain queued effect envelopes emitted by VM callbacks.
+    /// Drain queued effect envelopes emitted by protocol-machine callbacks.
     pub fn drain_envelopes(&self) -> Vec<AuraVmEffectEnvelope> {
         let mut guard = lock_unpoisoned(&self.envelopes);
         guard.drain(..).collect()
@@ -418,9 +418,7 @@ impl EffectHandler for AuraVmEffectHandler {
         _state: &[Value],
     ) -> EffectResult<String> {
         if labels.is_empty() {
-            return EffectResult::failure(EffectFailure::contract_violation(
-                "no labels available",
-            ));
+            return EffectResult::failure(EffectFailure::contract_violation("no labels available"));
         }
 
         let selected = if let Some(candidate) = self.bridge_effects.dequeue_branch_choice() {
@@ -618,8 +616,7 @@ mod tests {
         let handler = AuraVmEffectHandler::default();
         handler.deny_layer("cap.guard");
 
-        let decision = handler
-            .handle_acquire(1, "A", "cap.guard", &[]);
+        let decision = handler.handle_acquire(1, "A", "cap.guard", &[]);
         assert!(matches!(decision, EffectResult::Blocked));
         assert_eq!(handler.telemetry().acquire_denied, 1);
     }
@@ -634,8 +631,7 @@ mod tests {
         };
         handler.bind_layer_scope("cap.guard", scope.clone());
 
-        let acquire = handler
-            .handle_acquire(42, "Coordinator", "cap.guard", &[]);
+        let acquire = handler.handle_acquire(42, "Coordinator", "cap.guard", &[]);
         assert!(matches!(acquire, EffectResult::Success(_)));
 
         let leases = handler.active_leases();
@@ -701,7 +697,9 @@ mod tests {
 
         let first = handler
             .topology_events(3)
-            .expect_success(|| EffectFailure::contract_violation("topology events should not block"))
+            .expect_success(|| {
+                EffectFailure::contract_violation("topology events should not block")
+            })
             .expect("scheduled events");
         assert_eq!(first.len(), 4);
         assert_eq!(
@@ -721,7 +719,9 @@ mod tests {
 
         let drained = handler
             .topology_events(3)
-            .expect_success(|| EffectFailure::contract_violation("topology events should not block"))
+            .expect_success(|| {
+                EffectFailure::contract_violation("topology events should not block")
+            })
             .expect("drained tick");
         assert!(drained.is_empty());
     }
@@ -744,11 +744,15 @@ mod tests {
 
         let tick_one = handler
             .topology_events(1)
-            .expect_success(|| EffectFailure::contract_violation("topology events should not block"))
+            .expect_success(|| {
+                EffectFailure::contract_violation("topology events should not block")
+            })
             .expect("tick one");
         let tick_two = handler
             .topology_events(2)
-            .expect_success(|| EffectFailure::contract_violation("topology events should not block"))
+            .expect_success(|| {
+                EffectFailure::contract_violation("topology events should not block")
+            })
             .expect("tick two");
         assert_eq!(tick_one.len(), 1);
         assert_eq!(tick_two.len(), 1);

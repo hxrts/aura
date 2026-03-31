@@ -105,7 +105,7 @@ let status = engine.run_to_completion(vm_sid)?;
 
 This wiring opens an admitted VM session from generated choreography metadata. The runtime source of truth is the composition manifest, not an ad hoc adapter. Register the service with the runtime and integrate it with the guard chain. Category C operations must follow the ceremony contract.
 
-Production services should treat the admitted unit as a VM fragment. If the manifest declares link bundles, each linked bundle becomes its own ownership unit. Runtime transfer must use `ReconfigurationManager`. Do not bypass fragment ownership through service-local state.
+Production services should treat the admitted unit as a protocol fragment. If the manifest declares link bundles, each linked bundle becomes its own ownership unit. Runtime transfer must use `ReconfigurationManager`. Do not bypass fragment ownership through service-local state.
 
 The runtime also derives execution mode from admitted policy. Cooperative protocols stay on the canonical VM path. Replay-deterministic and envelope-bounded protocols select the threaded path only through the admission and hardening surface. Service code should not construct ad hoc threaded runtimes.
 

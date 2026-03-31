@@ -257,7 +257,7 @@ pub enum AuraEnvelopeLawClass {
 
 /// Explicit effect-envelope registry for parity checks.
 ///
-/// Keep this list aligned with effect kinds emitted by `telltale-vm`.
+/// Keep this list aligned with effect kinds emitted by the admitted Telltale runtime.
 pub const AURA_EFFECT_ENVELOPE_CLASSIFICATIONS: &[(&str, AuraEnvelopeLawClass)] = &[
     ("send_decision", AuraEnvelopeLawClass::Commutative),
     ("handle_recv", AuraEnvelopeLawClass::Strict),
@@ -405,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn effect_kind_registry_covers_current_core_vm_kinds() {
+    fn effect_kind_registry_covers_current_runtime_effect_kinds() {
         if let Err(err) = assert_effect_kinds_classified([
             "send_decision",
             "handle_recv",
@@ -415,7 +415,7 @@ mod tests {
             "handle_release",
             "topology_event",
         ]) {
-            panic!("current telltale-vm effect kinds should be classified: {err}");
+            panic!("current Telltale runtime effect kinds should be classified: {err}");
         }
     }
 

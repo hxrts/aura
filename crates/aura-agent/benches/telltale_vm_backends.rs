@@ -1,11 +1,11 @@
 #![allow(clippy::expect_used, clippy::disallowed_methods)]
 #![allow(missing_docs)]
-//! Cooperative vs threaded Telltale VM benchmarks for Category C protocol shapes.
+//! Cooperative vs threaded Telltale protocol-machine benchmarks for Category C protocol shapes.
 
 use std::collections::BTreeMap;
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use telltale_vm::coroutine::Value;
 use telltale_vm::effect::EffectHandler;
 use telltale_vm::loader::CodeImage;

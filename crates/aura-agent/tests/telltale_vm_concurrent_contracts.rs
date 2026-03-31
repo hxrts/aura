@@ -1,4 +1,4 @@
-//! Concurrent mixed-protocol contract lane for Telltale VM backends.
+//! Concurrent mixed-protocol contract lane for Telltale protocol-machine backends.
 #![cfg(feature = "choreo-backend-telltale-vm")]
 #![allow(clippy::expect_used, clippy::disallowed_methods, missing_docs)]
 
@@ -7,8 +7,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use aura_agent::{build_vm_config, AuraVmHardeningProfile, AuraVmParityProfile};
-use serde::Serialize;
 use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
+use serde::Serialize;
 use telltale_vm::coroutine::Value;
 use telltale_vm::effect::EffectHandler;
 use telltale_vm::loader::CodeImage;

@@ -82,7 +82,7 @@
 
 #[cfg(not(feature = "choreo-backend-telltale-vm"))]
 compile_error!(
-    "Aura agent requires the Telltale VM choreography backend. \
+    "Aura agent requires the Telltale choreography backend. \
      Enable feature `choreo-backend-telltale-vm`."
 );
 
@@ -176,6 +176,8 @@ pub use handlers::{ChannelResult, RendezvousHandler, RendezvousResult, Rendezvou
 // Runtime types for advanced usage
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::system::RuntimeShutdownError;
+#[cfg(all(feature = "choreo-backend-telltale-vm", not(target_arch = "wasm32")))]
+pub use runtime::AuraHandlerAdapter;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::{
     EffectContext, EffectExecutor, EffectOperation, EffectRegistry, EffectRegistryError,
@@ -184,8 +186,6 @@ pub use runtime::{
     RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth, SharedTransport,
     TaskSupervisor,
 };
-#[cfg(all(feature = "choreo-backend-telltale-vm", not(target_arch = "wasm32")))]
-pub use runtime::AuraHandlerAdapter;
 
 // Protocol adapter for choreography execution (used by tests)
 #[cfg(feature = "choreo-backend-telltale-vm")]
@@ -204,13 +204,13 @@ pub use runtime::vm_hardening::{
     parse_effect_determinism_tier, policy_for_protocol, policy_for_ref,
     policy_requires_envelope_artifact, required_runtime_capabilities_for_policy,
     scheduler_control_input_for_image, scheduler_control_input_for_protocol_machine_image,
-    scheduler_policy_for_input, scheduler_policy_ref,
-    validate_determinism_profile, validate_envelope_artifact_for_policy,
-    validate_protocol_execution_policy, validate_scheduler_execution_policy, vm_config_for_profile,
-    AuraVmDeterminismProfileError, AuraVmGuardLayer, AuraVmHardeningProfile, AuraVmParityProfile,
-    AuraVmProtocolExecutionPolicy, AuraVmRuntimeMode, AuraVmRuntimeSelector,
-    AuraVmSchedulerControlInput, AuraVmSchedulerEnvelopeClass, AuraVmSchedulerExecutionPolicy,
-    AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider, AURA_OUTPUT_PREDICATE_CHOICE,
+    scheduler_policy_for_input, scheduler_policy_ref, validate_determinism_profile,
+    validate_envelope_artifact_for_policy, validate_protocol_execution_policy,
+    validate_scheduler_execution_policy, vm_config_for_profile, AuraVmDeterminismProfileError,
+    AuraVmGuardLayer, AuraVmHardeningProfile, AuraVmParityProfile, AuraVmProtocolExecutionPolicy,
+    AuraVmRuntimeMode, AuraVmRuntimeSelector, AuraVmSchedulerControlInput,
+    AuraVmSchedulerEnvelopeClass, AuraVmSchedulerExecutionPolicy, AuraVmSchedulerSignals,
+    AuraVmSchedulerSignalsProvider, AURA_OUTPUT_PREDICATE_CHOICE,
     AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE, AURA_OUTPUT_PREDICATE_GUARD_RELEASE,
     AURA_OUTPUT_PREDICATE_OBSERVABLE, AURA_OUTPUT_PREDICATE_STEP,
     AURA_OUTPUT_PREDICATE_TRANSPORT_RECV, AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,

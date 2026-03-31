@@ -752,10 +752,7 @@ where
         + aura_core::TimeEffects,
     R: RoleId,
 {
-    async fn provide_message<M: Send + 'static>(
-        &mut self,
-        to: Self::Role,
-    ) -> ChoreoResult<M> {
+    async fn provide_message<M: Send + 'static>(&mut self, to: Self::Role) -> ChoreoResult<M> {
         self.ensure_runtime_admission()
             .await
             .map_err(map_runtime_error)?;

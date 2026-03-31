@@ -1,7 +1,7 @@
-//! Telltale VM parity boundary for aura-simulator.
+//! Telltale protocol-machine parity boundary for aura-simulator.
 //!
 //! This module defines a crate-local integration boundary.
-//! It avoids direct VM execution coupling in the default simulator path.
+//! It avoids direct protocol-machine execution coupling in the default simulator path.
 //! Callers provide conformance artifacts and select a comparison profile.
 
 use crate::differential_tester::{DifferentialProfile, DifferentialReport, DifferentialTester};
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 /// Schema identifier for simulator parity reports.
 pub const AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1: &str = "aura.telltale-parity.report.v1";
 
-/// Canonical mapping row from telltale VM event families to Aura surfaces.
+/// Canonical mapping row from telltale protocol-machine event families to Aura surfaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TelltaleSurfaceMappingV1 {
     /// Telltale event family label.

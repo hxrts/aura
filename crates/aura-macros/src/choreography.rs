@@ -19,14 +19,14 @@ use syn::{
     visit_mut::{self, VisitMut},
     Attribute, Expr, ExprLit, ExprMacro, Ident, Lit, LitStr, Stmt, Type,
 };
-use telltale_language as telltale_choreography;
+use telltale_choreography::ast::{
+    choreography_to_global, local_to_local_r, GlobalTypeCore, PayloadSort,
+};
 use telltale_choreography::{
     generate_choreography_code, parse_choreography_str, project, Choreography, MessageType,
     Protocol,
 };
-use telltale_choreography::ast::{
-    choreography_to_global, local_to_local_r, GlobalTypeCore, PayloadSort,
-};
+use telltale_language as telltale_choreography;
 use telltale_theory_v9::coherence::check_coherent;
 
 // Import Biscuit-related types for the updated annotation system

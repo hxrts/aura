@@ -222,11 +222,11 @@ commit, and `leak` specifies leakage budget allocation.
 
 Projection extracts each role's local view from the global type. The local view specifies what messages the role sends and receives. Execution interprets the local view against the effect system. See [MPST and Choreography](110_mpst_and_choreography.md) for projection rules and the global type grammar.
 
-### 5.2 Telltale VM
+### 5.2 Telltale Protocol Machine
 
-Production choreography execution uses the Telltale VM with a host bridge. Startup is manifest-driven and admitted by construction. Execution is bounded by deterministic step budgets derived from weighted measures of the local session type. The budget removes wall-clock coupling from safety enforcement and keeps bound checks replay-deterministic across native and WASM conformance lanes.
+Production choreography execution uses the Telltale protocol machine with a host bridge. Startup is manifest-driven and admitted by construction. Execution is bounded by deterministic step budgets derived from weighted measures of the local session type. The budget removes wall-clock coupling from safety enforcement and keeps bound checks replay-deterministic across native and WASM conformance lanes.
 
-The VM supports canonical, hardening, and parity profiles. The canonical profile runs at concurrency 1 as the reference behavior. Hardening profiles test edge cases. Parity profiles compare native and WASM execution. See [MPST and Choreography](110_mpst_and_choreography.md) for runtime details.
+The protocol machine supports canonical, hardening, and parity profiles. The canonical profile runs at concurrency 1 as the reference behavior. Hardening profiles test edge cases. Parity profiles compare native and WASM execution. See [MPST and Choreography](110_mpst_and_choreography.md) for runtime details.
 
 ### 5.3 Consensus and agreement
 

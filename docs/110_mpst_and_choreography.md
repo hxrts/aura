@@ -38,7 +38,7 @@ This example shows the projected type for role `A`. The type describes that `A` 
 
 ## 3. Runtime Integration
 
-Aura executes production choreographies through the Telltale VM. The `choreography!` macro emits the global type, projected local types, role metadata, and composition metadata that the runtime uses to build VM code images. `AuraChoreoEngine` in `crates/aura-agent/src/runtime/choreo_engine.rs` is the production runtime surface.
+Aura executes production choreographies through the Telltale protocol machine. The `choreography!` macro emits the global type, projected local types, role metadata, and composition metadata that the runtime uses to build protocol-machine code images. `AuraChoreoEngine` in `crates/aura-agent/src/runtime/choreo_engine.rs` is the production runtime surface.
 
 Generated runners still expose role-specific execution helpers. Aura keeps those helpers for tests, focused migration utilities, and narrow tooling paths. They are not the production execution boundary.
 
@@ -53,7 +53,7 @@ Generated runtime artifacts also carry the data that production startup needs:
 These values are sourced from runtime state such as params, journal facts, UI inputs, and manifest-driven admission state.
 
 Aura has one production choreography backend:
-- VM backend (`AuraChoreoEngine`) for admitted Telltale VM execution, replay, and parity checks.
+- protocol-machine backend (`AuraChoreoEngine`) for admitted Telltale runtime execution, replay, and parity checks.
 
 The authoritative async ownership contract for how `aura-agent` hosts these sessions lives in `crates/aura-agent/ARCHITECTURE.md`.
 
@@ -66,9 +66,9 @@ This distinction matters because `delegate` is not merely another actor message.
 
 Direct generated-runner execution is test and migration support only.
 
-Production runtime ownership is fragment-scoped. The admitted unit is one VM fragment derived from the generated `CompositionManifest`. A manifest without `link` metadata yields one protocol fragment. A manifest with `link` metadata yields one fragment per linked bundle.
+Production runtime ownership is fragment-scoped. The admitted unit is one protocol fragment derived from the generated `CompositionManifest`. A manifest without `link` metadata yields one protocol fragment. A manifest with `link` metadata yields one fragment per linked bundle.
 
-`delegate` and `link` define how ownership moves. Local runtime services claim fragment ownership through `AuraEffectSystem`. Runtime transfer goes through `ReconfigurationManager`. The runtime rejects ambiguous local ownership before a transfer reaches the VM.
+`delegate` and `link` define how ownership moves. Local runtime services claim fragment ownership through `AuraEffectSystem`. Runtime transfer goes through `ReconfigurationManager`. The runtime rejects ambiguous local ownership before a transfer reaches the protocol machine.
 
 The host runtime may use actor services to supervise the surrounding work, but fragment ownership itself remains a singular move boundary with stale-owner rejection.
 
@@ -81,7 +81,7 @@ Delegation must define both the ownership handoff and the capability scope that 
 
 Host-side async code must preserve that ownership model. External network, timer, and callback work enters through canonical ingress and is routed to the current local owner before any session mutation occurs.
 
-`VmBridgeEffects` is the synchronous host boundary for one fragment. VM callbacks use it for session-local payload queues, blocked receive snapshots, and scheduler signals. Async transport, journal, and storage work stay outside the callback path in the host bridge loop.
+`VmBridgeEffects` is the synchronous host boundary for one fragment. Protocol-machine callbacks use it for session-local payload queues, blocked receive snapshots, and scheduler signals. Async transport, journal, and storage work stay outside the callback path in the host bridge loop.
 
 ## 4. Choreography Annotations and Effect Commands
 
@@ -156,7 +156,7 @@ See [Project Structure](999_project_structure.md) for the protocol inventory wit
 
 ## 10. Runtime Infrastructure
 
-The runtime provides production choreographic execution through manifest-driven Telltale VM sessions.
+The runtime provides production choreographic execution through manifest-driven Telltale protocol-machine sessions.
 
 ### 10.1 ChoreographicEffects Trait
 
@@ -168,19 +168,19 @@ The runtime provides production choreographic execution through manifest-driven 
 | `start_session` | Initialize choreography session |
 | `end_session` | Terminate choreography session |
 
-`AuraVmEffectHandler` is the synchronous host boundary between the VM and Aura runtime services. `AuraQueuedVmBridgeHandler` provides queued outbound payloads and branch decisions for role-scoped VM sessions.
+`AuraVmEffectHandler` is the synchronous host boundary between the protocol machine and Aura runtime services. `AuraQueuedVmBridgeHandler` provides queued outbound payloads and branch decisions for role-scoped protocol-machine sessions.
 
 ### 10.2 Wiring a Choreography
 
-Wiring a choreography involves storing the protocol in a `.choreo` file, generating artifacts via `choreography!`, opening an admitted VM session, and providing decision sources through the host bridge.
+Wiring a choreography involves storing the protocol in a `.choreo` file, generating artifacts via `choreography!`, opening an admitted protocol-machine session, and providing decision sources through the host bridge.
 
 See [Choreography Development Guide](803_choreography_guide.md) for the wiring procedure.
 
 ### 10.5 Output and Flow Policy Integration Points
 
-Aura binds choreography execution to VM output/flow gates at the runtime boundary.
+Aura binds choreography execution to protocol-machine output/flow gates at the runtime boundary.
 
-`AuraVmEffectHandler` tags VM-observable operations with output-condition predicate hints so `OutputConditionPolicy` can enforce commit visibility rules. The hardening profile allow-list admits only known predicates (transport send/recv, protocol choice/step, guard acquire/release). Unknown predicates are rejected in CI profiles.
+`AuraVmEffectHandler` tags protocol-machine-observable operations with output-condition predicate hints so `OutputConditionPolicy` can enforce commit visibility rules. The hardening profile allow-list admits only known predicates (transport send/recv, protocol choice/step, guard acquire/release). Unknown predicates are rejected in CI profiles.
 
 Flow constraints are enforced with `FlowPolicy::PredicateExpr(...)` derived from Aura role/category constraints. This keeps pre-send flow checks aligned with Aura's information-flow contract while preserving deterministic replay behavior.
 
@@ -190,9 +190,9 @@ Practical integration points:
 2. Macro output emits `EffectCommand` sequences.
 3. Snapshot builders evaluate typed capability candidates into an admitted
    frontier, and the guard chain evaluates commands and budgets at send sites.
-4. VM output/flow policies gate observable commits and cross-role message flow before transport effects execute.
+4. Protocol-machine output/flow policies gate observable commits and cross-role message flow before transport effects execute.
 
-Choreography-level guard semantics and VM-level hardening are additive, not competing. Annotations define required effects. Policies constrain which effects are allowed to become observable.
+Choreography-level guard semantics and protocol-machine-level hardening are additive, not competing. Annotations define required effects. Policies constrain which effects are allowed to become observable.
 
 ## 11. Summary
 

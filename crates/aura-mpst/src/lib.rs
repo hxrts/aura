@@ -114,9 +114,9 @@ pub trait GeneratedChoreographyRuntime: telltale_runtime::ChoreoHandlerExt + Sen
         let start_idx = start as usize;
         let end_idx = end as usize;
         if start_idx >= roles.len() || end_idx > roles.len() || start_idx >= end_idx {
-            return Err(telltale_runtime::ChoreographyError::ExecutionError(format!(
-                "invalid role family range for {family}: [{start}, {end})"
-            )));
+            return Err(telltale_runtime::ChoreographyError::ExecutionError(
+                format!("invalid role family range for {family}: [{start}, {end})"),
+            ));
         }
         Ok(roles[start_idx..end_idx].to_vec())
     }

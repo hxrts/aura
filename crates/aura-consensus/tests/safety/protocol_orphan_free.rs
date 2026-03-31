@@ -10,19 +10,23 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
 
     #[allow(clippy::while_let_on_iterator)]
     while let Some(ch) = chars.next() {
-        if ch != '[' {
+        let Some((closing, preserve_if_no_equals)) = (match ch {
+            '[' => Some((']', true)),
+            '{' => Some(('}', true)),
+            _ => None,
+        }) else {
             out.push(ch);
             continue;
-        }
+        };
 
         let mut depth = 1usize;
         let mut buf = String::new();
         let mut has_equals = false;
 
         while let Some(next) = chars.next() {
-            if next == '[' {
+            if next == ch {
                 depth += 1;
-            } else if next == ']' {
+            } else if next == closing {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
                     break;
@@ -34,10 +38,10 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
             buf.push(next);
         }
 
-        if !has_equals {
-            out.push('[');
+        if preserve_if_no_equals && !has_equals {
+            out.push(ch);
             out.push_str(&buf);
-            out.push(']');
+            out.push(closing);
         }
     }
 

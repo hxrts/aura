@@ -293,7 +293,7 @@ The `quint` module provides integration with Quint formal specifications. See [F
 
 ## Telltale Parity Integration
 
-The simulator exposes telltale parity as an artifact-level boundary. The boundary lives in `aura_simulator::telltale_parity`. Default simulator execution does not run telltale VM directly.
+The simulator exposes telltale parity as an artifact-level boundary. The boundary lives in `aura_simulator::telltale_parity`. Default simulator execution does not run the protocol machine directly.
 
 ### Entry Points
 

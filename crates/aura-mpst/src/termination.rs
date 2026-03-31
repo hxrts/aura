@@ -1,7 +1,7 @@
 //! Termination-weight helpers for choreography runtime budgeting.
 
-use std::collections::BTreeMap;
 use crate::upstream::types::LocalTypeR;
+use std::collections::BTreeMap;
 
 /// Snapshot of in-flight per-edge message buffers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

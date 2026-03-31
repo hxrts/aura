@@ -62,7 +62,7 @@ Enforcement locus:
 - `src/differential_tester.rs` evaluates strict and envelope-bounded profiles.
 
 Failure mode:
-- Simulator paths become tightly coupled to VM execution backends.
+- Simulator paths become tightly coupled to protocol-machine execution backends.
 - Default simulation behavior changes when telltale parity is unused.
 
 Verification hooks:

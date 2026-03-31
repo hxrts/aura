@@ -119,7 +119,7 @@ pub mod liveness;
 pub mod properties;
 /// Per-tick property monitor runtime.
 pub mod property_monitor;
-/// Telltale VM parity boundary and comparison entry points.
+/// Telltale parity boundary and comparison entry points.
 pub mod telltale_parity;
 
 // AMP scenario helpers

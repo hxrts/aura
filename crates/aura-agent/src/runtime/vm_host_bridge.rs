@@ -2,9 +2,9 @@
 
 use crate::runtime::vm_hardening::{
     apply_protocol_execution_policy, apply_scheduler_execution_policy, configured_guard_capacity,
-    policy_for_protocol, scheduler_control_input_for_protocol_machine_image, scheduler_policy_for_input,
-    AuraVmProtocolExecutionPolicy, AuraVmRuntimeSelector, AuraVmSchedulerSignals,
-    AuraVmSchedulerSignalsProvider,
+    policy_for_protocol, scheduler_control_input_for_protocol_machine_image,
+    scheduler_policy_for_input, AuraVmProtocolExecutionPolicy, AuraVmRuntimeSelector,
+    AuraVmSchedulerSignals, AuraVmSchedulerSignalsProvider,
 };
 use crate::runtime::{
     build_vm_config, AuraChoreoEngine, AuraEffectSystem, AuraRuntimeEnvelopeAdmission,
@@ -18,14 +18,13 @@ use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, Choreograp
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
 use telltale_machine::coroutine::{
     BlockReason as ProtocolMachineBlockReason, CoroStatus as ProtocolMachineCoroStatus,
 };
+use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
 use telltale_machine::{
     runtime::loader::CodeImage as ProtocolMachineCodeImage, EffectTraceEntry, ProtocolMachine,
-    RuntimeContracts, SessionId, StepResult as ProtocolMachineStepResult,
-    Value,
+    RuntimeContracts, SessionId, StepResult as ProtocolMachineStepResult, Value,
 };
 use telltale_vm::loader::CodeImage;
 
@@ -75,7 +74,7 @@ pub enum AuraVmSessionOpenError {
         #[source]
         source: crate::runtime::AuraVmDeterminismProfileError,
     },
-    #[error("failed to claim VM fragments for protocol {protocol_id}: {message}")]
+    #[error("failed to claim protocol fragments for protocol {protocol_id}: {message}")]
     FragmentClaim {
         protocol_id: String,
         message: String,
@@ -429,8 +428,12 @@ fn open_role_scoped_vm_session(
     ),
     String,
 > {
-    let image =
-        build_role_scoped_protocol_machine_code_image(role_names, active_role, global_type, local_types)?;
+    let image = build_role_scoped_protocol_machine_code_image(
+        role_names,
+        active_role,
+        global_type,
+        local_types,
+    )?;
     let handler = Arc::new(AuraQueuedVmBridgeHandler::default());
     let config = build_vm_config(
         AuraVmHardeningProfile::Prod,
@@ -471,10 +474,10 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
         global_type,
         local_types,
     )
-        .map_err(|message| AuraVmSessionOpenError::RoleScopedImage {
-            protocol_id: protocol_id.to_string(),
-            message,
-        })?;
+    .map_err(|message| AuraVmSessionOpenError::RoleScopedImage {
+        protocol_id: protocol_id.to_string(),
+        message,
+    })?;
     let handler = Arc::new(AuraQueuedVmBridgeHandler::default());
     handler.set_scheduler_signals(scheduler_signals);
     let mut config = build_vm_config(
@@ -772,9 +775,9 @@ pub fn blocked_recv_edge(
             return None;
         }
         match &coro.status {
-            ProtocolMachineCoroStatus::Blocked(ProtocolMachineBlockReason::Recv { edge, .. }) => {
-                Some((edge.sender.clone(), edge.receiver.clone()))
-            }
+            ProtocolMachineCoroStatus::Blocked(ProtocolMachineBlockReason::Recv {
+                edge, ..
+            }) => Some((edge.sender.clone(), edge.receiver.clone())),
             _ => None,
         }
     })
@@ -996,9 +999,7 @@ mod tests {
         handler.push_send_bytes(vec![0xAB]);
         handler
             .handle_send("Sender", "Receiver", "msg", &[])
-            .expect_success(|| {
-                EffectFailure::contract_violation("pending send should not block")
-            })
+            .expect_success(|| EffectFailure::contract_violation("pending send should not block"))
             .expect("pending send recorded");
 
         let err = flush_pending_vm_sends(effects.as_ref(), &handler, &BTreeMap::new())
@@ -1027,9 +1028,7 @@ mod tests {
         handler.push_send_bytes(vec![0xCD]);
         handler
             .handle_send("Sender", "Receiver", "msg", &[])
-            .expect_success(|| {
-                EffectFailure::contract_violation("pending send should not block")
-            })
+            .expect_success(|| EffectFailure::contract_violation("pending send should not block"))
             .expect("pending send recorded");
         effects.end_session().await.expect("session ends");
 

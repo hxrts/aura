@@ -306,9 +306,9 @@ Session creation and lifecycle are managed as choreographic protocols. The `Sess
 
 ### Telltale Integration
 
-Aura executes production choreography sessions through the Telltale VM in Layer 6. Production startup is manifest-driven. Generated `CompositionManifest` metadata defines the protocol id, required capabilities, determinism profile reference, link constraints, and delegation constraints for each choreography. `AuraChoreoEngine` runs admitted VM sessions and exposes deterministic trace, replay, and envelope-validation APIs.
+Aura executes production choreography sessions through the Telltale protocol machine in Layer 6. Production startup is manifest-driven. Generated `CompositionManifest` metadata defines the protocol id, required capabilities, determinism profile reference, link constraints, and delegation constraints for each choreography. `AuraChoreoEngine` runs admitted protocol-machine sessions and exposes deterministic trace, replay, and envelope-validation APIs.
 
-Runtime ownership is fragment-scoped. One admitted VM fragment has one local owner at a time. A choreography without link metadata is one fragment. A choreography with link metadata yields one fragment per linked bundle. Ownership claims, transfer, and release flow through `AuraEffectSystem` and `ReconfigurationManager`.
+Runtime ownership is fragment-scoped. One admitted protocol fragment has one local owner at a time. A choreography without link metadata is one fragment. A choreography with link metadata yields one fragment per linked bundle. Ownership claims, transfer, and release flow through `AuraEffectSystem` and `ReconfigurationManager`.
 
 This is why the runtime uses both abstractions at once:
 
@@ -317,18 +317,18 @@ This is why the runtime uses both abstractions at once:
 
 When delegation changes ownership, the runtime must also define whether the moved capability is transferred intact or attenuated to a narrower scope. That decision is part of the protocol/runtime contract, not a host-side convenience choice.
 
-The synchronous callback boundary is `VmBridgeEffects`. `AuraVmEffectHandler` and `AuraQueuedVmBridgeHandler` use it for session-local payload queues, blocked receive snapshots, branch choices, and scheduler signals. Async transport, guard-chain execution, journal coupling, and storage remain outside VM callbacks in `vm_host_bridge` and service loops.
+The synchronous callback boundary is `VmBridgeEffects`. `AuraVmEffectHandler` and `AuraQueuedVmBridgeHandler` use it for session-local payload queues, blocked receive snapshots, branch choices, and scheduler signals. Async transport, guard-chain execution, journal coupling, and storage remain outside protocol-machine callbacks in `vm_host_bridge` and service loops.
 
 Dynamic reconfiguration follows the same rule. Runtime code must go through `ReconfigurationManager` for link and delegation so bundle evidence, capability admission, and coherence checks are enforced before any transfer occurs.
 
-### VM Profiles
+### Runtime Profiles
 
-Telltale VM execution is configured through two profile axes:
+Telltale protocol-machine execution is configured through two profile axes:
 
 - **`AuraVmHardeningProfile`** controls safety posture: `Dev` (assertions + full trace), `Ci` (strict allow-lists + replay), `Prod` (safety checks with bounded overhead).
 - **`AuraVmParityProfile`** controls deterministic cross-target lanes: `NativeCooperative` (native baseline) and `WasmCooperative` (WASM lane), both using cooperative scheduling and strict effect determinism.
 
-Determinism and scheduler policy are protocol-driven. Admission resolves the protocol class, applies the configured determinism tier and replay mode, validates the selected VM profile, and chooses scheduler controls. Production code should not mutate these settings directly after admission.
+Determinism and scheduler policy are protocol-driven. Admission resolves the protocol class, applies the configured determinism tier and replay mode, validates the selected runtime profile, and chooses scheduler controls. Production code should not mutate these settings directly after admission.
 
 Mixed workloads are allowed. Cooperative and threaded fragments may coexist in the same runtime. The contract is per fragment.
 
@@ -384,7 +384,7 @@ Transfer and attenuation are separate concepts:
 
 If the runtime cannot state which one is happening and under which protocol rule, it must reject the delegation path.
 
-A successful delegation must move one owned bundle: session owner record, owner capability, VM fragment ownership, runtime footprint / reconfiguration state, and delegation audit witness. If these do not move together, the transfer is incomplete and must be treated as a runtime error.
+A successful delegation must move one owned bundle: session owner record, owner capability, protocol fragment ownership, runtime footprint / reconfiguration state, and delegation audit witness. If these do not move together, the transfer is incomplete and must be treated as a runtime error.
 
 ### Theorem-pack / Invariant Alignment
 

@@ -47,7 +47,7 @@ impl RuntimeCapabilityHandler {
 
 #[cfg(feature = "telltale-runtime-capability")]
 impl RuntimeCapabilityHandler {
-    /// Build from the legacy Telltale VM runtime contracts/admission surface.
+    /// Build from the legacy Telltale runtime-contract admission surface.
     pub fn from_runtime_contracts(
         contracts: &telltale_vm::runtime_contracts::RuntimeContracts,
     ) -> Self {

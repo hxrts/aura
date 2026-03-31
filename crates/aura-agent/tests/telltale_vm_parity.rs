@@ -1,11 +1,11 @@
-//! Cross-target parity tests for Telltale VM backends used by Aura.
+//! Cross-target parity tests for Telltale protocol-machine backends used by Aura.
 #![cfg(feature = "choreo-backend-telltale-vm")]
 #![allow(clippy::expect_used, clippy::disallowed_methods)]
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cfg_if::cfg_if;
 use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
+use cfg_if::cfg_if;
 use telltale_vm::coroutine::Value;
 use telltale_vm::effect::EffectHandler;
 
@@ -432,15 +432,14 @@ mod native {
         runtime::loader::CodeImage as ProtocolMachineCodeImage,
         serialization::CanonicalReplayFragmentV1 as ProtocolMachineCanonicalReplayFragmentV1,
         EffectDeterminismTier as ProtocolMachineEffectDeterminismTier,
-        EnvelopeDiff as ProtocolMachineEnvelopeDiff,
-        RunStatus as ProtocolMachineRunStatus,
+        EnvelopeDiff as ProtocolMachineEnvelopeDiff, RunStatus as ProtocolMachineRunStatus,
         TopologyPerturbation as ProtocolMachineTopologyPerturbation,
     };
     use telltale_vm::loader::CodeImage;
     use telltale_vm::serialization::CanonicalReplayFragmentV1;
     use telltale_vm::threaded::ThreadedVM;
     use telltale_vm::vm::{ObsEvent, RunStatus, VM};
-    use telltale_vm::{EffectTraceEntry};
+    use telltale_vm::EffectTraceEntry;
 
     struct ParityRun {
         obs_trace: Vec<ObsEvent>,
@@ -566,16 +565,19 @@ mod native {
         payload["schema_version"] =
             serde_json::Value::String("machine.serialization.v1".to_string());
         serde_json::from_value(payload)
-        .expect("transcode VM replay fragment to protocol-machine fragment")
+            .expect("transcode VM replay fragment to protocol-machine fragment")
     }
 
     fn protocol_machine_image(image: &CodeImage) -> ProtocolMachineCodeImage {
-        let global_type: telltale_types_v9::GlobalType =
-            serde_json::from_value(serde_json::to_value(&image.global_type).expect("serialize global"))
-                .expect("decode protocol-machine global");
+        let global_type: telltale_types_v9::GlobalType = serde_json::from_value(
+            serde_json::to_value(&image.global_type).expect("serialize global"),
+        )
+        .expect("decode protocol-machine global");
         let local_types: std::collections::BTreeMap<String, telltale_types_v9::LocalTypeR> =
-            serde_json::from_value(serde_json::to_value(&image.local_types).expect("serialize locals"))
-                .expect("decode protocol-machine locals");
+            serde_json::from_value(
+                serde_json::to_value(&image.local_types).expect("serialize locals"),
+            )
+            .expect("decode protocol-machine locals");
         let image = ProtocolMachineCodeImage::from_local_types(&local_types, &global_type);
         image.validate_runtime_shape().expect("runtime image");
         image
@@ -783,8 +785,7 @@ mod native {
                     normalized_fragment_without_handler_identity(&cooperative.canonical_fragment);
                 let threaded_fragment =
                     normalized_fragment_without_handler_identity(&threaded.canonical_fragment);
-                let cooperative_fragment =
-                    protocol_machine_fragment(&cooperative_fragment);
+                let cooperative_fragment = protocol_machine_fragment(&cooperative_fragment);
                 let threaded_fragment = protocol_machine_fragment(&threaded_fragment);
                 let diff = ProtocolMachineEnvelopeDiff::from_replay_fragments(
                     "native_cooperative",
@@ -1106,10 +1107,13 @@ mod native {
         let image = protocol_machine_image(&CodeImage::from_local_types(&locals, &global));
 
         let handler = Arc::new(AuraVmEffectHandler::default());
-        let mut engine = AuraChoreoEngine::new(build_vm_config(
-            AuraVmHardeningProfile::Ci,
-            AuraVmParityProfile::NativeCooperative,
-        ), Arc::clone(&handler));
+        let mut engine = AuraChoreoEngine::new(
+            build_vm_config(
+                AuraVmHardeningProfile::Ci,
+                AuraVmParityProfile::NativeCooperative,
+            ),
+            Arc::clone(&handler),
+        );
         let crash = ProtocolMachineTopologyPerturbation::Crash {
             site: "fault-node-a".to_string(),
         };
@@ -1196,7 +1200,7 @@ mod wasm {
         payload["schema_version"] =
             serde_json::Value::String("machine.serialization.v1".to_string());
         serde_json::from_value(payload)
-        .expect("transcode VM replay fragment to protocol-machine fragment")
+            .expect("transcode VM replay fragment to protocol-machine fragment")
     }
 
     fn build_wasm_artifact(

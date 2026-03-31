@@ -286,7 +286,7 @@ test-crate-isolated crate:
     echo "Testing {{ crate }} in isolation (lib + unit tests only)..."
     cd "crates/{{ crate }}" && cargo test --lib --verbose
 
-# Benchmark Telltale VM cooperative vs threaded backends for Category C shapes
+# Benchmark Telltale protocol-machine cooperative vs threaded backends for Category C shapes
 bench-choreo-parity:
     cargo bench -p aura-agent --features choreo-backend-telltale-vm --bench telltale_vm_backends
 
@@ -540,7 +540,7 @@ ci-simulator-telltale-parity:
     AURA_TELLTALE_PARITY_ARTIFACT="${PWD}/artifacts/telltale-parity/report.json" \
     cargo test -p aura-simulator telltale_parity_report_generation_ci -- --nocapture
 
-# Telltale VM parity gates (determinism profile + replay conformance)
+# Telltale protocol-machine parity gates (determinism profile + replay conformance)
 ci-choreo-parity:
     mkdir -p artifacts/choreo-parity
     AURA_CONFORMANCE_WRITE_ARTIFACTS=1 \

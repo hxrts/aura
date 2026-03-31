@@ -17,19 +17,23 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
 
     #[allow(clippy::while_let_on_iterator)]
     while let Some(ch) = chars.next() {
-        if ch != '[' {
+        let Some((closing, preserve_if_no_equals)) = (match ch {
+            '[' => Some((']', true)),
+            '{' => Some(('}', true)),
+            _ => None,
+        }) else {
             out.push(ch);
             continue;
-        }
+        };
 
         let mut depth = 1usize;
         let mut buf = String::new();
         let mut has_equals = false;
 
         while let Some(next) = chars.next() {
-            if next == '[' {
+            if next == ch {
                 depth += 1;
-            } else if next == ']' {
+            } else if next == closing {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
                     break;
@@ -41,10 +45,10 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
             buf.push(next);
         }
 
-        if !has_equals {
-            out.push('[');
+        if preserve_if_no_equals && !has_equals {
+            out.push(ch);
             out.push_str(&buf);
-            out.push(']');
+            out.push(closing);
         }
     }
 
@@ -216,7 +220,7 @@ pub fn check_async_subtype_for_shared_roles(
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_legacy_parser_surface;
+    use super::{normalize_legacy_parser_surface, strip_aura_annotations_for_parser};
 
     #[test]
     fn normalizes_legacy_choice_and_message_syntax() {
@@ -248,5 +252,22 @@ protocol Demo =
         let normalized = normalize_legacy_parser_surface(source);
         assert!(!normalized.contains("@parallel"));
         assert!(normalized.contains("Msg of crate.demo.Payload"));
+    }
+
+    #[test]
+    fn strips_brace_style_role_annotations_for_parser_surface() {
+        let source = r#"
+protocol Demo =
+  roles
+    A { guard_capability = "demo:start" },
+    B
+
+  A -> B : Msg(crate::demo::Payload)
+"#;
+
+        let normalized = strip_aura_annotations_for_parser(source);
+        assert!(!normalized.contains("guard_capability"));
+        assert!(normalized.contains("roles"));
+        assert!(normalized.contains("A ,"));
     }
 }

@@ -11,7 +11,7 @@ Native Rust interface to the Quint formal verification language using the Quint 
 | Bridge schema types and import/export transforms | Quint specification files (verification/quint/) |
 | Bridge cross-validation logic | Runtime simulation (aura-simulator) |
 | Verification runners and evaluators | Protocol implementations (feature crates) |
-| Property suite organization | Runtime VM execution or transport-level conformance replay |
+| Property suite organization | Runtime protocol-machine execution or transport-level conformance replay |
 
 ## Dependencies
 

@@ -649,7 +649,7 @@ impl AuraEffectSystem {
             .current_runtime_choreography_session_id()
             .ok_or_else(|| {
                 format!(
-                "cannot claim VM fragments for protocol {} without an active choreography session",
+                "cannot claim protocol fragments for protocol {} without an active choreography session",
                 manifest.protocol_id
             )
             })?;
@@ -664,7 +664,7 @@ impl AuraEffectSystem {
             protocol_id = %manifest.protocol_id,
             owner_label = %owner_label,
             fragment_count = claimed.len(),
-            "claimed local VM fragment ownership"
+            "claimed local protocol fragment ownership"
         );
         Ok(claimed)
     }
@@ -682,7 +682,7 @@ impl AuraEffectSystem {
             tracing::debug!(
                 session_id = %session_id,
                 fragment_count = released.len(),
-                "released local VM fragment ownership"
+                "released local protocol fragment ownership"
             );
         }
         released
@@ -697,7 +697,7 @@ impl AuraEffectSystem {
         if !released.is_empty() {
             tracing::debug!(
                 fragment_count = released.len(),
-                "released explicitly claimed local VM fragments"
+                "released explicitly claimed local protocol fragments"
             );
         }
         released
