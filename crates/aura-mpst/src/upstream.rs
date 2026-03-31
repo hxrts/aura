@@ -15,6 +15,7 @@
 //! ownership, and runtime admission semantics above this layer.
 
 pub use telltale as api;
-pub use telltale_choreography as choreography;
+pub use telltale_language as language;
+pub use telltale_runtime as runtime;
 pub use telltale_theory as theory;
 pub use telltale_types as types;

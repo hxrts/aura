@@ -3,12 +3,13 @@
 //! These assertions are intended for test code in Layer 5+ crates to enforce
 //! coherence and orphan-free properties on choreography sources.
 
-use aura_mpst::upstream::choreography::{
+use aura_mpst::upstream::language::{
     ast::{choreography_to_global, local_to_local_r, LocalTypeR},
-    compiler::{parse_choreography_str, project},
+    parse_choreography_str, project,
 };
 use std::collections::BTreeMap;
-use aura_mpst::upstream::theory::{async_subtype, check_coherent, orphan_free};
+use telltale_theory_v9::coherence::check_coherent;
+use telltale_theory_v9::subtyping::{async_subtype, orphan_free};
 
 fn strip_aura_annotations_for_parser(input: &str) -> String {
     let mut out = String::with_capacity(input.len());

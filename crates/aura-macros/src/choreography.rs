@@ -13,23 +13,21 @@ use proc_macro2::{Group, TokenStream, TokenTree};
 use quote::quote;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use aura_mpst::upstream::{
-    choreography as telltale_choreography, theory as telltale_theory,
-};
 use syn::spanned::Spanned;
 use syn::{
     parse::Parse,
     visit_mut::{self, VisitMut},
     Attribute, Expr, ExprLit, ExprMacro, Ident, Lit, LitStr, Stmt, Type,
 };
+use telltale_language as telltale_choreography;
 use telltale_choreography::{
-    ast::{
-        choreography_to_global, local_to_local_r, Choreography, GlobalTypeCore, MessageType,
-        PayloadSort, Protocol,
-    },
-    compiler::{codegen::generate_choreography_code, parse_choreography_str, project},
+    generate_choreography_code, parse_choreography_str, project, Choreography, MessageType,
+    Protocol,
 };
-use telltale_theory::check_coherent;
+use telltale_choreography::ast::{
+    choreography_to_global, local_to_local_r, GlobalTypeCore, PayloadSort,
+};
+use telltale_theory_v9::coherence::check_coherent;
 
 // Import Biscuit-related types for the updated annotation system
 use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
@@ -66,9 +64,6 @@ enum CoherenceModelError {
         hint: &'static str,
     },
     InvalidChoice(String),
-    ConversionDrift {
-        detail: String,
-    },
 }
 
 impl std::fmt::Display for CoherenceModelError {
@@ -81,7 +76,6 @@ impl std::fmt::Display for CoherenceModelError {
                 )
             }
             Self::InvalidChoice(reason) => write!(f, "{reason}"),
-            Self::ConversionDrift { detail } => write!(f, "{detail}"),
         }
     }
 }
@@ -134,15 +128,12 @@ fn validate_protocol_coherence(choreography: &Choreography) -> Result<(), String
 fn build_coherence_validation_input(
     choreography: &Choreography,
 ) -> Result<CoherenceValidationInput, CoherenceModelError> {
-    let mut next_loop_id = 0usize;
-    let global_type = protocol_to_global_for_coherence(&choreography.protocol, &mut next_loop_id)?;
-    if let Ok(authoritative_global) = choreography_to_global(choreography) {
-        if global_type != authoritative_global {
-            return Err(CoherenceModelError::ConversionDrift {
-                detail: "custom coherence conversion drifted from telltale_choreography::ast::choreography_to_global for a supported DSL subset".to_string(),
-            });
-        }
-    }
+    let global_type = if let Ok(authoritative_global) = choreography_to_global(choreography) {
+        authoritative_global
+    } else {
+        let mut next_loop_id = 0usize;
+        protocol_to_global_for_coherence(&choreography.protocol, &mut next_loop_id)?
+    };
     let mut initial_delivery_env = BTreeMap::new();
     collect_initial_delivery_env(&global_type, &mut initial_delivery_env);
     Ok(CoherenceValidationInput {
@@ -156,6 +147,21 @@ fn protocol_to_global_for_coherence(
     next_loop_id: &mut usize,
 ) -> Result<GlobalTypeCore, CoherenceModelError> {
     match protocol {
+        Protocol::Begin { .. }
+        | Protocol::Await { .. }
+        | Protocol::Resolve { .. }
+        | Protocol::Invalidate { .. }
+        | Protocol::Let { .. }
+        | Protocol::Case { .. }
+        | Protocol::Timeout { .. }
+        | Protocol::Publish { .. }
+        | Protocol::PublishAuthority { .. }
+        | Protocol::Materialize { .. }
+        | Protocol::Handoff { .. }
+        | Protocol::DependentWork { .. } => Err(CoherenceModelError::UnsupportedFeature {
+            feature: "authority-local protocol constructs",
+            hint: "the current Aura runner-generation path still only supports the message-passing choreography subset",
+        }),
         Protocol::End => Ok(GlobalTypeCore::End),
         Protocol::Var(ident) => Ok(GlobalTypeCore::var(ident.to_string())),
         Protocol::Rec { label, body } => Ok(GlobalTypeCore::mu(
@@ -300,7 +306,7 @@ fn parse_choreography_source(input: TokenStream) -> Result<ChoreographyInput, sy
     let namespace_attr = extract_namespace_from_attrs(&parsed.attrs)?;
     let (dsl, span) = read_choreography_source(parsed.expr)?;
 
-    let parser_dsl = strip_aura_annotations_for_parser(&dsl);
+    let parser_dsl = normalize_choreography_for_parser(&dsl);
     let mut choreography = parse_choreography_str(&parser_dsl)
         .map_err(|err| syn::Error::new(span, format!("Choreography parse error: {err}")))?;
     let namespace = match (namespace_attr, choreography.namespace.clone()) {
@@ -392,19 +398,23 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
 
     #[allow(clippy::while_let_on_iterator)]
     while let Some(ch) = chars.next() {
-        if ch != '[' {
-            out.push(ch);
-            continue;
-        }
+        let (open, close) = match ch {
+            '[' => ('[', ']'),
+            '{' => ('{', '}'),
+            _ => {
+                out.push(ch);
+                continue;
+            }
+        };
 
         let mut depth = 1usize;
         let mut buf = String::new();
         let mut has_equals = false;
 
         while let Some(next) = chars.next() {
-            if next == '[' {
+            if next == open {
                 depth += 1;
-            } else if next == ']' {
+            } else if next == close {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
                     break;
@@ -417,13 +427,38 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
         }
 
         if !has_equals {
-            out.push('[');
+            out.push(open);
             out.push_str(&buf);
-            out.push(']');
+            out.push(close);
         }
     }
 
     out
+}
+
+fn normalize_choreography_for_parser(input: &str) -> String {
+    let stripped = strip_aura_annotations_for_parser(input);
+    let mut normalized = String::with_capacity(stripped.len());
+
+    for line in stripped.lines() {
+        let indent_len = line.chars().take_while(|ch| ch.is_whitespace()).count();
+        let (indent, body) = line.split_at(indent_len);
+        if let Some(rest) = body.strip_prefix("choice at ") {
+            normalized.push_str(indent);
+            normalized.push_str("choice ");
+            normalized.push_str(rest);
+            normalized.push_str(" at");
+        } else if body.starts_with('|') && body.contains("->") {
+            let rewritten = body.replacen("->", "=>", 1);
+            normalized.push_str(indent);
+            normalized.push_str(&rewritten);
+        } else {
+            normalized.push_str(line);
+        }
+        normalized.push('\n');
+    }
+
+    normalized
 }
 
 fn insert_message(out: &mut BTreeMap<String, MessageType>, message: MessageType) {
@@ -441,6 +476,19 @@ fn insert_choice_label(out: &mut BTreeMap<String, MessageType>, label: &Ident) {
 
 fn collect_messages(protocol: &Protocol, out: &mut BTreeMap<String, MessageType>) {
     match protocol {
+        Protocol::Begin { continuation, .. }
+        | Protocol::Await { continuation, .. }
+        | Protocol::Resolve { continuation, .. }
+        | Protocol::Invalidate { continuation, .. }
+        | Protocol::Let { continuation, .. }
+        | Protocol::Publish { continuation, .. }
+        | Protocol::PublishAuthority { continuation, .. }
+        | Protocol::Materialize { continuation, .. }
+        | Protocol::Handoff { continuation, .. }
+        | Protocol::DependentWork { continuation, .. }
+        | Protocol::Extension { continuation, .. } => {
+            collect_messages(continuation, out);
+        }
         Protocol::Send {
             message,
             continuation,
@@ -474,8 +522,22 @@ fn collect_messages(protocol: &Protocol, out: &mut BTreeMap<String, MessageType>
         Protocol::Rec { body, .. } => {
             collect_messages(body, out);
         }
-        Protocol::Extension { continuation, .. } => {
-            collect_messages(continuation, out);
+        Protocol::Case { branches, .. } => {
+            for branch in branches {
+                collect_messages(&branch.protocol, out);
+            }
+        }
+        Protocol::Timeout {
+            body,
+            on_timeout,
+            on_cancel,
+            ..
+        } => {
+            collect_messages(body, out);
+            collect_messages(on_timeout, out);
+            if let Some(on_cancel) = on_cancel {
+                collect_messages(on_cancel, out);
+            }
         }
         Protocol::Var(_) | Protocol::End => {}
     }
@@ -829,7 +891,9 @@ fn generate_compat_runners(
         #[allow(dead_code, unused_imports, unused_variables)]
         pub mod runners {
             use super::*;
-            use ::aura_mpst::{ChoreographicAdapterExt as ChoreographicAdapter, ProtocolContext};
+            use ::aura_mpst::GeneratedChoreographyRuntime;
+            use ::aura_mpst::upstream::runtime::{ChoreoHandler, ChoreoHandlerExt};
+            use ::aura_mpst::upstream::runtime::effects::ContextExt;
 
             #output_types
             #(#runner_fns)*
@@ -874,7 +938,7 @@ fn generate_runner_branch_label_enum(labels: &BTreeSet<String>) -> TokenStream {
             #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
             pub enum BranchLabel {}
 
-            impl ::aura_mpst::upstream::choreography::LabelId for BranchLabel {
+            impl ::aura_mpst::upstream::runtime::LabelId for BranchLabel {
                 fn as_str(&self) -> &'static str {
                     match *self {}
                 }
@@ -905,7 +969,7 @@ fn generate_runner_branch_label_enum(labels: &BTreeSet<String>) -> TokenStream {
             #(#variants),*
         }
 
-        impl ::aura_mpst::upstream::choreography::LabelId for BranchLabel {
+        impl ::aura_mpst::upstream::runtime::LabelId for BranchLabel {
             fn as_str(&self) -> &'static str {
                 match self {
                     #(#as_str_arms),*
@@ -939,9 +1003,9 @@ fn generate_runner_role_enum(roles: &[telltale_choreography::ast::Role]) -> Toke
         let name = role.name();
         let role_str = role.name().to_string();
         if role.index().is_some() || role.param().is_some() {
-            quote! { RuntimeRole::#name(_) => ::aura_mpst::upstream::choreography::RoleName::from_static(#role_str) }
+            quote! { RuntimeRole::#name(_) => ::aura_mpst::upstream::runtime::RoleName::from_static(#role_str) }
         } else {
-            quote! { RuntimeRole::#name => ::aura_mpst::upstream::choreography::RoleName::from_static(#role_str) }
+            quote! { RuntimeRole::#name => ::aura_mpst::upstream::runtime::RoleName::from_static(#role_str) }
         }
     }).collect();
 
@@ -963,10 +1027,10 @@ fn generate_runner_role_enum(roles: &[telltale_choreography::ast::Role]) -> Toke
             #(#role_variants),*
         }
 
-        impl ::aura_mpst::upstream::choreography::RoleId for RuntimeRole {
+        impl ::aura_mpst::upstream::runtime::RoleId for RuntimeRole {
             type Label = BranchLabel;
 
-            fn role_name(&self) -> ::aura_mpst::upstream::choreography::RoleName {
+            fn role_name(&self) -> ::aura_mpst::upstream::runtime::RoleName {
                 match self {
                     #(#role_name_arms),*
                 }
@@ -999,6 +1063,7 @@ fn generate_runner_fn(
     local_type: &telltale_choreography::ast::LocalType,
 ) -> TokenStream {
     let role_name = role.name();
+    let role_name_literal = role_name.to_string();
     let fn_name = quote::format_ident!("run_{}", role_name.to_string().to_lowercase());
     let output_type = quote::format_ident!("{}Output", role_name);
     let role_variant = if role.index().is_some() || role.param().is_some() {
@@ -1010,29 +1075,42 @@ fn generate_runner_fn(
 
     let signature = if role.index().is_some() || role.param().is_some() {
         quote! {
-            pub async fn #fn_name<A: ChoreographicAdapter<Role = RuntimeRole>>(
+            pub async fn #fn_name<A: GeneratedChoreographyRuntime<Role = RuntimeRole>>(
                 adapter: &mut A,
                 index: u32,
-            ) -> Result<#output_type, A::Error>
-            where
-                A::Error: From<::aura_mpst::upstream::choreography::ChoreographyError>
+            ) -> ::aura_mpst::upstream::runtime::ChoreoResult<#output_type>
         }
     } else {
         quote! {
-            pub async fn #fn_name<A: ChoreographicAdapter<Role = RuntimeRole>>(
+            pub async fn #fn_name<A: GeneratedChoreographyRuntime<Role = RuntimeRole>>(
                 adapter: &mut A,
-            ) -> Result<#output_type, A::Error>
-            where
-                A::Error: From<::aura_mpst::upstream::choreography::ChoreographyError>
+            ) -> ::aura_mpst::upstream::runtime::ChoreoResult<#output_type>
         }
     };
 
     quote! {
         #signature {
-            let _ctx = ProtocolContext::for_role(#protocol_name, #role_variant);
-            let output = #output_type::default();
-            #body
-            Ok(output)
+            let role = #role_variant;
+            let mut ep = adapter
+                .setup(role)
+                .await
+                .with_protocol_context(#protocol_name, #role_name_literal, "setup")?;
+            let run_result = async {
+                let output = #output_type::default();
+                #body
+                Ok(output)
+            }
+            .await
+            .with_protocol_context(#protocol_name, #role_name_literal, "execute");
+            let teardown_result = adapter
+                .teardown(ep)
+                .await
+                .with_protocol_context(#protocol_name, #role_name_literal, "teardown");
+            match (run_result, teardown_result) {
+                (Err(error), _) => Err(error),
+                (Ok(_), Err(error)) => Err(error),
+                (Ok(output), Ok(())) => Ok(output),
+            }
         }
     }
 }
@@ -1055,12 +1133,10 @@ fn generate_runner_execute_as(
         .collect();
 
     quote! {
-        pub async fn execute_as<A: ChoreographicAdapter<Role = RuntimeRole>>(
+        pub async fn execute_as<A: GeneratedChoreographyRuntime<Role = RuntimeRole>>(
             role: RuntimeRole,
             adapter: &mut A,
-        ) -> Result<(), A::Error>
-        where
-            A::Error: From<::aura_mpst::upstream::choreography::ChoreographyError>
+        ) -> ::aura_mpst::upstream::runtime::ChoreoResult<()>
         {
             match role {
                 #(#match_arms)*
@@ -1088,10 +1164,10 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                         return quote! {
                             let roles = adapter.resolve_family(#family_name)?;
                             if roles.is_empty() {
-                                return Err(::aura_mpst::upstream::choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                                return Err(::aura_mpst::upstream::runtime::ChoreographyError::EmptyRoleFamily(#family_name.to_string()));
                             }
                             let msg: #msg_type = adapter.provide_message(roles[0]).await?;
-                            adapter.broadcast(&roles, msg).await?;
+                            adapter.broadcast(&mut ep, &roles, &msg).await?;
                             #cont
                         };
                     }
@@ -1101,10 +1177,10 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                         return quote! {
                             let roles = adapter.resolve_range(#family_name, #start_expr, #end_expr)?;
                             if roles.is_empty() {
-                                return Err(::aura_mpst::upstream::choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                                return Err(::aura_mpst::upstream::runtime::ChoreographyError::EmptyRoleFamily(#family_name.to_string()));
                             }
                             let msg: #msg_type = adapter.provide_message(roles[0]).await?;
-                            adapter.broadcast(&roles, msg).await?;
+                            adapter.broadcast(&mut ep, &roles, &msg).await?;
                             #cont
                         };
                     }
@@ -1115,7 +1191,7 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
             let to_role = generate_runner_role_id(to);
             quote! {
                 let msg: #msg_type = adapter.provide_message(#to_role).await?;
-                adapter.send(#to_role, msg).await?;
+                adapter.send(&mut ep, #to_role, &msg).await?;
                 #cont
             }
         }
@@ -1133,9 +1209,9 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                         return quote! {
                             let roles = adapter.resolve_family(#family_name)?;
                             if roles.is_empty() {
-                                return Err(::aura_mpst::upstream::choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                                return Err(::aura_mpst::upstream::runtime::ChoreographyError::EmptyRoleFamily(#family_name.to_string()));
                             }
-                            let _msgs: Vec<#msg_type> = adapter.collect(&roles).await?;
+                            let _msgs: Vec<#msg_type> = adapter.collect(&mut ep, &roles).await?;
                             #cont
                         };
                     }
@@ -1145,9 +1221,9 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                         return quote! {
                             let roles = adapter.resolve_range(#family_name, #start_expr, #end_expr)?;
                             if roles.is_empty() {
-                                return Err(::aura_mpst::upstream::choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                                return Err(::aura_mpst::upstream::runtime::ChoreographyError::EmptyRoleFamily(#family_name.to_string()));
                             }
-                            let _msgs: Vec<#msg_type> = adapter.collect(&roles).await?;
+                            let _msgs: Vec<#msg_type> = adapter.collect(&mut ep, &roles).await?;
                             #cont
                         };
                     }
@@ -1157,7 +1233,7 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
 
             let from_role = generate_runner_role_id(from);
             quote! {
-                let _msg: #msg_type = adapter.recv(#from_role).await?;
+                let _msg: #msg_type = adapter.recv(&mut ep, #from_role).await?;
                 #cont
             }
         }
@@ -1167,7 +1243,7 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                 .iter()
                 .map(|(label, cont_type)| {
                     let cont = generate_runner_body(cont_type);
-                    quote! { BranchLabel::#label => { adapter.choose(#to_role, BranchLabel::#label).await?; #cont } }
+                    quote! { BranchLabel::#label => { adapter.choose(&mut ep, #to_role, BranchLabel::#label).await?; #cont } }
                 })
                 .collect();
             let choices: Vec<_> = branches
@@ -1191,7 +1267,7 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                 })
                 .collect();
             quote! {
-                let label = adapter.offer(#from_role).await?;
+                let label = adapter.offer(&mut ep, #from_role).await?;
                 match label {
                     #(#match_arms),*
                 }
@@ -1264,14 +1340,14 @@ fn generate_runner_role_id(role: &telltale_choreography::ast::Role) -> TokenStre
                 quote! { RuntimeRole::#name(#var_ident) }
             }
             RoleIndex::Wildcard => quote! {{
-                return Err(::aura_mpst::upstream::choreography::ChoreographyError::ExecutionError(
+                return Err(::aura_mpst::upstream::runtime::ChoreographyError::ExecutionError(
                     "wildcard roles must be resolved with resolve_family()".to_string()
-                ).into());
+                ));
             }},
             RoleIndex::Range(_) => quote! {{
-                return Err(::aura_mpst::upstream::choreography::ChoreographyError::ExecutionError(
+                return Err(::aura_mpst::upstream::runtime::ChoreographyError::ExecutionError(
                     "range roles must be resolved with resolve_range()".to_string()
-                ).into());
+                ));
             }},
         }
     } else if role.param().is_some() {
@@ -1299,75 +1375,7 @@ fn rewrite_runner_modules(items: &mut [syn::Item]) {
 }
 
 fn rewrite_runner_imports(items: &mut [syn::Item]) {
-    for item in items.iter_mut() {
-        if let syn::Item::Use(item_use) = item {
-            if use_tree_contains_adapter(item_use) {
-                strip_adapter_from_use(item_use);
-            }
-        }
-    }
-
     strip_output_metadata_updates(items);
-}
-
-fn use_tree_contains_adapter(item_use: &syn::ItemUse) -> bool {
-    match &item_use.tree {
-        syn::UseTree::Path(path) => {
-            if path.ident == "aura_mpst" {
-                if let syn::UseTree::Path(inner) = &*path.tree {
-                    if inner.ident != "telltale_choreography" {
-                        return false;
-                    }
-                    return contains_name(&inner.tree, "ChoreographicAdapter");
-                }
-                return false;
-            }
-
-            if path.ident == "telltale_choreography" {
-                return contains_name(&path.tree, "ChoreographicAdapter");
-            }
-
-            false
-        }
-        _ => false,
-    }
-}
-
-fn contains_name(tree: &syn::UseTree, name: &str) -> bool {
-    match tree {
-        syn::UseTree::Name(item) => item.ident == name,
-        syn::UseTree::Rename(item) => item.ident == name,
-        syn::UseTree::Group(group) => group.items.iter().any(|item| contains_name(item, name)),
-        syn::UseTree::Path(path) => contains_name(&path.tree, name),
-        syn::UseTree::Glob(_) => false,
-    }
-}
-
-fn strip_adapter_from_use(item_use: &mut syn::ItemUse) {
-    fn strip(tree: &mut syn::UseTree) {
-        match tree {
-            syn::UseTree::Group(group) => {
-                let mut filtered = syn::punctuated::Punctuated::new();
-                for item in group.items.iter() {
-                    let is_adapter = matches!(
-                        item,
-                        syn::UseTree::Name(name) if name.ident == "ChoreographicAdapter"
-                    ) || matches!(
-                        item,
-                        syn::UseTree::Rename(rename) if rename.ident == "ChoreographicAdapter"
-                    );
-                    if !is_adapter {
-                        filtered.push(item.clone());
-                    }
-                }
-                group.items = filtered;
-            }
-            syn::UseTree::Path(path) => strip(&mut path.tree),
-            _ => {}
-        }
-    }
-
-    strip(&mut item_use.tree);
 }
 
 fn strip_output_metadata_updates(items: &mut [syn::Item]) {
@@ -1600,6 +1608,19 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
 
 fn collect_message_type_names(protocol: &Protocol, names: &mut BTreeSet<String>) {
     match protocol {
+        Protocol::Begin { continuation, .. }
+        | Protocol::Await { continuation, .. }
+        | Protocol::Resolve { continuation, .. }
+        | Protocol::Invalidate { continuation, .. }
+        | Protocol::Let { continuation, .. }
+        | Protocol::Publish { continuation, .. }
+        | Protocol::PublishAuthority { continuation, .. }
+        | Protocol::Materialize { continuation, .. }
+        | Protocol::Handoff { continuation, .. }
+        | Protocol::DependentWork { continuation, .. }
+        | Protocol::Extension { continuation, .. } => {
+            collect_message_type_names(continuation, names);
+        }
         Protocol::Send {
             message,
             continuation,
@@ -1632,8 +1653,22 @@ fn collect_message_type_names(protocol: &Protocol, names: &mut BTreeSet<String>)
         Protocol::Rec { body, .. } => {
             collect_message_type_names(body, names);
         }
-        Protocol::Extension { continuation, .. } => {
-            collect_message_type_names(continuation, names);
+        Protocol::Case { branches, .. } => {
+            for branch in branches {
+                collect_message_type_names(&branch.protocol, names);
+            }
+        }
+        Protocol::Timeout {
+            body,
+            on_timeout,
+            on_cancel,
+            ..
+        } => {
+            collect_message_type_names(body, names);
+            collect_message_type_names(on_timeout, names);
+            if let Some(on_cancel) = on_cancel {
+                collect_message_type_names(on_cancel, names);
+            }
         }
         Protocol::Var(_) | Protocol::End => {}
     }
@@ -2489,13 +2524,15 @@ fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        build_coherence_validation_input, validate_link_annotations, validate_protocol_coherence,
+        build_coherence_validation_input, normalize_choreography_for_parser,
+        validate_link_annotations, validate_protocol_coherence,
     };
     use aura_mpst::ast_extraction::extract_aura_annotations;
-    use telltale_choreography::compiler::parse_choreography_str;
+    use telltale_language::parse_choreography_str;
 
-    fn parse_test_choreography(dsl: &str) -> telltale_choreography::ast::Choreography {
-        parse_choreography_str(dsl).expect("choreography should parse")
+    fn parse_test_choreography(dsl: &str) -> telltale_language::ast::Choreography {
+        let normalized = normalize_choreography_for_parser(dsl);
+        parse_choreography_str(&normalized).expect("choreography should parse")
     }
 
     #[test]
@@ -2572,7 +2609,7 @@ protocol SimpleChoice =
             input_a, input_b,
             "choice coherence input must be deterministic across repeated derivations"
         );
-        assert_eq!(input_a.initial_delivery_env.len(), 2);
+        assert_eq!(input_a.initial_delivery_env.len(), 4);
         validate_protocol_coherence(&choreography).expect("choice protocol should be coherent");
     }
 

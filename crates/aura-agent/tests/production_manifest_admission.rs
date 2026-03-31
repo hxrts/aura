@@ -41,6 +41,36 @@ fn production_manifests_have_explicit_admission_profiles() {
 }
 
 #[test]
+fn production_manifests_preserve_core_protocol_metadata() {
+    for manifest in production_manifests() {
+        assert!(
+            !manifest.protocol_name.is_empty(),
+            "manifest protocol_name must not be empty for protocol_id={}",
+            manifest.protocol_id
+        );
+        assert!(
+            !manifest.protocol_id.is_empty(),
+            "manifest protocol_id must not be empty for protocol_name={}",
+            manifest.protocol_name
+        );
+        assert!(
+            !manifest.role_names.is_empty(),
+            "manifest role_names must not be empty for protocol_id={}",
+            manifest.protocol_id
+        );
+        assert_eq!(
+            manifest.protocol_qualified_name,
+            CompositionManifest::qualified_name(
+                manifest.protocol_namespace.as_deref(),
+                &manifest.protocol_name,
+            ),
+            "qualified-name derivation drifted for protocol_id={}",
+            manifest.protocol_id
+        );
+    }
+}
+
+#[test]
 fn production_manifests_match_admission_capability_mapping() {
     for manifest in production_manifests() {
         let expected = required_artifacts(&manifest.protocol_id).to_vec();
@@ -52,6 +82,25 @@ fn production_manifests_match_admission_capability_mapping() {
         assert_eq!(
             actual, expected,
             "manifest capability mapping drifted for protocol_id={}",
+            manifest.protocol_id
+        );
+    }
+}
+
+#[test]
+fn production_manifests_emit_sorted_unique_guard_capabilities() {
+    for manifest in production_manifests() {
+        let actual = manifest
+            .guard_capabilities
+            .iter()
+            .map(|capability| capability.as_str())
+            .collect::<Vec<_>>();
+        let mut expected = actual.clone();
+        expected.sort_unstable();
+        expected.dedup();
+        assert_eq!(
+            actual, expected,
+            "guard capability ordering/dedup drifted for protocol_id={}",
             manifest.protocol_id
         );
     }

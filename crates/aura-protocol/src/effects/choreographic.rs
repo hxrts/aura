@@ -308,10 +308,10 @@ pub enum ChoreographyError {
 }
 
 pub fn map_telltale_choreography_error(
-    error: aura_mpst::upstream::choreography::ChoreographyError,
+    error: aura_mpst::upstream::runtime::ChoreographyError,
 ) -> ChoreographyError {
     use aura_core::effects::TransportError;
-    use aura_mpst::upstream::choreography::ChoreographyError as TelltaleChoreographyError;
+    use aura_mpst::upstream::runtime::ChoreographyError as TelltaleChoreographyError;
 
     fn parse_transport_error(message: &str) -> Option<TransportError> {
         let message = message.trim();
@@ -400,8 +400,8 @@ pub fn map_telltale_choreography_error(
     }
 }
 
-impl From<aura_mpst::upstream::choreography::ChoreographyError> for ChoreographyError {
-    fn from(e: aura_mpst::upstream::choreography::ChoreographyError) -> Self {
+impl From<aura_mpst::upstream::runtime::ChoreographyError> for ChoreographyError {
+    fn from(e: aura_mpst::upstream::runtime::ChoreographyError) -> Self {
         map_telltale_choreography_error(e)
     }
 }

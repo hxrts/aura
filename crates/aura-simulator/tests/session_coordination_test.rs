@@ -8,7 +8,7 @@
 use aura_agent::handlers::SessionCoordinationRole;
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
-use aura_mpst::upstream::choreography::RoleId;
+use aura_mpst::upstream::runtime::RoleId;
 use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;

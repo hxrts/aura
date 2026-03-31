@@ -72,88 +72,37 @@ pub use serde_json;
 /// Generated choreography composition metadata types.
 pub mod composition;
 
-use crate::upstream::choreography as telltale_choreography;
+use crate::upstream::{language as telltale_language, runtime as telltale_runtime};
 use async_trait::async_trait;
 pub use composition::{
     startup_defaults_for_qualified_name, AdmittedModuleGuardCapabilities,
     CompositionDelegationConstraint, CompositionLinkSpec, CompositionManifest,
     GuardCapabilityAdmission, GuardCapabilityAdmissionError, ModuleGuardCapabilityError,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-/// Aura compatibility adapter for generated choreography runners.
+/// Aura-owned runtime hooks required by generated choreography runners.
 ///
-/// Telltale 3.0 moved generated choreography execution toward `ChoreoHandler`
-/// effect programs. Aura still has a large surface area built around the
-/// simpler runner adapter model, so `aura-macros` continues generating against
-/// this compatibility trait while the underlying dependency stack is on
-/// Telltale 3.0.
+/// Generated Aura choreographies execute over upstream `ChoreoHandlerExt`
+/// lifecycle and endpoint management. This trait only supplies the additional
+/// Aura-owned hooks that upstream does not model: sourcing outbound payloads,
+/// selecting local branches, and resolving parameterized role families.
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-pub trait ChoreographicAdapter: Send {
-    /// The error type for this adapter.
-    type Error: std::error::Error + Send + Sync + 'static;
-    /// The role identifier type for this adapter.
-    type Role: telltale_choreography::RoleId;
-
-    /// Send a message to a specific role.
-    async fn send<M: Serialize + Send + Sync + 'static>(
+pub trait GeneratedChoreographyRuntime: telltale_runtime::ChoreoHandlerExt + Send {
+    /// Provide the next outbound message for a send.
+    async fn provide_message<M: Send + 'static>(
         &mut self,
         to: Self::Role,
-        msg: M,
-    ) -> Result<(), Self::Error>;
+    ) -> telltale_runtime::ChoreoResult<M>;
 
-    /// Receive a message from a specific role.
-    async fn recv<M: DeserializeOwned + Send + 'static>(
+    /// Select a branch label from the available choices.
+    async fn select_branch<L: telltale_runtime::LabelId>(
         &mut self,
-        from: Self::Role,
-    ) -> Result<M, Self::Error>;
-
-    /// Broadcast a message to multiple roles.
-    async fn broadcast<M: Serialize + Clone + Send + Sync + 'static>(
-        &mut self,
-        to: &[Self::Role],
-        msg: M,
-    ) -> Result<(), Self::Error> {
-        for role in to {
-            self.send(*role, msg.clone()).await?;
-        }
-        Ok(())
-    }
-
-    /// Collect messages from multiple roles.
-    async fn collect<M: DeserializeOwned + Send + 'static>(
-        &mut self,
-        from: &[Self::Role],
-    ) -> Result<Vec<M>, Self::Error> {
-        let mut messages = Vec::with_capacity(from.len());
-        for role in from {
-            messages.push(self.recv::<M>(*role).await?);
-        }
-        Ok(messages)
-    }
-
-    /// Broadcast a branch label.
-    async fn choose(
-        &mut self,
-        to: Self::Role,
-        label: <Self::Role as telltale_choreography::RoleId>::Label,
-    ) -> Result<(), Self::Error> {
-        self.send(to, ChoiceLabel(label)).await
-    }
-
-    /// Receive a branch label.
-    async fn offer(
-        &mut self,
-        from: Self::Role,
-    ) -> Result<<Self::Role as telltale_choreography::RoleId>::Label, Self::Error> {
-        let choice: ChoiceLabel<<Self::Role as telltale_choreography::RoleId>::Label> =
-            self.recv(from).await?;
-        Ok(choice.0)
-    }
+        choices: &[L],
+    ) -> telltale_runtime::ChoreoResult<L>;
 
     /// Resolve all instances of a parameterized role family.
-    fn resolve_family(&self, family: &str) -> Result<Vec<Self::Role>, Self::Error>;
+    fn resolve_family(&self, family: &str) -> telltale_runtime::ChoreoResult<Vec<Self::Role>>;
 
     /// Resolve a role family range `[start, end)`.
     fn resolve_range(
@@ -161,82 +110,34 @@ pub trait ChoreographicAdapter: Send {
         family: &str,
         start: u32,
         end: u32,
-    ) -> Result<Vec<Self::Role>, Self::Error>;
+    ) -> telltale_runtime::ChoreoResult<Vec<Self::Role>> {
+        let roles = self.resolve_family(family)?;
+        let start_idx = start as usize;
+        let end_idx = end as usize;
+        if start_idx >= roles.len() || end_idx > roles.len() || start_idx >= end_idx {
+            return Err(telltale_runtime::ChoreographyError::ExecutionError(format!(
+                "invalid role family range for {family}: [{start}, {end})"
+            )));
+        }
+        Ok(roles[start_idx..end_idx].to_vec())
+    }
+
+    /// Collect messages from multiple roles using the active endpoint.
+    async fn collect<M: serde::de::DeserializeOwned + Send>(
+        &mut self,
+        ep: &mut Self::Endpoint,
+        from: &[Self::Role],
+    ) -> telltale_runtime::ChoreoResult<Vec<M>> {
+        let mut messages = Vec::with_capacity(from.len());
+        for role in from {
+            messages.push(self.recv(ep, *role).await?);
+        }
+        Ok(messages)
+    }
 
     /// Get the total count of instances in a role family.
-    fn family_size(&self, family: &str) -> Result<usize, Self::Error> {
+    fn family_size(&self, family: &str) -> telltale_runtime::ChoreoResult<usize> {
         self.resolve_family(family).map(|roles| roles.len())
-    }
-}
-
-/// Optional lifecycle hooks for compatibility runners.
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-pub trait ChoreographicAdapterExt: ChoreographicAdapter {
-    /// Called before protocol execution starts.
-    async fn setup(&mut self) -> Result<(), Self::Error>;
-
-    /// Called after protocol execution completes.
-    async fn teardown(&mut self) -> Result<(), Self::Error>;
-
-    /// Provide the next outbound message for a send.
-    async fn provide_message<M: Send + 'static>(
-        &mut self,
-        to: Self::Role,
-    ) -> Result<M, Self::Error>;
-
-    /// Select a branch label from the available choices.
-    async fn select_branch<L: telltale_choreography::LabelId>(
-        &mut self,
-        choices: &[L],
-    ) -> Result<L, Self::Error>;
-}
-
-/// A branch label wrapper used by compatibility runners.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ChoiceLabel<L: telltale_choreography::LabelId>(pub L);
-
-impl<L: telltale_choreography::LabelId> Serialize for ChoiceLabel<L> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.0.as_str())
-    }
-}
-
-impl<'de, L: telltale_choreography::LabelId> Deserialize<'de> for ChoiceLabel<L> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let label = String::deserialize(deserializer)?;
-        L::from_str(&label)
-            .map(ChoiceLabel)
-            .ok_or_else(|| serde::de::Error::custom("unknown choice label"))
-    }
-}
-
-/// Context metadata passed to generated runner functions.
-#[derive(Debug, Clone)]
-pub struct ProtocolContext {
-    /// Name of the protocol being executed.
-    pub protocol: &'static str,
-    /// Name of the role being executed.
-    pub role: telltale_choreography::RoleName,
-    /// Optional index for parameterized roles.
-    pub index: Option<u32>,
-}
-
-impl ProtocolContext {
-    /// Create a context from a concrete role value.
-    #[must_use]
-    pub fn for_role<R: telltale_choreography::RoleId>(protocol: &'static str, role: R) -> Self {
-        Self {
-            protocol,
-            role: role.role_name(),
-            index: role.role_index(),
-        }
     }
 }
 
@@ -280,9 +181,9 @@ pub mod extensions;
 /// - Compile-time validation of annotations
 /// - Zero runtime overhead for extension processing
 /// - Better error messages via proc macros
-pub fn init_aura_extensions() -> telltale_choreography::extensions::ExtensionRegistry {
+pub fn init_aura_extensions() -> telltale_language::extensions::ExtensionRegistry {
     // Create empty registry - extensions are now handled in aura-macros
-    telltale_choreography::extensions::ExtensionRegistry::new()
+    telltale_language::extensions::ExtensionRegistry::new()
 }
 
 pub use ast_extraction::{
@@ -428,9 +329,9 @@ mod tests {
     #[test]
     fn test_all_choreography_features_available() {
         // Verify we have access to the re-exported choreography types and functions.
-        let _registry = telltale_choreography::extensions::ExtensionRegistry::new();
-        let _composer = telltale_choreography::compiler::GrammarComposer::new();
-        let _parser = telltale_choreography::compiler::ExtensionParser::new();
+        let _registry = telltale_language::extensions::ExtensionRegistry::new();
+        let _composer = telltale_language::compiler::grammar::GrammarComposer::new();
+        let _parser = crate::upstream::runtime::ExtensionParser::new();
 
         // If this compiles, we successfully re-exported everything
     }

@@ -37,12 +37,11 @@ use aura_core::{CapabilityName, FlowCost};
 use aura_guards::guards::journal::JournalCoupler;
 use aura_guards::prelude::{GuardContextProvider, GuardEffects, SendGuardChain};
 use aura_guards::LeakageBudget;
-#[cfg(not(target_arch = "wasm32"))]
-use aura_mpst::upstream::choreography::{ChoreoHandler, ChoreoHandlerExt, ChoreoResult};
-use aura_mpst::upstream::choreography::{
+use aura_mpst::upstream::runtime::{ChoreoHandler, ChoreoHandlerExt, ChoreoResult};
+use aura_mpst::upstream::runtime::{
     ChoreographyError as TelltaleChoreographyError, LabelId, RoleId,
 };
-use aura_mpst::ChoreographicAdapterExt;
+use aura_mpst::GeneratedChoreographyRuntime;
 use aura_protocol::effects::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError as AuraChoreographyError, RoleIndex,
 };
@@ -193,10 +192,11 @@ pub struct MessageRequest<R: RoleId> {
     pub type_name: &'static str,
 }
 
-/// Runtime adapter used by generated choreography runners.
+/// Runtime adapter used by generated Aura choreography runners.
 ///
-/// This adapter implements the `ChoreographicAdapter` trait from telltale-choreography,
-/// bridging Aura's effect system with the choreographic programming model.
+/// This adapter implements upstream runtime handler traits plus Aura-owned
+/// generated-runtime hooks for message sourcing, branch selection, and
+/// parameterized role-family resolution.
 ///
 /// ## Role Family Support
 ///
@@ -213,10 +213,11 @@ struct RuntimeAdmissionConfig {
     admitted: bool,
 }
 
-/// Runtime adapter used by generated choreography runners.
+/// Runtime adapter used by generated Aura choreography runners.
 ///
-/// This adapter implements the `ChoreographicAdapter` trait from telltale-choreography,
-/// bridging Aura's effect system with the choreographic programming model.
+/// This adapter implements upstream runtime handler traits plus Aura-owned
+/// generated-runtime hooks for message sourcing, branch selection, and
+/// parameterized role-family resolution.
 ///
 /// ## Features
 ///
@@ -468,9 +469,7 @@ where
     }
 
     pub async fn start_session(&mut self, session_id: Uuid) -> Result<(), AuraChoreographyError> {
-        self.ensure_runtime_admission()
-            .await
-            .map_err(|error| TelltaleChoreographyError::ExecutionError(error.to_string()))?;
+        self.ensure_runtime_admission().await?;
         let mut roles = Vec::new();
         let self_role = self.map_role(self.self_role)?;
         roles.push(self_role);
@@ -747,9 +746,8 @@ where
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl<E, R> aura_mpst::ChoreographicAdapter for AuraProtocolAdapter<E, R>
+impl<E, R> GeneratedChoreographyRuntime for AuraProtocolAdapter<E, R>
 where
     E: ChoreographicEffects
         + GuardEffects
@@ -758,86 +756,13 @@ where
         + aura_core::TimeEffects,
     R: RoleId,
 {
-    type Error = AuraChoreographyError;
-    type Role = R;
-
-    async fn send<M: serde::Serialize + Send + Sync + 'static>(
-        &mut self,
-        to: Self::Role,
-        msg: M,
-    ) -> Result<(), Self::Error> {
-        self.send_value(to, &msg).await
-    }
-
-    async fn recv<M: serde::de::DeserializeOwned + Send + 'static>(
-        &mut self,
-        from: Self::Role,
-    ) -> Result<M, Self::Error> {
-        self.recv_value(from).await
-    }
-
-    fn resolve_family(&self, family: &str) -> Result<Vec<Self::Role>, Self::Error> {
-        self.role_families
-            .get(family)
-            .cloned()
-            .ok_or_else(|| AuraChoreographyError::RoleFamilyNotFound {
-                family: family.to_string(),
-            })
-            .and_then(|roles| {
-                if roles.is_empty() {
-                    Err(AuraChoreographyError::EmptyRoleFamily {
-                        family: family.to_string(),
-                    })
-                } else {
-                    Ok(roles)
-                }
-            })
-    }
-
-    fn resolve_range(
-        &self,
-        family: &str,
-        start: u32,
-        end: u32,
-    ) -> Result<Vec<Self::Role>, Self::Error> {
-        let roles = self.resolve_family(family)?;
-        let start_idx = start as usize;
-        let end_idx = end as usize;
-        if start_idx >= roles.len() || end_idx > roles.len() || start_idx >= end_idx {
-            return Err(AuraChoreographyError::InvalidRoleFamilyRange {
-                family: family.to_string(),
-                start,
-                end,
-            });
-        }
-        Ok(roles[start_idx..end_idx].to_vec())
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl<E, R> ChoreographicAdapterExt for AuraProtocolAdapter<E, R>
-where
-    E: ChoreographicEffects
-        + GuardEffects
-        + GuardContextProvider
-        + aura_core::PhysicalTimeEffects
-        + aura_core::TimeEffects,
-    R: RoleId,
-{
-    async fn setup(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    async fn teardown(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
     async fn provide_message<M: Send + 'static>(
         &mut self,
         to: Self::Role,
-    ) -> Result<M, Self::Error> {
-        self.ensure_runtime_admission().await?;
+    ) -> ChoreoResult<M> {
+        self.ensure_runtime_admission()
+            .await
+            .map_err(map_runtime_error)?;
         let boxed = match self.outbound.pop_front() {
             Some(boxed) => boxed,
             None => {
@@ -850,50 +775,58 @@ where
                         &self.received,
                     )
                     .ok_or_else(|| {
-                        AuraChoreographyError::ProtocolViolation {
+                        map_runtime_error(AuraChoreographyError::ProtocolViolation {
                             message: "message provider returned None".to_string(),
-                        }
+                        })
                     })?
                 } else {
-                    return Err(AuraChoreographyError::ProtocolViolation {
-                        message: "no queued message for provide_message".to_string(),
-                    });
+                    return Err(map_runtime_error(
+                        AuraChoreographyError::ProtocolViolation {
+                            message: "no queued message for provide_message".to_string(),
+                        },
+                    ));
                 }
             }
         };
 
         boxed.downcast::<M>().map(|msg| *msg).map_err(|_| {
-            AuraChoreographyError::ProtocolViolation {
+            map_runtime_error(AuraChoreographyError::ProtocolViolation {
                 message: format!(
                     "queued message type mismatch (expected {})",
                     std::any::type_name::<M>()
                 ),
-            }
+            })
         })
     }
 
-    async fn select_branch<L: LabelId>(&mut self, choices: &[L]) -> Result<L, Self::Error> {
-        self.ensure_runtime_admission().await?;
+    async fn select_branch<L: LabelId>(&mut self, choices: &[L]) -> ChoreoResult<L> {
+        self.ensure_runtime_admission()
+            .await
+            .map_err(map_runtime_error)?;
         let choice = match self.branch_choices.pop_front() {
             Some(choice) => choice,
             None => {
                 if let Some(decider) = self.branch_decider.as_mut() {
                     let label = decider(&self.received).ok_or_else(|| {
-                        AuraChoreographyError::ProtocolViolation {
+                        map_runtime_error(AuraChoreographyError::ProtocolViolation {
                             message: "branch decider returned None".to_string(),
-                        }
+                        })
                     })?;
                     let selected = choices
                         .iter()
                         .copied()
                         .find(|choice| choice.as_str() == label);
-                    return selected.ok_or_else(|| AuraChoreographyError::ProtocolViolation {
-                        message: format!("branch decider returned invalid label: {label}"),
+                    return selected.ok_or_else(|| {
+                        map_runtime_error(AuraChoreographyError::ProtocolViolation {
+                            message: format!("branch decider returned invalid label: {label}"),
+                        })
                     });
                 }
-                return Err(AuraChoreographyError::ProtocolViolation {
-                    message: "no queued branch choice for select_branch".to_string(),
-                });
+                return Err(map_runtime_error(
+                    AuraChoreographyError::ProtocolViolation {
+                        message: "no queued branch choice for select_branch".to_string(),
+                    },
+                ));
             }
         };
 
@@ -902,9 +835,30 @@ where
             .copied()
             .find(|label| label.as_str() == choice.as_str());
 
-        selected.ok_or_else(|| AuraChoreographyError::ProtocolViolation {
-            message: "queued branch choice is not valid for this choice".to_string(),
+        selected.ok_or_else(|| {
+            map_runtime_error(AuraChoreographyError::ProtocolViolation {
+                message: "queued branch choice is not valid for this choice".to_string(),
+            })
         })
+    }
+
+    fn resolve_family(&self, family: &str) -> ChoreoResult<Vec<Self::Role>> {
+        self.role_families
+            .get(family)
+            .cloned()
+            .ok_or_else(|| AuraChoreographyError::RoleFamilyNotFound {
+                family: family.to_string(),
+            })
+            .map_err(map_runtime_error)
+            .and_then(|roles| {
+                if roles.is_empty() {
+                    Err(map_runtime_error(AuraChoreographyError::EmptyRoleFamily {
+                        family: family.to_string(),
+                    }))
+                } else {
+                    Ok(roles)
+                }
+            })
     }
 }
 

@@ -144,9 +144,9 @@ fn invitation_exchange_global_from_source() -> GlobalType {
     let source = strip_aura_annotations_for_parser(include_str!(
         "../../aura-invitation/src/protocol.invitation_exchange.choreo"
     ));
-    let choreography = aura_mpst::upstream::choreography::compiler::parse_choreography_str(&source)
+    let choreography = aura_mpst::upstream::language::parse_choreography_str(&source)
         .expect("parse invitation choreography source");
-    aura_mpst::upstream::choreography::ast::choreography_to_global(&choreography)
+    aura_mpst::upstream::language::ast::choreography_to_global(&choreography)
         .expect("convert invitation choreography to global type")
 }
 

@@ -16,7 +16,8 @@ workspace = true
 aura-core = { path = "../aura-core", version = "0.1.0" }
 
 telltale = { workspace = true }
-telltale-choreography = { workspace = true }
+telltale-language = { workspace = true }
+telltale-runtime = { workspace = true }
 telltale-theory = { workspace = true }
 telltale-types = { workspace = true }
 syn = { workspace = true }

@@ -33,6 +33,7 @@ aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
 aura-app = { path = "../aura-app", version = "0.1.0" }
 aura-agent = { path = "../aura-agent", version = "0.1.0", optional = true }
 telltale-theory = { workspace = true, features = ["async-subtyping"] }
+telltale-theory-v9 = { package = "telltale-theory", version = "9.0.0", features = ["async-subtyping"] }
 
 async-trait = { workspace = true }
 tokio = { workspace = true }
