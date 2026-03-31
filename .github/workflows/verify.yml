@@ -68,13 +68,15 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
-      - name: Run Kani proofs
-        uses: model-checking/kani-github-action@v1
+      - uses: ./.github/actions/setup-nix
         with:
-          args: --package aura-protocol --default-unwind 10 --output-format terse
+          cache-name: kani
+          enable-store-cache: false
+      - name: Run Kani proofs
+        run: nix develop .#nightly --command just ci-kani
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: verify-deep
-          replay-command: cargo install --locked kani-verifier && cargo kani setup && cargo kani --package aura-protocol --default-unwind 10 --output-format terse
+          replay-command: nix develop .#nightly --command just ci-kani

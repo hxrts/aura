@@ -58,8 +58,19 @@ mod tests {
 
     fn test_socket_path(label: &str) -> std::path::PathBuf {
         let suffix = TEST_SOCKET_COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "aura-terminal-{label}-{}-{suffix}.sock",
+        let compact_label = label
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .take(6)
+            .collect::<String>();
+        let temp_root = if std::path::Path::new("/tmp").is_dir() {
+            std::path::PathBuf::from("/tmp")
+        } else {
+            std::env::temp_dir()
+        };
+        temp_root.join(format!(
+            "atui-{}-{}-{suffix}.sock",
+            compact_label,
             std::process::id()
         ))
     }
