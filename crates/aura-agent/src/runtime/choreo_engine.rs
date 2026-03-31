@@ -1065,7 +1065,7 @@ impl AuraChoreoEngine<AuraVmEffectHandler> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
+    use aura_mpst::upstream::types::{GlobalType, LocalTypeR};
     use std::collections::BTreeMap;
     use telltale_vm::runtime_contracts::RuntimeContracts;
 

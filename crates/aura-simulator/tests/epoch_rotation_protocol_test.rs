@@ -7,7 +7,7 @@
 
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
-use aura_mpst::telltale_choreography::RoleId;
+use aura_mpst::upstream::choreography::RoleId;
 use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_sync::protocols::epoch_runners::EpochRotationProtocolRole;
 use aura_testkit::ProtocolTest;

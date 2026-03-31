@@ -19,7 +19,7 @@ use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash;
 use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use aura_core::util::serialization::to_vec;
-use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
+use aura_mpst::upstream::types::{GlobalType, LocalTypeR};
 use aura_mpst::CompositionManifest;
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use std::collections::BTreeMap;

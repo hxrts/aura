@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use aura_mpst::{
-    telltale_types::{GlobalType, LocalTypeR},
+    upstream::types::{GlobalType, LocalTypeR},
     CompositionManifest,
 };
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole};

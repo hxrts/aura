@@ -1193,7 +1193,7 @@ pub fn vm_config_for_profile(hardening: AuraVmHardeningProfile) -> VMConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use telltale_types::{GlobalType, Label};
+    use aura_mpst::upstream::types::{GlobalType, Label};
     use telltale_vm::coroutine::KnowledgeFact;
     use telltale_vm::effect::EffectHandler;
     use telltale_vm::instr::Endpoint;
@@ -1252,7 +1252,7 @@ mod tests {
             Label::new("delta"),
             GlobalType::send("Replica", "Primary", Label::new("receipt"), GlobalType::End),
         );
-        let locals = telltale_theory::projection::project_all(&global)
+        let locals = aura_mpst::upstream::theory::projection::project_all(&global)
             .expect("projection must succeed")
             .into_iter()
             .collect::<std::collections::BTreeMap<_, _>>();

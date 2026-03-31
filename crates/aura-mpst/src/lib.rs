@@ -65,14 +65,14 @@
 //! ```
 
 // Canonical Telltale re-exports for Aura choreography/runtime integration.
+pub mod upstream;
+
 pub use serde_json;
-pub use telltale;
-pub use telltale_choreography;
-pub use telltale_types;
 
 /// Generated choreography composition metadata types.
 pub mod composition;
 
+use crate::upstream::choreography as telltale_choreography;
 use async_trait::async_trait;
 pub use composition::{
     startup_defaults_for_qualified_name, AdmittedModuleGuardCapabilities,

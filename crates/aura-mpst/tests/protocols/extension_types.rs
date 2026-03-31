@@ -3,7 +3,7 @@
 //! form the runtime side-effect bridge for choreographic guard annotations.
 
 use aura_core::{capability_name, types::identifiers::DeviceId, ContextId};
-use aura_mpst::telltale_choreography::extensions::ExtensionRegistry;
+use aura_mpst::upstream::choreography::extensions::ExtensionRegistry;
 
 /// Extension registry can be instantiated — basic smoke test.
 #[test]

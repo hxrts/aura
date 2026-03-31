@@ -12,7 +12,7 @@ Runtime library for choreographic protocol specifications and multi-party sessio
 | Journal coupling types (`JournalCoupling`, `JournalAnnotation`) | Protocol implementations (belong in feature crates, Layer 5) |
 | Guard chain integration traits | Macro parsing (belongs in `aura-macros`) |
 | Choreography error types (`MpstError`) | |
-| Re-exports of Telltale choreography/runtime functionality | |
+| Aura-owned upstream boundary in `src/upstream.rs` | Ad hoc direct upstream Telltale imports in downstream Aura crates |
 
 ## Dependencies
 
@@ -30,6 +30,23 @@ Runtime library for choreographic protocol specifications and multi-party sessio
 - `src/guards.rs`: Guard chain integration traits.
 - `src/runtime.rs`: Session endpoints and continuation types.
 - `src/ast_extraction.rs`: Annotation parsing, canonical capability parsing, and typed choreography metadata extraction.
+- `src/upstream.rs`: Single Aura-owned boundary for upstream Telltale surfaces.
+
+## Upstream Boundary Contract
+
+Allowed to cross `src/upstream.rs`:
+
+- upstream protocol/type surfaces required for choreography parsing and projection
+- theory/coherence surfaces required for compile-time validation and test helpers
+- serialized protocol metadata types consumed by Aura-owned manifest generation
+
+Must not cross `src/upstream.rs`:
+
+- Aura ownership policy
+- Aura guard-chain admission decisions
+- Aura workflow semantics
+- Aura runtime service lifecycle and task ownership
+- ad hoc direct imports of upstream crate names from unrelated Aura crates
 
 ## Invariants
 
@@ -37,6 +54,8 @@ Runtime library for choreographic protocol specifications and multi-party sessio
 - No handler implementations or composition.
 - Extensions handled externally via aura-macros.
 - Provides the same `choreography!` macro interface over Telltale.
+- `src/upstream.rs` is the sanctioned boundary for naming upstream Telltale crates from Aura-owned code.
+- `src/upstream.rs` remains intentionally narrow: protocol/types/theory only.
 - Choreography capability parsing is fail-closed and admits only canonical
   namespaced `CapabilityName` values.
 

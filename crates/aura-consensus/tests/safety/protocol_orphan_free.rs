@@ -1,11 +1,11 @@
 //! Protocol-level coherence and orphan-free checks for consensus choreography patterns.
 
-use aura_mpst::telltale_choreography::{
+use aura_mpst::upstream::choreography::{
     ast::local_to_local_r,
     compiler::{parse_choreography_str, project},
 };
 use std::collections::BTreeMap;
-use telltale_theory::orphan_free;
+use aura_mpst::upstream::theory::orphan_free;
 
 fn strip_aura_annotations_for_parser(input: &str) -> String {
     let mut out = String::with_capacity(input.len());

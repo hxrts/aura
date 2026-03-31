@@ -13,7 +13,7 @@ use aura_agent::{
     AuraVmParityProfile, AuraVmRuntimeSelector, AuraVmSchedulerSignals,
     AURA_VM_SCHED_PRIORITY_AGING, AURA_VM_SCHED_PROGRESS_AWARE,
 };
-use telltale_types::{GlobalType, Label};
+use aura_mpst::upstream::types::{GlobalType, Label};
 use telltale_vm::effect::EffectHandler;
 use telltale_vm::effect::TopologyPerturbation;
 use telltale_vm::loader::CodeImage;
@@ -24,7 +24,7 @@ use telltale_vm::{SessionId, Value};
 
 fn simple_send_image() -> CodeImage {
     let global = GlobalType::send("Sender", "Receiver", Label::new("msg"), GlobalType::End);
-    let locals = telltale_theory::projection::project_all(&global)
+    let locals = aura_mpst::upstream::theory::projection::project_all(&global)
         .expect("projection must succeed")
         .into_iter()
         .collect::<std::collections::BTreeMap<_, _>>();

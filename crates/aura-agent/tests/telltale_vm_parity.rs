@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cfg_if::cfg_if;
-use telltale_types::{GlobalType, Label, LocalTypeR};
+use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
 use telltale_vm::coroutine::Value;
 use telltale_vm::effect::EffectHandler;
 
@@ -348,7 +348,7 @@ fn mixed_protocol_composition_global(seed: u64) -> GlobalType {
 }
 
 fn project_locals(global: &GlobalType) -> BTreeMap<String, LocalTypeR> {
-    telltale_theory::projection::project_all(global)
+    aura_mpst::upstream::theory::projection::project_all(global)
         .expect("project global choreography to local session types")
         .into_iter()
         .collect()

@@ -13,7 +13,7 @@ use aura_agent::AuraProtocolAdapter;
 use aura_consensus::protocol::runners::AuraConsensusRole;
 use aura_core::{AuthorityId, DeviceId};
 use aura_invitation::protocol::exchange_runners::InvitationExchangeRole;
-use aura_mpst::telltale_choreography::RoleId;
+use aura_mpst::upstream::choreography::RoleId;
 use aura_recovery::recovery_runners::RecoveryProtocolRole;
 use aura_rendezvous::protocol::exchange_runners::RendezvousExchangeRole;
 use aura_simulator::{SimulatedMessageBus, TestEffectSystem};

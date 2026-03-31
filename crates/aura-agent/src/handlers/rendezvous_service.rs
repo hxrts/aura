@@ -123,8 +123,8 @@ impl RendezvousServiceApi {
         peer_roles: BTreeMap<String, ChoreographicRole>,
         active_role: &str,
         manifest: &CompositionManifest,
-        global_type: &aura_mpst::telltale_types::GlobalType,
-        local_types: &BTreeMap<String, aura_mpst::telltale_types::LocalTypeR>,
+        global_type: &aura_mpst::upstream::types::GlobalType,
+        local_types: &BTreeMap<String, aura_mpst::upstream::types::LocalTypeR>,
         initial_payloads: Vec<Vec<u8>>,
     ) -> AgentResult<()> {
         let result = async {

@@ -648,8 +648,8 @@ mod tests {
     ) -> (
         Vec<ChoreographicRole>,
         CompositionManifest,
-        aura_mpst::telltale_types::GlobalType,
-        BTreeMap<String, aura_mpst::telltale_types::LocalTypeR>,
+        aura_mpst::upstream::types::GlobalType,
+        BTreeMap<String, aura_mpst::upstream::types::LocalTypeR>,
     ) {
         let roles = vec![
             ChoreographicRole::for_authority(

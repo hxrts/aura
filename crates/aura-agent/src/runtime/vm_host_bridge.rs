@@ -12,7 +12,7 @@ use crate::runtime::{
 };
 use aura_core::effects::{VmBridgeEffects, VmBridgePendingSend};
 use aura_core::AuraVmDeterminismProfileV1;
-use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
+use aura_mpst::upstream::types::{GlobalType, LocalTypeR};
 use aura_mpst::{CompositionManifest, GuardCapabilityAdmission};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
 use std::collections::BTreeMap;
@@ -797,7 +797,7 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use aura_core::AuthorityId;
-    use aura_mpst::telltale_types::Label;
+    use aura_mpst::upstream::types::Label;
     use aura_mpst::CompositionLinkSpec;
     use aura_protocol::effects::{ChoreographicEffects, RoleIndex};
     use aura_testkit::stateful_effects::MockVmBridgeEffects;

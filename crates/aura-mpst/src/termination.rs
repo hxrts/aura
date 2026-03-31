@@ -1,7 +1,7 @@
 //! Termination-weight helpers for choreography runtime budgeting.
 
 use std::collections::BTreeMap;
-use telltale_types::LocalTypeR;
+use crate::upstream::types::LocalTypeR;
 
 /// Snapshot of in-flight per-edge message buffers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -58,7 +58,7 @@ pub fn compute_weighted_measure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use telltale_types::Label;
+    use crate::upstream::types::Label;
 
     fn simple_send_recv() -> LocalTypeR {
         LocalTypeR::send(

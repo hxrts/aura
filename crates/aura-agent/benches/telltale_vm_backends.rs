@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use telltale_types::{GlobalType, Label, LocalTypeR};
+use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
 use telltale_vm::coroutine::Value;
 use telltale_vm::effect::EffectHandler;
 use telltale_vm::loader::CodeImage;
@@ -56,7 +56,7 @@ impl EffectHandler for NoOpHandler {
 }
 
 fn project_locals(global: &GlobalType) -> BTreeMap<String, LocalTypeR> {
-    telltale_theory::projection::project_all(global)
+    aura_mpst::upstream::theory::projection::project_all(global)
         .expect("project choreography")
         .into_iter()
         .collect()

@@ -10,7 +10,7 @@ use aura_agent::{
 };
 use serde::Serialize;
 use std::collections::BTreeSet;
-use telltale_types::{GlobalType, Label, LocalTypeR};
+use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
 use telltale_vm::coroutine::Value;
 use telltale_vm::effect::EffectHandler;
 use telltale_vm::effect::TopologyPerturbation;
@@ -94,7 +94,7 @@ const CONTRACT_BUNDLES: &[ContractBundleSpec] = &[
 const CONTRACT_SEEDS: &[u64] = &[1, 7, 42];
 
 fn project_locals(global: &GlobalType) -> std::collections::BTreeMap<String, LocalTypeR> {
-    telltale_theory::projection::project_all(global)
+    aura_mpst::upstream::theory::projection::project_all(global)
         .expect("project global choreography to local session types")
         .into_iter()
         .collect()
@@ -144,9 +144,9 @@ fn invitation_exchange_global_from_source() -> GlobalType {
     let source = strip_aura_annotations_for_parser(include_str!(
         "../../aura-invitation/src/protocol.invitation_exchange.choreo"
     ));
-    let choreography = aura_mpst::telltale_choreography::compiler::parse_choreography_str(&source)
+    let choreography = aura_mpst::upstream::choreography::compiler::parse_choreography_str(&source)
         .expect("parse invitation choreography source");
-    aura_mpst::telltale_choreography::ast::choreography_to_global(&choreography)
+    aura_mpst::upstream::choreography::ast::choreography_to_global(&choreography)
         .expect("convert invitation choreography to global type")
 }
 

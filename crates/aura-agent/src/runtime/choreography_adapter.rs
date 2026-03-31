@@ -38,8 +38,8 @@ use aura_guards::guards::journal::JournalCoupler;
 use aura_guards::prelude::{GuardContextProvider, GuardEffects, SendGuardChain};
 use aura_guards::LeakageBudget;
 #[cfg(not(target_arch = "wasm32"))]
-use aura_mpst::telltale_choreography::{ChoreoHandler, ChoreoHandlerExt, ChoreoResult};
-use aura_mpst::telltale_choreography::{
+use aura_mpst::upstream::choreography::{ChoreoHandler, ChoreoHandlerExt, ChoreoResult};
+use aura_mpst::upstream::choreography::{
     ChoreographyError as TelltaleChoreographyError, LabelId, RoleId,
 };
 use aura_mpst::ChoreographicAdapterExt;

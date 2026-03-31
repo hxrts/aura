@@ -13,6 +13,9 @@ use proc_macro2::{Group, TokenStream, TokenTree};
 use quote::quote;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use aura_mpst::upstream::{
+    choreography as telltale_choreography, theory as telltale_theory,
+};
 use syn::spanned::Spanned;
 use syn::{
     parse::Parse,
@@ -630,8 +633,8 @@ fn generate_vm_projection_artifacts(
             use std::collections::BTreeMap;
             use std::sync::OnceLock;
 
-            fn decode_global_type() -> &'static ::aura_mpst::telltale_types::GlobalType {
-                static GLOBAL_TYPE: OnceLock<::aura_mpst::telltale_types::GlobalType> =
+            fn decode_global_type() -> &'static ::aura_mpst::upstream::types::GlobalType {
+                static GLOBAL_TYPE: OnceLock<::aura_mpst::upstream::types::GlobalType> =
                     OnceLock::new();
                 GLOBAL_TYPE.get_or_init(|| {
                     ::aura_mpst::serde_json::from_str(#global_json_lit)
@@ -640,9 +643,9 @@ fn generate_vm_projection_artifacts(
             }
 
             fn decode_local_types(
-            ) -> &'static BTreeMap<String, ::aura_mpst::telltale_types::LocalTypeR> {
+            ) -> &'static BTreeMap<String, ::aura_mpst::upstream::types::LocalTypeR> {
                 static LOCAL_TYPES: OnceLock<
-                    BTreeMap<String, ::aura_mpst::telltale_types::LocalTypeR>,
+                    BTreeMap<String, ::aura_mpst::upstream::types::LocalTypeR>,
                 > = OnceLock::new();
                 LOCAL_TYPES.get_or_init(|| {
                     ::aura_mpst::serde_json::from_str(#local_types_json_lit)
@@ -663,17 +666,17 @@ fn generate_vm_projection_artifacts(
                 &[#(#role_names),*]
             }
 
-            pub fn global_type() -> ::aura_mpst::telltale_types::GlobalType {
+            pub fn global_type() -> ::aura_mpst::upstream::types::GlobalType {
                 decode_global_type().clone()
             }
 
-            pub fn local_types() -> BTreeMap<String, ::aura_mpst::telltale_types::LocalTypeR> {
+            pub fn local_types() -> BTreeMap<String, ::aura_mpst::upstream::types::LocalTypeR> {
                 decode_local_types().clone()
             }
 
             pub fn local_type(
                 role: &str,
-            ) -> Option<::aura_mpst::telltale_types::LocalTypeR> {
+            ) -> Option<::aura_mpst::upstream::types::LocalTypeR> {
                 decode_local_types().get(role).cloned()
             }
 
@@ -871,7 +874,7 @@ fn generate_runner_branch_label_enum(labels: &BTreeSet<String>) -> TokenStream {
             #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
             pub enum BranchLabel {}
 
-            impl ::aura_mpst::telltale_choreography::LabelId for BranchLabel {
+            impl ::aura_mpst::upstream::choreography::LabelId for BranchLabel {
                 fn as_str(&self) -> &'static str {
                     match *self {}
                 }
@@ -902,7 +905,7 @@ fn generate_runner_branch_label_enum(labels: &BTreeSet<String>) -> TokenStream {
             #(#variants),*
         }
 
-        impl ::aura_mpst::telltale_choreography::LabelId for BranchLabel {
+        impl ::aura_mpst::upstream::choreography::LabelId for BranchLabel {
             fn as_str(&self) -> &'static str {
                 match self {
                     #(#as_str_arms),*
@@ -936,9 +939,9 @@ fn generate_runner_role_enum(roles: &[telltale_choreography::ast::Role]) -> Toke
         let name = role.name();
         let role_str = role.name().to_string();
         if role.index().is_some() || role.param().is_some() {
-            quote! { RuntimeRole::#name(_) => ::aura_mpst::telltale_choreography::RoleName::from_static(#role_str) }
+            quote! { RuntimeRole::#name(_) => ::aura_mpst::upstream::choreography::RoleName::from_static(#role_str) }
         } else {
-            quote! { RuntimeRole::#name => ::aura_mpst::telltale_choreography::RoleName::from_static(#role_str) }
+            quote! { RuntimeRole::#name => ::aura_mpst::upstream::choreography::RoleName::from_static(#role_str) }
         }
     }).collect();
 
@@ -960,10 +963,10 @@ fn generate_runner_role_enum(roles: &[telltale_choreography::ast::Role]) -> Toke
             #(#role_variants),*
         }
 
-        impl ::aura_mpst::telltale_choreography::RoleId for RuntimeRole {
+        impl ::aura_mpst::upstream::choreography::RoleId for RuntimeRole {
             type Label = BranchLabel;
 
-            fn role_name(&self) -> ::aura_mpst::telltale_choreography::RoleName {
+            fn role_name(&self) -> ::aura_mpst::upstream::choreography::RoleName {
                 match self {
                     #(#role_name_arms),*
                 }
@@ -1012,7 +1015,7 @@ fn generate_runner_fn(
                 index: u32,
             ) -> Result<#output_type, A::Error>
             where
-                A::Error: From<::aura_mpst::telltale_choreography::ChoreographyError>
+                A::Error: From<::aura_mpst::upstream::choreography::ChoreographyError>
         }
     } else {
         quote! {
@@ -1020,7 +1023,7 @@ fn generate_runner_fn(
                 adapter: &mut A,
             ) -> Result<#output_type, A::Error>
             where
-                A::Error: From<::aura_mpst::telltale_choreography::ChoreographyError>
+                A::Error: From<::aura_mpst::upstream::choreography::ChoreographyError>
         }
     };
 
@@ -1057,7 +1060,7 @@ fn generate_runner_execute_as(
             adapter: &mut A,
         ) -> Result<(), A::Error>
         where
-            A::Error: From<::aura_mpst::telltale_choreography::ChoreographyError>
+            A::Error: From<::aura_mpst::upstream::choreography::ChoreographyError>
         {
             match role {
                 #(#match_arms)*
@@ -1085,7 +1088,7 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                         return quote! {
                             let roles = adapter.resolve_family(#family_name)?;
                             if roles.is_empty() {
-                                return Err(::aura_mpst::telltale_choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                                return Err(::aura_mpst::upstream::choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
                             }
                             let msg: #msg_type = adapter.provide_message(roles[0]).await?;
                             adapter.broadcast(&roles, msg).await?;
@@ -1098,7 +1101,7 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                         return quote! {
                             let roles = adapter.resolve_range(#family_name, #start_expr, #end_expr)?;
                             if roles.is_empty() {
-                                return Err(::aura_mpst::telltale_choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                                return Err(::aura_mpst::upstream::choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
                             }
                             let msg: #msg_type = adapter.provide_message(roles[0]).await?;
                             adapter.broadcast(&roles, msg).await?;
@@ -1130,7 +1133,7 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                         return quote! {
                             let roles = adapter.resolve_family(#family_name)?;
                             if roles.is_empty() {
-                                return Err(::aura_mpst::telltale_choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                                return Err(::aura_mpst::upstream::choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
                             }
                             let _msgs: Vec<#msg_type> = adapter.collect(&roles).await?;
                             #cont
@@ -1142,7 +1145,7 @@ fn generate_runner_body(local_type: &telltale_choreography::ast::LocalType) -> T
                         return quote! {
                             let roles = adapter.resolve_range(#family_name, #start_expr, #end_expr)?;
                             if roles.is_empty() {
-                                return Err(::aura_mpst::telltale_choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
+                                return Err(::aura_mpst::upstream::choreography::ChoreographyError::EmptyRoleFamily(#family_name.to_string()).into());
                             }
                             let _msgs: Vec<#msg_type> = adapter.collect(&roles).await?;
                             #cont
@@ -1261,12 +1264,12 @@ fn generate_runner_role_id(role: &telltale_choreography::ast::Role) -> TokenStre
                 quote! { RuntimeRole::#name(#var_ident) }
             }
             RoleIndex::Wildcard => quote! {{
-                return Err(::aura_mpst::telltale_choreography::ChoreographyError::ExecutionError(
+                return Err(::aura_mpst::upstream::choreography::ChoreographyError::ExecutionError(
                     "wildcard roles must be resolved with resolve_family()".to_string()
                 ).into());
             }},
             RoleIndex::Range(_) => quote! {{
-                return Err(::aura_mpst::telltale_choreography::ChoreographyError::ExecutionError(
+                return Err(::aura_mpst::upstream::choreography::ChoreographyError::ExecutionError(
                     "range roles must be resolved with resolve_range()".to_string()
                 ).into());
             }},
@@ -2314,7 +2317,7 @@ fn choreography_impl_namespace_aware(
     let imports = quote! {
         #[allow(unused_imports)]
         use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-        use aura_mpst::telltale::{
+        use aura_mpst::upstream::api::{
             channel::*,
             Branch, End, Message, Receive, Role, Roles, Route, Sealable, Select, Send, session,
         };
