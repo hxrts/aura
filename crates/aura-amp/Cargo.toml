@@ -15,14 +15,11 @@ workspace = true
 
 [features]
 default = ["demo-crypto"]
-# Enable demo XOR-based encryption for simulation/testing (NOT for production)
+# XOR-based encryption for simulation/testing only, not production
 demo-crypto = []
-# Enable simulation mode for deterministic testing with aura-simulator.
-# Provides access to simulation-specific effect traits and handlers.
 simulation = ["aura-core/simulation"]
 
 [dependencies]
-# Workspace crates
 aura-core = { path = "../aura-core", version = "0.1.0" }
 aura-effects = { path = "../aura-effects", version = "0.1.0" }
 aura-journal = { path = "../aura-journal", version = "0.1.0" }
@@ -33,22 +30,19 @@ aura-macros = { path = "../aura-macros", version = "0.1.0" }
 aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
 telltale = { workspace = true }
 
-# Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 bincode = { workspace = true }
 hex = { workspace = true }
 
-# Async
 tokio = { workspace = true }
 async-trait = { workspace = true }
+futures = { workspace = true }
 
-# Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-futures = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 tokio = { workspace = true }

@@ -247,9 +247,7 @@ impl EffectSystemBuilder {
             rendezvous_manager
                 .as_ref()
                 .map(|manager| manager.registry())
-                .unwrap_or_else(|| {
-                    Arc::new(super::services::ServiceRegistry::new())
-                }),
+                .unwrap_or_else(|| Arc::new(super::services::ServiceRegistry::new())),
         ));
         let hold_manager = Some(super::services::HoldManager::new(
             authority_id,

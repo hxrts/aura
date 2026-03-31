@@ -243,7 +243,11 @@ async fn resolve_move_route(
 ) -> Option<Route> {
     let manager = effects.rendezvous_manager()?;
     let descriptor = manager.get_descriptor(context, peer).await?;
-    descriptor.advertised_move_paths().into_iter().map(|path| path.route).next()
+    descriptor
+        .advertised_move_paths()
+        .into_iter()
+        .map(|path| path.route)
+        .next()
 }
 
 async fn send_planned_envelope(
@@ -305,12 +309,14 @@ fn route_destination_addr(endpoint: &LinkEndpoint) -> Option<String> {
 
     #[cfg(not(target_arch = "wasm32"))]
     if endpoint.protocol == LinkProtocol::WebSocket {
-        return endpoint.address.as_ref().map(|addr| format!("ws://{}", addr));
+        return endpoint
+            .address
+            .as_ref()
+            .map(|addr| format!("ws://{}", addr));
     }
 
     endpoint.address.clone()
 }
-
 
 async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(), TransportError> {
     cfg_if! {
@@ -677,12 +683,12 @@ mod tests {
     use crate::core::default_context_id_for_authority;
     use crate::core::AgentConfig;
     use crate::runtime::services::{
-        MoveManager, MoveManagerConfig, RendezvousManager, RendezvousManagerConfig,
-        RuntimeService, RuntimeServiceContext, ServiceRegistry,
+        MoveManager, MoveManagerConfig, RendezvousManager, RendezvousManagerConfig, RuntimeService,
+        RuntimeServiceContext, ServiceRegistry,
     };
     use crate::runtime::TaskSupervisor;
-    use aura_core::effects::TransportEffects;
     use aura_core::effects::transport::TransportEnvelope;
+    use aura_core::effects::TransportEffects;
     use aura_rendezvous::{RendezvousDescriptor, TransportHint};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -774,12 +780,13 @@ mod tests {
         let context = ContextId::new_from_entropy([222u8; 32]);
 
         let plain_shared = crate::runtime::SharedTransport::new();
-        let plain_sender = AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            sender,
-            plain_shared.clone(),
-        )
-        .unwrap();
+        let plain_sender =
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender,
+                plain_shared.clone(),
+            )
+            .unwrap();
         let plain_receiver =
             AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
                 &config,
@@ -806,12 +813,13 @@ mod tests {
         let baseline = plain_receiver.receive_envelope().await.unwrap();
 
         let move_shared = crate::runtime::SharedTransport::new();
-        let move_sender = AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            sender,
-            move_shared.clone(),
-        )
-        .unwrap();
+        let move_sender =
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender,
+                move_shared.clone(),
+            )
+            .unwrap();
         let move_receiver =
             AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
                 &config,

@@ -28,8 +28,8 @@ pub mod receipt_manager;
 pub mod reconfiguration_manager;
 pub mod recovery_manager;
 pub mod rendezvous_manager;
-pub mod service_registry;
 mod service_actor;
+pub mod service_registry;
 pub mod session_manager;
 pub mod social_manager;
 pub mod state;
@@ -47,7 +47,7 @@ pub use hold_manager::{
     AccountabilityWitness, AccountabilityWitnessKind, HoldBudgetSnapshot, HoldDepositOutcome,
     HoldGcOutcome, HoldLocalIndexEntry, HoldManager, HoldManagerConfig, HoldProjection,
     HoldRetrievalOutcome, HoldRetrievalStatus, HoldSelectionPlan, HoldSyncBatch,
-    QueuedAccountabilityReply, QueuedSyncRetrieval, VerifierRole, VerifiedServiceWitness,
+    QueuedAccountabilityReply, QueuedSyncRetrieval, VerifiedServiceWitness, VerifierRole,
 };
 pub(crate) use invitation_manager::InvitationManager;
 pub use lan_listener_service::LanTransportListenerService;
@@ -67,7 +67,8 @@ pub use reconfiguration_manager::{
 };
 pub(crate) use recovery_manager::RecoveryManager;
 pub use rendezvous_manager::{RendezvousManager, RendezvousManagerConfig};
-#[allow(unused_imports)] // Re-exported for runtime/app integration as the registry surface lands.
+#[allow(unused_imports)]
+// Re-exported for runtime/app integration as the registry surface lands.
 pub use service_registry::{
     HoldObservation, PendingRouteState, ProviderHealthSnapshot, ServiceRegistry,
     ServiceRegistryProjection,

@@ -127,7 +127,11 @@ impl FactReducer for FriendshipFactReducer {
 
 /// Bounded introduction artifact for an introduced FoF candidate.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "trust_introduction", schema_version = 1, context = "context_id")]
+#[domain_fact(
+    type_id = "trust_introduction",
+    schema_version = 1,
+    context = "context_id"
+)]
 pub enum TrustIntroductionFact {
     Issued {
         context_id: ContextId,
@@ -301,29 +305,37 @@ impl WebOfTrustIndex {
     pub fn provider_evidence(&self, now_ms: u64) -> Vec<WebOfTrustEvidence> {
         let mut output = Vec::new();
 
-        output.extend(self.friendship.direct_friends.iter().map(|(authority_id, context_id)| {
-            WebOfTrustEvidence {
-                authority_id: *authority_id,
-                evidence: ProviderEvidence::DirectFriend,
-                context_id: *context_id,
-                introduced_by: None,
-                expires_at: None,
-                remaining_depth: 0,
-                max_fanout: 0,
-            }
-        }));
+        output.extend(
+            self.friendship
+                .direct_friends
+                .iter()
+                .map(|(authority_id, context_id)| WebOfTrustEvidence {
+                    authority_id: *authority_id,
+                    evidence: ProviderEvidence::DirectFriend,
+                    context_id: *context_id,
+                    introduced_by: None,
+                    expires_at: None,
+                    remaining_depth: 0,
+                    max_fanout: 0,
+                }),
+        );
 
-        output.extend(self.introductions.values().filter(|evidence| {
-            evidence.remaining_depth > 0
-                && evidence.max_fanout > 0
-                && evidence
-                    .introduced_by
-                    .is_some_and(|introducer| self.friendship.direct_friends.contains_key(&introducer))
-                && evidence
-                    .expires_at
-                    .as_ref()
-                    .is_none_or(|expires_at| expires_at.ts_ms > now_ms)
-        }).cloned());
+        output.extend(
+            self.introductions
+                .values()
+                .filter(|evidence| {
+                    evidence.remaining_depth > 0
+                        && evidence.max_fanout > 0
+                        && evidence.introduced_by.is_some_and(|introducer| {
+                            self.friendship.direct_friends.contains_key(&introducer)
+                        })
+                        && evidence
+                            .expires_at
+                            .as_ref()
+                            .map_or(true, |expires_at| expires_at.ts_ms > now_ms)
+                })
+                .cloned(),
+        );
 
         output
     }

@@ -214,7 +214,10 @@ impl RendezvousAdapter {
         replies.sort_by_key(|entry| entry.deadline_ms);
         replies.truncate(max_batch);
 
-        SyncBlendedHoldWindow { retrievals, replies }
+        SyncBlendedHoldWindow {
+            retrievals,
+            replies,
+        }
     }
 }
 
@@ -498,7 +501,10 @@ mod tests {
         let peers = adapter.discover_hold_peers(&descriptors, context, 5000);
 
         assert_eq!(peers.len(), 1);
-        assert!(peers.get(&bob).expect("bob").supports_hold());
+        assert!(peers
+            .get(&bob)
+            .unwrap_or_else(|| panic!("bob"))
+            .supports_hold());
     }
 
     #[test]

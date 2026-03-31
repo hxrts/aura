@@ -186,11 +186,10 @@ pub use service::{
     HoldDepositReplyBlock, HoldDepositRequest, HoldDescriptor, HoldRequestError,
     HoldRetentionMetadata, HoldRetrievalReplyBlock, HoldRetrievalRequest, LinkEndpoint,
     LinkProtocol, LocalRoutingProfile, MoveDescriptor, MoveEnvelope, MovePath,
-    MoveReceiptReplyBlock, MoveToHoldHandoff, PolicySurface, ProviderCandidate,
-    ProviderEvidence, RelayHop, ReplyBlockError, RetrievalCapability,
-    RetrievalCapabilityError, Route, SelectionState, ServiceDescriptor,
-    ServiceDescriptorHeader, ServiceDescriptorKind, ServiceFamily, ServiceLimits,
-    ServiceObjectCategory, ServiceProfile, ServiceQualityHints,
+    MoveReceiptReplyBlock, MoveToHoldHandoff, PolicySurface, ProviderCandidate, ProviderEvidence,
+    RelayHop, ReplyBlockError, RetrievalCapability, RetrievalCapabilityError, Route,
+    SelectionState, ServiceDescriptor, ServiceDescriptorHeader, ServiceDescriptorKind,
+    ServiceFamily, ServiceLimits, ServiceObjectCategory, ServiceProfile, ServiceQualityHints,
 };
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{

@@ -243,7 +243,8 @@ impl ServiceRegistryService {
             .iter()
             .filter(|((_, candidate_authority), descriptor)| {
                 *candidate_authority == authority_id && {
-                    let refresh_threshold = descriptor.valid_until.saturating_sub(refresh_window_ms);
+                    let refresh_threshold =
+                        descriptor.valid_until.saturating_sub(refresh_window_ms);
                     now_ms >= refresh_threshold
                 }
             })
@@ -265,13 +266,15 @@ impl ServiceRegistryService {
             .await
             .descriptors
             .values()
-            .filter(|descriptor| {
-                descriptor.context_id == context_id && descriptor.is_valid(now_ms)
-            })
+            .filter(|descriptor| descriptor.context_id == context_id && descriptor.is_valid(now_ms))
             .cloned()
             .collect::<Vec<_>>();
         descriptors.sort_by_key(|descriptor| {
-            (descriptor.context_id, descriptor.authority_id, descriptor.device_id)
+            (
+                descriptor.context_id,
+                descriptor.authority_id,
+                descriptor.device_id,
+            )
         });
         descriptors
     }
@@ -360,7 +363,9 @@ impl ServiceRegistryService {
         with_state_mut_validated(
             &self.state,
             |registry| {
-                registry.selection_state.insert((scope, state.family), state);
+                registry
+                    .selection_state
+                    .insert((scope, state.family), state);
             },
             ServiceRegistryState::validate,
         )
@@ -475,12 +480,17 @@ impl ServiceRegistryService {
         let _ = with_state_mut_validated(
             &self.state,
             |state| {
-                state.selection_state.retain(|(candidate_scope, _), selection| {
-                    *candidate_scope != scope || selection.epoch.is_none_or(|value| value == epoch)
-                });
-                state.hold_observations
+                state
+                    .selection_state
+                    .retain(|(candidate_scope, _), selection| {
+                        *candidate_scope != scope
+                            || selection.epoch.map_or(true, |value| value == epoch)
+                    });
+                state
+                    .hold_observations
                     .retain(|(candidate_scope, _), _| *candidate_scope != scope);
-                state.pending_routes
+                state
+                    .pending_routes
                     .retain(|(candidate_scope, _), _| *candidate_scope != scope);
             },
             ServiceRegistryState::validate,
@@ -510,17 +520,25 @@ impl ServiceRegistryService {
         .await;
     }
 
-    pub async fn projection(&self, scope: Option<ContextId>, now_ms: u64) -> ServiceRegistryProjection {
+    pub async fn projection(
+        &self,
+        scope: Option<ContextId>,
+        now_ms: u64,
+    ) -> ServiceRegistryProjection {
         let state = self.state.read().await;
         let mut descriptors = state
             .descriptors
             .values()
             .filter(|descriptor| descriptor.is_valid(now_ms))
-            .filter(|descriptor| scope.is_none_or(|value| descriptor.context_id == value))
+            .filter(|descriptor| scope.map_or(true, |value| descriptor.context_id == value))
             .cloned()
             .collect::<Vec<_>>();
         descriptors.sort_by_key(|descriptor| {
-            (descriptor.context_id, descriptor.authority_id, descriptor.device_id)
+            (
+                descriptor.context_id,
+                descriptor.authority_id,
+                descriptor.device_id,
+            )
         });
         let mut provider_health = state
             .provider_health
@@ -537,7 +555,9 @@ impl ServiceRegistryService {
         let mut selection_state = state
             .selection_state
             .iter()
-            .filter(|((candidate_scope, _), _)| scope.is_none_or(|value| *candidate_scope == value))
+            .filter(|((candidate_scope, _), _)| {
+                scope.map_or(true, |value| *candidate_scope == value)
+            })
             .map(|(_, value)| value.clone())
             .collect::<Vec<_>>();
         selection_state.sort_by_key(|entry| {
@@ -549,14 +569,18 @@ impl ServiceRegistryService {
         let mut hold_observations = state
             .hold_observations
             .iter()
-            .filter(|((candidate_scope, _), _)| scope.is_none_or(|value| *candidate_scope == value))
+            .filter(|((candidate_scope, _), _)| {
+                scope.map_or(true, |value| *candidate_scope == value)
+            })
             .map(|(_, value)| value.clone())
             .collect::<Vec<_>>();
         hold_observations.sort_by_key(|entry| (entry.scope, entry.authority_id));
         let mut pending_routes = state
             .pending_routes
             .iter()
-            .filter(|((candidate_scope, _), _)| scope.is_none_or(|value| *candidate_scope == value))
+            .filter(|((candidate_scope, _), _)| {
+                scope.map_or(true, |value| *candidate_scope == value)
+            })
             .map(|(_, value)| value.clone())
             .collect::<Vec<_>>();
         pending_routes.sort_by_key(|entry| (entry.scope, entry.authority_id));
@@ -581,7 +605,7 @@ impl ServiceRegistryService {
             .descriptors
             .values()
             .filter(|descriptor| descriptor.authority_id != owner)
-            .filter(|descriptor| scope.is_none_or(|value| descriptor.context_id == value))
+            .filter(|descriptor| scope.map_or(true, |value| descriptor.context_id == value))
             .map(|descriptor| descriptor.authority_id)
             .collect::<Vec<_>>();
         peers.sort();
@@ -601,7 +625,7 @@ impl ServiceRegistryService {
             .descriptors
             .values()
             .filter(|descriptor| descriptor.authority_id != owner)
-            .filter(|descriptor| scope.is_none_or(|value| descriptor.context_id == value))
+            .filter(|descriptor| scope.map_or(true, |value| descriptor.context_id == value))
             .filter_map(|descriptor| descriptor.device_id)
             .collect::<Vec<_>>();
         devices.sort();
@@ -621,7 +645,7 @@ impl ServiceRegistryService {
             .descriptors
             .values()
             .filter(|descriptor| descriptor.authority_id == authority_id)
-            .filter(|descriptor| scope.is_none_or(|value| descriptor.context_id == value))
+            .filter(|descriptor| scope.map_or(true, |value| descriptor.context_id == value))
             .filter_map(|descriptor| descriptor.device_id)
             .collect::<Vec<_>>();
         devices.sort();
@@ -671,7 +695,9 @@ mod tests {
         let alive = authority(2);
         let expired = authority(3);
         registry.cache_descriptor(descriptor(alive, ctx, 500)).await;
-        registry.cache_descriptor(descriptor(expired, ctx, 100)).await;
+        registry
+            .cache_descriptor(descriptor(expired, ctx, 100))
+            .await;
 
         let removed = registry.cleanup_expired_descriptors(200).await;
         assert_eq!(removed, 1);
@@ -704,8 +730,15 @@ mod tests {
 
         registry.invalidate_scope_epoch(ctx, 11).await;
 
-        assert!(registry.selection_state(ctx, ServiceFamily::Move).await.is_none());
+        assert!(registry
+            .selection_state(ctx, ServiceFamily::Move)
+            .await
+            .is_none());
         assert!(registry.hold_observations(ctx).await.is_empty());
-        assert!(registry.projection(Some(ctx), 0).await.pending_routes.is_empty());
+        assert!(registry
+            .projection(Some(ctx), 0)
+            .await
+            .pending_routes
+            .is_empty());
     }
 }

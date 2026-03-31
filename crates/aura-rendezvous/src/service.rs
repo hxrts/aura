@@ -778,7 +778,7 @@ mod tests {
             .advertised_establish_paths()
             .into_iter()
             .next()
-            .expect("establish path");
+            .unwrap_or_else(|| panic!("establish path"));
 
         let outcome = service
             .prepare_establish_channel(

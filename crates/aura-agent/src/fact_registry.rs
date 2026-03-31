@@ -36,13 +36,12 @@ use aura_invitation::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYP
 use aura_journal::FactRegistry;
 use aura_recovery::{RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
-    ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
-    GuardianRequestFact, GuardianRequestFactReducer, RecoveryGrantDetailsFact,
-    RecoveryGrantDetailsFactReducer, FriendshipFact, FriendshipFactReducer,
+    ContactFact, ContactFactReducer, FriendshipFact, FriendshipFactReducer,
+    GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer, GuardianRequestFact,
+    GuardianRequestFactReducer, RecoveryGrantDetailsFact, RecoveryGrantDetailsFactReducer,
     TrustIntroductionFact, TrustIntroductionFactReducer, CONTACT_FACT_TYPE_ID,
-    FRIENDSHIP_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
-    GUARDIAN_REQUEST_FACT_TYPE_ID, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
-    TRUST_INTRODUCTION_FACT_TYPE_ID,
+    FRIENDSHIP_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID, GUARDIAN_REQUEST_FACT_TYPE_ID,
+    RECOVERY_GRANT_DETAILS_FACT_TYPE_ID, TRUST_INTRODUCTION_FACT_TYPE_ID,
 };
 use aura_rendezvous::{RendezvousFact, RendezvousFactReducer, RENDEZVOUS_FACT_TYPE_ID};
 use aura_social::moderation::register_moderation_facts;

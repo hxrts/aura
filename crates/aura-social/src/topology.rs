@@ -530,8 +530,7 @@ mod tests {
             },
         );
 
-        let candidates =
-            topology.build_provider_candidates(ServiceFamily::Move, &target, |_| true);
+        let candidates = topology.build_provider_candidates(ServiceFamily::Move, &target, |_| true);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].family, ServiceFamily::Move);
         assert_eq!(candidates[0].evidence, vec![ProviderEvidence::Neighborhood]);
@@ -554,8 +553,7 @@ mod tests {
         );
         topology.add_peer(guardian_peer, RelayRelationship::Guardian);
 
-        let candidates =
-            topology.build_provider_candidates(ServiceFamily::Hold, &target, |_| true);
+        let candidates = topology.build_provider_candidates(ServiceFamily::Hold, &target, |_| true);
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].authority_id, neighborhood_peer);

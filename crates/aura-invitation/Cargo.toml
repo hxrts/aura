@@ -21,24 +21,23 @@ aura-composition = { path = "../aura-composition", version = "0.1.0" }
 aura-macros = { path = "../aura-macros", version = "0.1.0" }
 aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
 
-# Choreography dependencies (required by aura-macros)
-telltale = { workspace = true }
-serde = { workspace = true }
-bincode = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
 async-trait = { workspace = true }
-uuid = { workspace = true }
-futures = { workspace = true }
-tokio = { workspace = true }
-once_cell = { workspace = true }
-hex = { workspace = true }
+bincode = { workspace = true }
 biscuit-auth = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+once_cell = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+telltale = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
 assert_matches = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

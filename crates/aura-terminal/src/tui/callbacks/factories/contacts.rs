@@ -164,10 +164,7 @@ impl ContactsCallbacks {
         )
     }
 
-    fn make_accept_friend_request(
-        ctx: Arc<IoContext>,
-        tx: UiUpdateSender,
-    ) -> IdLocalOwnedCallback {
+    fn make_accept_friend_request(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {
         Arc::new(
             move |contact_id: String, operation: LocalTerminalOperationOwner| {
                 spawn_local_terminal_result_callback(
@@ -269,12 +266,8 @@ impl ContactsCallbacks {
                     },
                     |_tx, ()| async {},
                     |tx, error| async move {
-                        emit_error_toast(
-                            &tx,
-                            "contacts",
-                            format!("Remove friend failed: {error}"),
-                        )
-                        .await;
+                        emit_error_toast(&tx, "contacts", format!("Remove friend failed: {error}"))
+                            .await;
                     },
                 );
             },

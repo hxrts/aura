@@ -13,49 +13,22 @@ description = "Multi-party session type extensions for Aura"
 workspace = true
 
 [dependencies]
-# Re-export telltale choreography/runtime surfaces
+aura-core = { path = "../aura-core", version = "0.1.0" }
+
 telltale = { workspace = true }
 telltale-choreography = { workspace = true }
 telltale-types = { workspace = true }
-
-# Note: aura-macros generates code that uses aura-mpst types, 
-# but aura-mpst does not depend on aura-macros to avoid circular dependency
-
-# Core Aura dependencies
-aura-core = { path = "../aura-core", version = "0.1.0" }
-
-# Dependencies needed for extension system
-proc-macro2 = { workspace = true }
-quote = { workspace = true }
 syn = { workspace = true }
-
-# Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-# Error handling
 thiserror = { workspace = true }
-
-# Async support (runtime dependencies removed for Layer 2 compliance)
 async-trait = { workspace = true }
-futures = { workspace = true }
-# tokio = { workspace = true } # Removed - violates Layer 2 runtime abstraction
-
-# Identifiers and time (unified time system via aura-core)
-uuid = { workspace = true }
-
-# Cryptographic and utility dependencies
-hex = { workspace = true }
-
-# Logging
 tracing = { workspace = true }
 
 [dev-dependencies]
 aura-effects = { path = "../aura-effects" }
 tokio = { workspace = true }
-futures = { workspace = true }
 
 [features]
 default = []
-# Enable debugging features for choreography analysis
 debug = []

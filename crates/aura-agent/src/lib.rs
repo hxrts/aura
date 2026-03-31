@@ -232,14 +232,14 @@ pub use runtime::services::{RendezvousManager, RendezvousManagerConfig};
 
 // Social service types
 #[cfg(feature = "choreo-backend-telltale-vm")]
-pub use runtime::services::{SocialManager, SocialManagerConfig, SocialManagerState};
-#[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::services::{
     AccountabilityWitness, AccountabilityWitnessKind, HoldBudgetSnapshot, HoldDepositOutcome,
     HoldGcOutcome, HoldLocalIndexEntry, HoldManager, HoldManagerConfig, HoldProjection,
     HoldRetrievalOutcome, HoldRetrievalStatus, HoldSelectionPlan, HoldSyncBatch,
-    QueuedAccountabilityReply, QueuedSyncRetrieval, VerifierRole, VerifiedServiceWitness,
+    QueuedAccountabilityReply, QueuedSyncRetrieval, VerifiedServiceWitness, VerifierRole,
 };
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use runtime::services::{SocialManager, SocialManagerConfig, SocialManagerState};
 
 // Threshold signing service types
 #[cfg(feature = "choreo-backend-telltale-vm")]

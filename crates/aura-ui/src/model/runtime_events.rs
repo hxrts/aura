@@ -1,6 +1,6 @@
 use super::*;
-use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_app::ui::types::ContactRelationshipState;
+use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_core::types::identifiers::CeremonyId;
 
 impl UiModel {

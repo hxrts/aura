@@ -9,9 +9,9 @@ description = "Core Quint formal verification integration for Aura - Layer 3: Im
 publish = false
 
 [dependencies]
-# Core dependencies
 aura-core = { path = "../aura-core", version = "0.1.0", features = ["simulation"] }
 aura-effects = { path = "../aura-effects", version = "0.1.0", features = ["simulation"] }
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 hex = { workspace = true }
@@ -25,19 +25,10 @@ async-trait = { workspace = true }
 async-process = "1"
 tempfile = "3.0"
 telltale-lean-bridge = { workspace = true }
-
-# Session types integration - temporarily removed during refactor
-
-# Native Quint evaluator from official repository
 quint_evaluator = { git = "https://github.com/informalsystems/quint", tag = "v0.29.0" }
 
-# For development and testing
 [dev-dependencies]
 tokio = { workspace = true }
-
-# Logging and tracing (for tests)
-
-# Aura types for error handling
 
 [lib]
 crate-type = ["rlib"]

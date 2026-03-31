@@ -490,7 +490,10 @@ mod tests {
         let duplicate = manager
             .enqueue_for_delivery(envelope(1), route(), 11, &TestRandom(1))
             .await;
-        assert!(matches!(duplicate, Err(MoveManagerError::DuplicateSuppressed)));
+        assert!(matches!(
+            duplicate,
+            Err(MoveManagerError::DuplicateSuppressed)
+        ));
 
         manager
             .enqueue_for_delivery(envelope(2), route(), 12, &TestRandom(1))
@@ -515,7 +518,10 @@ mod tests {
             .await
             .expect("enqueue");
         assert_eq!(plan.len(), 1);
-        assert_eq!(plan[0].route.destination.address.as_deref(), Some("127.0.0.1:7000"));
+        assert_eq!(
+            plan[0].route.destination.address.as_deref(),
+            Some("127.0.0.1:7000")
+        );
     }
 
     #[tokio::test]

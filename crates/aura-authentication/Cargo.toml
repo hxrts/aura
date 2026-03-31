@@ -21,24 +21,22 @@ aura-guards = { path = "../aura-guards", version = "0.1.0" }
 aura-relational = { path = "../aura-relational", version = "0.1.0" }
 aura-signature = { path = "../aura-signature", version = "0.1.0" }
 aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
-ed25519-dalek = { workspace = true }
-hex = { workspace = true }
 
-# Choreography dependencies (required by aura-macros)
-telltale = { workspace = true }
+async-trait = { workspace = true }
+bincode = { workspace = true }
+biscuit-auth = { workspace = true }
+ed25519-dalek = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+telltale = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-async-trait = { workspace = true }
 uuid = { workspace = true }
-futures = { workspace = true }
-rand = { workspace = true }
-serde_json = { workspace = true }
-biscuit-auth = { workspace = true }
-bincode = { workspace = true }
 
 [dev-dependencies]
-# Testing infrastructure (Layer 5 can use testkit)
 aura-agent = { path = "../aura-agent" }
 aura-testkit = { path = "../aura-testkit", features = ["full-effect-system"] }
 tokio = { workspace = true }

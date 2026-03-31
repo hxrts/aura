@@ -1,46 +1,61 @@
-# Aura root workspace
 [workspace]
 resolver = "2"
 
 members = [
-    "crates/aura-agent",
-    "crates/aura-app",
-    "crates/aura-macros",
+    # L1 Foundation
+    "crates/aura-core",
+
+    # L2 Specification
+    "crates/aura-journal",
+    "crates/aura-authorization",
     "crates/aura-signature",
+    "crates/aura-store",
+    "crates/aura-transport",
+    "crates/aura-maintenance",
+    "crates/aura-mpst",
+    "crates/aura-macros",
+
+    # L3 Implementation
+    "crates/aura-effects",
+    "crates/aura-composition",
+
+    # L4 Orchestration
+    "crates/aura-protocol",
     "crates/aura-guards",
     "crates/aura-consensus",
     "crates/aura-amp",
     "crates/aura-anti-entropy",
-    "crates/aura-protocol",
-    "crates/aura-effects",
-    "crates/aura-composition",
-    "crates/aura-journal",
-    "crates/aura-store",
-    "crates/aura-transport",
-    "crates/aura-testkit",
-    "crates/aura-terminal",
-    "crates/aura-simulator",
-    "crates/aura-authorization",
-    "crates/aura-maintenance",
-    "crates/aura-mpst",
-    "crates/aura-quint",
-    "crates/aura-core",
+
+    # L5 Features
     "crates/aura-authentication",
-    "crates/aura-sync",
+    "crates/aura-chat",
     "crates/aura-invitation",
     "crates/aura-recovery",
-    "crates/aura-rendezvous",
     "crates/aura-relational",
-    "crates/aura-chat",
+    "crates/aura-rendezvous",
     "crates/aura-social",
+    "crates/aura-sync",
+
+    # L6 Runtime
+    "crates/aura-agent",
+    "crates/aura-simulator",
+    "crates/aura-app",
+
+    # L7 UI
+    "crates/aura-terminal",
     "crates/aura-ui",
     "crates/aura-web",
+
+    # L8 Testing
+    "crates/aura-testkit",
+    "crates/aura-quint",
     "crates/aura-harness",
+
+    # Examples
     "examples/hello-crdt",
     "examples/hello-choreo",
     "examples/session-choreography",
 ]
-
 
 [workspace.package]
 version = "0.1.0"
@@ -57,20 +72,17 @@ frost-core = { version = "1.0", features = ["serialization"] }
 frost-ed25519 = { version = "1.0", features = ["serialization"] }
 ed25519-dalek = { version = "2.0", features = ["rand_core", "serde"] }
 curve25519-dalek = "4.1"
-chrono = { version = "0.4", features = ["serde"] }
 hkdf = "0.12"
 sha2 = "0.10"
-sha1 = "0.10"
 hmac = "0.12"
-hex = "0.4"
 aes-gcm = "0.10"
 chacha20 = "0.9"
 chacha20poly1305 = "0.10.1"
 zeroize = { version = "1.7", features = ["derive"] }
-blake3 = "1.5"
+subtle = "2.6"
+signature = "2.2"
 
-# CRDT & serialization
-automerge = "0.5"
+# Serialization
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 serde_cbor = "0.11"
@@ -79,80 +91,67 @@ bincode = "1.3"
 postcard = { version = "1.0", features = ["use-std"] }
 serde_ipld_dagcbor = "0.6"
 
-# Async runtime & networking
-# Keep workspace Tokio cross-platform by default; native-only crates opt into
-# `net`, `process`, and `signal` explicitly so wasm targets never pull in `mio`.
+# Async runtime
+# Pin futures to 0.3.31 — 0.3.32 has ambiguous Self::Error on Rust 1.93
 tokio = { version = "1.49", default-features = false, features = [
-    "io-util",
-    "macros",
-    "rt",
-    "sync",
-    "time",
+    "io-util", "macros", "rt", "sync", "time",
 ] }
-# Pin to 0.3.31 — 0.3.32 has ambiguous Self::Error in into_sink.rs on Rust 1.93
 futures = "=0.3.31"
+futures-util = { version = "=0.3.31", features = ["alloc"] }
+futures-signals = "0.3"
 async-trait = "0.1"
 async-lock = "3"
 
-# Utilities
-uuid = { version = "1.6", features = ["v4", "v5", "serde", "js"] }
-time = { version = "0.3", features = ["serde"] }
-thiserror = "1.0"
-once_cell = "1.19"
-anyhow = "1.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
-
-# CLI
-clap = { version = "4.5", default-features = false, features = ["std", "derive"] }
-toml = "0.8"
-
-# Additional utilities
-rand = "0.8"
-rand_chacha = "0.3"
-rand_core = { version = "0.6", features = ["std"] }
-base64 = "0.22"
-indexmap = "2.5"
-proptest = { version = "=1.5.0", default-features = false, features = ["std"] }
-dirs = "5.0"
-glob = "0.3"
-parking_lot = { version = "0.12", features = ["deadlock_detection"] }
-subtle = "2.6"
-getrandom = { version = "0.2", features = ["js"] }
-# Pin to 0.3.31 — 0.3.32 has ambiguous Self::Error in into_sink.rs on Rust 1.93
-futures-util = { version = "=0.3.31", features = ["alloc"] }
-futures-signals = "0.3"
+# Networking
+tokio-tungstenite = "0.20"
 socket2 = { version = "0.5", features = ["all"] }
 
-# Session types & choreographic programming
+# Session types
 telltale = "4.0.1"
 telltale-choreography = "4.0.1"
 telltale-vm = "4.0.1"
 telltale-types = "4.0.1"
 telltale-theory = "4.0.1"
 telltale-lean-bridge = "4.0.1"
-signature = "2.2"
 
-# KeyJournal dependencies for threshold operations and graph algorithms
-petgraph = "0.6"
+# Authorization
+biscuit-auth = { version = "5.0", features = ["wasm"] }
 
-# WebSocket and networking
-tokio-tungstenite = "0.20"
-tokio-stream = "0.1"
+# CLI
+clap = { version = "4.5", default-features = false, features = ["std", "derive"] }
+toml = "0.8"
 
-# Development and testing
-tokio-test = "0.4"
+# Utilities
+uuid = { version = "1.6", features = ["v4", "v5", "serde", "js"] }
+time = { version = "0.3", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+once_cell = "1.19"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
+rand = "0.8"
+rand_chacha = "0.3"
+rand_core = { version = "0.6", features = ["std"] }
+base64 = "0.22"
+hex = "0.4"
+indexmap = "2.5"
+dirs = "5.0"
+parking_lot = { version = "0.12", features = ["deadlock_detection"] }
+getrandom = { version = "0.2", features = ["js"] }
+sysinfo = "0.33"
+
+# Proc macros
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
+
+# Testing
 tempfile = "3.8"
 assert_matches = "1.5"
 serial_test = "3.0"
 trybuild = "1.0"
-biscuit-auth = { version = "5.0", features = ["wasm"] }
-proc-macro2 = "1.0"
-quote = "1.0"
-syn = { version = "2.0", features = ["full"] }
-sysinfo = "0.33"
-
-# Benchmarking and WASM dependencies
+proptest = { version = "=1.5.0", default-features = false, features = ["std"] }
 criterion = "0.5"
 
 [profile.release]
@@ -161,7 +160,6 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
-# Keep symbols small, enable debuginfo only in debug/profile builds
 debug = false
 
 [profile.release.package.aura-terminal]
@@ -171,77 +169,39 @@ opt-level = "s"
 opt-level = 0
 debug = true
 
-# WASM-optimized profile for size, used by console and client crates
 [profile.wasm]
 inherits = "release"
-opt-level = "s"  # Optimize for size
+opt-level = "s"
 lto = true
 codegen-units = 1
-strip = false  # Keep debug info for WASM stack traces
+strip = false
 debug = true
 
-# Lint configuration to enforce effects system usage
 [workspace.lints.clippy]
-# Deny problematic patterns that bypass the effects system
 disallowed_methods = "deny"
 disallowed_types = "deny"
 missing_docs_in_private_items = "allow"
-
-# Additional lints for code quality
-# too_many_arguments: disabled by default, enable for style audits
 too_many_arguments = "allow"
 type_complexity = "warn"
 unwrap_used = "warn"
 expect_used = "warn"
-
-# === Rust Style Guide Enforcement ===
-#
-# DISABLED BY DEFAULT (too noisy for active development):
-#   - must_use_candidate, trivially_copy_pass_by_ref, needless_pass_by_value
-#   - unused_async (many trait impls are async for signature compatibility)
-#   - manual_let_else, cognitive_complexity, fn_params_excessive_bools, etc.
-#
-# To run a stricter audit with all style lints enabled:
-#   cargo clippy -- -W clippy::must_use_candidate -W clippy::trivially_copy_pass_by_ref \
-#                   -W clippy::needless_pass_by_value -W clippy::unused_async \
-#                   -W clippy::manual_let_else -W clippy::cognitive_complexity \
-#                   -W clippy::fn_params_excessive_bools -W clippy::struct_excessive_bools \
-#                   -W clippy::too_many_arguments
-
-# Safety §4 / Style by Numbers: "#[must_use] for APIs where dropping the value is likely a bug"
-# Disabled: too noisy (2000+ warnings), enable for periodic audits
 must_use_candidate = "allow"
-
-# APIs: misuse hard - "avoid bool parameters (use enums)"
 fn_params_excessive_bools = "allow"
 struct_excessive_bools = "allow"
-
-# Memory §7: "pre-size collections", "avoid per-request allocations"
 large_types_passed_by_value = "warn"
-# Disabled: often intentional for API ergonomics
 trivially_copy_pass_by_ref = "allow"
 needless_pass_by_value = "allow"
 redundant_clone = "warn"
 implicit_clone = "warn"
 vec_box = "warn"
-
-# Safety §1: "simple, explicit control flow"
 cognitive_complexity = "allow"
 manual_let_else = "allow"
-
-# Safety §5: Error handling - async functions that never await are suspicious
-# Disabled: many trait implementations must be async for signature compatibility
 unused_async = "allow"
-
-# Performance: format!("{}", x) → format!("{x}")
 uninlined_format_args = "warn"
-
-# Naming / Consistency
 default_trait_access = "warn"
 semicolon_if_nothing_returned = "warn"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
-# Allow kani cfg for bounded model checking proofs
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

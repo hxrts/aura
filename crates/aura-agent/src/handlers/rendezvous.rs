@@ -476,9 +476,7 @@ impl RendezvousHandler {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Remove from pending
-        self.registry
-            .remove_pending_route(context_id, peer)
-            .await;
+        self.registry.remove_pending_route(context_id, peer).await;
 
         // Create channel established fact
         let fact = self
@@ -742,9 +740,7 @@ impl RendezvousHandler {
             .await
             .map_err(|e| AgentError::effects(format!("handle completion failed: {e}")))?;
 
-        self.registry
-            .remove_pending_route(context_id, peer)
-            .await;
+        self.registry.remove_pending_route(context_id, peer).await;
 
         Ok(())
     }
@@ -1086,8 +1082,8 @@ mod tests {
     use crate::core::AgentConfig;
     use crate::runtime::services::{RendezvousManager, RendezvousManagerConfig};
     use aura_core::CapabilityName;
-    use aura_guards::GuardContextProvider;
     use aura_effects::time::PhysicalTimeHandler;
+    use aura_guards::GuardContextProvider;
     use aura_rendezvous::GuardDecision;
     use base64::Engine;
 
@@ -1331,7 +1327,8 @@ mod tests {
             RendezvousManagerConfig::for_testing(),
             Arc::new(PhysicalTimeHandler::new()),
         );
-        let handler = RendezvousHandler::new(authority_context).unwrap()
+        let handler = RendezvousHandler::new(authority_context)
+            .unwrap()
             .with_rendezvous_manager(manager.clone());
 
         let context_id = ContextId::new_from_entropy([153u8; 32]);
@@ -1357,7 +1354,12 @@ mod tests {
             .expect("descriptor should be visible through manager registry");
         assert_eq!(cached.authority_id, peer);
         assert_eq!(
-            manager.registry().projection(Some(context_id), 1).await.descriptors.len(),
+            manager
+                .registry()
+                .projection(Some(context_id), 1)
+                .await
+                .descriptors
+                .len(),
             1
         );
     }

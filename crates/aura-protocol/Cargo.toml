@@ -1,4 +1,3 @@
-# Protocol coordination - manages distributed protocols (DKD, Resharing, Locking, Recovery)
 [package]
 name = "aura-protocol"
 version.workspace = true
@@ -16,13 +15,10 @@ workspace = true
 [features]
 default = []
 simulation = ["aura-core/simulation"]
-# Enable CrdtCoordinator for choreography-based CRDT synchronization.
-# This provides an alternative to the digest-based sync in aura-anti-entropy.
-# Currently not wired into any protocol; enable if choreography-based CRDT sync is needed.
+# Choreography-based CRDT sync; alternative to digest-based sync in aura-anti-entropy
 crdt-sync = []
 
 [dependencies]
-# Workspace crates
 aura-core = { path = "../aura-core", version = "0.1.0" }
 aura-effects = { path = "../aura-effects", version = "0.1.0" }
 aura-composition = { path = "../aura-composition", version = "0.1.0" }
@@ -31,42 +27,31 @@ aura-guards = { path = "../aura-guards", version = "0.1.0" }
 aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
 aura-amp = { path = "../aura-amp", version = "0.1.0" }
 aura-anti-entropy = { path = "../aura-anti-entropy", version = "0.1.0" }
-# Note: do NOT depend on aura-relational to avoid cycles (Layer 4 -> Layer 5).
-# Guardian coordinator will be in Layer 4; relational helpers stay in aura-relational.
 aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
 aura-transport = { path = "../aura-transport", version = "0.1.0" }
 aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
 aura-macros = { path = "../aura-macros", version = "0.1.0" }
 aura-store = { path = "../aura-store", version = "0.1.0" }
-frost-ed25519 = { workspace = true }
-async-lock = "3.0"
 
-# Curve operations
+frost-ed25519 = { workspace = true }
 curve25519-dalek = { workspace = true }
 ed25519-dalek = { workspace = true }
-
-# Cryptographic hashing (retain for protocol hashing needs)
 sha2 = { workspace = true }
-
-# Cryptography provided through aura-core
 hmac = { workspace = true }
 hkdf = { workspace = true }
 aes-gcm = { workspace = true }
 getrandom = { workspace = true }
 rand_chacha = { workspace = true }
 
-# Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-# serde_bytes = { workspace = true } # removed - unused
 bincode = { workspace = true }
 
-# Async
 tokio = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
+async-lock = "3.0"
 
-# Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -78,13 +63,7 @@ base64 = { workspace = true }
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
 
-# Choreographic programming dependencies
-
-# Authorization tokens
 biscuit-auth = { workspace = true }
-
-
-[dev-dependencies]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }

@@ -8,8 +8,7 @@ use super::services::{
     HoldManager, LanTransportListenerService, LanTransportService, MoveManager,
     ReactivePipelineService, ReceiptManager, ReconfigurationManager, RendezvousManager,
     RuntimeMaintenanceService, RuntimeService, RuntimeServiceContext, ServiceError,
-    ServiceErrorKind, ServiceHealth, SocialManager, SyncServiceManager,
-    ThresholdSigningService,
+    ServiceErrorKind, ServiceHealth, SocialManager, SyncServiceManager, ThresholdSigningService,
 };
 use super::{
     AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager, RuntimeDiagnosticSink,

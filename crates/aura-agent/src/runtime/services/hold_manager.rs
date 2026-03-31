@@ -11,10 +11,10 @@ use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, Service
 use async_trait::async_trait;
 use aura_core::hash::hash;
 use aura_core::service::{
-    AccountabilityReplyBlock, HoldDepositReplyBlock, HoldDepositRequest,
-    HoldRequestError, HoldRetrievalReplyBlock, HoldRetrievalRequest, HoldRetentionMetadata,
-    MoveReceiptReplyBlock, ProviderCandidate, ProviderEvidence, ReplyBlockError,
-    RetrievalCapability, RetrievalCapabilityError, SelectionState, ServiceFamily, ServiceProfile,
+    AccountabilityReplyBlock, HoldDepositReplyBlock, HoldDepositRequest, HoldRequestError,
+    HoldRetentionMetadata, HoldRetrievalReplyBlock, HoldRetrievalRequest, MoveReceiptReplyBlock,
+    ProviderCandidate, ProviderEvidence, ReplyBlockError, RetrievalCapability,
+    RetrievalCapabilityError, SelectionState, ServiceFamily, ServiceProfile,
 };
 use aura_core::types::epochs::Epoch;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
@@ -235,6 +235,7 @@ pub struct QueuedAccountabilityReply {
 }
 
 /// Verified witness token required before local budget or scoring changes.
+#[allow(clippy::manual_non_exhaustive)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedServiceWitness {
     pub family: ServiceFamily,
@@ -472,13 +473,16 @@ impl HoldManager {
             .filter(|state| state.epoch == Some(maintenance_epoch.identity_epoch.value()));
 
         if let Some(ref existing) = existing {
-            let still_admissible = existing
-                .selected_authorities
-                .iter()
-                .all(|authority| admissible.iter().any(|candidate| candidate.authority_id == *authority));
+            let still_admissible = existing.selected_authorities.iter().all(|authority| {
+                admissible
+                    .iter()
+                    .any(|candidate| candidate.authority_id == *authority)
+            });
             if still_admissible && existing.bounded_residency_remaining.unwrap_or_default() > 0 {
-                let next_remaining =
-                    existing.bounded_residency_remaining.unwrap_or_default().saturating_sub(1);
+                let next_remaining = existing
+                    .bounded_residency_remaining
+                    .unwrap_or_default()
+                    .saturating_sub(1);
                 let plan = HoldSelectionPlan {
                     selected_authorities: existing.selected_authorities.clone(),
                     rotated: false,
@@ -530,13 +534,21 @@ impl HoldManager {
         let rotation_offset = existing
             .as_ref()
             .and_then(|selection| selection.selected_authorities.first().copied())
-            .and_then(|first| ranked.iter().position(|(candidate, _, _)| candidate.authority_id == first))
+            .and_then(|first| {
+                ranked
+                    .iter()
+                    .position(|(candidate, _, _)| candidate.authority_id == first)
+            })
             .map(|index| index.saturating_add(1))
             .unwrap_or_default();
         let limit = self.config.max_active_holders.min(ranked.len()).max(1);
 
         let selected = (0..limit)
-            .map(|offset| ranked[(rotation_offset + offset) % ranked.len()].0.authority_id)
+            .map(|offset| {
+                ranked[(rotation_offset + offset) % ranked.len()]
+                    .0
+                    .authority_id
+            })
             .collect::<Vec<_>>();
         let remaining = self.config.residency_window_turns.saturating_sub(1);
         self.registry
@@ -566,7 +578,12 @@ impl HoldManager {
     ) -> Result<HoldDepositOutcome, HoldManagerError> {
         request.validate_profile()?;
         let plan = self
-            .select_holders(request.held_object.scope, candidates, now_ms, maintenance_epoch)
+            .select_holders(
+                request.held_object.scope,
+                candidates,
+                now_ms,
+                maintenance_epoch,
+            )
             .await?;
 
         let accepted_ms = request
@@ -579,7 +596,12 @@ impl HoldManager {
             deposited_at_ms: now_ms,
             expires_at_ms: now_ms.saturating_add(accepted_ms),
         };
-        let capability = self.issue_capability(request.held_object.scope, &request.held_object, maintenance_epoch.identity_epoch, now_ms);
+        let capability = self.issue_capability(
+            request.held_object.scope,
+            &request.held_object,
+            maintenance_epoch.identity_epoch,
+            now_ms,
+        );
         let content_key = content_key_for(&request.held_object);
         let invalidation = CacheInvalidated::new(
             self.authority_id,
@@ -590,7 +612,12 @@ impl HoldManager {
             inner: self.issue_reply_block(
                 request.held_object.scope,
                 AccountabilityWitnessKind::HoldDeposit,
-                command_scope(&request.held_object.scope, &content_key, now_ms, b"hold-deposit"),
+                command_scope(
+                    &request.held_object.scope,
+                    &content_key,
+                    now_ms,
+                    b"hold-deposit",
+                ),
                 now_ms,
             ),
         };
@@ -664,13 +691,15 @@ impl HoldManager {
                         used: false,
                     },
                 );
-                state.pending_sync_replies.push_back(QueuedAccountabilityReply {
-                    kind: AccountabilityWitnessKind::HoldDeposit,
-                    scope: held_object.scope,
-                    token: reply_token,
-                    available_at_ms: now_ms.saturating_add(self.config.reply_jitter_ms),
-                    deadline_ms: reply_block.inner.valid_until,
-                });
+                state
+                    .pending_sync_replies
+                    .push_back(QueuedAccountabilityReply {
+                        kind: AccountabilityWitnessKind::HoldDeposit,
+                        scope: held_object.scope,
+                        token: reply_token,
+                        available_at_ms: now_ms.saturating_add(self.config.reply_jitter_ms),
+                        deadline_ms: reply_block.inner.valid_until,
+                    });
             },
             HoldState::validate,
         )
@@ -678,7 +707,14 @@ impl HoldManager {
 
         for authority in &plan.selected_authorities {
             self.registry
-                .record_hold_observation(request.held_object.scope, *authority, now_ms, held_object.retention_until.or(Some(retention.expires_at_ms)))
+                .record_hold_observation(
+                    request.held_object.scope,
+                    *authority,
+                    now_ms,
+                    held_object
+                        .retention_until
+                        .or(Some(retention.expires_at_ms)),
+                )
                 .await;
         }
 
@@ -708,7 +744,12 @@ impl HoldManager {
             inner: self.issue_reply_block(
                 request.scope,
                 AccountabilityWitnessKind::HoldRetrieval,
-                command_scope(&request.scope, &hex_selector(request.selector), now_ms, b"hold-retrieve"),
+                command_scope(
+                    &request.scope,
+                    &hex_selector(request.selector),
+                    now_ms,
+                    b"hold-retrieve",
+                ),
                 now_ms,
             ),
         };
@@ -738,13 +779,15 @@ impl HoldManager {
                             used: false,
                         },
                     );
-                    state.pending_sync_replies.push_back(QueuedAccountabilityReply {
-                        kind: AccountabilityWitnessKind::HoldRetrieval,
-                        scope: request.scope,
-                        token: reply_block.inner.token,
-                        available_at_ms: now_ms.saturating_add(self.config.reply_jitter_ms),
-                        deadline_ms: reply_block.inner.valid_until,
-                    });
+                    state
+                        .pending_sync_replies
+                        .push_back(QueuedAccountabilityReply {
+                            kind: AccountabilityWitnessKind::HoldRetrieval,
+                            scope: request.scope,
+                            token: reply_block.inner.token,
+                            available_at_ms: now_ms.saturating_add(self.config.reply_jitter_ms),
+                            deadline_ms: reply_block.inner.valid_until,
+                        });
                 },
                 HoldState::validate,
             )
@@ -809,7 +852,9 @@ impl HoldManager {
                                 now_ms,
                             );
                             next_capability = Some(rotated.clone());
-                            state.selector_index.insert(rotated.selector, (scope, content_key.clone()));
+                            state
+                                .selector_index
+                                .insert(rotated.selector, (scope, content_key.clone()));
                             stored.selectors.push(SelectorRecord {
                                 capability: rotated,
                                 used: false,
@@ -830,14 +875,17 @@ impl HoldManager {
                         used: false,
                     },
                 );
-                state.pending_sync_replies.push_back(QueuedAccountabilityReply {
-                    kind: AccountabilityWitnessKind::HoldRetrieval,
-                    scope,
-                    token: reply_token,
-                    available_at_ms: now_ms.saturating_add(self.config.reply_jitter_ms),
-                    deadline_ms: reply_block.inner.valid_until,
-                });
-                if let Some(local_index) = state.local_index.get_mut(&(scope, content_key.clone())) {
+                state
+                    .pending_sync_replies
+                    .push_back(QueuedAccountabilityReply {
+                        kind: AccountabilityWitnessKind::HoldRetrieval,
+                        scope,
+                        token: reply_token,
+                        available_at_ms: now_ms.saturating_add(self.config.reply_jitter_ms),
+                        deadline_ms: reply_block.inner.valid_until,
+                    });
+                if let Some(local_index) = state.local_index.get_mut(&(scope, content_key.clone()))
+                {
                     local_index.selector_count = stored.selectors.len();
                     local_index.last_observed_ms = now_ms;
                 }
@@ -877,11 +925,13 @@ impl HoldManager {
         let _ = with_state_mut_validated(
             &self.state,
             |state| {
-                state.pending_sync_retrievals.push_back(QueuedSyncRetrieval {
-                    request,
-                    queued_at_ms,
-                    deadline_ms,
-                });
+                state
+                    .pending_sync_retrievals
+                    .push_back(QueuedSyncRetrieval {
+                        request,
+                        queued_at_ms,
+                        deadline_ms,
+                    });
             },
             HoldState::validate,
         )
@@ -899,7 +949,12 @@ impl HoldManager {
                 let _ = state.pending_sync_retrievals.pop_front();
                 continue;
             }
-            retrievals.push(state.pending_sync_retrievals.pop_front().expect("front existed"));
+            retrievals.push(
+                state
+                    .pending_sync_retrievals
+                    .pop_front()
+                    .expect("front existed"),
+            );
         }
 
         let mut replies = Vec::new();
@@ -910,10 +965,18 @@ impl HoldManager {
             if front.available_at_ms > now_ms {
                 break;
             }
-            replies.push(state.pending_sync_replies.pop_front().expect("front existed"));
+            replies.push(
+                state
+                    .pending_sync_replies
+                    .pop_front()
+                    .expect("front existed"),
+            );
         }
 
-        HoldSyncBatch { retrievals, replies }
+        HoldSyncBatch {
+            retrievals,
+            replies,
+        }
     }
 
     pub async fn rotate_capabilities(
@@ -938,10 +1001,7 @@ impl HoldManager {
                     };
                     let should_rotate = stored.selectors.iter().any(|selector| {
                         selector.capability.epoch != maintenance_epoch.identity_epoch.value()
-                            || selector
-                                .capability
-                                .valid_until
-                                .saturating_sub(now_ms)
+                            || selector.capability.valid_until.saturating_sub(now_ms)
                                 <= self.config.capability_rotation_window_ms
                     });
                     if should_rotate {
@@ -987,7 +1047,9 @@ impl HoldManager {
                 let mut removable = state
                     .objects
                     .iter()
-                    .filter(|((candidate_scope, _), _)| scope.is_none_or(|value| *candidate_scope == value))
+                    .filter(|((candidate_scope, _), _)| {
+                        scope.map_or(true, |value| *candidate_scope == value)
+                    })
                     .filter_map(|(key, stored)| {
                         let expired_caps = stored
                             .selectors
@@ -1008,7 +1070,9 @@ impl HoldManager {
                     let mut extra = state
                         .objects
                         .iter()
-                        .filter(|((candidate_scope, _), _)| scope.is_none_or(|value| *candidate_scope == value))
+                        .filter(|((candidate_scope, _), _)| {
+                            scope.map_or(true, |value| *candidate_scope == value)
+                        })
                         .map(|(key, stored)| {
                             (
                                 key.clone(),
@@ -1019,7 +1083,9 @@ impl HoldManager {
                         })
                         .collect::<Vec<_>>();
                     extra.sort_by_key(|(_, epoch, deposited_at_ms, _)| (*epoch, *deposited_at_ms));
-                    let mut bytes_over = state.total_custody_bytes.saturating_sub(self.config.storage_limit_bytes);
+                    let mut bytes_over = state
+                        .total_custody_bytes
+                        .saturating_sub(self.config.storage_limit_bytes);
                     for (key, _, _, invalidation) in extra {
                         if bytes_over == 0 {
                             break;
@@ -1028,7 +1094,8 @@ impl HoldManager {
                             continue;
                         }
                         if let Some(stored) = state.objects.get(&key) {
-                            bytes_over = bytes_over.saturating_sub(stored.held_object.ciphertext.len());
+                            bytes_over =
+                                bytes_over.saturating_sub(stored.held_object.ciphertext.len());
                         }
                         removable.push((key, invalidation));
                     }
@@ -1095,13 +1162,15 @@ impl HoldManager {
                         used: false,
                     },
                 );
-                state.pending_sync_replies.push_back(QueuedAccountabilityReply {
-                    kind: AccountabilityWitnessKind::MoveReceipt,
-                    scope,
-                    token,
-                    available_at_ms: now_ms.saturating_add(self.config.reply_jitter_ms),
-                    deadline_ms: valid_until,
-                });
+                state
+                    .pending_sync_replies
+                    .push_back(QueuedAccountabilityReply {
+                        kind: AccountabilityWitnessKind::MoveReceipt,
+                        scope,
+                        token,
+                        available_at_ms: now_ms.saturating_add(self.config.reply_jitter_ms),
+                        deadline_ms: valid_until,
+                    });
             },
             HoldState::validate,
         )
@@ -1134,8 +1203,15 @@ impl HoldManager {
         witness: &AccountabilityWitness,
         now_ms: u64,
     ) -> Result<VerifiedServiceWitness, HoldManagerError> {
-        self.verify_witness(role, witness.kind, ServiceFamily::Hold, reply_block, witness, now_ms)
-            .await
+        self.verify_witness(
+            role,
+            witness.kind,
+            ServiceFamily::Hold,
+            reply_block,
+            witness,
+            now_ms,
+        )
+        .await
     }
 
     async fn verify_witness(
@@ -1161,10 +1237,19 @@ impl HoldManager {
         }
         let role_matches = matches!(
             (kind, role),
-            (AccountabilityWitnessKind::MoveReceipt, VerifierRole::AdjacentMoveHop)
-                | (AccountabilityWitnessKind::HoldDeposit, VerifierRole::HoldDepositor)
-                | (AccountabilityWitnessKind::HoldRetrieval, VerifierRole::HoldRetriever)
-                | (AccountabilityWitnessKind::HoldAudit, VerifierRole::HoldAuditor)
+            (
+                AccountabilityWitnessKind::MoveReceipt,
+                VerifierRole::AdjacentMoveHop
+            ) | (
+                AccountabilityWitnessKind::HoldDeposit,
+                VerifierRole::HoldDepositor
+            ) | (
+                AccountabilityWitnessKind::HoldRetrieval,
+                VerifierRole::HoldRetriever
+            ) | (
+                AccountabilityWitnessKind::HoldAudit,
+                VerifierRole::HoldAuditor
+            )
         );
         if !role_matches
             || record.command_scope != witness.command_scope
@@ -1262,7 +1347,12 @@ impl HoldManager {
     ) -> AccountabilityReplyBlock {
         AccountabilityReplyBlock {
             scope,
-            token: hash(&reply_block_material(self.authority_id, scope, command_scope, now_ms)),
+            token: hash(&reply_block_material(
+                self.authority_id,
+                scope,
+                command_scope,
+                now_ms,
+            )),
             command_scope,
             valid_until: now_ms.saturating_add(self.config.reply_block_ttl_ms),
         }
@@ -1447,7 +1537,10 @@ mod tests {
             .expect("retrieve");
 
         assert_eq!(retrieval.status, HoldRetrievalStatus::Success);
-        assert_eq!(retrieval.held_object.expect("object"), held(scope, b"hello"));
+        assert_eq!(
+            retrieval.held_object.expect("object"),
+            held(scope, b"hello")
+        );
         assert!(retrieval.redeposit_on_miss);
     }
 
@@ -1593,9 +1686,7 @@ mod tests {
             .await
             .expect("second deposit");
 
-        let gc = manager
-            .garbage_collect(Some(scope), epoch, 150)
-            .await;
+        let gc = manager.garbage_collect(Some(scope), epoch, 150).await;
         assert!(gc.removed_objects >= 1);
         assert!(!gc.invalidations.is_empty());
     }
@@ -1603,7 +1694,11 @@ mod tests {
     #[tokio::test]
     async fn verified_witness_is_required_before_provider_health_updates() {
         let registry = Arc::new(ServiceRegistry::new());
-        let manager = HoldManager::new(authority(1), HoldManagerConfig::for_testing(), registry.clone());
+        let manager = HoldManager::new(
+            authority(1),
+            HoldManagerConfig::for_testing(),
+            registry.clone(),
+        );
         let scope = context(11);
         let move_reply = manager
             .issue_move_receipt_reply_block(scope, [7; 32], 100)
@@ -1626,12 +1721,7 @@ mod tests {
             .is_none());
 
         let verified = manager
-            .verify_move_receipt(
-                VerifierRole::AdjacentMoveHop,
-                &move_reply,
-                &witness,
-                130,
-            )
+            .verify_move_receipt(VerifierRole::AdjacentMoveHop, &move_reply, &witness, 130)
             .await
             .expect("verified");
         manager

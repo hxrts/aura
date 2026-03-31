@@ -655,17 +655,21 @@ impl UiModel {
         let previous = self.selected_contact_id;
         self.contacts = contacts
             .into_iter()
-            .map(|(authority_id, name, is_guardian, relationship_state)| ContactRow {
-                authority_id,
-                name,
-                selected: false,
-                is_guardian,
-                relationship_state,
-                confirmation: match relationship_state {
-                    ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
-                    _ => ConfirmationState::Confirmed,
+            .map(
+                |(authority_id, name, is_guardian, relationship_state)| ContactRow {
+                    authority_id,
+                    name,
+                    selected: false,
+                    is_guardian,
+                    relationship_state,
+                    confirmation: match relationship_state {
+                        ContactRelationshipState::PendingOutbound => {
+                            ConfirmationState::PendingLocal
+                        }
+                        _ => ConfirmationState::Confirmed,
+                    },
                 },
-            })
+            )
             .collect();
 
         if self.contacts.is_empty() {

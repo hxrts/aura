@@ -1,4 +1,3 @@
-# Aura Chat - Secure Messaging Layer
 [package]
 name = "aura-chat"
 version.workspace = true
@@ -12,46 +11,19 @@ description = "Secure chat functionality for the Aura threshold identity platfor
 keywords = ["chat", "messaging", "secure", "amp", "authority"]
 categories = ["cryptography"]
 
-[lints]
-workspace = true
-
 [dependencies]
-# Core traits (interface layer)
 aura-core = { path = "../aura-core", version = "0.1.0" }
-
-# Journal for domain fact types
 aura-journal = { path = "../aura-journal", version = "0.1.0" }
-
-# Proc-macros for DomainFact derives
 aura-macros = { path = "../aura-macros", version = "0.1.0" }
-
-# Effect handler composition utilities (for ViewDeltaReducer)
 aura-composition = { path = "../aura-composition", version = "0.1.0" }
-
-# Guard-chain shared helpers
 aura-guards = { path = "../aura-guards", version = "0.1.0" }
 
-# Session types and choreography
-
-# Transport layer for AMP protocol
-
-# Async runtime
-tokio = { workspace = true }
-async-trait = { workspace = true }
-futures = { workspace = true }
-
-# Serialization
 serde = { workspace = true }
-bincode = { workspace = true }
-serde_json = { workspace = true }
-
-# Utilities
-uuid = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
-# For testing
-tokio = { workspace = true }
+uuid = { workspace = true }
 
 [features]
 default = []
+
+[lints]
+workspace = true

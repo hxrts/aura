@@ -92,6 +92,12 @@ and continue to map to the same canonical coverage anchors:
   creation, channel join, and message-send flows stay anchored by
   `scenario13-mixed-contact-channel-message-e2e.toml`
 
+Scenario 13 remains the canonical anchor for the shared contacts lifecycle
+because it exercises the parity-critical semantic controls for `send friend
+request`, `accept friend request`, `decline friend request`, and `remove
+friend` while preserving the runtime-projected relationship states `contact`,
+`pending_outbound`, `pending_inbound`, and `friend` across both TUI and web.
+
 ## Frontend-Conformance Coverage
 
 These scenarios are maintained outside the main shared semantic lane:

@@ -13,18 +13,11 @@ workspace = true
 
 [features]
 default = []
-# Enable full effect system from aura-agent (Layer 6)
-# Only enable this feature in crates that are Layer 5+ or integration tests
 full-effect-system = ["dep:aura-agent"]
-# Enable Lean oracle for differential testing against formally verified models
-# Requires Lean toolchain and `just lean-oracle-build` to be run first
 lean = []
-# Enable CrdtCoordinator tests (forwards to aura-protocol/crdt-sync)
 crdt-sync = ["aura-protocol/crdt-sync"]
 
 [dependencies]
-# Workspace crates - Layer 8 testkit provides test utilities
-# Note: aura-protocol removed (was unused, and would create circular dependency)
 aura-core = { path = "../aura-core", version = "0.1.0", features = ["simulation"] }
 aura-effects = { path = "../aura-effects", version = "0.1.0", features = ["simulation"] }
 aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
@@ -37,15 +30,10 @@ aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
 aura-anti-entropy = { path = "../aura-anti-entropy", version = "0.1.0" }
 aura-amp = { path = "../aura-amp", version = "0.1.0" }
 aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
+aura-app = { path = "../aura-app", version = "0.1.0" }
+aura-agent = { path = "../aura-agent", version = "0.1.0", optional = true }
 telltale-theory = { workspace = true, features = ["async-subtyping"] }
 
-# App core for RuntimeBridge trait and types
-aura-app = { path = "../aura-app", version = "0.1.0" }
-
-# Optional: Full effect system from Layer 6 (only for higher-layer tests)
-aura-agent = { path = "../aura-agent", version = "0.1.0", optional = true }
-
-# Async runtime
 async-trait = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
@@ -53,20 +41,16 @@ futures-timer = { version = "3", features = ["wasm-bindgen"] }
 async-lock = "3"
 async-channel = "1"
 
-# Cryptography provided through aura-core
 ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
 sha2 = { workspace = true }
 
-# Randomness
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 
-# Logging
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-# Utilities
 uuid = { workspace = true }
 once_cell = { workspace = true }
 serde = { workspace = true }
@@ -79,21 +63,12 @@ zeroize = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }
 
-# Property testing
 proptest = { workspace = true }
-
-# Authorization system
 biscuit-auth = { workspace = true }
-
-# Test serialization for global state tests
 serial_test = { workspace = true }
-
-# Conditional compilation
 cfg-if = "1"
 
 [dev-dependencies]
-# For testing the test utilities themselves
-# tokio-test = { workspace = true } # removed - unused
 aura-composition = { path = "../aura-composition" }
 aura-macros = { path = "../aura-macros", version = "0.1.0" }
 bincode = { workspace = true }

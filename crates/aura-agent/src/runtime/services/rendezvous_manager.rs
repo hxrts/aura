@@ -195,7 +195,7 @@ enum RendezvousCommand {
     },
     CacheDiscoveredPeer {
         local_authority_id: AuthorityId,
-        peer: DiscoveredPeer,
+        peer: Box<DiscoveredPeer>,
         reply: oneshot::Sender<()>,
     },
     InstallLanDiscovery {
@@ -414,6 +414,7 @@ impl RendezvousManager {
                         peer,
                         reply,
                     } => {
+                        let peer = *peer;
                         state
                             .lan_discovered_peers
                             .insert(peer.authority_id, peer.clone());
@@ -870,7 +871,9 @@ impl RendezvousManager {
     /// Returns unique AuthorityIds for all peers with cached descriptors.
     /// Useful for peer discovery integration with sync.
     pub async fn list_cached_peers(&self) -> Vec<AuthorityId> {
-        self.registry.list_cached_peers(self.authority_id, None).await
+        self.registry
+            .list_cached_peers(self.authority_id, None)
+            .await
     }
 
     /// Return the valid cached descriptors for a single context.
@@ -921,12 +924,9 @@ impl RendezvousManager {
             .into_iter()
             .filter(|path| {
                 path.route.hops.is_empty()
-                    && path
-                        .route
-                        .destination
-                        .address
-                        .as_deref()
-                        .is_some_and(|_| path.route.destination.protocol != LinkProtocol::WebSocketRelay)
+                    && path.route.destination.address.as_deref().is_some_and(|_| {
+                        path.route.destination.protocol != LinkProtocol::WebSocketRelay
+                    })
                     && descriptor_supports_local_recovery(&path.route.destination, interfaces)
             })
             .collect()
@@ -977,7 +977,7 @@ impl RendezvousManager {
                     let _ = commands
                         .request(|reply| RendezvousCommand::CacheDiscoveredPeer {
                             local_authority_id,
-                            peer: peer_clone.clone(),
+                            peer: Box::new(peer_clone.clone()),
                             reply,
                         })
                         .await;
@@ -1264,15 +1264,16 @@ fn descriptor_supports_local_recovery(
 ) -> bool {
     match endpoint.protocol {
         LinkProtocol::WebSocketRelay => false,
-        LinkProtocol::Quic | LinkProtocol::Tcp | LinkProtocol::WebSocket | LinkProtocol::QuicReflexive => {
-            endpoint.address.as_deref().is_some_and(|address| {
-                TransportHint::tcp_direct(address)
-                    .or_else(|_| TransportHint::quic_direct(address))
-                    .or_else(|_| TransportHint::websocket_direct(address))
-                    .map(|hint| hint.is_recoverable(interfaces))
-                    .unwrap_or(false)
-            })
-        }
+        LinkProtocol::Quic
+        | LinkProtocol::Tcp
+        | LinkProtocol::WebSocket
+        | LinkProtocol::QuicReflexive => endpoint.address.as_deref().is_some_and(|address| {
+            TransportHint::tcp_direct(address)
+                .or_else(|_| TransportHint::quic_direct(address))
+                .or_else(|_| TransportHint::websocket_direct(address))
+                .map(|hint| hint.is_recoverable(interfaces))
+                .unwrap_or(false)
+        }),
     }
 }
 
@@ -1738,17 +1739,19 @@ mod tests {
             ..valid_descriptor.clone()
         };
 
-        manager.cache_descriptor(valid_descriptor.clone()).await.unwrap();
         manager
-            .cache_descriptor(expired_descriptor)
+            .cache_descriptor(valid_descriptor.clone())
             .await
             .unwrap();
+        manager.cache_descriptor(expired_descriptor).await.unwrap();
         manager
             .cache_descriptor(other_context_descriptor)
             .await
             .unwrap();
 
-        let descriptors = manager.list_descriptors_in_context(test_context(), 1_000).await;
+        let descriptors = manager
+            .list_descriptors_in_context(test_context(), 1_000)
+            .await;
         assert_eq!(descriptors.len(), 1);
         assert_eq!(descriptors[0].authority_id, valid_descriptor.authority_id);
         assert_eq!(descriptors[0].context_id, valid_descriptor.context_id);

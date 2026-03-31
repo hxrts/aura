@@ -1,4 +1,3 @@
-# Aura Effects - Standard Effect Handler Implementations
 [package]
 name = "aura-effects"
 version.workspace = true
@@ -17,35 +16,25 @@ workspace = true
 
 [features]
 default = []
-# Enable simulation effect handlers (requires aura-core/simulation)
 simulation = ["aura-core/simulation"]
 telltale-runtime-capability = ["dep:telltale-vm"]
 
 [dependencies]
-# Core traits (interface layer)
 aura-core = { path = "../aura-core", version = "0.1.0" }
 
-# NOTE: aura-store creates circular dependency (aura-store → aura-protocol → aura-effects)
-# Encrypted storage handler belongs in a higher layer
-# aura-store = { path = "../aura-store", version = "0.1.0" }
-
-# Async runtime
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 futures-util = "0.3"
 cfg-if = "1"
 
-# Transport libraries
 url = "2.5"
 
-# Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 bincode = { workspace = true }
 postcard = { workspace = true }
 
-# Cryptography
 ed25519-dalek = { workspace = true }
 curve25519-dalek = { workspace = true }
 snow = "0.9.6"
@@ -61,10 +50,8 @@ chacha20 = { workspace = true }
 chacha20poly1305 = { workspace = true }
 getrandom = { workspace = true }
 
-# Authorization
 biscuit-auth = { workspace = true }
 
-# Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -73,7 +60,6 @@ hex = { workspace = true }
 telltale-vm = { workspace = true, optional = true }
 
 [dev-dependencies]
-# tokio-test = { workspace = true } # removed - unused
 tempfile = { workspace = true }
 proptest = { workspace = true }
 

@@ -22,7 +22,7 @@ pub use connections::{ConnectionMetadata, ConnectionPool, PoolConfig};
 pub use peers::{PeerDiscoveryConfig, PeerInfo, PeerManager, PeerMetadata, PeerStatus};
 pub use rate_limit::{RateLimit, RateLimitConfig, RateLimitResult, RateLimiter};
 pub use rendezvous::{
-    DiscoveredPeer, RendezvousAdapter, RendezvousEvent, SyncBlendedHoldWindow,
-    SyncBlendedReply, SyncBlendedRetrieval,
+    DiscoveredPeer, RendezvousAdapter, RendezvousEvent, SyncBlendedHoldWindow, SyncBlendedReply,
+    SyncBlendedRetrieval,
 };
 pub use retry::{BackoffStrategy, RetryContext, RetryPolicy, RetryResult};

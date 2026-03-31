@@ -1,4 +1,3 @@
-# Core shared types for Aura - fundamental data structures used across the entire workspace
 [package]
 name = "aura-core"
 version.workspace = true
@@ -14,17 +13,12 @@ description = "Foundation types, effect traits, and cryptographic utilities for 
 workspace = true
 
 [dependencies]
-# Serialization
 serde = { workspace = true }
 serde_ipld_dagcbor = { workspace = true }
 serde_json = { workspace = true }
+serde_bytes = { workspace = true }
 toml = { workspace = true }
-bincode = { workspace = true }
-
-# Identifiers
 uuid = { workspace = true }
-
-# Utilities
 thiserror = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
@@ -32,59 +26,27 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }
 parking_lot = { workspace = true }
-
-# Cryptographic hashing
 sha2 = { workspace = true }
-
-# Randomness
 rand = { workspace = true }
-getrandom = { workspace = true }
-
-# FROST threshold cryptography (for ParticipantId conversion)
-frost-core = { workspace = true }
 frost-ed25519 = { workspace = true }
-curve25519-dalek = { workspace = true }
-
-# Ed25519 signatures for effects
 ed25519-dalek = { workspace = true }
-
-# Key derivation
 hkdf = { workspace = true }
-
-# Additional serialization for crypto types
-serde_bytes = { workspace = true }
 paste = "1.0"
-
-# Time utilities
 time = { workspace = true }
-
-# Crypto utilities
-subtle = { workspace = true }
 zeroize = { workspace = true }
-
-# Conditional compilation
 cfg-if = "1"
-
-# Authorization tokens
 biscuit-auth = { workspace = true }
 tracing = { workspace = true }
-
-# Property testing (optional)
 proptest = { workspace = true, optional = true }
-
 
 [features]
 default = []
-# Enable proptest integration for property testing
 proptest = ["dep:proptest"]
-# Enable simulation/testing effect traits (used by aura-simulator, aura-quint, aura-testkit)
 simulation = []
 
 [dev-dependencies]
-# For testing
 proptest = { workspace = true }
 trybuild = { workspace = true }
-# For benchmarking
 async-trait = { workspace = true }
 tracing-subscriber = { workspace = true }
 

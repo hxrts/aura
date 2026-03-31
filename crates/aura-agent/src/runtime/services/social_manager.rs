@@ -232,11 +232,11 @@ impl SocialManager {
     where
         F: Fn(&AuthorityId) -> bool + Copy,
     {
-        let neighborhood_candidates = self
-            .topology
-            .read()
-            .await
-            .build_provider_candidates(family, destination, reachability);
+        let neighborhood_candidates =
+            self.topology
+                .read()
+                .await
+                .build_provider_candidates(family, destination, reachability);
 
         if family == ServiceFamily::Hold {
             return neighborhood_candidates;
@@ -443,7 +443,9 @@ mod tests {
         }));
         assert!(candidates.iter().any(|candidate| {
             candidate.authority_id == introduced_peer
-                && candidate.evidence.contains(&ProviderEvidence::IntroducedFof)
+                && candidate
+                    .evidence
+                    .contains(&ProviderEvidence::IntroducedFof)
         }));
     }
 

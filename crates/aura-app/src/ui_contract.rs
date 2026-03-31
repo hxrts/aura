@@ -681,9 +681,7 @@ impl ControlId {
             Self::NeighborhoodAcceptInvitationButton => Some("aura-neighborhood-accept-invitation"),
             Self::ContactsCreateInvitationButton => Some("aura-contacts-create-invitation"),
             Self::ContactsSendFriendRequestButton => Some("aura-contacts-send-friend-request"),
-            Self::ContactsAcceptFriendRequestButton => {
-                Some("aura-contacts-accept-friend-request")
-            }
+            Self::ContactsAcceptFriendRequestButton => Some("aura-contacts-accept-friend-request"),
             Self::ContactsDeclineFriendRequestButton => {
                 Some("aura-contacts-decline-friend-request")
             }
@@ -3765,31 +3763,31 @@ mod tests {
     use super::next_projection_revision;
     use super::{
         classify_screen_item_id, classify_semantic_settings_section_item_id,
-        classify_settings_section_item_id, compare_ui_snapshots_for_parity, list_item_dom_id,
-        list_item_selector, nav_control_id_for_screen, screen_item_id,
-        semantic_settings_section_item_id, semantic_settings_section_surface_id,
-        settings_section_item_id, shared_flow_scenarios, shared_flow_source_areas,
-        shared_list_support, shared_modal_support, shared_screen_module_map, shared_screen_support,
-        uncovered_ui_parity_mismatches, validate_harness_shell_structure,
-        validate_render_convergence, AuthoritativeSemanticFact, AuthoritativeSemanticFactKind,
-        BrowserHarnessBridgeMethodKind, ChannelFactKey, ConfirmationState, ControlId, FieldId,
-        FlowAvailability, FrontendExecutionBoundaryKind, FrontendSpecificSettingsSectionId,
-        HarnessModeChangeKind, HarnessShellMode, HarnessShellStructureSnapshot, InvitationFactKind,
-        ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId,
-        OperationInstanceId, OperationSnapshot, OperationState, ParityUiIdentity,
-        ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventKind,
-        RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot, SemanticFailureCode,
-        SemanticFailureDomain, SemanticOperationCausality, SemanticOperationError,
-        SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
-        SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId, ToastKind, ToastSnapshot,
-        UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES,
-        BROWSER_HARNESS_BRIDGE_METHODS, BROWSER_OBSERVATION_SURFACE_GLOBAL,
-        BROWSER_OBSERVATION_SURFACE_METHODS, FRONTEND_EXECUTION_BOUNDARIES,
-        FRONTEND_SPECIFIC_SETTINGS_SECTIONS, HARNESS_MODE_ALLOWLIST,
+        classify_settings_section_item_id, compare_ui_snapshots_for_parity,
+        contacts_friend_action_controls, list_item_dom_id, list_item_selector,
+        nav_control_id_for_screen, screen_item_id, semantic_settings_section_item_id,
+        semantic_settings_section_surface_id, settings_section_item_id, shared_flow_scenarios,
+        shared_flow_source_areas, shared_list_support, shared_modal_support,
+        shared_screen_module_map, shared_screen_support, uncovered_ui_parity_mismatches,
+        validate_harness_shell_structure, validate_render_convergence, AuthoritativeSemanticFact,
+        AuthoritativeSemanticFactKind, BrowserHarnessBridgeMethodKind, ChannelFactKey,
+        ConfirmationState, ControlId, FieldId, FlowAvailability, FrontendExecutionBoundaryKind,
+        FrontendSpecificSettingsSectionId, HarnessModeChangeKind, HarnessShellMode,
+        HarnessShellStructureSnapshot, InvitationFactKind, ListId, ListItemSnapshot, ListSnapshot,
+        MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
+        OperationState, ParityUiIdentity, ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat,
+        RuntimeEventId, RuntimeEventKind, RuntimeEventSnapshot, RuntimeFact, ScreenId,
+        SelectionSnapshot, SemanticFailureCode, SemanticFailureDomain, SemanticOperationCausality,
+        SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
+        SemanticOperationStatus, SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId,
+        ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
+        BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
+        BROWSER_OBSERVATION_SURFACE_GLOBAL, BROWSER_OBSERVATION_SURFACE_METHODS,
+        FRONTEND_EXECUTION_BOUNDARIES, FRONTEND_SPECIFIC_SETTINGS_SECTIONS, HARNESS_MODE_ALLOWLIST,
         PARITY_CRITICAL_SETTINGS_SECTIONS, PARITY_EXCEPTION_METADATA,
         SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SOURCE_AREAS, SHARED_FLOW_SUPPORT,
         SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
-        TUI_OBSERVATION_SURFACE_METHODS, contacts_friend_action_controls,
+        TUI_OBSERVATION_SURFACE_METHODS,
     };
     use crate::views::contacts::ContactRelationshipState;
     use aura_core::{OwnerEpoch, PublicationSequence};

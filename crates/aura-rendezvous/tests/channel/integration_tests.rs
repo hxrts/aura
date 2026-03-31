@@ -234,7 +234,7 @@ async fn test_channel_establishment_flow() {
         .advertised_establish_paths()
         .into_iter()
         .next()
-        .expect("establish path");
+        .unwrap_or_else(|| panic!("establish path"));
 
     let snapshot = test_snapshot(alice, context);
     let mock_effects = MockNoise;
@@ -284,7 +284,7 @@ async fn test_channel_establishment_uses_explicit_context_over_descriptor_contex
         .advertised_establish_paths()
         .into_iter()
         .next()
-        .expect("establish path");
+        .unwrap_or_else(|| panic!("establish path"));
     let mock_effects = MockNoise;
 
     let result = service
@@ -336,7 +336,7 @@ async fn test_channel_establishment_rejects_expired_descriptor() {
         .advertised_establish_paths()
         .into_iter()
         .next()
-        .expect("establish path");
+        .unwrap_or_else(|| panic!("establish path"));
     let mock_effects = MockNoise;
 
     let result = service
@@ -593,7 +593,7 @@ async fn test_missing_capability_blocks_connect() {
         .advertised_establish_paths()
         .into_iter()
         .next()
-        .expect("establish path");
+        .unwrap_or_else(|| panic!("establish path"));
     let mock_effects = MockNoise;
 
     let result = service
@@ -655,7 +655,7 @@ async fn test_complete_discovery_to_channel_flow() {
         .advertised_establish_paths()
         .into_iter()
         .next()
-        .expect("establish path");
+        .unwrap_or_else(|| panic!("establish path"));
 
     // Step 3: Alice initiates channel establishment
     // Requires mutable service for Alice

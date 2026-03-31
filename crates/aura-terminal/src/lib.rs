@@ -65,7 +65,6 @@
 
 #![allow(clippy::disallowed_methods)] // CLI handlers intentionally call system APIs for user interactions
 #![allow(clippy::disallowed_types)]
-// CLI uses blake3::Hasher directly in some places
 #![allow(clippy::empty_line_after_doc_comments)]
 #![allow(clippy::derivable_impls)]
 #![allow(clippy::redundant_closure)]

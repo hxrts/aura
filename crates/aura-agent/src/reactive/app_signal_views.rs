@@ -48,8 +48,7 @@ use aura_invitation::{
 };
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
-    ContactFact, FriendshipFact, ReadReceiptPolicy, CONTACT_FACT_TYPE_ID,
-    FRIENDSHIP_FACT_TYPE_ID,
+    ContactFact, FriendshipFact, ReadReceiptPolicy, CONTACT_FACT_TYPE_ID, FRIENDSHIP_FACT_TYPE_ID,
 };
 use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
@@ -2162,7 +2161,9 @@ mod tests {
             .await
             .expect("contacts signal should be published");
         assert_eq!(
-            contacts.contact(&peer).map(|contact| contact.relationship_state),
+            contacts
+                .contact(&peer)
+                .map(|contact| contact.relationship_state),
             Some(ContactRelationshipState::Contact)
         );
 
@@ -2176,14 +2177,17 @@ mod tests {
             },
         }
         .to_generic();
-        view.update(&[fact_from_relational(outbound_proposed)]).await;
+        view.update(&[fact_from_relational(outbound_proposed)])
+            .await;
 
         let contacts = reactive
             .read(&*CONTACTS_SIGNAL)
             .await
             .expect("contacts signal should remain published");
         assert_eq!(
-            contacts.contact(&peer).map(|contact| contact.relationship_state),
+            contacts
+                .contact(&peer)
+                .map(|contact| contact.relationship_state),
             Some(ContactRelationshipState::PendingOutbound)
         );
 
@@ -2204,7 +2208,9 @@ mod tests {
             .await
             .expect("contacts signal should remain published");
         assert_eq!(
-            contacts.contact(&peer).map(|contact| contact.relationship_state),
+            contacts
+                .contact(&peer)
+                .map(|contact| contact.relationship_state),
             Some(ContactRelationshipState::Friend)
         );
 
@@ -2225,7 +2231,9 @@ mod tests {
             .await
             .expect("contacts signal should remain published");
         assert_eq!(
-            contacts.contact(&peer).map(|contact| contact.relationship_state),
+            contacts
+                .contact(&peer)
+                .map(|contact| contact.relationship_state),
             Some(ContactRelationshipState::Contact)
         );
 

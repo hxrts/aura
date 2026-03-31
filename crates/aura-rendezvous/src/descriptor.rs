@@ -342,7 +342,11 @@ fn establish_path_priority(route: &Route) -> u8 {
 }
 
 async fn path_is_reachable(route: &Route, prober: &TransportProber) -> AuraResult<bool> {
-    let target = route.hops.first().map(|hop| &hop.link_endpoint).unwrap_or(&route.destination);
+    let target = route
+        .hops
+        .first()
+        .map(|hop| &hop.link_endpoint)
+        .unwrap_or(&route.destination);
     endpoint_is_reachable(target, prober).await
 }
 

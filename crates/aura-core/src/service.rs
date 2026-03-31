@@ -722,10 +722,7 @@ pub struct SelectionState {
 impl ServiceProfile {
     /// Return whether this profile is layered over the shared `Hold` substrate.
     pub fn is_hold_profile(&self) -> bool {
-        matches!(
-            self,
-            Self::DeferredDeliveryHold | Self::CacheReplicaHold
-        )
+        matches!(self, Self::DeferredDeliveryHold | Self::CacheReplicaHold)
     }
 }
 
@@ -848,38 +845,43 @@ mod tests {
         };
         let passthrough = LocalRoutingProfile::passthrough();
 
-        let envelope_json = serde_json::to_vec(&envelope).expect("serialize move envelope");
-        let held_json = serde_json::to_vec(&held).expect("serialize held object");
-        let retrieval_json = serde_json::to_vec(&retrieval).expect("serialize retrieval cap");
-        let candidate_json = serde_json::to_vec(&candidate).expect("serialize provider candidate");
-        let state_json = serde_json::to_vec(&state).expect("serialize selection state");
+        let envelope_json = serde_json::to_vec(&envelope)
+            .unwrap_or_else(|err| panic!("serialize move envelope: {err}"));
+        let held_json =
+            serde_json::to_vec(&held).unwrap_or_else(|err| panic!("serialize held object: {err}"));
+        let retrieval_json = serde_json::to_vec(&retrieval)
+            .unwrap_or_else(|err| panic!("serialize retrieval cap: {err}"));
+        let candidate_json = serde_json::to_vec(&candidate)
+            .unwrap_or_else(|err| panic!("serialize provider candidate: {err}"));
+        let state_json = serde_json::to_vec(&state)
+            .unwrap_or_else(|err| panic!("serialize selection state: {err}"));
 
         assert_eq!(
-            serde_json::from_slice::<MoveEnvelope>(&envelope_json).expect("deserialize"),
+            serde_json::from_slice::<MoveEnvelope>(&envelope_json)
+                .unwrap_or_else(|err| panic!("deserialize move envelope: {err}")),
             envelope
         );
         assert_eq!(
-            serde_json::from_slice::<HeldObject>(&held_json).expect("deserialize"),
+            serde_json::from_slice::<HeldObject>(&held_json)
+                .unwrap_or_else(|err| panic!("deserialize held object: {err}")),
             held
         );
         assert_eq!(
-            serde_json::from_slice::<RetrievalCapability>(&retrieval_json).expect("deserialize"),
+            serde_json::from_slice::<RetrievalCapability>(&retrieval_json)
+                .unwrap_or_else(|err| panic!("deserialize retrieval capability: {err}")),
             retrieval
         );
         assert_eq!(
-            serde_json::from_slice::<ProviderCandidate>(&candidate_json).expect("deserialize"),
+            serde_json::from_slice::<ProviderCandidate>(&candidate_json)
+                .unwrap_or_else(|err| panic!("deserialize provider candidate: {err}")),
             candidate
         );
         assert_eq!(
-            serde_json::from_slice::<SelectionState>(&state_json).expect("deserialize"),
+            serde_json::from_slice::<SelectionState>(&state_json)
+                .unwrap_or_else(|err| panic!("deserialize selection state: {err}")),
             state
         );
-        assert_eq!(
-            envelope.path,
-            Some(MovePath {
-                route: route.clone(),
-            })
-        );
+        assert_eq!(envelope.path, Some(MovePath { route }));
         assert_eq!(passthrough.mixing_depth, 0);
         assert_eq!(passthrough.delay_ms, 0);
         assert_eq!(passthrough.cover_rate_per_second, 0);
@@ -938,9 +940,7 @@ mod tests {
 
         assert!(deposit.validate_profile().is_ok());
         assert!(retrieval.validate_profile().is_ok());
-        assert!(ServiceProfile::DirectBootstrap
-            .is_hold_profile()
-            .eq(&false));
+        assert!(ServiceProfile::DirectBootstrap.is_hold_profile().eq(&false));
         assert_eq!(
             HoldRetrievalRequest {
                 profile: ServiceProfile::RelayTransport,

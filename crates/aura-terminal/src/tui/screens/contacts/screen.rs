@@ -44,8 +44,8 @@ use crate::tui::types::{
     InvitationType, ReadReceiptPolicyExt,
 };
 use aura_app::ui::signals::DiscoveredPeerMethod;
-use aura_app::ui::types::ContactRelationshipState;
 use aura_app::ui::types::format_relative_time_from;
+use aura_app::ui::types::ContactRelationshipState;
 use std::collections::HashSet;
 
 fn contact_relationship_label(state: ContactRelationshipState) -> &'static str {
@@ -69,16 +69,19 @@ fn contact_friend_action_hint(state: ContactRelationshipState) -> Option<String>
             ControlId::ContactsSendFriendRequestButton => {
                 Some(format!("{} send friend request", control.activation_key()?))
             }
-            ControlId::ContactsAcceptFriendRequestButton => {
-                Some(format!("{} accept friend request", control.activation_key()?))
-            }
-            ControlId::ContactsDeclineFriendRequestButton => {
-                Some(format!("{} decline friend request", control.activation_key()?))
-            }
+            ControlId::ContactsAcceptFriendRequestButton => Some(format!(
+                "{} accept friend request",
+                control.activation_key()?
+            )),
+            ControlId::ContactsDeclineFriendRequestButton => Some(format!(
+                "{} decline friend request",
+                control.activation_key()?
+            )),
             ControlId::ContactsRemoveFriendButton => match state {
-                ContactRelationshipState::PendingOutbound => {
-                    Some(format!("{} cancel friend request", control.activation_key()?))
-                }
+                ContactRelationshipState::PendingOutbound => Some(format!(
+                    "{} cancel friend request",
+                    control.activation_key()?
+                )),
                 ContactRelationshipState::Friend => {
                     Some(format!("{} remove friend", control.activation_key()?))
                 }

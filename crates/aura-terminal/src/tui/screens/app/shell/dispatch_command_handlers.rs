@@ -2,11 +2,11 @@ use super::dispatch::*;
 use super::dispatch_handlers_neighborhood::handle_neighborhood_dispatch;
 use super::*;
 
+use aura_app::ui::types::ContactRelationshipState;
 use aura_app::ui::workflows::ceremonies::{
     monitor_key_rotation_ceremony_with_policy, start_device_threshold_ceremony,
     start_guardian_ceremony, CeremonyLifecycleState, CeremonyPollPolicy,
 };
-use aura_app::ui::types::ContactRelationshipState;
 use aura_app::ui_contract::SemanticOperationKind;
 use aura_core::types::FrostThreshold;
 
@@ -1045,7 +1045,10 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("No contact selected");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            if !matches!(contact.relationship_state, ContactRelationshipState::Contact) {
+            if !matches!(
+                contact.relationship_state,
+                ContactRelationshipState::Contact
+            ) {
                 new_state.toast_error("Selected contact is not eligible for a new friend request");
                 return EventCommandLoopAction::ContinueCommand;
             }
@@ -1060,7 +1063,7 @@ pub(super) fn handle_dispatch_command_match(
                 OperationId::send_friend_request(),
                 SemanticOperationKind::SendFriendRequest,
             );
-            (cb.contacts.on_send_friend_request)(contact.id.clone(), operation);
+            (cb.contacts.on_send_friend_request)(contact.id, operation);
         }
         DispatchCommand::AcceptSelectedFriendRequest => {
             let idx = new_state.contacts.selected_index;
@@ -1090,7 +1093,7 @@ pub(super) fn handle_dispatch_command_match(
                 OperationId::accept_friend_request(),
                 SemanticOperationKind::AcceptFriendRequest,
             );
-            (cb.contacts.on_accept_friend_request)(contact.id.clone(), operation);
+            (cb.contacts.on_accept_friend_request)(contact.id, operation);
         }
         DispatchCommand::DeclineSelectedFriendRequest => {
             let idx = new_state.contacts.selected_index;
@@ -1120,7 +1123,7 @@ pub(super) fn handle_dispatch_command_match(
                 OperationId::decline_friend_request(),
                 SemanticOperationKind::DeclineFriendRequest,
             );
-            (cb.contacts.on_decline_friend_request)(contact.id.clone(), operation);
+            (cb.contacts.on_decline_friend_request)(contact.id, operation);
         }
         DispatchCommand::RevokeSelectedFriendship => {
             let idx = new_state.contacts.selected_index;
@@ -1150,7 +1153,7 @@ pub(super) fn handle_dispatch_command_match(
                 OperationId::revoke_friendship(),
                 SemanticOperationKind::RevokeFriendship,
             );
-            (cb.contacts.on_revoke_friendship)(contact.id.clone(), operation);
+            (cb.contacts.on_revoke_friendship)(contact.id, operation);
         }
         DispatchCommand::InviteSelectedContactToChannel => {
             let contact_idx = new_state.contacts.selected_index;

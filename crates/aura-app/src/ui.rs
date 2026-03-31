@@ -65,17 +65,17 @@ pub mod contract {
         classify_screen_item_id, classify_semantic_settings_section_item_id,
         classify_settings_section_item_id, compare_ui_snapshots_for_parity,
         contacts_friend_action_controls, list_item_dom_id, list_item_selector,
-        nav_control_id_for_screen, screen_item_id,
-        semantic_settings_section_item_id, semantic_settings_section_surface_id,
-        settings_section_item_id, shared_flow_scenarios, shared_flow_support, shared_list_support,
-        shared_modal_support, shared_screen_support, AuthoritativeSemanticFact, ConfirmationState,
-        ControlId, FieldId, FlowAvailability, FrontendId, HarnessUiCommand,
-        HarnessUiCommandReceipt, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId,
-        OperationId, OperationInstanceId, OperationSnapshot, OperationState, ParityException,
-        RenderHeartbeat, RuntimeEventId, RuntimeEventKind, RuntimeEventSnapshot, ScreenId,
-        SelectionSnapshot, SharedFlowId, SharedFlowScenarioCoverage, SharedFlowSupport,
-        SharedListSupport, SharedModalSupport, SharedScreenModuleMap, SharedScreenSupport, ToastId,
-        ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
+        nav_control_id_for_screen, screen_item_id, semantic_settings_section_item_id,
+        semantic_settings_section_surface_id, settings_section_item_id, shared_flow_scenarios,
+        shared_flow_support, shared_list_support, shared_modal_support, shared_screen_support,
+        AuthoritativeSemanticFact, ConfirmationState, ControlId, FieldId, FlowAvailability,
+        FrontendId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, ListItemSnapshot,
+        ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
+        OperationSnapshot, OperationState, ParityException, RenderHeartbeat, RuntimeEventId,
+        RuntimeEventKind, RuntimeEventSnapshot, ScreenId, SelectionSnapshot, SharedFlowId,
+        SharedFlowScenarioCoverage, SharedFlowSupport, SharedListSupport, SharedModalSupport,
+        SharedScreenModuleMap, SharedScreenSupport, ToastId, ToastKind, ToastSnapshot,
+        UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
         SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SUPPORT, SHARED_LIST_SUPPORT,
         SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
     };
@@ -183,19 +183,19 @@ pub mod types {
         operations, recovery, wizards,
     };
     // Naming pattern
+    pub use crate::views::contacts::ContactRelationshipState;
     pub use crate::views::naming::EffectiveName;
     pub use crate::views::{
         classify_threshold_security, format_recovery_status, security_level_hint, AccountBackup,
         AccountConfig, BanRecord, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,
         BootstrapSurface, CeremonyProgress, Channel, ChannelType, ChatState, Contact,
-        ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeMember, HomeRole,
-        HomeState, HomesState, InvitationDirection, InvitationStatus, InvitationsState,
-        KickRecord, Message, MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome,
-        NeighborhoodState, OneHopLinkType, PendingAccountBootstrap, RecoveryApproval,
-        RecoveryProcess, RecoveryProcessStatus, RecoveryState, SecurityLevel, SuggestionPolicy,
-        TraversalPosition, BACKUP_PREFIX, BACKUP_VERSION,
+        ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeMember, HomeRole, HomeState,
+        HomesState, InvitationDirection, InvitationStatus, InvitationsState, KickRecord, Message,
+        MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome, NeighborhoodState,
+        OneHopLinkType, PendingAccountBootstrap, RecoveryApproval, RecoveryProcess,
+        RecoveryProcessStatus, RecoveryState, SecurityLevel, SuggestionPolicy, TraversalPosition,
+        BACKUP_PREFIX, BACKUP_VERSION,
     };
-    pub use crate::views::contacts::ContactRelationshipState;
     pub use crate::workflows::account::{
         can_submit_account_setup, is_valid_nickname_suggestion, prepare_pending_account_bootstrap,
         validate_nickname_suggestion, NicknameSuggestionError, MAX_NICKNAME_SUGGESTION_LENGTH,

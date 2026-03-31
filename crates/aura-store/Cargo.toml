@@ -1,4 +1,3 @@
-# Domain-focused storage types and logic
 [package]
 name = "aura-store"
 version.workspace = true
@@ -14,24 +13,13 @@ description = "Storage domain types, semantics, and pure logic for Aura"
 workspace = true
 
 [dependencies]
-# Foundation layer only
 aura-core = { path = "../aura-core", version = "0.1.0" }
 aura-macros = { path = "../aura-macros", version = "0.1.0" }
 
-# Authorization logic moved to aura-authorization (proper domain separation)
-
-# Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# Utilities
-hex = { workspace = true }
-
 [dev-dependencies]
-tokio = { workspace = true }
-async-trait = { workspace = true }
-uuid = { workspace = true }
-aura-testkit = { path = "../aura-testkit" }
 proptest = { workspace = true }
 
 [features]

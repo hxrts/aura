@@ -49,7 +49,7 @@ Shared scenarios must submit typed semantic commands through the frontend bridge
 
 Command submission must enter the frontend through its real update and event path. It must not use render-coupled polling or ad hoc harness shims.
 
-Contacts friend management is part of that shared UX contract. The canonical relationship states are `contact`, `pending_outbound`, `pending_inbound`, and `friend`, and they must be projected from runtime-owned relational facts rather than shell-local heuristics. The shared contract owns the parity-critical contacts controls for `send friend request`, `accept friend request`, `decline friend request`, and `remove friend`, and both TUI and web tests should assert those actions through the same semantic surface.
+Contacts friend management is part of that shared UX contract. The canonical relationship states are `contact`, `pending_outbound`, `pending_inbound`, and `friend`, and they must be projected from runtime-owned relational facts rather than shell-local heuristics. The shared contract owns the parity-critical contacts controls for `send friend request`, `accept friend request`, `decline friend request`, and `remove friend`, and both TUI and web tests should assert those actions through the same semantic surface. Harness and frontend-conformance coverage may verify renderer wiring around those controls, but the lifecycle itself stays anchored to Scenario 13 and the shared semantic command/observation path.
 
 ### Shared Semantic Ownership Model
 

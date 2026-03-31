@@ -11,7 +11,6 @@ publish = false
 workspace = true
 
 [dependencies]
-# Internal crates
 aura-agent = { path = "../aura-agent", version = "0.1.0", features = ["simulation"] }
 aura-core = { path = "../aura-core", version = "0.1.0", features = ["simulation"] }
 aura-effects = { path = "../aura-effects", version = "0.1.0", features = ["simulation"] }
@@ -21,14 +20,12 @@ aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
 aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
 aura-testkit = { path = "../aura-testkit" }
 aura-sync = { path = "../aura-sync", version = "0.1.0" }
-# app-console-types = { path = "../app-console-types" }
 aura-quint = { path = "../aura-quint" }
+aura-guards = { path = "../aura-guards", version = "0.1.0" }
 
-# Cryptography
 ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
 
-# Core dependencies
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -36,43 +33,29 @@ thiserror = { workspace = true }
 hex = { workspace = true }
 tracing = { workspace = true }
 
-# Async runtime
 tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
+futures = { workspace = true }
 
-# Concurrency
 parking_lot = { workspace = true }
 
-# Randomness
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 
-# Collections
 indexmap = { workspace = true }
 
-# Conditional compilation
 cfg-if = "1"
-
-# Additional dependencies for choreographic framework
-futures = { workspace = true }
 bincode = { workspace = true }
 sysinfo = { workspace = true }
-
-# Scenario management
 toml = { workspace = true }
 chrono = { workspace = true }
 
-# Guard infrastructure for TestEffectSystem
-aura-guards = { path = "../aura-guards", version = "0.1.0" }
-
 [dev-dependencies]
-# tokio-test = { workspace = true } # removed - unused
 tempfile = { workspace = true }
 aura-macros = { path = "../aura-macros" }
 aura-anti-entropy = { path = "../aura-anti-entropy", version = "0.1.0" }
 proptest = { workspace = true }
-# Protocol tests dependencies
 aura-authentication = { path = "../aura-authentication", version = "0.1.0" }
 aura-invitation = { path = "../aura-invitation", version = "0.1.0" }
 aura-recovery = { path = "../aura-recovery", version = "0.1.0" }

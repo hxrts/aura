@@ -24,6 +24,10 @@ name = "aura-harness"
 path = "src/main.rs"
 
 [dependencies]
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-app = { path = "../aura-app", version = "0.1.0" }
+aura-simulator = { path = "../aura-simulator" }
+
 anyhow = { workspace = true }
 cfg-if = "1"
 async-trait = { workspace = true }
@@ -36,18 +40,15 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+sysinfo = { workspace = true }
 portable-pty = "0.9"
 vt100 = "0.15"
 regex = "1.11"
 nix = "0.26"
 which = "6"
-hex = { workspace = true }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
-sysinfo = { workspace = true }
-aura-core = { path = "../aura-core", version = "0.1.0" }
-aura-app = { path = "../aura-app", version = "0.1.0" }
-aura-simulator = { path = "../aura-simulator" }
 ctrlc = "3.4"
 patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura", optional = true }
 

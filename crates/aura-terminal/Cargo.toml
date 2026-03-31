@@ -1,4 +1,3 @@
-# Terminal interface for Aura - CLI + TUI
 [package]
 name = "aura-terminal"
 version.workspace = true
@@ -37,11 +36,7 @@ required-features = ["testing"]
 [features]
 default = ["terminal"]
 terminal = []
-
-# Testing utilities for deterministic TUI/CLI testing
 testing = ["terminal", "aura-app/app-internals"]
-
-# Development mode with simulator, testkit, and debugging
 development = [
     "terminal",
     "testing",
@@ -51,17 +46,12 @@ development = [
     "dep:aura-testkit",
     "aura-app/app-internals",
 ]
-
-# Property-based tests for the TUI state machine
 proptest = []
 
 [dependencies]
-# Headless app core with native (signals) API
 aura-app = { path = "../aura-app", version = "0.1.0", features = ["native"] }
 aura-core = { path = "../aura-core", version = "0.1.0" }
 aura-agent = { path = "../aura-agent", version = "0.1.0" }
-
-# Workspace crates (Layer 5 features)
 aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
 aura-recovery = { path = "../aura-recovery", version = "0.1.0" }
 aura-invitation = { path = "../aura-invitation", version = "0.1.0" }
@@ -74,36 +64,22 @@ aura-chat = { path = "../aura-chat", version = "0.1.0" }
 aura-journal = { path = "../aura-journal", version = "0.1.0" }
 aura-relational = { path = "../aura-relational", version = "0.1.0" }
 
-# Optional development dependencies - only included with "development" feature
 aura-simulator = { path = "../aura-simulator", optional = true }
 aura-testkit = { path = "../aura-testkit", optional = true, features = ["full-effect-system"] }
 
-# Effect system
 async-trait = { workspace = true }
-
-# Terminal UI (iocraft declarative framework)
 iocraft = "0.7.16"
-
-# Reactive signals for TUI state management
 futures-signals = "0.3"
-
-# CLI
 toml = { workspace = true }
 serde = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
 cfg-if = "1"
 bpaf = "0.9"
-
-# Async
 tokio = { workspace = true, features = ["fs", "signal", "rt-multi-thread"] }
 async-lock = "3"
 futures = { workspace = true }
-
-# Concurrency
 parking_lot = { workspace = true }
-
-# Other dependencies
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
@@ -115,14 +91,13 @@ once_cell = { workspace = true }
 biscuit-auth = { workspace = true }
 nix = "0.26"
 dirs = "6"
-arboard = "3"  # Cross-platform clipboard
+arboard = "3"
 
 [dev-dependencies]
-# Testing infrastructure (Layer 7 can use testkit with full effect system)
 aura-testkit = { path = "../aura-testkit", features = ["full-effect-system"] }
 aura-macros = { path = "../aura-macros" }
 tempfile = { workspace = true }
-insta = "1.34"  # Snapshot testing for TUI render tests
-proptest = { workspace = true }  # Property-based testing for TUI state machine
+insta = "1.34"
+proptest = { workspace = true }
 assert_matches = { workspace = true }
 trybuild = { workspace = true }

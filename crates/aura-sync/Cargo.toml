@@ -12,9 +12,7 @@ include = ["src/**", "Cargo.toml"]
 
 [features]
 default = []
-# Enable choreography-based CRDT synchronization via CrdtCoordinator.
-# Use this for general CRDT state sync (journal facts, app state) as an
-# alternative to digest-based anti-entropy sync.
+# Choreography-based CRDT sync via CrdtCoordinator
 crdt-sync = ["aura-protocol/crdt-sync"]
 
 [dependencies]
@@ -29,33 +27,30 @@ aura-effects = { path = "../aura-effects", version = "0.1.0" }
 aura-anti-entropy = { path = "../aura-anti-entropy", version = "0.1.0" }
 aura-macros = { path = "../aura-macros", version = "0.1.0" }
 aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
-telltale = { workspace = true }
 
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
-async-trait = { workspace = true }
-uuid = { workspace = true }
-futures = { workspace = true }
-tokio = { workspace = true }
 async-lock = "3"
+async-trait = { workspace = true }
 bincode = { workspace = true }
+biscuit-auth = { workspace = true }
+futures = { workspace = true }
+hex = "0.4"
 parking_lot = { workspace = true }
 rand = { workspace = true }
-biscuit-auth = { workspace = true }
-hex = "0.4"
+serde = { workspace = true }
+serde_json = { workspace = true }
+telltale = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
-# Testing infrastructure (Layer 5 can use testkit)
-aura-testkit = { path = "../aura-testkit" }
 aura-macros = { path = "../aura-macros" }
+aura-testkit = { path = "../aura-testkit" }
 tokio = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-time = "1"
-
-
 
 [lints]
 workspace = true

@@ -1541,9 +1541,11 @@ async fn reconcile_accepted_channel_invitation_authoritative(
             authoritative_channel,
         )
         .await?;
-        runtime_state_ready =
-            crate::workflows::messaging::runtime_channel_state_exists(runtime, authoritative_channel)
-                .await?;
+        runtime_state_ready = crate::workflows::messaging::runtime_channel_state_exists(
+            runtime,
+            authoritative_channel,
+        )
+        .await?;
         if !runtime_state_ready {
             resolved_runtime_context = timeout_runtime_call(
                 runtime,

@@ -26,11 +26,7 @@ telltale-theory = { workspace = true }
 futures = "0.3"
 thiserror = "1.0"
 serde_json = { workspace = true }
-
-# Async trait support for generated code  
 async-trait = "0.1"
-
-# Aura crate dependencies for Biscuit integration (minimal to avoid cycles)
 aura-core = { path = "../aura-core", version = "0.1.0" }
 aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
 

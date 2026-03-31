@@ -4,9 +4,9 @@
 //! These facts are stored in context journals and propagated via `aura-sync`.
 
 use aura_core::service::{
-    EstablishDescriptor, EstablishPath, HoldDescriptor, LinkEndpoint, LinkProtocol,
-    MoveDescriptor, MovePath, ServiceDescriptor as AdvertisedServiceDescriptor,
-    ServiceDescriptorHeader, ServiceDescriptorKind, ServiceFamily, ServiceLimits, ServiceProfile,
+    EstablishDescriptor, EstablishPath, HoldDescriptor, LinkEndpoint, LinkProtocol, MoveDescriptor,
+    MovePath, ServiceDescriptor as AdvertisedServiceDescriptor, ServiceDescriptorHeader,
+    ServiceDescriptorKind, ServiceFamily, ServiceLimits, ServiceProfile,
 };
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_journal::extensibility::FactReducer;
@@ -656,7 +656,9 @@ impl TransportHint {
                 stun_server: Some(stun_server.to_string()),
                 bound_local: bound_local.as_ref().map(|bound| bound.0.to_string()),
             },
-            TransportHint::WebSocketRelay { relay_authority } => LinkEndpoint::relay(*relay_authority),
+            TransportHint::WebSocketRelay { relay_authority } => {
+                LinkEndpoint::relay(*relay_authority)
+            }
             TransportHint::WebSocketDirect { addr, bound_local } => LinkEndpoint {
                 protocol: LinkProtocol::WebSocket,
                 address: Some(addr.to_string()),
@@ -678,17 +680,23 @@ impl TransportHint {
     pub fn from_link_endpoint(endpoint: &LinkEndpoint) -> Result<Self, TransportAddressError> {
         match endpoint.protocol {
             LinkProtocol::Quic => {
-                let address = endpoint.address.as_deref().ok_or_else(|| TransportAddressError {
-                    input: String::new(),
-                    reason: "quic endpoint missing address".to_string(),
-                })?;
+                let address = endpoint
+                    .address
+                    .as_deref()
+                    .ok_or_else(|| TransportAddressError {
+                        input: String::new(),
+                        reason: "quic endpoint missing address".to_string(),
+                    })?;
                 Self::quic_direct(address)
             }
             LinkProtocol::QuicReflexive => {
-                let address = endpoint.address.as_deref().ok_or_else(|| TransportAddressError {
-                    input: String::new(),
-                    reason: "reflexive endpoint missing address".to_string(),
-                })?;
+                let address = endpoint
+                    .address
+                    .as_deref()
+                    .ok_or_else(|| TransportAddressError {
+                        input: String::new(),
+                        reason: "reflexive endpoint missing address".to_string(),
+                    })?;
                 let stun_server =
                     endpoint
                         .stun_server
@@ -700,25 +708,32 @@ impl TransportHint {
                 Self::quic_reflexive(address, stun_server)
             }
             LinkProtocol::Tcp => {
-                let address = endpoint.address.as_deref().ok_or_else(|| TransportAddressError {
-                    input: String::new(),
-                    reason: "tcp endpoint missing address".to_string(),
-                })?;
+                let address = endpoint
+                    .address
+                    .as_deref()
+                    .ok_or_else(|| TransportAddressError {
+                        input: String::new(),
+                        reason: "tcp endpoint missing address".to_string(),
+                    })?;
                 Self::tcp_direct(address)
             }
             LinkProtocol::WebSocket => {
-                let address = endpoint.address.as_deref().ok_or_else(|| TransportAddressError {
-                    input: String::new(),
-                    reason: "websocket endpoint missing address".to_string(),
-                })?;
+                let address = endpoint
+                    .address
+                    .as_deref()
+                    .ok_or_else(|| TransportAddressError {
+                        input: String::new(),
+                        reason: "websocket endpoint missing address".to_string(),
+                    })?;
                 Self::websocket_direct(address)
             }
-            LinkProtocol::WebSocketRelay => endpoint.relay_authority.map(Self::websocket_relay).ok_or_else(
-                || TransportAddressError {
+            LinkProtocol::WebSocketRelay => endpoint
+                .relay_authority
+                .map(Self::websocket_relay)
+                .ok_or_else(|| TransportAddressError {
                     input: String::new(),
                     reason: "relay endpoint missing relay authority".to_string(),
-                },
-            ),
+                }),
         }
     }
 
@@ -919,9 +934,10 @@ mod tests {
     #[test]
     fn test_transport_hint_roundtrips_through_link_endpoint() {
         let hint = TransportHint::quic_reflexive("10.0.0.1:7443", "10.0.0.2:3478")
-            .expect("valid reflexive hint");
+            .unwrap_or_else(|err| panic!("valid reflexive hint: {err}"));
         let endpoint = hint.to_link_endpoint();
-        let restored = TransportHint::from_link_endpoint(&endpoint).expect("roundtrip");
+        let restored = TransportHint::from_link_endpoint(&endpoint)
+            .unwrap_or_else(|err| panic!("roundtrip: {err}"));
         assert_eq!(restored, hint);
     }
 

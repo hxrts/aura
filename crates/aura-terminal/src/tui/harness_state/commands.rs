@@ -487,11 +487,13 @@ mod tests {
             },
             semantic_inputs(&snapshot, &contacts),
         )
-        .expect("send control should map");
+        .unwrap_or_else(|err| panic!("send control should map: {err}"));
         assert!(
             matches!(
                 send.as_slice(),
-                [TuiCommand::Dispatch(DispatchCommand::SendSelectedFriendRequest)]
+                [TuiCommand::Dispatch(
+                    DispatchCommand::SendSelectedFriendRequest
+                )]
             ),
             "unexpected send mapping: {send:?}"
         );
@@ -503,11 +505,13 @@ mod tests {
             },
             semantic_inputs(&snapshot, &contacts),
         )
-        .expect("accept control should map");
+        .unwrap_or_else(|err| panic!("accept control should map: {err}"));
         assert!(
             matches!(
                 accept.as_slice(),
-                [TuiCommand::Dispatch(DispatchCommand::AcceptSelectedFriendRequest)]
+                [TuiCommand::Dispatch(
+                    DispatchCommand::AcceptSelectedFriendRequest
+                )]
             ),
             "unexpected accept mapping: {accept:?}"
         );
@@ -519,11 +523,13 @@ mod tests {
             },
             semantic_inputs(&snapshot, &contacts),
         )
-        .expect("decline control should map");
+        .unwrap_or_else(|err| panic!("decline control should map: {err}"));
         assert!(
             matches!(
                 decline.as_slice(),
-                [TuiCommand::Dispatch(DispatchCommand::DeclineSelectedFriendRequest)]
+                [TuiCommand::Dispatch(
+                    DispatchCommand::DeclineSelectedFriendRequest
+                )]
             ),
             "unexpected decline mapping: {decline:?}"
         );
@@ -535,11 +541,13 @@ mod tests {
             },
             semantic_inputs(&snapshot, &contacts),
         )
-        .expect("remove control should map");
+        .unwrap_or_else(|err| panic!("remove control should map: {err}"));
         assert!(
             matches!(
                 revoke.as_slice(),
-                [TuiCommand::Dispatch(DispatchCommand::RevokeSelectedFriendship)]
+                [TuiCommand::Dispatch(
+                    DispatchCommand::RevokeSelectedFriendship
+                )]
             ),
             "unexpected revoke mapping: {revoke:?}"
         );
