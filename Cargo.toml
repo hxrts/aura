@@ -120,7 +120,6 @@ telltale = "4.0.1"
 telltale-vm = "4.0.1"
 telltale-types = "4.0.1"
 telltale-theory = "4.0.1"
-telltale-lean-bridge = "4.0.1"
 
 # Authorization
 biscuit-auth = { version = "5.0", features = ["wasm"] }

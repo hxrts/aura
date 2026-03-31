@@ -1,4 +1,4 @@
-//! Lean/Quint bridge interchange schema.
+//! Telltale bridge interchange schema.
 //!
 //! These types provide a stable, versioned format for:
 //! - Quint session model export into Telltale-compatible choreography graphs
@@ -10,7 +10,7 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 
 /// Schema version for bridge bundles.
-pub const AURA_LEAN_QUINT_BRIDGE_SCHEMA_V1: &str = "aura.lean-quint-bridge.v1";
+pub const AURA_TELLTALE_BRIDGE_SCHEMA_V1: &str = "aura.telltale-bridge.v1";
 
 /// Bridge bundle containing session, property, and certificate payloads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,7 +34,7 @@ pub struct BridgeBundleV1 {
 impl Default for BridgeBundleV1 {
     fn default() -> Self {
         Self {
-            schema_version: AURA_LEAN_QUINT_BRIDGE_SCHEMA_V1.to_string(),
+            schema_version: AURA_TELLTALE_BRIDGE_SCHEMA_V1.to_string(),
             session_types: Vec::new(),
             properties: Vec::new(),
             certificates: Vec::new(),
@@ -229,6 +229,6 @@ mod tests {
         let payload = serde_json::to_vec(&bundle).expect("serialize bundle");
         let decoded: BridgeBundleV1 = serde_json::from_slice(&payload).expect("deserialize bundle");
         assert_eq!(decoded, bundle);
-        assert_eq!(decoded.schema_version, AURA_LEAN_QUINT_BRIDGE_SCHEMA_V1);
+        assert_eq!(decoded.schema_version, AURA_TELLTALE_BRIDGE_SCHEMA_V1);
     }
 }

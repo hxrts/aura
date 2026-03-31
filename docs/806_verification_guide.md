@@ -330,13 +330,13 @@ nix develop --command cargo test -p aura-simulator --test fault_invariant_monito
 
 This verifies that injected faults produce monitor-visible invariant violations (for example, `NoFaults` violations), and that a gate configured to require zero violations fails accordingly.
 
-### 4) `telltale-lean-bridge` integration status
+### 4) `telltale-bridge` integration status
 
-As of March 5, 2026, Aura includes `telltale-lean-bridge` as a workspace dependency and integrates it through `aura-quint`.
+As of March 31, 2026, Aura includes `telltale-bridge` as a workspace dependency and integrates it through `aura-quint`.
 
 This adds direct access to upstream Lean runner and equivalence utilities from the Telltale project. It provides explicit schema and version linkage with upstream bridge contracts for cross-tool consistency. It also creates a cleaner path for future migration of local bridge helpers to upstream bridge APIs.
 
-Call `aura_quint::upstream_telltale_lean_bridge_schema_version()` to get the upstream bridge schema version. CI lanes remain `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity`.
+Call `aura_quint::upstream_telltale_bridge_schema_version()` to get the upstream bridge schema version. CI lanes are `just ci-telltale-bridge` and `just ci-simulator-telltale-parity`.
 
 ### 5) `aura-testkit` Lean verification API migration (March 5, 2026)
 
@@ -344,7 +344,7 @@ The canonical Lean API types are specified in [Formal Verification Reference](12
 
 Import Lean verification payload types from `aura_testkit::verification` which re-exports from `lean_types`. Construct structured journals with `LeanJournal` and `LeanNamespace`. Update tests to compare `LeanTimestampOrdering` values directly.
 
-## Lean-Quint Bridge
+## Telltale Bridge Cross-Validation
 
 The bridge connects Quint model checking with Telltale and Lean proof artifacts. It enables exporting Quint session models to a stable interchange format, importing Telltale and Lean properties back into Quint harnesses, and running cross-validation to detect divergence early in CI.
 
@@ -353,10 +353,10 @@ The bridge connects Quint model checking with Telltale and Lean proof artifacts.
 Run the bridge lane:
 
 ```bash
-just ci-lean-quint-bridge
+just ci-telltale-bridge
 ```
 
-Inspect outputs at `artifacts/lean-quint-bridge/bridge.log`, `artifacts/lean-quint-bridge/bridge_discrepancy_report.json`, and `artifacts/lean-quint-bridge/report.json`.
+Inspect outputs at `artifacts/telltale-bridge/bridge.log`, `artifacts/telltale-bridge/bridge_discrepancy_report.json`, and `artifacts/telltale-bridge/report.json`.
 
 Run the simulator telltale parity lane:
 
@@ -393,10 +393,10 @@ Cross-validation detects proof and model divergence. Use `run_cross_validation(.
 Run cross-validation in CI:
 
 ```bash
-just ci-lean-quint-bridge
+just ci-telltale-bridge
 ```
 
-This command produces artifacts under `artifacts/lean-quint-bridge/` including `bridge.log` and `report.json`.
+This command produces artifacts under `artifacts/telltale-bridge/` including `bridge.log` and `report.json`.
 
 ### Handling Discrepancies
 

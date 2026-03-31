@@ -1,5 +1,5 @@
 {
-  "schema_version": "aura.lean-quint-bridge.v1",
+  "schema_version": "aura.telltale-bridge.v1",
   "session_types": [
     {
       "session_id": "sid_negative_1",

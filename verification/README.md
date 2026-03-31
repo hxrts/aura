@@ -140,14 +140,14 @@ And oracle methods:
 - `verify_journal_merge`, `verify_journal_reduce`
 - `verify_flow_charge`, `verify_timestamp_compare`
 
-### Telltale Lean Bridge
+### Telltale Bridge
 
-`aura-quint` now depends on and re-exports upstream `telltale-lean-bridge` to align Aura's bridge workflows with Telltale's Lean integration surface.
+`aura-quint` now depends on and re-exports upstream `telltale-bridge` to align Aura's bridge workflows with Telltale's current bridge integration surface.
 
 Use:
 
 ```bash
-just ci-lean-quint-bridge
+just ci-telltale-bridge
 just ci-simulator-telltale-parity
 ```
 

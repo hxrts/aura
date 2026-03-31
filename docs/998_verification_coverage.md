@@ -343,7 +343,7 @@ Automated verification lanes wired into CI pipelines.
 |------|---------|---------|
 | Lean Build | `just ci-lean-build` | Compile Lean proofs |
 | Lean Completeness | `just ci-lean-check-sorry` | Check for incomplete proofs (sorry) |
-| Lean-Quint Bridge | `just ci-lean-quint-bridge` | Cross-validation between Lean and Quint |
+| Telltale Bridge | `just ci-telltale-bridge` | Cross-validation between Lean and Quint |
 | Kani BMC | `just ci-kani` | Bounded model checking for unsafe code |
 
 ### CI Artifacts
@@ -367,14 +367,14 @@ Telltale parity and bridge lanes emit additional artifacts:
 artifacts/telltale-parity/
 └── report.json
 
-artifacts/lean-quint-bridge/
+artifacts/telltale-bridge/
 ├── bridge.log
 ├── bridge_discrepancy_report.json
 └── report.json
 ```
 
 `artifacts/telltale-parity/report.json` uses schema `aura.telltale-parity.report.v1`.
-`artifacts/lean-quint-bridge/bridge_discrepancy_report.json` uses schema `aura.lean-quint-bridge.discrepancy.v1`.
+`artifacts/telltale-bridge/bridge_discrepancy_report.json` uses schema `aura.telltale-bridge.discrepancy.v1`.
 
 ## Bridge Pipeline Fixtures
 

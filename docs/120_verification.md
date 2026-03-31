@@ -298,13 +298,13 @@ The evaluator classifies properties by keyword patterns.
 
 Categories help organize verification coverage reports.
 
-## Lean-Quint Bridge Data Contract
+## Telltale Bridge Data Contract
 
 `aura-quint` defines a versioned interchange schema for bridge workflows.
 
 | Type | Purpose |
 |------|---------|
-| `BridgeBundleV1` | Top-level bundle with `schema_version = "aura.lean-quint-bridge.v1"` |
+| `BridgeBundleV1` | Top-level bundle with `schema_version = "aura.telltale-bridge.v1"` |
 | `SessionTypeInterchangeV1` | Session graph exchange |
 | `PropertyInterchangeV1` | Quint, Telltale, and Lean property exchange |
 | `ProofCertificateV1` | Proof or model-check evidence |

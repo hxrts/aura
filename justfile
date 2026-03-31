@@ -966,20 +966,20 @@ ci-conformance: ci-conformance-policy
     just ci-conformance-itf
     just ci-conformance-diff
 
-# Lean/Quint bridge cross-validation lane
-ci-lean-quint-bridge:
+# Telltale bridge cross-validation lane
+ci-telltale-bridge:
     #!/usr/bin/env bash
     set -euo pipefail
-    ARTIFACT_DIR="${AURA_LEAN_QUINT_BRIDGE_ARTIFACT_DIR:-${PWD}/artifacts/lean-quint-bridge}"
+    ARTIFACT_DIR="${AURA_TELLTALE_BRIDGE_ARTIFACT_DIR:-${PWD}/artifacts/telltale-bridge}"
     mkdir -p "${ARTIFACT_DIR}"
-    AURA_LEAN_QUINT_BRIDGE_ARTIFACT_DIR="${ARTIFACT_DIR}" \
+    AURA_TELLTALE_BRIDGE_ARTIFACT_DIR="${ARTIFACT_DIR}" \
       cargo test -p aura-quint bridge_ -- --nocapture | tee "${ARTIFACT_DIR}/bridge.log"
     if [[ ! -f "${ARTIFACT_DIR}/bridge_discrepancy_report.json" ]]; then
       echo "missing bridge discrepancy report artifact"
       exit 1
     fi
     printf '%s\n' \
-      '{"schema_version":"aura.lean-quint-bridge.report.v2","status":"ok","suite":"aura-quint bridge cross-validation","sources":["quint_model_check","lean_certificate"],"discrepancy_detection":"enabled","artifacts":{"bridge_discrepancy":"bridge_discrepancy_report.json","telltale_parity":"../telltale-parity/report.json"}}' \
+      '{"schema_version":"aura.telltale-bridge.report.v2","status":"ok","suite":"aura-quint bridge cross-validation","sources":["quint_model_check","lean_certificate"],"discrepancy_detection":"enabled","artifacts":{"bridge_discrepancy":"bridge_discrepancy_report.json","telltale_parity":"../telltale-parity/report.json"}}' \
       > "${ARTIFACT_DIR}/report.json"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1073,7 +1073,7 @@ ci-dry-run profile="push":
 
         # CI / Deep Verify (push)
         add_step "Lean Proofs"               "nix develop --command bash -lc 'just ci-lean-build && just ci-lean-check-sorry'"
-        add_step "Lean-Quint Bridge"         "nix develop --command just ci-lean-quint-bridge"
+        add_step "Telltale Bridge"           "nix develop --command just ci-telltale-bridge"
         add_step "Kani Proofs"               "nix develop .#nightly --command just ci-kani"
     fi
 

@@ -24,7 +24,7 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 async-process = "1"
 tempfile = "3.0"
-telltale-lean-bridge = { workspace = true }
+telltale-bridge = { workspace = true }
 quint_evaluator = { git = "https://github.com/informalsystems/quint", tag = "v0.29.0" }
 
 [dev-dependencies]

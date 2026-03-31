@@ -50,7 +50,7 @@ pub use bridge_export::{
 pub use bridge_format::{
     BridgeBundleV1, ProofBackendV1, ProofCertificateV1, PropertyClassV1, PropertyInterchangeV1,
     SessionEdgeV1, SessionNodeKindV1, SessionNodeV1, SessionTypeInterchangeV1,
-    AURA_LEAN_QUINT_BRIDGE_SCHEMA_V1,
+    AURA_TELLTALE_BRIDGE_SCHEMA_V1,
 };
 pub use bridge_import::{
     generate_quint_invariant_module, map_certificates_to_quint_assertions,
@@ -80,10 +80,10 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Schema version reported by the upstream `telltale-lean-bridge` crate.
+/// Schema version reported by the current upstream `telltale-bridge` crate.
 #[must_use]
-pub fn upstream_telltale_lean_bridge_schema_version() -> &'static str {
-    telltale_lean_bridge::LEAN_BRIDGE_SCHEMA_VERSION
+pub fn upstream_telltale_bridge_schema_version() -> &'static str {
+    telltale_bridge::LEAN_BRIDGE_SCHEMA_VERSION
 }
 
 #[cfg(test)]
@@ -96,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn test_upstream_telltale_lean_bridge_schema_version() {
-        assert!(!upstream_telltale_lean_bridge_schema_version().is_empty());
+    fn test_upstream_telltale_bridge_schema_version() {
+        assert!(!upstream_telltale_bridge_schema_version().is_empty());
     }
 }

@@ -110,15 +110,15 @@ fn bridge_pipeline_ci_discrepancy_artifact() {
     let negative = run_cross_validation(&negative_bundle, &mut negative_executor)
         .expect("run negative cross validation");
 
-    let artifact_dir = std::env::var("AURA_LEAN_QUINT_BRIDGE_ARTIFACT_DIR")
+    let artifact_dir = std::env::var("AURA_TELLTALE_BRIDGE_ARTIFACT_DIR")
         .ok()
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("artifacts/lean-quint-bridge"));
+        .unwrap_or_else(|| PathBuf::from("artifacts/telltale-bridge"));
     std::fs::create_dir_all(&artifact_dir).expect("create bridge artifact directory");
     let artifact_path = artifact_dir.join("bridge_discrepancy_report.json");
 
     let payload = serde_json::json!({
-        "schema_version": "aura.lean-quint-bridge.discrepancy.v1",
+        "schema_version": "aura.telltale-bridge.discrepancy.v1",
         "suite": "aura-quint bridge pipeline",
         "positive_fixture_consistent": positive.is_consistent(),
         "negative_fixture_discrepancies": negative.discrepancies.len(),
