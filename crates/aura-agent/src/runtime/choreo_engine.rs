@@ -16,26 +16,26 @@ use aura_mpst::termination::{compute_weighted_measure, SessionBufferSnapshot};
 use aura_protocol::termination::{
     TerminationBudget, TerminationBudgetConfig, TerminationBudgetError, TerminationProtocolClass,
 };
-use telltale_vm::coroutine::Fault;
-use telltale_vm::effect::EffectHandler as VmEffectHandler;
-use telltale_vm::envelope_diff::EnvelopeDiffArtifactV1;
-use telltale_vm::loader::CodeImage;
-use telltale_vm::runtime_contracts::{
-    enforce_vm_runtime_gates, runtime_capability_snapshot, RuntimeContracts, RuntimeGateResult,
+use serde::{de::DeserializeOwned, Serialize};
+use telltale_machine::coroutine::Fault;
+use telltale_machine::model::effects::EffectHandler as ProtocolMachineEffectHandler;
+use telltale_machine::model::state::SessionStatus;
+use telltale_machine::runtime::loader::CodeImage as ProtocolMachineCodeImage;
+use telltale_machine::{
+    canonical_effect_trace, enforce_protocol_machine_runtime_gates, normalize_trace, obs_session,
+    EffectTraceEntry, ObsEvent, ProtocolMachine, ProtocolMachineConfig, ProtocolMachineError,
+    RunStatus, RuntimeContracts, RuntimeGateResult, SessionId, StepResult,
+    ThreadedProtocolMachine,
 };
-use telltale_vm::session::SessionStatus;
-use telltale_vm::threaded::ThreadedVM;
-use telltale_vm::trace::{normalize_trace, obs_session};
-use telltale_vm::vm::{ObsEvent, RunStatus, StepResult, VMError};
-use telltale_vm::{canonical_effect_trace, EffectTraceEntry, RecordingEffectHandler};
-use telltale_vm::{SessionId, VMConfig, VM};
+use telltale_vm::envelope_diff::EnvelopeDiffArtifactV1;
+use telltale_vm::vm::VMConfig;
 use tracing::warn;
 
 use super::vm_effect_handler::AuraVmEffectHandler;
 use super::vm_hardening::{
-    build_vm_config, configured_guard_capacity, policy_for_protocol,
-    policy_requires_envelope_artifact, required_runtime_capabilities_for_policy,
-    scheduler_control_input_for_image, validate_determinism_profile,
+    build_vm_config, configured_guard_capacity, policy_requires_envelope_artifact,
+    required_runtime_capabilities_for_policy,
+    scheduler_control_input_for_protocol_machine_image, validate_determinism_profile,
     validate_envelope_artifact_for_policy, validate_protocol_execution_policy,
     validate_scheduler_execution_policy, vm_config_for_profile, AuraVmHardeningProfile,
     AuraVmParityProfile, AuraVmProtocolExecutionPolicy, AuraVmRuntimeMode, AuraVmRuntimeSelector,
@@ -49,7 +49,7 @@ pub enum AuraChoreoEngineError {
     #[error("vm error: {source}")]
     Vm {
         /// Wrapped VM error.
-        source: VMError,
+        source: ProtocolMachineError,
     },
     /// Session store lifecycle error.
     #[error("session lifecycle error: {message}")]
@@ -117,15 +117,94 @@ pub enum AuraChoreoEngineError {
     },
 }
 
-impl From<VMError> for AuraChoreoEngineError {
-    fn from(source: VMError) -> Self {
+impl From<ProtocolMachineError> for AuraChoreoEngineError {
+    fn from(source: ProtocolMachineError) -> Self {
         Self::Vm { source }
     }
 }
 
+type VM = ProtocolMachine;
+type VMError = ProtocolMachineError;
+
+fn transcode_compat<T, U>(value: &T, context: &str) -> Result<U, AuraChoreoEngineError>
+where
+    T: Serialize + ?Sized,
+    U: DeserializeOwned,
+{
+    let payload = serde_json::to_value(value).map_err(|error| AuraChoreoEngineError::Interpreter {
+        message: format!("{context} serialization failed: {error}"),
+    })?;
+    serde_json::from_value(payload).map_err(|error| AuraChoreoEngineError::Interpreter {
+        message: format!("{context} deserialization failed: {error}"),
+    })
+}
+
+fn transcode_or_panic<T, U>(value: &T, context: &str) -> U
+where
+    T: Serialize + ?Sized,
+    U: DeserializeOwned,
+{
+    transcode_compat(value, context).expect("legacy/current Telltale compatibility transcode")
+}
+
+fn protocol_machine_config_from_vm_config(
+    config: &VMConfig,
+) -> Result<ProtocolMachineConfig, AuraChoreoEngineError> {
+    // Aura hardening policies are still expressed in the shared VM config shape,
+    // so the runtime translates that policy output into the protocol-machine config.
+    let converted: ProtocolMachineConfig = transcode_compat(config, "legacy VM config")?;
+    converted
+        .validate_invariants()
+        .map_err(|reason| AuraChoreoEngineError::Interpreter {
+            message: format!("invalid protocol-machine config: {reason}"),
+        })?;
+    Ok(converted)
+}
+
+#[cfg(test)]
+fn protocol_machine_code_image_from_legacy(
+    image: &telltale_vm::loader::CodeImage,
+) -> Result<ProtocolMachineCodeImage, AuraChoreoEngineError> {
+    let global_type = transcode_compat::<_, telltale_types_v9::GlobalType>(
+        &image.global_type,
+        "legacy global type",
+    )?;
+    let local_types = transcode_compat::<_, BTreeMap<String, telltale_types_v9::LocalTypeR>>(
+        &image.local_types,
+        "legacy local types",
+    )?;
+    let image = ProtocolMachineCodeImage::from_local_types(&local_types, &global_type);
+    image
+        .validate_runtime_shape()
+        .map_err(|reason| AuraChoreoEngineError::Interpreter {
+            message: format!("invalid protocol-machine code image: {reason}"),
+        })?;
+    Ok(image)
+}
+
+fn admit_protocol_machine_runtime(
+    config: &VMConfig,
+    runtime_contracts: Option<&RuntimeContracts>,
+) -> Result<ProtocolMachineConfig, AuraChoreoEngineError> {
+    validate_determinism_profile(config).map_err(|error| AuraChoreoEngineError::Interpreter {
+        message: format!("invalid VM determinism profile: {error}"),
+    })?;
+
+    let protocol_machine_config = protocol_machine_config_from_vm_config(config)?;
+    match enforce_protocol_machine_runtime_gates(&protocol_machine_config, runtime_contracts) {
+        RuntimeGateResult::Admitted => Ok(protocol_machine_config),
+        RuntimeGateResult::RejectedMissingContracts => {
+            Err(AuraChoreoEngineError::MissingRuntimeContracts)
+        }
+        RuntimeGateResult::RejectedUnsupportedDeterminismProfile => {
+            Err(AuraChoreoEngineError::UnsupportedDeterminismProfile)
+        }
+    }
+}
+
 enum AuraVmBackend {
-    Cooperative(Box<VM>),
-    Threaded(Box<ThreadedVM>),
+    Cooperative(Box<ProtocolMachine>),
+    Threaded(Box<ThreadedProtocolMachine>),
 }
 
 impl std::fmt::Debug for AuraVmBackend {
@@ -138,17 +217,25 @@ impl std::fmt::Debug for AuraVmBackend {
 }
 
 impl AuraVmBackend {
-    fn new(config: &VMConfig, selector: AuraVmRuntimeSelector) -> Self {
+    fn new(config: &ProtocolMachineConfig, selector: AuraVmRuntimeSelector) -> Self {
         match selector.runtime_mode {
-            AuraVmRuntimeMode::Cooperative => Self::Cooperative(Box::new(VM::new(config.clone()))),
+            AuraVmRuntimeMode::Cooperative => {
+                Self::Cooperative(Box::new(ProtocolMachine::new(config.clone())))
+            }
             AuraVmRuntimeMode::ThreadedReplayDeterministic
             | AuraVmRuntimeMode::ThreadedEnvelopeBounded => Self::Threaded(Box::new(
-                ThreadedVM::with_workers(config.clone(), selector.threaded_workers.max(1)),
+                ThreadedProtocolMachine::with_workers(
+                    config.clone(),
+                    selector.threaded_workers.max(1),
+                ),
             )),
         }
     }
 
-    fn load_choreography(&mut self, image: &CodeImage) -> Result<SessionId, VMError> {
+    fn load_choreography(
+        &mut self,
+        image: &ProtocolMachineCodeImage,
+    ) -> Result<SessionId, ProtocolMachineError> {
         match self {
             Self::Cooperative(vm) => vm.load_choreography(image),
             Self::Threaded(vm) => vm.load_choreography(image),
@@ -157,9 +244,9 @@ impl AuraVmBackend {
 
     fn step_round(
         &mut self,
-        handler: &dyn VmEffectHandler,
+        handler: &dyn ProtocolMachineEffectHandler,
         concurrency: usize,
-    ) -> Result<StepResult, VMError> {
+    ) -> Result<StepResult, ProtocolMachineError> {
         match self {
             Self::Cooperative(vm) => vm.step_round(handler, 1),
             Self::Threaded(vm) => vm.step_round(handler, concurrency.max(1)),
@@ -168,11 +255,11 @@ impl AuraVmBackend {
 
     fn run_replay_shared(
         &mut self,
-        fallback: &dyn VmEffectHandler,
+        fallback: &dyn ProtocolMachineEffectHandler,
         replay_trace: Arc<[EffectTraceEntry]>,
         max_steps: usize,
         concurrency: usize,
-    ) -> Result<RunStatus, VMError> {
+    ) -> Result<RunStatus, ProtocolMachineError> {
         match self {
             Self::Cooperative(vm) => {
                 vm.run_concurrent_replay_shared(fallback, replay_trace, max_steps, 1)
@@ -206,14 +293,14 @@ impl AuraVmBackend {
         }
     }
 
-    fn as_cooperative(&self) -> Option<&VM> {
+    fn as_cooperative(&self) -> Option<&ProtocolMachine> {
         match self {
             Self::Cooperative(vm) => Some(vm),
             Self::Threaded(_) => None,
         }
     }
 
-    fn as_cooperative_mut(&mut self) -> Option<&mut VM> {
+    fn as_cooperative_mut(&mut self) -> Option<&mut ProtocolMachine> {
         match self {
             Self::Cooperative(vm) => Some(vm),
             Self::Threaded(_) => None,
@@ -223,7 +310,7 @@ impl AuraVmBackend {
 
 /// VM-backed choreography engine with explicit session lifecycle hooks.
 #[derive(Debug)]
-pub struct AuraChoreoEngine<H: VmEffectHandler = AuraVmEffectHandler> {
+pub struct AuraChoreoEngine<H: ProtocolMachineEffectHandler = AuraVmEffectHandler> {
     backend: AuraVmBackend,
     vm_config: VMConfig,
     runtime_selector: AuraVmRuntimeSelector,
@@ -247,7 +334,7 @@ impl Default for AuraChoreoEngine<AuraVmEffectHandler> {
     }
 }
 
-impl<H: VmEffectHandler> AuraChoreoEngine<H> {
+impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
     /// Create an engine from explicit Aura hardening/parity profiles.
     pub fn new_with_profiles(
         hardening: AuraVmHardeningProfile,
@@ -259,18 +346,17 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
 
     /// Create an engine with explicit VM configuration and host effect handler.
     pub fn new(config: VMConfig, handler: Arc<H>) -> Self {
-        Self::new_with_contracts(config, handler, None)
+        Self::new_with_protocol_machine_contracts(config, handler, None)
             .expect("default VM config should admit without runtime contracts")
     }
 
-    /// Create an engine with admission checks, capability snapshot capture, and
-    /// canonical cooperative execution selected by default.
-    pub fn new_with_contracts(
+    /// Create an engine with current protocol-machine runtime contracts.
+    pub fn new_with_protocol_machine_contracts(
         config: VMConfig,
         handler: Arc<H>,
         runtime_contracts: Option<RuntimeContracts>,
     ) -> Result<Self, AuraChoreoEngineError> {
-        Self::new_with_contracts_and_selector(
+        Self::new_with_protocol_machine_contracts_and_selector(
             config,
             handler,
             runtime_contracts,
@@ -278,36 +364,22 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
         )
     }
 
-    /// Create an engine with an explicit runtime selector.
-    pub fn new_with_contracts_and_selector(
+    /// Create an engine with an explicit runtime selector and current protocol-machine contracts.
+    pub fn new_with_protocol_machine_contracts_and_selector(
         config: VMConfig,
         handler: Arc<H>,
         runtime_contracts: Option<RuntimeContracts>,
         runtime_selector: AuraVmRuntimeSelector,
     ) -> Result<Self, AuraChoreoEngineError> {
-        validate_determinism_profile(&config).map_err(|error| {
-            AuraChoreoEngineError::Interpreter {
-                message: format!("invalid VM determinism profile: {error}"),
-            }
-        })?;
-
-        match enforce_vm_runtime_gates(&config, runtime_contracts.as_ref()) {
-            RuntimeGateResult::Admitted => {}
-            RuntimeGateResult::RejectedMissingContracts => {
-                return Err(AuraChoreoEngineError::MissingRuntimeContracts);
-            }
-            RuntimeGateResult::RejectedUnsupportedDeterminismProfile => {
-                return Err(AuraChoreoEngineError::UnsupportedDeterminismProfile);
-            }
-        }
-
+        let protocol_machine_config =
+            admit_protocol_machine_runtime(&config, runtime_contracts.as_ref())?;
         let capability_snapshot = runtime_contracts
             .as_ref()
-            .map(runtime_capability_snapshot)
+            .map(telltale_machine::runtime_capability_snapshot)
             .unwrap_or_default();
         let runtime_capabilities = runtime_contracts
             .as_ref()
-            .map(RuntimeCapabilityHandler::from_runtime_contracts)
+            .map(RuntimeCapabilityHandler::from_protocol_machine_runtime_contracts)
             .unwrap_or_else(|| {
                 RuntimeCapabilityHandler::from_pairs(
                     capability_snapshot
@@ -317,7 +389,7 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
             });
 
         Ok(Self {
-            backend: AuraVmBackend::new(&config, runtime_selector),
+            backend: AuraVmBackend::new(&protocol_machine_config, runtime_selector),
             vm_config: config,
             runtime_selector,
             handler,
@@ -453,9 +525,12 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
         self.termination_budget_config
     }
 
-    /// Load a choreography image into the VM and open a tracked session.
-    pub fn open_session(&mut self, image: &CodeImage) -> Result<SessionId, AuraChoreoEngineError> {
-        let sid = self.backend.load_choreography(image)?;
+    /// Load a current protocol-machine code image into the runtime and open a tracked session.
+    pub fn open_protocol_machine_session(
+        &mut self,
+        image: &ProtocolMachineCodeImage,
+    ) -> Result<SessionId, AuraChoreoEngineError> {
+        let sid = self.backend.load_choreography(&image)?;
         self.active_sessions.insert(sid);
         self.session_protocol_classes
             .entry(sid)
@@ -487,9 +562,8 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
     ) -> Result<(RunStatus, Vec<EffectTraceEntry>), AuraChoreoEngineError> {
         let (status, trace) = {
             let handler = Arc::clone(&self.handler);
-            let recorder = RecordingEffectHandler::new(handler.as_ref());
-            let status = self.run_with_handler_budget(&recorder, max_steps)?;
-            let trace = recorder.effect_trace();
+            let status = self.run_with_handler_budget(handler.as_ref(), max_steps)?;
+            let trace = self.backend.effect_trace();
             (status, trace)
         };
         assert_effect_kinds_classified(trace.iter().map(|entry| entry.effect_kind.as_str()))
@@ -699,7 +773,7 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
 
     fn run_with_handler_budget(
         &mut self,
-        handler: &dyn VmEffectHandler,
+        handler: &dyn ProtocolMachineEffectHandler,
         max_steps: usize,
     ) -> Result<RunStatus, AuraChoreoEngineError> {
         let mut budget = self.build_termination_budget(max_steps)?;
@@ -804,7 +878,10 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
 
         for session in vm.sessions().iter() {
             for entry in session.local_types.values() {
-                local_types.push(entry.current.clone());
+                local_types.push(transcode_or_panic(
+                    &entry.current,
+                    "protocol-machine local type",
+                ));
             }
 
             for (edge, buffer) in &session.buffers {
@@ -958,7 +1035,7 @@ fn map_termination_error_to_engine(error: TerminationBudgetError) -> AuraChoreoE
     }
 }
 
-impl<H: VmEffectHandler> AuraChoreoEngine<H> {
+impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
     fn dominant_determinism_policy(&self) -> Option<AuraVmProtocolExecutionPolicy> {
         self.session_determinism_profiles
             .values()
@@ -977,11 +1054,11 @@ impl<H: VmEffectHandler> AuraChoreoEngine<H> {
     }
 }
 
-impl<H: VmEffectHandler + AuraVmSchedulerSignalsProvider> AuraChoreoEngine<H> {
-    /// Admit one explicitly selected runtime policy, then open the choreography session.
-    pub async fn open_session_for_policy_admitted(
+impl<H: ProtocolMachineEffectHandler + AuraVmSchedulerSignalsProvider> AuraChoreoEngine<H> {
+    /// Admit one explicitly selected runtime policy, then open a current protocol-machine image.
+    pub async fn open_protocol_machine_session_for_policy_admitted(
         &mut self,
-        image: &CodeImage,
+        runtime_image: &ProtocolMachineCodeImage,
         policy: AuraVmProtocolExecutionPolicy,
         required_capabilities: &[&str],
     ) -> Result<SessionId, AuraChoreoEngineError> {
@@ -1000,8 +1077,8 @@ impl<H: VmEffectHandler + AuraVmSchedulerSignalsProvider> AuraChoreoEngine<H> {
                 message: format!("unsupported VM runtime profile for protocol: {error}"),
             }
         })?;
-        let scheduler_input = scheduler_control_input_for_image(
-            image,
+        let scheduler_input = scheduler_control_input_for_protocol_machine_image(
+            runtime_image,
             policy.protocol_class,
             configured_guard_capacity(&self.vm_config),
             self.handler.scheduler_signals(),
@@ -1011,30 +1088,13 @@ impl<H: VmEffectHandler + AuraVmSchedulerSignalsProvider> AuraChoreoEngine<H> {
                 message: format!("unsupported VM scheduler profile for protocol: {error}"),
             }
         })?;
-        let sid = self.open_session(image)?;
+        let sid = self.open_protocol_machine_session(runtime_image)?;
         self.session_runtime_selectors
             .insert(sid, AuraVmRuntimeSelector::for_policy(policy));
         self.session_protocol_classes
             .insert(sid, policy.protocol_class);
         self.session_determinism_profiles.insert(sid, policy);
         Ok(sid)
-    }
-
-    /// Admit required runtime capabilities, then open the choreography session.
-    pub async fn open_session_admitted(
-        &mut self,
-        image: &CodeImage,
-        protocol_id: &str,
-        determinism_policy_ref: Option<&str>,
-        required_capabilities: &[&str],
-    ) -> Result<SessionId, AuraChoreoEngineError> {
-        let policy = policy_for_protocol(protocol_id, determinism_policy_ref).map_err(|error| {
-            AuraChoreoEngineError::Interpreter {
-                message: format!("invalid VM protocol policy: {error}"),
-            }
-        })?;
-        self.open_session_for_policy_admitted(image, policy, required_capabilities)
-            .await
     }
 }
 
@@ -1067,11 +1127,12 @@ mod tests {
     use super::*;
     use aura_mpst::upstream::types::{GlobalType, LocalTypeR};
     use std::collections::BTreeMap;
-    use telltale_vm::runtime_contracts::RuntimeContracts;
+    use telltale_machine::RuntimeContracts;
+    use telltale_vm::loader::CodeImage as LegacyCodeImage;
 
     #[test]
     fn step_reaps_completed_sessions() {
-        let image = CodeImage::from_local_types(
+        let image = LegacyCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1079,8 +1140,11 @@ mod tests {
             vm_config_for_profile(AuraVmHardeningProfile::Prod),
             Arc::new(AuraVmEffectHandler::default()),
         );
+        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
 
-        let sid = engine.open_session(&image).expect("session opens");
+        let sid = engine
+            .open_protocol_machine_session(&runtime_image)
+            .expect("session opens");
         assert!(engine.active_sessions().contains(&sid));
         assert!(engine.vm().sessions().get(sid).is_some());
 
@@ -1094,7 +1158,7 @@ mod tests {
 
     #[test]
     fn explicit_threaded_selector_builds_threaded_backend() {
-        let image = CodeImage::from_local_types(
+        let image = LegacyCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1104,7 +1168,8 @@ mod tests {
         let selector = AuraVmRuntimeSelector::for_policy(policy);
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
-        let mut engine = AuraChoreoEngine::new_with_contracts_and_selector(
+        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
+        let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts_and_selector(
             config,
             Arc::new(AuraVmEffectHandler::default()),
             Some(RuntimeContracts::full()),
@@ -1121,7 +1186,9 @@ mod tests {
             }
         );
 
-        let sid = engine.open_session(&image).expect("session opens");
+        let sid = engine
+            .open_protocol_machine_session(&runtime_image)
+            .expect("session opens");
         assert!(engine.active_sessions().contains(&sid));
         let status = engine.run(8).expect("threaded run succeeds");
         assert!(matches!(status, RunStatus::AllDone));
@@ -1130,7 +1197,7 @@ mod tests {
 
     #[tokio::test]
     async fn admission_surfaces_threaded_envelope_metadata() {
-        let image = CodeImage::from_local_types(
+        let image = LegacyCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1140,8 +1207,9 @@ mod tests {
         let selector = AuraVmRuntimeSelector::for_policy(policy);
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
-        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_image(
-            &image,
+        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
+        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
+            &runtime_image,
             policy.protocol_class,
             super::super::vm_hardening::configured_guard_capacity(&config),
             super::super::vm_hardening::AuraVmSchedulerSignals::default(),
@@ -1152,7 +1220,7 @@ mod tests {
             &mut config,
             &scheduler_policy,
         );
-        let mut engine = AuraChoreoEngine::new_with_contracts_and_selector(
+        let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts_and_selector(
             config,
             Arc::new(AuraVmEffectHandler::default()),
             Some(RuntimeContracts::full()),
@@ -1161,7 +1229,11 @@ mod tests {
         .expect("engine");
 
         let sid = engine
-            .open_session_admitted(&image, "aura.sync.epoch_rotation", None, &[])
+            .open_protocol_machine_session_for_policy_admitted(
+                &runtime_image,
+                policy,
+                &[],
+            )
             .await
             .expect("admission succeeds");
 
@@ -1192,7 +1264,7 @@ mod tests {
 
     #[tokio::test]
     async fn admission_surfaces_replay_threaded_metadata() {
-        let image = CodeImage::from_local_types(
+        let image = LegacyCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1204,8 +1276,9 @@ mod tests {
         let selector = AuraVmRuntimeSelector::for_policy(policy);
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
-        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_image(
-            &image,
+        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
+        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
+            &runtime_image,
             policy.protocol_class,
             super::super::vm_hardening::configured_guard_capacity(&config),
             super::super::vm_hardening::AuraVmSchedulerSignals::default(),
@@ -1216,7 +1289,7 @@ mod tests {
             &mut config,
             &scheduler_policy,
         );
-        let mut engine = AuraChoreoEngine::new_with_contracts_and_selector(
+        let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts_and_selector(
             config,
             Arc::new(AuraVmEffectHandler::default()),
             Some(RuntimeContracts::full()),
@@ -1225,12 +1298,7 @@ mod tests {
         .expect("engine");
 
         let sid = engine
-            .open_session_admitted(
-                &image,
-                "aura.dkg.ceremony",
-                Some(super::super::vm_hardening::AURA_VM_POLICY_DKG_CEREMONY),
-                &[],
-            )
+            .open_protocol_machine_session_for_policy_admitted(&runtime_image, policy, &[])
             .await
             .expect("admission succeeds");
 
@@ -1254,7 +1322,7 @@ mod tests {
 
     #[tokio::test]
     async fn conformance_artifact_includes_selected_determinism_profile() {
-        let image = CodeImage::from_local_types(
+        let image = LegacyCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1262,8 +1330,9 @@ mod tests {
             .expect("policy");
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
-        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_image(
-            &image,
+        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
+        let scheduler_input = super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
+            &runtime_image,
             policy.protocol_class,
             super::super::vm_hardening::configured_guard_capacity(&config),
             super::super::vm_hardening::AuraVmSchedulerSignals::default(),
@@ -1274,7 +1343,7 @@ mod tests {
             &mut config,
             &scheduler_policy,
         );
-        let mut engine = AuraChoreoEngine::new_with_contracts(
+        let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts(
             config,
             Arc::new(AuraVmEffectHandler::default()),
             Some(RuntimeContracts::full()),
@@ -1282,7 +1351,7 @@ mod tests {
         .expect("engine");
 
         engine
-            .open_session_admitted(&image, "aura.recovery.grant", None, &[])
+            .open_protocol_machine_session_for_policy_admitted(&runtime_image, policy, &[])
             .await
             .expect("session opens");
         let admitted_sid = *engine

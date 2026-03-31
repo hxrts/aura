@@ -17,7 +17,7 @@ workspace = true
 [features]
 default = []
 simulation = ["aura-core/simulation"]
-telltale-runtime-capability = ["dep:telltale-vm"]
+telltale-runtime-capability = ["dep:telltale-machine", "dep:telltale-vm"]
 
 [dependencies]
 aura-core = { path = "../aura-core", version = "0.1.0" }
@@ -57,7 +57,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 fastrand = "2.1"
 hex = { workspace = true }
-telltale-vm = { workspace = true, optional = true }
+telltale-machine = { workspace = true, optional = true, features = ["multi-thread"] }
+telltale-vm = { workspace = true, optional = true, features = ["multi-thread"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -33,8 +33,8 @@ fn capability_refs(capabilities: &[CapabilityKey]) -> Vec<String> {
 fn consensus_runtime_capability_handler() -> RuntimeCapabilityHandler {
     #[cfg(feature = "choreo-backend-telltale-vm")]
     {
-        let contracts = telltale_vm::runtime_contracts::RuntimeContracts::full();
-        RuntimeCapabilityHandler::from_runtime_contracts(&contracts)
+        let contracts = telltale_machine::runtime_contracts::RuntimeContracts::full();
+        RuntimeCapabilityHandler::from_protocol_machine_runtime_contracts(&contracts)
     }
 
     #[cfg(not(feature = "choreo-backend-telltale-vm"))]

@@ -31,7 +31,6 @@ use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
-#[cfg(not(target_arch = "wasm32"))]
 use aura_core::TimeoutBudget;
 use aura_core::{CapabilityName, FlowCost};
 use aura_guards::guards::journal::JournalCoupler;
@@ -48,7 +47,6 @@ use aura_protocol::effects::{
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -639,7 +637,6 @@ where
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 impl<E, R> ChoreoHandler for AuraProtocolAdapter<E, R>
 where
@@ -726,7 +723,6 @@ where
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 impl<E, R> ChoreoHandlerExt for AuraProtocolAdapter<E, R>
 where
@@ -746,7 +742,7 @@ where
     }
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[async_trait]
 impl<E, R> GeneratedChoreographyRuntime for AuraProtocolAdapter<E, R>
 where
     E: ChoreographicEffects
@@ -862,7 +858,6 @@ where
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn map_runtime_error(error: AuraChoreographyError) -> TelltaleChoreographyError {
     TelltaleChoreographyError::ExecutionError(error.to_string())
 }

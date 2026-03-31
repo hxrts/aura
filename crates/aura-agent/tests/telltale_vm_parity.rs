@@ -417,8 +417,8 @@ mod native {
         native_repro_command, project_locals, selected_scenarios, selected_seed_corpus, NoOpHandler,
     };
     use aura_agent::{
-        build_vm_config, AuraEnvelopeParityPolicy, AuraVmEffectHandler, AuraVmHardeningProfile,
-        AuraVmParityProfile,
+        build_vm_config, AuraChoreoEngine, AuraEnvelopeParityPolicy, AuraVmEffectHandler,
+        AuraVmHardeningProfile, AuraVmParityProfile,
     };
     use aura_core::{
         assert_effect_kinds_classified, AuraConformanceArtifactV1, AuraConformanceRunMetadataV1,
@@ -428,12 +428,19 @@ mod native {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
-    use telltale_vm::effect::TopologyPerturbation;
+    use telltale_machine::{
+        runtime::loader::CodeImage as ProtocolMachineCodeImage,
+        serialization::CanonicalReplayFragmentV1 as ProtocolMachineCanonicalReplayFragmentV1,
+        EffectDeterminismTier as ProtocolMachineEffectDeterminismTier,
+        EnvelopeDiff as ProtocolMachineEnvelopeDiff,
+        RunStatus as ProtocolMachineRunStatus,
+        TopologyPerturbation as ProtocolMachineTopologyPerturbation,
+    };
     use telltale_vm::loader::CodeImage;
     use telltale_vm::serialization::CanonicalReplayFragmentV1;
     use telltale_vm::threaded::ThreadedVM;
     use telltale_vm::vm::{ObsEvent, RunStatus, VM};
-    use telltale_vm::{EffectDeterminismTier, EffectTraceEntry, EnvelopeDiff};
+    use telltale_vm::{EffectTraceEntry};
 
     struct ParityRun {
         obs_trace: Vec<ObsEvent>,
@@ -550,6 +557,28 @@ mod native {
             entry.handler_identity.clear();
         }
         normalized
+    }
+
+    fn protocol_machine_fragment(
+        fragment: &CanonicalReplayFragmentV1,
+    ) -> ProtocolMachineCanonicalReplayFragmentV1 {
+        let mut payload = serde_json::to_value(fragment).expect("serialize VM replay fragment");
+        payload["schema_version"] =
+            serde_json::Value::String("machine.serialization.v1".to_string());
+        serde_json::from_value(payload)
+        .expect("transcode VM replay fragment to protocol-machine fragment")
+    }
+
+    fn protocol_machine_image(image: &CodeImage) -> ProtocolMachineCodeImage {
+        let global_type: telltale_types_v9::GlobalType =
+            serde_json::from_value(serde_json::to_value(&image.global_type).expect("serialize global"))
+                .expect("decode protocol-machine global");
+        let local_types: std::collections::BTreeMap<String, telltale_types_v9::LocalTypeR> =
+            serde_json::from_value(serde_json::to_value(&image.local_types).expect("serialize locals"))
+                .expect("decode protocol-machine locals");
+        let image = ProtocolMachineCodeImage::from_local_types(&local_types, &global_type);
+        image.validate_runtime_shape().expect("runtime image");
+        image
     }
 
     fn write_replay_lane_metrics(
@@ -754,7 +783,10 @@ mod native {
                     normalized_fragment_without_handler_identity(&cooperative.canonical_fragment);
                 let threaded_fragment =
                     normalized_fragment_without_handler_identity(&threaded.canonical_fragment);
-                let diff = EnvelopeDiff::from_replay_fragments(
+                let cooperative_fragment =
+                    protocol_machine_fragment(&cooperative_fragment);
+                let threaded_fragment = protocol_machine_fragment(&threaded_fragment);
+                let diff = ProtocolMachineEnvelopeDiff::from_replay_fragments(
                     "native_cooperative",
                     "native_threaded",
                     &cooperative_fragment,
@@ -762,7 +794,7 @@ mod native {
                     1,
                     1,
                     1,
-                    EffectDeterminismTier::StrictDeterministic,
+                    ProtocolMachineEffectDeterminismTier::StrictDeterministic,
                 );
 
                 AuraEnvelopeParityPolicy::commutative_algebraic_only()
@@ -1071,17 +1103,17 @@ mod native {
 
         let global = (scenario.build)(seed);
         let locals = project_locals(&global);
-        let image = CodeImage::from_local_types(&locals, &global);
+        let image = protocol_machine_image(&CodeImage::from_local_types(&locals, &global));
 
-        let mut vm = VM::new(build_vm_config(
+        let handler = Arc::new(AuraVmEffectHandler::default());
+        let mut engine = AuraChoreoEngine::new(build_vm_config(
             AuraVmHardeningProfile::Ci,
             AuraVmParityProfile::NativeCooperative,
-        ));
-        let handler = AuraVmEffectHandler::default();
-        let crash = TopologyPerturbation::Crash {
+        ), Arc::clone(&handler));
+        let crash = ProtocolMachineTopologyPerturbation::Crash {
             site: "fault-node-a".to_string(),
         };
-        let partition = TopologyPerturbation::Partition {
+        let partition = ProtocolMachineTopologyPerturbation::Partition {
             from: "fault-node-a".to_string(),
             to: "fault-node-b".to_string(),
         };
@@ -1090,12 +1122,14 @@ mod native {
             handler.schedule_topology_event(tick, crash.clone());
         }
 
-        vm.load_choreography(&image).expect("load choreography");
-        let status = vm.run(&handler, 64).expect("run choreography");
-        assert_eq!(status, RunStatus::AllDone);
+        engine
+            .open_protocol_machine_session(&image)
+            .expect("load choreography");
+        let status = engine.run(64).expect("run choreography");
+        assert_eq!(status, ProtocolMachineRunStatus::AllDone);
 
-        let topology_events = vm
-            .effect_trace()
+        let topology_events = engine
+            .vm_effect_trace()
             .iter()
             .filter_map(|entry| entry.topology.clone())
             .collect::<Vec<_>>();
@@ -1142,13 +1176,28 @@ mod wasm {
         ConformanceSurfaceName,
     };
     use aura_testkit::{compare_artifacts, EnvelopeLawRegistry};
+    use telltale_machine::{
+        serialization::CanonicalReplayFragmentV1 as ProtocolMachineCanonicalReplayFragmentV1,
+        EffectDeterminismTier as ProtocolMachineEffectDeterminismTier,
+        EnvelopeDiff as ProtocolMachineEnvelopeDiff,
+    };
     use telltale_vm::loader::CodeImage;
     use telltale_vm::serialization::canonical_replay_fragment_v1;
     use telltale_vm::trace::normalize_trace;
     use telltale_vm::vm::{ObsEvent, VM};
     use telltale_vm::wasm::WasmVM;
-    use telltale_vm::{CommunicationReplayMode, EffectDeterminismTier, EnvelopeDiff};
+    use telltale_vm::{CommunicationReplayMode, EffectDeterminismTier};
     use wasm_bindgen_test::wasm_bindgen_test;
+
+    fn protocol_machine_fragment(
+        fragment: &telltale_vm::serialization::CanonicalReplayFragmentV1,
+    ) -> ProtocolMachineCanonicalReplayFragmentV1 {
+        let mut payload = serde_json::to_value(fragment).expect("serialize VM replay fragment");
+        payload["schema_version"] =
+            serde_json::Value::String("machine.serialization.v1".to_string());
+        serde_json::from_value(payload)
+        .expect("transcode VM replay fragment to protocol-machine fragment")
+    }
 
     fn build_wasm_artifact(
         profile: &str,
@@ -1254,7 +1303,9 @@ mod wasm {
                     None,
                     Vec::new(),
                 );
-                let diff = EnvelopeDiff::from_replay_fragments(
+                let native_fragment = protocol_machine_fragment(&native_fragment);
+                let wasm_fragment = protocol_machine_fragment(&wasm_fragment);
+                let diff = ProtocolMachineEnvelopeDiff::from_replay_fragments(
                     "native_cooperative",
                     "wasm_cooperative",
                     &native_fragment,
@@ -1262,7 +1313,7 @@ mod wasm {
                     1,
                     1,
                     1,
-                    EffectDeterminismTier::StrictDeterministic,
+                    ProtocolMachineEffectDeterminismTier::StrictDeterministic,
                 );
                 AuraEnvelopeParityPolicy::commutative_algebraic_only()
                     .validate(&diff)

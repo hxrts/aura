@@ -6,6 +6,7 @@ use aura_mpst::termination::{compute_weighted_measure, SessionBufferSnapshot};
 use aura_protocol::termination::TerminationProtocolClass;
 use telltale_vm::envelope_diff::EnvelopeDiffArtifactV1;
 use telltale_vm::loader::CodeImage;
+use telltale_machine::runtime::loader::CodeImage as ProtocolMachineCodeImage;
 use telltale_vm::vm::{FlowPolicy, FlowPredicate, GuardLayerConfig};
 use telltale_vm::{
     CanonicalReplayFragmentV1, CommunicationReplayMode, DeterminismMode, EffectDeterminismTier,
@@ -856,6 +857,28 @@ pub fn scheduler_control_input_for_image(
     }
 }
 
+/// Compute scheduler-selection input for one admitted protocol-machine code image.
+#[must_use]
+pub fn scheduler_control_input_for_protocol_machine_image(
+    image: &ProtocolMachineCodeImage,
+    protocol_class: TerminationProtocolClass,
+    guard_capacity_slots: usize,
+    signals: AuraVmSchedulerSignals,
+) -> AuraVmSchedulerControlInput {
+    let initial_weight = image
+        .local_types
+        .values()
+        .map(|local_type| local_type.depth() as u64)
+        .sum::<u64>()
+        .saturating_mul(2);
+    AuraVmSchedulerControlInput {
+        protocol_class,
+        initial_weight,
+        guard_capacity_slots: guard_capacity_slots.max(1),
+        signals: signals.normalized(),
+    }
+}
+
 /// Canonical scheduler policy for one admitted session.
 #[must_use]
 pub fn scheduler_policy_for_input(
@@ -976,7 +999,9 @@ pub fn validate_protocol_execution_policy(
 /// # Errors
 ///
 /// Returns [`AuraVmDeterminismProfileError::UnknownDeterminismMode`] for unknown values.
-pub fn parse_determinism_mode(raw: &str) -> Result<DeterminismMode, AuraVmDeterminismProfileError> {
+pub fn parse_determinism_mode(
+    raw: &str,
+) -> Result<DeterminismMode, AuraVmDeterminismProfileError> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "full" => Ok(DeterminismMode::Full),
         "modulo_effects" | "modulo-effects" => Ok(DeterminismMode::ModuloEffects),
@@ -1177,7 +1202,10 @@ fn apply_parity_profile(config: &mut VMConfig, parity: AuraVmParityProfile) {
 
 /// Build a VM config with explicit hardening and parity profiles.
 #[must_use]
-pub fn build_vm_config(hardening: AuraVmHardeningProfile, parity: AuraVmParityProfile) -> VMConfig {
+pub fn build_vm_config(
+    hardening: AuraVmHardeningProfile,
+    parity: AuraVmParityProfile,
+) -> VMConfig {
     let mut config = VMConfig::default();
     apply_hardening_profile(&mut config, hardening);
     apply_parity_profile(&mut config, parity);

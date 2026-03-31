@@ -57,6 +57,7 @@ pub mod reliability;
 pub mod session_ingress;
 
 // Choreography integration
+#[cfg(not(target_arch = "wasm32"))]
 pub mod choreography_adapter;
 cfg_if::cfg_if! {
     if #[cfg(feature = "choreo-backend-telltale-vm")] {
@@ -81,6 +82,7 @@ pub use builder::EffectSystemBuilder;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use choreo_engine::{AuraChoreoEngine, AuraChoreoEngineError};
 #[allow(unused_imports)] // Re-exported for public API
+#[cfg(not(target_arch = "wasm32"))]
 pub use choreography_adapter::{
     AuraHandlerAdapter, AuraProtocolAdapter, GuardConfig, MessageGuardRequirements,
 };
@@ -127,7 +129,8 @@ pub use vm_hardening::{
     configured_guard_capacity, parse_communication_replay_mode, parse_determinism_mode,
     parse_effect_determinism_tier, policy_for_protocol, policy_for_ref,
     policy_requires_envelope_artifact, required_runtime_capabilities_for_policy,
-    scheduler_control_input_for_image, scheduler_policy_for_input, scheduler_policy_ref,
+    scheduler_control_input_for_image, scheduler_control_input_for_protocol_machine_image,
+    scheduler_policy_for_input, scheduler_policy_ref,
     validate_determinism_profile, validate_envelope_artifact_for_policy,
     validate_protocol_execution_policy, validate_scheduler_execution_policy, vm_config_for_profile,
     AuraVmConcurrencyProfile, AuraVmDeterminismProfileError, AuraVmGuardLayer,

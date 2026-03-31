@@ -4,16 +4,22 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use aura_agent::{
-    build_vm_config, AuraVmEffectHandler, AuraVmHardeningProfile, AuraVmParityProfile,
+    build_vm_config, AuraChoreoEngine, AuraVmEffectHandler, AuraVmHardeningProfile,
+    AuraVmParityProfile,
 };
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
+use telltale_machine::{
+    runtime::loader::CodeImage as ProtocolMachineCodeImage,
+    RunStatus as ProtocolMachineRunStatus,
+    TopologyPerturbation as ProtocolMachineTopologyPerturbation,
+};
 use telltale_vm::coroutine::Value;
 use telltale_vm::effect::EffectHandler;
-use telltale_vm::effect::TopologyPerturbation;
 use telltale_vm::loader::CodeImage;
 use telltale_vm::vm::{ObsEvent, RunStatus, VM};
 
@@ -106,19 +112,23 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
 
     #[allow(clippy::while_let_on_iterator)]
     while let Some(ch) = chars.next() {
-        if ch != '[' {
-            out.push(ch);
-            continue;
-        }
+        let (open, close) = match ch {
+            '[' => ('[', ']'),
+            '{' => ('{', '}'),
+            _ => {
+                out.push(ch);
+                continue;
+            }
+        };
 
         let mut depth = 1usize;
         let mut buf = String::new();
         let mut has_equals = false;
 
         while let Some(next) = chars.next() {
-            if next == '[' {
+            if next == open {
                 depth += 1;
-            } else if next == ']' {
+            } else if next == close {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
                     break;
@@ -131,9 +141,9 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
         }
 
         if !has_equals {
-            out.push('[');
+            out.push(open);
             out.push_str(&buf);
-            out.push(']');
+            out.push(close);
         }
     }
 
@@ -146,8 +156,29 @@ fn invitation_exchange_global_from_source() -> GlobalType {
     ));
     let choreography = aura_mpst::upstream::language::parse_choreography_str(&source)
         .expect("parse invitation choreography source");
-    aura_mpst::upstream::language::ast::choreography_to_global(&choreography)
-        .expect("convert invitation choreography to global type")
+    let current_global = aura_mpst::upstream::language::ast::choreography_to_global(&choreography)
+        .expect("convert invitation choreography to global type");
+    serde_json::from_value(
+        serde_json::to_value(&current_global).expect("serialize current global type"),
+    )
+    .expect("transcode current global type to VM-aligned global type")
+}
+
+fn protocol_machine_image(global: &GlobalType, locals: &BTreeMap<String, LocalTypeR>) -> ProtocolMachineCodeImage {
+    let protocol_machine_global: telltale_types_v9::GlobalType =
+        serde_json::from_value(serde_json::to_value(global).expect("serialize global type"))
+            .expect("decode protocol-machine global type");
+    let protocol_machine_locals: BTreeMap<String, telltale_types_v9::LocalTypeR> =
+        serde_json::from_value(serde_json::to_value(locals).expect("serialize local types"))
+            .expect("decode protocol-machine local types");
+    let image = ProtocolMachineCodeImage::from_local_types(
+        &protocol_machine_locals,
+        &protocol_machine_global,
+    );
+    image
+        .validate_runtime_shape()
+        .expect("validate protocol-machine image");
+    image
 }
 
 fn consensus_fast_fallback_global(_seed: u64) -> GlobalType {
@@ -527,31 +558,32 @@ fn scenario_contract_bundles_hold_under_ci_profile() {
 fn scenario_contract_real_invitation_source_runs_with_non_noop_handler() {
     let global = invitation_exchange_global_from_source();
     let locals = project_locals(&global);
-    let image = CodeImage::from_local_types(&locals, &global);
+    let image = protocol_machine_image(&global, &locals);
     let config = build_vm_config(
         AuraVmHardeningProfile::Ci,
         AuraVmParityProfile::NativeCooperative,
     );
-    let mut vm = VM::new(config);
-    let handler = AuraVmEffectHandler::default();
+    let handler = Arc::new(AuraVmEffectHandler::default());
+    let mut engine = AuraChoreoEngine::new(config, Arc::clone(&handler));
     for tick in 0..=4 {
         handler.schedule_topology_event(
             tick,
-            TopologyPerturbation::Crash {
+            ProtocolMachineTopologyPerturbation::Crash {
                 site: "invitation-topology-node".to_string(),
             },
         );
     }
 
-    vm.load_choreography(&image)
+    engine
+        .open_protocol_machine_session(&image)
         .expect("load real invitation choreography");
-    let status = vm.run(&handler, 128).expect("run invitation choreography");
-    assert_eq!(status, RunStatus::AllDone);
+    let status = engine.run(128).expect("run invitation choreography");
+    assert_eq!(status, ProtocolMachineRunStatus::AllDone);
 
-    let effect_kinds = vm
-        .effect_trace()
-        .iter()
-        .map(|entry| entry.effect_kind.as_str())
+    let effect_kinds = engine
+        .vm_effect_trace()
+        .into_iter()
+        .map(|entry| entry.effect_kind)
         .collect::<BTreeSet<_>>();
     assert!(
         effect_kinds.contains("send_decision"),

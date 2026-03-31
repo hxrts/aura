@@ -2,7 +2,7 @@
 
 use crate::runtime::vm_hardening::{
     apply_protocol_execution_policy, apply_scheduler_execution_policy, configured_guard_capacity,
-    policy_for_protocol, scheduler_control_input_for_image, scheduler_policy_for_input,
+    policy_for_protocol, scheduler_control_input_for_protocol_machine_image, scheduler_policy_for_input,
     AuraVmProtocolExecutionPolicy, AuraVmRuntimeSelector, AuraVmSchedulerSignals,
     AuraVmSchedulerSignalsProvider,
 };
@@ -15,15 +15,19 @@ use aura_core::AuraVmDeterminismProfileV1;
 use aura_mpst::upstream::types::{GlobalType, LocalTypeR};
 use aura_mpst::{CompositionManifest, GuardCapabilityAdmission};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
+use serde::{de::DeserializeOwned, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use telltale_vm::coroutine::{BlockReason, CoroStatus, Value};
-use telltale_vm::effect::EffectHandler;
+use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
+use telltale_machine::coroutine::{
+    BlockReason as ProtocolMachineBlockReason, CoroStatus as ProtocolMachineCoroStatus,
+};
+use telltale_machine::{
+    runtime::loader::CodeImage as ProtocolMachineCodeImage, EffectTraceEntry, ProtocolMachine,
+    RuntimeContracts, SessionId, StepResult as ProtocolMachineStepResult,
+    Value,
+};
 use telltale_vm::loader::CodeImage;
-use telltale_vm::runtime_contracts::RuntimeContracts;
-use telltale_vm::vm::VM;
-use telltale_vm::EffectTraceEntry;
-use telltale_vm::SessionId;
 
 use super::subsystems::VmBridgeState;
 
@@ -111,7 +115,7 @@ pub struct BlockedVmReceive {
 
 #[derive(Debug)]
 pub struct AuraVmBridgeRound {
-    pub step: telltale_vm::vm::StepResult,
+    pub step: ProtocolMachineStepResult,
     pub blocked_receive: Option<BlockedVmReceive>,
     pub host_wait_status: AuraVmHostWaitStatus,
 }
@@ -208,13 +212,19 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
         partner: &str,
         label: &str,
         _state: &[Value],
-    ) -> Result<Value, String> {
+    ) -> EffectResult<Value> {
         let payload_bytes = self
             .bridge_effects
             .dequeue_outbound_payload()
             .ok_or_else(|| {
                 format!("missing queued outbound payload for VM send {role}->{partner}:{label}")
-            })?;
+            });
+        let payload_bytes = match payload_bytes {
+            Ok(payload_bytes) => payload_bytes,
+            Err(error) => {
+                return EffectResult::failure(EffectFailure::contract_violation(error));
+            }
+        };
         self.bridge_effects
             .record_pending_send(VmBridgePendingSend {
                 from_role: role.to_string(),
@@ -222,7 +232,7 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
                 label: label.to_string(),
                 payload: payload_bytes.clone(),
             });
-        Ok(Self::bytes_to_value(&payload_bytes))
+        EffectResult::success(Self::bytes_to_value(&payload_bytes))
     }
 
     fn handle_recv(
@@ -232,13 +242,13 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
         _label: &str,
         state: &mut Vec<Value>,
         payload: &Value,
-    ) -> Result<(), String> {
+    ) -> EffectResult<()> {
         if let Some(last) = state.last_mut() {
             *last = payload.clone();
         } else {
             state.push(payload.clone());
         }
-        Ok(())
+        EffectResult::success(())
     }
 
     fn handle_choose(
@@ -247,24 +257,40 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
         _partner: &str,
         labels: &[String],
         _state: &[Value],
-    ) -> Result<String, String> {
+    ) -> EffectResult<String> {
         if let Some(choice) = self.bridge_effects.dequeue_branch_choice() {
             if labels.iter().any(|label| label == &choice) {
-                return Ok(choice);
+                return EffectResult::success(choice);
             }
-            return Err(format!(
+            return EffectResult::failure(EffectFailure::contract_violation(format!(
                 "queued VM choice {choice} not present in offered labels {labels:?}"
-            ));
+            )));
         }
         labels
             .first()
             .cloned()
-            .ok_or_else(|| "no labels available for VM bridge choice".to_string())
+            .map(EffectResult::success)
+            .unwrap_or_else(|| {
+                EffectResult::failure(EffectFailure::contract_violation(
+                    "no labels available for VM bridge choice",
+                ))
+            })
     }
 
-    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> Result<(), String> {
-        Ok(())
+    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> EffectResult<()> {
+        EffectResult::success(())
     }
+}
+
+fn transcode_protocol_machine<T, U>(value: &T, context: &str) -> Result<U, String>
+where
+    T: Serialize + ?Sized,
+    U: DeserializeOwned,
+{
+    let payload = serde_json::to_value(value)
+        .map_err(|error| format!("{context} serialization failed: {error}"))?;
+    serde_json::from_value(payload)
+        .map_err(|error| format!("{context} deserialization failed: {error}"))
 }
 
 fn effective_host_bridge_policy(
@@ -368,6 +394,27 @@ pub fn build_role_scoped_code_image(
     Ok(CodeImage::from_local_types(&scoped, global_type))
 }
 
+fn build_role_scoped_protocol_machine_code_image(
+    roles: &[&str],
+    active_role: &str,
+    global_type: &GlobalType,
+    local_types: &BTreeMap<String, LocalTypeR>,
+) -> Result<ProtocolMachineCodeImage, String> {
+    let legacy_image = build_role_scoped_code_image(roles, active_role, global_type, local_types)?;
+    let protocol_machine_global: telltale_types_v9::GlobalType =
+        transcode_protocol_machine(&legacy_image.global_type, "role-scoped global type")?;
+    let protocol_machine_locals: BTreeMap<String, telltale_types_v9::LocalTypeR> =
+        transcode_protocol_machine(&legacy_image.local_types, "role-scoped local types")?;
+    let image = ProtocolMachineCodeImage::from_local_types(
+        &protocol_machine_locals,
+        &protocol_machine_global,
+    );
+    image
+        .validate_runtime_shape()
+        .map_err(|reason| format!("invalid protocol-machine role-scoped image: {reason}"))?;
+    Ok(image)
+}
+
 #[cfg(test)]
 fn open_role_scoped_vm_session(
     role_names: &[&str],
@@ -382,20 +429,21 @@ fn open_role_scoped_vm_session(
     ),
     String,
 > {
-    let image = build_role_scoped_code_image(role_names, active_role, global_type, local_types)?;
+    let image =
+        build_role_scoped_protocol_machine_code_image(role_names, active_role, global_type, local_types)?;
     let handler = Arc::new(AuraQueuedVmBridgeHandler::default());
     let config = build_vm_config(
         AuraVmHardeningProfile::Prod,
         AuraVmParityProfile::RuntimeDefault,
     );
-    let mut engine = AuraChoreoEngine::new_with_contracts(
+    let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts(
         config,
         Arc::clone(&handler),
         Some(RuntimeContracts::full()),
     )
     .map_err(|error| format!("failed to create VM engine: {error}"))?;
     let sid = engine
-        .open_session(&image)
+        .open_protocol_machine_session(&image)
         .map_err(|error| format!("failed to open VM session: {error}"))?;
     Ok((engine, handler, sid))
 }
@@ -417,7 +465,12 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
     ),
     AuraVmSessionOpenError,
 > {
-    let image = build_role_scoped_code_image(role_names, active_role, global_type, local_types)
+    let runtime_image = build_role_scoped_protocol_machine_code_image(
+        role_names,
+        active_role,
+        global_type,
+        local_types,
+    )
         .map_err(|message| AuraVmSessionOpenError::RoleScopedImage {
             protocol_id: protocol_id.to_string(),
             message,
@@ -445,15 +498,15 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
     }
     log_concurrency_profile_selection(&admission);
     apply_protocol_execution_policy(&mut config, effective_policy);
-    let scheduler_input = scheduler_control_input_for_image(
-        &image,
+    let scheduler_input = scheduler_control_input_for_protocol_machine_image(
+        &runtime_image,
         effective_policy.protocol_class,
         configured_guard_capacity(&config),
         handler.scheduler_signals(),
     );
     let scheduler_policy = scheduler_policy_for_input(scheduler_input);
     apply_scheduler_execution_policy(&mut config, &scheduler_policy);
-    let mut engine = AuraChoreoEngine::new_with_contracts_and_selector(
+    let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts_and_selector(
         config,
         Arc::clone(&handler),
         Some(RuntimeContracts::full()),
@@ -465,7 +518,11 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
         source,
     })?;
     let sid = engine
-        .open_session_for_policy_admitted(&image, effective_policy, required_capabilities)
+        .open_protocol_machine_session_for_policy_admitted(
+            &runtime_image,
+            effective_policy,
+            required_capabilities,
+        )
         .await
         .map_err(|source| AuraVmSessionOpenError::SessionOpen {
             protocol_id: protocol_id.to_string(),
@@ -656,9 +713,9 @@ pub fn handle_standard_vm_round(
     }
 
     match round.step {
-        telltale_vm::vm::StepResult::AllDone => Ok(AuraVmRoundDisposition::Complete),
-        telltale_vm::vm::StepResult::Continue => Ok(AuraVmRoundDisposition::Continue),
-        telltale_vm::vm::StepResult::Stuck => Err(format!(
+        ProtocolMachineStepResult::AllDone => Ok(AuraVmRoundDisposition::Complete),
+        ProtocolMachineStepResult::Continue => Ok(AuraVmRoundDisposition::Continue),
+        ProtocolMachineStepResult::Stuck => Err(format!(
             "{context_label} became stuck without a pending receive"
         )),
     }
@@ -666,7 +723,7 @@ pub fn handle_standard_vm_round(
 
 async fn classify_blocked_receive(
     effects: &AuraEffectSystem,
-    vm: &VM,
+    vm: &ProtocolMachine,
     sid: SessionId,
     active_role: &str,
     peer_roles: &BTreeMap<String, ChoreographicRole>,
@@ -705,13 +762,17 @@ fn is_receive_cancelled(error: &ChoreographyError) -> bool {
         )
 }
 
-pub fn blocked_recv_edge(vm: &VM, sid: SessionId, role: &str) -> Option<(String, String)> {
+pub fn blocked_recv_edge(
+    vm: &ProtocolMachine,
+    sid: SessionId,
+    role: &str,
+) -> Option<(String, String)> {
     vm.coroutines().iter().find_map(|coro| {
         if coro.session_id != sid || coro.role != role {
             return None;
         }
         match &coro.status {
-            CoroStatus::Blocked(BlockReason::Recv { edge, .. }) => {
+            ProtocolMachineCoroStatus::Blocked(ProtocolMachineBlockReason::Recv { edge, .. }) => {
                 Some((edge.sender.clone(), edge.receiver.clone()))
             }
             _ => None,
@@ -721,7 +782,7 @@ pub fn blocked_recv_edge(vm: &VM, sid: SessionId, role: &str) -> Option<(String,
 
 pub async fn receive_blocked_vm_message(
     effects: &AuraEffectSystem,
-    vm: &VM,
+    vm: &ProtocolMachine,
     sid: SessionId,
     active_role: &str,
     peer_roles: &BTreeMap<String, ChoreographicRole>,
@@ -802,7 +863,8 @@ mod tests {
     use aura_protocol::effects::{ChoreographicEffects, RoleIndex};
     use aura_testkit::stateful_effects::MockVmBridgeEffects;
     use std::sync::Arc;
-    use telltale_vm::session::SessionStatus;
+    use telltale_machine::model::effects::EffectFailure;
+    use telltale_machine::model::state::SessionStatus;
     use uuid::Uuid;
 
     fn authority_device_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
@@ -884,6 +946,7 @@ mod tests {
 
         let payload = handler
             .handle_send("Sender", "Receiver", "InvitationOffer", &[])
+            .expect_success(|| EffectFailure::contract_violation("queued send should not block"))
             .expect("queued send");
         assert_eq!(
             payload,
@@ -909,6 +972,7 @@ mod tests {
                 &["finalize".to_string(), "cancel".to_string()],
                 &[],
             )
+            .expect_success(|| EffectFailure::contract_violation("choice should not block"))
             .expect("choice");
 
         assert_eq!(choice, "cancel");
@@ -932,6 +996,9 @@ mod tests {
         handler.push_send_bytes(vec![0xAB]);
         handler
             .handle_send("Sender", "Receiver", "msg", &[])
+            .expect_success(|| {
+                EffectFailure::contract_violation("pending send should not block")
+            })
             .expect("pending send recorded");
 
         let err = flush_pending_vm_sends(effects.as_ref(), &handler, &BTreeMap::new())
@@ -960,6 +1027,9 @@ mod tests {
         handler.push_send_bytes(vec![0xCD]);
         handler
             .handle_send("Sender", "Receiver", "msg", &[])
+            .expect_success(|| {
+                EffectFailure::contract_violation("pending send should not block")
+            })
             .expect("pending send recorded");
         effects.end_session().await.expect("session ends");
 

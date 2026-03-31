@@ -94,7 +94,7 @@ use web_sys::js_sys;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 #[cfg(feature = "choreo-backend-telltale-vm")]
-use telltale_vm::vm::StepResult;
+use telltale_machine::StepResult;
 
 mod cache;
 mod channel;

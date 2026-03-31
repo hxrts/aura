@@ -1,6 +1,6 @@
 //! Envelope divergence policy for cross-runtime parity gates.
 
-use telltale_vm::{
+use telltale_machine::{
     EffectDeterminismTier, EffectOrderingClass, EnvelopeDiff, FailureVisibleDiffClass,
     SchedulerPermutationClass,
 };
@@ -122,8 +122,8 @@ impl AuraEnvelopeParityPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use telltale_vm::envelope_diff::ENVELOPE_DIFF_SCHEMA_VERSION;
-    use telltale_vm::WaveWidthBound;
+    use telltale_machine::envelope_diff::ENVELOPE_DIFF_SCHEMA_VERSION;
+    use telltale_machine::WaveWidthBound;
 
     fn diff_fixture() -> EnvelopeDiff {
         EnvelopeDiff {

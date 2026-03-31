@@ -8,8 +8,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
-use telltale_vm::effect::{AcquireDecision, EffectHandler, TopologyPerturbation};
-use telltale_vm::{OutputConditionHint, SessionId, Value};
+use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
+use telltale_machine::{OutputConditionHint, SessionId, TopologyPerturbation, Value};
 
 use aura_core::effects::{guard::EffectCommand, VmBridgeEffects};
 use aura_core::types::scope::ResourceScope;
@@ -356,7 +356,7 @@ impl EffectHandler for AuraVmEffectHandler {
         partner: &str,
         label: &str,
         state: &[Value],
-    ) -> Result<Value, String> {
+    ) -> EffectResult<Value> {
         let event = AuraVmEffectEvent::Send {
             role: role.to_string(),
             partner: partner.to_string(),
@@ -364,17 +364,19 @@ impl EffectHandler for AuraVmEffectHandler {
         };
         self.record(event.clone());
         self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_TRANSPORT_SEND);
-        self.emit_envelope(AuraVmEffectEnvelope::metadata(
+        if let Err(error) = self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.send",
             format!("{role}->{partner}:{label}"),
-        ))?;
-
-        if let Some(payload) = self.bridge_effects.dequeue_outbound_payload() {
-            return Ok(Value::Str(hex::encode(payload)));
+        )) {
+            return EffectResult::failure(EffectFailure::contract_violation(error));
         }
 
-        Ok(state.last().cloned().unwrap_or(Value::Unit))
+        if let Some(payload) = self.bridge_effects.dequeue_outbound_payload() {
+            return EffectResult::success(Value::Str(hex::encode(payload)));
+        }
+
+        EffectResult::success(state.last().cloned().unwrap_or(Value::Unit))
     }
 
     fn handle_recv(
@@ -384,7 +386,7 @@ impl EffectHandler for AuraVmEffectHandler {
         label: &str,
         state: &mut Vec<Value>,
         payload: &Value,
-    ) -> Result<(), String> {
+    ) -> EffectResult<()> {
         if let Some(last) = state.last_mut() {
             *last = payload.clone();
         } else {
@@ -398,12 +400,14 @@ impl EffectHandler for AuraVmEffectHandler {
         };
         self.record(event.clone());
         self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_TRANSPORT_RECV);
-        self.emit_envelope(AuraVmEffectEnvelope::metadata(
+        if let Err(error) = self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.recv",
             format!("{role}<-{partner}:{label}"),
-        ))?;
-        Ok(())
+        )) {
+            return EffectResult::failure(EffectFailure::contract_violation(error));
+        }
+        EffectResult::success(())
     }
 
     fn handle_choose(
@@ -412,16 +416,20 @@ impl EffectHandler for AuraVmEffectHandler {
         partner: &str,
         labels: &[String],
         _state: &[Value],
-    ) -> Result<String, String> {
+    ) -> EffectResult<String> {
         if labels.is_empty() {
-            return Err("no labels available".to_string());
+            return EffectResult::failure(EffectFailure::contract_violation(
+                "no labels available",
+            ));
         }
 
         let selected = if let Some(candidate) = self.bridge_effects.dequeue_branch_choice() {
             if labels.iter().any(|label| label == &candidate) {
                 candidate
             } else {
-                return Err(format!("queued branch choice '{candidate}' is not valid"));
+                return EffectResult::failure(EffectFailure::contract_violation(format!(
+                    "queued branch choice '{candidate}' is not valid"
+                )));
             }
         } else {
             labels[0].clone()
@@ -435,27 +443,31 @@ impl EffectHandler for AuraVmEffectHandler {
         };
         self.record(event.clone());
         self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_CHOICE);
-        self.emit_envelope(AuraVmEffectEnvelope::metadata(
+        if let Err(error) = self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.choose",
             format!("{role}:{selected}"),
-        ))?;
+        )) {
+            return EffectResult::failure(EffectFailure::contract_violation(error));
+        }
 
-        Ok(selected)
+        EffectResult::success(selected)
     }
 
-    fn step(&self, role: &str, _state: &mut Vec<Value>) -> Result<(), String> {
+    fn step(&self, role: &str, _state: &mut Vec<Value>) -> EffectResult<()> {
         let event = AuraVmEffectEvent::Step {
             role: role.to_string(),
         };
         self.record(event.clone());
         self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_STEP);
-        self.emit_envelope(AuraVmEffectEnvelope::metadata(
+        if let Err(error) = self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.step",
             role.to_string(),
-        ))?;
-        Ok(())
+        )) {
+            return EffectResult::failure(EffectFailure::contract_violation(error));
+        }
+        EffectResult::success(())
     }
 
     fn handle_acquire(
@@ -464,7 +476,7 @@ impl EffectHandler for AuraVmEffectHandler {
         role: &str,
         layer: &str,
         _state: &[Value],
-    ) -> Result<AcquireDecision, String> {
+    ) -> EffectResult<Value> {
         let granted = !lock_unpoisoned(&self.denied_layers).contains(layer);
         let mapped_scope = self.layer_scope(layer);
         let evidence = Value::Str(layer.to_string());
@@ -476,7 +488,7 @@ impl EffectHandler for AuraVmEffectHandler {
         };
         self.record(event.clone());
         self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE);
-        self.emit_envelope(AuraVmEffectEnvelope::metadata(
+        if let Err(error) = self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.acquire",
             format!(
@@ -486,7 +498,9 @@ impl EffectHandler for AuraVmEffectHandler {
                     .map(ResourceScope::resource_pattern)
                     .unwrap_or_else(|| "unmapped".to_string())
             ),
-        ))?;
+        )) {
+            return EffectResult::failure(EffectFailure::contract_violation(error));
+        }
 
         if granted {
             lock_unpoisoned(&self.active_leases).insert(
@@ -499,11 +513,11 @@ impl EffectHandler for AuraVmEffectHandler {
                     evidence: evidence.clone(),
                 },
             );
-            Ok(AcquireDecision::Grant(evidence))
+            EffectResult::success(evidence)
         } else {
             let mut telemetry = lock_unpoisoned(&self.telemetry);
             telemetry.acquire_denied = telemetry.acquire_denied.saturating_add(1);
-            Ok(AcquireDecision::Block)
+            EffectResult::blocked()
         }
     }
 
@@ -514,7 +528,7 @@ impl EffectHandler for AuraVmEffectHandler {
         layer: &str,
         evidence: &Value,
         _state: &[Value],
-    ) -> Result<(), String> {
+    ) -> EffectResult<()> {
         let event = AuraVmEffectEvent::Release {
             sid,
             role: role.to_string(),
@@ -523,11 +537,13 @@ impl EffectHandler for AuraVmEffectHandler {
         };
         self.record(event.clone());
         self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_GUARD_RELEASE);
-        self.emit_envelope(AuraVmEffectEnvelope::metadata(
+        if let Err(error) = self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.release",
             format!("sid={sid}:{role}:{layer}"),
-        ))?;
+        )) {
+            return EffectResult::failure(EffectFailure::contract_violation(error));
+        }
         let removed = lock_unpoisoned(&self.active_leases).remove(&(
             sid,
             role.to_string(),
@@ -536,11 +552,11 @@ impl EffectHandler for AuraVmEffectHandler {
         if removed.is_none() {
             let mut telemetry = lock_unpoisoned(&self.telemetry);
             telemetry.release_faults = telemetry.release_faults.saturating_add(1);
-            return Err(format!(
+            return EffectResult::failure(EffectFailure::contract_violation(format!(
                 "release without active lease sid={sid} role={role} layer={layer}"
-            ));
+            )));
         }
-        Ok(())
+        EffectResult::success(())
     }
 
     fn output_condition_hint(
@@ -559,12 +575,12 @@ impl EffectHandler for AuraVmEffectHandler {
         })
     }
 
-    fn topology_events(&self, tick: u64) -> Result<Vec<TopologyPerturbation>, String> {
+    fn topology_events(&self, tick: u64) -> EffectResult<Vec<TopologyPerturbation>> {
         let mut events = lock_unpoisoned(&self.topology_schedule)
             .remove(&tick)
             .unwrap_or_default();
         events.sort_by_key(TopologyPerturbation::ordering_key);
-        Ok(events)
+        EffectResult::success(events)
     }
 }
 
@@ -574,7 +590,7 @@ mod tests {
     use aura_core::types::scope::{AuthorityOp, ResourceScope};
     use aura_core::AuthorityId;
     use std::time::Duration;
-    use telltale_vm::effect::{CorruptionType, TopologyPerturbation};
+    use telltale_machine::CorruptionType;
     use uuid::Uuid;
 
     #[test]
@@ -585,11 +601,13 @@ mod tests {
 
         let send = handler
             .handle_send("A", "B", "Msg", &[])
+            .expect_success(|| EffectFailure::contract_violation("send should not block"))
             .expect("send should succeed");
         assert_eq!(send, Value::Str("07".to_string()));
 
         let choice = handler
             .handle_choose("A", "B", &["Commit".to_string(), "Abort".to_string()], &[])
+            .expect_success(|| EffectFailure::contract_violation("choice should not block"))
             .expect("choose should succeed");
         assert_eq!(choice, "Commit");
         assert_eq!(handler.drain_envelopes().len(), 2);
@@ -601,9 +619,8 @@ mod tests {
         handler.deny_layer("cap.guard");
 
         let decision = handler
-            .handle_acquire(1, "A", "cap.guard", &[])
-            .expect("acquire should return decision");
-        assert!(matches!(decision, AcquireDecision::Block));
+            .handle_acquire(1, "A", "cap.guard", &[]);
+        assert!(matches!(decision, EffectResult::Blocked));
         assert_eq!(handler.telemetry().acquire_denied, 1);
     }
 
@@ -618,9 +635,8 @@ mod tests {
         handler.bind_layer_scope("cap.guard", scope.clone());
 
         let acquire = handler
-            .handle_acquire(42, "Coordinator", "cap.guard", &[])
-            .expect("acquire should succeed");
-        assert!(matches!(acquire, AcquireDecision::Grant(_)));
+            .handle_acquire(42, "Coordinator", "cap.guard", &[]);
+        assert!(matches!(acquire, EffectResult::Success(_)));
 
         let leases = handler.active_leases();
         assert_eq!(leases.len(), 1);
@@ -628,6 +644,7 @@ mod tests {
 
         handler
             .handle_release(42, "Coordinator", "cap.guard", &Value::Unit, &[])
+            .expect_success(|| EffectFailure::contract_violation("release should not block"))
             .expect("release should succeed");
         assert!(handler.active_leases().is_empty());
     }
@@ -637,8 +654,9 @@ mod tests {
         let handler = AuraVmEffectHandler::default();
         let err = handler
             .handle_release(99, "Coordinator", "cap.guard", &Value::Unit, &[])
+            .expect_success(|| EffectFailure::contract_violation("expected release fault"))
             .expect_err("release without prior acquire should fault");
-        assert!(err.contains("release without active lease"));
+        assert!(err.message.contains("release without active lease"));
         assert_eq!(handler.telemetry().release_faults, 1);
     }
 
@@ -648,7 +666,7 @@ mod tests {
         handler.deny_layer("cap.guard");
         let _ = handler
             .handle_acquire(7, "A", "cap.guard", &[])
-            .expect("acquire decision");
+            .expect_success(|| EffectFailure::contract_violation("acquire blocked as expected"));
         let _ = handler.handle_release(7, "A", "cap.guard", &Value::Unit, &[]);
 
         let snapshot = handler.guard_contention_snapshot();
@@ -681,7 +699,10 @@ mod tests {
             ],
         );
 
-        let first = handler.topology_events(3).expect("scheduled events");
+        let first = handler
+            .topology_events(3)
+            .expect_success(|| EffectFailure::contract_violation("topology events should not block"))
+            .expect("scheduled events");
         assert_eq!(first.len(), 4);
         assert_eq!(
             first
@@ -698,7 +719,10 @@ mod tests {
             }
         );
 
-        let drained = handler.topology_events(3).expect("drained tick");
+        let drained = handler
+            .topology_events(3)
+            .expect_success(|| EffectFailure::contract_violation("topology events should not block"))
+            .expect("drained tick");
         assert!(drained.is_empty());
     }
 
@@ -718,8 +742,14 @@ mod tests {
             },
         );
 
-        let tick_one = handler.topology_events(1).expect("tick one");
-        let tick_two = handler.topology_events(2).expect("tick two");
+        let tick_one = handler
+            .topology_events(1)
+            .expect_success(|| EffectFailure::contract_violation("topology events should not block"))
+            .expect("tick one");
+        let tick_two = handler
+            .topology_events(2)
+            .expect_success(|| EffectFailure::contract_violation("topology events should not block"))
+            .expect("tick two");
         assert_eq!(tick_one.len(), 1);
         assert_eq!(tick_two.len(), 1);
         assert_eq!(

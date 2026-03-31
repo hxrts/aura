@@ -4,7 +4,7 @@ use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDispositio
 use aura_core::util::serialization::to_vec;
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use std::collections::BTreeMap;
-use telltale_vm::vm::StepResult;
+use telltale_machine::StepResult;
 
 fn recovery_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
     ChoreographicRole::for_authority(

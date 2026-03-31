@@ -50,7 +50,7 @@ use aura_recovery::setup_runners::GuardianSetupRole;
 use aura_recovery::types::{GuardianProfile, GuardianSet};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use telltale_vm::vm::StepResult;
+use telltale_machine::StepResult;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 

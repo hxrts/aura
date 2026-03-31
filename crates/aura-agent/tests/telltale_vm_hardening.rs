@@ -7,20 +7,20 @@ use std::sync::Arc;
 
 use aura_agent::{
     apply_protocol_execution_policy, apply_scheduler_execution_policy,
-    aura_output_predicate_allow_list, build_vm_config, configured_guard_capacity,
-    policy_for_protocol, scheduler_control_input_for_image, scheduler_policy_for_input,
-    AuraChoreoEngine, AuraChoreoEngineError, AuraVmEffectHandler, AuraVmHardeningProfile,
-    AuraVmParityProfile, AuraVmRuntimeSelector, AuraVmSchedulerSignals,
-    AURA_VM_SCHED_PRIORITY_AGING, AURA_VM_SCHED_PROGRESS_AWARE,
+    aura_output_predicate_allow_list, build_vm_config, configured_guard_capacity, policy_for_protocol,
+    scheduler_control_input_for_protocol_machine_image, scheduler_policy_for_input, AuraChoreoEngine,
+    AuraChoreoEngineError, AuraVmEffectHandler, AuraVmHardeningProfile, AuraVmParityProfile,
+    AuraVmRuntimeSelector, AuraVmSchedulerSignals, AURA_VM_SCHED_PRIORITY_AGING,
+    AURA_VM_SCHED_PROGRESS_AWARE,
 };
 use aura_mpst::upstream::types::{GlobalType, Label};
-use telltale_vm::effect::EffectHandler;
-use telltale_vm::effect::TopologyPerturbation;
+use telltale_machine::{
+    model::effects::{EffectFailure, EffectHandler, EffectResult},
+    runtime::loader::CodeImage as ProtocolMachineCodeImage,
+    ObsEvent, OutputConditionHint, RunStatus, SessionId,
+    RuntimeContracts, TopologyPerturbation as ProtocolMachineTopologyPerturbation, Value,
+};
 use telltale_vm::loader::CodeImage;
-use telltale_vm::output_condition::OutputConditionHint;
-use telltale_vm::runtime_contracts::RuntimeContracts;
-use telltale_vm::vm::{ObsEvent, RunStatus};
-use telltale_vm::{SessionId, Value};
 
 fn simple_send_image() -> CodeImage {
     let global = GlobalType::send("Sender", "Receiver", Label::new("msg"), GlobalType::End);
@@ -29,6 +29,18 @@ fn simple_send_image() -> CodeImage {
         .into_iter()
         .collect::<std::collections::BTreeMap<_, _>>();
     CodeImage::from_local_types(&locals, &global)
+}
+
+fn protocol_machine_image(image: &CodeImage) -> ProtocolMachineCodeImage {
+    let global_type: telltale_types_v9::GlobalType =
+        serde_json::from_value(serde_json::to_value(&image.global_type).expect("serialize global"))
+            .expect("decode protocol-machine global");
+    let local_types: std::collections::BTreeMap<String, telltale_types_v9::LocalTypeR> =
+        serde_json::from_value(serde_json::to_value(&image.local_types).expect("serialize locals"))
+            .expect("decode protocol-machine locals");
+    let image = ProtocolMachineCodeImage::from_local_types(&local_types, &global_type);
+    image.validate_runtime_shape().expect("runtime image");
+    image
 }
 
 #[test]
@@ -40,8 +52,11 @@ fn ci_profile_allows_known_output_predicates_from_aura_handler() {
     let handler = Arc::new(AuraVmEffectHandler::default());
     let mut engine = AuraChoreoEngine::new(config, handler);
     let image = simple_send_image();
+    let runtime_image = protocol_machine_image(&image);
 
-    engine.open_session(&image).expect("open session");
+    engine
+        .open_protocol_machine_session(&runtime_image)
+        .expect("open session");
     let status = engine.run(32).expect("run should succeed");
     assert_eq!(status, RunStatus::AllDone);
 
@@ -75,8 +90,8 @@ impl EffectHandler for UnknownPredicateHandler {
         _partner: &str,
         _label: &str,
         _state: &[Value],
-    ) -> Result<Value, String> {
-        Ok(Value::Unit)
+    ) -> EffectResult<Value> {
+        EffectResult::success(Value::Unit)
     }
 
     fn handle_recv(
@@ -86,8 +101,8 @@ impl EffectHandler for UnknownPredicateHandler {
         _label: &str,
         _state: &mut Vec<Value>,
         _payload: &Value,
-    ) -> Result<(), String> {
-        Ok(())
+    ) -> EffectResult<()> {
+        EffectResult::success(())
     }
 
     fn handle_choose(
@@ -96,15 +111,20 @@ impl EffectHandler for UnknownPredicateHandler {
         _partner: &str,
         labels: &[String],
         _state: &[Value],
-    ) -> Result<String, String> {
+    ) -> EffectResult<String> {
         labels
             .first()
             .cloned()
-            .ok_or_else(|| "no labels available".to_string())
+            .map(EffectResult::success)
+            .unwrap_or_else(|| {
+                EffectResult::failure(EffectFailure::contract_violation(
+                    "no labels available",
+                ))
+            })
     }
 
-    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> Result<(), String> {
-        Ok(())
+    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> EffectResult<()> {
+        EffectResult::success(())
     }
 
     fn output_condition_hint(
@@ -129,8 +149,11 @@ fn ci_profile_rejects_unknown_output_predicates_with_diagnostics() {
     let handler = Arc::new(UnknownPredicateHandler);
     let mut engine = AuraChoreoEngine::new(config, handler);
     let image = simple_send_image();
+    let runtime_image = protocol_machine_image(&image);
 
-    engine.open_session(&image).expect("open session");
+    engine
+        .open_protocol_machine_session(&runtime_image)
+        .expect("open session");
     let err = engine
         .run(32)
         .expect_err("run must fail on unknown predicate");
@@ -199,8 +222,9 @@ async fn envelope_bounded_admission_fails_closed_when_runtime_capability_missing
     );
     apply_protocol_execution_policy(&mut config, policy);
     let image = simple_send_image();
-    let scheduler_input = scheduler_control_input_for_image(
-        &image,
+    let runtime_image = protocol_machine_image(&image);
+    let scheduler_input = scheduler_control_input_for_protocol_machine_image(
+        &runtime_image,
         policy.protocol_class,
         configured_guard_capacity(&config),
         AuraVmSchedulerSignals::default(),
@@ -210,7 +234,7 @@ async fn envelope_bounded_admission_fails_closed_when_runtime_capability_missing
 
     let mut contracts = RuntimeContracts::full();
     contracts.determinism_artifacts.full = false;
-    let mut engine = AuraChoreoEngine::new_with_contracts_and_selector(
+    let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts_and_selector(
         config,
         Arc::new(AuraVmEffectHandler::default()),
         Some(contracts),
@@ -219,7 +243,7 @@ async fn envelope_bounded_admission_fails_closed_when_runtime_capability_missing
     .expect("engine");
 
     let err = engine
-        .open_session_admitted(&image, "aura.sync.epoch_rotation", None, &[])
+        .open_protocol_machine_session_for_policy_admitted(&runtime_image, policy, &[])
         .await
         .expect_err("admission must fail without derived envelope capability");
     assert!(matches!(
@@ -237,8 +261,11 @@ fn run_emits_bound_exceeded_when_step_budget_is_exhausted() {
     let handler = Arc::new(AuraVmEffectHandler::default());
     let mut engine = AuraChoreoEngine::new(config, handler);
     let image = simple_send_image();
+    let runtime_image = protocol_machine_image(&image);
 
-    engine.open_session(&image).expect("open session");
+    engine
+        .open_protocol_machine_session(&runtime_image)
+        .expect("open session");
     let err = engine
         .run(1)
         .expect_err("run should fail when deterministic step budget is exhausted");
@@ -258,15 +285,18 @@ fn prod_profile_topology_only_capture_records_topology_events() {
     for tick in 0..=8 {
         handler.schedule_topology_event(
             tick,
-            TopologyPerturbation::Crash {
+            ProtocolMachineTopologyPerturbation::Crash {
                 site: "prod-topology-node".to_string(),
             },
         );
     }
     let mut engine = AuraChoreoEngine::new(config, Arc::clone(&handler));
     let image = simple_send_image();
+    let runtime_image = protocol_machine_image(&image);
 
-    engine.open_session(&image).expect("open session");
+    engine
+        .open_protocol_machine_session(&runtime_image)
+        .expect("open session");
     let status = engine.run(32).expect("run should succeed");
     assert_eq!(status, RunStatus::AllDone);
 
@@ -284,7 +314,7 @@ fn prod_profile_topology_only_capture_records_topology_events() {
     assert!(
         effect_trace.iter().any(|entry| matches!(
             entry.topology,
-            Some(TopologyPerturbation::Crash { ref site }) if site == "prod-topology-node"
+            Some(ProtocolMachineTopologyPerturbation::Crash { ref site }) if site == "prod-topology-node"
         )),
         "expected scheduled topology crash to appear in trace"
     );
@@ -300,8 +330,9 @@ async fn admitted_sync_sessions_select_progress_aware_scheduler() {
         AuraVmParityProfile::RuntimeDefault,
     );
     apply_protocol_execution_policy(&mut config, policy);
-    let scheduler_input = scheduler_control_input_for_image(
-        &image,
+    let runtime_image = protocol_machine_image(&image);
+    let scheduler_input = scheduler_control_input_for_protocol_machine_image(
+        &runtime_image,
         policy.protocol_class,
         configured_guard_capacity(&config),
         AuraVmSchedulerSignals::default(),
@@ -310,11 +341,14 @@ async fn admitted_sync_sessions_select_progress_aware_scheduler() {
     assert_eq!(scheduler_policy.policy_ref, AURA_VM_SCHED_PROGRESS_AWARE);
     apply_scheduler_execution_policy(&mut config, &scheduler_policy);
 
-    let mut engine =
-        AuraChoreoEngine::new_with_contracts(config, handler, Some(RuntimeContracts::full()))
-            .expect("engine with admitted scheduler policy");
+    let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts(
+        config,
+        handler,
+        Some(RuntimeContracts::full()),
+    )
+    .expect("engine with admitted scheduler policy");
     engine
-        .open_session_admitted(&image, "aura.sync.epoch_rotation", None, &[])
+        .open_protocol_machine_session_for_policy_admitted(&runtime_image, policy, &[])
         .await
         .expect("admitted session should open");
 
@@ -340,12 +374,16 @@ async fn admission_rejects_scheduler_drift_under_budget_pressure() {
         AuraVmParityProfile::RuntimeDefault,
     );
     apply_protocol_execution_policy(&mut config, policy);
+    let runtime_image = protocol_machine_image(&image);
 
-    let mut engine =
-        AuraChoreoEngine::new_with_contracts(config, handler, Some(RuntimeContracts::full()))
-            .expect("engine should admit base config");
+    let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts(
+        config,
+        handler,
+        Some(RuntimeContracts::full()),
+    )
+    .expect("engine should admit base config");
     let err = engine
-        .open_session_admitted(&image, "aura.recovery.grant", None, &[])
+        .open_protocol_machine_session_for_policy_admitted(&runtime_image, policy, &[])
         .await
         .expect_err("scheduler mismatch must fail admission");
 

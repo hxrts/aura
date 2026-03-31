@@ -47,7 +47,7 @@ impl RuntimeCapabilityHandler {
 
 #[cfg(feature = "telltale-runtime-capability")]
 impl RuntimeCapabilityHandler {
-    /// Build from Telltale runtime contracts/admission surface.
+    /// Build from the legacy Telltale VM runtime contracts/admission surface.
     pub fn from_runtime_contracts(
         contracts: &telltale_vm::runtime_contracts::RuntimeContracts,
     ) -> Self {
@@ -68,6 +68,47 @@ impl RuntimeCapabilityHandler {
         inventory.insert(
             CapabilityKey::new("reconfiguration"),
             contracts.live_migration && contracts.placement_refinement,
+        );
+        inventory.insert(
+            CapabilityKey::new("mixed_determinism"),
+            contracts.can_use_mixed_determinism_profiles,
+        );
+        inventory.insert(
+            CapabilityKey::new("vmEnvelopeAdherence"),
+            contracts.determinism_artifacts.full,
+        );
+
+        Self {
+            inventory: Arc::new(inventory),
+        }
+    }
+
+    /// Build from the current ProtocolMachine runtime contracts/admission surface.
+    pub fn from_protocol_machine_runtime_contracts(
+        contracts: &telltale_machine::runtime_contracts::RuntimeContracts,
+    ) -> Self {
+        let mut inventory =
+            telltale_machine::runtime_contracts::runtime_capability_snapshot(contracts)
+                .into_iter()
+                .map(|(key, admitted)| (CapabilityKey::new(key), admitted))
+                .collect::<BTreeMap<_, _>>();
+
+        inventory.insert(
+            CapabilityKey::new("byzantine_envelope"),
+            contracts.determinism_artifacts.full,
+        );
+        inventory.insert(
+            CapabilityKey::new("termination_bounded"),
+            contracts.determinism_artifacts.replay || contracts.determinism_artifacts.full,
+        );
+        inventory.insert(
+            CapabilityKey::new("reconfiguration"),
+            contracts
+                .capabilities
+                .contains(&telltale_machine::runtime_contracts::RuntimeCapability::LiveMigration)
+                && contracts.capabilities.contains(
+                    &telltale_machine::runtime_contracts::RuntimeCapability::PlacementRefinement,
+                ),
         );
         inventory.insert(
             CapabilityKey::new("mixed_determinism"),
@@ -150,6 +191,33 @@ mod tests {
     fn runtime_contract_mapping_exposes_derived_aura_capabilities() {
         let contracts = telltale_vm::runtime_contracts::RuntimeContracts::full();
         let handler = RuntimeCapabilityHandler::from_runtime_contracts(&contracts);
+        assert!(
+            handler
+                .inventory
+                .get(&CapabilityKey::new("byzantine_envelope"))
+                .copied()
+                .unwrap_or(false),
+            "full contracts should admit byzantine_envelope"
+        );
+        assert!(
+            handler
+                .inventory
+                .contains_key(&CapabilityKey::new("termination_bounded")),
+            "derived termination_bounded key should be present"
+        );
+        assert!(
+            handler
+                .inventory
+                .contains_key(&CapabilityKey::new("mixed_determinism")),
+            "derived mixed_determinism key should be present"
+        );
+    }
+
+    #[cfg(feature = "telltale-runtime-capability")]
+    #[test]
+    fn protocol_machine_runtime_contract_mapping_exposes_derived_aura_capabilities() {
+        let contracts = telltale_machine::runtime_contracts::RuntimeContracts::full();
+        let handler = RuntimeCapabilityHandler::from_protocol_machine_runtime_contracts(&contracts);
         assert!(
             handler
                 .inventory

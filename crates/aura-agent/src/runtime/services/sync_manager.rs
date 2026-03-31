@@ -29,7 +29,7 @@ use aura_sync::verification::{MerkleVerifier, VerificationResult};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use telltale_vm::vm::StepResult;
+use telltale_machine::StepResult;
 use thiserror::Error;
 use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;

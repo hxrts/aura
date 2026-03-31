@@ -6,7 +6,9 @@ use std::path::Path;
 use aura_core::AuraFault;
 use aura_core::AuraVmDeterminismProfileV1;
 use serde::{Deserialize, Serialize};
-use telltale_vm::{canonical_effect_trace, EffectTraceCaptureMode, EffectTraceEntry, VMConfig};
+use telltale_machine::{
+    canonical_effect_trace, EffectTraceCaptureMode, EffectTraceEntry, ProtocolMachineConfig,
+};
 
 /// Trace payload encoding for persisted replay artifacts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -149,13 +151,13 @@ impl EffectTraceCapture {
     }
 
     /// Apply capture granularity onto VM configuration.
-    pub fn apply_to_vm_config(&self, config: &mut VMConfig) {
+    pub fn apply_to_vm_config(&self, config: &mut ProtocolMachineConfig) {
         config.effect_trace_capture_mode = self.options.granularity.to_vm_mode();
     }
 
     /// Build capture utility from VM configuration.
     #[must_use]
-    pub fn from_vm_config(config: &VMConfig) -> Self {
+    pub fn from_vm_config(config: &ProtocolMachineConfig) -> Self {
         Self::new(EffectTraceCaptureOptions {
             encoding: AuraEffectTraceEncoding::Json,
             granularity: AuraEffectTraceGranularity::from_vm_mode(config.effect_trace_capture_mode),
@@ -358,6 +360,8 @@ mod tests {
             inputs: json!({"in": effect_id}),
             outputs: json!({"out": effect_id}),
             handler_identity: "handler".to_string(),
+            effect_interface: Some("AuraTest".to_string()),
+            effect_operation: Some(effect_kind.to_string()),
             ordering_key: effect_id,
             topology: None,
         }

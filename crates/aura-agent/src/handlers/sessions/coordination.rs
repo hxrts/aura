@@ -25,7 +25,7 @@ use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, RoleIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use telltale_vm::vm::StepResult;
+use telltale_machine::StepResult;
 
 // Session coordination choreography protocol
 //

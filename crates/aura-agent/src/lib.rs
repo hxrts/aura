@@ -178,17 +178,19 @@ pub use handlers::{ChannelResult, RendezvousHandler, RendezvousResult, Rendezvou
 pub use runtime::system::RuntimeShutdownError;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::{
-    AuraHandlerAdapter, EffectContext, EffectExecutor, EffectOperation, EffectRegistry,
-    EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, EffectType, FlowBudgetManager,
-    LifecycleManager, OperationSessionId, ReceiptManager, RuntimeChoreographySessionId,
-    RuntimeService, RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth,
-    SharedTransport, TaskSupervisor,
+    EffectContext, EffectExecutor, EffectOperation, EffectRegistry, EffectRegistryError,
+    EffectRegistryExt, EffectSystemBuilder, EffectType, FlowBudgetManager, LifecycleManager,
+    OperationSessionId, ReceiptManager, RuntimeChoreographySessionId, RuntimeService,
+    RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth, SharedTransport,
+    TaskSupervisor,
 };
+#[cfg(all(feature = "choreo-backend-telltale-vm", not(target_arch = "wasm32")))]
+pub use runtime::AuraHandlerAdapter;
 
 // Protocol adapter for choreography execution (used by tests)
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::choreo_engine::{AuraChoreoEngine, AuraChoreoEngineError};
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(all(feature = "choreo-backend-telltale-vm", not(target_arch = "wasm32")))]
 pub use runtime::choreography_adapter::{AuraProtocolAdapter, MessageRequest, ReceivedMessage};
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::parity_policy::{AuraEnvelopeParityError, AuraEnvelopeParityPolicy};
@@ -201,7 +203,8 @@ pub use runtime::vm_hardening::{
     configured_guard_capacity, parse_communication_replay_mode, parse_determinism_mode,
     parse_effect_determinism_tier, policy_for_protocol, policy_for_ref,
     policy_requires_envelope_artifact, required_runtime_capabilities_for_policy,
-    scheduler_control_input_for_image, scheduler_policy_for_input, scheduler_policy_ref,
+    scheduler_control_input_for_image, scheduler_control_input_for_protocol_machine_image,
+    scheduler_policy_for_input, scheduler_policy_ref,
     validate_determinism_profile, validate_envelope_artifact_for_policy,
     validate_protocol_execution_policy, validate_scheduler_execution_policy, vm_config_for_profile,
     AuraVmDeterminismProfileError, AuraVmGuardLayer, AuraVmHardeningProfile, AuraVmParityProfile,
