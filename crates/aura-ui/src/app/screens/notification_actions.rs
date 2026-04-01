@@ -242,6 +242,80 @@ pub(in crate::app) fn approve_recovery_action(
     });
 }
 
+pub(in crate::app) fn accept_friend_request_action(
+    controller: Arc<UiController>,
+    render_tick: Signal<u64>,
+    authority_id: String,
+) {
+    let app_core = controller.app_core().clone();
+    let operation = UiLocalOperationOwner::submit(
+        controller.clone(),
+        OperationId::accept_friend_request(),
+        SemanticOperationKind::AcceptFriendRequest,
+    );
+    let mut tick = render_tick;
+    spawn_ui(async move {
+        let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
+            Ok(value) => value,
+            Err(error) => {
+                operation.fail_with(command_failure(error.to_string()));
+                controller.runtime_error_toast(error.to_string());
+                return;
+            }
+        };
+        match contacts_workflows::accept_friend_request(&app_core, &authority_id, timestamp_ms)
+            .await
+        {
+            Ok(()) => {
+                operation.succeed(None);
+                controller.complete_runtime_modal_success("Friend request accepted");
+            }
+            Err(error) => {
+                operation.fail_with(command_failure(error.to_string()));
+                controller.runtime_error_toast(error.to_string());
+            }
+        }
+        tick.set(tick() + 1);
+    });
+}
+
+pub(in crate::app) fn decline_friend_request_action(
+    controller: Arc<UiController>,
+    render_tick: Signal<u64>,
+    authority_id: String,
+) {
+    let app_core = controller.app_core().clone();
+    let operation = UiLocalOperationOwner::submit(
+        controller.clone(),
+        OperationId::decline_friend_request(),
+        SemanticOperationKind::DeclineFriendRequest,
+    );
+    let mut tick = render_tick;
+    spawn_ui(async move {
+        let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
+            Ok(value) => value,
+            Err(error) => {
+                operation.fail_with(command_failure(error.to_string()));
+                controller.runtime_error_toast(error.to_string());
+                return;
+            }
+        };
+        match contacts_workflows::decline_friend_request(&app_core, &authority_id, timestamp_ms)
+            .await
+        {
+            Ok(()) => {
+                operation.succeed(None);
+                controller.complete_runtime_modal_success("Friend request declined");
+            }
+            Err(error) => {
+                operation.fail_with(command_failure(error.to_string()));
+                controller.runtime_error_toast(error.to_string());
+            }
+        }
+        tick.set(tick() + 1);
+    });
+}
+
 /// Shared action bar for notification detail panel.
 /// Renders accept/decline/approve buttons at the bottom right based on action type.
 #[component]
@@ -345,6 +419,35 @@ pub(in crate::app) fn NotificationActionBar(
                             controller.clone(),
                             render_tick,
                             ceremony_id.clone(),
+                        );
+                    },
+                }
+            }
+        }
+        NotificationRuntimeAction::FriendRequest => {
+            let accept_controller = controller.clone();
+            let accept_id = item_id.clone();
+            let decline_id = item_id;
+            rsx! {
+                UiButton {
+                    label: "Accept".to_string(),
+                    variant: ButtonVariant::Primary,
+                    onclick: move |_| {
+                        accept_friend_request_action(
+                            accept_controller.clone(),
+                            render_tick,
+                            accept_id.clone(),
+                        );
+                    },
+                }
+                UiButton {
+                    label: "Decline".to_string(),
+                    variant: ButtonVariant::Secondary,
+                    onclick: move |_| {
+                        decline_friend_request_action(
+                            controller.clone(),
+                            render_tick,
+                            decline_id.clone(),
                         );
                     },
                 }

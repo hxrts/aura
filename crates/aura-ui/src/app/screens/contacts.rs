@@ -67,8 +67,6 @@ pub(super) fn ContactsScreen(
     let invite_to_channel_controller = controller.clone();
     let add_guardian_controller = controller.clone();
     let send_friend_request_controller = controller.clone();
-    let accept_friend_request_controller = controller.clone();
-    let decline_friend_request_controller = controller.clone();
     let remove_friend_controller = controller.clone();
     let edit_controller = controller.clone();
     let remove_controller = controller.clone();
@@ -381,110 +379,6 @@ pub(super) fn ContactsScreen(
                                                         Ok(()) => {
                                                             operation.succeed(None);
                                                             controller.info_toast("friend request sent");
-                                                        }
-                                                        Err(error) => {
-                                                            operation.fail_with(command_failure(error.to_string()));
-                                                            controller.runtime_error_toast(error.to_string());
-                                                        }
-                                                    }
-                                                });
-                                                render_tick.set(render_tick() + 1);
-                                            }
-                                        }
-                                    }
-                                }
-                                if contacts_friend_action_controls(contact.relationship_state)
-                                    .contains(&ControlId::ContactsAcceptFriendRequestButton) {
-                                    UiButton {
-                                        id: Some(
-                                            ControlId::ContactsAcceptFriendRequestButton
-                                                .web_dom_id()
-                                                .required_dom_id(
-                                                    "ControlId::ContactsAcceptFriendRequestButton must define a web DOM id",
-                                                )
-                                                .to_string(),
-                                        ),
-                                        label: "Accept Friend".to_string(),
-                                        variant: ButtonVariant::Primary,
-                                        onclick: {
-                                            let authority_id = contact.authority_id;
-                                            move |_| {
-                                                let controller = accept_friend_request_controller.clone();
-                                                let app_core = controller.app_core().clone();
-                                                let operation = UiLocalOperationOwner::submit(
-                                                    controller.clone(),
-                                                    OperationId::accept_friend_request(),
-                                                    SemanticOperationKind::AcceptFriendRequest,
-                                                );
-                                                spawn_ui(async move {
-                                                    let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
-                                                        Ok(value) => value,
-                                                        Err(error) => {
-                                                            operation.fail_with(command_failure(error.to_string()));
-                                                            controller.runtime_error_toast(error.to_string());
-                                                            return;
-                                                        }
-                                                    };
-                                                    match contacts_workflows::accept_friend_request(
-                                                        &app_core,
-                                                        &authority_id.to_string(),
-                                                        timestamp_ms,
-                                                    ).await {
-                                                        Ok(()) => {
-                                                            operation.succeed(None);
-                                                            controller.info_toast("friend request accepted");
-                                                        }
-                                                        Err(error) => {
-                                                            operation.fail_with(command_failure(error.to_string()));
-                                                            controller.runtime_error_toast(error.to_string());
-                                                        }
-                                                    }
-                                                });
-                                                render_tick.set(render_tick() + 1);
-                                            }
-                                        }
-                                    }
-                                }
-                                if contacts_friend_action_controls(contact.relationship_state)
-                                    .contains(&ControlId::ContactsDeclineFriendRequestButton) {
-                                    UiButton {
-                                        id: Some(
-                                            ControlId::ContactsDeclineFriendRequestButton
-                                                .web_dom_id()
-                                                .required_dom_id(
-                                                    "ControlId::ContactsDeclineFriendRequestButton must define a web DOM id",
-                                                )
-                                                .to_string(),
-                                        ),
-                                        label: "Decline Friend".to_string(),
-                                        variant: ButtonVariant::Secondary,
-                                        onclick: {
-                                            let authority_id = contact.authority_id;
-                                            move |_| {
-                                                let controller = decline_friend_request_controller.clone();
-                                                let app_core = controller.app_core().clone();
-                                                let operation = UiLocalOperationOwner::submit(
-                                                    controller.clone(),
-                                                    OperationId::decline_friend_request(),
-                                                    SemanticOperationKind::DeclineFriendRequest,
-                                                );
-                                                spawn_ui(async move {
-                                                    let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
-                                                        Ok(value) => value,
-                                                        Err(error) => {
-                                                            operation.fail_with(command_failure(error.to_string()));
-                                                            controller.runtime_error_toast(error.to_string());
-                                                            return;
-                                                        }
-                                                    };
-                                                    match contacts_workflows::decline_friend_request(
-                                                        &app_core,
-                                                        &authority_id.to_string(),
-                                                        timestamp_ms,
-                                                    ).await {
-                                                        Ok(()) => {
-                                                            operation.succeed(None);
-                                                            controller.info_toast("friend request declined");
                                                         }
                                                         Err(error) => {
                                                             operation.fail_with(command_failure(error.to_string()));

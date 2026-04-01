@@ -1,6 +1,10 @@
 use crate::model::{NotificationSelectionId, UiController};
-use aura_app::ui::signals::{ERROR_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
-use aura_app::ui::types::{AppError, InvitationsState, RecoveryState};
+use aura_app::ui::signals::{
+    CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
+};
+use aura_app::ui::types::{
+    AppError, ContactRelationshipState, ContactsState, InvitationsState, RecoveryState,
+};
 use aura_core::effects::reactive::ReactiveEffects;
 use std::sync::Arc;
 
@@ -23,6 +27,7 @@ pub(in crate::app) enum NotificationRuntimeAction {
     PendingChannelInvitation,
     SentInvitation,
     RecoveryApproval,
+    FriendRequest,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -34,6 +39,7 @@ pub(in crate::app) struct NotificationsRuntimeView {
 fn build_notifications_runtime_view(
     invitations: InvitationsState,
     recovery: RecoveryState,
+    contacts: ContactsState,
     error: Option<AppError>,
 ) -> NotificationsRuntimeView {
     let mut items = Vec::new();
@@ -195,6 +201,32 @@ fn build_notifications_runtime_view(
         });
     }
 
+    for contact in contacts.all_contacts() {
+        if contact.relationship_state != ContactRelationshipState::PendingInbound {
+            continue;
+        }
+        let name = if !contact.nickname.trim().is_empty() {
+            contact.nickname.clone()
+        } else if let Some(suggestion) = contact
+            .nickname_suggestion
+            .as_ref()
+            .filter(|v| !v.trim().is_empty())
+        {
+            suggestion.clone()
+        } else {
+            contact.id.to_string().chars().take(8).collect()
+        };
+        items.push(NotificationRuntimeItem {
+            id: contact.id.to_string(),
+            kind_label: "Friend Request".to_string(),
+            title: format!("Friend request from {name}"),
+            subtitle: "Accept or decline".to_string(),
+            detail: contact.id.to_string(),
+            timestamp: contact.last_interaction.unwrap_or(0),
+            action: NotificationRuntimeAction::FriendRequest,
+        });
+    }
+
     if let Some(error) = error {
         items.push(NotificationRuntimeItem {
             id: "runtime-error".to_string(),
@@ -225,11 +257,15 @@ pub(in crate::app) async fn load_notifications_runtime_view(
         let core = controller.app_core().read().await;
         core.read(&*RECOVERY_SIGNAL).await.unwrap_or_default()
     };
+    let contacts = {
+        let core = controller.app_core().read().await;
+        core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
+    };
     let error = {
         let core = controller.app_core().read().await;
         core.read(&*ERROR_SIGNAL).await.unwrap_or_default()
     };
-    let runtime = build_notifications_runtime_view(invitations, recovery, error);
+    let runtime = build_notifications_runtime_view(invitations, recovery, contacts, error);
     controller.publish_runtime_notifications_projection(
         runtime
             .items
