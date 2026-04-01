@@ -10,6 +10,11 @@ use aura_core::{AuthorityId, ComposedBundle, SessionFootprint, SessionId};
 use aura_effects::RuntimeCapabilityHandler;
 use aura_journal::fact::{FactContent, ProtocolRelationalFact, RelationalFact};
 use std::collections::BTreeSet;
+use telltale_machine::{
+    CanonicalPublicationContinuity, PendingEffectTreatment, ReconfigurationPlan,
+    ReconfigurationPlanStep, RuntimeUpgradeCompatibility, RuntimeUpgradeExecutionConstraint,
+    RuntimeUpgradeRequest, TransitionArtifactPhase,
+};
 use uuid::Uuid;
 
 fn authority(seed: u8) -> AuthorityId {
@@ -323,4 +328,208 @@ async fn guardian_handoff_delegation_records_guardian_bundle() {
         }),
         "guardian handoff delegation fact must be committed"
     );
+}
+
+#[tokio::test]
+async fn delegation_carries_runtime_upgrade_artifacts_explicitly() {
+    let from_authority = authority(41);
+    let to_authority = authority(42);
+    let session_id = session(43);
+
+    let effects = AuraEffectSystem::simulation_for_test_for_authority(
+        &AgentConfig::default(),
+        from_authority,
+    )
+    .expect("simulation effect system");
+    let manager = ReconfigurationManager::new();
+    manager
+        .record_native_session(from_authority, session_id)
+        .await;
+    manager
+        .seed_runtime_upgrade_membership("device_migration", ["member-a", "member-b"])
+        .await
+        .expect("seed membership");
+
+    let runtime_upgrade_request = RuntimeUpgradeRequest {
+        upgrade_id: "upgrade/device-migration-delegation".to_string(),
+        plan: ReconfigurationPlan {
+            plan_id: "plan/device-migration-delegation".to_string(),
+            steps: vec![ReconfigurationPlanStep {
+                step_id: "cutover-1".to_string(),
+                next_members: vec!["member-b".to_string(), "member-c".to_string()],
+                placements: Vec::new(),
+            }],
+        },
+        compatibility: RuntimeUpgradeCompatibility {
+            execution_constraint: RuntimeUpgradeExecutionConstraint::PreserveBundleProfile,
+            ownership_continuity_required: true,
+            pending_effect_treatment: PendingEffectTreatment::PreservePending,
+            canonical_publication_continuity:
+                CanonicalPublicationContinuity::PreserveCanonicalTruth,
+        },
+        carried_publication_ids: vec!["pub:device".to_string()],
+        invalidated_publication_ids: Vec::new(),
+        carried_obligation_ids: vec!["obl:pending-send".to_string()],
+        invalidated_obligation_ids: Vec::new(),
+    };
+
+    let outcome = manager
+        .delegate_session(
+            &effects,
+            SessionDelegationTransfer::new(
+                session_id,
+                from_authority,
+                to_authority,
+                "device_migration",
+            )
+            .with_runtime_upgrade_request(runtime_upgrade_request.clone()),
+        )
+        .await
+        .expect("delegate session with explicit runtime upgrade");
+
+    assert_eq!(
+        outcome
+            .witness
+            .runtime_upgrade_request
+            .as_ref()
+            .expect("request on witness")
+            .upgrade_id,
+        runtime_upgrade_request.upgrade_id
+    );
+    let execution = outcome
+        .witness
+        .runtime_upgrade_execution
+        .as_ref()
+        .expect("execution on witness");
+    assert_eq!(
+        execution
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.phase)
+            .collect::<Vec<_>>(),
+        vec![
+            TransitionArtifactPhase::Staged,
+            TransitionArtifactPhase::Admitted,
+            TransitionArtifactPhase::CommittedCutover,
+        ]
+    );
+
+    let snapshot = manager
+        .runtime_upgrade_snapshot("device_migration")
+        .await
+        .expect("runtime-upgrade snapshot");
+    assert_eq!(
+        snapshot.active_members,
+        vec!["member-b".to_string(), "member-c".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn runtime_upgrade_records_public_execution_artifacts() {
+    let manager = ReconfigurationManager::new();
+    manager
+        .seed_runtime_upgrade_membership("device_migration", ["member-a", "member-b"])
+        .await
+        .expect("seed membership");
+
+    let request = RuntimeUpgradeRequest {
+        upgrade_id: "upgrade/device-migration".to_string(),
+        plan: ReconfigurationPlan {
+            plan_id: "plan/device-migration".to_string(),
+            steps: vec![ReconfigurationPlanStep {
+                step_id: "cutover-1".to_string(),
+                next_members: vec!["member-b".to_string(), "member-c".to_string()],
+                placements: Vec::new(),
+            }],
+        },
+        compatibility: RuntimeUpgradeCompatibility {
+            execution_constraint: RuntimeUpgradeExecutionConstraint::PreserveBundleProfile,
+            ownership_continuity_required: true,
+            pending_effect_treatment: PendingEffectTreatment::PreservePending,
+            canonical_publication_continuity:
+                CanonicalPublicationContinuity::PreserveCanonicalTruth,
+        },
+        carried_publication_ids: vec!["pub:device".to_string()],
+        invalidated_publication_ids: Vec::new(),
+        carried_obligation_ids: vec!["obl:pending-send".to_string()],
+        invalidated_obligation_ids: Vec::new(),
+    };
+
+    let execution = manager
+        .execute_runtime_upgrade("device_migration", &request)
+        .await
+        .expect("execute runtime upgrade");
+
+    assert_eq!(execution.upgrade_id, "upgrade/device-migration");
+    assert_eq!(
+        execution
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.phase)
+            .collect::<Vec<_>>(),
+        vec![
+            TransitionArtifactPhase::Staged,
+            TransitionArtifactPhase::Admitted,
+            TransitionArtifactPhase::CommittedCutover,
+        ]
+    );
+    assert_eq!(
+        execution.final_members,
+        vec!["member-b".to_string(), "member-c".to_string()]
+    );
+
+    let snapshot = manager
+        .runtime_upgrade_snapshot("device_migration")
+        .await
+        .expect("runtime-upgrade snapshot");
+    assert_eq!(
+        snapshot.active_members,
+        vec!["member-b".to_string(), "member-c".to_string()]
+    );
+    assert_eq!(snapshot.runtime_upgrades, vec![execution]);
+}
+
+#[tokio::test]
+async fn runtime_upgrade_requires_reconfiguration_capability() {
+    let manager =
+        ReconfigurationManager::with_runtime_capabilities(RuntimeCapabilityHandler::from_pairs([
+            ("reconfiguration", false),
+        ]));
+    manager
+        .seed_runtime_upgrade_membership("device_migration", ["member-a", "member-b"])
+        .await
+        .expect("seed membership");
+
+    let request = RuntimeUpgradeRequest {
+        upgrade_id: "upgrade/device-migration".to_string(),
+        plan: ReconfigurationPlan {
+            plan_id: "plan/device-migration".to_string(),
+            steps: vec![ReconfigurationPlanStep {
+                step_id: "cutover-1".to_string(),
+                next_members: vec!["member-b".to_string(), "member-c".to_string()],
+                placements: Vec::new(),
+            }],
+        },
+        compatibility: RuntimeUpgradeCompatibility {
+            execution_constraint: RuntimeUpgradeExecutionConstraint::PreserveBundleProfile,
+            ownership_continuity_required: true,
+            pending_effect_treatment: PendingEffectTreatment::PreservePending,
+            canonical_publication_continuity:
+                CanonicalPublicationContinuity::PreserveCanonicalTruth,
+        },
+        carried_publication_ids: vec!["pub:device".to_string()],
+        invalidated_publication_ids: Vec::new(),
+        carried_obligation_ids: vec!["obl:pending-send".to_string()],
+        invalidated_obligation_ids: Vec::new(),
+    };
+
+    let err = manager
+        .execute_runtime_upgrade("device_migration", &request)
+        .await
+        .expect_err("runtime upgrade without reconfiguration capability must fail closed");
+
+    assert!(matches!(
+        err,
+        ReconfigurationManagerError::MissingCapability { .. }
+    ));
 }

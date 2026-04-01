@@ -17,6 +17,7 @@ use aura_mpst::upstream::types::{GlobalType, Label};
 use telltale_machine::runtime::loader::CodeImage;
 use telltale_machine::{
     model::effects::{EffectFailure, EffectHandler, EffectResult},
+    FinalizationStage,
     runtime::loader::CodeImage as ProtocolMachineCodeImage,
     ObsEvent, OutputConditionHint, RunStatus, RuntimeContracts, SessionId,
     TopologyPerturbation as ProtocolMachineTopologyPerturbation, Value,
@@ -154,6 +155,7 @@ fn ci_profile_rejects_unknown_output_predicates_with_diagnostics() {
             predicate_ref,
             tick,
             witness_ref,
+            finalization_path,
             ..
         } => {
             assert_eq!(predicate_ref, "aura.unknown");
@@ -162,6 +164,16 @@ fn ci_profile_rejects_unknown_output_predicates_with_diagnostics() {
                 "output condition diagnostics should include tick"
             );
             assert_eq!(witness_ref.as_deref(), Some("unknown-witness"));
+            let finalization_path = finalization_path.expect("rejection should expose finalization path");
+            assert_eq!(finalization_path.stage, FinalizationStage::Rejected);
+            assert!(
+                !finalization_path.proof_ids.is_empty(),
+                "rejection should expose public materialization proof refs"
+            );
+            assert!(
+                !finalization_path.publication_ids.is_empty(),
+                "rejection should expose public publication refs"
+            );
         }
         other => panic!("unexpected error variant: {other:?}"),
     }

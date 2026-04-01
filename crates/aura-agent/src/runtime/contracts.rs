@@ -6,6 +6,9 @@ use aura_mpst::CompositionManifest;
 use std::collections::BTreeSet;
 
 #[cfg(feature = "choreo-backend-telltale-machine")]
+use telltale_machine::{RuntimeUpgradeExecution, RuntimeUpgradeRequest};
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
 use super::vm_hardening::{
     policy_requires_envelope_artifact, required_runtime_capabilities_for_policy,
     AuraVmConcurrencyProfile, AuraVmProtocolExecutionPolicy, AuraVmRuntimeMode,
@@ -285,6 +288,10 @@ pub struct AuraDelegationWitness {
     pub capability_scope: SessionOwnerCapabilityScope,
     pub moved_fragment_keys: BTreeSet<String>,
     pub coherence: AuraDelegationCoherence,
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub runtime_upgrade_request: Option<RuntimeUpgradeRequest>,
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub runtime_upgrade_execution: Option<RuntimeUpgradeExecution>,
 }
 
 impl AuraDelegationWitness {
@@ -308,11 +315,33 @@ impl AuraDelegationWitness {
             capability_scope,
             moved_fragment_keys,
             coherence: AuraDelegationCoherence::Pending,
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            runtime_upgrade_request: None,
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            runtime_upgrade_execution: None,
         }
     }
 
     pub fn with_coherence(mut self, coherence: AuraDelegationCoherence) -> Self {
         self.coherence = coherence;
+        self
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub fn with_runtime_upgrade_request(
+        mut self,
+        runtime_upgrade_request: RuntimeUpgradeRequest,
+    ) -> Self {
+        self.runtime_upgrade_request = Some(runtime_upgrade_request);
+        self
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub fn with_runtime_upgrade_execution(
+        mut self,
+        runtime_upgrade_execution: RuntimeUpgradeExecution,
+    ) -> Self {
+        self.runtime_upgrade_execution = Some(runtime_upgrade_execution);
         self
     }
 }
@@ -414,6 +443,11 @@ mod tests {
 
         assert_eq!(witness.link_boundary, boundary);
         assert_eq!(witness.moved_fragment_keys, boundary.fragment_keys);
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        {
+            assert!(witness.runtime_upgrade_request.is_none());
+            assert!(witness.runtime_upgrade_execution.is_none());
+        }
     }
 
     #[test]

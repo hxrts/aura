@@ -6,10 +6,32 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects};
 
+#[cfg(feature = "telltale-runtime-capability")]
+use telltale_machine::capabilities::protocol_critical_capability_boundary;
+
+#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+const PROTOCOL_SURFACE_RUNTIME_ADMISSION: &str = "runtime_admission";
+#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+const PROTOCOL_SURFACE_THEOREM_PACK_CAPABILITIES: &str = "theorem_pack_capabilities";
+#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+const PROTOCOL_SURFACE_OWNERSHIP_CAPABILITY: &str = "ownership_capability";
+#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+const PROTOCOL_SURFACE_READINESS_WITNESS: &str = "readiness_witness";
+#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+const PROTOCOL_SURFACE_AUTHORITATIVE_READ: &str = "authoritative_read";
+#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+const PROTOCOL_SURFACE_MATERIALIZATION_PROOF: &str = "materialization_proof";
+#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+const PROTOCOL_SURFACE_CANONICAL_HANDLE: &str = "canonical_handle";
+const PROTOCOL_SURFACE_OWNERSHIP_RECEIPT: &str = "ownership_receipt";
+const PROTOCOL_SURFACE_SEMANTIC_HANDOFF: &str = "semantic_handoff";
+const PROTOCOL_SURFACE_RECONFIGURATION_TRANSITION: &str = "reconfiguration_transition";
+
 /// Immutable runtime capability inventory captured at runtime boot.
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeCapabilityHandler {
     inventory: Arc<BTreeMap<CapabilityKey, bool>>,
+    protocol_critical_surfaces: Arc<BTreeMap<String, bool>>,
 }
 
 impl RuntimeCapabilityHandler {
@@ -18,6 +40,9 @@ impl RuntimeCapabilityHandler {
         let inventory = snapshot.into_iter().collect::<BTreeMap<_, _>>();
         Self {
             inventory: Arc::new(inventory),
+            protocol_critical_surfaces: Arc::new(protocol_surface_inventory_from_aura_capabilities(
+                &BTreeMap::new(),
+            )),
         }
     }
 
@@ -30,6 +55,9 @@ impl RuntimeCapabilityHandler {
             .map(|(key, admitted)| (key.into(), admitted))
             .collect::<BTreeMap<_, _>>();
         Self {
+            protocol_critical_surfaces: Arc::new(protocol_surface_inventory_from_aura_capabilities(
+                &inventory,
+            )),
             inventory: Arc::new(inventory),
         }
     }
@@ -42,6 +70,29 @@ impl RuntimeCapabilityHandler {
     /// Returns true if the snapshot is empty.
     pub fn is_empty(&self) -> bool {
         self.inventory.is_empty()
+    }
+
+    /// Returns whether one public protocol-critical surface is admitted.
+    pub fn protocol_critical_surface_admitted(&self, surface: &str) -> bool {
+        self.protocol_critical_surfaces
+            .get(surface)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Require that the given public protocol-critical surfaces are admitted.
+    pub fn require_protocol_critical_surfaces(
+        &self,
+        required: &[&str],
+    ) -> Result<(), AdmissionError> {
+        for surface in required {
+            if !self.protocol_critical_surface_admitted(surface) {
+                return Err(AdmissionError::MissingCapability {
+                    capability: CapabilityKey::new(*surface),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -56,6 +107,7 @@ impl RuntimeCapabilityHandler {
                 .into_iter()
                 .map(|(key, admitted)| (CapabilityKey::new(key), admitted))
                 .collect::<BTreeMap<_, _>>();
+        let protocol_critical_surfaces = protocol_surface_inventory_from_runtime_contracts(contracts);
 
         inventory.insert(
             CapabilityKey::new("byzantine_envelope"),
@@ -85,8 +137,84 @@ impl RuntimeCapabilityHandler {
 
         Self {
             inventory: Arc::new(inventory),
+            protocol_critical_surfaces: Arc::new(protocol_critical_surfaces),
         }
     }
+}
+
+fn protocol_surface_inventory_from_aura_capabilities(
+    inventory: &BTreeMap<CapabilityKey, bool>,
+) -> BTreeMap<String, bool> {
+    let reconfiguration_enabled = inventory
+        .get(&CapabilityKey::new("reconfiguration"))
+        .copied()
+        .unwrap_or(false);
+    #[cfg(feature = "telltale-runtime-capability")]
+    {
+        protocol_surface_inventory_from_boundary(reconfiguration_enabled)
+    }
+    #[cfg(not(feature = "telltale-runtime-capability"))]
+    {
+        protocol_surface_inventory_from_known_surfaces(reconfiguration_enabled)
+    }
+}
+
+#[cfg(feature = "telltale-runtime-capability")]
+fn protocol_surface_inventory_from_runtime_contracts(
+    contracts: &telltale_machine::runtime_contracts::RuntimeContracts,
+) -> BTreeMap<String, bool> {
+    let reconfiguration_enabled = contracts
+        .capabilities
+        .contains(&telltale_machine::runtime_contracts::RuntimeCapability::LiveMigration)
+        && contracts.capabilities.contains(
+            &telltale_machine::runtime_contracts::RuntimeCapability::PlacementRefinement,
+        );
+    protocol_surface_inventory_from_boundary(reconfiguration_enabled)
+}
+
+#[cfg(feature = "telltale-runtime-capability")]
+fn protocol_surface_inventory_from_boundary(reconfiguration_enabled: bool) -> BTreeMap<String, bool> {
+    protocol_critical_capability_boundary()
+        .into_iter()
+        .map(|entry| {
+            let admitted = match entry.surface.as_str() {
+                PROTOCOL_SURFACE_OWNERSHIP_RECEIPT
+                | PROTOCOL_SURFACE_SEMANTIC_HANDOFF
+                | PROTOCOL_SURFACE_RECONFIGURATION_TRANSITION => reconfiguration_enabled,
+                _ => true,
+            };
+            (entry.surface, admitted)
+        })
+        .collect()
+}
+
+#[cfg(not(feature = "telltale-runtime-capability"))]
+fn protocol_surface_inventory_from_known_surfaces(
+    reconfiguration_enabled: bool,
+) -> BTreeMap<String, bool> {
+    let always_admitted = [
+        PROTOCOL_SURFACE_RUNTIME_ADMISSION,
+        PROTOCOL_SURFACE_THEOREM_PACK_CAPABILITIES,
+        PROTOCOL_SURFACE_OWNERSHIP_CAPABILITY,
+        PROTOCOL_SURFACE_READINESS_WITNESS,
+        PROTOCOL_SURFACE_AUTHORITATIVE_READ,
+        PROTOCOL_SURFACE_MATERIALIZATION_PROOF,
+        PROTOCOL_SURFACE_CANONICAL_HANDLE,
+    ];
+    let transition_surfaces = [
+        PROTOCOL_SURFACE_OWNERSHIP_RECEIPT,
+        PROTOCOL_SURFACE_SEMANTIC_HANDOFF,
+        PROTOCOL_SURFACE_RECONFIGURATION_TRANSITION,
+    ];
+
+    let mut admitted = always_admitted
+        .into_iter()
+        .map(|surface| (surface.to_string(), true))
+        .collect::<BTreeMap<_, _>>();
+    for surface in transition_surfaces {
+        admitted.insert(surface.to_string(), reconfiguration_enabled);
+    }
+    admitted
 }
 
 #[async_trait]
@@ -175,5 +303,25 @@ mod tests {
                 .contains_key(&CapabilityKey::new("mixed_determinism")),
             "derived mixed_determinism key should be present"
         );
+        assert!(
+            handler.protocol_critical_surface_admitted(PROTOCOL_SURFACE_OWNERSHIP_CAPABILITY),
+            "public ownership capability surface should be tracked"
+        );
+        assert!(
+            handler.protocol_critical_surface_admitted(PROTOCOL_SURFACE_RECONFIGURATION_TRANSITION),
+            "full contracts should admit public reconfiguration transition surface"
+        );
+    }
+
+    #[test]
+    fn missing_public_protocol_surface_is_rejected() {
+        let handler = RuntimeCapabilityHandler::from_pairs([("reconfiguration", false)]);
+        let result =
+            handler.require_protocol_critical_surfaces(&[PROTOCOL_SURFACE_RECONFIGURATION_TRANSITION]);
+        assert!(matches!(
+            result,
+            Err(AdmissionError::MissingCapability { capability })
+                if capability == CapabilityKey::new(PROTOCOL_SURFACE_RECONFIGURATION_TRANSITION)
+        ));
     }
 }

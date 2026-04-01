@@ -22,9 +22,10 @@ use telltale_machine::model::state::SessionStatus;
 use telltale_machine::runtime::loader::CodeImage as ProtocolMachineCodeImage;
 use telltale_machine::{
     canonical_effect_trace, enforce_protocol_machine_runtime_gates, normalize_trace, obs_session,
-    EffectTraceEntry, EnvelopeDiffArtifactV1, ObsEvent, ProtocolMachine,
-    ProtocolMachineConfig as VMConfig, ProtocolMachineError, RunStatus, RuntimeContracts,
-    RuntimeGateResult, SessionId, StepResult, ThreadedProtocolMachine,
+    EffectTraceEntry, EnvelopeDiffArtifactV1, FinalizationPath, ObsEvent, ProtocolMachine,
+    ProtocolMachineConfig as VMConfig, ProtocolMachineError, ProtocolMachineSemanticObjects,
+    RunStatus, RuntimeContracts, RuntimeGateResult, SessionId, StepResult,
+    ThreadedProtocolMachine,
 };
 use tracing::warn;
 
@@ -85,7 +86,7 @@ pub enum AuraChoreoEngineError {
     },
     /// Output-condition gate rejected an observable commit.
     #[error(
-        "output-condition rejected (predicate={predicate_ref}, tick={tick:?}, witness={witness_ref:?}, digest={output_digest:?})"
+        "output-condition rejected (predicate={predicate_ref}, tick={tick:?}, witness={witness_ref:?}, digest={output_digest:?}, finalization_path={finalization_path:?})"
     )]
     OutputConditionRejected {
         /// Predicate reference that failed.
@@ -96,6 +97,8 @@ pub enum AuraChoreoEngineError {
         witness_ref: Option<String>,
         /// Optional output digest captured in trace.
         output_digest: Option<String>,
+        /// Public finalization path derived from protocol-machine semantic objects.
+        finalization_path: Option<FinalizationPath>,
     },
     /// Step budget derived from weighted termination bound was exceeded.
     #[error(
@@ -236,6 +239,13 @@ impl AuraVmBackend {
         match self {
             Self::Cooperative(vm) => vm.effect_trace().to_vec(),
             Self::Threaded(vm) => vm.effect_trace().to_vec(),
+        }
+    }
+
+    fn semantic_objects(&self) -> ProtocolMachineSemanticObjects {
+        match self {
+            Self::Cooperative(vm) => vm.semantic_objects(),
+            Self::Threaded(vm) => vm.semantic_objects(),
         }
     }
 
@@ -655,6 +665,19 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
         canonical_effect_trace(&self.backend.effect_trace())
     }
 
+    /// Public semantic-object snapshot exported by the protocol machine.
+    pub fn vm_semantic_objects(&self) -> ProtocolMachineSemanticObjects {
+        self.backend.semantic_objects()
+    }
+
+    /// Derived public finalization path for one operation id, if available.
+    pub fn finalization_path_for_operation(&self, operation_id: &str) -> Option<FinalizationPath> {
+        self.backend
+            .semantic_objects()
+            .finalization()
+            .path_for_operation_id(operation_id)
+    }
+
     /// Explicitly close a tracked session.
     pub fn close_session(&mut self, sid: SessionId) -> Result<(), AuraChoreoEngineError> {
         let vm = self.backend.as_cooperative_mut().ok_or_else(|| {
@@ -940,11 +963,30 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
                         _ => None,
                     })
                     .unwrap_or((None, None, None));
+                let semantic_objects = self.backend.semantic_objects();
+                let finalization_path = semantic_objects
+                    .materialization_proofs
+                    .iter()
+                    .rev()
+                    .find(|proof| {
+                        proof.predicate_ref == predicate_ref
+                            && proof.witness_ref == diagnostic.1
+                            && diagnostic
+                                .2
+                                .as_ref()
+                                .map_or(true, |digest| &proof.output_digest == digest)
+                    })
+                    .map(|proof| {
+                        let operation_id = format!("materialization:{}", proof.proof_id);
+                        semantic_objects.finalization().path_for_operation_id(&operation_id)
+                    })
+                    .flatten();
                 AuraChoreoEngineError::OutputConditionRejected {
                     predicate_ref,
                     tick: diagnostic.0,
                     witness_ref: diagnostic.1,
                     output_digest: diagnostic.2,
+                    finalization_path,
                 }
             }
             other => AuraChoreoEngineError::Vm { source: other },

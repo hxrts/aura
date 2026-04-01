@@ -6,6 +6,13 @@ use aura_core::{
 };
 use std::collections::{BTreeSet, HashMap};
 
+#[cfg(feature = "choreo-backend-telltale-machine")]
+use telltale_machine::{
+    CanonicalPublicationContinuity, PendingEffectTreatment, ReconfigurationRuntimeSnapshot,
+    RuntimeUpgradeArtifact, RuntimeUpgradeExecution, RuntimeUpgradeRequest,
+    TransitionArtifactPhase,
+};
+
 /// Reconfiguration controller errors.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ReconfigurationError {
@@ -30,6 +37,10 @@ pub enum ReconfigurationError {
     /// Delegation produced a coherence violation.
     #[error("reconfiguration coherence violation: {reason}")]
     CoherenceViolation { reason: String },
+    /// Runtime-upgrade request violated the admitted public contract.
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    #[error("runtime upgrade rejected for bundle `{bundle_id}`: {reason}")]
+    InvalidRuntimeUpgrade { bundle_id: String, reason: String },
 }
 
 /// Coherence result for session footprints.
@@ -58,6 +69,15 @@ pub(crate) struct ReconfigurationController {
     bundles: HashMap<String, ComposedBundle>,
     footprints: HashMap<AuthorityId, SessionFootprint>,
     delegation_log: Vec<DelegationReceipt>,
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    runtime_upgrade_state: HashMap<String, BundleRuntimeUpgradeState>,
+}
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+#[derive(Debug, Clone, Default)]
+struct BundleRuntimeUpgradeState {
+    active_members: BTreeSet<String>,
+    runtime_upgrades: Vec<RuntimeUpgradeExecution>,
 }
 
 impl ReconfigurationController {
@@ -77,6 +97,10 @@ impl ReconfigurationController {
                 bundle_id: bundle.bundle_id,
             });
         }
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        self.runtime_upgrade_state
+            .entry(bundle.bundle_id.clone())
+            .or_default();
         self.bundles.insert(bundle.bundle_id.clone(), bundle);
         Ok(())
     }
@@ -299,7 +323,308 @@ impl ReconfigurationController {
             bundles: self.bundles.clone(),
             footprints: self.footprints.clone(),
             delegation_log: Vec::new(),
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            runtime_upgrade_state: self.runtime_upgrade_state.clone(),
         }
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub(crate) fn seed_runtime_upgrade_membership<I, S>(
+        &mut self,
+        bundle_id: &str,
+        members: I,
+    ) -> Result<(), ReconfigurationError>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.ensure_bundle_registered(bundle_id)?;
+        let active_members: BTreeSet<String> = members.into_iter().map(Into::into).collect();
+        if active_members.is_empty() {
+            return Err(Self::invalid_runtime_upgrade(
+                bundle_id,
+                "active membership may not be empty",
+            ));
+        }
+        let state = self.runtime_upgrade_state_mut(bundle_id)?;
+        state.active_members = active_members;
+        state.runtime_upgrades.clear();
+        Ok(())
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub(crate) fn runtime_upgrade_snapshot(
+        &self,
+        bundle_id: &str,
+    ) -> Result<ReconfigurationRuntimeSnapshot, ReconfigurationError> {
+        self.ensure_bundle_registered(bundle_id)?;
+        let state = self.runtime_upgrade_state(bundle_id)?;
+        if state.active_members.is_empty() {
+            return Err(Self::invalid_runtime_upgrade(
+                bundle_id,
+                "active membership must be seeded before exporting a runtime-upgrade snapshot",
+            ));
+        }
+        Ok(ReconfigurationRuntimeSnapshot {
+            epoch: state.runtime_upgrades.len() as u64,
+            active_members: state.active_members.iter().cloned().collect(),
+            history: Vec::new(),
+            plan_executions: Vec::new(),
+            runtime_upgrades: state.runtime_upgrades.clone(),
+        })
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub(crate) fn execute_runtime_upgrade(
+        &mut self,
+        bundle_id: &str,
+        request: &RuntimeUpgradeRequest,
+    ) -> Result<RuntimeUpgradeExecution, ReconfigurationError> {
+        self.ensure_bundle_registered(bundle_id)?;
+        let state = self.runtime_upgrade_state_mut(bundle_id)?;
+        if state.active_members.is_empty() {
+            return Err(Self::invalid_runtime_upgrade(
+                bundle_id,
+                "active membership must be seeded before executing a runtime upgrade",
+            ));
+        }
+
+        let initial_members = state.active_members.iter().cloned().collect::<Vec<_>>();
+        let next_members = request
+            .plan
+            .steps
+            .last()
+            .map(|step| step.next_members.clone())
+            .unwrap_or_default();
+        let staged = runtime_upgrade_artifact(
+            request,
+            TransitionArtifactPhase::Staged,
+            initial_members.clone(),
+            next_members.clone(),
+            None,
+        );
+
+        if let Err(error) = validate_runtime_upgrade_request(bundle_id, &state.active_members, request)
+        {
+            let execution = RuntimeUpgradeExecution {
+                artifact_id: bundle_id.to_string(),
+                upgrade_id: request.upgrade_id.clone(),
+                final_members: initial_members.clone(),
+                artifacts: vec![
+                    staged,
+                    runtime_upgrade_artifact(
+                        request,
+                        TransitionArtifactPhase::Failed,
+                        initial_members.clone(),
+                        initial_members.clone(),
+                        Some(error.to_string()),
+                    ),
+                ],
+            };
+            state.runtime_upgrades.push(execution);
+            return Err(error);
+        }
+
+        let admitted = runtime_upgrade_artifact(
+            request,
+            TransitionArtifactPhase::Admitted,
+            initial_members.clone(),
+            next_members.clone(),
+            None,
+        );
+        state.active_members = next_members.iter().cloned().collect();
+        let execution = RuntimeUpgradeExecution {
+            artifact_id: bundle_id.to_string(),
+            upgrade_id: request.upgrade_id.clone(),
+            final_members: state.active_members.iter().cloned().collect(),
+            artifacts: vec![
+                staged,
+                admitted,
+                runtime_upgrade_artifact(
+                    request,
+                    TransitionArtifactPhase::CommittedCutover,
+                    initial_members,
+                    next_members,
+                    None,
+                ),
+            ],
+        };
+        state.runtime_upgrades.push(execution.clone());
+        Ok(execution)
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    fn ensure_bundle_registered(&self, bundle_id: &str) -> Result<(), ReconfigurationError> {
+        if self.bundles.contains_key(bundle_id) {
+            Ok(())
+        } else {
+            Err(ReconfigurationError::BundleNotFound {
+                bundle_id: bundle_id.to_string(),
+            })
+        }
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    fn runtime_upgrade_state(
+        &self,
+        bundle_id: &str,
+    ) -> Result<&BundleRuntimeUpgradeState, ReconfigurationError> {
+        self.runtime_upgrade_state
+            .get(bundle_id)
+            .ok_or_else(|| ReconfigurationError::BundleNotFound {
+                bundle_id: bundle_id.to_string(),
+            })
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    fn runtime_upgrade_state_mut(
+        &mut self,
+        bundle_id: &str,
+    ) -> Result<&mut BundleRuntimeUpgradeState, ReconfigurationError> {
+        self.runtime_upgrade_state
+            .get_mut(bundle_id)
+            .ok_or_else(|| ReconfigurationError::BundleNotFound {
+                bundle_id: bundle_id.to_string(),
+            })
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    fn invalid_runtime_upgrade(
+        bundle_id: &str,
+        reason: impl Into<String>,
+    ) -> ReconfigurationError {
+        ReconfigurationError::InvalidRuntimeUpgrade {
+            bundle_id: bundle_id.to_string(),
+            reason: reason.into(),
+        }
+    }
+}
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+fn validate_runtime_upgrade_request(
+    bundle_id: &str,
+    active_members: &BTreeSet<String>,
+    request: &RuntimeUpgradeRequest,
+) -> Result<(), ReconfigurationError> {
+    if request.plan.steps.is_empty() {
+        return Err(ReconfigurationController::invalid_runtime_upgrade(
+            bundle_id,
+            format!(
+                "runtime upgrade `{}` must contain at least one plan step",
+                request.upgrade_id
+            ),
+        ));
+    }
+
+    if request
+        .carried_publication_ids
+        .iter()
+        .any(|publication_id| request.invalidated_publication_ids.contains(publication_id))
+    {
+        return Err(ReconfigurationController::invalid_runtime_upgrade(
+            bundle_id,
+            format!(
+                "runtime upgrade `{}` may not both carry and invalidate the same canonical publication",
+                request.upgrade_id
+            ),
+        ));
+    }
+
+    if request
+        .carried_obligation_ids
+        .iter()
+        .any(|obligation_id| request.invalidated_obligation_ids.contains(obligation_id))
+    {
+        return Err(ReconfigurationController::invalid_runtime_upgrade(
+            bundle_id,
+            format!(
+                "runtime upgrade `{}` may not both carry and invalidate the same obligation",
+                request.upgrade_id
+            ),
+        ));
+    }
+
+    if request.compatibility.ownership_continuity_required {
+        let first_members = request.plan.steps[0]
+            .next_members
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if active_members.is_disjoint(&first_members) {
+            return Err(ReconfigurationController::invalid_runtime_upgrade(
+                bundle_id,
+                format!(
+                    "runtime upgrade `{}` requires ownership continuity across the first cutover",
+                    request.upgrade_id
+                ),
+            ));
+        }
+    }
+
+    if matches!(
+        request.compatibility.pending_effect_treatment,
+        PendingEffectTreatment::InvalidateBlocked
+    ) && request.carried_obligation_ids.is_empty()
+        && request.invalidated_obligation_ids.is_empty()
+    {
+        return Err(ReconfigurationController::invalid_runtime_upgrade(
+            bundle_id,
+            format!(
+                "runtime upgrade `{}` must make pending-effect treatment explicit",
+                request.upgrade_id
+            ),
+        ));
+    }
+
+    if matches!(
+        request.compatibility.canonical_publication_continuity,
+        CanonicalPublicationContinuity::PreserveCanonicalTruth
+    ) && !request.invalidated_publication_ids.is_empty()
+    {
+        return Err(ReconfigurationController::invalid_runtime_upgrade(
+            bundle_id,
+            format!(
+                "runtime upgrade `{}` may not invalidate canonical publications when continuity is required",
+                request.upgrade_id
+            ),
+        ));
+    }
+
+    for step in &request.plan.steps {
+        let members = step.next_members.iter().cloned().collect::<BTreeSet<_>>();
+        if members.is_empty() {
+            return Err(ReconfigurationController::invalid_runtime_upgrade(
+                bundle_id,
+                format!(
+                    "runtime upgrade `{}` step `{}` must preserve a non-empty membership set",
+                    request.upgrade_id, step.step_id
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+fn runtime_upgrade_artifact(
+    request: &RuntimeUpgradeRequest,
+    phase: TransitionArtifactPhase,
+    previous_members: Vec<String>,
+    next_members: Vec<String>,
+    reason: Option<String>,
+) -> RuntimeUpgradeArtifact {
+    RuntimeUpgradeArtifact {
+        upgrade_id: request.upgrade_id.clone(),
+        phase,
+        previous_members,
+        next_members,
+        compatibility: request.compatibility.clone(),
+        carried_publication_ids: request.carried_publication_ids.clone(),
+        invalidated_publication_ids: request.invalidated_publication_ids.clone(),
+        carried_obligation_ids: request.carried_obligation_ids.clone(),
+        invalidated_obligation_ids: request.invalidated_obligation_ids.clone(),
+        reason,
     }
 }
 

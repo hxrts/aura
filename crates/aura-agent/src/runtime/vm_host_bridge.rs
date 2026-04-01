@@ -22,8 +22,9 @@ use telltale_machine::coroutine::{
 };
 use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
 use telltale_machine::{
-    runtime::loader::CodeImage as ProtocolMachineCodeImage, EffectTraceEntry, ProtocolMachine,
-    RuntimeContracts, SessionId, StepResult as ProtocolMachineStepResult, Value,
+    runtime::loader::CodeImage as ProtocolMachineCodeImage, EffectTraceEntry, FinalizationPath,
+    ProtocolMachine, ProtocolMachineSemanticObjects, RuntimeContracts, SessionId,
+    StepResult as ProtocolMachineStepResult, Value,
 };
 
 use super::subsystems::VmBridgeState;
@@ -131,6 +132,8 @@ pub struct AuraVmSessionArtifactSnapshot {
     pub requires_envelope_artifact: bool,
     pub effect_trace: Vec<EffectTraceEntry>,
     pub canonical_effect_trace: Vec<EffectTraceEntry>,
+    pub semantic_objects: ProtocolMachineSemanticObjects,
+    pub finalization_paths: Vec<FinalizationPath>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -826,12 +829,20 @@ pub fn collect_vm_session_artifacts(
             "cannot collect artifacts for inactive VM session {sid}"
         ));
     }
+    let semantic_objects = engine.vm_semantic_objects();
+    let finalization_paths = semantic_objects
+        .operation_instances
+        .iter()
+        .map(|operation| semantic_objects.finalization().path_for_operation(operation))
+        .collect();
     Ok(AuraVmSessionArtifactSnapshot {
         session_id: sid,
         determinism_profile: engine.session_determinism_profile_metadata(sid),
         requires_envelope_artifact: engine.session_requires_envelope_artifact(sid),
         effect_trace: engine.vm_effect_trace(),
         canonical_effect_trace: engine.canonical_vm_effect_trace(),
+        semantic_objects,
+        finalization_paths,
     })
 }
 
@@ -1064,6 +1075,21 @@ mod tests {
             snapshot.effect_trace.len(),
             snapshot.canonical_effect_trace.len()
         );
+        assert_eq!(
+            snapshot.finalization_paths.len(),
+            snapshot.semantic_objects.operation_instances.len()
+        );
+        assert!(
+            snapshot
+                .semantic_objects
+                .operation_instances
+                .iter()
+                .all(|operation| snapshot
+                    .finalization_paths
+                    .iter()
+                    .any(|path| path.operation_id == operation.operation_id)),
+            "session artifact snapshot should expose a finalization path for every operation"
+        );
     }
 
     #[tokio::test]
@@ -1113,6 +1139,14 @@ mod tests {
         assert_eq!(
             admitted_snapshot.canonical_effect_trace,
             canonical_snapshot.canonical_effect_trace
+        );
+        assert_eq!(
+            admitted_snapshot.semantic_objects,
+            canonical_snapshot.semantic_objects
+        );
+        assert_eq!(
+            admitted_snapshot.finalization_paths,
+            canonical_snapshot.finalization_paths
         );
     }
 

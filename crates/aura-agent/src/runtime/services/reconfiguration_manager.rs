@@ -7,7 +7,7 @@ use crate::runtime::{
     OwnedVmSession, RuntimeBoundaryError, RuntimeReconfigurationEvent, SessionIngressError,
     SessionOwnerCapabilityScope,
 };
-use aura_core::effects::{CapabilityKey, PhysicalTimeEffects, RuntimeCapabilityEffects};
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::time::{ProvenancedTime, TimeStamp};
 use aura_core::{
     AuthorityId, ComposedBundle, ContextId, DelegationReceipt, OwnershipCategory, SessionFootprint,
@@ -16,11 +16,13 @@ use aura_core::{
 use aura_effects::RuntimeCapabilityHandler;
 use aura_journal::fact::{ProtocolRelationalFact, RelationalFact, SessionDelegationFact};
 use aura_mpst::CompositionManifest;
-use aura_protocol::admission::CAPABILITY_RECONFIGURATION;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+use telltale_machine::{ReconfigurationRuntimeSnapshot, RuntimeUpgradeExecution, RuntimeUpgradeRequest};
 
 #[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +62,8 @@ pub struct SessionDelegationTransfer {
     pub bundle_id: String,
     pub link_boundary: Option<AuraLinkBoundary>,
     pub capability_scope: SessionOwnerCapabilityScope,
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub runtime_upgrade_request: Option<RuntimeUpgradeRequest>,
 }
 
 /// Typed result for one successful runtime delegation.
@@ -105,9 +109,12 @@ pub enum ActiveSessionDelegationError {
 /// Typed runtime errors for reconfiguration and delegation.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ReconfigurationManagerError {
-    #[error("{operation} requires runtime capability `{CAPABILITY_RECONFIGURATION}`: {message}")]
+    #[error(
+        "{operation} requires protocol-critical runtime surfaces {surfaces:?}: {message}"
+    )]
     MissingCapability {
         operation: &'static str,
+        surfaces: &'static [&'static str],
         message: String,
     },
     #[error("register bundle `{bundle_id}` failed: {message}")]
@@ -140,6 +147,9 @@ pub enum ReconfigurationManagerError {
         session_id: SessionId,
         message: String,
     },
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    #[error("runtime upgrade for bundle `{bundle_id}` failed: {message}")]
+    RuntimeUpgrade { bundle_id: String, message: String },
     #[error("failed to persist delegation fact for session {session_id}: {message}")]
     PersistDelegationFact {
         session_id: SessionId,
@@ -174,6 +184,8 @@ impl SessionDelegationTransfer {
             bundle_id,
             capability_scope: link_boundary.capability_scope.clone(),
             link_boundary: Some(link_boundary),
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            runtime_upgrade_request: None,
         }
     }
 
@@ -195,6 +207,16 @@ impl SessionDelegationTransfer {
         self.capability_scope = capability_scope;
         self
     }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    #[must_use]
+    pub fn with_runtime_upgrade_request(
+        mut self,
+        runtime_upgrade_request: RuntimeUpgradeRequest,
+    ) -> Self {
+        self.runtime_upgrade_request = Some(runtime_upgrade_request);
+        self
+    }
 }
 
 impl Default for ReconfigurationManager {
@@ -205,6 +227,11 @@ impl Default for ReconfigurationManager {
 
 impl ReconfigurationManager {
     pub const OWNERSHIP_CATEGORY: OwnershipCategory = OwnershipCategory::MoveOwned;
+    const REQUIRED_RUNTIME_SURFACES: &'static [&'static str] = &[
+        "ownership_receipt",
+        "semantic_handoff",
+        "reconfiguration_transition",
+    ];
 
     /// Create a new manager.
     #[must_use]
@@ -234,10 +261,10 @@ impl ReconfigurationManager {
         operation: &'static str,
     ) -> Result<(), ReconfigurationManagerError> {
         self.runtime_capabilities
-            .require_capabilities(&[CapabilityKey::new(CAPABILITY_RECONFIGURATION)])
-            .await
+            .require_protocol_critical_surfaces(Self::REQUIRED_RUNTIME_SURFACES)
             .map_err(|error| ReconfigurationManagerError::MissingCapability {
                 operation,
+                surfaces: Self::REQUIRED_RUNTIME_SURFACES,
                 message: error.to_string(),
             })
     }
@@ -386,6 +413,8 @@ impl ReconfigurationManager {
             bundle_id,
             link_boundary,
             capability_scope,
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            runtime_upgrade_request,
         } = transfer;
         let timestamp = effects.physical_time().await.map_err(|e| {
             ReconfigurationManagerError::DelegationTimestamp {
@@ -406,7 +435,7 @@ impl ReconfigurationManager {
             .resolve_delegation_boundary(session_id, &bundle_id, link_boundary, &capability_scope)
             .await?;
 
-        let (receipt, controller_snapshot) = {
+        let (receipt, runtime_upgrade_execution, controller_snapshot) = {
             let mut controller = self.shared.controller.write().await;
             let controller_snapshot = controller.clone();
             let from_known = controller
@@ -439,7 +468,25 @@ impl ReconfigurationManager {
                     session_id,
                     message: e.to_string(),
                 })?;
-            (receipt, controller_snapshot)
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            let runtime_upgrade_execution = if let Some(request) = runtime_upgrade_request.as_ref()
+            {
+                match controller.execute_runtime_upgrade(&bundle_id, request) {
+                    Ok(execution) => Some(execution),
+                    Err(error) => {
+                        *controller = controller_snapshot.clone();
+                        return Err(ReconfigurationManagerError::RuntimeUpgrade {
+                            bundle_id: bundle_id.clone(),
+                            message: error.to_string(),
+                        });
+                    }
+                }
+            } else {
+                None
+            };
+            #[cfg(not(feature = "choreo-backend-telltale-machine"))]
+            let runtime_upgrade_execution = None;
+            (receipt, runtime_upgrade_execution, controller_snapshot)
         };
 
         let fact = RelationalFact::Protocol(ProtocolRelationalFact::SessionDelegation(
@@ -472,6 +519,19 @@ impl ReconfigurationManager {
             capability_scope,
         )
         .with_coherence(AuraDelegationCoherence::Preserved);
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        let witness = {
+            let witness = if let Some(request) = runtime_upgrade_request {
+                witness.with_runtime_upgrade_request(request)
+            } else {
+                witness
+            };
+            if let Some(execution) = runtime_upgrade_execution {
+                witness.with_runtime_upgrade_execution(execution)
+            } else {
+                witness
+            }
+        };
 
         tracing::info!(
             event = RuntimeReconfigurationEvent::DelegationPersisted.as_event_name(),
@@ -497,6 +557,56 @@ impl ReconfigurationManager {
             );
         }
         status
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub async fn seed_runtime_upgrade_membership<I, S>(
+        &self,
+        bundle_id: &str,
+        members: I,
+    ) -> Result<(), ReconfigurationManagerError>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut controller = self.shared.controller.write().await;
+        controller
+            .seed_runtime_upgrade_membership(bundle_id, members)
+            .map_err(|error| ReconfigurationManagerError::RuntimeUpgrade {
+                bundle_id: bundle_id.to_string(),
+                message: error.to_string(),
+            })
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub async fn runtime_upgrade_snapshot(
+        &self,
+        bundle_id: &str,
+    ) -> Result<ReconfigurationRuntimeSnapshot, ReconfigurationManagerError> {
+        let controller = self.shared.controller.read().await;
+        controller
+            .runtime_upgrade_snapshot(bundle_id)
+            .map_err(|error| ReconfigurationManagerError::RuntimeUpgrade {
+                bundle_id: bundle_id.to_string(),
+                message: error.to_string(),
+            })
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub async fn execute_runtime_upgrade(
+        &self,
+        bundle_id: &str,
+        request: &RuntimeUpgradeRequest,
+    ) -> Result<RuntimeUpgradeExecution, ReconfigurationManagerError> {
+        self.require_reconfiguration_capability("runtime upgrade")
+            .await?;
+        let mut controller = self.shared.controller.write().await;
+        controller
+            .execute_runtime_upgrade(bundle_id, request)
+            .map_err(|error| ReconfigurationManagerError::RuntimeUpgrade {
+                bundle_id: bundle_id.to_string(),
+                message: error.to_string(),
+            })
     }
 }
 
@@ -617,7 +727,7 @@ fn default_runtime_capability_handler() -> RuntimeCapabilityHandler {
 
     #[cfg(not(feature = "choreo-backend-telltale-machine"))]
     {
-        RuntimeCapabilityHandler::from_pairs([(CAPABILITY_RECONFIGURATION, true)])
+        RuntimeCapabilityHandler::from_pairs([("reconfiguration", true)])
     }
 }
 
