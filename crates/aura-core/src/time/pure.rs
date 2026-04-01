@@ -1,57 +1,15 @@
-//! Pure timestamp comparison function - thin wrapper for Aeneas translation
+//! Pure time comparison functions for Aeneas translation
 //!
-//! This module exposes the actual `TimeStamp::compare` implementation as a
-//! free function for potential Aeneas translation.
-//!
-//! # Actual Implementation
-//!
-//! The real comparison logic is in `super::TimeStamp::compare()`. This module
-//! provides a thin wrapper that exposes it as a free function.
-//!
-//! # Lean Correspondence
-//!
-//! The Lean model in `verification/lean/Aura/TimeSystem.lean`:
-//!
-//! ```lean
-//! def compare (policy : Policy) (a b : TimeStamp) : Ordering :=
-//!   if policy.ignorePhysical then
-//!     compareNat a.logical b.logical
-//!   else
-//!     match compareNat a.logical b.logical with
-//!     | .lt => .lt
-//!     | .gt => .gt
-//!     | .eq => compareNat a.orderClock b.orderClock
-//! ```
-//!
-//! # Proven Properties
-//!
-//! - `compare_refl`: Reflexivity
-//! - `compare_trans`: Transitivity for lt
-//! - `physical_hidden`: Privacy when ignorePhysical=true
+//! This module exposes `TimeStamp::compare` as free functions for potential
+//! Aeneas translation. The Lean model in `verification/lean/Aura/TimeSystem.lean`
+//! proves reflexivity, transitivity, and privacy (OrderClock hides physical time).
 
 use crate::time::{OrderingPolicy, TimeOrdering, TimeStamp};
 
 /// Pure timestamp comparison function.
 ///
-/// This is a thin wrapper around `TimeStamp::compare()` exposed as a free
-/// function for easier Aeneas targeting.
-///
-/// # Lean Correspondence
-///
-/// Maps to the Lean `compare` function. The Lean model proves:
-/// - **Reflexivity**: `compare policy t t = Ordering.eq`
-/// - **Transitivity**: `compare policy a b = .lt → compare policy b c = .lt → compare policy a c = .lt`
-/// - **Privacy**: Physical time is hidden when policy ignores it
-///
-/// # Arguments
-///
-/// * `a` - First timestamp
-/// * `b` - Second timestamp
-/// * `policy` - Ordering policy (Native or DeterministicTieBreak)
-///
-/// # Returns
-///
-/// The ordering relationship between the timestamps.
+/// Thin wrapper around `TimeStamp::compare()` exposed as a free function
+/// for easier Aeneas targeting.
 #[inline]
 pub fn timestamp_compare(a: &TimeStamp, b: &TimeStamp, policy: OrderingPolicy) -> TimeOrdering {
     a.compare(b, policy)
@@ -74,10 +32,6 @@ mod tests {
     use super::*;
     use crate::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
 
-    // ==========================================================
-    // Reflexivity tests (compare_refl in Lean)
-    // ==========================================================
-
     #[test]
     fn test_reflexive_physical() {
         let t = TimeStamp::PhysicalClock(PhysicalTime {
@@ -86,7 +40,7 @@ mod tests {
         });
         assert_eq!(
             timestamp_compare(&t, &t, OrderingPolicy::Native),
-            TimeOrdering::Concurrent // Same time = concurrent
+            TimeOrdering::Concurrent
         );
     }
 
@@ -98,10 +52,6 @@ mod tests {
             TimeOrdering::Concurrent
         );
     }
-
-    // ==========================================================
-    // Transitivity tests (compare_trans in Lean)
-    // ==========================================================
 
     #[test]
     fn test_transitive_physical() {
@@ -152,10 +102,6 @@ mod tests {
         );
     }
 
-    // ==========================================================
-    // Cross-domain tests
-    // ==========================================================
-
     #[test]
     fn test_cross_domain_incomparable() {
         let physical = TimeStamp::PhysicalClock(PhysicalTime {
@@ -169,10 +115,6 @@ mod tests {
             TimeOrdering::Incomparable
         );
     }
-
-    // ==========================================================
-    // Policy tests
-    // ==========================================================
 
     #[test]
     fn test_deterministic_tiebreak_policy() {
@@ -195,13 +137,11 @@ mod tests {
             lamport: 1,
         });
 
-        // Native policy returns Incomparable for concurrent vector clocks
         assert_eq!(
             timestamp_compare(&t1, &t2, OrderingPolicy::Native),
             TimeOrdering::Incomparable
         );
 
-        // DeterministicTieBreak returns Concurrent
         assert_eq!(
             timestamp_compare(&t1, &t2, OrderingPolicy::DeterministicTieBreak),
             TimeOrdering::Concurrent
