@@ -1914,54 +1914,6 @@ impl RecoveryServiceApi {
         .await;
         result.map(|_| vote)
     }
-
-    /// Process incoming guardian acceptance responses from transport
-    ///
-    /// This method should be called periodically to check for acceptance messages
-    /// from guardians. The caller should update the ceremony tracker with the results.
-    ///
-    /// # Returns
-    /// List of (ceremony_id, guardian_id) pairs for accepted guardians
-    pub async fn process_guardian_acceptances(&self) -> AgentResult<Vec<(String, String)>> {
-        use aura_core::effects::TransportEffects;
-
-        let mut acceptances = Vec::new();
-
-        // Poll for incoming acceptance messages
-        loop {
-            match self.effects.receive_envelope().await {
-                Ok(envelope) => {
-                    // Check if this is a guardian acceptance response
-                    if envelope.metadata.get("content-type")
-                        == Some(&"application/aura-guardian-acceptance".to_string())
-                    {
-                        if let (Some(ceremony_id), Some(guardian_id)) = (
-                            envelope.metadata.get("ceremony-id"),
-                            envelope.metadata.get("guardian-id"),
-                        ) {
-                            tracing::info!(
-                                ceremony_id = %ceremony_id,
-                                guardian_id = %guardian_id,
-                                "Received guardian acceptance"
-                            );
-
-                            acceptances.push((ceremony_id.clone(), guardian_id.clone()));
-                        }
-                    }
-                }
-                Err(aura_core::effects::TransportError::NoMessage) => {
-                    // No more messages
-                    break;
-                }
-                Err(e) => {
-                    tracing::warn!("Error receiving acceptance response: {}", e);
-                    break;
-                }
-            }
-        }
-
-        Ok(acceptances)
-    }
 }
 
 impl RecoveryServiceApi {

@@ -19,6 +19,8 @@ pub const CAPABILITY_MIXED_DETERMINISM: &str = "mixed_determinism";
 pub const PROTOCOL_AURA_CONSENSUS: &str = "aura.consensus";
 /// Aura protocol id for sync epoch-rotation choreography admission.
 pub const PROTOCOL_SYNC_EPOCH_ROTATION: &str = "aura.sync.epoch_rotation";
+/// Aura protocol id for device-scoped epoch rotation choreography.
+pub const PROTOCOL_SYNC_DEVICE_EPOCH_ROTATION: &str = "aura.sync.device_epoch_rotation";
 /// Aura protocol id for DKG ceremony execution.
 pub const PROTOCOL_DKG_CEREMONY: &str = "aura.dkg.ceremony";
 /// Aura protocol id for guardian recovery-grant choreography.
@@ -61,6 +63,9 @@ pub fn protocol_admission_profile(protocol_id: &str) -> Option<ProtocolAdmission
             required_artifacts: &[CAPABILITY_BYZANTINE_ENVELOPE],
         }),
         PROTOCOL_SYNC_EPOCH_ROTATION => Some(ProtocolAdmissionProfile {
+            required_artifacts: &[CAPABILITY_TERMINATION_BOUNDED],
+        }),
+        PROTOCOL_SYNC_DEVICE_EPOCH_ROTATION => Some(ProtocolAdmissionProfile {
             required_artifacts: &[CAPABILITY_TERMINATION_BOUNDED],
         }),
         PROTOCOL_DKG_CEREMONY => Some(ProtocolAdmissionProfile {
@@ -233,6 +238,7 @@ mod tests {
             PROTOCOL_RENDEZVOUS_RELAY,
             PROTOCOL_SESSION_COORDINATION,
             PROTOCOL_SYNC_EPOCH_ROTATION,
+            PROTOCOL_SYNC_DEVICE_EPOCH_ROTATION,
         ];
 
         for protocol_id in known {

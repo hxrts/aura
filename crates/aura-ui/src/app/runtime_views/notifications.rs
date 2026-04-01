@@ -1,7 +1,5 @@
 use crate::model::{NotificationSelectionId, UiController};
-use aura_app::ui::signals::{
-    CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
-};
+use aura_app::ui::signals::{CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::ui::types::{
     AppError, ContactRelationshipState, ContactsState, InvitationsState, RecoveryState,
 };

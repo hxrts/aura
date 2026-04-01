@@ -11,7 +11,6 @@
 pub mod agent;
 pub mod builder;
 pub mod ceremony;
-pub mod ceremony_processor;
 pub mod config;
 pub mod context;
 pub mod error;

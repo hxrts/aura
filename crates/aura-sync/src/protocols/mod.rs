@@ -42,6 +42,7 @@
 //! - Statistics and metrics
 
 pub mod anti_entropy;
+pub mod device_epoch_rotation;
 pub mod epochs;
 pub mod fact_sync;
 pub mod journal;
@@ -111,6 +112,10 @@ pub use epochs::{
     EpochRotationProposal, RotationStatus,
 };
 
+pub use device_epoch_rotation::{
+    DeviceEpochAcceptance, DeviceEpochCommit, DeviceEpochProposal, DeviceEpochRotationKind,
+};
+
 /// Re-exports for EpochRotation choreography runners
 pub mod epoch_runners {
     pub use crate::protocols::epochs::telltale_session_types_epoch_rotation::epoch_rotation::EpochRotationProtocolRole;
@@ -123,8 +128,7 @@ pub mod epoch_runners {
 pub use ota_ceremony::{
     OTACeremonyAbort, OTACeremonyCommit, OTACeremonyConfig, OTACeremonyFact, OTACeremonyId,
     OTACeremonyState, OTACeremonyStatus, OTAReadinessOutcome, OTAReadinessWitness,
-    ReadinessCommitment,
-    UpgradeProposal as CeremonyUpgradeProposal,
+    ReadinessCommitment, UpgradeProposal as CeremonyUpgradeProposal,
 };
 
 /// Re-exports for the OTA activation choreography surface.

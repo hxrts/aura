@@ -251,6 +251,7 @@ impl RuntimeSystem {
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
         let reactive_pipeline_service =
             ReactivePipelineService::new(effect_system.clone(), authority_id, diagnostics.clone());
@@ -258,6 +259,10 @@ impl RuntimeSystem {
             effect_system.clone(),
             authority_id,
             device_id,
+            ceremony_tracker.clone(),
+            ceremony_runner.clone(),
+            threshold_signing.clone(),
+            reconfiguration_manager.clone(),
             None,
             None,
             None,
@@ -283,7 +288,7 @@ impl RuntimeSystem {
             reactive_pipeline_service,
             lan_listener_service: None,
             maintenance_service,
-            reconfiguration_manager: ReconfigurationManager::new(),
+            reconfiguration_manager,
             runtime_tasks,
             activity_gate: Arc::new(RuntimeActivityGate::new()),
             diagnostics,
@@ -313,6 +318,7 @@ impl RuntimeSystem {
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
         let reactive_pipeline_service =
             ReactivePipelineService::new(effect_system.clone(), authority_id, diagnostics.clone());
@@ -320,6 +326,10 @@ impl RuntimeSystem {
             effect_system.clone(),
             authority_id,
             device_id,
+            ceremony_tracker.clone(),
+            ceremony_runner.clone(),
+            threshold_signing.clone(),
+            reconfiguration_manager.clone(),
             Some(sync_manager.clone()),
             None,
             None,
@@ -345,7 +355,7 @@ impl RuntimeSystem {
             reactive_pipeline_service,
             lan_listener_service: None,
             maintenance_service,
-            reconfiguration_manager: ReconfigurationManager::new(),
+            reconfiguration_manager,
             runtime_tasks,
             activity_gate: Arc::new(RuntimeActivityGate::new()),
             diagnostics,
@@ -375,6 +385,7 @@ impl RuntimeSystem {
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
         let reactive_pipeline_service =
             ReactivePipelineService::new(effect_system.clone(), authority_id, diagnostics.clone());
@@ -382,6 +393,10 @@ impl RuntimeSystem {
             effect_system.clone(),
             authority_id,
             device_id,
+            ceremony_tracker.clone(),
+            ceremony_runner.clone(),
+            threshold_signing.clone(),
+            reconfiguration_manager.clone(),
             None,
             Some(rendezvous_manager.clone()),
             None,
@@ -407,7 +422,7 @@ impl RuntimeSystem {
             reactive_pipeline_service,
             lan_listener_service: None,
             maintenance_service,
-            reconfiguration_manager: ReconfigurationManager::new(),
+            reconfiguration_manager,
             runtime_tasks,
             activity_gate: Arc::new(RuntimeActivityGate::new()),
             diagnostics,
@@ -442,6 +457,7 @@ impl RuntimeSystem {
             Arc::new(effect_system.time_effects().clone());
         let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
         let reactive_pipeline_service =
             ReactivePipelineService::new(effect_system.clone(), authority_id, diagnostics.clone());
@@ -452,6 +468,10 @@ impl RuntimeSystem {
             effect_system.clone(),
             authority_id,
             device_id,
+            ceremony_tracker.clone(),
+            ceremony_runner.clone(),
+            threshold_signing.clone(),
+            reconfiguration_manager.clone(),
             sync_manager.clone(),
             rendezvous_manager.clone(),
             rendezvous_handler.clone(),
@@ -477,7 +497,7 @@ impl RuntimeSystem {
             reactive_pipeline_service,
             lan_listener_service,
             maintenance_service,
-            reconfiguration_manager: ReconfigurationManager::new(),
+            reconfiguration_manager,
             runtime_tasks,
             activity_gate: Arc::new(RuntimeActivityGate::new()),
             diagnostics,

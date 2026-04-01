@@ -383,25 +383,6 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
 
     println!("Control test: Multifactor ceremony started with ID: {ceremony_id}");
 
-    // Start ceremony processors for both devices
-    let bob_ceremony_agent = agent.clone();
-    let bob_task = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(100));
-        loop {
-            interval.tick().await;
-            let _ = bob_ceremony_agent.process_ceremony_acceptances().await;
-        }
-    });
-
-    let mobile_ceremony_agent = mobile_agent.clone();
-    let mobile_task = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(100));
-        loop {
-            interval.tick().await;
-            let _ = mobile_ceremony_agent.process_ceremony_acceptances().await;
-        }
-    });
-
     // Wait for completion
     let start = tokio::time::Instant::now();
     loop {
@@ -431,9 +412,6 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
             panic!("Control test: Timed out waiting for multifactor ceremony completion")
         }
     }
-
-    bob_task.abort();
-    mobile_task.abort();
     simulator.stop().await.expect("stop demo simulator");
     let _ = std::fs::remove_dir_all(&test_dir);
 }

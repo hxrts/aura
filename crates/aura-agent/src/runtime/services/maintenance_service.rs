@@ -1,8 +1,13 @@
 use super::service_actor::{validate_actor_transition, ActorLifecyclePhase};
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
-use super::{LanTransportService, RendezvousManager, SyncServiceManager};
+use super::{
+    ceremony_runner::CeremonyRunner, CeremonyTracker, LanTransportService, ReconfigurationManager,
+    RendezvousManager, SyncServiceManager, ThresholdSigningService,
+};
 use crate::core::AuthorityContext;
-use crate::handlers::{InvitationHandler, RendezvousHandler};
+use crate::handlers::{
+    device_epoch_rotation::DeviceEpochRotationService, InvitationHandler, RendezvousHandler,
+};
 use crate::runtime::system::{publish_lan_descriptor_with, sync_peer_reconcile_interval};
 use crate::runtime::AuraEffectSystem;
 use crate::runtime::TaskGroup;
@@ -54,6 +59,10 @@ pub struct RuntimeMaintenanceService {
     effects: Arc<AuraEffectSystem>,
     authority_id: AuthorityId,
     device_id: DeviceId,
+    ceremony_tracker: CeremonyTracker,
+    ceremony_runner: CeremonyRunner,
+    threshold_signing: ThresholdSigningService,
+    reconfiguration: ReconfigurationManager,
     sync_manager: Option<SyncServiceManager>,
     rendezvous_manager: Option<RendezvousManager>,
     rendezvous_handler: Option<RendezvousHandler>,
@@ -66,6 +75,10 @@ impl RuntimeMaintenanceService {
         effects: Arc<AuraEffectSystem>,
         authority_id: AuthorityId,
         device_id: DeviceId,
+        ceremony_tracker: CeremonyTracker,
+        ceremony_runner: CeremonyRunner,
+        threshold_signing: ThresholdSigningService,
+        reconfiguration: ReconfigurationManager,
         sync_manager: Option<SyncServiceManager>,
         rendezvous_manager: Option<RendezvousManager>,
         rendezvous_handler: Option<RendezvousHandler>,
@@ -75,6 +88,10 @@ impl RuntimeMaintenanceService {
             effects,
             authority_id,
             device_id,
+            ceremony_tracker,
+            ceremony_runner,
+            threshold_signing,
+            reconfiguration,
             sync_manager,
             rendezvous_manager,
             rendezvous_handler,
@@ -173,6 +190,14 @@ impl RuntimeMaintenanceService {
             self.device_id,
         ))
         .map_err(|error| ServiceError::startup_failed(self.name(), error.to_string()))?;
+        let device_rotation_service = DeviceEpochRotationService::new(
+            self.authority_id,
+            self.effects.clone(),
+            self.ceremony_tracker.clone(),
+            self.ceremony_runner.clone(),
+            self.threshold_signing.clone(),
+            self.reconfiguration.clone(),
+        );
         let effects = self.effects.clone();
         let acceptance_service = self.clone();
         cfg_if::cfg_if! {
@@ -234,6 +259,63 @@ impl RuntimeMaintenanceService {
                             } else {
                                 acceptance_service
                                     .clear_degraded_reason_contains("invitation_acceptance")
+                                    .await;
+                            }
+                            true
+                        }
+                    },
+                );
+            }
+        }
+
+        let device_ceremony_service = self.clone();
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _device_rotation_task_handle = tasks.spawn_local_interval_until_named(
+                    "device_epoch_rotation",
+                    time_effects.clone(),
+                    Duration::from_millis(500),
+                    move || {
+                        let service = device_rotation_service.clone();
+                        let device_ceremony_service = device_ceremony_service.clone();
+                        async move {
+                            if let Err(error) = service.process_pending_participant_sessions().await {
+                                device_ceremony_service
+                                    .record_degraded_reason(format!("device_epoch_rotation: {error}"))
+                                    .await;
+                                tracing::debug!(
+                                    error = %error,
+                                    "Failed to process device epoch rotation sessions"
+                                );
+                            } else {
+                                device_ceremony_service
+                                    .clear_degraded_reason_contains("device_epoch_rotation")
+                                    .await;
+                            }
+                            true
+                        }
+                    },
+                );
+            } else {
+                let _device_rotation_task_handle = tasks.spawn_interval_until_named(
+                    "device_epoch_rotation",
+                    time_effects.clone(),
+                    Duration::from_millis(500),
+                    move || {
+                        let service = device_rotation_service.clone();
+                        let device_ceremony_service = device_ceremony_service.clone();
+                        async move {
+                            if let Err(error) = service.process_pending_participant_sessions().await {
+                                device_ceremony_service
+                                    .record_degraded_reason(format!("device_epoch_rotation: {error}"))
+                                    .await;
+                                tracing::debug!(
+                                    error = %error,
+                                    "Failed to process device epoch rotation sessions"
+                                );
+                            } else {
+                                device_ceremony_service
+                                    .clear_degraded_reason_contains("device_epoch_rotation")
                                     .await;
                             }
                             true
@@ -580,18 +662,26 @@ mod tests {
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_for_authority(&config, authority_id).unwrap(),
         );
+        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+            Arc::new(effects.time_effects().clone());
+        let ceremony_tracker = CeremonyTracker::new(time_effects.clone());
+        let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        let threshold_signing = ThresholdSigningService::new(effects.clone());
+        let reconfiguration = ReconfigurationManager::new();
         let service = RuntimeMaintenanceService::new(
             effects.clone(),
             authority_id,
             config.device_id,
+            ceremony_tracker,
+            ceremony_runner,
+            threshold_signing,
+            reconfiguration,
             None,
             None,
             None,
             None,
         );
         *service.shared.state.write().await = MaintenanceServiceState::Running;
-        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
-            Arc::new(effects.time_effects().clone());
         let tasks = TaskSupervisor::new();
         *service.shared.tasks.write().await = Some(tasks.group("maintenance_test"));
         service
@@ -605,6 +695,5 @@ mod tests {
                 reason: "initial_lan_descriptor: publish failed".to_string(),
             }
         );
-        let _ = time_effects;
     }
 }

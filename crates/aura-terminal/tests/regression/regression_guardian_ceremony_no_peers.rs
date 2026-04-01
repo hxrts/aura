@@ -333,17 +333,6 @@ async fn control_guardian_ceremony_works_with_demo_peers() {
     };
 
     println!("Control test: Ceremony started with ID: {ceremony_id}");
-
-    // Start ceremony processor
-    let ceremony_agent = agent.clone();
-    let ceremony_task = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(100));
-        loop {
-            interval.tick().await;
-            let _ = ceremony_agent.process_ceremony_acceptances().await;
-        }
-    });
-
     // Wait for completion
     let start = tokio::time::Instant::now();
     loop {
@@ -373,8 +362,6 @@ async fn control_guardian_ceremony_works_with_demo_peers() {
             panic!("Control test: Timed out waiting for ceremony completion")
         }
     }
-
-    ceremony_task.abort();
     simulator.stop().await.expect("stop demo simulator");
     let _ = std::fs::remove_dir_all(&test_dir);
 }

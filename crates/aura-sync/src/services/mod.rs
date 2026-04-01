@@ -70,10 +70,9 @@ pub use ota_policy::{
     DiscoveryDecision, OtaPolicyEvaluator, SharingCandidate, SharingDecision,
 };
 pub use ota_transition::{
-    cutover_session_plan, partition_observed_fact, rollback_executed_fact,
-    rollback_session_plan, staged_residency_for_compatibility,
-    InFlightIncompatibilityAction, NewSessionAdmission, ScopedUpgradeState,
-    SessionCompatibilityPlan,
+    cutover_session_plan, partition_observed_fact, rollback_executed_fact, rollback_session_plan,
+    staged_residency_for_compatibility, InFlightIncompatibilityAction, NewSessionAdmission,
+    ScopedUpgradeState, SessionCompatibilityPlan,
 };
 pub use sync::{SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth};
 

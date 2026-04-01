@@ -179,6 +179,8 @@ impl fmt::Display for SessionStartError {
 pub struct ChoreographySessionState {
     /// Current session ID.
     pub session_id: RuntimeChoreographySessionId,
+    /// Stable protocol identifier when the session was admitted from a manifest.
+    pub protocol_id: Option<String>,
     /// Context ID for this session
     pub context_id: ContextId,
     /// Roles participating in this choreography
@@ -196,6 +198,7 @@ pub struct ChoreographySessionState {
 impl ChoreographySessionState {
     fn new(
         session_id: RuntimeChoreographySessionId,
+        protocol_id: Option<String>,
         context_id: ContextId,
         roles: Vec<ChoreographicRole>,
         current_role: ChoreographicRole,
@@ -204,6 +207,7 @@ impl ChoreographySessionState {
     ) -> Self {
         Self {
             session_id,
+            protocol_id,
             context_id,
             roles,
             current_role,
@@ -240,6 +244,7 @@ impl Default for ChoreographySessionState {
     fn default() -> Self {
         Self {
             session_id: RuntimeChoreographySessionId::from_uuid(Uuid::from_bytes([0xA5; 16])),
+            protocol_id: None,
             context_id: ContextId::new_from_entropy([0; 32]),
             roles: Vec::new(),
             current_role: ChoreographicRole::new(
@@ -290,6 +295,7 @@ impl ChoreographyState {
     pub fn start_session(
         &mut self,
         session_id: RuntimeChoreographySessionId,
+        protocol_id: Option<String>,
         context_id: ContextId,
         roles: Vec<ChoreographicRole>,
         current_role: ChoreographicRole,
@@ -313,6 +319,7 @@ impl ChoreographyState {
             session_id,
             ChoreographySessionState::new(
                 session_id,
+                protocol_id,
                 context_id,
                 roles,
                 current_role,
@@ -324,6 +331,20 @@ impl ChoreographyState {
             .insert(session_id, Arc::new(Notify::new()));
         self.session_inboxes.entry(session_id).or_default();
         self.task_bindings.insert(task_id, session_id);
+        Ok(())
+    }
+
+    /// Attach or replace the stable protocol identifier for one active session.
+    pub fn set_session_protocol_id(
+        &mut self,
+        session_id: RuntimeChoreographySessionId,
+        protocol_id: impl Into<String>,
+    ) -> Result<(), String> {
+        let session = self
+            .sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| format!("missing choreography session state for {session_id}"))?;
+        session.protocol_id = Some(protocol_id.into());
         Ok(())
     }
 
@@ -633,7 +654,15 @@ mod tests {
         let mut state = ChoreographyState::new();
 
         state
-            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .start_session(
+                session_id,
+                None,
+                context_id,
+                vec![role],
+                role,
+                Some(1000),
+                0,
+            )
             .expect("session starts");
         assert!(
             state.session_inbox_notify(session_id).is_some(),
@@ -660,7 +689,15 @@ mod tests {
         let mut state = ChoreographyState::new();
 
         state
-            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .start_session(
+                session_id,
+                None,
+                context_id,
+                vec![role],
+                role,
+                Some(1000),
+                0,
+            )
             .expect("session starts");
         state.queue_session_envelope(
             session_id,
@@ -693,7 +730,15 @@ mod tests {
         let mut state = ChoreographyState::new();
 
         state
-            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .start_session(
+                session_id,
+                None,
+                context_id,
+                vec![role],
+                role,
+                Some(1000),
+                0,
+            )
             .expect("session starts");
         state
             .claim_session_owner(session_id, "owner-a")
@@ -718,7 +763,15 @@ mod tests {
         let mut state = ChoreographyState::new();
 
         state
-            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .start_session(
+                session_id,
+                None,
+                context_id,
+                vec![role],
+                role,
+                Some(1000),
+                0,
+            )
             .expect("session starts");
         let capability = state
             .claim_session_owner(session_id, "owner-a")
@@ -744,7 +797,15 @@ mod tests {
         let mut state = ChoreographyState::new();
 
         state
-            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .start_session(
+                session_id,
+                None,
+                context_id,
+                vec![role],
+                role,
+                Some(1000),
+                0,
+            )
             .expect("session starts");
         let first = state
             .claim_session_owner(session_id, "owner-a")
@@ -777,7 +838,15 @@ mod tests {
         let mut state = ChoreographyState::new();
 
         state
-            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .start_session(
+                session_id,
+                None,
+                context_id,
+                vec![role],
+                role,
+                Some(1000),
+                0,
+            )
             .expect("session starts");
         let original = state
             .claim_session_owner(session_id, "owner-a")
@@ -821,11 +890,11 @@ mod tests {
         let mut state = ChoreographyState::new();
 
         state
-            .start_session(session_a, context_a, vec![role], role, Some(1000), 0)
+            .start_session(session_a, None, context_a, vec![role], role, Some(1000), 0)
             .expect("session a starts");
         state.task_bindings.clear();
         state
-            .start_session(session_b, context_b, vec![role], role, Some(1000), 1)
+            .start_session(session_b, None, context_b, vec![role], role, Some(1000), 1)
             .expect("session b starts");
 
         let capability_a = state
@@ -864,13 +933,29 @@ mod tests {
         let mut state = ChoreographyState::new();
 
         state
-            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .start_session(
+                session_id,
+                None,
+                context_id,
+                vec![role],
+                role,
+                Some(1000),
+                0,
+            )
             .expect("session starts");
         state.task_bindings.clear();
 
         assert_eq!(
             state
-                .start_session(session_id, context_id, vec![role], role, Some(1000), 1)
+                .start_session(
+                    session_id,
+                    None,
+                    context_id,
+                    vec![role],
+                    role,
+                    Some(1000),
+                    1
+                )
                 .expect_err("duplicate session should be rejected"),
             SessionStartError::SessionAlreadyExists { session_id }
         );

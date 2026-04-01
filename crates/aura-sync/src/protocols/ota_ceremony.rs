@@ -511,8 +511,10 @@ pub fn create_ota_activation_signature(
     ceremony_id: OTACeremonyId,
     commitments: &[ReadinessCommitment],
 ) -> AuraResult<Vec<u8>> {
-    let ready_commitments: Vec<&ReadinessCommitment> =
-        commitments.iter().filter(|commitment| commitment.ready).collect();
+    let ready_commitments: Vec<&ReadinessCommitment> = commitments
+        .iter()
+        .filter(|commitment| commitment.ready)
+        .collect();
 
     if ready_commitments.is_empty() {
         return Err(AuraError::invalid(

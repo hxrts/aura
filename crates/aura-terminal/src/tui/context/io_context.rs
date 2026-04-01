@@ -361,22 +361,6 @@ impl IoContext {
                     })?;
                 Ok(())
             }
-
-            /// Drive ceremony processing on the demo Mobile device.
-            ///
-            /// This is used by demo-mode harness flows to ensure device-threshold
-            /// ceremony packages are consumed by the simulated secondary device.
-            pub async fn process_demo_mobile_ceremony_acceptances(&self) -> TerminalResult<()> {
-                let agent = self
-                    .demo_mobile_agent
-                    .as_ref()
-                    .ok_or_else(|| TerminalError::NotFound("Demo Mobile agent unavailable".to_string()))?;
-                agent
-                    .process_ceremony_acceptances()
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| TerminalError::Operation(e.to_string()))
-            }
         } else {
             #[must_use]
             pub fn is_demo_mode(&self) -> bool {

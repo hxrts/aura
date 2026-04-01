@@ -409,19 +409,6 @@ async fn run_background_sync_pass(app_core: Arc<RwLock<AppCore>>) {
     }
 }
 
-async fn run_ceremony_acceptance_pass(agent: Arc<AuraAgent>) {
-    if let Err(error) = agent.process_ceremony_acceptances().await {
-        log_web_error(
-            "warn",
-            &WebUiError::operation(
-                WebUiOperation::ProcessCeremonyAcceptances,
-                "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
-                format!("{error}"),
-            ),
-        );
-    }
-}
-
 fn spawn_generation_maintenance_supervisor(
     owner: &WebTaskOwner,
     controller: Arc<UiController>,
@@ -430,7 +417,6 @@ fn spawn_generation_maintenance_supervisor(
     agent: Option<Arc<AuraAgent>>,
 ) {
     let tick_app_core = app_core.clone();
-    let ceremony_interval_ticks = interval_ticks(500);
     let browser_harness_mode = harness_mode_enabled();
     let background_sync_interval_ticks = if browser_harness_mode {
         interval_ticks(HARNESS_BACKGROUND_SYNC_INTERVAL_MS)
@@ -455,7 +441,6 @@ fn spawn_generation_maintenance_supervisor(
             tick_count = tick_count.saturating_add(1);
             let tick_app_core = tick_app_core.clone();
             let agent = agent.clone();
-            let run_ceremony = agent.is_some() && tick_count % ceremony_interval_ticks == 0;
             let run_background_sync = account_ready
                 && tick_count >= background_sync_start_delay_ticks
                 && tick_count % background_sync_interval_ticks == 0;
@@ -463,9 +448,6 @@ fn spawn_generation_maintenance_supervisor(
                 if let Some(agent) = agent.clone() {
                     if browser_harness_mode {
                         run_harness_transport_tick(tick_app_core.clone(), agent.clone()).await;
-                    }
-                    if run_ceremony {
-                        run_ceremony_acceptance_pass(agent).await;
                     }
                 }
                 if run_background_sync {

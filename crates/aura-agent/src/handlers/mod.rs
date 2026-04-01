@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod auth_service;
 pub mod chat_service;
+pub mod device_epoch_rotation;
 pub mod invitation;
 pub mod invitation_service;
 pub mod ota;

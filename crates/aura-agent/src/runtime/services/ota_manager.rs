@@ -1,7 +1,7 @@
 //! Runtime-owned OTA updater/launcher control plane.
 
-use super::ReconfigurationManager;
 use super::state::with_state_mut_validated;
+use super::ReconfigurationManager;
 use aura_core::{AuthorityId, ComposedBundle, SessionFootprint};
 use aura_maintenance::{
     AuraActivationScope, AuraCompatibilityClass, AuraReleaseId, AuraRollbackPreference,
@@ -369,7 +369,12 @@ impl OtaManager {
     }
 
     async fn ensure_runtime_upgrade_bundle(&self, bundle_id: &str) -> Result<(), String> {
-        if self.reconfiguration_manager.bundle(bundle_id).await.is_some() {
+        if self
+            .reconfiguration_manager
+            .bundle(bundle_id)
+            .await
+            .is_some()
+        {
             return Ok(());
         }
         self.reconfiguration_manager
@@ -685,24 +690,16 @@ impl OtaManager {
             {
                 guard.scoped_records.remove(scope);
                 guard.staged_releases.remove(&revoked_release_id);
-                if guard
-                    .pending_activation
-                    .as_ref()
-                    .is_some_and(|intent| {
-                        intent.to_release_id == revoked_release_id
-                            && intent.scope.as_ref() == Some(scope)
-                    })
-                {
+                if guard.pending_activation.as_ref().is_some_and(|intent| {
+                    intent.to_release_id == revoked_release_id
+                        && intent.scope.as_ref() == Some(scope)
+                }) {
                     guard.pending_activation = None;
                 }
-                if guard
-                    .pending_rollback
-                    .as_ref()
-                    .is_some_and(|intent| {
-                        intent.from_release_id == revoked_release_id
-                            && intent.scope.as_ref() == Some(scope)
-                    })
-                {
+                if guard.pending_rollback.as_ref().is_some_and(|intent| {
+                    intent.from_release_id == revoked_release_id
+                        && intent.scope.as_ref() == Some(scope)
+                }) {
                     guard.pending_rollback = None;
                 }
                 guard.status = UpdateStatus::Failed {
@@ -967,10 +964,7 @@ fn rollback_request(
         )],
         invalidated_publication_ids: Vec::new(),
         carried_obligation_ids: Vec::new(),
-        invalidated_obligation_ids: vec![format!(
-            "ota:scope:{}:pending-cutover",
-            record.bundle_id
-        )],
+        invalidated_obligation_ids: vec![format!("ota:scope:{}:pending-cutover", record.bundle_id)],
     }
 }
 
@@ -1409,7 +1403,10 @@ mod tests {
             .await
             .unwrap();
 
-        let snapshot = manager.scope_runtime_upgrade_snapshot(&scope()).await.unwrap();
+        let snapshot = manager
+            .scope_runtime_upgrade_snapshot(&scope())
+            .await
+            .unwrap();
         assert_eq!(snapshot.runtime_upgrades.len(), 1);
         let execution = &snapshot.runtime_upgrades[0];
         assert_eq!(
@@ -1436,7 +1433,10 @@ mod tests {
         );
         assert_eq!(
             admitted.invalidated_obligation_ids,
-            vec![format!("ota:scope:{}:pending-cutover", scoped_bundle_id(&scope()))]
+            vec![format!(
+                "ota:scope:{}:pending-cutover",
+                scoped_bundle_id(&scope())
+            )]
         );
     }
 

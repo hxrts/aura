@@ -329,18 +329,6 @@ fn reexec_current_tui_process(reason: &str) -> Result<(), AuraError> {
     )))
 }
 
-fn spawn_ceremony_acceptance_pump(startup_tasks: &Arc<UiTaskOwner>, agent: Arc<AuraAgent>) {
-    startup_tasks.spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
-        loop {
-            interval.tick().await;
-            if let Err(error) = agent.process_ceremony_acceptances().await {
-                tracing::debug!("Error processing ceremony acceptances: {}", error);
-            }
-        }
-    });
-}
-
 async fn initialized_runtime_app_core(
     app_config: AppConfig,
     agent: Arc<AuraAgent>,
@@ -700,8 +688,6 @@ async fn handle_tui_launch(
                     });
             }
 
-            spawn_ceremony_acceptance_pump(&startup_tasks, agent.clone());
-
             #[cfg(feature = "development")]
             {
                 simulator = match launch.mode {
@@ -807,8 +793,6 @@ async fn handle_tui_launch(
 
                 let agent = Arc::new(agent);
                 let app_core = initialized_runtime_app_core(app_config, agent.clone()).await?;
-
-                spawn_ceremony_acceptance_pump(&startup_tasks, agent);
 
                 if let Err(error) =
                     aura_app::ui::workflows::settings::refresh_settings_from_runtime(app_core.raw())

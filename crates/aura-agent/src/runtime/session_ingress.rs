@@ -536,6 +536,14 @@ pub async fn open_owned_manifest_vm_session_admitted(
     let owner = effects
         .start_owned_choreography_session(owner_label, session_uuid, roles)
         .await?;
+    effects
+        .set_current_runtime_choreography_protocol_id(manifest.protocol_id.clone())
+        .map_err(|message| SessionIngressError::SessionStart {
+            session_id: owner.session_id,
+            owner_label: owner.owner_label.clone(),
+            reason: SessionStartFailureReason::VmSessionOpenFailed,
+            message,
+        })?;
     let routing_boundary = AuraLinkBoundary::for_manifest(manifest);
 
     match open_manifest_vm_session_admitted(

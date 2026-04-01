@@ -167,6 +167,17 @@ impl ChoreographicEffects for AuraEffectSystem {
             "application/aura-choreography".to_string(),
         );
         metadata.insert("session-id".to_string(), session.session_id.to_string());
+        metadata.insert(
+            "aura-source-device-id".to_string(),
+            current_role.device_id.to_string(),
+        );
+        metadata.insert(
+            "aura-destination-device-id".to_string(),
+            role.device_id.to_string(),
+        );
+        if let Some(protocol_id) = session.protocol_id.as_ref() {
+            metadata.insert("protocol-id".to_string(), protocol_id.clone());
+        }
 
         let envelope = TransportEnvelope {
             destination: peer,
@@ -414,6 +425,7 @@ impl ChoreographicEffects for AuraEffectSystem {
         state
             .start_session(
                 runtime_session_id,
+                None,
                 context_id,
                 roles,
                 current_role,
@@ -604,7 +616,14 @@ mod tests {
     #[tokio::test]
     async fn concurrent_session_sends_keep_guard_and_transport_contexts_isolated() {
         let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([13; 16]));
-        let effects = test_effects(authority_id);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &AgentConfig::default(),
+                authority_id,
+                crate::runtime::SharedTransport::new(),
+            )
+            .expect("testing effect system with shared transport"),
+        );
         let barrier = Arc::new(Barrier::new(3));
 
         let session_a = Uuid::from_u128(41);
@@ -625,12 +644,7 @@ mod tests {
                 .send_to_role_bytes(loopback_peer, b"alpha".to_vec())
                 .await
                 .expect("session a send succeeds");
-            let envelopes = task_a_effects
-                .choreography_state
-                .read()
-                .session_inbox_snapshot(RuntimeChoreographySessionId::from_uuid(session_a));
             task_a_effects.end_session().await.expect("session a ends");
-            envelopes
         });
 
         let task_b_effects = Arc::clone(&effects);
@@ -645,34 +659,43 @@ mod tests {
                 .send_to_role_bytes(loopback_peer, b"beta".to_vec())
                 .await
                 .expect("session b send succeeds");
-            let envelopes = task_b_effects
-                .choreography_state
-                .read()
-                .session_inbox_snapshot(RuntimeChoreographySessionId::from_uuid(session_b));
             task_b_effects.end_session().await.expect("session b ends");
-            envelopes
         });
 
         barrier.wait().await;
-        let first = tasks
+        tasks
             .join_next()
             .await
             .expect("first task joined")
             .expect("first task result");
-        let second = tasks
+        tasks
             .join_next()
             .await
             .expect("second task joined")
             .expect("second task result");
-        let (session_a_envelopes, session_b_envelopes) = if first.iter().any(|env| {
-            env.metadata
-                .get("session-id")
-                .is_some_and(|value| value == &session_a.to_string())
-        }) {
-            (first, second)
-        } else {
-            (second, first)
-        };
+        let shared = effects
+            .transport
+            .shared_transport()
+            .expect("shared transport should be attached for the test");
+        let shared_inbox = shared.inbox_for(authority_id).read().clone();
+        let session_a_envelopes = shared_inbox
+            .iter()
+            .filter(|env| {
+                env.metadata
+                    .get("session-id")
+                    .is_some_and(|value| value == &session_a.to_string())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let session_b_envelopes = shared_inbox
+            .iter()
+            .filter(|env| {
+                env.metadata
+                    .get("session-id")
+                    .is_some_and(|value| value == &session_b.to_string())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         assert_eq!(
             session_a_envelopes.len(),
             1,
@@ -925,6 +948,77 @@ mod tests {
             (b"alpha", b"beta") | (b"beta", b"alpha")
         ));
         assert_eq!(effects.choreography_state.read().active_session_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn session_sends_include_protocol_and_device_routing_metadata() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([0x71; 16]));
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &AgentConfig::default(),
+                authority_id,
+                crate::runtime::SharedTransport::new(),
+            )
+            .expect("testing effect system with shared transport"),
+        );
+        let session_id = Uuid::from_u128(0x7172);
+        let self_role = authority_device_role(authority_id, 0);
+        let loopback_peer = authority_device_role(authority_id, 1);
+
+        effects
+            .start_session(session_id, vec![self_role, loopback_peer])
+            .await
+            .expect("session starts");
+        effects
+            .set_current_runtime_choreography_protocol_id("aura.test.protocol")
+            .expect("protocol id attaches to current session");
+        effects
+            .send_to_role_bytes(loopback_peer, b"hello".to_vec())
+            .await
+            .expect("send succeeds");
+
+        let shared = effects
+            .transport
+            .shared_transport()
+            .expect("shared transport should be attached for the test");
+        let envelope = shared
+            .inbox_for(authority_id)
+            .read()
+            .first()
+            .cloned()
+            .expect("loopback send should queue one envelope");
+        let session_id_string = session_id.to_string();
+        let source_device_string = self_role.device_id.to_string();
+        let destination_device_string = loopback_peer.device_id.to_string();
+
+        assert_eq!(
+            envelope.metadata.get("content-type").map(String::as_str),
+            Some("application/aura-choreography")
+        );
+        assert_eq!(
+            envelope.metadata.get("session-id").map(String::as_str),
+            Some(session_id_string.as_str())
+        );
+        assert_eq!(
+            envelope.metadata.get("protocol-id").map(String::as_str),
+            Some("aura.test.protocol")
+        );
+        assert_eq!(
+            envelope
+                .metadata
+                .get("aura-source-device-id")
+                .map(String::as_str),
+            Some(source_device_string.as_str())
+        );
+        assert_eq!(
+            envelope
+                .metadata
+                .get("aura-destination-device-id")
+                .map(String::as_str),
+            Some(destination_device_string.as_str())
+        );
+
+        effects.end_session().await.expect("session ends");
     }
 
     #[tokio::test]

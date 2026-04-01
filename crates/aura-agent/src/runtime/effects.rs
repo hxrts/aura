@@ -552,6 +552,21 @@ impl AuraEffectSystem {
         self.choreography_state.read().current_session_id()
     }
 
+    /// Attach the admitted protocol identifier to the current task-bound runtime session.
+    pub(crate) fn set_current_runtime_choreography_protocol_id(
+        &self,
+        protocol_id: impl Into<String>,
+    ) -> Result<(), String> {
+        let session_id = self
+            .current_runtime_choreography_session_id()
+            .ok_or_else(|| {
+                "cannot attach a protocol id without an active choreography session".to_string()
+            })?;
+        self.choreography_state
+            .write()
+            .set_session_protocol_id(session_id, protocol_id)
+    }
+
     /// Claim authoritative ownership for one active runtime choreography session.
     pub(crate) fn claim_runtime_choreography_session_owner(
         &self,

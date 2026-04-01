@@ -349,10 +349,8 @@ impl DemoSimulator {
                             }
                         }
 
-                        // Mobile processes transport messages for device enrollment choreography
-                        // and ceremony messages for key package installation.
+                        // Mobile processes transport messages for device enrollment choreography.
                         let _ = process_peer_transport_messages("Mobile", &mobile, bob_authority).await;
-                        let _ = mobile.process_ceremony_acceptances().await;
 
                         for peer in &social_peers {
                             let _ = process_peer_transport_messages(&peer.name, &peer.agent, bob_authority).await;

@@ -17,8 +17,8 @@ use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::Epoch;
 use aura_core::{AuraError, DeviceId, Hash32};
 use aura_mpst::upstream::runtime::{
-    ChoreoHandler, ChoreoHandlerExt, ChoreoResult,
-    ChoreographyError as TelltaleChoreographyError, LabelId, RoleId,
+    ChoreoHandler, ChoreoHandlerExt, ChoreoResult, ChoreographyError as TelltaleChoreographyError,
+    LabelId, RoleId,
 };
 use aura_mpst::GeneratedChoreographyRuntime;
 use aura_sync::protocols::ota_ceremony::telltale_session_types_ota_activation::ota_activation::{
@@ -28,10 +28,11 @@ use aura_sync::protocols::ota_ceremony::{
     compute_ota_ceremony_prestate_hash, create_ota_activation_signature,
     emit_ota_ceremony_aborted_fact, emit_ota_ceremony_committed_fact,
     emit_ota_ceremony_initiated_fact, emit_ota_commitment_received_fact,
-    emit_ota_threshold_reached_fact, OTACeremonyAbort, OTACeremonyAbortReason,
-    OTACeremonyCommit, OTACeremonyConfig, OTACeremonyId, OTACeremonyState, OTACeremonyStatus,
-    OTAReadinessOutcome, OTAReadinessWitness, ReadinessCommitment, UpgradeProposal,
-    telltale_session_types_ota_activation::BranchLabel as OtaBranchLabel,
+    emit_ota_threshold_reached_fact,
+    telltale_session_types_ota_activation::BranchLabel as OtaBranchLabel, OTACeremonyAbort,
+    OTACeremonyAbortReason, OTACeremonyCommit, OTACeremonyConfig, OTACeremonyId, OTACeremonyState,
+    OTACeremonyStatus, OTAReadinessOutcome, OTAReadinessWitness, ReadinessCommitment,
+    UpgradeProposal,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
@@ -145,7 +146,8 @@ impl OtaCoordinatorProtocolRuntime {
                 )
                 .await
                 .map_err(map_ota_error)?;
-                if let Some(OtaFinalizeResponder::Commit(responder)) = self.finalize_responder.take()
+                if let Some(OtaFinalizeResponder::Commit(responder)) =
+                    self.finalize_responder.take()
                 {
                     let _ = responder.send(Ok(activation_epoch));
                 }
@@ -234,14 +236,20 @@ impl OtaCoordinatorProtocolRuntime {
                 return Err(AgentError::invalid("Device has already committed"));
             }
 
-            state.commitments.insert(commitment.device, commitment.clone());
+            state
+                .commitments
+                .insert(commitment.device, commitment.clone());
             let threshold_reached = state.threshold_met();
             if threshold_reached {
                 state.status = OTACeremonyStatus::AwaitingConsensus;
                 state.agreement_mode = AgreementMode::CoordinatorSoftSafe;
             }
 
-            (threshold_reached, state.ready_count(), state.ready_devices())
+            (
+                threshold_reached,
+                state.ready_count(),
+                state.ready_devices(),
+            )
         };
 
         emit_ota_commitment_received_fact(&*self.effects, self.ceremony_id, &commitment)
@@ -308,15 +316,10 @@ impl OtaCoordinatorProtocolRuntime {
         }
     }
 
-    async fn collect_commitments_for_threshold(
-        &mut self,
-    ) -> AgentResult<Vec<ReadinessCommitment>> {
+    async fn collect_commitments_for_threshold(&mut self) -> AgentResult<Vec<ReadinessCommitment>> {
         let mut collected = Vec::new();
         loop {
-            if matches!(
-                self.pending_decision,
-                Some(OtaProtocolDecision::Abort(_))
-            ) {
+            if matches!(self.pending_decision, Some(OtaProtocolDecision::Abort(_))) {
                 break;
             }
 
@@ -345,11 +348,9 @@ impl OtaCoordinatorProtocolRuntime {
                     respond_to,
                 } => match decision {
                     OtaProtocolDecision::Commit => {
-                        let _ = respond_to
-                            .into_commit()
-                            .send(Err(AgentError::invalid(
-                                "Ceremony is not yet awaiting consensus",
-                            )));
+                        let _ = respond_to.into_commit().send(Err(AgentError::invalid(
+                            "Ceremony is not yet awaiting consensus",
+                        )));
                     }
                     OtaProtocolDecision::Abort(reason) => {
                         self.pending_decision = Some(OtaProtocolDecision::Abort(reason));
@@ -362,9 +363,7 @@ impl OtaCoordinatorProtocolRuntime {
         Ok(collected)
     }
 
-    async fn choose_final_branch(
-        &mut self,
-    ) -> Result<OtaBranchLabel, TelltaleChoreographyError> {
+    async fn choose_final_branch(&mut self) -> Result<OtaBranchLabel, TelltaleChoreographyError> {
         if let Some(label) = self.selected_branch_label() {
             return Ok(label);
         }
@@ -395,10 +394,12 @@ impl OtaCoordinatorProtocolRuntime {
                 } => match decision {
                     OtaProtocolDecision::Commit => {
                         let state = self.state.read().await;
-                        if state.status != OTACeremonyStatus::AwaitingConsensus || !state.threshold_met() {
-                            let _ = respond_to.into_commit().send(Err(AgentError::invalid(
-                                "Ceremony not awaiting consensus",
-                            )));
+                        if state.status != OTACeremonyStatus::AwaitingConsensus
+                            || !state.threshold_met()
+                        {
+                            let _ = respond_to
+                                .into_commit()
+                                .send(Err(AgentError::invalid("Ceremony not awaiting consensus")));
                             continue;
                         }
                         drop(state);
@@ -538,11 +539,17 @@ impl GeneratedChoreographyRuntime for OtaCoordinatorProtocolRuntime {
             }
             OtaPendingOutbound::FinalDecision => match self.pending_decision.clone() {
                 Some(OtaProtocolDecision::Commit) => {
-                    let payload = self.final_commit_payload().await.map_err(map_runtime_error)?;
+                    let payload = self
+                        .final_commit_payload()
+                        .await
+                        .map_err(map_runtime_error)?;
                     downcast_payload(payload)
                 }
                 Some(OtaProtocolDecision::Abort(_)) => {
-                    let payload = self.final_abort_payload().await.map_err(map_runtime_error)?;
+                    let payload = self
+                        .final_abort_payload()
+                        .await
+                        .map_err(map_runtime_error)?;
                     downcast_payload(payload)
                 }
                 None => Err(TelltaleChoreographyError::ExecutionError(
@@ -587,9 +594,7 @@ impl GeneratedChoreographyRuntime for OtaCoordinatorProtocolRuntime {
             .into_iter()
             .map(|commitment| {
                 serde_json::to_vec(&commitment)
-                    .map_err(|error| {
-                        TelltaleChoreographyError::Serialization(error.to_string())
-                    })
+                    .map_err(|error| TelltaleChoreographyError::Serialization(error.to_string()))
                     .and_then(|bytes| {
                         serde_json::from_slice(&bytes).map_err(|error| {
                             TelltaleChoreographyError::Serialization(error.to_string())
@@ -613,15 +618,12 @@ impl OtaFinalizeResponder {
 
 fn downcast_payload<M: Send + 'static, T: Send + 'static>(payload: T) -> ChoreoResult<M> {
     let boxed: Box<dyn std::any::Any + Send> = Box::new(payload);
-    boxed
-        .downcast::<M>()
-        .map(|payload| *payload)
-        .map_err(|_| {
-            TelltaleChoreographyError::ExecutionError(format!(
-                "OTA generated runner requested unexpected payload type {}",
-                std::any::type_name::<M>()
-            ))
-        })
+    boxed.downcast::<M>().map(|payload| *payload).map_err(|_| {
+        TelltaleChoreographyError::ExecutionError(format!(
+            "OTA generated runner requested unexpected payload type {}",
+            std::any::type_name::<M>()
+        ))
+    })
 }
 
 fn map_ota_error(error: AuraError) -> AgentError {
@@ -740,15 +742,21 @@ impl OtaActivationServiceApi {
         participant_count: usize,
     ) {
         let effects = self.effects.clone();
-        let tasks = self
-            .tasks
-            .group(format!("ota_activation_service.{}", hex::encode(ceremony_id.0.as_bytes())));
+        let tasks = self.tasks.group(format!(
+            "ota_activation_service.{}",
+            hex::encode(ceremony_id.0.as_bytes())
+        ));
         let devices = (0..participant_count)
             .map(|index| OtaActivationRole::Devices(index as u32))
             .collect::<Vec<_>>();
         let fut = async move {
-            let runtime =
-                OtaCoordinatorProtocolRuntime::new(effects, ceremony_id, state, devices, command_rx);
+            let runtime = OtaCoordinatorProtocolRuntime::new(
+                effects,
+                ceremony_id,
+                state,
+                devices,
+                command_rx,
+            );
             if let Err(error) = runtime.run_until_terminal().await {
                 tracing::error!(
                     ceremony_id = %hex::encode(ceremony_id.0.as_bytes()),
@@ -846,17 +854,16 @@ impl OtaActivationServiceApi {
                 prestate_hash,
             })
             .await
-            .map_err(|error| AgentError::internal(format!(
-                "Failed to register OTA ceremony: {error}"
-            )))?;
+            .map_err(|error| {
+                AgentError::internal(format!("Failed to register OTA ceremony: {error}"))
+            })?;
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
-        self.shared.ceremonies.write().await.insert(
-            ceremony_id,
-            OtaProtocolSession {
-                command_tx,
-            },
-        );
+        self.shared
+            .ceremonies
+            .write()
+            .await
+            .insert(ceremony_id, OtaProtocolSession { command_tx });
         self.spawn_coordinator_protocol(ceremony_id, state, command_rx, participants.len());
         Ok(ceremony_id)
     }
@@ -874,10 +881,12 @@ impl OtaActivationServiceApi {
                 commitment: commitment.clone(),
                 respond_to,
             })
-            .map_err(|_| AgentError::runtime("OTA ceremony session is no longer active".to_string()))?;
-        let readiness = recv
-            .await
-            .map_err(|_| AgentError::runtime("OTA ceremony session dropped response".to_string()))??;
+            .map_err(|_| {
+                AgentError::runtime("OTA ceremony session is no longer active".to_string())
+            })?;
+        let readiness = recv.await.map_err(|_| {
+            AgentError::runtime("OTA ceremony session dropped response".to_string())
+        })??;
 
         if commitment.ready {
             let runner_id = Self::runner_ceremony_id(ceremony_id);
@@ -899,10 +908,12 @@ impl OtaActivationServiceApi {
                 decision: OtaProtocolDecision::Commit,
                 respond_to: OtaFinalizeResponder::Commit(respond_to),
             })
-            .map_err(|_| AgentError::runtime("OTA ceremony session is no longer active".to_string()))?;
-        let activation_epoch = recv
-            .await
-            .map_err(|_| AgentError::runtime("OTA ceremony session dropped commit response".to_string()))??;
+            .map_err(|_| {
+                AgentError::runtime("OTA ceremony session is no longer active".to_string())
+            })?;
+        let activation_epoch = recv.await.map_err(|_| {
+            AgentError::runtime("OTA ceremony session dropped commit response".to_string())
+        })??;
 
         let committed_at = self
             .effects
@@ -941,9 +952,12 @@ impl OtaActivationServiceApi {
                 }),
                 respond_to: OtaFinalizeResponder::Abort(respond_to),
             })
-            .map_err(|_| AgentError::runtime("OTA ceremony session is no longer active".to_string()))?;
-        recv.await
-            .map_err(|_| AgentError::runtime("OTA ceremony session dropped abort response".to_string()))??;
+            .map_err(|_| {
+                AgentError::runtime("OTA ceremony session is no longer active".to_string())
+            })?;
+        recv.await.map_err(|_| {
+            AgentError::runtime("OTA ceremony session dropped abort response".to_string())
+        })??;
 
         let runner_id = Self::runner_ceremony_id(ceremony_id);
         self.ceremony_runner

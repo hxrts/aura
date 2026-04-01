@@ -319,22 +319,6 @@ impl SettingsCallbacks {
 
                     ctx.remember_key_rotation_ceremony(handle).await;
 
-                    #[cfg(feature = "development")]
-                    {
-                        // In demo mode, make sure the simulated mobile device processes incoming
-                        // threshold key packages so the removal ceremony can reach completion.
-                        if device_id_clone == ctx.demo_mobile_device_id() {
-                            let demo_ctx = ctx.clone();
-                            spawn_ctx(ctx.clone(), async move {
-                                for _ in 0..6 {
-                                    let _ =
-                                        demo_ctx.process_demo_mobile_ceremony_acceptances().await;
-                                    physical_sleep(Duration::from_millis(150)).await;
-                                }
-                            });
-                        }
-                    }
-
                     // Best-effort: monitor completion and toast success/failure.
                     let tx_monitor = tx.clone();
                     spawn_ctx(ctx.clone(), async move {

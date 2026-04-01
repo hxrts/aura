@@ -312,16 +312,6 @@ fn service_unavailable_with_detail(
     service_error_to_intent(ServiceError::unavailable(service, format!("{detail}")))
 }
 
-fn device_key_package_delivery_error(
-    package_kind: &'static str,
-    device_id: impl std::fmt::Display,
-    error: impl std::fmt::Display,
-) -> IntentError {
-    IntentError::network_error(format!(
-        "Failed to send device {package_kind} key package to {device_id}: {error}"
-    ))
-}
-
 fn harness_mode_enabled() -> bool {
     std::env::var_os("AURA_HARNESS_MODE").is_some()
 }
@@ -1690,12 +1680,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn is_peer_online(&self, peer: AuthorityId) -> bool {
-        // Drive inbox processing opportunistically so background-less runtimes
-        // still respond to key-rotation/device-enrollment messages.
-        if let Err(e) = self.agent.process_ceremony_acceptances().await {
-            tracing::debug!("Failed to process ceremony acceptances: {}", e);
-        }
-
         let effects = self.agent.runtime().effects();
         let context = EffectContext::with_authority(self.agent.authority_id()).context_id();
 
@@ -1819,13 +1803,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn process_ceremony_messages(&self) -> Result<CeremonyProcessingOutcome, IntentError> {
-        let (processed_acceptances, processed_completions) = self
-            .agent
-            .process_ceremony_acceptances()
-            .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to process ceremony messages: {e}"))
-            })?;
         let invitation_handler = crate::handlers::invitation::InvitationHandler::new(
             crate::core::AuthorityContext::new_with_device(
                 self.agent.authority_id(),
@@ -1868,8 +1845,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             };
 
         let counts = CeremonyProcessingCounts {
-            acceptances: processed_acceptances,
-            completions: processed_completions,
+            acceptances: 0,
+            completions: 0,
             contact_messages: processed_contact_messages,
             handshakes: processed_handshakes,
         };
@@ -2472,8 +2449,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
     ///    - metadata["target-authority-id"] = initiator's authority_id
     ///    - metadata["participant-device-id"] = device_id (for recipient validation)
     ///    - payload = FROST key package for this participant
-    /// 3. Send envelope via TransportEffects
-    /// 4. If send fails, return NetworkError indicating unreachable device
+    /// 3. Launch a device-scoped `aura.sync.device_epoch_rotation` session for each
+    ///    participant device
+    /// 4. Let the protocol session carry proposal, acceptance, and commit ordering
     ///
     /// # Error Cases
     ///
@@ -2483,7 +2461,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     ///
     /// # See Also
     ///
-    /// - `crates/aura-agent/src/core/ceremony_processor/threshold.rs` - Recipient handling
+    /// - `crates/aura-agent/src/handlers/device_epoch_rotation.rs` - Recipient handling
     /// - `docs/102_authority_and_identity.md` - Multi-authority device model
     async fn initiate_device_threshold_ceremony(
         &self,
@@ -2680,29 +2658,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .record_response(&ceremony_id, ParticipantIdentity::device(current_device_id))
             .await;
 
-        // Send key packages to other devices.
-        let context_entropy = {
-            let mut h = aura_core::hash::hasher();
-            h.update(b"DEVICE_THRESHOLD_CONTEXT");
-            h.update(&authority_id.to_bytes());
-            h.update(ceremony_id.as_str().as_bytes());
-            h.finalize()
-        };
-        let ceremony_context =
-            aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
-
-        use base64::Engine;
-        let config_b64 = if threshold_config.is_empty() {
-            None
-        } else {
-            Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config))
-        };
-        let pubkey_b64 = if public_key_package.is_empty() {
-            None
-        } else {
-            Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package))
-        };
-
+        // Launch one protocol-native device epoch rotation session per peer device.
         for device_id in parsed_devices.iter().copied() {
             if device_id == current_device_id {
                 continue;
@@ -2714,50 +2670,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     device_id
                 )));
             };
-
-            let mut metadata = std::collections::HashMap::new();
-            metadata.insert(
-                "content-type".to_string(),
-                "application/aura-device-threshold-key-package".to_string(),
+            self.spawn_device_epoch_rotation(
+                crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest {
+                    ceremony_id: ceremony_id.clone(),
+                    kind: aura_sync::protocols::DeviceEpochRotationKind::Rotation,
+                    pending_epoch: pending_epoch.value(),
+                    participant_device_id: device_id,
+                    key_package,
+                    threshold_config: threshold_config.clone(),
+                    public_key_package: public_key_package.clone(),
+                },
             );
-            metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
-            metadata.insert(
-                "pending-epoch".to_string(),
-                pending_epoch.value().to_string(),
-            );
-            metadata.insert(
-                "initiator-device-id".to_string(),
-                current_device_id.to_string(),
-            );
-            metadata.insert("participant-device-id".to_string(), device_id.to_string());
-            metadata.insert(
-                "aura-destination-device-id".to_string(),
-                device_id.to_string(),
-            );
-            // Include the target authority in metadata for ceremony coordination
-            metadata.insert("target-authority-id".to_string(), authority_id.to_string());
-            if let Some(config_b64) = config_b64.as_ref() {
-                metadata.insert("threshold-config".to_string(), config_b64.clone());
-            }
-            if let Some(pubkey_b64) = pubkey_b64.as_ref() {
-                metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
-            }
-
-            let envelope = aura_core::effects::TransportEnvelope {
-                // Device-specific routing happens via aura-destination-device-id under the
-                // shared target authority for the ceremony.
-                destination: authority_id,
-                source: authority_id,
-                context: ceremony_context,
-                payload: key_package,
-                metadata,
-                receipt: None,
-            };
-
-            effects
-                .send_envelope(envelope)
-                .await
-                .map_err(|e| device_key_package_delivery_error("threshold", device_id, e))?;
         }
 
         Ok(ceremony_id)
@@ -3027,29 +2950,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to register ceremony: {e}"))
             })?;
 
-        // Distribute new-epoch key packages to existing devices (so they are not bricked).
+        // Launch device-scoped rotation sessions for existing devices so they can
+        // stage and commit the new epoch through one protocol path.
         if !other_device_ids.is_empty() {
-            use base64::Engine;
-            let config_b64 = if threshold_config.is_empty() {
-                None
-            } else {
-                Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config))
-            };
-            let pubkey_b64 = if public_key_package.is_empty() {
-                None
-            } else {
-                Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package))
-            };
-            let context_entropy = {
-                let mut h = aura_core::hash::hasher();
-                h.update(b"DEVICE_ENROLLMENT_CONTEXT");
-                h.update(&authority_id.to_bytes());
-                h.update(ceremony_id.as_str().as_bytes());
-                h.finalize()
-            };
-            let ceremony_context =
-                aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
-
             for device_id in &other_device_ids {
                 let Some(key_package) = key_package_by_device.get(device_id).cloned() else {
                     return Err(IntentError::internal_error(format!(
@@ -3057,46 +2960,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
                         device_id
                     )));
                 };
-
-                let mut metadata = std::collections::HashMap::new();
-                metadata.insert(
-                    "content-type".to_string(),
-                    "application/aura-device-enrollment-key-package".to_string(),
+                self.spawn_device_epoch_rotation(
+                    crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest {
+                        ceremony_id: ceremony_id.clone(),
+                        kind: aura_sync::protocols::DeviceEpochRotationKind::Enrollment,
+                        pending_epoch: pending_epoch.value(),
+                        participant_device_id: *device_id,
+                        key_package,
+                        threshold_config: threshold_config.clone(),
+                        public_key_package: public_key_package.clone(),
+                    },
                 );
-                metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
-                metadata.insert(
-                    "pending-epoch".to_string(),
-                    pending_epoch.value().to_string(),
-                );
-                metadata.insert(
-                    "initiator-device-id".to_string(),
-                    current_device_id.to_string(),
-                );
-                metadata.insert("participant-device-id".to_string(), device_id.to_string());
-                metadata.insert(
-                    "aura-destination-device-id".to_string(),
-                    device_id.to_string(),
-                );
-                if let Some(config_b64) = config_b64.as_ref() {
-                    metadata.insert("threshold-config".to_string(), config_b64.clone());
-                }
-                if let Some(pubkey_b64) = pubkey_b64.as_ref() {
-                    metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
-                }
-
-                let envelope = aura_core::effects::TransportEnvelope {
-                    destination: authority_id,
-                    source: authority_id,
-                    context: ceremony_context,
-                    payload: key_package,
-                    metadata,
-                    receipt: None,
-                };
-
-                effects
-                    .send_envelope(envelope)
-                    .await
-                    .map_err(|e| device_key_package_delivery_error("enrollment", device_id, e))?;
             }
         }
 
@@ -3442,28 +3316,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .record_response(&ceremony_id, ParticipantIdentity::device(current_device_id))
             .await;
 
-        use base64::Engine;
-        let config_b64 = if threshold_config.is_empty() {
-            None
-        } else {
-            Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&threshold_config))
-        };
-        let pubkey_b64 = if public_key_package.is_empty() {
-            None
-        } else {
-            Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&public_key_package))
-        };
-
-        let context_entropy = {
-            let mut h = aura_core::hash::hasher();
-            h.update(b"DEVICE_THRESHOLD_CONTEXT");
-            h.update(&authority_id.to_bytes());
-            h.update(ceremony_id.as_str().as_bytes());
-            h.finalize()
-        };
-        let ceremony_context =
-            aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
-
         for device_id in participant_device_ids.iter().copied() {
             if device_id == current_device_id {
                 continue;
@@ -3475,46 +3327,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     device_id
                 )));
             };
-
-            let mut metadata = std::collections::HashMap::new();
-            metadata.insert(
-                "content-type".to_string(),
-                "application/aura-device-threshold-key-package".to_string(),
+            self.spawn_device_epoch_rotation(
+                crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest {
+                    ceremony_id: ceremony_id.clone(),
+                    kind: aura_sync::protocols::DeviceEpochRotationKind::Removal,
+                    pending_epoch: pending_epoch.value(),
+                    participant_device_id: device_id,
+                    key_package,
+                    threshold_config: threshold_config.clone(),
+                    public_key_package: public_key_package.clone(),
+                },
             );
-            metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
-            metadata.insert(
-                "pending-epoch".to_string(),
-                pending_epoch.value().to_string(),
-            );
-            metadata.insert(
-                "initiator-device-id".to_string(),
-                current_device_id.to_string(),
-            );
-            metadata.insert("participant-device-id".to_string(), device_id.to_string());
-            metadata.insert(
-                "aura-destination-device-id".to_string(),
-                device_id.to_string(),
-            );
-            if let Some(config_b64) = config_b64.as_ref() {
-                metadata.insert("threshold-config".to_string(), config_b64.clone());
-            }
-            if let Some(pubkey_b64) = pubkey_b64.as_ref() {
-                metadata.insert("threshold-pubkey".to_string(), pubkey_b64.clone());
-            }
-
-            let envelope = aura_core::effects::TransportEnvelope {
-                destination: authority_id,
-                source: authority_id,
-                context: ceremony_context,
-                payload: key_package,
-                metadata,
-                receipt: None,
-            };
-
-            effects
-                .send_envelope(envelope)
-                .await
-                .map_err(|e| device_key_package_delivery_error("removal", device_id, e))?;
         }
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
@@ -3597,14 +3420,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         ceremony_id: &aura_core::types::identifiers::CeremonyId,
     ) -> Result<aura_app::runtime_bridge::CeremonyStatus, IntentError> {
-        // Ensure ceremony progress is driven even when the caller only polls status.
-        //
-        // In demo mode, acceptances arrive via transport envelopes. If nothing processes
-        // them, ceremonies will never complete and guardian bindings will never be committed.
-        if let Err(e) = self.agent.process_ceremony_acceptances().await {
-            tracing::debug!("Failed to process ceremony acceptances: {}", e);
-        }
-
         let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
         let _status = runner
@@ -3646,11 +3461,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         ceremony_id: &aura_core::types::identifiers::CeremonyId,
     ) -> Result<aura_app::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
-        // Ensure acceptances are processed so polling drives progress in demo/simulation mode.
-        if let Err(e) = self.agent.process_ceremony_acceptances().await {
-            tracing::debug!("Failed to process ceremony acceptances: {}", e);
-        }
-
         let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
         let _status = runner
@@ -3683,11 +3493,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         ceremony_id: &aura_core::types::identifiers::CeremonyId,
     ) -> Result<(), IntentError> {
-        // Ensure acceptances are processed so state is up-to-date.
-        if let Err(e) = self.agent.process_ceremony_acceptances().await {
-            tracing::debug!("Failed to process ceremony acceptances: {}", e);
-        }
-
         let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
         let state = tracker.get(ceremony_id).await?;
@@ -4255,6 +4060,45 @@ impl RuntimeBridge for AgentRuntimeBridge {
 }
 
 // ============================================================================
+// AgentRuntimeBridge helpers
+// ============================================================================
+
+impl AgentRuntimeBridge {
+    fn spawn_device_epoch_rotation(
+        &self,
+        request: crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest,
+    ) {
+        let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
+            self.agent.authority_id(),
+            self.agent.runtime().effects(),
+            self.agent.runtime().ceremony_tracker().clone(),
+            self.agent.runtime().ceremony_runner().clone(),
+            self.agent.runtime().threshold_signing(),
+            self.agent.runtime().reconfiguration().clone(),
+        );
+        let task_name = format!(
+            "device_epoch_rotation.{}.{}",
+            request.ceremony_id, request.participant_device_id
+        );
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _task_handle = self.agent.runtime().tasks().spawn_local_named(task_name, async move {
+                    if let Err(error) = service.execute_initiator(request).await {
+                        tracing::warn!(error = %error, "device epoch rotation initiator failed");
+                    }
+                });
+            } else {
+                let _task_handle = self.agent.runtime().tasks().spawn_named(task_name, async move {
+                    if let Err(error) = service.execute_initiator(request).await {
+                        tracing::warn!(error = %error, "device epoch rotation initiator failed");
+                    }
+                });
+            }
+        }
+    }
+}
+
+// ============================================================================
 // AuraAgent extension
 // ============================================================================
 
@@ -4380,22 +4224,6 @@ mod tests {
         std::env::remove_var("AURA_HARNESS_MODE");
         std::env::remove_var("AURA_HARNESS_SYNC_ROUNDS");
         std::env::remove_var("AURA_HARNESS_SYNC_BACKOFF_MS");
-    }
-
-    #[test]
-    fn device_key_package_delivery_error_uses_transport_class_without_string_matching() {
-        let device_id = DeviceId::new_from_entropy([73u8; 32]);
-        let error =
-            device_key_package_delivery_error("threshold", device_id, "offline mode transport");
-        let message = error.to_string();
-        assert!(
-            message.contains("Failed to send device threshold key package"),
-            "expected normalized delivery error message, got: {message}"
-        );
-        assert!(
-            !message.contains("is not reachable"),
-            "delivery error should not synthesize reachability text from transport strings: {message}"
-        );
     }
 
     #[tokio::test]

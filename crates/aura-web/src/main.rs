@@ -169,9 +169,9 @@ mod tests {
             .find("async fn run_background_sync_pass(")
             .unwrap_or_else(|| panic!("missing run_background_sync_pass"));
         let helper_end = source[helper_start..]
-            .find("async fn run_ceremony_acceptance_pass(")
+            .find("fn spawn_generation_maintenance_supervisor(")
             .map(|offset| helper_start + offset)
-            .unwrap_or_else(|| panic!("missing run_ceremony_acceptance_pass"));
+            .unwrap_or_else(|| panic!("missing spawn_generation_maintenance_supervisor"));
         let helper = &source[helper_start..helper_end];
 
         assert!(source.contains("async fn yield_browser_maintenance_step("));
@@ -185,18 +185,17 @@ mod tests {
     }
 
     #[test]
-    fn web_ceremony_acceptance_exit_is_structurally_visible() {
+    fn web_generation_maintenance_is_owned_by_browser_loop() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let maintenance_path = repo_root.join("crates/aura-web/src/shell/maintenance.rs");
         let source = std::fs::read_to_string(&maintenance_path).unwrap_or_else(|error| {
             panic!("failed to read {}: {error}", maintenance_path.display())
         });
 
-        assert!(source.contains("async fn run_ceremony_acceptance_pass(agent: Arc<AuraAgent>)"));
-        assert!(source.contains("\"WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED\""));
-        assert!(source.contains("let run_ceremony = agent.is_some() &&"));
-        assert!(source.contains("if run_ceremony {"));
-        assert!(source.contains("run_ceremony_acceptance_pass(agent).await;"));
+        assert!(source.contains("fn spawn_generation_maintenance_supervisor("));
+        assert!(source.contains("if let Some(agent) = agent.clone() {"));
+        assert!(source
+            .contains("run_harness_transport_tick(tick_app_core.clone(), agent.clone()).await;"));
         assert!(source.contains("\"Browser maintenance paused; refresh to resume\""));
         assert!(source.contains("\"WEB_GENERATION_MAINTENANCE_SLEEP_FAILED\""));
     }
