@@ -382,10 +382,8 @@
             gnused
 
             # Kani dependencies
-            # Note: Kani itself must be installed via `cargo install --locked kani-verifier`
-            # and `cargo kani setup` because it requires specific nightly Rust components
-            # that aren't available in nixpkgs. Kani downloads its own CBMC during setup,
-            # so we only need z3 from nixpkgs.
+            # Kani itself is bootstrapped by `just _ensure-kani` into a repo-local tool root.
+            # Keep z3 in the shell because Kani can delegate to it at verification time.
             z3 # SMT solver for Kani
           ];
 
@@ -403,12 +401,11 @@
             echo "  just --list              Show all available tasks"
             echo ""
             echo "Kani Setup (first time only):"
-            echo "  cargo install --locked kani-verifier"
-            echo "  cargo kani setup"
+            echo "  just kani-setup"
             echo ""
             echo "Kani Usage:"
-            echo "  cargo kani                   Run Kani on current crate"
-            echo "  cargo kani --harness <name>  Run specific harness"
+            echo "  just kani                    Run Kani on aura-protocol"
+            echo "  just kani-harness <name>     Run a specific harness"
             echo ""
             export RUST_BACKTRACE=1
             export RUST_LOG=info

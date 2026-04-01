@@ -901,7 +901,7 @@ ci-lean-check-sorry:
 
 # Kani bounded model checking
 ci-kani:
-    cargo kani --package aura-protocol --default-unwind 10 --output-format terse
+    just _run-kani cargo kani --package aura-protocol --default-unwind 10 --output-format terse
 
 # ITF conformance tests
 ci-conformance-itf:
@@ -1463,20 +1463,31 @@ lean-translate jobs="1" crate="all":
 
 # Run Kani verification on a package
 kani package="aura-protocol" unwind="10":
-    just _nix-nightly -- cargo kani --package {{ package }} --default-unwind {{ unwind }}
+    just _nix-nightly -- just _run-kani cargo kani --package {{ package }} --default-unwind {{ unwind }}
 
 # Run a specific Kani harness
 kani-harness harness package="aura-protocol" unwind="10":
-    just _nix-nightly -- cargo kani --package {{ package }} --harness {{ harness }} --default-unwind {{ unwind }}
+    just _nix-nightly -- just _run-kani cargo kani --package {{ package }} --harness {{ harness }} --default-unwind {{ unwind }}
 
 # Setup Kani (first time only)
 kani-setup:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Setting up Kani verifier..."
-    just _nix-nightly -- cargo install --locked kani-verifier
-    just _nix-nightly -- cargo kani setup
-    echo "✓ Kani setup complete! Run 'just kani' to verify."
+    just _nix-nightly -- bash scripts/verify/ensure-kani.sh
+    echo "✓ Kani setup complete at ${AURA_KANI_ROOT:-$PWD/.tmp/kani-root}. Run 'just kani' to verify."
+
+_ensure-kani:
+    bash scripts/verify/ensure-kani.sh
+
+_run-kani *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ROOT="${AURA_KANI_ROOT:-$PWD/.tmp/kani-root}"
+    export KANI_HOME="${AURA_KANI_HOME:-$ROOT/kani-home}"
+    bash scripts/verify/ensure-kani.sh
+    export PATH="$ROOT/bin:$PATH"
+    {{ ARGS }}
 
 # Run full Kani verification suite
 kani-suite:
