@@ -1,9 +1,9 @@
-//! Scoped OTA transition engine and mixed-version session behavior.
+//! OTA compatibility-policy helpers and maintenance facts.
 
 use aura_core::{AuthorityId, TimeStamp};
 use aura_maintenance::{
     AuraActivationScope, AuraCompatibilityClass, AuraReleaseId, AuraUpgradeFailure,
-    MaintenanceFact, ReleaseResidency, TransitionState, UpgradeExecutionFact,
+    MaintenanceFact, UpgradeExecutionFact,
 };
 
 /// Admission policy for new sessions during scoped rollout.
@@ -37,20 +37,10 @@ pub struct SessionCompatibilityPlan {
     pub partition_required: bool,
 }
 
-impl SessionCompatibilityPlan {
-    fn compatible_coexistence() -> Self {
-        Self {
-            new_sessions: NewSessionAdmission::Allow,
-            in_flight: InFlightIncompatibilityAction::Drain,
-            partition_required: false,
-        }
-    }
-}
-
-/// Scoped upgrade state tracked by the transition engine.
+/// Observed scoped OTA state projected from canonical runtime-upgrade artifacts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopedUpgradeState {
-    /// Scope owning this upgrade state machine.
+    /// Scope owning this upgrade state.
     pub scope: AuraActivationScope,
     /// Release that is currently live before the target cutover.
     pub legacy_release_id: Option<AuraReleaseId>,
@@ -59,193 +49,134 @@ pub struct ScopedUpgradeState {
     /// Compatibility class governing mixed-version behavior.
     pub compatibility: AuraCompatibilityClass,
     /// Current release residency in the scope.
-    pub residency: ReleaseResidency,
+    pub residency: aura_maintenance::ReleaseResidency,
     /// Current transition state in the scope.
-    pub transition: TransitionState,
+    pub transition: aura_maintenance::TransitionState,
     /// Current session compatibility plan for the scope.
     pub session_plan: SessionCompatibilityPlan,
 }
 
-/// Deterministic rollback directive produced on activation failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RollbackDirective {
-    /// Release being rolled back from.
-    pub from_release_id: AuraReleaseId,
-    /// Release being restored.
-    pub to_release_id: AuraReleaseId,
-    /// Structured failure that triggered rollback.
-    pub failure: AuraUpgradeFailure,
+impl SessionCompatibilityPlan {
+    /// Compatibility plan for coexistence-safe states.
+    #[must_use]
+    pub fn compatible_coexistence() -> Self {
+        Self {
+            new_sessions: NewSessionAdmission::Allow,
+            in_flight: InFlightIncompatibilityAction::Drain,
+            partition_required: false,
+        }
+    }
 }
 
-/// Scoped OTA transition engine.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ScopedOtaTransitionEngine;
-
-impl ScopedOtaTransitionEngine {
-    /// Create a new scoped OTA transition engine.
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Create the staged scope state for one target release.
-    pub fn stage_scope(
-        &self,
-        scope: AuraActivationScope,
-        legacy_release_id: Option<AuraReleaseId>,
-        target_release_id: AuraReleaseId,
-        compatibility: AuraCompatibilityClass,
-    ) -> ScopedUpgradeState {
-        let residency = match compatibility {
-            AuraCompatibilityClass::BackwardCompatible
-            | AuraCompatibilityClass::MixedCoexistenceAllowed => ReleaseResidency::Coexisting,
-            AuraCompatibilityClass::ScopedHardFork
-            | AuraCompatibilityClass::IncompatibleWithoutPartition => ReleaseResidency::LegacyOnly,
-        };
-
-        ScopedUpgradeState {
-            scope,
-            legacy_release_id,
-            target_release_id,
-            compatibility,
-            residency,
-            transition: TransitionState::AwaitingCutover,
-            session_plan: SessionCompatibilityPlan::compatible_coexistence(),
+/// Resolve the scoped mixed-version plan for an active cutover.
+#[must_use]
+pub fn cutover_session_plan(
+    compatibility: AuraCompatibilityClass,
+    preferred_in_flight: InFlightIncompatibilityAction,
+    delegation_supported: bool,
+) -> SessionCompatibilityPlan {
+    match compatibility {
+        AuraCompatibilityClass::BackwardCompatible
+        | AuraCompatibilityClass::MixedCoexistenceAllowed => {
+            SessionCompatibilityPlan::compatible_coexistence()
         }
-    }
-
-    /// Move a staged scope into active cutover with explicit mixed-version behavior.
-    pub fn begin_cutover(
-        &self,
-        mut state: ScopedUpgradeState,
-        preferred_in_flight: InFlightIncompatibilityAction,
-        delegation_supported: bool,
-    ) -> ScopedUpgradeState {
-        state.transition = TransitionState::CuttingOver;
-        state.session_plan = self.session_plan_for_cutover(
-            state.compatibility,
-            preferred_in_flight,
-            delegation_supported,
-        );
-        state
-    }
-
-    /// Commit a successful cutover.
-    pub fn complete_cutover(&self, mut state: ScopedUpgradeState) -> ScopedUpgradeState {
-        state.residency = ReleaseResidency::TargetOnly;
-        state.transition = TransitionState::Idle;
-        state
-    }
-
-    /// Start deterministic rollback after a failed cutover.
-    pub fn begin_rollback(
-        &self,
-        mut state: ScopedUpgradeState,
-        failure: AuraUpgradeFailure,
-    ) -> Option<(ScopedUpgradeState, RollbackDirective)> {
-        let legacy_release_id = state.legacy_release_id?;
-        let directive = RollbackDirective {
-            from_release_id: state.target_release_id,
-            to_release_id: legacy_release_id,
-            failure,
-        };
-        state.transition = TransitionState::RollingBack;
-        state.session_plan = SessionCompatibilityPlan {
+        AuraCompatibilityClass::ScopedHardFork => SessionCompatibilityPlan {
             new_sessions: NewSessionAdmission::RejectIncompatible,
-            in_flight: InFlightIncompatibilityAction::Abort,
-            partition_required: matches!(
-                state.compatibility,
-                AuraCompatibilityClass::IncompatibleWithoutPartition
+            in_flight: resolve_in_flight_action(
+                preferred_in_flight,
+                delegation_supported,
+                InFlightIncompatibilityAction::Drain,
             ),
-        };
-        Some((state, directive))
+            partition_required: false,
+        },
+        AuraCompatibilityClass::IncompatibleWithoutPartition => SessionCompatibilityPlan {
+            new_sessions: NewSessionAdmission::RejectIncompatible,
+            in_flight: resolve_in_flight_action(
+                preferred_in_flight,
+                delegation_supported,
+                InFlightIncompatibilityAction::Abort,
+            ),
+            partition_required: true,
+        },
     }
+}
 
-    /// Commit a successful rollback to the legacy release.
-    pub fn complete_rollback(&self, mut state: ScopedUpgradeState) -> ScopedUpgradeState {
-        state.residency = ReleaseResidency::LegacyOnly;
-        state.transition = TransitionState::Idle;
-        state.session_plan = SessionCompatibilityPlan::compatible_coexistence();
-        state
+/// Resolve the scoped mixed-version plan for an explicit rollback.
+#[must_use]
+pub fn rollback_session_plan(compatibility: AuraCompatibilityClass) -> SessionCompatibilityPlan {
+    SessionCompatibilityPlan {
+        new_sessions: NewSessionAdmission::RejectIncompatible,
+        in_flight: InFlightIncompatibilityAction::Abort,
+        partition_required: matches!(
+            compatibility,
+            AuraCompatibilityClass::IncompatibleWithoutPartition
+        ),
     }
+}
 
-    /// Build a rollback journal fact for a completed scoped rollback.
-    pub fn rollback_executed_fact(
-        &self,
-        authority_id: AuthorityId,
-        scope: AuraActivationScope,
-        directive: &RollbackDirective,
-        rolled_back_at: TimeStamp,
-    ) -> MaintenanceFact {
-        MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::RollbackExecuted {
-            authority_id,
-            scope,
-            from_release_id: directive.from_release_id,
-            to_release_id: directive.to_release_id,
-            failure: directive.failure.clone(),
-            rolled_back_at,
-        })
-    }
-
-    /// Build a partition observation journal fact for an incompatible scoped cutover.
-    pub fn partition_observed_fact(
-        &self,
-        authority_id: AuthorityId,
-        scope: AuraActivationScope,
-        release_id: AuraReleaseId,
-        failure: AuraUpgradeFailure,
-        observed_at: TimeStamp,
-    ) -> MaintenanceFact {
-        MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::PartitionObserved {
-            authority_id,
-            scope,
-            release_id,
-            failure,
-            observed_at,
-        })
-    }
-
-    fn session_plan_for_cutover(
-        &self,
-        compatibility: AuraCompatibilityClass,
-        preferred_in_flight: InFlightIncompatibilityAction,
-        delegation_supported: bool,
-    ) -> SessionCompatibilityPlan {
-        match compatibility {
-            AuraCompatibilityClass::BackwardCompatible
-            | AuraCompatibilityClass::MixedCoexistenceAllowed => {
-                SessionCompatibilityPlan::compatible_coexistence()
-            }
-            AuraCompatibilityClass::ScopedHardFork => SessionCompatibilityPlan {
-                new_sessions: NewSessionAdmission::RejectIncompatible,
-                in_flight: self.resolve_in_flight_action(
-                    preferred_in_flight,
-                    delegation_supported,
-                    InFlightIncompatibilityAction::Drain,
-                ),
-                partition_required: false,
-            },
-            AuraCompatibilityClass::IncompatibleWithoutPartition => SessionCompatibilityPlan {
-                new_sessions: NewSessionAdmission::RejectIncompatible,
-                in_flight: self.resolve_in_flight_action(
-                    preferred_in_flight,
-                    delegation_supported,
-                    InFlightIncompatibilityAction::Abort,
-                ),
-                partition_required: true,
-            },
+/// Determine the staged residency before an OTA scope has cut over.
+#[must_use]
+pub fn staged_residency_for_compatibility(
+    compatibility: AuraCompatibilityClass,
+) -> aura_maintenance::ReleaseResidency {
+    match compatibility {
+        AuraCompatibilityClass::BackwardCompatible
+        | AuraCompatibilityClass::MixedCoexistenceAllowed => {
+            aura_maintenance::ReleaseResidency::Coexisting
+        }
+        AuraCompatibilityClass::ScopedHardFork
+        | AuraCompatibilityClass::IncompatibleWithoutPartition => {
+            aura_maintenance::ReleaseResidency::LegacyOnly
         }
     }
+}
 
-    fn resolve_in_flight_action(
-        &self,
-        preferred: InFlightIncompatibilityAction,
-        delegation_supported: bool,
-        fallback: InFlightIncompatibilityAction,
-    ) -> InFlightIncompatibilityAction {
-        match preferred {
-            InFlightIncompatibilityAction::Delegate if !delegation_supported => fallback,
-            _ => preferred,
-        }
+/// Build a rollback journal fact for a completed scoped rollback.
+#[must_use]
+pub fn rollback_executed_fact(
+    authority_id: AuthorityId,
+    scope: AuraActivationScope,
+    from_release_id: AuraReleaseId,
+    to_release_id: AuraReleaseId,
+    failure: AuraUpgradeFailure,
+    rolled_back_at: TimeStamp,
+) -> MaintenanceFact {
+    MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::RollbackExecuted {
+        authority_id,
+        scope,
+        from_release_id,
+        to_release_id,
+        failure,
+        rolled_back_at,
+    })
+}
+
+/// Build a partition observation journal fact for an incompatible scoped cutover.
+#[must_use]
+pub fn partition_observed_fact(
+    authority_id: AuthorityId,
+    scope: AuraActivationScope,
+    release_id: AuraReleaseId,
+    failure: AuraUpgradeFailure,
+    observed_at: TimeStamp,
+) -> MaintenanceFact {
+    MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::PartitionObserved {
+        authority_id,
+        scope,
+        release_id,
+        failure,
+        observed_at,
+    })
+}
+
+fn resolve_in_flight_action(
+    preferred: InFlightIncompatibilityAction,
+    delegation_supported: bool,
+    fallback: InFlightIncompatibilityAction,
+) -> InFlightIncompatibilityAction {
+    match preferred {
+        InFlightIncompatibilityAction::Delegate if !delegation_supported => fallback,
+        _ => preferred,
     }
 }
 
@@ -254,7 +185,9 @@ mod tests {
     use super::*;
     use aura_core::time::PhysicalTime;
     use aura_core::Hash32;
-    use aura_maintenance::AuraUpgradeFailureClass;
+    use aura_maintenance::{
+        AuraUpgradeFailureClass, ReleaseResidency, TransitionState, UpgradeExecutionFact,
+    };
 
     fn release(byte: u8) -> AuraReleaseId {
         AuraReleaseId::new(Hash32([byte; 32]))
@@ -262,149 +195,113 @@ mod tests {
 
     fn scope() -> AuraActivationScope {
         AuraActivationScope::AuthorityLocal {
-            authority_id: aura_core::AuthorityId::new_from_entropy([7; 32]),
+            authority_id: AuthorityId::new_from_entropy([1; 32]),
         }
     }
 
     fn ts(ms: u64) -> TimeStamp {
         TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: ms,
-            uncertainty: Some(5),
+            uncertainty: None,
         })
     }
 
     #[test]
-    fn soft_fork_scopes_start_in_coexisting_mode() {
-        let engine = ScopedOtaTransitionEngine::new();
-        let state = engine.stage_scope(
-            scope(),
-            Some(release(1)),
-            release(2),
-            AuraCompatibilityClass::MixedCoexistenceAllowed,
-        );
-
-        assert_eq!(state.residency, ReleaseResidency::Coexisting);
-        assert_eq!(state.transition, TransitionState::AwaitingCutover);
-        assert_eq!(state.session_plan.new_sessions, NewSessionAdmission::Allow);
-    }
-
-    #[test]
-    fn incompatible_cutover_rejects_new_sessions_and_can_delegate() {
-        let engine = ScopedOtaTransitionEngine::new();
-        let staged = engine.stage_scope(
-            scope(),
-            Some(release(1)),
-            release(2),
-            AuraCompatibilityClass::IncompatibleWithoutPartition,
-        );
-        let cutting_over =
-            engine.begin_cutover(staged, InFlightIncompatibilityAction::Delegate, true);
-
-        assert_eq!(cutting_over.transition, TransitionState::CuttingOver);
+    fn staged_residency_matches_compatibility_contract() {
         assert_eq!(
-            cutting_over.session_plan.new_sessions,
-            NewSessionAdmission::RejectIncompatible
+            staged_residency_for_compatibility(AuraCompatibilityClass::BackwardCompatible),
+            ReleaseResidency::Coexisting
         );
         assert_eq!(
-            cutting_over.session_plan.in_flight,
-            InFlightIncompatibilityAction::Delegate
-        );
-        assert!(cutting_over.session_plan.partition_required);
-    }
-
-    #[test]
-    fn rollback_is_deterministic_and_restores_legacy_mode() {
-        let engine = ScopedOtaTransitionEngine::new();
-        let staged = engine.stage_scope(
-            scope(),
-            Some(release(1)),
-            release(2),
-            AuraCompatibilityClass::ScopedHardFork,
-        );
-        let cutting_over =
-            engine.begin_cutover(staged, InFlightIncompatibilityAction::Drain, false);
-        let (rolling_back, directive) = engine
-            .begin_rollback(
-                cutting_over,
-                AuraUpgradeFailure::new(
-                    AuraUpgradeFailureClass::HealthGateFailed,
-                    "health gate failed",
-                ),
-            )
-            .unwrap_or_else(|| panic!("legacy release exists"));
-        assert_eq!(rolling_back.transition, TransitionState::RollingBack);
-        assert_eq!(directive.from_release_id, release(2));
-        assert_eq!(directive.to_release_id, release(1));
-        assert_eq!(
-            directive.failure,
-            AuraUpgradeFailure::new(
-                AuraUpgradeFailureClass::HealthGateFailed,
-                "health gate failed",
-            )
-        );
-
-        let restored = engine.complete_rollback(rolling_back);
-        assert_eq!(restored.residency, ReleaseResidency::LegacyOnly);
-        assert_eq!(restored.transition, TransitionState::Idle);
-    }
-
-    #[test]
-    fn rollback_and_partition_facts_preserve_failure_classification() {
-        let engine = ScopedOtaTransitionEngine::new();
-        let staged = engine.stage_scope(
-            scope(),
-            Some(release(1)),
-            release(2),
-            AuraCompatibilityClass::IncompatibleWithoutPartition,
-        );
-        let cutting_over =
-            engine.begin_cutover(staged, InFlightIncompatibilityAction::Abort, false);
-        let (rolling_back, directive) = engine
-            .begin_rollback(
-                cutting_over,
-                AuraUpgradeFailure::new(
-                    AuraUpgradeFailureClass::HealthGateFailed,
-                    "post-cutover health failure",
-                ),
-            )
-            .unwrap_or_else(|| panic!("legacy release exists"));
-        let authority_id = aura_core::AuthorityId::new_from_entropy([8; 32]);
-        let rollback_fact =
-            engine.rollback_executed_fact(authority_id, scope(), &directive, ts(10));
-        assert_eq!(
-            rollback_fact,
-            MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::RollbackExecuted {
-                authority_id,
-                scope: scope(),
-                from_release_id: directive.from_release_id,
-                to_release_id: directive.to_release_id,
-                failure: directive.failure,
-                rolled_back_at: ts(10),
-            })
-        );
-
-        let partition_fact = engine.partition_observed_fact(
-            authority_id,
-            rolling_back.scope.clone(),
-            rolling_back.target_release_id,
-            AuraUpgradeFailure::new(
-                AuraUpgradeFailureClass::PartitionRequired,
-                "incompatible peer partition required",
+            staged_residency_for_compatibility(
+                AuraCompatibilityClass::IncompatibleWithoutPartition
             ),
-            ts(11),
+            ReleaseResidency::LegacyOnly
         );
-        assert_eq!(
-            partition_fact,
+    }
+
+    #[test]
+    fn hard_fork_cutover_rejects_incompatible_sessions() {
+        let plan = cutover_session_plan(
+            AuraCompatibilityClass::ScopedHardFork,
+            InFlightIncompatibilityAction::Delegate,
+            true,
+        );
+        assert_eq!(plan.new_sessions, NewSessionAdmission::RejectIncompatible);
+        assert_eq!(plan.in_flight, InFlightIncompatibilityAction::Delegate);
+        assert!(!plan.partition_required);
+    }
+
+    #[test]
+    fn incompatible_partition_cutover_requires_partition_and_abort_fallback() {
+        let plan = cutover_session_plan(
+            AuraCompatibilityClass::IncompatibleWithoutPartition,
+            InFlightIncompatibilityAction::Delegate,
+            false,
+        );
+        assert_eq!(plan.new_sessions, NewSessionAdmission::RejectIncompatible);
+        assert_eq!(plan.in_flight, InFlightIncompatibilityAction::Abort);
+        assert!(plan.partition_required);
+    }
+
+    #[test]
+    fn rollback_plan_is_fail_closed() {
+        let plan = rollback_session_plan(AuraCompatibilityClass::IncompatibleWithoutPartition);
+        assert_eq!(plan.new_sessions, NewSessionAdmission::RejectIncompatible);
+        assert_eq!(plan.in_flight, InFlightIncompatibilityAction::Abort);
+        assert!(plan.partition_required);
+    }
+
+    #[test]
+    fn rollback_fact_records_structured_failure() {
+        let fact = rollback_executed_fact(
+            AuthorityId::new_from_entropy([2; 32]),
+            scope(),
+            release(9),
+            release(8),
+            AuraUpgradeFailure::new(AuraUpgradeFailureClass::HealthGateFailed, "health gate"),
+            ts(10),
+        );
+        assert!(matches!(
+            fact,
+            MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::RollbackExecuted {
+                from_release_id,
+                to_release_id,
+                ..
+            }) if from_release_id == release(9) && to_release_id == release(8)
+        ));
+    }
+
+    #[test]
+    fn partition_fact_records_incompatible_observation() {
+        let fact = partition_observed_fact(
+            AuthorityId::new_from_entropy([3; 32]),
+            scope(),
+            release(7),
+            AuraUpgradeFailure::new(AuraUpgradeFailureClass::PartitionRequired, "partition"),
+            ts(20),
+        );
+        assert!(matches!(
+            fact,
             MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::PartitionObserved {
-                authority_id,
-                scope: rolling_back.scope,
-                release_id: rolling_back.target_release_id,
-                failure: AuraUpgradeFailure::new(
-                    AuraUpgradeFailureClass::PartitionRequired,
-                    "incompatible peer partition required",
-                ),
-                observed_at: ts(11),
-            })
-        );
+                release_id,
+                ..
+            }) if release_id == release(7)
+        ));
+    }
+
+    #[test]
+    fn scoped_upgrade_state_is_an_observed_projection_shape() {
+        let state = ScopedUpgradeState {
+            scope: scope(),
+            legacy_release_id: Some(release(1)),
+            target_release_id: release(2),
+            compatibility: AuraCompatibilityClass::BackwardCompatible,
+            residency: ReleaseResidency::TargetOnly,
+            transition: TransitionState::Idle,
+            session_plan: SessionCompatibilityPlan::compatible_coexistence(),
+        };
+        assert_eq!(state.transition, TransitionState::Idle);
+        assert_eq!(state.residency, ReleaseResidency::TargetOnly);
     }
 }

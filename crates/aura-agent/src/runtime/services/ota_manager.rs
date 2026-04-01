@@ -1,17 +1,25 @@
 //! Runtime-owned OTA updater/launcher control plane.
 
+use super::ReconfigurationManager;
 use super::state::with_state_mut_validated;
-use aura_core::AuthorityId;
+use aura_core::{AuthorityId, ComposedBundle, SessionFootprint};
 use aura_maintenance::{
     AuraActivationScope, AuraCompatibilityClass, AuraReleaseId, AuraRollbackPreference,
     AuraUpgradeFailure, ReleaseResidency, TransitionState,
 };
 use aura_sync::services::{
-    InFlightIncompatibilityAction, RollbackDirective, ScopedOtaTransitionEngine,
-    ScopedUpgradeState, SessionCompatibilityPlan,
+    cutover_session_plan, rollback_session_plan, staged_residency_for_compatibility,
+    InFlightIncompatibilityAction, ScopedUpgradeState, SessionCompatibilityPlan,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use tokio::sync::RwLock;
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+use telltale_machine::{
+    CanonicalPublicationContinuity, PendingEffectTreatment, ReconfigurationPlan,
+    ReconfigurationPlanStep, ReconfigurationRuntimeSnapshot, RuntimeUpgradeCompatibility,
+    RuntimeUpgradeExecution, RuntimeUpgradeExecutionConstraint, RuntimeUpgradeRequest,
+};
 
 /// Update status for the agent.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -75,15 +83,38 @@ pub enum LauncherCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActivationIntent {
+    scope: Option<AuraActivationScope>,
     from_release_id: Option<AuraReleaseId>,
     to_release_id: AuraReleaseId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RollbackIntent {
+    scope: Option<AuraActivationScope>,
     from_release_id: AuraReleaseId,
     to_release_id: AuraReleaseId,
     failure: AuraUpgradeFailure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CutoverPolicy {
+    preferred_in_flight: InFlightIncompatibilityAction,
+    delegation_supported: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ScopedUpgradeRecord {
+    scope: AuraActivationScope,
+    legacy_release_id: Option<AuraReleaseId>,
+    target_release_id: AuraReleaseId,
+    compatibility: AuraCompatibilityClass,
+    bundle_id: String,
+    members: Vec<String>,
+    cutover_policy: Option<CutoverPolicy>,
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    cutover_execution: Option<RuntimeUpgradeExecution>,
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    rollback_execution: Option<RuntimeUpgradeExecution>,
 }
 
 #[derive(Debug, Default)]
@@ -91,7 +122,7 @@ struct RollbackIntent {
 struct OtaState {
     status: UpdateStatus,
     staged_releases: BTreeMap<AuraReleaseId, StagedRelease>,
-    scoped_states: BTreeMap<AuraActivationScope, ScopedUpgradeState>,
+    scoped_records: BTreeMap<AuraActivationScope, ScopedUpgradeRecord>,
     managed_quorum_approvals: BTreeMap<AuraActivationScope, BTreeSet<AuthorityId>>,
     launcher_queue: VecDeque<LauncherCommand>,
     active_release: Option<AuraReleaseId>,
@@ -119,10 +150,10 @@ impl OtaState {
             }
         }
 
-        for scoped_state in self.scoped_states.values() {
+        for scoped_record in self.scoped_records.values() {
             if !self
                 .staged_releases
-                .contains_key(&scoped_state.target_release_id)
+                .contains_key(&scoped_record.target_release_id)
             {
                 return Err(super::invariant::InvariantViolation::new(
                     "OtaManager",
@@ -161,14 +192,18 @@ impl OtaState {
     capacity = 32,
     category = "actor_owned"
 )]
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct OtaManager {
     state: RwLock<OtaState>,
+    reconfiguration_manager: ReconfigurationManager,
 }
 
 impl OtaManager {
     pub(crate) fn new() -> Self {
-        Self::default()
+        Self {
+            state: RwLock::new(OtaState::default()),
+            reconfiguration_manager: ReconfigurationManager::new(),
+        }
     }
 
     pub(crate) async fn status(&self) -> UpdateStatus {
@@ -180,7 +215,11 @@ impl OtaManager {
         &self,
         scope: &AuraActivationScope,
     ) -> Option<ScopedUpgradeState> {
-        self.state.read().await.scoped_states.get(scope).cloned()
+        let guard = self.state.read().await;
+        guard
+            .scoped_records
+            .get(scope)
+            .map(|record| self.project_scope_state(&guard, record))
     }
 
     pub(crate) async fn set_status(&self, status: UpdateStatus) {
@@ -211,6 +250,160 @@ impl OtaManager {
         .await;
     }
 
+    fn project_scope_state(
+        &self,
+        state: &OtaState,
+        record: &ScopedUpgradeRecord,
+    ) -> ScopedUpgradeState {
+        let default_cutover_policy = CutoverPolicy {
+            preferred_in_flight: InFlightIncompatibilityAction::Drain,
+            delegation_supported: false,
+        };
+        let cutover_policy = record.cutover_policy.unwrap_or(default_cutover_policy);
+        let transition = self.project_transition(state, &record.scope, record);
+        let residency = self.project_residency(state, record, transition);
+        let session_plan = match transition {
+            TransitionState::AwaitingCutover => SessionCompatibilityPlan::compatible_coexistence(),
+            TransitionState::CuttingOver => cutover_session_plan(
+                record.compatibility,
+                cutover_policy.preferred_in_flight,
+                cutover_policy.delegation_supported,
+            ),
+            TransitionState::RollingBack => rollback_session_plan(record.compatibility),
+            TransitionState::Idle => {
+                if self.scope_has_cutover(record) && !self.scope_has_rollback(record) {
+                    cutover_session_plan(
+                        record.compatibility,
+                        cutover_policy.preferred_in_flight,
+                        cutover_policy.delegation_supported,
+                    )
+                } else {
+                    SessionCompatibilityPlan::compatible_coexistence()
+                }
+            }
+        };
+
+        ScopedUpgradeState {
+            scope: record.scope.clone(),
+            legacy_release_id: record.legacy_release_id,
+            target_release_id: record.target_release_id,
+            compatibility: record.compatibility,
+            residency,
+            transition,
+            session_plan,
+        }
+    }
+
+    fn project_transition(
+        &self,
+        state: &OtaState,
+        scope: &AuraActivationScope,
+        record: &ScopedUpgradeRecord,
+    ) -> TransitionState {
+        if state
+            .pending_rollback
+            .as_ref()
+            .is_some_and(|intent| intent.scope.as_ref() == Some(scope))
+        {
+            TransitionState::RollingBack
+        } else if state
+            .pending_activation
+            .as_ref()
+            .is_some_and(|intent| intent.scope.as_ref() == Some(scope))
+        {
+            TransitionState::CuttingOver
+        } else if !self.scope_has_cutover(record) && !self.scope_has_rollback(record) {
+            TransitionState::AwaitingCutover
+        } else {
+            TransitionState::Idle
+        }
+    }
+
+    fn project_residency(
+        &self,
+        state: &OtaState,
+        record: &ScopedUpgradeRecord,
+        transition: TransitionState,
+    ) -> ReleaseResidency {
+        if matches!(transition, TransitionState::RollingBack) {
+            return staged_residency_for_compatibility(record.compatibility);
+        }
+        if self.scope_has_rollback(record) {
+            return ReleaseResidency::LegacyOnly;
+        }
+        if matches!(transition, TransitionState::CuttingOver) {
+            return staged_residency_for_compatibility(record.compatibility);
+        }
+        if self.scope_has_cutover(record)
+            && state.active_release == Some(record.target_release_id)
+            && state
+                .pending_activation
+                .as_ref()
+                .is_none_or(|intent| intent.to_release_id != record.target_release_id)
+        {
+            return ReleaseResidency::TargetOnly;
+        }
+        staged_residency_for_compatibility(record.compatibility)
+    }
+
+    fn scope_has_cutover(&self, record: &ScopedUpgradeRecord) -> bool {
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        {
+            record.cutover_execution.is_some()
+        }
+        #[cfg(not(feature = "choreo-backend-telltale-machine"))]
+        {
+            false
+        }
+    }
+
+    fn scope_has_rollback(&self, record: &ScopedUpgradeRecord) -> bool {
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        {
+            record.rollback_execution.is_some()
+        }
+        #[cfg(not(feature = "choreo-backend-telltale-machine"))]
+        {
+            false
+        }
+    }
+
+    async fn ensure_runtime_upgrade_bundle(&self, bundle_id: &str) -> Result<(), String> {
+        if self.reconfiguration_manager.bundle(bundle_id).await.is_some() {
+            return Ok(());
+        }
+        self.reconfiguration_manager
+            .register_bundle(ComposedBundle::new(
+                bundle_id.to_string(),
+                Vec::new(),
+                BTreeSet::new(),
+                BTreeSet::new(),
+                SessionFootprint::new(),
+            ))
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    #[allow(dead_code)]
+    pub(crate) async fn scope_runtime_upgrade_snapshot(
+        &self,
+        scope: &AuraActivationScope,
+    ) -> Result<ReconfigurationRuntimeSnapshot, String> {
+        let bundle_id = {
+            let guard = self.state.read().await;
+            guard
+                .scoped_records
+                .get(scope)
+                .map(|record| record.bundle_id.clone())
+                .ok_or_else(|| "scope is not staged for OTA cutover".to_string())?
+        };
+        self.reconfiguration_manager
+            .runtime_upgrade_snapshot(&bundle_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     #[allow(dead_code)] // Used by the upcoming launcher bridge.
     pub(crate) async fn stage_scope_upgrade(
         &self,
@@ -220,13 +413,28 @@ impl OtaManager {
         compatibility: AuraCompatibilityClass,
     ) -> Result<ScopedUpgradeState, String> {
         let version = release.version.clone();
-        let scope_state = ScopedOtaTransitionEngine::new().stage_scope(
-            scope.clone(),
-            legacy_release_id,
-            release.release_id,
-            compatibility,
-        );
+        let bundle_id = scoped_bundle_id(&scope);
+        let members = scope_members(&scope);
+        self.ensure_runtime_upgrade_bundle(&bundle_id).await?;
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        self.reconfiguration_manager
+            .seed_runtime_upgrade_membership(&bundle_id, members.clone())
+            .await
+            .map_err(|error| error.to_string())?;
         let mut guard = self.state.write().await;
+        let record = ScopedUpgradeRecord {
+            scope: scope.clone(),
+            legacy_release_id,
+            target_release_id: release.release_id,
+            compatibility,
+            bundle_id,
+            members,
+            cutover_policy: None,
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            cutover_execution: None,
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            rollback_execution: None,
+        };
         guard
             .launcher_queue
             .push_back(LauncherCommand::Stage(release.clone()));
@@ -236,7 +444,8 @@ impl OtaManager {
                 .managed_quorum_approvals
                 .insert(scope.clone(), BTreeSet::new());
         }
-        guard.scoped_states.insert(scope, scope_state.clone());
+        let scope_state = self.project_scope_state(&guard, &record);
+        guard.scoped_records.insert(scope, record);
         guard.status = UpdateStatus::Ready { version };
         guard.validate().map_err(|v| v.to_string())?;
         Ok(scope_state)
@@ -273,10 +482,9 @@ impl OtaManager {
         preferred_in_flight: InFlightIncompatibilityAction,
         delegation_supported: bool,
     ) -> Result<SessionCompatibilityPlan, String> {
-        let engine = ScopedOtaTransitionEngine::new();
         let mut guard = self.state.write().await;
         let current = guard
-            .scoped_states
+            .scoped_records
             .get(scope)
             .cloned()
             .ok_or_else(|| "scope is not staged for OTA cutover".to_string())?;
@@ -296,9 +504,32 @@ impl OtaManager {
             .get(&current.target_release_id)
             .map(|release| release.version.clone())
             .ok_or_else(|| "cutover target must be staged".to_string())?;
-        let next = engine.begin_cutover(current, preferred_in_flight, delegation_supported);
-        let plan = next.session_plan;
+        let plan = cutover_session_plan(
+            current.compatibility,
+            preferred_in_flight,
+            delegation_supported,
+        );
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        let cutover_execution = self
+            .reconfiguration_manager
+            .execute_runtime_upgrade(
+                &current.bundle_id,
+                &cutover_request(&current, preferred_in_flight, delegation_supported),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut next = current;
+        next.cutover_policy = Some(CutoverPolicy {
+            preferred_in_flight,
+            delegation_supported,
+        });
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        {
+            next.cutover_execution = Some(cutover_execution);
+            next.rollback_execution = None;
+        }
         guard.pending_activation = Some(ActivationIntent {
+            scope: Some(scope.clone()),
             from_release_id: next.legacy_release_id,
             to_release_id: next.target_release_id,
         });
@@ -306,7 +537,7 @@ impl OtaManager {
             from_release_id: next.legacy_release_id,
             to_release_id: next.target_release_id,
         });
-        guard.scoped_states.insert(scope.clone(), next);
+        guard.scoped_records.insert(scope.clone(), next);
         guard.status = UpdateStatus::Installing { version };
         guard.validate().map_err(|v| v.to_string())?;
         Ok(plan)
@@ -317,21 +548,25 @@ impl OtaManager {
         &self,
         scope: &AuraActivationScope,
     ) -> Result<ScopedUpgradeState, String> {
-        let engine = ScopedOtaTransitionEngine::new();
         let mut guard = self.state.write().await;
         let current = guard
-            .scoped_states
+            .scoped_records
             .get(scope)
             .cloned()
             .ok_or_else(|| "scope is not staged for OTA cutover".to_string())?;
-        let next = engine.complete_cutover(current);
-        guard.active_release = Some(next.target_release_id);
-        guard.pending_activation = None;
+        guard.active_release = Some(current.target_release_id);
+        if guard
+            .pending_activation
+            .as_ref()
+            .is_some_and(|intent| intent.scope.as_ref() == Some(scope))
+        {
+            guard.pending_activation = None;
+        }
         guard.pending_rollback = None;
-        guard.scoped_states.insert(scope.clone(), next.clone());
+        guard.scoped_records.insert(scope.clone(), current.clone());
         guard.status = UpdateStatus::UpToDate;
         guard.validate().map_err(|v| v.to_string())?;
-        Ok(next)
+        Ok(self.project_scope_state(&guard, &current))
     }
 
     #[allow(dead_code)] // Used by the upcoming launcher bridge.
@@ -339,37 +574,52 @@ impl OtaManager {
         &self,
         scope: &AuraActivationScope,
         failure: AuraUpgradeFailure,
-    ) -> Result<RollbackDirective, String> {
-        let engine = ScopedOtaTransitionEngine::new();
+    ) -> Result<LauncherCommand, String> {
         let mut guard = self.state.write().await;
         let current = guard
-            .scoped_states
+            .scoped_records
             .get(scope)
             .cloned()
             .ok_or_else(|| "scope is not staged for OTA cutover".to_string())?;
-        let (next, directive) = engine
-            .begin_rollback(current, failure)
+        let rollback_target = current
+            .legacy_release_id
             .ok_or_else(|| "rollback requires a legacy release".to_string())?;
         let version = guard
             .staged_releases
-            .get(&directive.to_release_id)
+            .get(&rollback_target)
             .map(|release| release.version.clone())
             .ok_or_else(|| "rollback target must be staged".to_string())?;
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        let rollback_execution = self
+            .reconfiguration_manager
+            .execute_runtime_upgrade(
+                &current.bundle_id,
+                &rollback_request(&current, rollback_target),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut next = current;
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        {
+            next.rollback_execution = Some(rollback_execution);
+        }
+        let command = LauncherCommand::Rollback {
+            from_release_id: next.target_release_id,
+            to_release_id: rollback_target,
+            failure: failure.clone(),
+        };
         guard.pending_activation = None;
         guard.pending_rollback = Some(RollbackIntent {
-            from_release_id: directive.from_release_id,
-            to_release_id: directive.to_release_id,
-            failure: directive.failure.clone(),
+            scope: Some(scope.clone()),
+            from_release_id: next.target_release_id,
+            to_release_id: rollback_target,
+            failure: failure.clone(),
         });
-        guard.launcher_queue.push_back(LauncherCommand::Rollback {
-            from_release_id: directive.from_release_id,
-            to_release_id: directive.to_release_id,
-            failure: directive.failure.clone(),
-        });
-        guard.scoped_states.insert(scope.clone(), next);
+        guard.launcher_queue.push_back(command.clone());
+        guard.scoped_records.insert(scope.clone(), next);
         guard.status = UpdateStatus::Installing { version };
         guard.validate().map_err(|v| v.to_string())?;
-        Ok(directive)
+        Ok(command)
     }
 
     #[allow(dead_code)] // Used by rollout policy integration.
@@ -378,7 +628,7 @@ impl OtaManager {
         scope: &AuraActivationScope,
         failure: AuraUpgradeFailure,
         rollback_preference: AuraRollbackPreference,
-    ) -> Result<Option<RollbackDirective>, String> {
+    ) -> Result<Option<LauncherCommand>, String> {
         match rollback_preference {
             AuraRollbackPreference::Automatic => {
                 self.fail_scoped_cutover(scope, failure).await.map(Some)
@@ -386,7 +636,7 @@ impl OtaManager {
             AuraRollbackPreference::ManualApproval => {
                 let mut guard = self.state.write().await;
                 let current = guard
-                    .scoped_states
+                    .scoped_records
                     .get(scope)
                     .cloned()
                     .ok_or_else(|| "scope is not staged for OTA cutover".to_string())?;
@@ -395,6 +645,7 @@ impl OtaManager {
                     .ok_or_else(|| "rollback requires a legacy release".to_string())?;
                 guard.pending_activation = None;
                 guard.pending_rollback = Some(RollbackIntent {
+                    scope: Some(scope.clone()),
                     from_release_id: current.target_release_id,
                     to_release_id: rollback_target,
                     failure: failure.clone(),
@@ -415,34 +666,42 @@ impl OtaManager {
         revoked_release_id: AuraReleaseId,
         failure: AuraUpgradeFailure,
         rollback_preference: AuraRollbackPreference,
-    ) -> Result<Option<RollbackDirective>, String> {
+    ) -> Result<Option<LauncherCommand>, String> {
         {
             let mut guard = self.state.write().await;
             let current = guard
-                .scoped_states
+                .scoped_records
                 .get(scope)
                 .cloned()
                 .ok_or_else(|| "scope is not staged for OTA handling".to_string())?;
+            let current_state = self.project_scope_state(&guard, &current);
             if current.target_release_id != revoked_release_id {
                 return Ok(None);
             }
 
-            if current.transition == TransitionState::AwaitingCutover
-                && current.residency != ReleaseResidency::TargetOnly
+            if current_state.transition == TransitionState::AwaitingCutover
+                && current_state.residency != ReleaseResidency::TargetOnly
+                && !self.scope_has_cutover(&current)
             {
-                guard.scoped_states.remove(scope);
+                guard.scoped_records.remove(scope);
                 guard.staged_releases.remove(&revoked_release_id);
                 if guard
                     .pending_activation
                     .as_ref()
-                    .is_some_and(|intent| intent.to_release_id == revoked_release_id)
+                    .is_some_and(|intent| {
+                        intent.to_release_id == revoked_release_id
+                            && intent.scope.as_ref() == Some(scope)
+                    })
                 {
                     guard.pending_activation = None;
                 }
                 if guard
                     .pending_rollback
                     .as_ref()
-                    .is_some_and(|intent| intent.from_release_id == revoked_release_id)
+                    .is_some_and(|intent| {
+                        intent.from_release_id == revoked_release_id
+                            && intent.scope.as_ref() == Some(scope)
+                    })
                 {
                     guard.pending_rollback = None;
                 }
@@ -463,24 +722,28 @@ impl OtaManager {
         &self,
         scope: &AuraActivationScope,
     ) -> Result<ScopedUpgradeState, String> {
-        let engine = ScopedOtaTransitionEngine::new();
         let mut guard = self.state.write().await;
         let current = guard
-            .scoped_states
+            .scoped_records
             .get(scope)
             .cloned()
             .ok_or_else(|| "scope is not rolling back".to_string())?;
         let active_release = current
             .legacy_release_id
             .ok_or_else(|| "rollback requires a legacy release".to_string())?;
-        let next = engine.complete_rollback(current);
         guard.active_release = Some(active_release);
         guard.pending_activation = None;
-        guard.pending_rollback = None;
-        guard.scoped_states.insert(scope.clone(), next.clone());
+        if guard
+            .pending_rollback
+            .as_ref()
+            .is_some_and(|intent| intent.scope.as_ref() == Some(scope))
+        {
+            guard.pending_rollback = None;
+        }
+        guard.scoped_records.insert(scope.clone(), current.clone());
         guard.status = UpdateStatus::UpToDate;
         guard.validate().map_err(|v| v.to_string())?;
-        Ok(next)
+        Ok(self.project_scope_state(&guard, &current))
     }
 
     #[allow(dead_code)] // Used by the upcoming launcher bridge.
@@ -497,6 +760,7 @@ impl OtaManager {
             .ok_or_else(|| "activation target must be staged first".to_string())?;
 
         guard.pending_activation = Some(ActivationIntent {
+            scope: None,
             from_release_id,
             to_release_id,
         });
@@ -538,6 +802,7 @@ impl OtaManager {
             .ok_or_else(|| "rollback target must be staged first".to_string())?;
 
         guard.pending_rollback = Some(RollbackIntent {
+            scope: None,
             from_release_id,
             to_release_id,
             failure: failure.clone(),
@@ -577,6 +842,138 @@ impl OtaManager {
     }
 }
 
+fn scoped_bundle_id(scope: &AuraActivationScope) -> String {
+    match scope {
+        AuraActivationScope::DeviceLocal { device_id } => format!("ota_scope_device_{device_id}"),
+        AuraActivationScope::AuthorityLocal { authority_id } => {
+            format!("ota_scope_authority_{authority_id}")
+        }
+        AuraActivationScope::RelationalContext { context_id } => {
+            format!("ota_scope_context_{context_id}")
+        }
+        AuraActivationScope::Home { home_id } => format!("ota_scope_home_{home_id}"),
+        AuraActivationScope::Neighborhood { neighborhood_id } => {
+            format!("ota_scope_neighborhood_{neighborhood_id}")
+        }
+        AuraActivationScope::ManagedQuorum { context_id, .. } => {
+            format!("ota_scope_managed_quorum_{context_id}")
+        }
+    }
+}
+
+fn scope_members(scope: &AuraActivationScope) -> Vec<String> {
+    let mut members = match scope {
+        AuraActivationScope::DeviceLocal { device_id } => vec![format!("device:{device_id}")],
+        AuraActivationScope::AuthorityLocal { authority_id } => {
+            vec![format!("authority:{authority_id}")]
+        }
+        AuraActivationScope::RelationalContext { context_id } => {
+            vec![format!("context:{context_id}")]
+        }
+        AuraActivationScope::Home { home_id } => vec![format!("home:{home_id}")],
+        AuraActivationScope::Neighborhood { neighborhood_id } => {
+            vec![format!("neighborhood:{neighborhood_id}")]
+        }
+        AuraActivationScope::ManagedQuorum { participants, .. } => participants
+            .iter()
+            .map(|authority_id| format!("authority:{authority_id}"))
+            .collect(),
+    };
+    members.sort();
+    members
+}
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+fn cutover_request(
+    record: &ScopedUpgradeRecord,
+    preferred_in_flight: InFlightIncompatibilityAction,
+    delegation_supported: bool,
+) -> RuntimeUpgradeRequest {
+    let plan = cutover_session_plan(
+        record.compatibility,
+        preferred_in_flight,
+        delegation_supported,
+    );
+    let obligation_id = format!("ota:scope:{}:pending-cutover", record.bundle_id);
+    let (carried_obligation_ids, invalidated_obligation_ids, pending_effect_treatment) =
+        match plan.in_flight {
+            InFlightIncompatibilityAction::Abort => (
+                Vec::new(),
+                vec![obligation_id],
+                PendingEffectTreatment::InvalidateBlocked,
+            ),
+            InFlightIncompatibilityAction::Drain | InFlightIncompatibilityAction::Delegate => (
+                vec![obligation_id],
+                Vec::new(),
+                PendingEffectTreatment::PreservePending,
+            ),
+        };
+
+    RuntimeUpgradeRequest {
+        upgrade_id: format!(
+            "ota/cutover/{}/{:?}",
+            record.bundle_id, record.target_release_id
+        ),
+        plan: ReconfigurationPlan {
+            plan_id: format!("ota-plan/cutover/{}", record.bundle_id),
+            steps: vec![ReconfigurationPlanStep {
+                step_id: "cutover".to_string(),
+                next_members: record.members.clone(),
+                placements: Vec::new(),
+            }],
+        },
+        compatibility: RuntimeUpgradeCompatibility {
+            execution_constraint: RuntimeUpgradeExecutionConstraint::PreserveBundleProfile,
+            ownership_continuity_required: true,
+            pending_effect_treatment,
+            canonical_publication_continuity:
+                CanonicalPublicationContinuity::PreserveCanonicalTruth,
+        },
+        carried_publication_ids: vec![format!(
+            "ota:scope:{}:release:{:?}",
+            record.bundle_id, record.target_release_id
+        )],
+        invalidated_publication_ids: Vec::new(),
+        carried_obligation_ids,
+        invalidated_obligation_ids,
+    }
+}
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+fn rollback_request(
+    record: &ScopedUpgradeRecord,
+    rollback_target: AuraReleaseId,
+) -> RuntimeUpgradeRequest {
+    RuntimeUpgradeRequest {
+        upgrade_id: format!("ota/rollback/{}/{:?}", record.bundle_id, rollback_target),
+        plan: ReconfigurationPlan {
+            plan_id: format!("ota-plan/rollback/{}", record.bundle_id),
+            steps: vec![ReconfigurationPlanStep {
+                step_id: "rollback".to_string(),
+                next_members: record.members.clone(),
+                placements: Vec::new(),
+            }],
+        },
+        compatibility: RuntimeUpgradeCompatibility {
+            execution_constraint: RuntimeUpgradeExecutionConstraint::PreserveBundleProfile,
+            ownership_continuity_required: true,
+            pending_effect_treatment: PendingEffectTreatment::InvalidateBlocked,
+            canonical_publication_continuity:
+                CanonicalPublicationContinuity::PreserveCanonicalTruth,
+        },
+        carried_publication_ids: vec![format!(
+            "ota:scope:{}:release:{:?}",
+            record.bundle_id, rollback_target
+        )],
+        invalidated_publication_ids: Vec::new(),
+        carried_obligation_ids: Vec::new(),
+        invalidated_obligation_ids: vec![format!(
+            "ota:scope:{}:pending-cutover",
+            record.bundle_id
+        )],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,6 +987,9 @@ mod tests {
     use std::collections::BTreeSet;
     use std::fs;
     use std::path::PathBuf;
+    use telltale_machine::{
+        CanonicalPublicationContinuity, PendingEffectTreatment, TransitionArtifactPhase,
+    };
 
     fn release(byte: u8, version: &str) -> StagedRelease {
         StagedRelease {
@@ -974,23 +1374,70 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(rollback.to_release_id, current.release_id);
+        assert!(matches!(
+            rollback,
+            LauncherCommand::Rollback { to_release_id, .. } if to_release_id == current.release_id
+        ));
         assert_eq!(
             manager.next_launcher_command().await,
-            Some(LauncherCommand::Rollback {
-                from_release_id: rollback.from_release_id,
-                to_release_id: rollback.to_release_id,
-                failure: AuraUpgradeFailure::new(
-                    AuraUpgradeFailureClass::HealthGateFailed,
-                    "post-cutover health failure",
-                ),
-            })
+            Some(rollback.clone())
         );
 
         let restored = manager.complete_scoped_rollback(&scope()).await.unwrap();
         assert_eq!(restored.residency, ReleaseResidency::LegacyOnly);
         assert_eq!(restored.transition, TransitionState::Idle);
         assert_eq!(manager.active_release().await, Some(current.release_id));
+    }
+
+    #[tokio::test]
+    async fn scoped_cutover_snapshot_uses_runtime_upgrade_artifacts_as_canonical_record() {
+        let manager = OtaManager::new();
+        let staged = manager
+            .stage_scope_upgrade(
+                scope(),
+                release(21, "21.0.0"),
+                Some(release(1, "1.0.0").release_id),
+                AuraCompatibilityClass::ScopedHardFork,
+            )
+            .await
+            .unwrap();
+        assert_eq!(staged.transition, TransitionState::AwaitingCutover);
+        let _ = manager.next_launcher_command().await;
+
+        manager
+            .begin_scoped_cutover(&scope(), InFlightIncompatibilityAction::Abort, false)
+            .await
+            .unwrap();
+
+        let snapshot = manager.scope_runtime_upgrade_snapshot(&scope()).await.unwrap();
+        assert_eq!(snapshot.runtime_upgrades.len(), 1);
+        let execution = &snapshot.runtime_upgrades[0];
+        assert_eq!(
+            execution
+                .artifacts
+                .iter()
+                .map(|artifact| artifact.phase)
+                .collect::<Vec<_>>(),
+            vec![
+                TransitionArtifactPhase::Staged,
+                TransitionArtifactPhase::Admitted,
+                TransitionArtifactPhase::CommittedCutover,
+            ]
+        );
+        let admitted = &execution.artifacts[1];
+        assert!(admitted.compatibility.ownership_continuity_required);
+        assert_eq!(
+            admitted.compatibility.pending_effect_treatment,
+            PendingEffectTreatment::InvalidateBlocked
+        );
+        assert_eq!(
+            admitted.compatibility.canonical_publication_continuity,
+            CanonicalPublicationContinuity::PreserveCanonicalTruth
+        );
+        assert_eq!(
+            admitted.invalidated_obligation_ids,
+            vec![format!("ota:scope:{}:pending-cutover", scoped_bundle_id(&scope()))]
+        );
     }
 
     #[tokio::test]
@@ -1030,7 +1477,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            rollback.as_ref().map(|d| d.to_release_id),
+            rollback.as_ref().and_then(|command| match command {
+                LauncherCommand::Rollback { to_release_id, .. } => Some(*to_release_id),
+                _ => None,
+            }),
             Some(current.release_id)
         );
         assert_eq!(
@@ -1164,7 +1614,10 @@ mod tests {
             residency: format!("{:?}", quorum_state.residency),
             transition: format!("{:?}", quorum_state.transition),
             partition_required: quorum_plan.partition_required,
-            active_release: Some(format!("{:?}", rollback.to_release_id)),
+            active_release: Some(match rollback {
+                LauncherCommand::Rollback { to_release_id, .. } => format!("{to_release_id:?}"),
+                _ => panic!("expected rollback command"),
+            }),
         });
 
         maybe_write_scoped_ota_artifact(&rows);
