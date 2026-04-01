@@ -4,8 +4,8 @@ use crate::core::default_context_id_for_authority;
 use crate::reconfiguration::{CoherenceStatus, ReconfigurationController, SessionFootprintClass};
 use crate::runtime::{
     AuraDelegationCoherence, AuraDelegationWitness, AuraEffectSystem, AuraLinkBoundary,
-    OwnedVmSession, RuntimeBoundaryError, RuntimeReconfigurationEvent, SessionIngressError,
-    SessionOwnerCapabilityScope,
+    OwnedVmSession, RuntimeBoundaryError, RuntimeReconfigurationEvent, RuntimeSessionOwner,
+    SessionIngressError, SessionOwnerCapabilityScope,
 };
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::time::{ProvenancedTime, TimeStamp};
@@ -23,7 +23,8 @@ use tokio::sync::RwLock;
 
 #[cfg(feature = "choreo-backend-telltale-machine")]
 use telltale_machine::{
-    ReconfigurationRuntimeSnapshot, RuntimeUpgradeExecution, RuntimeUpgradeRequest,
+    OwnershipReceipt, OwnershipScope, ReconfigurationRuntimeSnapshot, RuntimeUpgradeExecution,
+    RuntimeUpgradeRequest,
 };
 
 #[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
@@ -366,6 +367,7 @@ impl ReconfigurationManager {
 
         let previous_owner_label = session.owner().owner_label.clone();
         let previous_boundary = session.routing_boundary().clone();
+        let previous_owner = session.owner().clone();
 
         session
             .transfer_owner_in_place(next_owner_label, next_boundary.clone())
@@ -373,12 +375,24 @@ impl ReconfigurationManager {
                 session_id: transfer.session_id,
                 source,
             })?;
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        let ownership_receipt = build_active_session_ownership_receipt(
+            session.vm_session_id(),
+            &previous_owner,
+            session.owner(),
+        );
 
         let delegation = self
             .delegate_session(effects, transfer.with_link_boundary(next_boundary))
             .await;
         match delegation {
-            Ok(outcome) => Ok(outcome),
+            Ok(mut outcome) => {
+                #[cfg(feature = "choreo-backend-telltale-machine")]
+                {
+                    outcome.witness = outcome.witness.with_ownership_receipt(ownership_receipt);
+                }
+                Ok(outcome)
+            }
             Err(source) => {
                 let rollback =
                     session.transfer_owner_in_place(previous_owner_label, previous_boundary);
@@ -435,7 +449,7 @@ impl ReconfigurationManager {
             .resolve_delegation_boundary(session_id, &bundle_id, link_boundary, &capability_scope)
             .await?;
 
-        let (receipt, runtime_upgrade_execution, controller_snapshot) = {
+        let (receipt, runtime_upgrade_execution, runtime_upgrade_snapshot, controller_snapshot) = {
             let mut controller = self.shared.controller.write().await;
             let controller_snapshot = controller.clone();
             let receipt = controller
@@ -468,7 +482,29 @@ impl ReconfigurationManager {
             };
             #[cfg(not(feature = "choreo-backend-telltale-machine"))]
             let runtime_upgrade_execution = None;
-            (receipt, runtime_upgrade_execution, controller_snapshot)
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            let runtime_upgrade_snapshot = if runtime_upgrade_request.is_some() {
+                match controller.runtime_upgrade_snapshot(&bundle_id) {
+                    Ok(snapshot) => Some(snapshot),
+                    Err(error) => {
+                        *controller = controller_snapshot.clone();
+                        return Err(ReconfigurationManagerError::RuntimeUpgrade {
+                            bundle_id: bundle_id.clone(),
+                            message: error.to_string(),
+                        });
+                    }
+                }
+            } else {
+                None
+            };
+            #[cfg(not(feature = "choreo-backend-telltale-machine"))]
+            let runtime_upgrade_snapshot = None;
+            (
+                receipt,
+                runtime_upgrade_execution,
+                runtime_upgrade_snapshot,
+                controller_snapshot,
+            )
         };
 
         let fact = RelationalFact::Protocol(ProtocolRelationalFact::SessionDelegation(
@@ -505,6 +541,11 @@ impl ReconfigurationManager {
         let witness = {
             let witness = if let Some(request) = runtime_upgrade_request {
                 witness.with_runtime_upgrade_request(request)
+            } else {
+                witness
+            };
+            let witness = if let Some(snapshot) = runtime_upgrade_snapshot {
+                witness.with_runtime_upgrade_snapshot(snapshot)
             } else {
                 witness
             };
@@ -713,6 +754,33 @@ fn default_runtime_capability_handler() -> RuntimeCapabilityHandler {
     }
 }
 
+#[cfg(feature = "choreo-backend-telltale-machine")]
+fn build_active_session_ownership_receipt(
+    vm_session_id: telltale_machine::SessionId,
+    previous_owner: &RuntimeSessionOwner,
+    next_owner: &RuntimeSessionOwner,
+) -> OwnershipReceipt {
+    OwnershipReceipt {
+        session_id: vm_session_id,
+        claim_id: next_owner.capability.generation,
+        from_owner_id: previous_owner.owner_label.clone(),
+        from_generation: previous_owner.capability.generation,
+        to_owner_id: next_owner.owner_label.clone(),
+        to_generation: next_owner.capability.generation,
+        scope: telltale_scope_for_capability_scope(&next_owner.capability.scope),
+    }
+}
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+fn telltale_scope_for_capability_scope(scope: &SessionOwnerCapabilityScope) -> OwnershipScope {
+    match scope {
+        SessionOwnerCapabilityScope::Session => OwnershipScope::Session,
+        SessionOwnerCapabilityScope::Fragments(fragments) => {
+            OwnershipScope::Fragments(fragments.clone())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -855,6 +923,27 @@ mod tests {
             outcome.witness.link_boundary.bundle_id.as_deref(),
             Some(bundle_id.as_str())
         );
+        #[cfg(feature = "choreo-backend-telltale-machine")]
+        {
+            let ownership_receipt = outcome
+                .witness
+                .ownership_receipt
+                .as_ref()
+                .expect("active handoff should publish an ownership receipt");
+            assert_eq!(ownership_receipt.session_id, active_session.vm_session_id());
+            assert_eq!(ownership_receipt.from_owner_id, stale_owner.owner_label);
+            assert_eq!(ownership_receipt.to_owner_id, "delegated-owner");
+            assert_eq!(
+                ownership_receipt.scope,
+                telltale_machine::OwnershipScope::Fragments(StdBTreeSet::from([format!(
+                    "bundle:{bundle_id}"
+                ),]))
+            );
+            assert_eq!(
+                ownership_receipt.to_generation,
+                stale_owner.capability.generation.saturating_add(1)
+            );
+        }
         assert_eq!(manager.verify_coherence().await, CoherenceStatus::Coherent);
         assert!(manager
             .footprint(from_authority)

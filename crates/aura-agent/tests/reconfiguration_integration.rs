@@ -427,6 +427,15 @@ async fn delegation_carries_runtime_upgrade_artifacts_explicitly() {
             .upgrade_id,
         runtime_upgrade_request.upgrade_id
     );
+    assert_eq!(
+        outcome
+            .witness
+            .runtime_upgrade_snapshot
+            .as_ref()
+            .expect("snapshot on witness")
+            .active_members,
+        vec!["member-b".to_string(), "member-c".to_string()]
+    );
     let execution = outcome
         .witness
         .runtime_upgrade_execution

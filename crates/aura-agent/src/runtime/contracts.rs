@@ -6,7 +6,10 @@ use aura_mpst::CompositionManifest;
 use std::collections::BTreeSet;
 
 #[cfg(feature = "choreo-backend-telltale-machine")]
-use telltale_machine::{RuntimeUpgradeExecution, RuntimeUpgradeRequest};
+use telltale_machine::{
+    OwnershipReceipt, ReconfigurationRuntimeSnapshot, RuntimeUpgradeExecution,
+    RuntimeUpgradeRequest,
+};
 
 #[cfg(feature = "choreo-backend-telltale-machine")]
 use super::vm_hardening::{
@@ -289,7 +292,11 @@ pub struct AuraDelegationWitness {
     pub moved_fragment_keys: BTreeSet<String>,
     pub coherence: AuraDelegationCoherence,
     #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub ownership_receipt: Option<OwnershipReceipt>,
+    #[cfg(feature = "choreo-backend-telltale-machine")]
     pub runtime_upgrade_request: Option<RuntimeUpgradeRequest>,
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub runtime_upgrade_snapshot: Option<ReconfigurationRuntimeSnapshot>,
     #[cfg(feature = "choreo-backend-telltale-machine")]
     pub runtime_upgrade_execution: Option<RuntimeUpgradeExecution>,
 }
@@ -316,7 +323,11 @@ impl AuraDelegationWitness {
             moved_fragment_keys,
             coherence: AuraDelegationCoherence::Pending,
             #[cfg(feature = "choreo-backend-telltale-machine")]
+            ownership_receipt: None,
+            #[cfg(feature = "choreo-backend-telltale-machine")]
             runtime_upgrade_request: None,
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            runtime_upgrade_snapshot: None,
             #[cfg(feature = "choreo-backend-telltale-machine")]
             runtime_upgrade_execution: None,
         }
@@ -333,6 +344,21 @@ impl AuraDelegationWitness {
         runtime_upgrade_request: RuntimeUpgradeRequest,
     ) -> Self {
         self.runtime_upgrade_request = Some(runtime_upgrade_request);
+        self
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub fn with_ownership_receipt(mut self, ownership_receipt: OwnershipReceipt) -> Self {
+        self.ownership_receipt = Some(ownership_receipt);
+        self
+    }
+
+    #[cfg(feature = "choreo-backend-telltale-machine")]
+    pub fn with_runtime_upgrade_snapshot(
+        mut self,
+        runtime_upgrade_snapshot: ReconfigurationRuntimeSnapshot,
+    ) -> Self {
+        self.runtime_upgrade_snapshot = Some(runtime_upgrade_snapshot);
         self
     }
 
@@ -445,7 +471,9 @@ mod tests {
         assert_eq!(witness.moved_fragment_keys, boundary.fragment_keys);
         #[cfg(feature = "choreo-backend-telltale-machine")]
         {
+            assert!(witness.ownership_receipt.is_none());
             assert!(witness.runtime_upgrade_request.is_none());
+            assert!(witness.runtime_upgrade_snapshot.is_none());
             assert!(witness.runtime_upgrade_execution.is_none());
         }
     }

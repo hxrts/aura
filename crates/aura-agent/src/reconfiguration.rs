@@ -70,14 +70,7 @@ pub(crate) struct ReconfigurationController {
     footprints: HashMap<AuthorityId, SessionFootprint>,
     delegation_log: Vec<DelegationReceipt>,
     #[cfg(feature = "choreo-backend-telltale-machine")]
-    runtime_upgrade_state: HashMap<String, BundleRuntimeUpgradeState>,
-}
-
-#[cfg(feature = "choreo-backend-telltale-machine")]
-#[derive(Debug, Clone, Default)]
-struct BundleRuntimeUpgradeState {
-    active_members: BTreeSet<String>,
-    runtime_upgrades: Vec<RuntimeUpgradeExecution>,
+    runtime_upgrade_snapshots: HashMap<String, ReconfigurationRuntimeSnapshot>,
 }
 
 impl ReconfigurationController {
@@ -98,9 +91,9 @@ impl ReconfigurationController {
             });
         }
         #[cfg(feature = "choreo-backend-telltale-machine")]
-        self.runtime_upgrade_state
+        self.runtime_upgrade_snapshots
             .entry(bundle.bundle_id.clone())
-            .or_default();
+            .or_insert_with(empty_runtime_upgrade_snapshot);
         self.bundles.insert(bundle.bundle_id.clone(), bundle);
         Ok(())
     }
@@ -324,7 +317,7 @@ impl ReconfigurationController {
             footprints: self.footprints.clone(),
             delegation_log: Vec::new(),
             #[cfg(feature = "choreo-backend-telltale-machine")]
-            runtime_upgrade_state: self.runtime_upgrade_state.clone(),
+            runtime_upgrade_snapshots: self.runtime_upgrade_snapshots.clone(),
         }
     }
 
@@ -339,16 +332,19 @@ impl ReconfigurationController {
         S: Into<String>,
     {
         self.ensure_bundle_registered(bundle_id)?;
-        let active_members: BTreeSet<String> = members.into_iter().map(Into::into).collect();
+        let active_members = canonical_member_list(members);
         if active_members.is_empty() {
             return Err(Self::invalid_runtime_upgrade(
                 bundle_id,
                 "active membership may not be empty",
             ));
         }
-        let state = self.runtime_upgrade_state_mut(bundle_id)?;
-        state.active_members = active_members;
-        state.runtime_upgrades.clear();
+        let snapshot = self.runtime_upgrade_snapshot_mut(bundle_id)?;
+        snapshot.epoch = 0;
+        snapshot.active_members = active_members;
+        snapshot.history.clear();
+        snapshot.plan_executions.clear();
+        snapshot.runtime_upgrades.clear();
         Ok(())
     }
 
@@ -358,20 +354,14 @@ impl ReconfigurationController {
         bundle_id: &str,
     ) -> Result<ReconfigurationRuntimeSnapshot, ReconfigurationError> {
         self.ensure_bundle_registered(bundle_id)?;
-        let state = self.runtime_upgrade_state(bundle_id)?;
-        if state.active_members.is_empty() {
+        let snapshot = self.runtime_upgrade_snapshot_ref(bundle_id)?;
+        if snapshot.active_members.is_empty() {
             return Err(Self::invalid_runtime_upgrade(
                 bundle_id,
                 "active membership must be seeded before exporting a runtime-upgrade snapshot",
             ));
         }
-        Ok(ReconfigurationRuntimeSnapshot {
-            epoch: state.runtime_upgrades.len() as u64,
-            active_members: state.active_members.iter().cloned().collect(),
-            history: Vec::new(),
-            plan_executions: Vec::new(),
-            runtime_upgrades: state.runtime_upgrades.clone(),
-        })
+        Ok(snapshot.clone())
     }
 
     #[cfg(feature = "choreo-backend-telltale-machine")]
@@ -381,20 +371,21 @@ impl ReconfigurationController {
         request: &RuntimeUpgradeRequest,
     ) -> Result<RuntimeUpgradeExecution, ReconfigurationError> {
         self.ensure_bundle_registered(bundle_id)?;
-        let state = self.runtime_upgrade_state_mut(bundle_id)?;
-        if state.active_members.is_empty() {
+        let snapshot = self.runtime_upgrade_snapshot_mut(bundle_id)?;
+        if snapshot.active_members.is_empty() {
             return Err(Self::invalid_runtime_upgrade(
                 bundle_id,
                 "active membership must be seeded before executing a runtime upgrade",
             ));
         }
 
-        let initial_members = state.active_members.iter().cloned().collect::<Vec<_>>();
+        let active_members: BTreeSet<String> = snapshot.active_members.iter().cloned().collect();
+        let initial_members = snapshot.active_members.clone();
         let next_members = request
             .plan
             .steps
             .last()
-            .map(|step| step.next_members.clone())
+            .map(|step| canonical_member_list(step.next_members.iter().cloned()))
             .unwrap_or_default();
         let staged = runtime_upgrade_artifact(
             request,
@@ -404,9 +395,7 @@ impl ReconfigurationController {
             None,
         );
 
-        if let Err(error) =
-            validate_runtime_upgrade_request(bundle_id, &state.active_members, request)
-        {
+        if let Err(error) = validate_runtime_upgrade_request(bundle_id, &active_members, request) {
             let execution = RuntimeUpgradeExecution {
                 artifact_id: bundle_id.to_string(),
                 upgrade_id: request.upgrade_id.clone(),
@@ -422,7 +411,8 @@ impl ReconfigurationController {
                     ),
                 ],
             };
-            state.runtime_upgrades.push(execution);
+            snapshot.runtime_upgrades.push(execution);
+            snapshot.epoch = snapshot.runtime_upgrades.len() as u64;
             return Err(error);
         }
 
@@ -433,11 +423,11 @@ impl ReconfigurationController {
             next_members.clone(),
             None,
         );
-        state.active_members = next_members.iter().cloned().collect();
+        snapshot.active_members = next_members.clone();
         let execution = RuntimeUpgradeExecution {
             artifact_id: bundle_id.to_string(),
             upgrade_id: request.upgrade_id.clone(),
-            final_members: state.active_members.iter().cloned().collect(),
+            final_members: snapshot.active_members.clone(),
             artifacts: vec![
                 staged,
                 admitted,
@@ -450,7 +440,8 @@ impl ReconfigurationController {
                 ),
             ],
         };
-        state.runtime_upgrades.push(execution.clone());
+        snapshot.runtime_upgrades.push(execution.clone());
+        snapshot.epoch = snapshot.runtime_upgrades.len() as u64;
         Ok(execution)
     }
 
@@ -466,23 +457,23 @@ impl ReconfigurationController {
     }
 
     #[cfg(feature = "choreo-backend-telltale-machine")]
-    fn runtime_upgrade_state(
+    fn runtime_upgrade_snapshot_ref(
         &self,
         bundle_id: &str,
-    ) -> Result<&BundleRuntimeUpgradeState, ReconfigurationError> {
-        self.runtime_upgrade_state.get(bundle_id).ok_or_else(|| {
-            ReconfigurationError::BundleNotFound {
+    ) -> Result<&ReconfigurationRuntimeSnapshot, ReconfigurationError> {
+        self.runtime_upgrade_snapshots
+            .get(bundle_id)
+            .ok_or_else(|| ReconfigurationError::BundleNotFound {
                 bundle_id: bundle_id.to_string(),
-            }
-        })
+            })
     }
 
     #[cfg(feature = "choreo-backend-telltale-machine")]
-    fn runtime_upgrade_state_mut(
+    fn runtime_upgrade_snapshot_mut(
         &mut self,
         bundle_id: &str,
-    ) -> Result<&mut BundleRuntimeUpgradeState, ReconfigurationError> {
-        self.runtime_upgrade_state
+    ) -> Result<&mut ReconfigurationRuntimeSnapshot, ReconfigurationError> {
+        self.runtime_upgrade_snapshots
             .get_mut(bundle_id)
             .ok_or_else(|| ReconfigurationError::BundleNotFound {
                 bundle_id: bundle_id.to_string(),
@@ -496,6 +487,31 @@ impl ReconfigurationController {
             reason: reason.into(),
         }
     }
+}
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+fn empty_runtime_upgrade_snapshot() -> ReconfigurationRuntimeSnapshot {
+    ReconfigurationRuntimeSnapshot {
+        epoch: 0,
+        active_members: Vec::new(),
+        history: Vec::new(),
+        plan_executions: Vec::new(),
+        runtime_upgrades: Vec::new(),
+    }
+}
+
+#[cfg(feature = "choreo-backend-telltale-machine")]
+fn canonical_member_list<I, S>(members: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    members
+        .into_iter()
+        .map(Into::into)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 #[cfg(feature = "choreo-backend-telltale-machine")]
