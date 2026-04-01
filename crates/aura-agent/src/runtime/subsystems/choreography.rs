@@ -134,6 +134,15 @@ pub enum SessionOwnershipError {
         expected_owner: String,
         current_generation: u64,
     },
+    /// The caller's capability was issued for a different session.
+    #[error(
+        "runtime session {session_id} rejected capability for owner {expected_owner}; capability was issued for session {capability_session_id}"
+    )]
+    CapabilitySessionMismatch {
+        session_id: RuntimeChoreographySessionId,
+        expected_owner: String,
+        capability_session_id: RuntimeChoreographySessionId,
+    },
 }
 
 /// Typed reasons why a runtime choreography session start was rejected.
@@ -528,6 +537,14 @@ impl ChoreographyState {
             });
         }
 
+        if expected_capability.session_id != session_id {
+            return Err(SessionOwnershipError::CapabilitySessionMismatch {
+                session_id,
+                expected_owner: expected_capability.owner_label.clone(),
+                capability_session_id: expected_capability.session_id,
+            });
+        }
+
         if owner.capability.generation != expected_capability.generation
             || owner.capability.scope != expected_capability.scope
         {
@@ -787,6 +804,51 @@ mod tests {
                 | Err(SessionOwnershipError::CapabilityMismatch { .. })
         ));
         assert!(state.ensure_session_owner(session_id, &transferred).is_ok());
+    }
+
+    #[test]
+    fn cross_session_forged_capability_is_rejected() {
+        let authority_id = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
+        let role = ChoreographicRole::new(
+            authority_id,
+            AuthorityId::new_from_entropy([6u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
+        let session_a = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(51));
+        let session_b = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(52));
+        let context_a = ContextId::new_from_entropy([14; 32]);
+        let context_b = ContextId::new_from_entropy([15; 32]);
+        let mut state = ChoreographyState::new();
+
+        state
+            .start_session(session_a, context_a, vec![role], role, Some(1000), 0)
+            .expect("session a starts");
+        state.task_bindings.clear();
+        state
+            .start_session(session_b, context_b, vec![role], role, Some(1000), 1)
+            .expect("session b starts");
+
+        let capability_a = state
+            .claim_session_owner(session_a, "owner-a")
+            .expect("owner claims session a");
+        let capability_b = state
+            .claim_session_owner(session_b, "owner-a")
+            .expect("owner claims session b");
+
+        assert_eq!(capability_a.generation, capability_b.generation);
+
+        let forged = SessionOwnerCapability {
+            session_id: session_a,
+            owner_label: capability_b.owner_label.clone(),
+            generation: capability_b.generation,
+            scope: capability_b.scope.clone(),
+        };
+
+        assert!(matches!(
+            state.ensure_session_owner(session_b, &forged),
+            Err(SessionOwnershipError::CapabilitySessionMismatch { .. })
+        ));
+        assert!(state.ensure_session_owner(session_b, &capability_b).is_ok());
     }
 
     #[test]

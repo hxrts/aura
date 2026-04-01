@@ -11,8 +11,7 @@ const BREAKING_CURRENT_PATH: &str = "../fixtures/protocol_compat/breaking_curren
 
 const BASELINE: &str = include_str!("../fixtures/protocol_compat/compatible_baseline.tell");
 const CURRENT: &str = include_str!("../fixtures/protocol_compat/compatible_current.tell");
-const BREAKING_BASELINE: &str =
-    include_str!("../fixtures/protocol_compat/breaking_baseline.tell");
+const BREAKING_BASELINE: &str = include_str!("../fixtures/protocol_compat/breaking_baseline.tell");
 const BREAKING_CURRENT: &str = include_str!("../fixtures/protocol_compat/breaking_current.tell");
 
 #[test]

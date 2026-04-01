@@ -94,6 +94,20 @@ const CONTRACT_BUNDLES: &[ContractBundleSpec] = &[
         ],
         min_observable_events: 10,
     },
+    ContractBundleSpec {
+        id: "strict_fail_closed_runtime",
+        build: strict_fail_closed_runtime_global,
+        required_labels: &[
+            "issue_receipt",
+            "reject_forged_receipt",
+            "issue_owner_capability",
+            "reject_forged_authority",
+            "issue_timeout_witness",
+            "expire_timeout_witness",
+            "commit_rejection",
+        ],
+        min_observable_events: 12,
+    },
 ];
 
 const CONTRACT_SEEDS: &[u64] = &[1, 7, 42];
@@ -395,6 +409,55 @@ fn reconfiguration_relay_delegation_global(seed: u64) -> GlobalType {
         Label::new("link_bundle"),
         relay_rounds(rounds),
     )
+}
+
+fn strict_fail_closed_runtime_global(seed: u64) -> GlobalType {
+    let rounds = (seed as usize % 2) + 1;
+
+    fn rejection_rounds(n: usize) -> GlobalType {
+        if n == 0 {
+            return GlobalType::send(
+                "Runtime",
+                "Audit",
+                Label::new("commit_rejection"),
+                GlobalType::End,
+            );
+        }
+
+        GlobalType::send(
+            "Runtime",
+            "Transport",
+            Label::new("issue_receipt"),
+            GlobalType::send(
+                "Transport",
+                "Runtime",
+                Label::new("reject_forged_receipt"),
+                GlobalType::send(
+                    "Runtime",
+                    "OwnerRegistry",
+                    Label::new("issue_owner_capability"),
+                    GlobalType::send(
+                        "OwnerRegistry",
+                        "Runtime",
+                        Label::new("reject_forged_authority"),
+                        GlobalType::send(
+                            "Runtime",
+                            "Timer",
+                            Label::new("issue_timeout_witness"),
+                            GlobalType::send(
+                                "Timer",
+                                "Runtime",
+                                Label::new("expire_timeout_witness"),
+                                rejection_rounds(n - 1),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    rejection_rounds(rounds)
 }
 
 #[derive(Debug, Default)]

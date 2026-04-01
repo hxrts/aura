@@ -9,19 +9,19 @@ use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects
 #[cfg(feature = "telltale-runtime-capability")]
 use telltale_machine::capabilities::protocol_critical_capability_boundary;
 
-#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+#[cfg(not(feature = "telltale-runtime-capability"))]
 const PROTOCOL_SURFACE_RUNTIME_ADMISSION: &str = "runtime_admission";
-#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+#[cfg(not(feature = "telltale-runtime-capability"))]
 const PROTOCOL_SURFACE_THEOREM_PACK_CAPABILITIES: &str = "theorem_pack_capabilities";
 #[cfg(any(test, not(feature = "telltale-runtime-capability")))]
 const PROTOCOL_SURFACE_OWNERSHIP_CAPABILITY: &str = "ownership_capability";
-#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+#[cfg(not(feature = "telltale-runtime-capability"))]
 const PROTOCOL_SURFACE_READINESS_WITNESS: &str = "readiness_witness";
-#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+#[cfg(not(feature = "telltale-runtime-capability"))]
 const PROTOCOL_SURFACE_AUTHORITATIVE_READ: &str = "authoritative_read";
-#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+#[cfg(not(feature = "telltale-runtime-capability"))]
 const PROTOCOL_SURFACE_MATERIALIZATION_PROOF: &str = "materialization_proof";
-#[cfg(any(test, not(feature = "telltale-runtime-capability")))]
+#[cfg(not(feature = "telltale-runtime-capability"))]
 const PROTOCOL_SURFACE_CANONICAL_HANDLE: &str = "canonical_handle";
 const PROTOCOL_SURFACE_OWNERSHIP_RECEIPT: &str = "ownership_receipt";
 const PROTOCOL_SURFACE_SEMANTIC_HANDOFF: &str = "semantic_handoff";
@@ -40,9 +40,9 @@ impl RuntimeCapabilityHandler {
         let inventory = snapshot.into_iter().collect::<BTreeMap<_, _>>();
         Self {
             inventory: Arc::new(inventory),
-            protocol_critical_surfaces: Arc::new(protocol_surface_inventory_from_aura_capabilities(
-                &BTreeMap::new(),
-            )),
+            protocol_critical_surfaces: Arc::new(
+                protocol_surface_inventory_from_aura_capabilities(&BTreeMap::new()),
+            ),
         }
     }
 
@@ -55,9 +55,9 @@ impl RuntimeCapabilityHandler {
             .map(|(key, admitted)| (key.into(), admitted))
             .collect::<BTreeMap<_, _>>();
         Self {
-            protocol_critical_surfaces: Arc::new(protocol_surface_inventory_from_aura_capabilities(
-                &inventory,
-            )),
+            protocol_critical_surfaces: Arc::new(
+                protocol_surface_inventory_from_aura_capabilities(&inventory),
+            ),
             inventory: Arc::new(inventory),
         }
     }
@@ -107,7 +107,8 @@ impl RuntimeCapabilityHandler {
                 .into_iter()
                 .map(|(key, admitted)| (CapabilityKey::new(key), admitted))
                 .collect::<BTreeMap<_, _>>();
-        let protocol_critical_surfaces = protocol_surface_inventory_from_runtime_contracts(contracts);
+        let protocol_critical_surfaces =
+            protocol_surface_inventory_from_runtime_contracts(contracts);
 
         inventory.insert(
             CapabilityKey::new("byzantine_envelope"),
@@ -166,14 +167,16 @@ fn protocol_surface_inventory_from_runtime_contracts(
     let reconfiguration_enabled = contracts
         .capabilities
         .contains(&telltale_machine::runtime_contracts::RuntimeCapability::LiveMigration)
-        && contracts.capabilities.contains(
-            &telltale_machine::runtime_contracts::RuntimeCapability::PlacementRefinement,
-        );
+        && contracts
+            .capabilities
+            .contains(&telltale_machine::runtime_contracts::RuntimeCapability::PlacementRefinement);
     protocol_surface_inventory_from_boundary(reconfiguration_enabled)
 }
 
 #[cfg(feature = "telltale-runtime-capability")]
-fn protocol_surface_inventory_from_boundary(reconfiguration_enabled: bool) -> BTreeMap<String, bool> {
+fn protocol_surface_inventory_from_boundary(
+    reconfiguration_enabled: bool,
+) -> BTreeMap<String, bool> {
     protocol_critical_capability_boundary()
         .into_iter()
         .map(|entry| {
@@ -316,8 +319,8 @@ mod tests {
     #[test]
     fn missing_public_protocol_surface_is_rejected() {
         let handler = RuntimeCapabilityHandler::from_pairs([("reconfiguration", false)]);
-        let result =
-            handler.require_protocol_critical_surfaces(&[PROTOCOL_SURFACE_RECONFIGURATION_TRANSITION]);
+        let result = handler
+            .require_protocol_critical_surfaces(&[PROTOCOL_SURFACE_RECONFIGURATION_TRANSITION]);
         assert!(matches!(
             result,
             Err(AdmissionError::MissingCapability { capability })

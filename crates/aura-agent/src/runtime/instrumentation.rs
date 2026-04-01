@@ -70,14 +70,12 @@ impl RuntimeShutdownEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeReconfigurationEvent {
-    SourceFootprintBackfilled,
     DelegationPersisted,
 }
 
 impl RuntimeReconfigurationEvent {
     pub const fn as_event_name(self) -> &'static str {
         match self {
-            Self::SourceFootprintBackfilled => "runtime.reconfiguration.source_backfilled",
             Self::DelegationPersisted => "runtime.reconfiguration.delegation.persisted",
         }
     }

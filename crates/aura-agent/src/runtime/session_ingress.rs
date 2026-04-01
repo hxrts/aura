@@ -153,6 +153,19 @@ impl From<SessionOwnershipError> for SessionIngressError {
                     ),
                 },
             },
+            SessionOwnershipError::CapabilitySessionMismatch {
+                session_id,
+                expected_owner,
+                capability_session_id,
+            } => SessionIngressError::InvalidIngressRouting {
+                session_id,
+                owner_label: expected_owner,
+                details: RuntimeBoundaryError::CapabilityRejected {
+                    details: format!(
+                        "session capability was issued for {capability_session_id}, not {session_id}"
+                    ),
+                },
+            },
             SessionOwnershipError::OwnerConflict {
                 session_id,
                 existing_owner,
@@ -1033,6 +1046,54 @@ mod tests {
             ),
             "stale capability generation must be rejected even if the owner label is unchanged"
         );
+    }
+
+    #[tokio::test]
+    async fn forged_cross_session_owner_capability_is_rejected() {
+        let authority = test_authority(0x79);
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority)
+                .expect("test effect system");
+        let roles = vec![ChoreographicRole::for_authority(
+            authority,
+            RoleIndex::new(0).expect("role index"),
+        )];
+        let session_a = Uuid::from_bytes([0x8a; 16]);
+        let session_b = Uuid::from_bytes([0x8b; 16]);
+        let owner_a = effects
+            .start_owned_choreography_session("owner-a", session_a, roles.clone())
+            .await
+            .expect("start session a");
+        effects
+            .end_owned_choreography_session(&owner_a)
+            .await
+            .expect("close session a");
+
+        let owner_b = effects
+            .start_owned_choreography_session("owner-a", session_b, roles)
+            .await
+            .expect("start session b");
+        let forged = RuntimeSessionOwner {
+            session_id: owner_b.session_id,
+            owner_label: owner_b.owner_label.clone(),
+            capability: owner_a.capability.clone(),
+        };
+
+        assert!(
+            matches!(
+                effects.assert_owned_choreography_session(&forged),
+                Err(SessionIngressError::InvalidIngressRouting { .. })
+            ),
+            "cross-session forged authority artifacts must fail closed"
+        );
+        effects
+            .assert_owned_choreography_session(&owner_b)
+            .expect("canonical capability should still be accepted");
+
+        effects
+            .end_owned_choreography_session(&owner_b)
+            .await
+            .expect("close session b");
     }
 
     #[tokio::test]

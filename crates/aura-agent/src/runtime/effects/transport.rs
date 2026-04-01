@@ -1,8 +1,10 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::effects::transport::{TransportEnvelope, TransportStats};
-use aura_core::effects::{TransportEffects, TransportError};
+use aura_core::effects::transport::{
+    TransportEnvelope, TransportError, TransportStats, MAX_TRANSPORT_SIGNATURE_BYTES,
+};
+use aura_core::effects::TransportEffects;
 use aura_core::service::{LinkEndpoint, LinkProtocol, Route};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
@@ -155,6 +157,7 @@ impl TransportEffects for AuraEffectSystem {
 
         match maybe {
             Some(env) => {
+                validate_inbound_transport_receipt(&env)?;
                 self.transport.record_receive();
                 Ok(env)
             }
@@ -196,6 +199,7 @@ impl TransportEffects for AuraEffectSystem {
 
         match maybe {
             Some(env) => {
+                validate_inbound_transport_receipt(&env)?;
                 self.transport.record_receive();
                 Ok(env)
             }
@@ -294,6 +298,40 @@ fn fallback_direct_route(envelope: &TransportEnvelope) -> Route {
         LinkProtocol::Tcp,
         format!("runtime://{}", envelope.destination),
     ))
+}
+
+fn validate_inbound_transport_receipt(envelope: &TransportEnvelope) -> Result<(), TransportError> {
+    let Some(receipt) = envelope.receipt.as_ref() else {
+        return Ok(());
+    };
+
+    if receipt.context != envelope.context {
+        return Err(TransportError::ReceiptValidationFailed {
+            reason: "receipt context does not match envelope context".to_string(),
+        });
+    }
+    if receipt.src != envelope.source {
+        return Err(TransportError::ReceiptValidationFailed {
+            reason: "receipt source does not match envelope source".to_string(),
+        });
+    }
+    if receipt.dst != envelope.destination {
+        return Err(TransportError::ReceiptValidationFailed {
+            reason: "receipt destination does not match envelope destination".to_string(),
+        });
+    }
+    if receipt.sig.is_empty() {
+        return Err(TransportError::ReceiptValidationFailed {
+            reason: "receipt signature is missing".to_string(),
+        });
+    }
+    if receipt.sig.len() > MAX_TRANSPORT_SIGNATURE_BYTES {
+        return Err(TransportError::ReceiptValidationFailed {
+            reason: "receipt signature exceeds transport bound".to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 fn route_destination_addr(endpoint: &LinkEndpoint) -> Option<String> {
@@ -853,5 +891,55 @@ mod tests {
         let projection = move_manager.projection().await;
         assert_eq!(projection.queued_envelopes, 0);
         assert_eq!(projection.replay_window_entries, 0);
+    }
+
+    #[tokio::test]
+    async fn receive_envelope_rejects_receipt_binding_mismatch() {
+        let config = AgentConfig::default();
+        let sender = AuthorityId::new_from_entropy([230u8; 32]);
+        let receiver = AuthorityId::new_from_entropy([231u8; 32]);
+        let context = ContextId::new_from_entropy([232u8; 32]);
+
+        let shared = crate::runtime::SharedTransport::new();
+        let sender_effects =
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender,
+                shared.clone(),
+            )
+            .unwrap();
+        let receiver_effects =
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config, receiver, shared,
+            )
+            .unwrap();
+
+        let envelope = TransportEnvelope {
+            destination: receiver,
+            source: sender,
+            context,
+            payload: vec![1, 2, 3],
+            metadata: HashMap::new(),
+            receipt: Some(aura_core::effects::transport::TransportReceipt {
+                context: ContextId::new_from_entropy([233u8; 32]),
+                src: sender,
+                dst: receiver,
+                epoch: 1,
+                cost: 1,
+                nonce: 7,
+                prev: [0u8; 32],
+                sig: vec![0xAA],
+            }),
+        };
+
+        sender_effects.send_envelope(envelope).await.unwrap();
+        let error = receiver_effects
+            .receive_envelope()
+            .await
+            .expect_err("receipt binding mismatch must fail closed");
+        assert!(matches!(
+            error,
+            TransportError::ReceiptValidationFailed { .. }
+        ));
     }
 }

@@ -22,7 +22,9 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 
 #[cfg(feature = "choreo-backend-telltale-machine")]
-use telltale_machine::{ReconfigurationRuntimeSnapshot, RuntimeUpgradeExecution, RuntimeUpgradeRequest};
+use telltale_machine::{
+    ReconfigurationRuntimeSnapshot, RuntimeUpgradeExecution, RuntimeUpgradeRequest,
+};
 
 #[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,9 +111,7 @@ pub enum ActiveSessionDelegationError {
 /// Typed runtime errors for reconfiguration and delegation.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ReconfigurationManagerError {
-    #[error(
-        "{operation} requires protocol-critical runtime surfaces {surfaces:?}: {message}"
-    )]
+    #[error("{operation} requires protocol-critical runtime surfaces {surfaces:?}: {message}")]
     MissingCapability {
         operation: &'static str,
         surfaces: &'static [&'static str],
@@ -438,24 +438,6 @@ impl ReconfigurationManager {
         let (receipt, runtime_upgrade_execution, controller_snapshot) = {
             let mut controller = self.shared.controller.write().await;
             let controller_snapshot = controller.clone();
-            let from_known = controller
-                .footprint(&from_authority)
-                .map(|footprint| footprint.contains(session_id))
-                .unwrap_or(false);
-            if !from_known {
-                tracing::warn!(
-                    event = RuntimeReconfigurationEvent::SourceFootprintBackfilled.as_event_name(),
-                    session_id = %session_id,
-                    from_authority = %from_authority,
-                    "delegation source not present in footprint; recording native ownership before delegation"
-                );
-                controller.footprint_extend(
-                    from_authority,
-                    session_id,
-                    SessionFootprintClass::Native,
-                );
-            }
-
             let receipt = controller
                 .delegate(
                     session_id,

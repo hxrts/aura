@@ -404,7 +404,8 @@ impl ReconfigurationController {
             None,
         );
 
-        if let Err(error) = validate_runtime_upgrade_request(bundle_id, &state.active_members, request)
+        if let Err(error) =
+            validate_runtime_upgrade_request(bundle_id, &state.active_members, request)
         {
             let execution = RuntimeUpgradeExecution {
                 artifact_id: bundle_id.to_string(),
@@ -469,11 +470,11 @@ impl ReconfigurationController {
         &self,
         bundle_id: &str,
     ) -> Result<&BundleRuntimeUpgradeState, ReconfigurationError> {
-        self.runtime_upgrade_state
-            .get(bundle_id)
-            .ok_or_else(|| ReconfigurationError::BundleNotFound {
+        self.runtime_upgrade_state.get(bundle_id).ok_or_else(|| {
+            ReconfigurationError::BundleNotFound {
                 bundle_id: bundle_id.to_string(),
-            })
+            }
+        })
     }
 
     #[cfg(feature = "choreo-backend-telltale-machine")]
@@ -489,10 +490,7 @@ impl ReconfigurationController {
     }
 
     #[cfg(feature = "choreo-backend-telltale-machine")]
-    fn invalid_runtime_upgrade(
-        bundle_id: &str,
-        reason: impl Into<String>,
-    ) -> ReconfigurationError {
+    fn invalid_runtime_upgrade(bundle_id: &str, reason: impl Into<String>) -> ReconfigurationError {
         ReconfigurationError::InvalidRuntimeUpgrade {
             bundle_id: bundle_id.to_string(),
             reason: reason.into(),

@@ -244,6 +244,13 @@ Three ownership classes for runtime effect paths:
 
 Service-owned effects never mutate session state directly. Session-owned effects require both current owner record and current owner capability. Capability-gated trust-boundary APIs fail closed on stale owner, stale capability, or wrong-boundary routing.
 
+Production fail-closed rules are explicit:
+
+- inbound transport receipts are validated before runtime consumers act on the envelope
+- owner capabilities must match the exact issued session, not merely owner label and generation
+- delegation fails closed when source ownership was not recorded; the runtime does not backfill ownership as a repair path
+- choreography receive timeouts are bound to issued timeout witnesses rather than reconstructed from later elapsed-time checks
+
 Reactive signal views are `Observed` bridges, not alternate owners. They may
 apply authoritative facts to known entities, but they may not fabricate
 canonical channel or invitation metadata from weaker facts such as membership
@@ -348,6 +355,7 @@ See [Runtime](../../docs/104_runtime.md) §Link and Delegate Boundaries for the 
 - `aura-agent` owns runtime admission wiring and choreography backend selection.
 - `aura-agent` owns telltale runtime parity test lanes and scenario contract gates.
 - `aura-agent` must not own bridge schema transformations that belong in `aura-quint`.
+- `aura-agent` uses Telltale `10.0.0` public semantic objects for authoritative reads, finalization paths, semantic handoffs, and runtime-upgrade artifacts; it must not recreate a private mirror of those concepts in parallel.
 
 ## Cross-Crate API Boundary
 

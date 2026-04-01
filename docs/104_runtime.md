@@ -308,6 +308,8 @@ Session creation and lifecycle are managed as choreographic protocols. The `Sess
 
 Aura executes production choreography sessions through the Telltale protocol machine in Layer 6. Production startup is manifest-driven. Generated `CompositionManifest` metadata defines the protocol id, required capabilities, determinism profile reference, link constraints, and delegation constraints for each choreography. `AuraChoreoEngine` runs admitted protocol-machine sessions and exposes deterministic trace, replay, and envelope-validation APIs.
 
+Aura is aligned with Telltale `10.0.0`'s public runtime model rather than a private compatibility surface. Runtime admission, canonical finalization, semantic handoff, and runtime-upgrade execution all use public protocol-machine concepts. Fail-closed receipt and authority handling is explicit at Aura's runtime boundaries, and timeout expiry is modeled from issued timeout witnesses rather than from late elapsed-time inference. For the upstream capability/finalization/runtime-upgrade contract, read Telltale `docs/38_capability_model.md`.
+
 Runtime ownership is fragment-scoped. One admitted protocol fragment has one local owner at a time. A choreography without link metadata is one fragment. A choreography with link metadata yields one fragment per linked bundle. Ownership claims, transfer, and release flow through `AuraEffectSystem` and `ReconfigurationManager`.
 
 This is why the runtime uses both abstractions at once:
@@ -320,6 +322,8 @@ When delegation changes ownership, the runtime must also define whether the move
 The synchronous callback boundary is `VmBridgeEffects`. `AuraVmEffectHandler` and `AuraQueuedVmBridgeHandler` use it for session-local payload queues, blocked receive snapshots, branch choices, and scheduler signals. Async transport, guard-chain execution, journal coupling, and storage remain outside protocol-machine callbacks in `vm_host_bridge` and service loops.
 
 Dynamic reconfiguration follows the same rule. Runtime code must go through `ReconfigurationManager` for link and delegation so bundle evidence, capability admission, and coherence checks are enforced before any transfer occurs.
+
+Dynamic reconfiguration also carries typed upgrade artifacts end to end. When a delegation also performs a runtime upgrade, Aura persists the delegation fact, records the typed upgrade request/execution pair, and rejects missing source ownership or invalid upgrade evidence rather than repairing state implicitly.
 
 ### Runtime Profiles
 

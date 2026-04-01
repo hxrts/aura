@@ -40,6 +40,8 @@ This example shows the projected type for role `A`. The type describes that `A` 
 
 Aura executes production choreographies through the Telltale protocol machine. The `choreography!` macro emits the global type, projected local types, role metadata, and composition metadata that the runtime uses to build protocol-machine code images. `AuraChoreoEngine` in `crates/aura-agent/src/runtime/choreo_engine.rs` is the production runtime surface.
 
+Aura targets the current public Telltale language/runtime surface directly. Generated code is sourced from `.tell` files, projected through the public session-type model, and admitted into the protocol machine without an Aura-local runner compatibility layer. For the upstream capability, finalization, semantic-handoff, and runtime-upgrade contract that this runtime model assumes, see Telltale `docs/38_capability_model.md`.
+
 Generated runners still expose role-specific execution helpers. Aura keeps those helpers for tests, focused migration utilities, and narrow tooling paths. They are not the production execution boundary.
 
 Generated runtime artifacts also carry the data that production startup needs:
@@ -69,6 +71,8 @@ Direct generated-runner execution is test and migration support only.
 Production runtime ownership is fragment-scoped. The admitted unit is one protocol fragment derived from the generated `CompositionManifest`. A manifest without `link` metadata yields one protocol fragment. A manifest with `link` metadata yields one fragment per linked bundle.
 
 `delegate` and `link` define how ownership moves. Local runtime services claim fragment ownership through `AuraEffectSystem`. Runtime transfer goes through `ReconfigurationManager`. The runtime rejects ambiguous local ownership before a transfer reaches the protocol machine.
+
+That rejection is fail-closed. Aura rejects stale or forged owner capabilities, rejects mismatched transfer evidence, and binds timeout expiry to issued timeout witnesses rather than reconstructing expiry from a later host-side elapsed-time guess.
 
 The host runtime may use actor services to supervise the surrounding work, but fragment ownership itself remains a singular move boundary with stale-owner rejection.
 

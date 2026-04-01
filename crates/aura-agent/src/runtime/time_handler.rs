@@ -186,6 +186,33 @@ impl EnhancedTimeHandler {
         .await;
     }
 
+    async fn timeout_expiration(&self, timeout_id: &TimeoutHandle) -> Result<u64> {
+        self.shared
+            .state
+            .read()
+            .await
+            .timeouts
+            .get(timeout_id)
+            .map(|task| task.expires_at_ms)
+            .ok_or_else(|| AuraError::not_found("Timeout not found"))
+    }
+
+    async fn complete_timeout(&self, timeout_id: &TimeoutHandle) -> Result<()> {
+        with_state_mut_validated(
+            &self.shared.state,
+            |state| {
+                if state.timeouts.remove(timeout_id).is_some() {
+                    state.stats.active_timeouts = state.stats.active_timeouts.saturating_sub(1);
+                    Ok(())
+                } else {
+                    Err(AuraError::not_found("Timeout not found"))
+                }
+            },
+            |state| state.validate(),
+        )
+        .await
+    }
+
     /// Yield until a wake condition is met
     pub async fn yield_until(&self, condition: WakeCondition) -> Result<()> {
         with_state_mut_validated(
@@ -235,6 +262,14 @@ impl EnhancedTimeHandler {
                         "Threshold events not reached within timeout",
                     )),
                 }
+            }
+            WakeCondition::TimeoutExpired { timeout_id } => {
+                let expires_at_ms = self.timeout_expiration(&timeout_id).await?;
+                let current = self.current_timestamp().await?;
+                if current < expires_at_ms {
+                    self.sleep_ms(expires_at_ms.saturating_sub(current)).await;
+                }
+                self.complete_timeout(&timeout_id).await
             }
             _ => {
                 // For other conditions, check if satisfied immediately
@@ -601,5 +636,24 @@ mod tests {
 
         let result = handler.cancel_timeout(timeout_handle).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_yield_until_timeout_expired_consumes_issued_handle() {
+        let handler = EnhancedTimeHandler::default();
+
+        let timeout_handle = handler.set_timeout(1).await.unwrap();
+        handler
+            .yield_until(WakeCondition::TimeoutExpired {
+                timeout_id: timeout_handle,
+            })
+            .await
+            .unwrap();
+
+        let result = handler.cancel_timeout(timeout_handle).await;
+        assert!(
+            result.is_err(),
+            "timeout handle should be consumed after expiry"
+        );
     }
 }

@@ -833,7 +833,11 @@ pub fn collect_vm_session_artifacts(
     let finalization_paths = semantic_objects
         .operation_instances
         .iter()
-        .map(|operation| semantic_objects.finalization().path_for_operation(operation))
+        .map(|operation| {
+            semantic_objects
+                .finalization()
+                .path_for_operation(operation)
+        })
         .collect();
     Ok(AuraVmSessionArtifactSnapshot {
         session_id: sid,

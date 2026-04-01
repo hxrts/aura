@@ -168,6 +168,37 @@ async fn delegation_requires_reconfiguration_capability() {
 }
 
 #[tokio::test]
+async fn delegation_without_recorded_source_ownership_fails_closed() {
+    let from_authority = authority(14);
+    let to_authority = authority(15);
+    let session_id = session(16);
+    let effects = AuraEffectSystem::simulation_for_test_for_authority(
+        &AgentConfig::default(),
+        from_authority,
+    )
+    .expect("simulation effect system");
+    let manager = ReconfigurationManager::new();
+
+    let err = manager
+        .delegate_session(
+            &effects,
+            SessionDelegationTransfer::new(
+                session_id,
+                from_authority,
+                to_authority,
+                "device_migration",
+            ),
+        )
+        .await
+        .expect_err("delegation without a recorded source footprint must fail closed");
+
+    assert!(matches!(
+        err,
+        ReconfigurationManagerError::DelegateSession { .. }
+    ));
+}
+
+#[tokio::test]
 async fn delegation_rejects_boundary_scope_mismatch() {
     let from_authority = authority(31);
     let to_authority = authority(32);

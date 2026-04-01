@@ -24,8 +24,7 @@ use telltale_machine::{
     canonical_effect_trace, enforce_protocol_machine_runtime_gates, normalize_trace, obs_session,
     EffectTraceEntry, EnvelopeDiffArtifactV1, FinalizationPath, ObsEvent, ProtocolMachine,
     ProtocolMachineConfig as VMConfig, ProtocolMachineError, ProtocolMachineSemanticObjects,
-    RunStatus, RuntimeContracts, RuntimeGateResult, SessionId, StepResult,
-    ThreadedProtocolMachine,
+    RunStatus, RuntimeContracts, RuntimeGateResult, SessionId, StepResult, ThreadedProtocolMachine,
 };
 use tracing::warn;
 
@@ -98,7 +97,7 @@ pub enum AuraChoreoEngineError {
         /// Optional output digest captured in trace.
         output_digest: Option<String>,
         /// Public finalization path derived from protocol-machine semantic objects.
-        finalization_path: Option<FinalizationPath>,
+        finalization_path: Option<Box<FinalizationPath>>,
     },
     /// Step budget derived from weighted termination bound was exceeded.
     #[error(
@@ -976,11 +975,13 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
                                 .as_ref()
                                 .map_or(true, |digest| &proof.output_digest == digest)
                     })
-                    .map(|proof| {
+                    .and_then(|proof| {
                         let operation_id = format!("materialization:{}", proof.proof_id);
-                        semantic_objects.finalization().path_for_operation_id(&operation_id)
+                        semantic_objects
+                            .finalization()
+                            .path_for_operation_id(&operation_id)
                     })
-                    .flatten();
+                    .map(Box::new);
                 AuraChoreoEngineError::OutputConditionRejected {
                     predicate_ref,
                     tick: diagnostic.0,

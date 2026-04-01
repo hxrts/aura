@@ -2,7 +2,7 @@ use super::{AuraEffectSystem, CHOREO_FLOW_COST_PER_KB, DEFAULT_CHOREO_FLOW_COST}
 use async_trait::async_trait;
 use aura_chat::capabilities::ChatCapability;
 use aura_core::effects::transport::{TransportEnvelope, TransportReceipt};
-use aura_core::effects::{PhysicalTimeEffects, TransportEffects};
+use aura_core::effects::{PhysicalTimeEffects, TransportEffects, WakeCondition};
 use aura_core::hash::hash;
 use aura_core::{AuthorityId, ContextId, FlowCost};
 use aura_guards::prelude::create_send_guard_op;
@@ -194,7 +194,6 @@ impl ChoreographicEffects for AuraEffectSystem {
         Ok(())
     }
 
-    #[allow(clippy::disallowed_methods)] // Instant::now() legitimate for network receive timeout
     async fn receive_from_role_bytes(
         &self,
         role: ChoreographicRole,
@@ -214,7 +213,13 @@ impl ChoreographicEffects for AuraEffectSystem {
         // Wait on the session-local inbox notifier instead of polling the global inbox.
         // Default timeout remains 5 seconds to allow async guardians time to respond.
         let timeout_ms = session.timeout_ms.unwrap_or(5000);
-        let start = aura_effects::time::monotonic_now();
+        let timeout_handle = self
+            .time_handler
+            .set_timeout(timeout_ms)
+            .await
+            .map_err(|error| ChoreographyError::InternalError {
+                message: format!("failed to issue receive timeout witness: {error}"),
+            })?;
 
         let source_authority = role.authority_id;
         tracing::debug!(
@@ -240,18 +245,8 @@ impl ChoreographicEffects for AuraEffectSystem {
                 break env;
             }
 
-            let elapsed_ms = start.elapsed().as_millis() as u64;
-            if elapsed_ms >= timeout_ms {
-                let mut state = self.choreography_state.write();
-                let _ = state.with_current_session_mut(|session| {
-                    session.metrics.timeout_count = session.metrics.timeout_count.saturating_add(1);
-                });
-                return Err(ChoreographyError::Transport {
-                    source: Box::new(aura_core::effects::TransportError::NoMessage),
-                });
-            }
-
             let Some(session_inbox_notify) = session_inbox_notify.clone() else {
+                let _ = self.time_handler.cancel_timeout(timeout_handle).await;
                 return Err(ChoreographyError::InternalError {
                     message: format!(
                         "missing choreography inbox notifier for active session {session_id}"
@@ -259,7 +254,6 @@ impl ChoreographicEffects for AuraEffectSystem {
                 });
             };
 
-            let wait_ms = timeout_ms.saturating_sub(elapsed_ms);
             tokio::select! {
                 _ = session_inbox_notify.notified() => {}
                 _ = async {
@@ -269,7 +263,14 @@ impl ChoreographicEffects for AuraEffectSystem {
                         std::future::pending::<()>().await;
                     }
                 } => {}
-                _ = self.time_handler.sleep_ms(wait_ms) => {
+                timeout_result = self.time_handler.yield_until(WakeCondition::TimeoutExpired {
+                    timeout_id: timeout_handle,
+                }) => {
+                    if let Err(error) = timeout_result {
+                        return Err(ChoreographyError::InternalError {
+                            message: format!("receive timeout witness failed: {error}"),
+                        });
+                    }
                     let mut state = self.choreography_state.write();
                     let _ = state.with_current_session_mut(|session| {
                         session.metrics.timeout_count = session.metrics.timeout_count.saturating_add(1);
@@ -281,6 +282,7 @@ impl ChoreographicEffects for AuraEffectSystem {
             }
 
             if !self.choreography_state.read().is_active() {
+                let _ = self.time_handler.cancel_timeout(timeout_handle).await;
                 return Err(ChoreographyError::SessionNotStarted);
             }
             if self
@@ -289,6 +291,7 @@ impl ChoreographicEffects for AuraEffectSystem {
                 .current_session_id()
                 .is_some_and(|active| active != session_id)
             {
+                let _ = self.time_handler.cancel_timeout(timeout_handle).await;
                 return Err(ChoreographyError::InternalError {
                     message: format!(
                         "choreography session binding changed while waiting for receive: {session_id}"
@@ -296,6 +299,8 @@ impl ChoreographicEffects for AuraEffectSystem {
                 });
             }
         };
+
+        let _ = self.time_handler.cancel_timeout(timeout_handle).await;
 
         {
             let mut state = self.choreography_state.write();

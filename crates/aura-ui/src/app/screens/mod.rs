@@ -3,6 +3,7 @@ use super::*;
 mod chat;
 mod contacts;
 mod neighborhood;
+pub(super) mod notification_actions;
 mod notifications;
 mod settings;
 

@@ -152,14 +152,29 @@ mod tests {
     #[test]
     fn notifications_home_invites_use_pending_channel_acceptance_workflow() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let notifications_path = repo_root.join("crates/aura-ui/src/app/screens/notifications.rs");
-        let notifications_source =
-            std::fs::read_to_string(&notifications_path).unwrap_or_else(|error| {
-                panic!("failed to read {}: {error}", notifications_path.display())
+        let notifications_view_path =
+            repo_root.join("crates/aura-ui/src/app/runtime_views/notifications.rs");
+        let notifications_view_source = std::fs::read_to_string(&notifications_view_path)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "failed to read {}: {error}",
+                    notifications_view_path.display()
+                )
+            });
+        let notifications_actions_path =
+            repo_root.join("crates/aura-ui/src/app/screens/notification_actions.rs");
+        let notifications_actions_source = std::fs::read_to_string(&notifications_actions_path)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "failed to read {}: {error}",
+                    notifications_actions_path.display()
+                )
             });
 
-        assert!(notifications_source.contains("PendingChannelInvitation"));
-        assert!(notifications_source.contains("handoff::accept_pending_channel_invitation("));
+        assert!(notifications_view_source.contains("PendingChannelInvitation"));
+        assert!(
+            notifications_actions_source.contains("handoff::accept_pending_channel_invitation(")
+        );
     }
 
     #[test]
@@ -214,7 +229,8 @@ mod tests {
     #[test]
     fn notifications_invitation_actions_use_typed_handoff_workflows() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let notifications_path = repo_root.join("crates/aura-ui/src/app/screens/notifications.rs");
+        let notifications_path =
+            repo_root.join("crates/aura-ui/src/app/screens/notification_actions.rs");
         let source = std::fs::read_to_string(&notifications_path).unwrap_or_else(|error| {
             panic!("failed to read {}: {error}", notifications_path.display())
         });
@@ -346,7 +362,8 @@ mod tests {
         let contacts_path = repo_root.join("crates/aura-ui/src/app/screens/contacts.rs");
         let contacts_source = std::fs::read_to_string(&contacts_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", contacts_path.display()));
-        let notifications_path = repo_root.join("crates/aura-ui/src/app/screens/notifications.rs");
+        let notifications_path =
+            repo_root.join("crates/aura-ui/src/app/screens/notification_actions.rs");
         let notifications_source =
             std::fs::read_to_string(&notifications_path).unwrap_or_else(|error| {
                 panic!("failed to read {}: {error}", notifications_path.display())

@@ -332,9 +332,9 @@ This verifies that injected faults produce monitor-visible invariant violations 
 
 ### 4) `telltale-bridge` integration status
 
-As of March 31, 2026, Aura includes `telltale-bridge` as a workspace dependency and integrates it through `aura-quint`.
+As of April 1, 2026, Aura includes `telltale-bridge` as a workspace dependency and integrates it through `aura-quint` on the Telltale `10.0.0` public bridge/runtime model.
 
-This adds direct access to upstream Lean runner and equivalence utilities from the Telltale project. It provides explicit schema and version linkage with upstream bridge contracts for cross-tool consistency. It also creates a cleaner path for future migration of local bridge helpers to upstream bridge APIs.
+This adds direct access to upstream Lean runner and equivalence utilities from the Telltale project. It provides explicit schema and version linkage with upstream bridge contracts for cross-tool consistency. It also keeps Aura verification aligned with the same public capability/finalization/runtime-upgrade model used by production runtime code rather than a private compatibility layer. Read upstream `docs/38_capability_model.md` before debugging capability-driven admission, authoritative-read/finalization behavior, or runtime-upgrade proofs.
 
 Call `aura_quint::upstream_telltale_bridge_schema_version()` to get the upstream bridge schema version. CI lanes are `just ci-telltale-bridge` and `just ci-simulator-telltale-parity`.
 
