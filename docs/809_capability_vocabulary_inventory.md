@@ -11,7 +11,7 @@ This inventory covers authorization capability names used in:
 - product Rust call sites
 - Biscuit token issuance
 - guard snapshots and guard checks
-- choreography `.choreo` files
+- choreography `.tell` files
 - docs and examples that currently teach or exercise capability annotations
 - test fixtures that still exercise legacy naming
 
@@ -84,15 +84,15 @@ These are the canonical migration targets for first-party product code.
 | Canonical name | Owner crate | Current sources | Notes |
 | --- | --- | --- | --- |
 | `amp:send` | `aura-amp` | `crates/aura-authorization/src/biscuit_token.rs`, `crates/aura-agent/src/runtime/effects.rs`, `crates/aura-simulator/tests/guarded_amp_anti_entropy.rs` | Canonical AMP send capability |
-| `amp:receive` | `aura-amp` | `crates/aura-amp/src/choreography.choreo` currently uses `cap:amp_recv` | Canonical AMP receive capability |
+| `amp:receive` | `aura-amp` | `crates/aura-amp/src/choreography.tell` currently uses `cap:amp_recv` | Canonical AMP receive capability |
 | `auth:request` | `aura-authentication` | `crates/aura-authentication/src/guards.rs` | Canonical authentication request capability |
 | `auth:submit_proof` | `aura-authentication` | `crates/aura-authentication/src/guards.rs` | Canonical proof-submission capability |
 | `auth:verify` | `aura-authentication` | `crates/aura-authentication/src/guards.rs` | Canonical proof-verification capability |
 | `auth:create_session` | `aura-authentication` | `crates/aura-authentication/src/guards.rs` | Authentication-owned session creation capability |
-| `auth:guardian:request_approval` | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.choreo`, `crates/aura-authentication/src/guards.rs` | Canonical guardian-auth request capability |
-| `auth:guardian:coordinate` | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.choreo` | Coordinator-side guardian-auth capability |
-| `auth:guardian:submit_proof` | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.choreo` | Guardian proof submission |
-| `auth:guardian:verify` | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.choreo`, `crates/aura-authentication/src/guards.rs` | Canonical guardian-auth verification capability |
+| `auth:guardian:request_approval` | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.tell`, `crates/aura-authentication/src/guards.rs` | Canonical guardian-auth request capability |
+| `auth:guardian:coordinate` | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.tell` | Coordinator-side guardian-auth capability |
+| `auth:guardian:submit_proof` | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.tell` | Guardian proof submission |
+| `auth:guardian:verify` | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.tell`, `crates/aura-authentication/src/guards.rs` | Canonical guardian-auth verification capability |
 | `chat:channel:create` | `aura-chat` | `crates/aura-chat/src/guards.rs` | Canonical chat channel-create capability |
 | `chat:message:send` | `aura-chat` | `crates/aura-chat/src/guards.rs` | Canonical chat send capability |
 | `consensus:initiate` | `aura-consensus` | `crates/aura-consensus/src/protocol/guards.rs` | Canonical start-of-ceremony capability |
@@ -100,44 +100,44 @@ These are the canonical migration targets for first-party product code.
 | `consensus:aggregate_nonces` | `aura-consensus` | `crates/aura-consensus/src/protocol/guards.rs` | Coordinator aggregation capability |
 | `consensus:witness_sign` | `aura-consensus` | `crates/aura-consensus/src/protocol/guards.rs` | Witness sign-share submission |
 | `consensus:finalize` | `aura-consensus` | `crates/aura-consensus/src/protocol/guards.rs` | Final consensus completion capability |
-| `dkd:initiate` | `aura-authentication` | `crates/aura-authentication/src/dkd.choreo` | DKD initiation |
-| `dkd:commit` | `aura-authentication` | `crates/aura-authentication/src/dkd.choreo` | DKD commitment |
-| `dkd:reveal` | `aura-authentication` | `crates/aura-authentication/src/dkd.choreo` | DKD reveal |
-| `dkd:finalize` | `aura-authentication` | `crates/aura-authentication/src/dkd.choreo` | DKD finalize |
-| `invitation:send` | `aura-invitation` | `crates/aura-invitation/src/guards.rs`, `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.invitation_exchange.choreo`, token issuance | Canonical invitation send capability |
-| `invitation:accept` | `aura-invitation` | `crates/aura-invitation/src/guards.rs`, `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.invitation_exchange.choreo`, token issuance | Canonical invitation accept capability |
+| `dkd:initiate` | `aura-authentication` | `crates/aura-authentication/src/dkd.tell` | DKD initiation |
+| `dkd:commit` | `aura-authentication` | `crates/aura-authentication/src/dkd.tell` | DKD commitment |
+| `dkd:reveal` | `aura-authentication` | `crates/aura-authentication/src/dkd.tell` | DKD reveal |
+| `dkd:finalize` | `aura-authentication` | `crates/aura-authentication/src/dkd.tell` | DKD finalize |
+| `invitation:send` | `aura-invitation` | `crates/aura-invitation/src/guards.rs`, `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.invitation_exchange.tell`, token issuance | Canonical invitation send capability |
+| `invitation:accept` | `aura-invitation` | `crates/aura-invitation/src/guards.rs`, `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.invitation_exchange.tell`, token issuance | Canonical invitation accept capability |
 | `invitation:decline` | `aura-invitation` | `crates/aura-invitation/src/guards.rs`, `crates/aura-invitation/src/protocol.rs`, token issuance | Canonical invitation decline capability |
 | `invitation:cancel` | `aura-invitation` | `crates/aura-invitation/src/guards.rs`, token issuance | Canonical invitation cancel capability |
-| `invitation:guardian` | `aura-invitation` | `crates/aura-invitation/src/guards.rs`, `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.guardian_invitation.choreo`, token issuance | Guardian invitation send capability |
-| `invitation:guardian:accept` | `aura-invitation` | `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.guardian_invitation.choreo` | Guardian invitation accept capability |
+| `invitation:guardian` | `aura-invitation` | `crates/aura-invitation/src/guards.rs`, `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.guardian_invitation.tell`, token issuance | Guardian invitation send capability |
+| `invitation:guardian:accept` | `aura-invitation` | `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.guardian_invitation.tell` | Guardian invitation accept capability |
 | `invitation:channel` | `aura-invitation` | `crates/aura-invitation/src/guards.rs`, token issuance | Shared-channel invitation capability |
-| `invitation:device:enroll` | `aura-invitation` | `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.device_enrollment.choreo` | Device-enrollment send capability |
-| `invitation:device:accept` | `aura-invitation` | `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.device_enrollment.choreo` | Device-enrollment accept capability |
-| `recovery:initiate` | `aura-recovery` | `crates/aura-authentication/src/guards.rs`, `crates/aura-agent/src/handlers/recovery.rs`, `crates/aura-recovery/src/recovery_protocol.choreo` | Recovery initiation |
-| `recovery:coordinate` | `aura-recovery` | `crates/aura-recovery/src/recovery_protocol.choreo` | Recovery coordination capability |
-| `recovery:approve` | `aura-recovery` | `crates/aura-authentication/src/guards.rs`, `crates/aura-agent/src/handlers/recovery.rs`, `crates/aura-recovery/src/recovery_protocol.choreo` | Guardian approval capability |
-| `recovery:finalize` | `aura-recovery` | `crates/aura-agent/src/handlers/recovery.rs`, `crates/aura-recovery/src/recovery_protocol.choreo` | Canonical completion/finalization capability |
+| `invitation:device:enroll` | `aura-invitation` | `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.device_enrollment.tell` | Device-enrollment send capability |
+| `invitation:device:accept` | `aura-invitation` | `crates/aura-invitation/src/protocol.rs`, `crates/aura-invitation/src/protocol.device_enrollment.tell` | Device-enrollment accept capability |
+| `recovery:initiate` | `aura-recovery` | `crates/aura-authentication/src/guards.rs`, `crates/aura-agent/src/handlers/recovery.rs`, `crates/aura-recovery/src/recovery_protocol.tell` | Recovery initiation |
+| `recovery:coordinate` | `aura-recovery` | `crates/aura-recovery/src/recovery_protocol.tell` | Recovery coordination capability |
+| `recovery:approve` | `aura-recovery` | `crates/aura-authentication/src/guards.rs`, `crates/aura-agent/src/handlers/recovery.rs`, `crates/aura-recovery/src/recovery_protocol.tell` | Guardian approval capability |
+| `recovery:finalize` | `aura-recovery` | `crates/aura-agent/src/handlers/recovery.rs`, `crates/aura-recovery/src/recovery_protocol.tell` | Canonical completion/finalization capability |
 | `recovery:cancel` | `aura-recovery` | `crates/aura-agent/src/handlers/recovery.rs` | Recovery cancellation capability |
-| `recovery:guardian_setup:initiate` | `aura-recovery` | `crates/aura-recovery/src/guardian_setup.choreo` | Guardian setup initiation |
-| `recovery:guardian_setup:accept_invitation` | `aura-recovery` | `crates/aura-recovery/src/guardian_setup.choreo` | Guardian setup invitation acceptance |
-| `recovery:guardian_setup:verify_invitation` | `aura-recovery` | `crates/aura-recovery/src/guardian_setup.choreo` | Guardian setup verification |
-| `recovery:guardian_setup:complete` | `aura-recovery` | `crates/aura-recovery/src/guardian_setup.choreo` | Guardian setup completion |
-| `recovery:membership_change:initiate` | `aura-recovery` | `crates/aura-recovery/src/guardian_membership.choreo` | Membership-change initiation |
-| `recovery:membership_change:vote` | `aura-recovery` | `crates/aura-recovery/src/guardian_membership.choreo` | Guardian vote capability |
-| `recovery:membership_change:verify_proposal` | `aura-recovery` | `crates/aura-recovery/src/guardian_membership.choreo` | Proposal verification |
-| `recovery:membership_change:complete` | `aura-recovery` | `crates/aura-recovery/src/guardian_membership.choreo` | Membership-change completion |
-| `relay:forward` | `aura-rendezvous` | `crates/aura-rendezvous/src/protocol.rs`, `crates/aura-rendezvous/src/protocol.relayed_rendezvous.choreo`, `docs/113_rendezvous.md` | Relay forwarding subfamily |
-| `rendezvous:publish` | `aura-rendezvous` | `crates/aura-rendezvous/src/protocol.rs`, `crates/aura-rendezvous/src/protocol.rendezvous_exchange.choreo`, `crates/aura-agent/src/handlers/rendezvous.rs`, `crates/aura-agent/src/runtime/services/rendezvous_manager.rs`, token issuance, `docs/113_rendezvous.md` | Canonical descriptor publish capability |
-| `rendezvous:connect` | `aura-rendezvous` | `crates/aura-rendezvous/src/protocol.rs`, `crates/aura-rendezvous/src/protocol.rendezvous_exchange.choreo`, `crates/aura-agent/src/handlers/rendezvous.rs`, `crates/aura-agent/src/runtime/services/rendezvous_manager.rs`, `docs/113_rendezvous.md` | Canonical direct connect capability |
-| `rendezvous:relay` | `aura-rendezvous` | `crates/aura-rendezvous/src/protocol.rs`, `crates/aura-rendezvous/src/protocol.relayed_rendezvous.choreo`, `crates/aura-agent/src/handlers/rendezvous.rs`, `docs/113_rendezvous.md` | Canonical relayed connect capability |
+| `recovery:guardian_setup:initiate` | `aura-recovery` | `crates/aura-recovery/src/guardian_setup.tell` | Guardian setup initiation |
+| `recovery:guardian_setup:accept_invitation` | `aura-recovery` | `crates/aura-recovery/src/guardian_setup.tell` | Guardian setup invitation acceptance |
+| `recovery:guardian_setup:verify_invitation` | `aura-recovery` | `crates/aura-recovery/src/guardian_setup.tell` | Guardian setup verification |
+| `recovery:guardian_setup:complete` | `aura-recovery` | `crates/aura-recovery/src/guardian_setup.tell` | Guardian setup completion |
+| `recovery:membership_change:initiate` | `aura-recovery` | `crates/aura-recovery/src/guardian_membership.tell` | Membership-change initiation |
+| `recovery:membership_change:vote` | `aura-recovery` | `crates/aura-recovery/src/guardian_membership.tell` | Guardian vote capability |
+| `recovery:membership_change:verify_proposal` | `aura-recovery` | `crates/aura-recovery/src/guardian_membership.tell` | Proposal verification |
+| `recovery:membership_change:complete` | `aura-recovery` | `crates/aura-recovery/src/guardian_membership.tell` | Membership-change completion |
+| `relay:forward` | `aura-rendezvous` | `crates/aura-rendezvous/src/protocol.rs`, `crates/aura-rendezvous/src/protocol.relayed_rendezvous.tell`, `docs/113_rendezvous.md` | Relay forwarding subfamily |
+| `rendezvous:publish` | `aura-rendezvous` | `crates/aura-rendezvous/src/protocol.rs`, `crates/aura-rendezvous/src/protocol.rendezvous_exchange.tell`, `crates/aura-agent/src/handlers/rendezvous.rs`, `crates/aura-agent/src/runtime/services/rendezvous_manager.rs`, token issuance, `docs/113_rendezvous.md` | Canonical descriptor publish capability |
+| `rendezvous:connect` | `aura-rendezvous` | `crates/aura-rendezvous/src/protocol.rs`, `crates/aura-rendezvous/src/protocol.rendezvous_exchange.tell`, `crates/aura-agent/src/handlers/rendezvous.rs`, `crates/aura-agent/src/runtime/services/rendezvous_manager.rs`, `docs/113_rendezvous.md` | Canonical direct connect capability |
+| `rendezvous:relay` | `aura-rendezvous` | `crates/aura-rendezvous/src/protocol.rs`, `crates/aura-rendezvous/src/protocol.relayed_rendezvous.tell`, `crates/aura-agent/src/handlers/rendezvous.rs`, `docs/113_rendezvous.md` | Canonical relayed connect capability |
 | `sync:request_digest` | `aura-sync` | `crates/aura-authorization/src/biscuit_token.rs`, `crates/aura-agent/src/runtime/effects.rs` | Anti-entropy digest request capability |
 | `sync:request_ops` | `aura-sync` | `crates/aura-authorization/src/biscuit_token.rs`, `crates/aura-agent/src/runtime/effects.rs` | Anti-entropy op request capability |
 | `sync:push_ops` | `aura-sync` | `crates/aura-authorization/src/biscuit_token.rs`, `crates/aura-agent/src/runtime/effects.rs` | Anti-entropy batch push capability |
 | `sync:announce_op` | `aura-sync` | `crates/aura-authorization/src/biscuit_token.rs`, `crates/aura-agent/src/runtime/effects.rs` | Anti-entropy announcement capability |
 | `sync:push_op` | `aura-sync` | `crates/aura-authorization/src/biscuit_token.rs`, `crates/aura-agent/src/runtime/effects.rs` | Anti-entropy single-op push capability |
-| `sync:epoch:propose_rotation` | `aura-sync` | `crates/aura-sync/src/protocols/epochs.choreo` | Epoch rotation proposal |
-| `sync:epoch:confirm_readiness` | `aura-sync` | `crates/aura-sync/src/protocols/epochs.choreo` | Epoch rotation readiness confirmation |
-| `sync:epoch:commit_rotation` | `aura-sync` | `crates/aura-sync/src/protocols/epochs.choreo` | Epoch rotation commit |
+| `sync:epoch:propose_rotation` | `aura-sync` | `crates/aura-sync/src/protocols/epochs.tell` | Epoch rotation proposal |
+| `sync:epoch:confirm_readiness` | `aura-sync` | `crates/aura-sync/src/protocols/epochs.tell` | Epoch rotation readiness confirmation |
+| `sync:epoch:commit_rotation` | `aura-sync` | `crates/aura-sync/src/protocols/epochs.tell` | Epoch rotation commit |
 
 ## Legacy Aliases and Invalid Drift
 
@@ -146,12 +146,12 @@ surface. They exist only as migration or deletion targets.
 
 | Current string | Classification | Canonical target | Current sources | Disposition |
 | --- | --- | --- | --- | --- |
-| `amp:send` and `cap:amp_send` coexist | legacy split-brain naming | `amp:send` | `crates/aura-simulator/tests/guarded_amp_anti_entropy.rs`, `crates/aura-amp/src/choreography.choreo`, token issuance | Keep `amp:send`; delete `cap:amp_send` |
-| `cap:amp_recv` | legacy alias | `amp:receive` | `crates/aura-amp/src/choreography.choreo` | Delete alias during Phase 4 |
+| `amp:send` and `cap:amp_send` coexist | legacy split-brain naming | `amp:send` | `crates/aura-simulator/tests/guarded_amp_anti_entropy.rs`, `crates/aura-amp/src/choreography.tell`, token issuance | Keep `amp:send`; delete `cap:amp_send` |
+| `cap:amp_recv` | legacy alias | `amp:receive` | `crates/aura-amp/src/choreography.tell` | Delete alias during Phase 4 |
 | `auth:request_guardian` | legacy alias | `auth:guardian:request_approval` | `crates/aura-authentication/src/guards.rs` | Rename in typed family |
 | `auth:approve_guardian` | legacy alias | `auth:guardian:verify` | `crates/aura-authentication/src/guards.rs` | Rename in typed family |
 | `auth:authenticate` | invalid drift | `auth:verify` or a new explicit `auth:status` if the owner decides status needs its own capability | `crates/aura-agent/src/handlers/auth.rs` | Phase 2/5 owner decision, then delete drift |
-| `initiate_consensus` | legacy choreography alias | `consensus:initiate` | `crates/aura-consensus/src/protocol/choreography.choreo`, `crates/aura-consensus/src/protocol/GUARD_INTEGRATION.md` | Temporary parse bridge only if needed in Phase 4 |
+| `initiate_consensus` | legacy choreography alias | `consensus:initiate` | `crates/aura-consensus/src/protocol/choreography.tell`, `crates/aura-consensus/src/protocol/GUARD_INTEGRATION.md` | Temporary parse bridge only if needed in Phase 4 |
 | `witness_nonce` | legacy choreography alias | `consensus:witness_nonce` | same as above | Temporary parse bridge only if needed in Phase 4 |
 | `aggregate_nonces` | legacy choreography alias | `consensus:aggregate_nonces` | same as above | Temporary parse bridge only if needed in Phase 4 |
 | `witness_sign` | legacy choreography alias | `consensus:witness_sign` | same as above | Temporary parse bridge only if needed in Phase 4 |
@@ -162,8 +162,8 @@ surface. They exist only as migration or deletion targets.
 | `rendezvous:initiate_channel` | invalid drift | `rendezvous:connect` | `crates/aura-agent/src/handlers/rendezvous.rs` | Delete drift |
 | `rendezvous:relay_request` | invalid drift | `rendezvous:relay` | `crates/aura-agent/src/handlers/rendezvous.rs` | Delete drift |
 | `recovery:complete` | legacy alias | `recovery:finalize` | `crates/aura-agent/src/handlers/recovery.rs` | Rename to finalized vocabulary |
-| `accept_guardian_invitation,verify_setup_invitation` | invalid composite choreography string | split to `recovery:guardian_setup:accept_invitation` and `recovery:guardian_setup:verify_invitation` | `crates/aura-recovery/src/guardian_setup.choreo` | Delete comma-joined string syntax on this path |
-| `vote_membership_change,verify_membership_proposal` | invalid composite choreography string | split to `recovery:membership_change:vote` and `recovery:membership_change:verify_proposal` | `crates/aura-recovery/src/guardian_membership.choreo` | Delete comma-joined string syntax on this path |
+| `accept_guardian_invitation,verify_setup_invitation` | invalid composite choreography string | split to `recovery:guardian_setup:accept_invitation` and `recovery:guardian_setup:verify_invitation` | `crates/aura-recovery/src/guardian_setup.tell` | Delete comma-joined string syntax on this path |
+| `vote_membership_change,verify_membership_proposal` | invalid composite choreography string | split to `recovery:membership_change:vote` and `recovery:membership_change:verify_proposal` | `crates/aura-recovery/src/guardian_membership.tell` | Delete comma-joined string syntax on this path |
 | `sync:read` | invalid umbrella name | replace with operation-specific `sync:*` capability per call site | `crates/aura-sync/src/infrastructure/peers.rs` | Delete umbrella capability |
 | `sync_journal` | invalid legacy name | replace with operation-specific `sync:*` capability per call site | `crates/aura-sync/src/protocols/anti_entropy.rs`, archived work notes | Delete legacy name |
 | `recover:device` | invalid drift in test payload | owner should replace with a canonical `recovery:*` capability or a typed role field | `crates/aura-invitation/src/protocol.rs` test serialization | Do not preserve as compatibility alias |
@@ -217,6 +217,6 @@ Phase 0 inventory data was gathered with:
 ```bash
 rg -n --no-heading 'CAP_[A-Z0-9_]+: &str = "[^"]+"' crates -g'*.rs'
 rg -n --no-heading 'CapabilityId::from\("[^"]+"|has_capability\("[^"]+"' crates -g'*.rs'
-rg -n --no-heading 'guard_capability = "[^"]+"|#\[guard_capability\("[^"]+"\)\]' crates docs examples -g'*.rs' -g'*.md' -g'*.choreo'
+rg -n --no-heading 'guard_capability = "[^"]+"|#\[guard_capability\("[^"]+"\)\]' crates docs examples -g'*.rs' -g'*.md' -g'*.tell'
 rg -n --no-heading 'capability\("[^"]+"\)' crates docs examples -g'*.rs' -g'*.md'
 ```

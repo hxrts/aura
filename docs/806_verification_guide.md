@@ -306,7 +306,7 @@ nix develop --command scripts/check/protocol-compat.sh --self-test
 nix develop --command just ci-protocol-compat
 ```
 
-This validates that known-compatible fixture pairs pass async subtyping checks. It confirms known-breaking fixture pairs fail as expected. It ensures changed `.choreo` files stay backward-compatible unless intentionally breaking.
+This validates that known-compatible fixture pairs pass async subtyping checks. It confirms known-breaking fixture pairs fail as expected. It ensures changed `.tell` files stay backward-compatible unless intentionally breaking.
 
 Fixtures live in `crates/aura-testkit/fixtures/protocol_compat/`.
 

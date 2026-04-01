@@ -4,16 +4,16 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const BASELINE_PATH: &str = "../fixtures/protocol_compat/compatible_baseline.choreo";
-const CURRENT_PATH: &str = "../fixtures/protocol_compat/compatible_current.choreo";
-const BREAKING_BASELINE_PATH: &str = "../fixtures/protocol_compat/breaking_baseline.choreo";
-const BREAKING_CURRENT_PATH: &str = "../fixtures/protocol_compat/breaking_current.choreo";
+const BASELINE_PATH: &str = "../fixtures/protocol_compat/compatible_baseline.tell";
+const CURRENT_PATH: &str = "../fixtures/protocol_compat/compatible_current.tell";
+const BREAKING_BASELINE_PATH: &str = "../fixtures/protocol_compat/breaking_baseline.tell";
+const BREAKING_CURRENT_PATH: &str = "../fixtures/protocol_compat/breaking_current.tell";
 
-const BASELINE: &str = include_str!("../fixtures/protocol_compat/compatible_baseline.choreo");
-const CURRENT: &str = include_str!("../fixtures/protocol_compat/compatible_current.choreo");
+const BASELINE: &str = include_str!("../fixtures/protocol_compat/compatible_baseline.tell");
+const CURRENT: &str = include_str!("../fixtures/protocol_compat/compatible_current.tell");
 const BREAKING_BASELINE: &str =
-    include_str!("../fixtures/protocol_compat/breaking_baseline.choreo");
-const BREAKING_CURRENT: &str = include_str!("../fixtures/protocol_compat/breaking_current.choreo");
+    include_str!("../fixtures/protocol_compat/breaking_baseline.tell");
+const BREAKING_CURRENT: &str = include_str!("../fixtures/protocol_compat/breaking_current.tell");
 
 #[test]
 fn compatible_protocol_fixture_pair_remains_async_subtype_compatible() {

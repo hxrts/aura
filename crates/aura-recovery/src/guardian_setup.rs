@@ -141,7 +141,7 @@ pub struct SetupCompletion {
 }
 
 // Guardian Setup Choreography - 3 phase protocol
-choreography!(include_str!("src/guardian_setup.choreo"));
+choreography!(include_str!("src/guardian_setup.tell"));
 
 /// Guardian setup coordinator.
 ///

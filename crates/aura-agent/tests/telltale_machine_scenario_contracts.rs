@@ -151,7 +151,7 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
 
 fn invitation_exchange_global_from_source() -> GlobalType {
     let source = strip_aura_annotations_for_parser(include_str!(
-        "../../aura-invitation/src/protocol.invitation_exchange.choreo"
+        "../../aura-invitation/src/protocol.invitation_exchange.tell"
     ));
     let choreography = aura_mpst::upstream::language::parse_choreography_str(&source)
         .expect("parse invitation choreography source");

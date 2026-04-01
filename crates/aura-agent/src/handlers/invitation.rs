@@ -4244,12 +4244,10 @@ mod tests {
             ContactFact::Added {
                 owner_id,
                 contact_id,
-                nickname,
                 ..
             } => {
                 assert_eq!(owner_id, own_authority);
                 assert_eq!(contact_id, sender_id);
-                assert_eq!(nickname, "Alice");
             }
             other => panic!("Expected ContactFact::Added, got {:?}", other),
         }

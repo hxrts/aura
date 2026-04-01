@@ -6,4 +6,4 @@
 use aura_macros::choreography;
 
 // Simple two-party choreography for AMP data + receipt exchange.
-choreography!(include_str!("src/choreography.choreo"));
+choreography!(include_str!("src/choreography.tell"));

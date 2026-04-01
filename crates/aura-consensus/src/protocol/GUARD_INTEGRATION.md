@@ -11,7 +11,7 @@ This document describes the guard chain integration for the aura-consensus proto
 1. **Guard Helper Infrastructure** (`protocol/guards.rs`):
    - Created typed guard helpers for all 5 message types
    - Each helper maps choreography annotations to `SendGuardChain` configuration
-   - Flow costs match `choreography.choreo` annotations exactly
+   - Flow costs match `choreography.tell` annotations exactly
    - Leakage budgets implemented for privacy-sensitive operations
 
 2. **Message Coverage**:
@@ -89,7 +89,7 @@ where
 
 ## Choreography Annotations Reference
 
-From `choreography.choreo`:
+From `choreography.tell`:
 
 ```purescript
 @parallel
@@ -150,4 +150,4 @@ Per `docs/001_system_architecture.md`:
 - `docs/001_system_architecture.md` - Guard chain architecture
 - `docs/003_information_flow_contract.md` - Privacy and flow budgets
 - `crates/aura-guards/src/guards/chain.rs` - SendGuardChain implementation
-- `crates/aura-consensus/src/protocol/choreography.choreo` - Source annotations
+- `crates/aura-consensus/src/protocol/choreography.tell` - Source annotations

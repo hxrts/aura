@@ -31,7 +31,7 @@ run_group() {
 run_group \
   "Product Choreography Vocabulary Drift" \
   'guard_capability = "[^"]*,[^"]+"' \
-  -g '*.choreo' \
+  -g '*.tell' \
   crates
 
 run_group \
@@ -39,7 +39,7 @@ run_group \
   '"send_ping"|"send_pong"|guard_capability = "send_request"|guard_capability = "respond"|permission_name|"create_session"|"join_session"|"decline_session"|"activate_session"|"broadcast_message"|"check_status"|"report_status"|"end_session"' \
   -g '*.md' \
   -g '*.rs' \
-  -g '*.choreo' \
+  -g '*.tell' \
   docs \
   examples \
   .claude

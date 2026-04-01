@@ -5,7 +5,7 @@
 //!
 //! # Choreography Annotations
 //!
-//! From `choreography.choreo`:
+//! From `choreography.tell`:
 //! - Execute: guard_capability="consensus:initiate", flow_cost=100
 //! - NonceCommit: guard_capability="consensus:witness_nonce", flow_cost=50
 //! - SignRequest: guard_capability="consensus:aggregate_nonces", flow_cost=75

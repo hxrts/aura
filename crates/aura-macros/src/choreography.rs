@@ -1533,7 +1533,7 @@ fn read_choreography_source(expr: Expr) -> Result<(String, proc_macro2::Span), s
         }
         other => Err(syn::Error::new(
             other.span(),
-            "choreography! expects a string literal or include_str!(\"path.choreo\")",
+            "choreography! expects a string literal or include_str!(\"path.tell\")",
         )),
     }
 }
@@ -1587,7 +1587,7 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
         quote! {
             compile_error!(
                 "Choreography is missing a namespace. \
-                 Add `module <name> exposing (...)` to your .choreo file \
+                 Add `module <name> exposing (...)` to your .tell file \
                  or use #[namespace = \"unique_name\"] inside the choreography! macro. \
                  Each choreography in the same file must have a unique namespace."
             );

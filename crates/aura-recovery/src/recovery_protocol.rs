@@ -274,7 +274,7 @@ impl RecoveryProtocol {
 }
 
 // Recovery Protocol Choreography
-choreography!(include_str!("src/recovery_protocol.choreo"));
+choreography!(include_str!("src/recovery_protocol.tell"));
 
 /// Recovery protocol handler
 pub struct RecoveryProtocolHandler {

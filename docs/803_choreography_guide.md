@@ -56,7 +56,7 @@ The macro provides canonical `ceremony_id()` and `ceremony_timestamp_ms()` acces
 
 ### Phase 2: Choreography Specification
 
-Write the choreography in a `.choreo` file:
+Write the choreography in a `.tell` file:
 
 ```rust
 use aura_macros::choreography;
@@ -80,7 +80,7 @@ Annotation syntax: `Role[guard_capability = "namespace:capability", flow_cost = 
 `guard_capability` is the one sanctioned raw-string boundary for first-party
 capability names in choreography source. The macro parses these values into
 validated `CapabilityName`s and fails closed on invalid or legacy names. In
-Rust code outside `.choreo` or `choreography!` inputs, prefer typed capability
+Rust code outside `.tell` or `choreography!` inputs, prefer typed capability
 families from the owning crate.
 
 Select the narrowest `TimeStamp` domain for each time field. See [Effect System](103_effect_system.md) for time domains.

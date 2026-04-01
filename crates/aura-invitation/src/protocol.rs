@@ -265,7 +265,7 @@ pub mod exchange {
     // 1. Sender creates and sends invitation offer
     // 2. Receiver accepts or declines the invitation
     // 3. Sender acknowledges the response
-    choreography!(include_str!("src/protocol.invitation_exchange.choreo"));
+    choreography!(include_str!("src/protocol.invitation_exchange.tell"));
 }
 
 /// Guardian invitation protocol module
@@ -280,7 +280,7 @@ pub mod guardian {
     // 1. Principal requests guardian relationship
     // 2. Guardian accepts or declines with appropriate response
     // 3. Principal confirms the relationship establishment
-    choreography!(include_str!("src/protocol.guardian_invitation.choreo"));
+    choreography!(include_str!("src/protocol.guardian_invitation.tell"));
 }
 
 /// Device enrollment protocol module
@@ -299,7 +299,7 @@ pub mod device_enrollment {
     // Note: The new device must create its own authority first, making it
     // addressable before the enrollment choreography can proceed.
     // The generated manifest carries device-migration link metadata for reconfiguration.
-    choreography!(include_str!("src/protocol.device_enrollment.choreo"));
+    choreography!(include_str!("src/protocol.device_enrollment.tell"));
 }
 
 // =============================================================================

@@ -18,22 +18,22 @@ has_dynamic_roles() {
 }
 
 run_fixture_compatible() {
-  local base="crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.choreo"
-  local curr="crates/aura-testkit/fixtures/protocol_compat/compatible_current.choreo"
+  local base="crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.tell"
+  local curr="crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell"
   echo "checking known-compatible fixture..."
   run_pair "$base" "$curr"
 }
 
 run_fixture_breaking() {
-  local base="crates/aura-testkit/fixtures/protocol_compat/breaking_baseline.choreo"
-  local curr="crates/aura-testkit/fixtures/protocol_compat/breaking_current.choreo"
+  local base="crates/aura-testkit/fixtures/protocol_compat/breaking_baseline.tell"
+  local curr="crates/aura-testkit/fixtures/protocol_compat/breaking_current.tell"
   echo "checking known-breaking fixture..."
   run_pair "$base" "$curr"
 }
 
 if [[ "${1:-}" == "--pair" ]]; then
   if [[ "$#" -ne 3 ]]; then
-    echo "usage: scripts/check/protocol-compat.sh --pair <baseline.choreo> <current.choreo>"
+    echo "usage: scripts/check/protocol-compat.sh --pair <baseline.tell> <current.tell>"
     exit 2
   fi
   run_pair "$2" "$3"
@@ -69,14 +69,14 @@ if ! git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
   exit 2
 fi
 
-changed_choreo="$(git diff --name-only "$BASE_REF"...HEAD -- '*.choreo')"
-if [[ -z "$changed_choreo" ]]; then
+changed_tell="$(git diff --name-only "$BASE_REF"...HEAD -- '*.tell')"
+if [[ -z "$changed_tell" ]]; then
   echo "no changed choreography files vs $BASE_REF; compatibility check skipped"
   exit 0
 fi
 
 status=0
-for file in $changed_choreo; do
+for file in $changed_tell; do
   if [[ ! -f "$file" ]]; then
     echo "skipping deleted choreography: $file"
     continue

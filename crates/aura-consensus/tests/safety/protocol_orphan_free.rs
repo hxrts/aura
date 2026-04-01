@@ -67,7 +67,7 @@ fn orphan_free_status_for_all_roles(source: &str) -> BTreeMap<String, bool> {
 
 #[test]
 fn consensus_protocol_pattern_is_coherent_and_orphan_free() {
-    let source = include_str!("../../src/protocol/choreography.choreo");
+    let source = include_str!("../../src/protocol/choreography.tell");
     let orphan_free = orphan_free_status_for_all_roles(source);
     assert!(
         orphan_free.values().any(|ok| !ok),

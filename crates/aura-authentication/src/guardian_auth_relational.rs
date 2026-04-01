@@ -240,7 +240,7 @@ fn verify_consensus_proof(
 }
 
 // Guardian Authentication Choreography via Relational Context
-choreography!(include_str!("src/guardian_auth_relational.choreo"));
+choreography!(include_str!("src/guardian_auth_relational.tell"));
 
 /// Guardian authentication handler for relational contexts
 pub struct GuardianAuthHandler {

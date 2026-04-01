@@ -3,4 +3,4 @@
 use aura_macros::choreography;
 
 // Define the consensus choreography protocol
-choreography!(include_str!("src/protocol/choreography.choreo"));
+choreography!(include_str!("src/protocol/choreography.tell"));

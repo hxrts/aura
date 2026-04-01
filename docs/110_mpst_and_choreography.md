@@ -4,15 +4,15 @@ This document describes the architecture of choreographic protocols in Aura. It 
 
 ## 1. DSL and Projection
 
-Aura defines global protocols using the `choreography!` macro. The macro parses a global specification into an abstract syntax tree. The macro produces code that represents the protocol as a choreographic structure. The source of truth for protocols is a `.choreo` file stored next to the Rust module that loads it.
+Aura defines global protocols using the `choreography!` macro. The macro parses a global specification into an abstract syntax tree. The macro produces code that represents the protocol as a choreographic structure. The source of truth for protocols is a `.tell` file stored next to the Rust module that loads it.
 
 Projection converts the global protocol into per-role local session types. Each local session type defines the exact sequence of sends and receives for a single role. Projection eliminates deadlocks and ensures that communication structure is correct.
 
 ```rust
-choreography!(include_str!("example.choreo"));
+choreography!(include_str!("example.tell"));
 ```
 
-Example file: `example.choreo`
+Example file: `example.tell`
 ```
 module example exposing (Example)
 
@@ -172,7 +172,7 @@ The runtime provides production choreographic execution through manifest-driven 
 
 ### 10.2 Wiring a Choreography
 
-Wiring a choreography involves storing the protocol in a `.choreo` file, generating artifacts via `choreography!`, opening an admitted protocol-machine session, and providing decision sources through the host bridge.
+Wiring a choreography involves storing the protocol in a `.tell` file, generating artifacts via `choreography!`, opening an admitted protocol-machine session, and providing decision sources through the host bridge.
 
 See [Choreography Development Guide](803_choreography_guide.md) for the wiring procedure.
 

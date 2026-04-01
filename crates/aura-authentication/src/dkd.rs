@@ -910,7 +910,7 @@ pub struct DkdMessage {
     pub timestamp: u64,
 }
 
-choreography!(include_str!("src/dkd.choreo"));
+choreography!(include_str!("src/dkd.tell"));
 
 // =============================================================================
 // Convenience Functions
