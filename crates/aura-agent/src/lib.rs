@@ -80,105 +80,108 @@
 
 #![allow(clippy::expect_used)]
 
-#[cfg(not(feature = "choreo-backend-telltale-vm"))]
+#[cfg(not(feature = "choreo-backend-telltale-machine"))]
 compile_error!(
     "Aura agent requires the Telltale choreography backend. \
-     Enable feature `choreo-backend-telltale-vm`."
+     Enable feature `choreo-backend-telltale-machine`."
 );
 
 // Core modules (public API)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub mod core;
 
 // Builder system for ergonomic runtime construction
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub mod builder;
 
 // Runtime modules (internal)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 mod runtime;
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 mod task_registry;
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 mod token_profiles;
 
 // Handler modules (public for service access)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub mod handlers;
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 mod reconfiguration;
 
 // Runtime-owned indexed journal utilities (stateful)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub mod database;
 
 // Reactive programming infrastructure (public)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub mod reactive;
 
 // RuntimeBridge implementation (for aura-app dependency inversion)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 mod runtime_bridge;
 #[cfg(test)]
 mod testing;
 
 // Journal fact registry helpers (public helper functions)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub mod fact_registry;
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub mod fact_types;
 
 // Public API - authority-first design
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, AuthorityContext};
 
 // Builder system exports
-#[cfg(all(feature = "android", feature = "choreo-backend-telltale-vm"))]
+#[cfg(all(feature = "android", feature = "choreo-backend-telltale-machine"))]
 pub use builder::AndroidPresetBuilder;
-#[cfg(all(feature = "web", feature = "choreo-backend-telltale-vm"))]
+#[cfg(all(feature = "web", feature = "choreo-backend-telltale-machine"))]
 pub use builder::WebPresetBuilder;
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use builder::{BuildError, CliPresetBuilder, CustomPresetBuilder};
-#[cfg(all(feature = "ios", feature = "choreo-backend-telltale-vm"))]
+#[cfg(all(feature = "ios", feature = "choreo-backend-telltale-machine"))]
 pub use builder::{DataProtectionClass, IosPresetBuilder};
 
 // Session management types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use handlers::{SessionHandle, SessionServiceApi, SessionStats};
 
 // Authentication types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use handlers::{
     AuthChallenge, AuthMethod, AuthResponse, AuthResult, AuthServiceApi, AuthenticationStatus,
 };
 
 // Invitation types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use handlers::{
     Invitation, InvitationResult, InvitationServiceApi, InvitationStatus, InvitationType,
 };
 
 // Recovery types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use handlers::{
     GuardianApproval, RecoveryOperation, RecoveryRequest, RecoveryResult, RecoveryServiceApi,
     RecoveryState,
 };
 
 // OTA types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use handlers::{OtaHandler, UpdateInfo, UpdateResult, UpdateStatus};
 
 // Rendezvous types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use handlers::{ChannelResult, RendezvousHandler, RendezvousResult, RendezvousServiceApi};
 
 // Runtime types for advanced usage
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::system::RuntimeShutdownError;
-#[cfg(all(feature = "choreo-backend-telltale-vm", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "choreo-backend-telltale-machine",
+    not(target_arch = "wasm32")
+))]
 pub use runtime::AuraHandlerAdapter;
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::{
     EffectContext, EffectExecutor, EffectOperation, EffectRegistry, EffectRegistryError,
     EffectRegistryExt, EffectSystemBuilder, EffectType, FlowBudgetManager, LifecycleManager,
@@ -188,15 +191,18 @@ pub use runtime::{
 };
 
 // Protocol adapter for choreography execution (used by tests)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::choreo_engine::{AuraChoreoEngine, AuraChoreoEngineError};
-#[cfg(all(feature = "choreo-backend-telltale-vm", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "choreo-backend-telltale-machine",
+    not(target_arch = "wasm32")
+))]
 pub use runtime::choreography_adapter::{AuraProtocolAdapter, MessageRequest, ReceivedMessage};
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::parity_policy::{AuraEnvelopeParityError, AuraEnvelopeParityPolicy};
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::vm_hardening::{
     apply_protocol_execution_policy, apply_scheduler_execution_policy, aura_flow_policy_predicate,
     aura_output_predicate_allow_list, build_envelope_diff_artifact_for_policy, build_vm_config,
@@ -219,69 +225,69 @@ pub use runtime::vm_hardening::{
     AURA_VM_POLICY_SYNC_ANTI_ENTROPY, AURA_VM_SCHED_PRIORITY_AGING, AURA_VM_SCHED_PROGRESS_AWARE,
     AURA_VM_SCHED_ROUND_ROBIN,
 };
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::{
     AuraEffectTraceEncoding, AuraEffectTraceGranularity, EffectTraceBundle, EffectTraceCapture,
     EffectTraceCaptureError, EffectTraceCaptureOptions,
 };
 
 // Sync service types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
 
 // Rendezvous service types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{RendezvousManager, RendezvousManagerConfig};
 
 // Social service types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{
     AccountabilityWitness, AccountabilityWitnessKind, HoldBudgetSnapshot, HoldDepositOutcome,
     HoldGcOutcome, HoldLocalIndexEntry, HoldManager, HoldManagerConfig, HoldProjection,
     HoldRetrievalOutcome, HoldRetrievalStatus, HoldSelectionPlan, HoldSyncBatch,
     QueuedAccountabilityReply, QueuedSyncRetrieval, VerifiedServiceWitness, VerifierRole,
 };
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{SocialManager, SocialManagerConfig, SocialManagerState};
 
 // Threshold signing service types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use reconfiguration::{CoherenceStatus, ReconfigurationError, SessionFootprintClass};
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::ThresholdSigningService;
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{
     ReconfigurationManager, ReconfigurationManagerError, SessionDelegationOutcome,
     SessionDelegationTransfer,
 };
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::SessionOwnerCapabilityScope;
 
 // Re-export core types for convenience
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use aura_core::effects::ExecutionMode;
 
 // Effect system types
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::AuraEffectSystem;
 
 // Simulation factory (feature-gated)
-#[cfg(all(feature = "simulation", feature = "choreo-backend-telltale-vm"))]
+#[cfg(all(feature = "simulation", feature = "choreo-backend-telltale-machine"))]
 pub use runtime::EffectSystemFactory;
 
 // Re-export core types for convenience (authority-first)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use aura_core::types::identifiers::{AuthorityId, ContextId, SessionId};
 
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use fact_registry::build_fact_registry;
 
 /// Selected choreography backend label.
-#[cfg(feature = "choreo-backend-telltale-vm")]
-pub const CHOREO_BACKEND: &str = "telltale_vm";
+#[cfg(feature = "choreo-backend-telltale-machine")]
+pub const CHOREO_BACKEND: &str = "telltale_machine";
 
 /// Create a production agent (convenience function)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub async fn create_production_agent(
     ctx: &EffectContext,
     authority_id: AuthorityId,
@@ -293,7 +299,7 @@ pub async fn create_production_agent(
 }
 
 /// Create a testing agent (convenience function)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub fn create_testing_agent(authority_id: AuthorityId) -> AgentResult<AuraAgent> {
     AgentBuilder::new()
         .with_authority(authority_id)
@@ -301,7 +307,7 @@ pub fn create_testing_agent(authority_id: AuthorityId) -> AgentResult<AuraAgent>
 }
 
 /// Create a simulation agent (convenience function)
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub fn create_simulation_agent(authority_id: AuthorityId, seed: u64) -> AgentResult<AuraAgent> {
     AgentBuilder::new()
         .with_authority(authority_id)

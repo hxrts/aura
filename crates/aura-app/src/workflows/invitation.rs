@@ -2702,15 +2702,13 @@ pub async fn accept_invitation_with_instance(
         SemanticOperationKind::AcceptPendingChannelInvitation
     };
     let operation_id = match operation_kind {
-        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+        SemanticOperationKind::AcceptPendingChannelInvitation => {
+            OperationId::invitation_accept_channel()
+        }
         _ => OperationId::invitation_accept_contact(),
     };
-    let owner = SemanticWorkflowOwner::new(
-        app_core,
-        operation_id,
-        instance_id.clone(),
-        operation_kind,
-    );
+    let owner =
+        SemanticWorkflowOwner::new(app_core, operation_id, instance_id.clone(), operation_kind);
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
     accept_invitation_id_owned(app_core, &invitation_id, &owner, None).await
@@ -2967,15 +2965,13 @@ pub async fn accept_imported_invitation_with_instance(
 ) -> Result<(), AuraError> {
     let operation_kind = semantic_kind_for_bridge_invitation(invitation.info());
     let operation_id = match operation_kind {
-        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+        SemanticOperationKind::AcceptPendingChannelInvitation => {
+            OperationId::invitation_accept_channel()
+        }
         _ => OperationId::invitation_accept_contact(),
     };
-    let owner = SemanticWorkflowOwner::new(
-        app_core,
-        operation_id,
-        instance_id.clone(),
-        operation_kind,
-    );
+    let owner =
+        SemanticWorkflowOwner::new(app_core, operation_id, instance_id.clone(), operation_kind);
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
     let invitation = invitation.into_info();
@@ -2991,15 +2987,13 @@ pub async fn accept_imported_invitation_with_terminal_status(
 ) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
     let operation_kind = semantic_kind_for_bridge_invitation(invitation.info());
     let operation_id = match operation_kind {
-        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+        SemanticOperationKind::AcceptPendingChannelInvitation => {
+            OperationId::invitation_accept_channel()
+        }
         _ => OperationId::invitation_accept_contact(),
     };
-    let owner = SemanticWorkflowOwner::new(
-        app_core,
-        operation_id,
-        instance_id.clone(),
-        operation_kind,
-    );
+    let owner =
+        SemanticWorkflowOwner::new(app_core, operation_id, instance_id.clone(), operation_kind);
     let result: Result<(), AuraError> = async {
         if operation_kind == SemanticOperationKind::AcceptContactInvitation {
             emit_contact_accept_probe("publish_workflow_dispatched");
@@ -3276,15 +3270,12 @@ pub async fn accept_invitation_by_str_with_terminal_status(
         .map(semantic_kind_for_bridge_invitation)
         .unwrap_or(SemanticOperationKind::AcceptContactInvitation);
     let operation_id = match kind {
-        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+        SemanticOperationKind::AcceptPendingChannelInvitation => {
+            OperationId::invitation_accept_channel()
+        }
         _ => OperationId::invitation_accept_contact(),
     };
-    let owner = SemanticWorkflowOwner::new(
-        app_core,
-        operation_id,
-        instance_id,
-        kind,
-    );
+    let owner = SemanticWorkflowOwner::new(app_core, operation_id, instance_id, kind);
     let result: Result<InvitationInfo, AuraError> = async {
         publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
             .await?;

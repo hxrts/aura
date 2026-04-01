@@ -47,42 +47,6 @@ impl RuntimeCapabilityHandler {
 
 #[cfg(feature = "telltale-runtime-capability")]
 impl RuntimeCapabilityHandler {
-    /// Build from the legacy Telltale runtime-contract admission surface.
-    pub fn from_runtime_contracts(
-        contracts: &telltale_vm::runtime_contracts::RuntimeContracts,
-    ) -> Self {
-        let mut inventory = telltale_vm::runtime_contracts::runtime_capability_snapshot(contracts)
-            .into_iter()
-            .map(|(key, admitted)| (CapabilityKey::new(key), admitted))
-            .collect::<BTreeMap<_, _>>();
-
-        // Derived Aura capability keys mapped from theorem-pack/runtime contracts.
-        inventory.insert(
-            CapabilityKey::new("byzantine_envelope"),
-            contracts.determinism_artifacts.full,
-        );
-        inventory.insert(
-            CapabilityKey::new("termination_bounded"),
-            contracts.determinism_artifacts.replay || contracts.determinism_artifacts.full,
-        );
-        inventory.insert(
-            CapabilityKey::new("reconfiguration"),
-            contracts.live_migration && contracts.placement_refinement,
-        );
-        inventory.insert(
-            CapabilityKey::new("mixed_determinism"),
-            contracts.can_use_mixed_determinism_profiles,
-        );
-        inventory.insert(
-            CapabilityKey::new("vmEnvelopeAdherence"),
-            contracts.determinism_artifacts.full,
-        );
-
-        Self {
-            inventory: Arc::new(inventory),
-        }
-    }
-
     /// Build from the current ProtocolMachine runtime contracts/admission surface.
     pub fn from_protocol_machine_runtime_contracts(
         contracts: &telltale_machine::runtime_contracts::RuntimeContracts,
@@ -184,33 +148,6 @@ mod tests {
         assert!(inventory.contains(&(CapabilityKey::new("capA"), true)));
         assert!(inventory.contains(&(CapabilityKey::new("capB"), false)));
         assert!(inventory.contains(&(CapabilityKey::new("capC"), true)));
-    }
-
-    #[cfg(feature = "telltale-runtime-capability")]
-    #[test]
-    fn runtime_contract_mapping_exposes_derived_aura_capabilities() {
-        let contracts = telltale_vm::runtime_contracts::RuntimeContracts::full();
-        let handler = RuntimeCapabilityHandler::from_runtime_contracts(&contracts);
-        assert!(
-            handler
-                .inventory
-                .get(&CapabilityKey::new("byzantine_envelope"))
-                .copied()
-                .unwrap_or(false),
-            "full contracts should admit byzantine_envelope"
-        );
-        assert!(
-            handler
-                .inventory
-                .contains_key(&CapabilityKey::new("termination_bounded")),
-            "derived termination_bounded key should be present"
-        );
-        assert!(
-            handler
-                .inventory
-                .contains_key(&CapabilityKey::new("mixed_determinism")),
-            "derived mixed_determinism key should be present"
-        );
     }
 
     #[cfg(feature = "telltale-runtime-capability")]

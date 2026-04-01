@@ -451,8 +451,8 @@ These commands run the conformance test suite and report any divergence between 
 AURA_CONFORMANCE_SCENARIO=scenario_name \
 AURA_CONFORMANCE_SEED=42 \
 cargo test -p aura-agent \
-  --features choreo-backend-telltale-vm \
-  --test telltale_vm_parity test_name \
+  --features choreo-backend-telltale-machine \
+  --test telltale_machine_parity test_name \
   -- --nocapture
 ```
 

@@ -1,5 +1,5 @@
 //! Concurrent mixed-protocol contract lane for Telltale protocol-machine backends.
-#![cfg(feature = "choreo-backend-telltale-vm")]
+#![cfg(feature = "choreo-backend-telltale-machine")]
 #![allow(clippy::expect_used, clippy::disallowed_methods, missing_docs)]
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -9,11 +9,13 @@ use std::path::PathBuf;
 use aura_agent::{build_vm_config, AuraVmHardeningProfile, AuraVmParityProfile};
 use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
 use serde::Serialize;
-use telltale_vm::coroutine::Value;
-use telltale_vm::effect::EffectHandler;
-use telltale_vm::loader::CodeImage;
-use telltale_vm::threaded::ThreadedVM;
-use telltale_vm::vm::{ObsEvent, RunStatus, ThreadedRoundSemantics, VMConfig, VM};
+use telltale_machine::coroutine::Value;
+use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
+use telltale_machine::runtime::loader::CodeImage;
+use telltale_machine::{
+    ObsEvent, ProtocolMachine as VM, ProtocolMachineConfig as VMConfig, RunStatus,
+    ThreadedProtocolMachine as ThreadedVM, ThreadedRoundSemantics,
+};
 
 const MIX_SEEDS: &[u64] = &[3, 11, 29];
 const REQUIRED_LABELS: &[&str] = &[
@@ -43,8 +45,8 @@ impl EffectHandler for NoOpHandler {
         _partner: &str,
         _label: &str,
         _state: &[Value],
-    ) -> Result<Value, String> {
-        Ok(Value::Unit)
+    ) -> EffectResult<Value> {
+        EffectResult::success(Value::Unit)
     }
 
     fn handle_recv(
@@ -54,8 +56,8 @@ impl EffectHandler for NoOpHandler {
         _label: &str,
         _state: &mut Vec<Value>,
         _payload: &Value,
-    ) -> Result<(), String> {
-        Ok(())
+    ) -> EffectResult<()> {
+        EffectResult::success(())
     }
 
     fn handle_choose(
@@ -64,15 +66,15 @@ impl EffectHandler for NoOpHandler {
         _partner: &str,
         labels: &[String],
         _state: &[Value],
-    ) -> Result<String, String> {
-        labels
-            .first()
-            .cloned()
-            .ok_or_else(|| "no labels available".to_string())
+    ) -> EffectResult<String> {
+        labels.first().cloned().map_or_else(
+            || EffectResult::failure(EffectFailure::contract_violation("no labels available")),
+            EffectResult::success,
+        )
     }
 
-    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> Result<(), String> {
-        Ok(())
+    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> EffectResult<()> {
+        EffectResult::success(())
     }
 }
 

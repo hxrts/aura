@@ -4,9 +4,9 @@
 //! by tracing spans at the call site - this module focuses on structured
 //! logging of AMP-specific data (headers, window validation, flow charges).
 
+use aura_core::effects::amp::AmpHeader;
 use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Receipt};
-use aura_core::effects::amp::AmpHeader;
 use aura_transport::amp::AmpError;
 use tracing::{error, info, warn};
 

@@ -1,6 +1,6 @@
 //! TimeStamp comparison and sorting logic.
 
-use super::{OrderingPolicy, TimeIndex, TimeDomain, TimeOrdering, TimeStamp};
+use super::{OrderingPolicy, TimeDomain, TimeIndex, TimeOrdering, TimeStamp};
 
 impl TimeStamp {
     /// Convert TimeStamp to a domain-scoped index.

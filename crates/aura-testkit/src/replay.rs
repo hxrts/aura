@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use aura_core::AuraFault;
 use serde::{Deserialize, Serialize};
-use telltale_vm::{EffectTraceEntry, ReplayEffectHandler};
+use telltale_machine::{model::effects::EffectHandler, EffectTraceEntry, ReplayEffectHandler};
 
 /// On-disk encoding for replay traces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -221,10 +221,7 @@ impl ReplayTrace {
 
     /// Build a Telltale replay handler with fallback behavior.
     #[must_use]
-    pub fn with_fallback<'a>(
-        &'a self,
-        fallback: &'a dyn telltale_vm::effect::EffectHandler,
-    ) -> ReplayEffectHandler<'a> {
+    pub fn with_fallback<'a>(&'a self, fallback: &'a dyn EffectHandler) -> ReplayEffectHandler<'a> {
         ReplayEffectHandler::with_fallback(self.shared(), fallback)
     }
 
@@ -319,6 +316,8 @@ mod tests {
             inputs: json!({"in": effect_id}),
             outputs: json!({"out": effect_id}),
             handler_identity: "test".to_string(),
+            effect_interface: None,
+            effect_operation: None,
             ordering_key: effect_id,
             topology: None,
         }

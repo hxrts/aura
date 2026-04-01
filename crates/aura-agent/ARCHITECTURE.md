@@ -146,7 +146,7 @@ Runtime telltale integration consumes bridge artifacts but does not redefine bri
 
 Enforcement locus:
 - `src/runtime/choreo_engine.rs` and `src/runtime/choreography_adapter.rs` enforce runtime capability admission.
-- `tests/telltale_vm_parity.rs` and `tests/telltale_vm_scenario_contracts.rs` run runtime parity and contract lanes for the admitted protocol-machine path.
+- `tests/telltale_machine_parity.rs` and `tests/telltale_machine_scenario_contracts.rs` run runtime parity and contract lanes for the admitted protocol-machine path.
 
 Failure mode:
 - Runtime layer duplicates schema translation code and drifts from `aura-quint`.
@@ -458,9 +458,9 @@ cargo test -p aura-agent --test compile_fail   # compile-fail boundary tests
 | Private runtime internals accessible | InvariantCanonicalIngress | `tests/ui/*_private.rs` (4 compile-fail) | Covered |
 | Protocol fragment registry leaked | InvariantSessionOwnership | `tests/ui/vm_fragment_registry_private.rs` | Covered |
 | Service actor handle leaked | InvariantStructuredConcurrency | `tests/ui/service_actor_handle_private.rs` | Covered |
-| Protocol-machine concurrent contract violated | InvariantStructuredConcurrency | `tests/telltale_vm_concurrent_contracts.rs` | Covered |
-| Protocol-machine parity diverges across profiles | InvariantBridgeOwnershipAgent | `tests/telltale_vm_parity.rs` | Covered |
-| Protocol-machine scenario contract fails | InvariantBridgeOwnershipAgent | `tests/telltale_vm_scenario_contracts.rs` | Covered |
+| Protocol-machine concurrent contract violated | InvariantStructuredConcurrency | `tests/telltale_machine_concurrent_contracts.rs` | Covered |
+| Protocol-machine parity diverges across profiles | InvariantBridgeOwnershipAgent | `tests/telltale_machine_parity.rs` | Covered |
+| Protocol-machine scenario contract fails | InvariantBridgeOwnershipAgent | `tests/telltale_machine_scenario_contracts.rs` | Covered |
 | Production manifest fails admission | InvariantRuntimeCompositionBoundary | `tests/production_manifest_admission.rs` | Covered |
 | FRP scheduler glitches | — | `tests/frp_glitch_freedom_test.rs` | Covered |
 | Journal integration roundtrip | — | `tests/journal_integration_test.rs` | Covered |

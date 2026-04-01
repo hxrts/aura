@@ -16,18 +16,16 @@ use aura_mpst::termination::{compute_weighted_measure, SessionBufferSnapshot};
 use aura_protocol::termination::{
     TerminationBudget, TerminationBudgetConfig, TerminationBudgetError, TerminationProtocolClass,
 };
-use serde::{de::DeserializeOwned, Serialize};
 use telltale_machine::coroutine::Fault;
 use telltale_machine::model::effects::EffectHandler as ProtocolMachineEffectHandler;
 use telltale_machine::model::state::SessionStatus;
 use telltale_machine::runtime::loader::CodeImage as ProtocolMachineCodeImage;
 use telltale_machine::{
     canonical_effect_trace, enforce_protocol_machine_runtime_gates, normalize_trace, obs_session,
-    EffectTraceEntry, ObsEvent, ProtocolMachine, ProtocolMachineConfig, ProtocolMachineError,
-    RunStatus, RuntimeContracts, RuntimeGateResult, SessionId, StepResult, ThreadedProtocolMachine,
+    EffectTraceEntry, EnvelopeDiffArtifactV1, ObsEvent, ProtocolMachine,
+    ProtocolMachineConfig as VMConfig, ProtocolMachineError, RunStatus, RuntimeContracts,
+    RuntimeGateResult, SessionId, StepResult, ThreadedProtocolMachine,
 };
-use telltale_vm::envelope_diff::EnvelopeDiffArtifactV1;
-use telltale_vm::vm::VMConfig;
 use tracing::warn;
 
 use super::vm_effect_handler::AuraVmEffectHandler;
@@ -124,67 +122,22 @@ impl From<ProtocolMachineError> for AuraChoreoEngineError {
 type VM = ProtocolMachine;
 type VMError = ProtocolMachineError;
 
-fn transcode_compat<T, U>(value: &T, context: &str) -> Result<U, AuraChoreoEngineError>
-where
-    T: Serialize + ?Sized,
-    U: DeserializeOwned,
-{
-    let payload =
-        serde_json::to_value(value).map_err(|error| AuraChoreoEngineError::Interpreter {
-            message: format!("{context} serialization failed: {error}"),
-        })?;
-    serde_json::from_value(payload).map_err(|error| AuraChoreoEngineError::Interpreter {
-        message: format!("{context} deserialization failed: {error}"),
-    })
-}
-
-fn transcode_or_panic<T, U>(value: &T, context: &str) -> U
-where
-    T: Serialize + ?Sized,
-    U: DeserializeOwned,
-{
-    transcode_compat(value, context).expect("legacy/current Telltale compatibility transcode")
-}
-
 fn protocol_machine_config_from_vm_config(
     config: &VMConfig,
-) -> Result<ProtocolMachineConfig, AuraChoreoEngineError> {
-    // Aura hardening policies are still expressed in the shared VM config shape,
-    // so the runtime translates that policy output into the protocol-machine config.
-    let converted: ProtocolMachineConfig = transcode_compat(config, "legacy VM config")?;
-    converted
+) -> Result<VMConfig, AuraChoreoEngineError> {
+    config
+        .clone()
         .validate_invariants()
         .map_err(|reason| AuraChoreoEngineError::Interpreter {
             message: format!("invalid protocol-machine config: {reason}"),
         })?;
-    Ok(converted)
-}
-
-#[cfg(test)]
-fn protocol_machine_code_image_from_legacy(
-    image: &telltale_vm::loader::CodeImage,
-) -> Result<ProtocolMachineCodeImage, AuraChoreoEngineError> {
-    let global_type = transcode_compat::<_, telltale_types_v9::GlobalType>(
-        &image.global_type,
-        "legacy global type",
-    )?;
-    let local_types = transcode_compat::<_, BTreeMap<String, telltale_types_v9::LocalTypeR>>(
-        &image.local_types,
-        "legacy local types",
-    )?;
-    let image = ProtocolMachineCodeImage::from_local_types(&local_types, &global_type);
-    image
-        .validate_runtime_shape()
-        .map_err(|reason| AuraChoreoEngineError::Interpreter {
-            message: format!("invalid protocol-machine code image: {reason}"),
-        })?;
-    Ok(image)
+    Ok(config.clone())
 }
 
 fn admit_protocol_machine_runtime(
     config: &VMConfig,
     runtime_contracts: Option<&RuntimeContracts>,
-) -> Result<ProtocolMachineConfig, AuraChoreoEngineError> {
+) -> Result<VMConfig, AuraChoreoEngineError> {
     validate_determinism_profile(config).map_err(|error| AuraChoreoEngineError::Interpreter {
         message: format!("invalid VM determinism profile: {error}"),
     })?;
@@ -216,7 +169,7 @@ impl std::fmt::Debug for AuraVmBackend {
 }
 
 impl AuraVmBackend {
-    fn new(config: &ProtocolMachineConfig, selector: AuraVmRuntimeSelector) -> Self {
+    fn new(config: &VMConfig, selector: AuraVmRuntimeSelector) -> Self {
         match selector.runtime_mode {
             AuraVmRuntimeMode::Cooperative => {
                 Self::Cooperative(Box::new(ProtocolMachine::new(config.clone())))
@@ -877,10 +830,7 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
 
         for session in vm.sessions().iter() {
             for entry in session.local_types.values() {
-                local_types.push(transcode_or_panic(
-                    &entry.current,
-                    "protocol-machine local type",
-                ));
+                local_types.push(entry.current.clone());
             }
 
             for (edge, buffer) in &session.buffers {
@@ -1126,12 +1076,13 @@ mod tests {
     use super::*;
     use aura_mpst::upstream::types::{GlobalType, LocalTypeR};
     use std::collections::BTreeMap;
-    use telltale_machine::RuntimeContracts;
-    use telltale_vm::loader::CodeImage as LegacyCodeImage;
+    use telltale_machine::{
+        runtime::loader::CodeImage as ProtocolMachineCodeImage, RuntimeContracts,
+    };
 
     #[test]
     fn step_reaps_completed_sessions() {
-        let image = LegacyCodeImage::from_local_types(
+        let runtime_image = ProtocolMachineCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1139,7 +1090,6 @@ mod tests {
             vm_config_for_profile(AuraVmHardeningProfile::Prod),
             Arc::new(AuraVmEffectHandler::default()),
         );
-        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
 
         let sid = engine
             .open_protocol_machine_session(&runtime_image)
@@ -1157,7 +1107,7 @@ mod tests {
 
     #[test]
     fn explicit_threaded_selector_builds_threaded_backend() {
-        let image = LegacyCodeImage::from_local_types(
+        let runtime_image = ProtocolMachineCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1167,7 +1117,6 @@ mod tests {
         let selector = AuraVmRuntimeSelector::for_policy(policy);
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
-        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
         let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts_and_selector(
             config,
             Arc::new(AuraVmEffectHandler::default()),
@@ -1196,7 +1145,7 @@ mod tests {
 
     #[tokio::test]
     async fn admission_surfaces_threaded_envelope_metadata() {
-        let image = LegacyCodeImage::from_local_types(
+        let runtime_image = ProtocolMachineCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1206,7 +1155,6 @@ mod tests {
         let selector = AuraVmRuntimeSelector::for_policy(policy);
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
-        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
         let scheduler_input =
             super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
                 &runtime_image,
@@ -1260,7 +1208,7 @@ mod tests {
 
     #[tokio::test]
     async fn admission_surfaces_replay_threaded_metadata() {
-        let image = LegacyCodeImage::from_local_types(
+        let runtime_image = ProtocolMachineCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1272,7 +1220,6 @@ mod tests {
         let selector = AuraVmRuntimeSelector::for_policy(policy);
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
-        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
         let scheduler_input =
             super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
                 &runtime_image,
@@ -1319,7 +1266,7 @@ mod tests {
 
     #[tokio::test]
     async fn conformance_artifact_includes_selected_determinism_profile() {
-        let image = LegacyCodeImage::from_local_types(
+        let runtime_image = ProtocolMachineCodeImage::from_local_types(
             &BTreeMap::from([("Solo".to_string(), LocalTypeR::End)]),
             &GlobalType::End,
         );
@@ -1327,7 +1274,6 @@ mod tests {
             .expect("policy");
         let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
         super::super::vm_hardening::apply_protocol_execution_policy(&mut config, policy);
-        let runtime_image = protocol_machine_code_image_from_legacy(&image).expect("runtime image");
         let scheduler_input =
             super::super::vm_hardening::scheduler_control_input_for_protocol_machine_image(
                 &runtime_image,

@@ -6,11 +6,13 @@ use std::collections::BTreeMap;
 
 use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use telltale_vm::coroutine::Value;
-use telltale_vm::effect::EffectHandler;
-use telltale_vm::loader::CodeImage;
-use telltale_vm::threaded::ThreadedVM;
-use telltale_vm::vm::{RunStatus, VMConfig, VM};
+use telltale_machine::coroutine::Value;
+use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
+use telltale_machine::runtime::loader::CodeImage;
+use telltale_machine::{
+    ProtocolMachine as VM, ProtocolMachineConfig as VMConfig, RunStatus,
+    ThreadedProtocolMachine as ThreadedVM,
+};
 
 #[derive(Debug, Default)]
 struct NoOpHandler;
@@ -22,8 +24,8 @@ impl EffectHandler for NoOpHandler {
         _partner: &str,
         _label: &str,
         _state: &[Value],
-    ) -> Result<Value, String> {
-        Ok(Value::Unit)
+    ) -> EffectResult<Value> {
+        EffectResult::success(Value::Unit)
     }
 
     fn handle_recv(
@@ -33,8 +35,8 @@ impl EffectHandler for NoOpHandler {
         _label: &str,
         _state: &mut Vec<Value>,
         _payload: &Value,
-    ) -> Result<(), String> {
-        Ok(())
+    ) -> EffectResult<()> {
+        EffectResult::success(())
     }
 
     fn handle_choose(
@@ -43,15 +45,15 @@ impl EffectHandler for NoOpHandler {
         _partner: &str,
         labels: &[String],
         _state: &[Value],
-    ) -> Result<String, String> {
-        labels
-            .first()
-            .cloned()
-            .ok_or_else(|| "no labels available".to_string())
+    ) -> EffectResult<String> {
+        labels.first().cloned().map_or_else(
+            || EffectResult::failure(EffectFailure::contract_violation("no labels available")),
+            EffectResult::success,
+        )
     }
 
-    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> Result<(), String> {
-        Ok(())
+    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> EffectResult<()> {
+        EffectResult::success(())
     }
 }
 
@@ -232,7 +234,7 @@ fn bench_pair_with_params(
     group.finish();
 }
 
-fn telltale_vm_runtime_benches(c: &mut Criterion) {
+fn telltale_machine_runtime_benches(c: &mut Criterion) {
     bench_pair(
         c,
         "category_c_consensus_runtime",
@@ -266,5 +268,5 @@ fn telltale_vm_runtime_benches(c: &mut Criterion) {
     );
 }
 
-criterion_group!(telltale_vm_backends, telltale_vm_runtime_benches);
-criterion_main!(telltale_vm_backends);
+criterion_group!(telltale_machine_backends, telltale_machine_runtime_benches);
+criterion_main!(telltale_machine_backends);

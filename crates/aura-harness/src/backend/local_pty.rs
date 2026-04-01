@@ -1608,6 +1608,20 @@ impl LocalPtyBackend {
         )?;
         Ok(SubmittedAction::with_ui_operation((), handle))
     }
+
+    fn submit_contact_control_action(
+        &mut self,
+        authority_id: &str,
+        control_id: ControlId,
+        operation: &str,
+    ) -> Result<SubmittedAction<()>> {
+        self.activate_list_item(ListId::Contacts, authority_id)?;
+        let handle = require_ui_operation_handle(
+            self.send_harness_command_receipt(&HarnessUiCommand::ActivateControl { control_id })?,
+            operation,
+        )?;
+        Ok(SubmittedAction::with_ui_operation((), handle))
+    }
 }
 
 impl SharedSemanticBackend for LocalPtyBackend {
@@ -1708,6 +1722,42 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
             IntentAction::AcceptContactInvitation { code } => {
                 let submitted = self.submit_accept_contact_invitation(&code)?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::SendFriendRequest { authority_id } => {
+                let submitted = self.submit_contact_control_action(
+                    &authority_id,
+                    ControlId::ContactsSendFriendRequestButton,
+                    "send_friend_request",
+                )?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::AcceptFriendRequest { authority_id } => {
+                let submitted = self.submit_contact_control_action(
+                    &authority_id,
+                    ControlId::ContactsAcceptFriendRequestButton,
+                    "accept_friend_request",
+                )?;
+                Ok(SemanticCommandResponse {
+                    submission: submitted.submission,
+                    handle: submitted.handle,
+                    value: SemanticCommandValue::None,
+                })
+            }
+            IntentAction::DeclineFriendRequest { authority_id } => {
+                let submitted = self.submit_contact_control_action(
+                    &authority_id,
+                    ControlId::ContactsDeclineFriendRequestButton,
+                    "decline_friend_request",
+                )?;
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,

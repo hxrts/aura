@@ -265,6 +265,7 @@ pub const AURA_EFFECT_ENVELOPE_CLASSIFICATIONS: &[(&str, AuraEnvelopeLawClass)] 
     ("invoke_step", AuraEnvelopeLawClass::Commutative),
     ("handle_acquire", AuraEnvelopeLawClass::Strict),
     ("handle_release", AuraEnvelopeLawClass::Strict),
+    ("output_condition_hint", AuraEnvelopeLawClass::Strict),
     ("topology_event", AuraEnvelopeLawClass::Algebraic),
 ];
 
@@ -413,6 +414,7 @@ mod tests {
             "invoke_step",
             "handle_acquire",
             "handle_release",
+            "output_condition_hint",
             "topology_event",
         ]) {
             panic!("current Telltale runtime effect kinds should be classified: {err}");

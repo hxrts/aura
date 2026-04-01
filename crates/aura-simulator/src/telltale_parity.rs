@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn boundary_uses_profile_from_input() {
         let baseline = artifact("aura", &["a", "b"]);
-        let telltale_candidate = artifact("telltale_vm", &["b", "a"]);
+        let telltale_candidate = artifact("telltale_machine", &["b", "a"]);
         let runner = DifferentialTester::new(DifferentialProfile::Strict);
         let strict_report = runner.run_telltale_parity(TelltaleParityInput {
             baseline: baseline.clone(),
@@ -287,7 +287,7 @@ mod tests {
         let report_path = dir.path().join("report.json");
 
         let baseline = artifact("aura", &["a", "b"]);
-        let candidate = artifact("telltale_vm", &["b", "a"]);
+        let candidate = artifact("telltale_machine", &["b", "a"]);
         std::fs::write(
             &baseline_path,
             serde_json::to_vec_pretty(&baseline).expect("serialize baseline"),
@@ -335,7 +335,7 @@ mod tests {
         let baseline_path = work_dir.join("baseline.json");
         let candidate_path = work_dir.join("telltale_candidate.json");
         let baseline = artifact("aura", &["a", "b"]);
-        let candidate = artifact("telltale_vm", &["b", "a"]);
+        let candidate = artifact("telltale_machine", &["b", "a"]);
         std::fs::write(
             &baseline_path,
             serde_json::to_vec_pretty(&baseline).expect("serialize baseline"),
@@ -367,7 +367,7 @@ mod tests {
         let report_path = dir.path().join("report.json");
 
         let baseline = artifact("aura", &["a", "b"]);
-        let candidate = artifact("telltale_vm", &["b", "a"]);
+        let candidate = artifact("telltale_machine", &["b", "a"]);
         std::fs::write(
             &baseline_path,
             serde_json::to_vec_pretty(&baseline).expect("serialize baseline"),

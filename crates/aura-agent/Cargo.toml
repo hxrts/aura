@@ -47,8 +47,7 @@ zeroize = { workspace = true }
 
 telltale = { workspace = true }
 telltale-machine = { workspace = true, optional = true, features = ["multi-thread"] }
-telltale-types-v9 = { package = "telltale-types", version = "9.0.0" }
-telltale-vm = { workspace = true, optional = true, features = ["multi-thread"] }
+telltale-types = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -83,12 +82,11 @@ wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Window", "Location"] }
 
 [features]
-default = ["choreo-backend-telltale-vm"]
+default = ["choreo-backend-telltale-machine"]
 real-android-keystore = []
 simulation = ["aura-core/simulation"]
-choreo-backend-telltale-vm = [
+choreo-backend-telltale-machine = [
     "dep:telltale-machine",
-    "dep:telltale-vm",
     "aura-effects/telltale-runtime-capability",
 ]
 ios = []
@@ -104,7 +102,6 @@ futures = { workspace = true }
 trybuild = { workspace = true }
 proptest = { workspace = true }
 telltale-machine = { workspace = true, features = ["multi-thread"] }
-telltale-vm = { workspace = true, features = ["multi-thread"] }
 telltale-types = { workspace = true }
 telltale-theory = { workspace = true }
 tempfile = { workspace = true }
@@ -115,9 +112,9 @@ criterion = { workspace = true }
 loom = "0.7"
 
 [[bench]]
-name = "telltale_vm_backends"
+name = "telltale_machine_backends"
 harness = false
-required-features = ["choreo-backend-telltale-vm"]
+required-features = ["choreo-backend-telltale-machine"]
 
 [lints]
 workspace = true

@@ -107,19 +107,14 @@ tokio-tungstenite = "0.20"
 socket2 = { version = "0.5", features = ["all"] }
 
 # Session types
-# Current upstream Telltale package layout. These are the canonical package
-# names Aura is migrating toward in Phase 2+.
+# Current upstream Telltale package layout.
+telltale = "9.0.0"
+telltale-types = "9.0.0"
+telltale-theory = "9.0.0"
 telltale-language = "9.0.0"
 telltale-runtime = "9.0.0"
 telltale-machine = "9.0.0"
 telltale-bridge = "9.0.0"
-
-# Legacy Aura integration line. These entries remain only until the codebase
-# finishes migrating to the current upstream package layout above.
-telltale = "4.0.1"
-telltale-vm = "4.0.1"
-telltale-types = "4.0.1"
-telltale-theory = "4.0.1"
 
 # Authorization
 biscuit-auth = { version = "5.0", features = ["wasm"] }

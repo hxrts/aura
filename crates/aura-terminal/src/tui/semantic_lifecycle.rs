@@ -604,7 +604,7 @@ mod tests {
                 kind: SemanticOperationKind::InviteActorToChannel,
             },
             OperationInvariantCase {
-                operation_id: OperationId::invitation_accept,
+                operation_id: OperationId::invitation_accept_channel,
                 kind: SemanticOperationKind::AcceptPendingChannelInvitation,
             },
             OperationInvariantCase {

@@ -16,11 +16,11 @@ use contact::InvitationContactHandler;
 use crate::core::{default_context_id_for_authority, AgentError, AgentResult, AuthorityContext};
 use crate::reactive::app_signal_views;
 use crate::runtime::services::InvitationManager;
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 use crate::runtime::{open_owned_manifest_vm_session_admitted, AuraEffectSystem};
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 use crate::runtime::vm_host_bridge::AuraVmHostWaitStatus;
-#[cfg(not(feature = "choreo-backend-telltale-vm"))]
+#[cfg(not(feature = "choreo-backend-telltale-machine"))]
 use crate::runtime::AuraEffectSystem;
 use crate::InvitationServiceApi;
 use device_enrollment::InvitationDeviceEnrollmentHandler;
@@ -51,7 +51,7 @@ use aura_invitation::capabilities::evaluation_candidates_for_invitation_guard;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
-#[cfg(not(feature = "choreo-backend-telltale-vm"))]
+#[cfg(not(feature = "choreo-backend-telltale-machine"))]
 use aura_invitation::protocol::exchange_runners::InvitationExchangeRole;
 use aura_invitation::protocol::exchange::telltale_session_types_invitation::message_wrappers::{
     InvitationAck as ExchangeInvitationAck,
@@ -91,9 +91,9 @@ use uuid::Uuid;
 use validation::InvitationValidationHandler;
 #[cfg(target_arch = "wasm32")]
 use web_sys::js_sys;
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 use telltale_machine::StepResult;
 
 mod cache;
@@ -2178,7 +2178,7 @@ impl InvitationHandler {
         }
     }
 
-    #[cfg(feature = "choreo-backend-telltale-vm")]
+    #[cfg(feature = "choreo-backend-telltale-machine")]
     fn invitation_exchange_peer_roles(
         authority_id: AuthorityId,
         peer_id: AuthorityId,
@@ -2194,7 +2194,7 @@ impl InvitationHandler {
         (local_role, peer_role, vec![local_role, peer_role])
     }
 
-    #[cfg(feature = "choreo-backend-telltale-vm")]
+    #[cfg(feature = "choreo-backend-telltale-machine")]
     async fn execute_invitation_exchange_sender_vm(
         &self,
         effects: Arc<AuraEffectSystem>,
@@ -2341,7 +2341,7 @@ impl InvitationHandler {
         loop_result
     }
 
-    #[cfg(feature = "choreo-backend-telltale-vm")]
+    #[cfg(feature = "choreo-backend-telltale-machine")]
     async fn execute_invitation_exchange_receiver_vm(
         &self,
         effects: Arc<AuraEffectSystem>,

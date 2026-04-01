@@ -26,9 +26,7 @@ use aura_journal::fact::{
     DkgTranscriptCommit, FactContent, ProposedChannelEpochBump, RelationalFact,
 };
 use aura_journal::ChannelEpochState;
-use aura_transport::amp::{
-    derive_for_recv, derive_for_send, AmpError, RatchetDerivation,
-};
+use aura_transport::amp::{derive_for_recv, derive_for_send, AmpError, RatchetDerivation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::instrument;
@@ -323,7 +321,7 @@ where
 
     // Phase 3: Serialize
     let core_header = header;
-    let msg = AmpMessage::new(core_header.clone(), sealed.clone());
+    let msg = AmpMessage::new(core_header, sealed.clone());
     let bytes = serialize_message(&msg).map_err(|e| {
         AMP_TELEMETRY.log_send_failure(context, channel, &e);
         e

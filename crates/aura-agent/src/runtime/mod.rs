@@ -60,7 +60,7 @@ pub mod session_ingress;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod choreography_adapter;
 cfg_if::cfg_if! {
-    if #[cfg(feature = "choreo-backend-telltale-vm")] {
+    if #[cfg(feature = "choreo-backend-telltale-machine")] {
         pub mod choreo_engine;
         pub mod effect_trace_capture;
         pub mod parity_policy;
@@ -79,7 +79,7 @@ pub use crate::task_registry::{TaskGroup, TaskSupervisionError, TaskSupervisor};
 pub use aura_core::OperationSessionId;
 pub use builder::EffectSystemBuilder;
 #[allow(unused_imports)] // Re-exported for public API
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use choreo_engine::{AuraChoreoEngine, AuraChoreoEngineError};
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(not(target_arch = "wasm32"))]
@@ -89,7 +89,7 @@ pub use choreography_adapter::{
 pub use context::EffectContext;
 pub use contracts::{AuraDelegationCoherence, AuraDelegationWitness, AuraLinkBoundary};
 #[allow(unused_imports)] // Re-exported for public API
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use contracts::{
     AuraRuntimeAdmissionEvidence, AuraRuntimeAdmissionEvidenceKind, AuraRuntimeEnvelopeAdmission,
 };
@@ -97,7 +97,7 @@ pub use diagnostics::{
     RuntimeDiagnostic, RuntimeDiagnosticKind, RuntimeDiagnosticSeverity, RuntimeDiagnosticSink,
 };
 #[allow(unused_imports)] // Re-exported for public API
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use effect_trace_capture::{
     AuraEffectTraceEncoding, AuraEffectTraceGranularity, EffectTraceBundle, EffectTraceCapture,
     EffectTraceCaptureError, EffectTraceCaptureOptions,
@@ -108,7 +108,7 @@ pub use instrumentation::{
     RuntimeReconfigurationEvent, RuntimeSessionEvent, RuntimeShutdownEvent, RuntimeVmEvent,
 };
 #[allow(unused_imports)] // Re-exported for public API
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use parity_policy::{AuraEnvelopeParityError, AuraEnvelopeParityPolicy};
 #[allow(unused_imports)] // Re-exported for public API
 pub use session_ingress::{
@@ -119,10 +119,10 @@ pub use shared_transport::SharedTransport;
 #[allow(unused_imports)] // Re-exported for public API
 pub use system::{RuntimeActivityGate, RuntimeActivityState, RuntimePublicOperationError};
 #[allow(unused_imports)] // Re-exported for public API
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};
 #[allow(unused_imports)] // Re-exported for public API
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use vm_hardening::{
     apply_protocol_execution_policy, apply_scheduler_execution_policy, aura_flow_policy_predicate,
     aura_output_predicate_allow_list, build_envelope_diff_artifact_for_policy, build_vm_config,
@@ -146,7 +146,7 @@ pub use vm_hardening::{
     AURA_VM_SCHED_ROUND_ROBIN,
 };
 #[allow(unused_imports)] // Re-exported for public API
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use vm_host_bridge::{AuraVmConcurrencyEnvelopeError, AuraVmSessionOpenError};
 
 // Re-export JournalCoupler for choreography journal coupling

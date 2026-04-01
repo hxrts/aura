@@ -40,7 +40,7 @@ fn test_amp_message_new() {
     let header = test_header();
     let payload = vec![1, 2, 3, 4, 5];
 
-    let msg = AmpMessage::new(header.clone(), payload.clone());
+    let msg = AmpMessage::new(header, payload.clone());
 
     assert_eq!(msg.schema_version, AMP_WIRE_SCHEMA_VERSION);
     assert_eq!(msg.header.context, header.context);

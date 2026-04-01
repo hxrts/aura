@@ -1335,7 +1335,9 @@ pub(super) fn handle_dispatch_command_match(
                         &invitation_id,
                     );
                     let operation_id = match accept_kind {
-                        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+                        SemanticOperationKind::AcceptPendingChannelInvitation => {
+                            OperationId::invitation_accept_channel()
+                        }
                         _ => OperationId::invitation_accept_contact(),
                     };
                     let operation = submit_workflow_handoff_operation(

@@ -26,6 +26,7 @@ use super::vm_host_bridge::{
 use super::{AuraChoreoEngine, AuraEffectSystem, AuraVmSchedulerSignals};
 use super::{AuraLinkBoundary, RuntimeBoundaryError, RuntimeSessionEvent};
 use aura_core::OwnershipCategory;
+use telltale_machine::SessionId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeSessionOwner {
@@ -173,7 +174,7 @@ pub struct OwnedVmSession {
     routing_boundary: AuraLinkBoundary,
     engine: AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
     handler: Arc<AuraQueuedVmBridgeHandler>,
-    vm_session_id: telltale_vm::SessionId,
+    vm_session_id: SessionId,
 }
 
 #[derive(Debug)]
@@ -335,7 +336,7 @@ impl OwnedVmSession {
         &mut self.engine
     }
 
-    pub fn vm_session_id(&self) -> telltale_vm::SessionId {
+    pub fn vm_session_id(&self) -> SessionId {
         self.vm_session_id
     }
 

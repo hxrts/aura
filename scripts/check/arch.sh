@@ -406,29 +406,29 @@ check_effects() {
       fi
 
       local telltale_src upstream_kinds missing
-      telltale_src=$(find "$HOME/.cargo/registry/src" -type d -path "*telltale-vm-*/src" 2>/dev/null | sort -V | tail -n1 || true)
+      telltale_src=$(find "$HOME/.cargo/registry/src" -type d -path "*telltale-machine-*/src" 2>/dev/null | sort -V | tail -n1 || true)
 
       if [[ -n "$telltale_src" && -d "$telltale_src" ]]; then
         upstream_kinds=$(rg --no-heading 'effect_kind:\s*"[^"]+"' \
           "$telltale_src/commit_common.rs" \
           "$telltale_src/effect/recording_impl.rs" \
           "$telltale_src/threaded/topology_and_planner.rs" \
-          "$telltale_src/vm/topology_and_dispatch.rs" \
+          "$telltale_src/engine/topology_and_dispatch.rs" \
           | sed -E 's/.*effect_kind:[[:space:]]*"([^"]+)".*/\1/' | sort -u || true)
 
         if [[ -n "$upstream_kinds" ]]; then
           missing=$(comm -23 <(echo "$upstream_kinds") <(echo "$classified_kinds") || true)
           if [[ -n "$missing" ]]; then
-            violation "Unclassified telltale-vm effect kinds: $(echo "$missing" | tr '\n' ' ' | sed 's/  */ /g')"
+            violation "Unclassified telltale-machine effect kinds: $(echo "$missing" | tr '\n' ' ' | sed 's/  */ /g')"
             hint "Add missing kinds to AURA_EFFECT_ENVELOPE_CLASSIFICATIONS in crates/aura-core/src/conformance.rs."
           else
-            info "Effect envelope registry: all telltale-vm effect kinds are classified"
+            info "Effect envelope registry: all telltale-machine effect kinds are classified"
           fi
         else
-          info "Effect envelope registry: telltale-vm effect_kind scan returned no kinds"
+          info "Effect envelope registry: telltale-machine effect_kind scan returned no kinds"
         fi
       else
-        info "Effect envelope registry: telltale-vm source not found in cargo registry; skipping upstream parity check"
+        info "Effect envelope registry: telltale-machine source not found in cargo registry; skipping upstream parity check"
       fi
     fi
   fi

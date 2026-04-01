@@ -2,7 +2,7 @@
 
 use aura_mpst::upstream::language::{ast::local_to_local_r, parse_choreography_str, project};
 use std::collections::BTreeMap;
-use telltale_theory_v9::subtyping::orphan_free;
+use telltale_theory::subtyping::orphan_free;
 
 fn strip_aura_annotations_for_parser(input: &str) -> String {
     let mut out = String::with_capacity(input.len());

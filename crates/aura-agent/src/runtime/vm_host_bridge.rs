@@ -15,7 +15,6 @@ use aura_core::AuraVmDeterminismProfileV1;
 use aura_mpst::upstream::types::{GlobalType, LocalTypeR};
 use aura_mpst::{CompositionManifest, GuardCapabilityAdmission};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
-use serde::{de::DeserializeOwned, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use telltale_machine::coroutine::{
@@ -26,7 +25,6 @@ use telltale_machine::{
     runtime::loader::CodeImage as ProtocolMachineCodeImage, EffectTraceEntry, ProtocolMachine,
     RuntimeContracts, SessionId, StepResult as ProtocolMachineStepResult, Value,
 };
-use telltale_vm::loader::CodeImage;
 
 use super::subsystems::VmBridgeState;
 
@@ -281,17 +279,6 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
     }
 }
 
-fn transcode_protocol_machine<T, U>(value: &T, context: &str) -> Result<U, String>
-where
-    T: Serialize + ?Sized,
-    U: DeserializeOwned,
-{
-    let payload = serde_json::to_value(value)
-        .map_err(|error| format!("{context} serialization failed: {error}"))?;
-    serde_json::from_value(payload)
-        .map_err(|error| format!("{context} deserialization failed: {error}"))
-}
-
 fn effective_host_bridge_policy(
     protocol_id: &str,
     policy: AuraVmProtocolExecutionPolicy,
@@ -377,7 +364,7 @@ pub fn build_role_scoped_code_image(
     active_role: &str,
     global_type: &GlobalType,
     local_types: &BTreeMap<String, LocalTypeR>,
-) -> Result<CodeImage, String> {
+) -> Result<ProtocolMachineCodeImage, String> {
     let mut scoped = BTreeMap::new();
     for role in roles {
         if *role == active_role {
@@ -390,7 +377,11 @@ pub fn build_role_scoped_code_image(
             scoped.insert((*role).to_string(), LocalTypeR::End);
         }
     }
-    Ok(CodeImage::from_local_types(&scoped, global_type))
+    let image = ProtocolMachineCodeImage::from_local_types(&scoped, global_type);
+    image
+        .validate_runtime_shape()
+        .map_err(|reason| format!("invalid protocol-machine role-scoped image: {reason}"))?;
+    Ok(image)
 }
 
 fn build_role_scoped_protocol_machine_code_image(
@@ -399,19 +390,7 @@ fn build_role_scoped_protocol_machine_code_image(
     global_type: &GlobalType,
     local_types: &BTreeMap<String, LocalTypeR>,
 ) -> Result<ProtocolMachineCodeImage, String> {
-    let legacy_image = build_role_scoped_code_image(roles, active_role, global_type, local_types)?;
-    let protocol_machine_global: telltale_types_v9::GlobalType =
-        transcode_protocol_machine(&legacy_image.global_type, "role-scoped global type")?;
-    let protocol_machine_locals: BTreeMap<String, telltale_types_v9::LocalTypeR> =
-        transcode_protocol_machine(&legacy_image.local_types, "role-scoped local types")?;
-    let image = ProtocolMachineCodeImage::from_local_types(
-        &protocol_machine_locals,
-        &protocol_machine_global,
-    );
-    image
-        .validate_runtime_shape()
-        .map_err(|reason| format!("invalid protocol-machine role-scoped image: {reason}"))?;
-    Ok(image)
+    build_role_scoped_code_image(roles, active_role, global_type, local_types)
 }
 
 #[cfg(test)]

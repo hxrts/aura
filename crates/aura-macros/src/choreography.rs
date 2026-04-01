@@ -27,7 +27,7 @@ use telltale_choreography::{
     Protocol,
 };
 use telltale_language as telltale_choreography;
-use telltale_theory_v9::coherence::check_coherent;
+use telltale_theory::coherence::check_coherent;
 
 // Import Biscuit-related types for the updated annotation system
 use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};

@@ -1,6 +1,6 @@
 //! VM hardening profile tests for Aura's telltale runtime integration.
 
-#![cfg(feature = "choreo-backend-telltale-vm")]
+#![cfg(feature = "choreo-backend-telltale-machine")]
 #![allow(clippy::expect_used)]
 
 use std::sync::Arc;
@@ -14,13 +14,13 @@ use aura_agent::{
     AURA_VM_SCHED_PRIORITY_AGING, AURA_VM_SCHED_PROGRESS_AWARE,
 };
 use aura_mpst::upstream::types::{GlobalType, Label};
+use telltale_machine::runtime::loader::CodeImage;
 use telltale_machine::{
     model::effects::{EffectFailure, EffectHandler, EffectResult},
     runtime::loader::CodeImage as ProtocolMachineCodeImage,
     ObsEvent, OutputConditionHint, RunStatus, RuntimeContracts, SessionId,
     TopologyPerturbation as ProtocolMachineTopologyPerturbation, Value,
 };
-use telltale_vm::loader::CodeImage;
 
 fn simple_send_image() -> CodeImage {
     let global = GlobalType::send("Sender", "Receiver", Label::new("msg"), GlobalType::End);
@@ -32,13 +32,7 @@ fn simple_send_image() -> CodeImage {
 }
 
 fn protocol_machine_image(image: &CodeImage) -> ProtocolMachineCodeImage {
-    let global_type: telltale_types_v9::GlobalType =
-        serde_json::from_value(serde_json::to_value(&image.global_type).expect("serialize global"))
-            .expect("decode protocol-machine global");
-    let local_types: std::collections::BTreeMap<String, telltale_types_v9::LocalTypeR> =
-        serde_json::from_value(serde_json::to_value(&image.local_types).expect("serialize locals"))
-            .expect("decode protocol-machine locals");
-    let image = ProtocolMachineCodeImage::from_local_types(&local_types, &global_type);
+    let image = ProtocolMachineCodeImage::from_local_types(&image.local_types, &image.global_type);
     image.validate_runtime_shape().expect("runtime image");
     image
 }

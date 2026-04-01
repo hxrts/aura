@@ -52,4 +52,3 @@ tracing = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 telltale-theory = { workspace = true }
-telltale-theory-v9 = { package = "telltale-theory", version = "9.0.0", features = ["async-subtyping"] }

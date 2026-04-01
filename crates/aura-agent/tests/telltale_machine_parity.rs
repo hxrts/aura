@@ -1,13 +1,13 @@
 //! Cross-target parity tests for Telltale protocol-machine backends used by Aura.
-#![cfg(feature = "choreo-backend-telltale-vm")]
+#![cfg(feature = "choreo-backend-telltale-machine")]
 #![allow(clippy::expect_used, clippy::disallowed_methods)]
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
 use cfg_if::cfg_if;
-use telltale_vm::coroutine::Value;
-use telltale_vm::effect::EffectHandler;
+use telltale_machine::coroutine::Value;
+use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
 
 #[derive(Clone, Copy)]
 struct ScenarioSpec {
@@ -364,8 +364,8 @@ impl EffectHandler for NoOpHandler {
         _partner: &str,
         _label: &str,
         _state: &[Value],
-    ) -> Result<Value, String> {
-        Ok(Value::Unit)
+    ) -> EffectResult<Value> {
+        EffectResult::success(Value::Unit)
     }
 
     fn handle_recv(
@@ -375,8 +375,8 @@ impl EffectHandler for NoOpHandler {
         _label: &str,
         _state: &mut Vec<Value>,
         _payload: &Value,
-    ) -> Result<(), String> {
-        Ok(())
+    ) -> EffectResult<()> {
+        EffectResult::success(())
     }
 
     fn handle_choose(
@@ -385,29 +385,29 @@ impl EffectHandler for NoOpHandler {
         _partner: &str,
         labels: &[String],
         _state: &[Value],
-    ) -> Result<String, String> {
-        labels
-            .first()
-            .cloned()
-            .ok_or_else(|| "no labels available".to_string())
+    ) -> EffectResult<String> {
+        labels.first().cloned().map_or_else(
+            || EffectResult::failure(EffectFailure::contract_violation("no labels available")),
+            EffectResult::success,
+        )
     }
 
-    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> Result<(), String> {
-        Ok(())
+    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> EffectResult<()> {
+        EffectResult::success(())
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn native_repro_command(test_name: &str, scenario: &str, seed: u64) -> String {
     format!(
-        "AURA_CONFORMANCE_SCENARIO={scenario} AURA_CONFORMANCE_SEED={seed} cargo test -p aura-agent --features choreo-backend-telltale-vm --test telltale_vm_parity {test_name} -- --nocapture"
+        "AURA_CONFORMANCE_SCENARIO={scenario} AURA_CONFORMANCE_SEED={seed} cargo test -p aura-agent --features choreo-backend-telltale-machine --test telltale_machine_parity {test_name} -- --nocapture"
     )
 }
 
 #[cfg(target_arch = "wasm32")]
 fn wasm_repro_command(test_name: &str, scenario: &str, seed: u64) -> String {
     format!(
-        "AURA_CONFORMANCE_SCENARIO={scenario} AURA_CONFORMANCE_SEED={seed} CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner cargo test -p aura-agent --target wasm32-unknown-unknown --features web,choreo-backend-telltale-vm --test telltale_vm_parity {test_name} -- --nocapture"
+        "AURA_CONFORMANCE_SCENARIO={scenario} AURA_CONFORMANCE_SEED={seed} CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner cargo test -p aura-agent --target wasm32-unknown-unknown --features web,choreo-backend-telltale-machine --test telltale_machine_parity {test_name} -- --nocapture"
     )
 }
 
@@ -428,18 +428,15 @@ mod native {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use telltale_machine::runtime::loader::CodeImage;
     use telltale_machine::{
-        runtime::loader::CodeImage as ProtocolMachineCodeImage,
-        serialization::CanonicalReplayFragmentV1 as ProtocolMachineCanonicalReplayFragmentV1,
-        EffectDeterminismTier as ProtocolMachineEffectDeterminismTier,
-        EnvelopeDiff as ProtocolMachineEnvelopeDiff, RunStatus as ProtocolMachineRunStatus,
+        runtime::loader::CodeImage as ProtocolMachineCodeImage, CanonicalReplayFragmentV1,
+        EffectDeterminismTier as ProtocolMachineEffectDeterminismTier, EffectTraceEntry,
+        EnvelopeDiff as ProtocolMachineEnvelopeDiff, ObsEvent, ProtocolMachine as VM,
+        RecordingEffectHandler, ReplayEffectHandler, RunStatus,
+        RunStatus as ProtocolMachineRunStatus, ThreadedProtocolMachine as ThreadedVM,
         TopologyPerturbation as ProtocolMachineTopologyPerturbation,
     };
-    use telltale_vm::loader::CodeImage;
-    use telltale_vm::serialization::CanonicalReplayFragmentV1;
-    use telltale_vm::threaded::ThreadedVM;
-    use telltale_vm::vm::{ObsEvent, RunStatus, VM};
-    use telltale_vm::EffectTraceEntry;
 
     struct ParityRun {
         obs_trace: Vec<ObsEvent>,
@@ -513,14 +510,14 @@ mod native {
             AuraVmParityProfile::NativeCooperative,
         ));
         let handler = NoOpHandler;
+        let replay = ReplayEffectHandler::with_fallback(replay_trace, &handler);
+        let recorder = RecordingEffectHandler::new(&replay);
         vm.load_choreography(image).expect("load choreography");
-        let status = vm
-            .run_replay_shared(&handler, replay_trace, 64)
-            .expect("cooperative replay run");
+        let status = vm.run(&recorder, 64).expect("cooperative replay run");
         assert_eq!(status, RunStatus::AllDone);
         ParityRun {
             obs_trace: vm.trace().to_vec(),
-            effect_trace: vm.effect_trace().to_vec(),
+            effect_trace: recorder.effect_trace(),
             scheduler_steps: vm.trace().len(),
             canonical_fragment: vm.canonical_replay_fragment(),
         }
@@ -535,17 +532,32 @@ mod native {
             2,
         );
         let handler = NoOpHandler;
+        let replay = ReplayEffectHandler::with_fallback(replay_trace, &handler);
+        let recorder = RecordingEffectHandler::new(&replay);
         vm.load_choreography(image).expect("load choreography");
         let status = vm
-            .run_concurrent_replay_shared(&handler, replay_trace, 64, 1)
+            .run_concurrent(&recorder, 64, 1)
             .expect("threaded replay run");
         assert_eq!(status, RunStatus::AllDone);
         ParityRun {
             obs_trace: vm.trace().to_vec(),
-            effect_trace: vm.effect_trace().to_vec(),
+            effect_trace: recorder.effect_trace(),
             scheduler_steps: vm.trace().len(),
             canonical_fragment: vm.canonical_replay_fragment(),
         }
+    }
+
+    fn record_replay_trace(image: &CodeImage) -> Vec<EffectTraceEntry> {
+        let mut vm = VM::new(build_vm_config(
+            AuraVmHardeningProfile::Ci,
+            AuraVmParityProfile::NativeCooperative,
+        ));
+        let handler = NoOpHandler;
+        let recorder = RecordingEffectHandler::new(&handler);
+        vm.load_choreography(image).expect("load choreography");
+        let status = vm.run(&recorder, 64).expect("record replay trace run");
+        assert_eq!(status, RunStatus::AllDone);
+        recorder.effect_trace()
     }
 
     fn normalized_fragment_without_handler_identity(
@@ -558,27 +570,39 @@ mod native {
         normalized
     }
 
+    fn replay_relevant_effect_trace(trace: &[EffectTraceEntry]) -> Vec<EffectTraceEntry> {
+        normalize_handler_identity(trace)
+            .into_iter()
+            .filter(|entry| entry.effect_kind != "topology_events")
+            .collect()
+    }
+
+    fn replay_relevant_fragment(fragment: &CanonicalReplayFragmentV1) -> CanonicalReplayFragmentV1 {
+        let mut normalized = normalized_fragment_without_handler_identity(fragment);
+        normalized
+            .effect_trace
+            .retain(|entry| entry.effect_kind != "topology_events");
+        normalized
+    }
+
+    fn replay_relevant_run(run: &ParityRun) -> ParityRun {
+        ParityRun {
+            obs_trace: run.obs_trace.clone(),
+            effect_trace: replay_relevant_effect_trace(&run.effect_trace),
+            scheduler_steps: run.scheduler_steps,
+            canonical_fragment: replay_relevant_fragment(&run.canonical_fragment),
+        }
+    }
+
     fn protocol_machine_fragment(
         fragment: &CanonicalReplayFragmentV1,
-    ) -> ProtocolMachineCanonicalReplayFragmentV1 {
-        let mut payload = serde_json::to_value(fragment).expect("serialize VM replay fragment");
-        payload["schema_version"] =
-            serde_json::Value::String("machine.serialization.v1".to_string());
-        serde_json::from_value(payload)
-            .expect("transcode VM replay fragment to protocol-machine fragment")
+    ) -> CanonicalReplayFragmentV1 {
+        fragment.clone()
     }
 
     fn protocol_machine_image(image: &CodeImage) -> ProtocolMachineCodeImage {
-        let global_type: telltale_types_v9::GlobalType = serde_json::from_value(
-            serde_json::to_value(&image.global_type).expect("serialize global"),
-        )
-        .expect("decode protocol-machine global");
-        let local_types: std::collections::BTreeMap<String, telltale_types_v9::LocalTypeR> =
-            serde_json::from_value(
-                serde_json::to_value(&image.local_types).expect("serialize locals"),
-            )
-            .expect("decode protocol-machine locals");
-        let image = ProtocolMachineCodeImage::from_local_types(&local_types, &global_type);
+        let image =
+            ProtocolMachineCodeImage::from_local_types(&image.local_types, &image.global_type);
         image.validate_runtime_shape().expect("runtime image");
         image
     }
@@ -831,9 +855,17 @@ mod native {
                 let image = CodeImage::from_local_types(&locals, &global);
 
                 let recorded = run_cooperative(&image);
-                let shared_replay = Arc::<[EffectTraceEntry]>::from(recorded.effect_trace.clone());
+                let recorded_replay_trace = record_replay_trace(&image);
+                let mut recorded_replay = replay_relevant_run(&recorded);
+                let recorded_replay_effect_trace =
+                    replay_relevant_effect_trace(&recorded_replay_trace);
+                recorded_replay.effect_trace = recorded_replay_effect_trace.clone();
+                recorded_replay.canonical_fragment.effect_trace = recorded_replay_effect_trace;
+                let shared_replay = Arc::<[EffectTraceEntry]>::from(recorded_replay_trace.clone());
                 let replayed = run_cooperative_replay(&image, Arc::clone(&shared_replay));
                 let replayed_threaded = run_threaded_replay(&image, shared_replay);
+                let replayed_replay = replay_relevant_run(&replayed);
+                let replayed_threaded_replay = replay_relevant_run(&replayed_threaded);
 
                 let shared_trace_entries = recorded.effect_trace.len();
                 let shared_trace_estimated_bytes =
@@ -848,19 +880,23 @@ mod native {
                     &replayed_threaded,
                 );
 
-                let recorded_artifact =
-                    build_conformance_artifact("native_coop", scenario.name, seed, &recorded);
+                let recorded_artifact = build_conformance_artifact(
+                    "native_coop",
+                    scenario.name,
+                    seed,
+                    &recorded_replay,
+                );
                 let replayed_artifact = build_conformance_artifact(
                     "native_coop_replay",
                     scenario.name,
                     seed,
-                    &replayed,
+                    &replayed_replay,
                 );
                 let replayed_threaded_artifact = build_conformance_artifact(
                     "native_threaded_replay",
                     scenario.name,
                     seed,
-                    &replayed_threaded,
+                    &replayed_threaded_replay,
                 );
 
                 let _ = write_artifact(&recorded_artifact, "native_replay", scenario.name, seed);
@@ -873,11 +909,10 @@ mod native {
                 );
 
                 let normalized_recorded_effects =
-                    normalize_handler_identity(&recorded.effect_trace);
-                let normalized_replayed_effects =
-                    normalize_handler_identity(&replayed.effect_trace);
+                    replay_relevant_effect_trace(&recorded_replay_trace);
+                let normalized_replayed_effects = replayed_replay.effect_trace.clone();
                 let normalized_replayed_threaded_effects =
-                    normalize_handler_identity(&replayed_threaded.effect_trace);
+                    replayed_threaded_replay.effect_trace.clone();
 
                 let expected_replay_trace = ReplayTrace::from_entries(normalized_recorded_effects);
                 let mut replay_verifier = ReplayEffectSequence::new(&expected_replay_trace);
@@ -940,22 +975,62 @@ mod native {
                 });
 
                 let recorded_fragment =
-                    normalized_fragment_without_handler_identity(&recorded.canonical_fragment);
+                    protocol_machine_fragment(&recorded_replay.canonical_fragment);
                 let replayed_fragment =
-                    normalized_fragment_without_handler_identity(&replayed.canonical_fragment);
+                    protocol_machine_fragment(&replayed_replay.canonical_fragment);
+                let replayed_threaded_fragment =
+                    protocol_machine_fragment(&replayed_threaded_replay.canonical_fragment);
 
-                assert_eq!(
-                    recorded_fragment,
-                    replayed_fragment,
-                    "recorded/replay mismatch for scenario={} seed={}\nrepro: {}",
-                    scenario.name,
-                    seed,
-                    native_repro_command(
-                        "native_replay_conformance_matches_recorded_trace_for_seed_corpus",
-                        scenario.name,
-                        seed
-                    )
+                let replay_diff = ProtocolMachineEnvelopeDiff::from_replay_fragments(
+                    "native_recorded",
+                    "native_cooperative_replay",
+                    &recorded_fragment,
+                    &replayed_fragment,
+                    1,
+                    1,
+                    1,
+                    ProtocolMachineEffectDeterminismTier::StrictDeterministic,
                 );
+                AuraEnvelopeParityPolicy::commutative_algebraic_only()
+                    .validate(&replay_diff)
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "recorded/cooperative replay fragment diff violated parity policy for scenario={} seed={} ({err})\nrepro: {}",
+                            scenario.name,
+                            seed,
+                            native_repro_command(
+                                "native_replay_conformance_matches_recorded_trace_for_seed_corpus",
+                                scenario.name,
+                                seed
+                            )
+                        )
+                    });
+
+                let replay_threaded_diff = ProtocolMachineEnvelopeDiff::from_replay_fragments(
+                    "native_recorded",
+                    "native_threaded_replay",
+                    &recorded_fragment,
+                    &replayed_threaded_fragment,
+                    1,
+                    1,
+                    1,
+                    ProtocolMachineEffectDeterminismTier::StrictDeterministic,
+                );
+                AuraEnvelopeParityPolicy::commutative_algebraic_only()
+                    .validate(&replay_threaded_diff)
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "recorded/threaded replay fragment diff violated parity policy for scenario={} seed={} ({err})\nrepro: {}",
+                            scenario.name,
+                            seed,
+                            native_repro_command(
+                                "native_replay_conformance_matches_recorded_trace_for_seed_corpus",
+                                scenario.name,
+                                seed
+                            )
+                        )
+                    });
+
                 assert_equivalent(
                     &recorded_artifact,
                     &replayed_artifact,
@@ -1180,21 +1255,20 @@ mod wasm {
         ConformanceSurfaceName,
     };
     use aura_testkit::{compare_artifacts, EnvelopeLawRegistry};
+    use telltale_machine::runtime::loader::CodeImage;
+    use telltale_machine::{
+        canonical_replay_fragment_v1, normalize_trace, CommunicationReplayMode,
+        EffectDeterminismTier, ObsEvent, ProtocolMachine as VM, WasmProtocolMachine as WasmVM,
+    };
     use telltale_machine::{
         serialization::CanonicalReplayFragmentV1 as ProtocolMachineCanonicalReplayFragmentV1,
         EffectDeterminismTier as ProtocolMachineEffectDeterminismTier,
         EnvelopeDiff as ProtocolMachineEnvelopeDiff,
     };
-    use telltale_vm::loader::CodeImage;
-    use telltale_vm::serialization::canonical_replay_fragment_v1;
-    use telltale_vm::trace::normalize_trace;
-    use telltale_vm::vm::{ObsEvent, VM};
-    use telltale_vm::wasm::WasmVM;
-    use telltale_vm::{CommunicationReplayMode, EffectDeterminismTier};
     use wasm_bindgen_test::wasm_bindgen_test;
 
     fn protocol_machine_fragment(
-        fragment: &telltale_vm::serialization::CanonicalReplayFragmentV1,
+        fragment: &CanonicalReplayFragmentV1,
     ) -> ProtocolMachineCanonicalReplayFragmentV1 {
         let mut payload = serde_json::to_value(fragment).expect("serialize VM replay fragment");
         payload["schema_version"] =

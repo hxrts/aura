@@ -609,13 +609,13 @@ impl ReconfigurationManager {
 }
 
 fn default_runtime_capability_handler() -> RuntimeCapabilityHandler {
-    #[cfg(feature = "choreo-backend-telltale-vm")]
+    #[cfg(feature = "choreo-backend-telltale-machine")]
     {
         let contracts = telltale_machine::runtime_contracts::RuntimeContracts::full();
         RuntimeCapabilityHandler::from_protocol_machine_runtime_contracts(&contracts)
     }
 
-    #[cfg(not(feature = "choreo-backend-telltale-vm"))]
+    #[cfg(not(feature = "choreo-backend-telltale-machine"))]
     {
         RuntimeCapabilityHandler::from_pairs([(CAPABILITY_RECONFIGURATION, true)])
     }

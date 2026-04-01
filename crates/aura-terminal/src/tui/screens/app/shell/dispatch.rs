@@ -434,9 +434,12 @@ pub(super) fn execute_harness_followup_command(
             let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected else {
                 return Err("Select a received invitation to accept".to_string());
             };
-            let accept_kind = semantic_accept_kind_for_invitation(shared_invitations, &invitation_id);
+            let accept_kind =
+                semantic_accept_kind_for_invitation(shared_invitations, &invitation_id);
             let operation_id = match accept_kind {
-                SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+                SemanticOperationKind::AcceptPendingChannelInvitation => {
+                    OperationId::invitation_accept_channel()
+                }
                 _ => OperationId::invitation_accept_contact(),
             };
             let operation = submit_workflow_handoff_operation(

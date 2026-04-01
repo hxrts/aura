@@ -1,5 +1,5 @@
 //! CI scenario-contract gate for Telltale protocol-machine execution profiles.
-#![cfg(feature = "choreo-backend-telltale-vm")]
+#![cfg(feature = "choreo-backend-telltale-machine")]
 #![allow(clippy::expect_used, clippy::disallowed_methods)]
 
 use std::fs;
@@ -13,14 +13,14 @@ use aura_agent::{
 use aura_mpst::upstream::types::{GlobalType, Label, LocalTypeR};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
+use telltale_machine::runtime::loader::CodeImage;
 use telltale_machine::{
-    runtime::loader::CodeImage as ProtocolMachineCodeImage, RunStatus as ProtocolMachineRunStatus,
+    coroutine::Value,
+    model::effects::{EffectFailure, EffectHandler, EffectResult},
+    runtime::loader::CodeImage as ProtocolMachineCodeImage,
+    ObsEvent, ProtocolMachine as VM, RunStatus, RunStatus as ProtocolMachineRunStatus,
     TopologyPerturbation as ProtocolMachineTopologyPerturbation,
 };
-use telltale_vm::coroutine::Value;
-use telltale_vm::effect::EffectHandler;
-use telltale_vm::loader::CodeImage;
-use telltale_vm::vm::{ObsEvent, RunStatus, VM};
 
 #[derive(Clone, Copy)]
 struct ContractBundleSpec {
@@ -167,16 +167,7 @@ fn protocol_machine_image(
     global: &GlobalType,
     locals: &BTreeMap<String, LocalTypeR>,
 ) -> ProtocolMachineCodeImage {
-    let protocol_machine_global: telltale_types_v9::GlobalType =
-        serde_json::from_value(serde_json::to_value(global).expect("serialize global type"))
-            .expect("decode protocol-machine global type");
-    let protocol_machine_locals: BTreeMap<String, telltale_types_v9::LocalTypeR> =
-        serde_json::from_value(serde_json::to_value(locals).expect("serialize local types"))
-            .expect("decode protocol-machine local types");
-    let image = ProtocolMachineCodeImage::from_local_types(
-        &protocol_machine_locals,
-        &protocol_machine_global,
-    );
+    let image = ProtocolMachineCodeImage::from_local_types(locals, global);
     image
         .validate_runtime_shape()
         .expect("validate protocol-machine image");
@@ -416,8 +407,8 @@ impl EffectHandler for NoOpHandler {
         _partner: &str,
         _label: &str,
         _state: &[Value],
-    ) -> Result<Value, String> {
-        Ok(Value::Unit)
+    ) -> EffectResult<Value> {
+        EffectResult::success(Value::Unit)
     }
 
     fn handle_recv(
@@ -427,8 +418,8 @@ impl EffectHandler for NoOpHandler {
         _label: &str,
         _state: &mut Vec<Value>,
         _payload: &Value,
-    ) -> Result<(), String> {
-        Ok(())
+    ) -> EffectResult<()> {
+        EffectResult::success(())
     }
 
     fn handle_choose(
@@ -437,15 +428,15 @@ impl EffectHandler for NoOpHandler {
         _partner: &str,
         labels: &[String],
         _state: &[Value],
-    ) -> Result<String, String> {
-        labels
-            .first()
-            .cloned()
-            .ok_or_else(|| "no labels available".to_string())
+    ) -> EffectResult<String> {
+        labels.first().cloned().map_or_else(
+            || EffectResult::failure(EffectFailure::contract_violation("no labels available")),
+            EffectResult::success,
+        )
     }
 
-    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> Result<(), String> {
-        Ok(())
+    fn step(&self, _role: &str, _state: &mut Vec<Value>) -> EffectResult<()> {
+        EffectResult::success(())
     }
 }
 

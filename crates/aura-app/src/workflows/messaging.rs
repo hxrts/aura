@@ -3952,7 +3952,7 @@ async fn send_message_ref_owned(
             }
 
             let maybe_fact = if let Some(cipher) = maybe_cipher {
-                let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
+                let wire = AmpMessage::new(cipher.header, cipher.ciphertext.clone());
                 let sealed = serialize_amp_message(&wire).map_err(super::error::fact_encoding)?;
 
                 // Extract epoch from the AMP header (used for consensus finalization tracking)

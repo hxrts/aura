@@ -2,23 +2,21 @@
 
 use aura_core::effects::VmBridgeSchedulerSignals;
 use aura_core::AuraVmDeterminismProfileV1;
-use aura_mpst::termination::{compute_weighted_measure, SessionBufferSnapshot};
 use aura_protocol::termination::TerminationProtocolClass;
+use serde::Serialize;
 use telltale_machine::runtime::loader::CodeImage as ProtocolMachineCodeImage;
-use telltale_vm::envelope_diff::EnvelopeDiffArtifactV1;
-use telltale_vm::loader::CodeImage;
-use telltale_vm::vm::{FlowPolicy, FlowPredicate, GuardLayerConfig};
-use telltale_vm::{
+use telltale_machine::{
     CanonicalReplayFragmentV1, CommunicationReplayMode, DeterminismMode, EffectDeterminismTier,
-    EffectOrderingClass, EffectTraceCaptureMode, FailureVisibleDiffClass, MonitorMode,
-    OutputConditionPolicy, PayloadValidationMode, PriorityPolicy, SchedPolicy,
-    SchedulerPermutationClass, ThreadedRoundSemantics, VMConfig,
+    EffectOrderingClass, EffectTraceCaptureMode, EnvelopeDiffArtifactV1, FailureVisibleDiffClass,
+    FlowPolicy, FlowPredicate, MonitorMode, OutputConditionPolicy, PayloadValidationMode,
+    PriorityPolicy, ProtocolMachineConfig as VMConfig, SchedPolicy, SchedulerPermutationClass,
+    ThreadedRoundSemantics,
 };
 
 /// Default output predicate when no operation-specific hint is provided.
 pub const AURA_OUTPUT_PREDICATE_OBSERVABLE: &str = "aura.observable_output";
-/// Lower-level VM observable predicate still emitted by baseline `UnitHandler` tests.
-pub const VM_OUTPUT_PREDICATE_OBSERVABLE: &str = "vm.observable_output";
+/// Current protocol-machine fallback predicate when the host does not emit a hint.
+pub const PROTOCOL_MACHINE_OUTPUT_PREDICATE_OBSERVABLE: &str = "protocol_machine.observable_output";
 /// Output predicate used for transport send visibility.
 pub const AURA_OUTPUT_PREDICATE_TRANSPORT_SEND: &str = "aura.transport.send";
 /// Output predicate used for transport receive visibility.
@@ -74,6 +72,12 @@ impl AuraVmGuardLayer {
     pub fn all() -> [Self; 2] {
         [Self::MigrationLock, Self::HighValueProtocolSlot]
     }
+}
+
+#[derive(Serialize)]
+struct AuraGuardLayerConfig {
+    id: String,
+    active: bool,
 }
 
 /// Profile-level VM hardening in Aura runtime contexts.
@@ -842,24 +846,6 @@ pub fn configured_guard_capacity(config: &VMConfig) -> usize {
 /// Compute scheduler-selection input for one admitted code image.
 #[must_use]
 pub fn scheduler_control_input_for_image(
-    image: &CodeImage,
-    protocol_class: TerminationProtocolClass,
-    guard_capacity_slots: usize,
-    signals: AuraVmSchedulerSignals,
-) -> AuraVmSchedulerControlInput {
-    let local_types = image.local_types.values().cloned().collect::<Vec<_>>();
-    let initial_weight = compute_weighted_measure(&local_types, &SessionBufferSnapshot::new());
-    AuraVmSchedulerControlInput {
-        protocol_class,
-        initial_weight,
-        guard_capacity_slots: guard_capacity_slots.max(1),
-        signals: signals.normalized(),
-    }
-}
-
-/// Compute scheduler-selection input for one admitted protocol-machine code image.
-#[must_use]
-pub fn scheduler_control_input_for_protocol_machine_image(
     image: &ProtocolMachineCodeImage,
     protocol_class: TerminationProtocolClass,
     guard_capacity_slots: usize,
@@ -877,6 +863,17 @@ pub fn scheduler_control_input_for_protocol_machine_image(
         guard_capacity_slots: guard_capacity_slots.max(1),
         signals: signals.normalized(),
     }
+}
+
+/// Compute scheduler-selection input for one admitted protocol-machine code image.
+#[must_use]
+pub fn scheduler_control_input_for_protocol_machine_image(
+    image: &ProtocolMachineCodeImage,
+    protocol_class: TerminationProtocolClass,
+    guard_capacity_slots: usize,
+    signals: AuraVmSchedulerSignals,
+) -> AuraVmSchedulerControlInput {
+    scheduler_control_input_for_image(image, protocol_class, guard_capacity_slots, signals)
 }
 
 /// Canonical scheduler policy for one admitted session.
@@ -1110,7 +1107,7 @@ pub fn validate_determinism_profile(
 pub fn aura_output_predicate_allow_list() -> Vec<String> {
     [
         AURA_OUTPUT_PREDICATE_OBSERVABLE,
-        VM_OUTPUT_PREDICATE_OBSERVABLE,
+        PROTOCOL_MACHINE_OUTPUT_PREDICATE_OBSERVABLE,
         AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,
         AURA_OUTPUT_PREDICATE_TRANSPORT_RECV,
         AURA_OUTPUT_PREDICATE_CHOICE,
@@ -1123,14 +1120,19 @@ pub fn aura_output_predicate_allow_list() -> Vec<String> {
     .collect()
 }
 
-fn aura_guard_layers() -> Vec<GuardLayerConfig> {
-    AuraVmGuardLayer::all()
-        .into_iter()
-        .map(|layer| GuardLayerConfig {
-            id: layer.id().to_string(),
-            active: true,
-        })
-        .collect()
+fn assign_aura_guard_layers(config: &mut VMConfig) {
+    let payload = serde_json::to_value(
+        AuraVmGuardLayer::all()
+            .into_iter()
+            .map(|layer| AuraGuardLayerConfig {
+                id: layer.id().to_string(),
+                active: true,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .expect("Aura guard-layer config should serialize");
+    config.guard_layers = serde_json::from_value(payload)
+        .expect("Aura guard-layer config should match protocol-machine schema");
 }
 
 /// Serializable flow-policy predicate for Aura role/category constraints.
@@ -1160,7 +1162,7 @@ fn apply_hardening_profile(config: &mut VMConfig, profile: AuraVmHardeningProfil
     config.output_condition_policy =
         OutputConditionPolicy::PredicateAllowList(aura_output_predicate_allow_list());
     config.flow_policy = FlowPolicy::PredicateExpr(aura_flow_policy_predicate());
-    config.guard_layers = aura_guard_layers();
+    assign_aura_guard_layers(config);
     config.payload_validation_mode = PayloadValidationMode::Structural;
     config.effect_trace_capture_mode = EffectTraceCaptureMode::Full;
     config.max_payload_bytes = 256 * 1024;
@@ -1217,13 +1219,14 @@ pub fn vm_config_for_profile(hardening: AuraVmHardeningProfile) -> VMConfig {
 mod tests {
     use super::*;
     use aura_mpst::upstream::types::{GlobalType, Label};
-    use telltale_vm::coroutine::KnowledgeFact;
-    use telltale_vm::effect::EffectHandler;
-    use telltale_vm::instr::Endpoint;
-    use telltale_vm::loader::CodeImage;
-    use telltale_vm::threaded::ThreadedVM;
-    use telltale_vm::vm::{RunStatus, VM};
-    use telltale_vm::{verify_output_condition, OutputConditionMeta, Value};
+    use telltale_machine::coroutine::{KnowledgeFact, Value};
+    use telltale_machine::instr::Endpoint;
+    use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
+    use telltale_machine::runtime::loader::CodeImage;
+    use telltale_machine::{
+        verify_output_condition, OutputConditionMeta, ProtocolMachine as VM, RunStatus,
+        ThreadedProtocolMachine as ThreadedVM,
+    };
 
     #[derive(Default)]
     struct UnitHandler;
@@ -1235,8 +1238,8 @@ mod tests {
             _partner: &str,
             _label: &str,
             _state: &[Value],
-        ) -> Result<Value, String> {
-            Ok(Value::Unit)
+        ) -> EffectResult<Value> {
+            EffectResult::success(Value::Unit)
         }
 
         fn handle_recv(
@@ -1246,8 +1249,8 @@ mod tests {
             _label: &str,
             _state: &mut Vec<Value>,
             _payload: &Value,
-        ) -> Result<(), String> {
-            Ok(())
+        ) -> EffectResult<()> {
+            EffectResult::success(())
         }
 
         fn handle_choose(
@@ -1256,15 +1259,15 @@ mod tests {
             _partner: &str,
             labels: &[String],
             _state: &[Value],
-        ) -> Result<String, String> {
-            labels
-                .first()
-                .cloned()
-                .ok_or_else(|| "no labels available".to_string())
+        ) -> EffectResult<String> {
+            labels.first().cloned().map_or_else(
+                || EffectResult::failure(EffectFailure::contract_violation("no labels available")),
+                EffectResult::success,
+            )
         }
 
-        fn step(&self, _role: &str, _state: &mut Vec<Value>) -> Result<(), String> {
-            Ok(())
+        fn step(&self, _role: &str, _state: &mut Vec<Value>) -> EffectResult<()> {
+            EffectResult::success(())
         }
     }
 

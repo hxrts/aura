@@ -5,14 +5,14 @@ use aura_core::{AuthorityId, ComposedBundle, ContextId, SessionId};
 use aura_mpst::CompositionManifest;
 use std::collections::BTreeSet;
 
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 use super::vm_hardening::{
     policy_requires_envelope_artifact, required_runtime_capabilities_for_policy,
     AuraVmConcurrencyProfile, AuraVmProtocolExecutionPolicy, AuraVmRuntimeMode,
 };
 
 /// Typed evidence kinds used to justify one runtime envelope admission decision.
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuraRuntimeAdmissionEvidenceKind {
     RuntimeCapability,
@@ -23,7 +23,7 @@ pub enum AuraRuntimeAdmissionEvidenceKind {
 }
 
 /// One proof-facing evidence item attached to one envelope admission decision.
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuraRuntimeAdmissionEvidence {
     pub kind: AuraRuntimeAdmissionEvidenceKind,
@@ -31,7 +31,7 @@ pub struct AuraRuntimeAdmissionEvidence {
     pub details: String,
 }
 
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 impl AuraRuntimeAdmissionEvidence {
     pub fn new(
         kind: AuraRuntimeAdmissionEvidenceKind,
@@ -47,7 +47,7 @@ impl AuraRuntimeAdmissionEvidence {
 }
 
 /// Typed runtime admission contract for one VM execution profile.
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuraRuntimeEnvelopeAdmission {
     pub protocol_id: String,
@@ -61,7 +61,7 @@ pub struct AuraRuntimeEnvelopeAdmission {
     pub canonical_fallback_reason: Option<&'static str>,
 }
 
-#[cfg(feature = "choreo-backend-telltale-vm")]
+#[cfg(feature = "choreo-backend-telltale-machine")]
 impl AuraRuntimeEnvelopeAdmission {
     pub fn from_policy(
         protocol_id: impl Into<String>,
@@ -323,7 +323,7 @@ mod tests {
     use aura_mpst::CompositionLinkSpec;
     use uuid::Uuid;
 
-    #[cfg(feature = "choreo-backend-telltale-vm")]
+    #[cfg(feature = "choreo-backend-telltale-machine")]
     #[test]
     fn envelope_admission_records_fallback_evidence() {
         let requested =
