@@ -339,7 +339,7 @@ impl OtaManager {
             && state
                 .pending_activation
                 .as_ref()
-                .is_none_or(|intent| intent.to_release_id != record.target_release_id)
+                .map_or(true, |intent| intent.to_release_id != record.target_release_id)
         {
             return ReleaseResidency::TargetOnly;
         }

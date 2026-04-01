@@ -194,8 +194,9 @@ mod tests {
 
         assert!(source.contains("fn spawn_generation_maintenance_supervisor("));
         assert!(source.contains("if let Some(agent) = agent.clone() {"));
-        assert!(source
-            .contains("run_harness_transport_tick(tick_app_core.clone(), agent.clone()).await;"));
+        assert!(source.contains("if browser_harness_mode {"));
+        assert!(source.contains("\"transport_tick_start\""));
+        assert!(source.contains("\"transport_tick_polled\""));
         assert!(source.contains("\"Browser maintenance paused; refresh to resume\""));
         assert!(source.contains("\"WEB_GENERATION_MAINTENANCE_SLEEP_FAILED\""));
     }

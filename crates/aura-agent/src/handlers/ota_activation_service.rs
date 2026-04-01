@@ -40,12 +40,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
+const OTA_PROTOCOL_COMMAND_BUFFER_CAPACITY: usize = 32;
+
 struct OtaActivationShared {
     ceremonies: RwLock<HashMap<OTACeremonyId, OtaProtocolSession>>,
 }
 
 struct OtaProtocolSession {
-    command_tx: mpsc::UnboundedSender<OtaProtocolCommand>,
+    command_tx: mpsc::Sender<OtaProtocolCommand>,
 }
 
 enum OtaProtocolCommand {
@@ -82,7 +84,7 @@ struct OtaCoordinatorProtocolRuntime {
     ceremony_id: OTACeremonyId,
     state: Arc<RwLock<OTACeremonyState>>,
     devices: Vec<OtaActivationRole>,
-    command_rx: mpsc::UnboundedReceiver<OtaProtocolCommand>,
+    command_rx: mpsc::Receiver<OtaProtocolCommand>,
     pending_decision: Option<OtaProtocolDecision>,
     finalize_responder: Option<OtaFinalizeResponder>,
     next_outbound: OtaPendingOutbound,
@@ -94,7 +96,7 @@ impl OtaCoordinatorProtocolRuntime {
         ceremony_id: OTACeremonyId,
         state: Arc<RwLock<OTACeremonyState>>,
         devices: Vec<OtaActivationRole>,
-        command_rx: mpsc::UnboundedReceiver<OtaProtocolCommand>,
+        command_rx: mpsc::Receiver<OtaProtocolCommand>,
     ) -> Self {
         Self {
             effects,
@@ -738,7 +740,7 @@ impl OtaActivationServiceApi {
         &self,
         ceremony_id: OTACeremonyId,
         state: Arc<RwLock<OTACeremonyState>>,
-        command_rx: mpsc::UnboundedReceiver<OtaProtocolCommand>,
+        command_rx: mpsc::Receiver<OtaProtocolCommand>,
         participant_count: usize,
     ) {
         let effects = self.effects.clone();
@@ -778,7 +780,7 @@ impl OtaActivationServiceApi {
     async fn session_command_tx(
         &self,
         ceremony_id: OTACeremonyId,
-    ) -> AgentResult<mpsc::UnboundedSender<OtaProtocolCommand>> {
+    ) -> AgentResult<mpsc::Sender<OtaProtocolCommand>> {
         self.shared
             .ceremonies
             .read()
@@ -858,7 +860,7 @@ impl OtaActivationServiceApi {
                 AgentError::internal(format!("Failed to register OTA ceremony: {error}"))
             })?;
 
-        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (command_tx, command_rx) = mpsc::channel(OTA_PROTOCOL_COMMAND_BUFFER_CAPACITY);
         self.shared
             .ceremonies
             .write()
@@ -881,6 +883,7 @@ impl OtaActivationServiceApi {
                 commitment: commitment.clone(),
                 respond_to,
             })
+            .await
             .map_err(|_| {
                 AgentError::runtime("OTA ceremony session is no longer active".to_string())
             })?;
@@ -908,6 +911,7 @@ impl OtaActivationServiceApi {
                 decision: OtaProtocolDecision::Commit,
                 respond_to: OtaFinalizeResponder::Commit(respond_to),
             })
+            .await
             .map_err(|_| {
                 AgentError::runtime("OTA ceremony session is no longer active".to_string())
             })?;
@@ -952,6 +956,7 @@ impl OtaActivationServiceApi {
                 }),
                 respond_to: OtaFinalizeResponder::Abort(respond_to),
             })
+            .await
             .map_err(|_| {
                 AgentError::runtime("OTA ceremony session is no longer active".to_string())
             })?;

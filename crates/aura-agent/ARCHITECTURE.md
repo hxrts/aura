@@ -355,7 +355,7 @@ See [Runtime](../../docs/104_runtime.md) §Link and Delegate Boundaries for the 
 - `aura-agent` owns runtime admission wiring and choreography backend selection.
 - `aura-agent` owns telltale runtime parity test lanes and scenario contract gates.
 - `aura-agent` must not own bridge schema transformations that belong in `aura-quint`.
-- `aura-agent` uses Telltale `10.0.0` public semantic objects for authoritative reads, finalization paths, semantic handoffs, and runtime-upgrade artifacts; it must not recreate a private mirror of those concepts in parallel.
+- `aura-agent` uses Telltale `10.0.0` public semantic objects for authoritative reads, finalization paths, semantic handoffs, ownership receipts, reconfiguration snapshots, and runtime-upgrade artifacts; it must not recreate a private mirror of those concepts in parallel.
 
 ## Cross-Crate API Boundary
 
