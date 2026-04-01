@@ -201,19 +201,16 @@ If policy enables it, `suggested_activation_time_unix_ms` acts only as a local "
 ### Soft Fork Workflow
 
 ```rust
-use aura_agent::runtime::services::OtaManager;
-use aura_maintenance::{AuraActivationScope, AuraCompatibilityClass};
-use aura_sync::services::InFlightIncompatibilityAction;
+use aura_maintenance::AuraCompatibilityClass;
+use aura_sync::services::{cutover_session_plan, InFlightIncompatibilityAction};
 
-async fn soft_fork_workflow(
-    manager: &OtaManager,
-    scope: AuraActivationScope,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let plan = manager
-        .begin_scoped_cutover(&scope, InFlightIncompatibilityAction::Drain, false)
-        .await?;
+fn soft_fork_workflow() {
+    let plan = cutover_session_plan(
+        AuraCompatibilityClass::BackwardCompatible,
+        InFlightIncompatibilityAction::Drain,
+        false,
+    );
     assert!(!plan.partition_required);
-    Ok(())
 }
 ```
 
@@ -222,19 +219,16 @@ Soft forks do not require a globally shared instant. Each scope moves from legac
 ### Hard Fork Workflow
 
 ```rust
-use aura_agent::runtime::services::OtaManager;
-use aura_maintenance::AuraActivationScope;
-use aura_sync::services::InFlightIncompatibilityAction;
+use aura_maintenance::AuraCompatibilityClass;
+use aura_sync::services::{cutover_session_plan, InFlightIncompatibilityAction};
 
-async fn execute_managed_quorum_cutover(
-    manager: &OtaManager,
-    scope: AuraActivationScope,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let plan = manager
-        .begin_scoped_cutover(&scope, InFlightIncompatibilityAction::Delegate, true)
-        .await?;
+fn execute_managed_quorum_cutover() {
+    let plan = cutover_session_plan(
+        AuraCompatibilityClass::ScopedHardFork,
+        InFlightIncompatibilityAction::Delegate,
+        true,
+    );
     assert!(plan.partition_required || plan.in_flight == InFlightIncompatibilityAction::Delegate);
-    Ok(())
 }
 ```
 

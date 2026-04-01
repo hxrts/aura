@@ -22,7 +22,6 @@ pub mod lan_transport;
 pub mod logical_clock_manager;
 pub mod maintenance_service;
 pub mod move_manager;
-pub mod ota_manager;
 pub mod reactive_pipeline_service;
 pub mod receipt_manager;
 pub mod reconfiguration_manager;
@@ -56,8 +55,6 @@ pub use logical_clock_manager::LogicalClockManager;
 pub use maintenance_service::RuntimeMaintenanceService;
 #[allow(unused_imports)] // Re-exported for runtime/app integration as move projections land.
 pub use move_manager::{MoveDeliveryPlan, MoveManager, MoveManagerConfig, MoveProjection};
-pub(crate) use ota_manager::OtaManager;
-pub use ota_manager::UpdateStatus;
 pub use reactive_pipeline_service::ReactivePipelineService;
 pub use receipt_manager::{ReceiptManager, ReceiptManagerConfig};
 #[allow(unused_imports)] // Re-exported for public API as live handoff surfaces land.

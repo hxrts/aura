@@ -9,7 +9,6 @@ pub mod chat_service;
 pub mod device_epoch_rotation;
 pub mod invitation;
 pub mod invitation_service;
-pub mod ota;
 pub mod ota_activation_service;
 pub mod recovery;
 pub mod recovery_service;
@@ -52,9 +51,6 @@ pub use recovery_service::RecoveryServiceApi;
 // Re-export rendezvous types for public API
 pub use rendezvous::{ChannelResult, RendezvousHandler, RendezvousResult};
 pub use rendezvous_service::RendezvousServiceApi;
-
-// Re-export OTA types for public API
-pub use ota::{OtaHandler, UpdateInfo, UpdateResult, UpdateStatus};
 
 // Re-export sync/maintenance types for CLI/tooling usage
 pub use aura_sync::maintenance::UpgradeProposal;

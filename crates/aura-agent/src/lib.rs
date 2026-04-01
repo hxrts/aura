@@ -165,10 +165,6 @@ pub use handlers::{
     RecoveryState,
 };
 
-// OTA types
-#[cfg(feature = "choreo-backend-telltale-machine")]
-pub use handlers::{OtaHandler, UpdateInfo, UpdateResult, UpdateStatus};
-
 // Rendezvous types
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use handlers::{ChannelResult, RendezvousHandler, RendezvousResult, RendezvousServiceApi};
