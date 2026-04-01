@@ -1268,7 +1268,7 @@ mod wasm {
     use wasm_bindgen_test::wasm_bindgen_test;
 
     fn protocol_machine_fragment(
-        fragment: &CanonicalReplayFragmentV1,
+        fragment: &ProtocolMachineCanonicalReplayFragmentV1,
     ) -> ProtocolMachineCanonicalReplayFragmentV1 {
         let mut payload = serde_json::to_value(fragment).expect("serialize VM replay fragment");
         payload["schema_version"] =
@@ -1371,6 +1371,13 @@ mod wasm {
                 native_fragment.effect_trace.clear();
                 let wasm_fragment = canonical_replay_fragment_v1(
                     &wasm_trace,
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                    &[],
+                    &[],
                     &[],
                     Vec::new(),
                     Vec::new(),

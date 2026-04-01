@@ -72,7 +72,7 @@ pub(in crate::app) fn modal_view(
                 value: modal_state.message,
             });
             inputs.push(ModalInputView {
-                label: "TTL Hours".to_string(),
+                label: "TTL (Hours)".to_string(),
                 field_id: FieldId::InvitationTtl,
                 value: modal_state.ttl_hours.to_string(),
             });

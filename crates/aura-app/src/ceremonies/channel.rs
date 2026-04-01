@@ -5,15 +5,15 @@
 use aura_core::types::identifiers::AuthorityId;
 use std::fmt;
 
-/// Minimum number of participants for a channel
-pub const MIN_CHANNEL_PARTICIPANTS: usize = 2;
+/// Minimum number of participants for a channel (1 for note-to-self channels)
+pub const MIN_CHANNEL_PARTICIPANTS: usize = 1;
 
 /// Error when constructing channel participants
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChannelError {
     /// Not enough participants for a channel
     InsufficientParticipants {
-        /// Number of participants required (always 2)
+        /// Number of participants required
         required: usize,
         /// Number of participants provided
         available: usize,
@@ -38,28 +38,17 @@ impl fmt::Display for ChannelError {
 
 impl std::error::Error for ChannelError {}
 
-/// A participant set with at least 2 authorities for channel creation
-///
-/// Invariants:
-/// - At least 2 participants must be present
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let participants = ChannelParticipants::new(vec![self_authority, other_authority])?;
-///
-/// // Can now safely create channel
-/// create_channel(participants);
-/// ```
+/// A participant set with at least 1 authority for channel creation.
+/// A single-participant channel represents a note-to-self channel.
 #[derive(Debug, Clone)]
 pub struct ChannelParticipants {
     participants: Vec<AuthorityId>,
 }
 
 impl ChannelParticipants {
-    /// Create a channel participant set
+    /// Create a channel participant set.
     ///
-    /// Returns an error if fewer than 2 participants are provided.
+    /// Returns an error if no participants are provided.
     pub fn new(participants: Vec<AuthorityId>) -> Result<Self, ChannelError> {
         if participants.len() < MIN_CHANNEL_PARTICIPANTS {
             return Err(ChannelError::InsufficientParticipants {
@@ -131,25 +120,21 @@ mod tests {
 
     #[test]
     fn test_insufficient_participants() {
-        // 0 participants
         let result = ChannelParticipants::new(vec![]);
         assert_eq!(
             result.unwrap_err(),
             ChannelError::InsufficientParticipants {
-                required: 2,
+                required: 1,
                 available: 0
             }
         );
+    }
 
-        // 1 participant
-        let result = ChannelParticipants::new(vec![make_authority()]);
-        assert_eq!(
-            result.unwrap_err(),
-            ChannelError::InsufficientParticipants {
-                required: 2,
-                available: 1
-            }
-        );
+    #[test]
+    fn test_single_participant() {
+        let participants = ChannelParticipants::new(vec![make_authority()]);
+        assert!(participants.is_ok());
+        assert!(!participants.unwrap().is_pairwise());
     }
 
     #[test]

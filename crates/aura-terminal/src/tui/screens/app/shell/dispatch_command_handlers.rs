@@ -772,18 +772,6 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::OpenChatCreateWizard => {
             let current_contacts = shared_contacts_for_dispatch.read().clone();
 
-            // Validate: need at least 1 contact (+ self = 2 participants)
-            if current_contacts.is_empty() {
-                new_state.toast_error(
-                    ChannelError::InsufficientParticipants {
-                        required: MIN_CHANNEL_PARTICIPANTS,
-                        available: 1, // Just self
-                    }
-                    .to_string(),
-                );
-                return EventCommandLoopAction::ContinueCommand;
-            }
-
             let mut candidates: Vec<crate::tui::state::ChatMemberCandidate> = current_contacts
                 .iter()
                 // Channel member invites only support user authorities.

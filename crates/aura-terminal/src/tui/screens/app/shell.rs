@@ -21,10 +21,7 @@ use iocraft::prelude::*;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use aura_app::ceremonies::{
-    ChannelError, GuardianSetupError, MfaSetupError, RecoveryError, MIN_CHANNEL_PARTICIPANTS,
-    MIN_MFA_DEVICES,
-};
+use aura_app::ceremonies::{GuardianSetupError, MfaSetupError, RecoveryError, MIN_MFA_DEVICES};
 use aura_app::harness_mode_enabled;
 use aura_app::scenario_contract::SemanticCommandValue;
 use aura_app::ui::contract::HarnessUiCommand;
