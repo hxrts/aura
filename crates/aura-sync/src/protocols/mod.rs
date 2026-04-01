@@ -121,10 +121,16 @@ pub mod epoch_runners {
 }
 
 pub use ota_ceremony::{
-    OTACeremonyConfig, OTACeremonyEffects, OTACeremonyExecutor, OTACeremonyFact, OTACeremonyId,
-    OTACeremonyState, OTACeremonyStatus, ReadinessCommitment,
+    OTACeremonyAbort, OTACeremonyCommit, OTACeremonyConfig, OTACeremonyFact, OTACeremonyId,
+    OTACeremonyState, OTACeremonyStatus, OTAReadinessOutcome, OTAReadinessWitness,
+    ReadinessCommitment,
     UpgradeProposal as CeremonyUpgradeProposal,
 };
+
+/// Re-exports for the OTA activation choreography surface.
+pub mod ota_runners {
+    pub use crate::protocols::ota_ceremony::telltale_session_types_ota_activation::ota_activation::OTAActivationProtocolRole;
+}
 
 pub use fact_sync::{FactSyncConfig, FactSyncProtocol, FactSyncResult, FactSyncStats};
 

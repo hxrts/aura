@@ -39,33 +39,16 @@
 //! - **Epoch Fencing**: Hard forks enforce coordinated epoch boundaries
 
 use aura_core::domain::FactValue;
-use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
-use aura_core::threshold::{
-    policy_for, AgreementMode, CeremonyFlow, SigningContext, ThresholdSignature,
-};
+use aura_core::effects::{JournalEffects, PhysicalTimeEffects};
+use aura_core::threshold::{AgreementMode, ThresholdSignature};
 use aura_core::types::Epoch;
-use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Hash32, SemanticVersion};
+use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::OnceLock;
 use uuid::Uuid;
 
 use super::ota::{UpgradeKind, UpgradeProposal as OTAProposal};
-
-static OTA_CEREMONY_MUTATION_CAPABILITY: OnceLock<ActorIngressMutationCapability> = OnceLock::new();
-static OTA_CEREMONY_PUBLICATION_CAPABILITY: OnceLock<LifecyclePublicationCapability> =
-    OnceLock::new();
-
-fn ota_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
-    OTA_CEREMONY_MUTATION_CAPABILITY
-        .get_or_init(|| ActorIngressMutationCapability::new("aura-sync:ota-ceremony"))
-}
-
-fn ota_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
-    OTA_CEREMONY_PUBLICATION_CAPABILITY
-        .get_or_init(|| LifecyclePublicationCapability::new("aura-sync:ota-facts"))
-}
 
 // =============================================================================
 // CEREMONY TYPES
@@ -223,6 +206,55 @@ impl std::fmt::Display for OTACeremonyAbortReason {
             OTACeremonyAbortReason::TimedOut => write!(f, "Ceremony timed out"),
             OTACeremonyAbortReason::Manual { reason } => write!(f, "{reason}"),
         }
+    }
+}
+
+/// Typed commit payload for the OTA activation choreography.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OTACeremonyCommit {
+    /// Ceremony being finalized.
+    pub ceremony_id: OTACeremonyId,
+    /// Activation epoch authorized by the ceremony.
+    pub activation_epoch: Epoch,
+    /// Ready devices that contributed to the threshold.
+    pub ready_devices: Vec<DeviceId>,
+}
+
+/// Typed abort payload for the OTA activation choreography.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OTACeremonyAbort {
+    /// Ceremony being terminated.
+    pub ceremony_id: OTACeremonyId,
+    /// Protocol-visible abort reason.
+    pub reason: OTACeremonyAbortReason,
+}
+
+/// Evidence-bearing readiness witness produced when OTA threshold is reached.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OTAReadinessWitness {
+    /// Ceremony whose readiness threshold was satisfied.
+    pub ceremony_id: OTACeremonyId,
+    /// Ready devices contributing to the threshold.
+    pub ready_devices: Vec<DeviceId>,
+    /// Number of ready devices observed when the witness was issued.
+    pub ready_count: u32,
+    /// Threshold required by the ceremony.
+    pub threshold: u32,
+}
+
+/// Public readiness result for OTA commitment processing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum OTAReadinessOutcome {
+    /// The ceremony is still collecting readiness commitments.
+    Collecting,
+    /// The readiness threshold has been met and witnessed.
+    ThresholdReached(OTAReadinessWitness),
+}
+
+impl OTAReadinessOutcome {
+    /// Whether the readiness threshold has been met.
+    pub fn threshold_reached(&self) -> bool {
+        matches!(self, Self::ThresholdReached(_))
     }
 }
 
@@ -441,715 +473,246 @@ impl Default for OTACeremonyConfig {
 //        - guard_capability: "ota:abort"
 //        - flow_cost: 1
 //        - journal_facts: OTACeremonyFact::CeremonyAborted
+
+// OTA activation choreography protocol surface.
+//
+// This is the protocol-critical public contract for OTA readiness, commit, and
+// abort sequencing. The executor migration in later phases should converge on
+// this generated surface instead of preserving the handwritten state machine as
+// a permanent parallel path.
+mod ota_activation_protocol_surface {
+    #![allow(unreachable_code)]
+
+    use super::*;
+
+    choreography!(include_str!("src/protocols/ota_activation.tell"));
+}
+
+pub use ota_activation_protocol_surface::telltale_session_types_ota_activation;
 //    }
 
 // =============================================================================
 // CEREMONY EXECUTOR
 // =============================================================================
 
-/// Executes OTA activation ceremonies with consensus guarantees.
-///
-/// The executor manages the lifecycle of hard fork activation ceremonies,
-/// ensuring atomicity through prestate binding and M-of-N consensus.
-pub struct OTACeremonyExecutor<E: OTACeremonyEffects> {
-    /// Effect system for all operations
-    effects: E,
-    /// Configuration
-    config: OTACeremonyConfig,
-    /// Active ceremonies by ID
-    ceremonies: HashMap<OTACeremonyId, OTACeremonyState>,
-}
-
-/// Combined effects required for OTA ceremonies.
-pub trait OTACeremonyEffects:
-    JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
+/// Compute the current OTA ceremony prestate hash from journal state.
+pub async fn compute_ota_ceremony_prestate_hash<E>(effects: &E) -> AuraResult<Hash32>
+where
+    E: JournalEffects + ?Sized,
 {
+    let journal = effects.get_journal().await?;
+    let journal_bytes =
+        serde_json::to_vec(&journal.facts).map_err(|e| AuraError::serialization(e.to_string()))?;
+    Ok(Hash32::from_bytes(&journal_bytes))
 }
 
-// Blanket implementation
-impl<T> OTACeremonyEffects for T where
-    T: JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
+/// Create the aggregated readiness-signature bundle for OTA activation.
+pub fn create_ota_activation_signature(
+    ceremony_id: OTACeremonyId,
+    commitments: &[ReadinessCommitment],
+) -> AuraResult<Vec<u8>> {
+    let ready_commitments: Vec<&ReadinessCommitment> =
+        commitments.iter().filter(|commitment| commitment.ready).collect();
+
+    if ready_commitments.is_empty() {
+        return Err(AuraError::invalid(
+            "No ready device signatures to aggregate",
+        ));
+    }
+
+    let mut aggregated = Vec::new();
+    aggregated.extend_from_slice(ceremony_id.0.as_bytes());
+    aggregated.extend_from_slice(&(ready_commitments.len() as u16).to_le_bytes());
+
+    for commitment in ready_commitments {
+        aggregated.extend_from_slice(&commitment.authority.to_bytes());
+        let sig_len = commitment.signature.signature.len() as u16;
+        aggregated.extend_from_slice(&sig_len.to_le_bytes());
+        aggregated.extend_from_slice(&commitment.signature.signature);
+    }
+
+    Ok(aggregated)
+}
+
+/// Emit the ceremony-initiated fact through OTA journal semantics.
+pub async fn emit_ota_ceremony_initiated_fact<E>(
+    effects: &E,
+    config: &OTACeremonyConfig,
+    ceremony_id: OTACeremonyId,
+    proposal: &UpgradeProposal,
+) -> AuraResult<()>
+where
+    E: JournalEffects + PhysicalTimeEffects + ?Sized,
 {
+    let timestamp_ms = effects
+        .physical_time()
+        .await
+        .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
+        .ts_ms;
+    let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
+    let fact = OTACeremonyFact::CeremonyInitiated {
+        ceremony_id: ceremony_id_hex.clone(),
+        trace_id: Some(ceremony_id_hex.clone()),
+        proposal_id: proposal.proposal_id.to_string(),
+        package_id: proposal.package_id.to_string(),
+        version: proposal.version.to_string(),
+        activation_epoch: proposal.activation_epoch,
+        coordinator: hex::encode(proposal.coordinator.0.as_bytes()),
+        threshold: config.threshold,
+        quorum_size: config.quorum_size,
+        timestamp_ms,
+    };
+
+    let mut journal = effects.get_journal().await?;
+    let key = format!("ota:initiated:{ceremony_id_hex}");
+    let fact_bytes =
+        serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
+    journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
+    effects.persist_journal(&journal).await?;
+    Ok(())
 }
 
-impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
-    /// Create a new ceremony executor.
-    pub fn new(effects: E, config: OTACeremonyConfig) -> Self {
-        Self {
-            effects,
-            config,
-            ceremonies: HashMap::new(),
-        }
-    }
-
-    /// Create with default configuration.
-    pub fn with_defaults(effects: E) -> Self {
-        Self::new(effects, OTACeremonyConfig::default())
-    }
-
-    fn ota_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
-        ota_ceremony_mutation_capability()
-    }
-
-    fn ota_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
-        ota_ceremony_publication_capability()
-    }
-
-    fn insert_ceremony(
-        &mut self,
-        _capability: &ActorIngressMutationCapability,
-        ceremony_id: OTACeremonyId,
-        state: OTACeremonyState,
-    ) {
-        self.ceremonies.insert(ceremony_id, state);
-    }
-
-    fn remove_ceremony(
-        &mut self,
-        _capability: &ActorIngressMutationCapability,
-        ceremony_id: &OTACeremonyId,
-    ) {
-        self.ceremonies.remove(ceremony_id);
-    }
-
-    // =========================================================================
-    // CEREMONY LIFECYCLE - COORDINATOR SIDE
-    // =========================================================================
-
-    /// Initiate a new OTA activation ceremony.
-    ///
-    /// Only for hard forks - soft forks don't need ceremony coordination.
-    pub async fn initiate_ceremony(
-        &mut self,
-        proposal: UpgradeProposal,
-        current_epoch: Epoch,
-    ) -> AuraResult<OTACeremonyId> {
-        let prestate_hash = self.compute_prestate_hash().await?;
-        self.initiate_ceremony_with_prestate(proposal, current_epoch, prestate_hash)
-            .await
-    }
-
-    /// Initiate a new OTA activation ceremony with a provided prestate hash.
-    ///
-    /// This allows callers to bind external ceremony tracking to the same prestate
-    /// hash used to compute the ceremony ID.
-    pub async fn initiate_ceremony_with_prestate(
-        &mut self,
-        proposal: UpgradeProposal,
-        current_epoch: Epoch,
-        prestate_hash: Hash32,
-    ) -> AuraResult<OTACeremonyId> {
-        // Verify this is a hard fork
-        if proposal.kind != UpgradeKind::HardFork {
-            return Err(AuraError::invalid(
-                "OTA ceremony only required for hard forks",
-            ));
-        }
-
-        // Verify activation epoch has sufficient notice
-        if proposal.activation_epoch.value()
-            < current_epoch.value() + self.config.min_activation_notice_epochs
-        {
-            return Err(AuraError::invalid(format!(
-                "Activation epoch {} too soon. Current: {}, minimum notice: {} epochs",
-                proposal.activation_epoch, current_epoch, self.config.min_activation_notice_epochs
-            )));
-        }
-
-        // Compute upgrade hash
-        let upgrade_hash = proposal.compute_hash();
-
-        // Generate nonce from current time
-        let nonce = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
-
-        // Create ceremony ID
-        let ceremony_id = OTACeremonyId::new(&prestate_hash, &upgrade_hash, nonce);
-
-        // Create ceremony state
-        let state = OTACeremonyState {
-            ceremony_id,
-            proposal: proposal.clone(),
-            status: OTACeremonyStatus::CollectingCommitments,
-            agreement_mode: policy_for(CeremonyFlow::OtaActivation).initial_mode(),
-            commitments: HashMap::new(),
-            threshold: self.config.threshold,
-            quorum_size: self.config.quorum_size,
-            started_at_ms: nonce,
-            timeout_ms: self.config.timeout_ms,
-        };
-
-        // Store ceremony through the sanctioned mutation boundary.
-        self.insert_ceremony(Self::ota_ceremony_mutation_capability(), ceremony_id, state);
-
-        // Emit ceremony initiated fact
-        self.emit_ceremony_initiated_fact(
-            Self::ota_ceremony_publication_capability(),
-            ceremony_id,
-            &proposal,
-        )
-        .await?;
-
-        Ok(ceremony_id)
-    }
-
-    /// Process a readiness commitment from a device.
-    pub async fn process_commitment(
-        &mut self,
-        ceremony_id: OTACeremonyId,
-        commitment: ReadinessCommitment,
-    ) -> AuraResult<bool> {
-        // Get current prestate and time before borrowing
-        let current_prestate = self.compute_prestate_hash().await?;
-        let now = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
-
-        // Track if we need to emit threshold reached
-        let threshold_reached;
-
-        // Process commitment in a block to limit borrow scope
-        {
-            let ceremony = self
-                .ceremonies
-                .get_mut(&ceremony_id)
-                .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
-
-            // Verify ceremony is collecting commitments
-            if ceremony.status != OTACeremonyStatus::CollectingCommitments {
-                return Err(AuraError::invalid(format!(
-                    "Ceremony not collecting commitments: {:?}",
-                    ceremony.status
-                )));
-            }
-
-            // Verify prestate matches
-            if commitment.prestate_hash != current_prestate {
-                return Err(AuraError::invalid(
-                    "Prestate hash mismatch - state has changed since commitment was created",
-                ));
-            }
-
-            // Verify ceremony ID matches
-            if commitment.ceremony_id != ceremony_id {
-                return Err(AuraError::invalid("Commitment is for different ceremony"));
-            }
-
-            // Check timeout
-            if now > ceremony.started_at_ms + ceremony.timeout_ms {
-                ceremony.status = OTACeremonyStatus::Aborted {
-                    reason: OTACeremonyAbortReason::TimedOut,
-                };
-                return Ok(false);
-            }
-
-            // Check for duplicate commitment
-            if ceremony.commitments.contains_key(&commitment.device) {
-                return Err(AuraError::invalid("Device has already committed"));
-            }
-
-            // Store commitment
-            ceremony
-                .commitments
-                .insert(commitment.device, commitment.clone());
-
-            // Check if threshold is now met
-            threshold_reached = ceremony.threshold_met()
-                && ceremony.status == OTACeremonyStatus::CollectingCommitments;
-
-            if threshold_reached {
-                ceremony.status = OTACeremonyStatus::AwaitingConsensus;
-                ceremony.agreement_mode = AgreementMode::CoordinatorSoftSafe;
-            }
-        }
-
-        // Emit commitment received fact
-        self.emit_commitment_received_fact(
-            Self::ota_ceremony_publication_capability(),
-            ceremony_id,
-            &commitment,
-        )
-        .await?;
-
-        // Emit threshold reached fact if applicable
-        if threshold_reached {
-            self.emit_threshold_reached_fact(
-                Self::ota_ceremony_publication_capability(),
-                ceremony_id,
-            )
-            .await?;
-        }
-
-        Ok(threshold_reached)
-    }
-
-    /// Commit the ceremony after consensus.
-    ///
-    /// This is the final step - all devices will activate at the specified epoch.
-    pub async fn commit_ceremony(&mut self, ceremony_id: OTACeremonyId) -> AuraResult<Epoch> {
-        // Get ceremony info before mutable borrow
-        let (activation_epoch, ready_devices) = {
-            let ceremony = self
-                .ceremonies
-                .get(&ceremony_id)
-                .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
-
-            // Verify ceremony is awaiting consensus
-            if ceremony.status != OTACeremonyStatus::AwaitingConsensus {
-                return Err(AuraError::invalid(format!(
-                    "Ceremony not awaiting consensus: {:?}",
-                    ceremony.status
-                )));
-            }
-
-            // Verify threshold is still met
-            if !ceremony.threshold_met() {
-                return Err(AuraError::invalid("Threshold no longer met"));
-            }
-
-            (ceremony.proposal.activation_epoch, ceremony.ready_devices())
-        };
-
-        // Update status
-        if let Some(ceremony) = self.ceremonies.get_mut(&ceremony_id) {
-            ceremony.status = OTACeremonyStatus::Committed;
-            ceremony.agreement_mode = AgreementMode::ConsensusFinalized;
-        }
-
-        // NOTE: True FROST threshold signing requires architectural changes:
-        // - OTA ceremony currently tracks DeviceId, but signing requires AuthorityId
-        // - Each device would need to create a FROST signature share, not just agree
-        // - A coordinator would aggregate shares into a single FROST signature
-        // For now, we bundle individual device signatures as proof of M-of-N agreement.
-        // This provides cryptographic proof that each device approved, just not aggregated.
-        let threshold_signature = self.create_activation_signature(ceremony_id).await?;
-
-        // Emit committed fact
-        self.emit_ceremony_committed_fact(
-            Self::ota_ceremony_publication_capability(),
-            ceremony_id,
-            activation_epoch,
-            &ready_devices,
-            &threshold_signature,
-        )
-        .await?;
-
-        // Remove terminal ceremony state to prevent unbounded growth.
-        self.remove_ceremony(Self::ota_ceremony_mutation_capability(), &ceremony_id);
-
-        Ok(activation_epoch)
-    }
-
-    /// Abort the ceremony.
-    pub async fn abort_ceremony(
-        &mut self,
-        ceremony_id: OTACeremonyId,
-        reason: &str,
-    ) -> AuraResult<()> {
-        let ceremony = self
-            .ceremonies
-            .get_mut(&ceremony_id)
-            .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
-
-        // Can abort from any non-terminal state
-        match &ceremony.status {
-            OTACeremonyStatus::Committed => {
-                return Err(AuraError::invalid("Cannot abort committed ceremony"));
-            }
-            OTACeremonyStatus::Aborted { .. } => {
-                return Ok(()); // Already aborted, idempotent
-            }
-            _ => {}
-        }
-
-        let abort_reason = OTACeremonyAbortReason::Manual {
-            reason: reason.to_string(),
-        };
-        ceremony.status = OTACeremonyStatus::Aborted {
-            reason: abort_reason.clone(),
-        };
-
-        // Emit aborted fact
-        self.emit_ceremony_aborted_fact(
-            Self::ota_ceremony_publication_capability(),
-            ceremony_id,
-            &abort_reason.to_string(),
-        )
-        .await?;
-
-        // Remove terminal ceremony state to prevent unbounded growth.
-        self.remove_ceremony(Self::ota_ceremony_mutation_capability(), &ceremony_id);
-
-        Ok(())
-    }
-
-    // =========================================================================
-    // CEREMONY LIFECYCLE - DEVICE SIDE
-    // =========================================================================
-
-    /// Create a readiness commitment for a ceremony.
-    ///
-    /// This creates a cryptographically signed commitment using the device's authority keys.
-    /// For 1-of-1 authorities, this uses single-signer Ed25519.
-    /// For m-of-n authorities, this uses FROST threshold signing.
-    pub async fn create_readiness_commitment(
-        &self,
-        ceremony_id: OTACeremonyId,
-        device: DeviceId,
-        authority: AuthorityId,
-        ready: bool,
-        reason: Option<String>,
-    ) -> AuraResult<ReadinessCommitment> {
-        // Get current prestate
-        let prestate_hash = self.compute_prestate_hash().await?;
-        let committed_at_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
-
-        // Get the upgrade hash from the ceremony
-        let ceremony = self
-            .ceremonies
-            .get(&ceremony_id)
-            .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
-
-        let upgrade_hash = ceremony.proposal.compute_hash();
-
-        // Create signing context for OTA activation
-        let signing_context = SigningContext::ota_activation(
-            authority,
-            ceremony_id.0 .0, // [u8; 32] from OTACeremonyId
-            upgrade_hash.0,   // [u8; 32] from Hash32
-            prestate_hash.0,  // [u8; 32] from Hash32
-            ceremony.proposal.activation_epoch,
-            ready,
-        );
-
-        // Sign using threshold signing effects
-        // This automatically uses FROST for m-of-n or Ed25519 for 1-of-1
-        let signature = self.effects.sign(signing_context).await?;
-
-        Ok(ReadinessCommitment {
-            ceremony_id,
-            device,
-            authority,
-            prestate_hash,
-            ready,
-            reason,
-            signature,
-            committed_at_ms,
-        })
-    }
-
-    // =========================================================================
-    // INTERNAL HELPERS
-    // =========================================================================
-
-    /// Compute current prestate hash from journal state.
-    async fn compute_prestate_hash(&self) -> AuraResult<Hash32> {
-        let journal = self.effects.get_journal().await?;
-        let journal_bytes = serde_json::to_vec(&journal.facts)
-            .map_err(|e| AuraError::serialization(e.to_string()))?;
-        Ok(Hash32::from_bytes(&journal_bytes))
-    }
-
-    /// Create aggregated signature bundle for activation.
-    ///
-    /// This bundles the threshold signatures from all ready devices, providing
-    /// cryptographic proof of M-of-N device consensus for the hard fork activation.
-    ///
-    /// ## Signature Structure
-    ///
-    /// Each device's `ReadinessCommitment` contains a `ThresholdSignature` created via
-    /// `ThresholdSigningEffects::sign()` with `SigningContext::ota_activation()`.
-    ///
-    /// - For 1-of-1 authorities: Single Ed25519 signature over the commitment
-    /// - For m-of-n authorities: FROST aggregated signature from device's threshold setup
-    ///
-    /// The activation bundle aggregates these individual authority signatures into a
-    /// single verifiable proof that M-of-N devices approved the hard fork.
-    ///
-    /// ## Bundle Format
-    ///
-    /// ```text
-    /// ceremony_id (32 bytes) || device_count (2 bytes) || [
-    ///     authority_id (32 bytes) || signature_len (2 bytes) || signature_bytes...
-    /// ] for each ready device
-    /// ```
-    async fn create_activation_signature(&self, ceremony_id: OTACeremonyId) -> AuraResult<Vec<u8>> {
-        let ceremony = self
-            .ceremonies
-            .get(&ceremony_id)
-            .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
-
-        // Collect ready commitments with their signatures
-        let ready_commitments: Vec<&ReadinessCommitment> =
-            ceremony.commitments.values().filter(|c| c.ready).collect();
-
-        if ready_commitments.is_empty() {
-            return Err(AuraError::invalid(
-                "No ready device signatures to aggregate",
-            ));
-        }
-
-        // Serialize the aggregated signature bundle with authority info for verification:
-        // - ceremony_id (32 bytes)
-        // - device_count (2 bytes)
-        // - For each device:
-        //   - authority_id (32 bytes)
-        //   - signature_len (2 bytes)
-        //   - signature_bytes
-        let mut aggregated = Vec::new();
-        aggregated.extend_from_slice(ceremony_id.0.as_bytes());
-        aggregated.extend_from_slice(&(ready_commitments.len() as u16).to_le_bytes());
-
-        for commitment in ready_commitments {
-            // Include authority ID so verifiers know which public key to use
-            aggregated.extend_from_slice(&commitment.authority.to_bytes());
-            // Include signature with length prefix
-            let sig_len = commitment.signature.signature.len() as u16;
-            aggregated.extend_from_slice(&sig_len.to_le_bytes());
-            aggregated.extend_from_slice(&commitment.signature.signature);
-        }
-
-        Ok(aggregated)
-    }
-
-    /// Emit ceremony initiated fact.
-    async fn emit_ceremony_initiated_fact(
-        &self,
-        _capability: &LifecyclePublicationCapability,
-        ceremony_id: OTACeremonyId,
-        proposal: &UpgradeProposal,
-    ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
-        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
-        let fact = OTACeremonyFact::CeremonyInitiated {
-            ceremony_id: ceremony_id_hex.clone(),
-            trace_id: Some(ceremony_id_hex.clone()),
-            proposal_id: proposal.proposal_id.to_string(),
-            package_id: proposal.package_id.to_string(),
-            version: proposal.version.to_string(),
-            activation_epoch: proposal.activation_epoch,
-            coordinator: hex::encode(proposal.coordinator.0.as_bytes()),
-            threshold: self.config.threshold,
-            quorum_size: self.config.quorum_size,
-            timestamp_ms,
-        };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:initiated:{ceremony_id_hex}");
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
-    }
-
-    /// Emit commitment received fact.
-    async fn emit_commitment_received_fact(
-        &self,
-        _capability: &LifecyclePublicationCapability,
-        ceremony_id: OTACeremonyId,
-        commitment: &ReadinessCommitment,
-    ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
-        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
-        let fact = OTACeremonyFact::CommitmentReceived {
-            ceremony_id: ceremony_id_hex.clone(),
-            trace_id: Some(ceremony_id_hex.clone()),
-            device: hex::encode(commitment.device.0.as_bytes()),
-            ready: commitment.ready,
-            reason: commitment.reason.clone(),
-            timestamp_ms,
-        };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!(
-            "ota:commitment:{}:{}",
-            ceremony_id_hex,
-            hex::encode(commitment.device.0.as_bytes())
-        );
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
-    }
-
-    /// Emit threshold reached fact.
-    async fn emit_threshold_reached_fact(
-        &self,
-        _capability: &LifecyclePublicationCapability,
-        ceremony_id: OTACeremonyId,
-    ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
-        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
-
-        let (ready_count, ready_devices) = {
-            let ceremony = self
-                .ceremonies
-                .get(&ceremony_id)
-                .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
-            (
-                ceremony.ready_count(),
-                ceremony
-                    .ready_devices()
-                    .into_iter()
-                    .map(|d| hex::encode(d.0.as_bytes()))
-                    .collect(),
-            )
-        };
-
-        let fact = OTACeremonyFact::ThresholdReached {
-            ceremony_id: ceremony_id_hex.clone(),
-            trace_id: Some(ceremony_id_hex.clone()),
-            ready_count,
-            ready_devices,
-            timestamp_ms,
-        };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:threshold:{ceremony_id_hex}");
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
-    }
-
-    /// Emit ceremony committed fact.
-    async fn emit_ceremony_committed_fact(
-        &self,
-        _capability: &LifecyclePublicationCapability,
-        ceremony_id: OTACeremonyId,
-        activation_epoch: Epoch,
-        ready_devices: &[DeviceId],
-        threshold_signature: &[u8],
-    ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
-        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
-        let fact = OTACeremonyFact::CeremonyCommitted {
-            ceremony_id: ceremony_id_hex.clone(),
-            trace_id: Some(ceremony_id_hex.clone()),
-            activation_epoch,
-            ready_devices: ready_devices
-                .iter()
-                .map(|d| hex::encode(d.0.as_bytes()))
-                .collect(),
-            threshold_signature: threshold_signature.to_vec(),
-            timestamp_ms,
-        };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:committed:{ceremony_id_hex}");
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
-    }
-
-    /// Emit ceremony aborted fact.
-    async fn emit_ceremony_aborted_fact(
-        &self,
-        _capability: &LifecyclePublicationCapability,
-        ceremony_id: OTACeremonyId,
-        reason: &str,
-    ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
-        let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
-        let fact = OTACeremonyFact::CeremonyAborted {
-            ceremony_id: ceremony_id_hex.clone(),
-            trace_id: Some(ceremony_id_hex.clone()),
-            reason: reason.to_string(),
-            timestamp_ms,
-        };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:aborted:{ceremony_id_hex}");
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
-    }
-
-    /// Get ceremony state.
-    pub fn get_ceremony(&self, ceremony_id: &OTACeremonyId) -> Option<&OTACeremonyState> {
-        self.ceremonies.get(ceremony_id)
-    }
-
-    /// Check if a ceremony exists.
-    pub fn has_ceremony(&self, ceremony_id: &OTACeremonyId) -> bool {
-        self.ceremonies.contains_key(ceremony_id)
-    }
-
-    /// Get all active ceremonies.
-    pub fn active_ceremonies(&self) -> Vec<&OTACeremonyState> {
-        self.ceremonies
-            .values()
-            .filter(|c| {
-                !matches!(
-                    c.status,
-                    OTACeremonyStatus::Committed | OTACeremonyStatus::Aborted { .. }
-                )
-            })
-            .collect()
-    }
-
-    /// Cleanup ceremonies that have completed or timed out.
-    pub fn cleanup_stale_ceremonies(&mut self, now_ms: u64) -> usize {
-        let before = self.ceremonies.len();
-        self.ceremonies.retain(|_, ceremony| {
-            let timed_out = now_ms > ceremony.started_at_ms.saturating_add(ceremony.timeout_ms);
-            let terminal = matches!(
-                ceremony.status,
-                OTACeremonyStatus::Committed | OTACeremonyStatus::Aborted { .. }
-            );
-            !(timed_out || terminal)
-        });
-        before.saturating_sub(self.ceremonies.len())
-    }
+/// Emit the commitment-received fact through OTA journal semantics.
+pub async fn emit_ota_commitment_received_fact<E>(
+    effects: &E,
+    ceremony_id: OTACeremonyId,
+    commitment: &ReadinessCommitment,
+) -> AuraResult<()>
+where
+    E: JournalEffects + PhysicalTimeEffects + ?Sized,
+{
+    let timestamp_ms = effects
+        .physical_time()
+        .await
+        .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
+        .ts_ms;
+    let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
+    let fact = OTACeremonyFact::CommitmentReceived {
+        ceremony_id: ceremony_id_hex.clone(),
+        trace_id: Some(ceremony_id_hex.clone()),
+        device: hex::encode(commitment.device.0.as_bytes()),
+        ready: commitment.ready,
+        reason: commitment.reason.clone(),
+        timestamp_ms,
+    };
+
+    let mut journal = effects.get_journal().await?;
+    let key = format!(
+        "ota:commitment:{}:{}",
+        ceremony_id_hex,
+        hex::encode(commitment.device.0.as_bytes())
+    );
+    let fact_bytes =
+        serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
+    journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
+    effects.persist_journal(&journal).await?;
+    Ok(())
+}
+
+/// Emit the threshold-reached fact through OTA journal semantics.
+pub async fn emit_ota_threshold_reached_fact<E>(
+    effects: &E,
+    ceremony_id: OTACeremonyId,
+    ready_count: u32,
+    ready_devices: &[DeviceId],
+) -> AuraResult<()>
+where
+    E: JournalEffects + PhysicalTimeEffects + ?Sized,
+{
+    let timestamp_ms = effects
+        .physical_time()
+        .await
+        .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
+        .ts_ms;
+    let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
+
+    let fact = OTACeremonyFact::ThresholdReached {
+        ceremony_id: ceremony_id_hex.clone(),
+        trace_id: Some(ceremony_id_hex.clone()),
+        ready_count,
+        ready_devices: ready_devices
+            .iter()
+            .map(|device| hex::encode(device.0.as_bytes()))
+            .collect(),
+        timestamp_ms,
+    };
+
+    let mut journal = effects.get_journal().await?;
+    let key = format!("ota:threshold:{ceremony_id_hex}");
+    let fact_bytes =
+        serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
+    journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
+    effects.persist_journal(&journal).await?;
+    Ok(())
+}
+
+/// Emit the ceremony-committed fact through OTA journal semantics.
+pub async fn emit_ota_ceremony_committed_fact<E>(
+    effects: &E,
+    ceremony_id: OTACeremonyId,
+    activation_epoch: Epoch,
+    ready_devices: &[DeviceId],
+    threshold_signature: &[u8],
+) -> AuraResult<()>
+where
+    E: JournalEffects + PhysicalTimeEffects + ?Sized,
+{
+    let timestamp_ms = effects
+        .physical_time()
+        .await
+        .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
+        .ts_ms;
+    let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
+    let fact = OTACeremonyFact::CeremonyCommitted {
+        ceremony_id: ceremony_id_hex.clone(),
+        trace_id: Some(ceremony_id_hex.clone()),
+        activation_epoch,
+        ready_devices: ready_devices
+            .iter()
+            .map(|device| hex::encode(device.0.as_bytes()))
+            .collect(),
+        threshold_signature: threshold_signature.to_vec(),
+        timestamp_ms,
+    };
+
+    let mut journal = effects.get_journal().await?;
+    let key = format!("ota:committed:{ceremony_id_hex}");
+    let fact_bytes =
+        serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
+    journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
+    effects.persist_journal(&journal).await?;
+    Ok(())
+}
+
+/// Emit the ceremony-aborted fact through OTA journal semantics.
+pub async fn emit_ota_ceremony_aborted_fact<E>(
+    effects: &E,
+    ceremony_id: OTACeremonyId,
+    reason: &str,
+) -> AuraResult<()>
+where
+    E: JournalEffects + PhysicalTimeEffects + ?Sized,
+{
+    let timestamp_ms = effects
+        .physical_time()
+        .await
+        .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
+        .ts_ms;
+    let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
+    let fact = OTACeremonyFact::CeremonyAborted {
+        ceremony_id: ceremony_id_hex.clone(),
+        trace_id: Some(ceremony_id_hex.clone()),
+        reason: reason.to_string(),
+        timestamp_ms,
+    };
+
+    let mut journal = effects.get_journal().await?;
+    let key = format!("ota:aborted:{ceremony_id_hex}");
+    let fact_bytes =
+        serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
+    journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
+    effects.persist_journal(&journal).await?;
+    Ok(())
 }
 
 // =============================================================================
@@ -1161,7 +724,10 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
-    use aura_core::threshold::{ParticipantIdentity, ThresholdConfig, ThresholdState};
+    use aura_core::threshold::{
+        policy_for, CeremonyFlow, ParticipantIdentity, SigningContext, ThresholdConfig,
+        ThresholdState,
+    };
     use aura_core::time::PhysicalTime;
     use aura_core::types::epochs::Epoch;
     use aura_core::{AuraError, ContextId, FlowBudget, FlowCost, Journal};
@@ -1537,51 +1103,33 @@ mod tests {
     }
 
     #[test]
-    fn test_ota_ceremony_commit_emits_fact() {
+    fn test_ota_commit_helper_emits_fact() {
         let mut pool = futures::executor::LocalPool::new();
         pool.run_until(async {
             let effects = TestEffects::new();
-            let config = OTACeremonyConfig {
-                threshold: 1,
-                quorum_size: 1,
-                timeout_ms: 1_000,
-                min_activation_notice_epochs: 0,
+            let ceremony_id = OTACeremonyId::new(&test_prestate(), &test_upgrade_hash(), 1);
+            let ready_devices = vec![DeviceId::from_bytes([1u8; 32])];
+            let commitment = ReadinessCommitment {
+                ceremony_id,
+                device: ready_devices[0],
+                authority: test_authority(9),
+                prestate_hash: test_prestate(),
+                ready: true,
+                reason: None,
+                signature: ThresholdSignature::single_signer(vec![7u8; 64], vec![8u8; 32], 0),
+                committed_at_ms: 42,
             };
-            let mut executor = OTACeremonyExecutor::new(effects.clone(), config);
+            let signature = create_ota_activation_signature(ceremony_id, &[commitment]).unwrap();
 
-            let proposal = UpgradeProposal {
-                proposal_id: Uuid::from_bytes(1u128.to_be_bytes()),
-                package_id: Uuid::from_bytes(2u128.to_be_bytes()),
-                version: SemanticVersion::new(2, 0, 0),
-                kind: UpgradeKind::HardFork,
-                package_hash: Hash32([9u8; 32]),
-                activation_epoch: Epoch::new(10),
-                coordinator: DeviceId::from_bytes([8u8; 32]),
-            };
-
-            let ceremony_id = executor
-                .initiate_ceremony(proposal, Epoch::new(0))
-                .await
-                .unwrap();
-
-            let commitment = executor
-                .create_readiness_commitment(
-                    ceremony_id,
-                    DeviceId::from_bytes([1u8; 32]),
-                    test_authority(9),
-                    true,
-                    None,
-                )
-                .await
-                .unwrap();
-
-            let threshold_reached = executor
-                .process_commitment(ceremony_id, commitment)
-                .await
-                .unwrap();
-            assert!(threshold_reached);
-
-            executor.commit_ceremony(ceremony_id).await.unwrap();
+            emit_ota_ceremony_committed_fact(
+                &effects,
+                ceremony_id,
+                Epoch::new(10),
+                &ready_devices,
+                &signature,
+            )
+            .await
+            .unwrap();
 
             let journal = effects.snapshot_journal();
             let key = format!("ota:committed:{}", hex::encode(ceremony_id.0.as_bytes()));
