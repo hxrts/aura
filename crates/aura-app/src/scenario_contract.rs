@@ -69,10 +69,13 @@ pub enum IntentKind {
     JoinChannel,
     InviteActorToChannel,
     SendChatMessage,
+    SendFriendRequest,
+    AcceptFriendRequest,
+    DeclineFriendRequest,
 }
 
 impl IntentKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 18] = [
         Self::OpenScreen,
         Self::CreateAccount,
         Self::CreateHome,
@@ -88,6 +91,9 @@ impl IntentKind {
         Self::JoinChannel,
         Self::InviteActorToChannel,
         Self::SendChatMessage,
+        Self::SendFriendRequest,
+        Self::AcceptFriendRequest,
+        Self::DeclineFriendRequest,
     ];
 }
 
@@ -468,6 +474,21 @@ pub const SEMANTIC_COMMAND_SUPPORT: &[SemanticCommandSupport] = &[
         web: FlowAvailability::Supported,
         tui: FlowAvailability::Supported,
     },
+    SemanticCommandSupport {
+        intent: IntentKind::SendFriendRequest,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::AcceptFriendRequest,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::DeclineFriendRequest,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
 ];
 
 #[must_use]
@@ -711,6 +732,15 @@ pub enum IntentAction {
         #[serde(default)]
         context_id: Option<String>,
     },
+    SendFriendRequest {
+        authority_id: String,
+    },
+    AcceptFriendRequest {
+        authority_id: String,
+    },
+    DeclineFriendRequest {
+        authority_id: String,
+    },
 }
 
 impl IntentAction {
@@ -732,6 +762,9 @@ impl IntentAction {
             Self::JoinChannel { .. } => IntentKind::JoinChannel,
             Self::InviteActorToChannel { .. } => IntentKind::InviteActorToChannel,
             Self::SendChatMessage { .. } => IntentKind::SendChatMessage,
+            Self::SendFriendRequest { .. } => IntentKind::SendFriendRequest,
+            Self::AcceptFriendRequest { .. } => IntentKind::AcceptFriendRequest,
+            Self::DeclineFriendRequest { .. } => IntentKind::DeclineFriendRequest,
         }
     }
 
@@ -1115,7 +1148,7 @@ impl IntentAction {
             Self::AcceptContactInvitation { .. } => SharedActionContract {
                 intent: IntentKind::AcceptContactInvitation,
                 submission: SubmissionContract::OperationHandle {
-                    operation_id: OperationId::invitation_accept(),
+                    operation_id: OperationId::invitation_accept_contact(),
                     value: SubmissionValueContract::None,
                 },
                 preconditions: vec![
@@ -1131,7 +1164,7 @@ impl IntentAction {
                     ],
                     before_next_intent: vec![
                         BarrierDeclaration::OperationState {
-                            operation_id: OperationId::invitation_accept(),
+                            operation_id: OperationId::invitation_accept_contact(),
                             state: OperationState::Succeeded,
                         },
                         BarrierDeclaration::RuntimeEvent(RuntimeEventKind::InvitationAccepted),
@@ -1142,11 +1175,11 @@ impl IntentAction {
                 focus_semantics: FocusSemantics::Field(FieldId::InvitationCode),
                 selection_semantics: SelectionSemantics::List(ListId::Contacts),
                 transitions: vec![AuthoritativeTransitionKind::Operation(
-                    OperationId::invitation_accept(),
+                    OperationId::invitation_accept_contact(),
                 )],
                 terminal_success: vec![
                     TerminalSuccessKind::OperationState {
-                        operation_id: OperationId::invitation_accept(),
+                        operation_id: OperationId::invitation_accept_contact(),
                         state: OperationState::Succeeded,
                     },
                     TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::InvitationAccepted),
@@ -1160,7 +1193,7 @@ impl IntentAction {
             Self::AcceptPendingChannelInvitation => SharedActionContract {
                 intent: IntentKind::AcceptPendingChannelInvitation,
                 submission: SubmissionContract::OperationHandle {
-                    operation_id: OperationId::invitation_accept(),
+                    operation_id: OperationId::invitation_accept_channel(),
                     value: SubmissionValueContract::None,
                 },
                 preconditions: vec![
@@ -1173,7 +1206,7 @@ impl IntentAction {
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
                     before_next_intent: vec![BarrierDeclaration::OperationState {
-                        operation_id: OperationId::invitation_accept(),
+                        operation_id: OperationId::invitation_accept_channel(),
                         state: OperationState::Succeeded,
                     }],
                 },
@@ -1181,11 +1214,11 @@ impl IntentAction {
                 focus_semantics: FocusSemantics::Screen(ScreenId::Chat),
                 selection_semantics: SelectionSemantics::PreservesCurrent,
                 transitions: vec![AuthoritativeTransitionKind::Operation(
-                    OperationId::invitation_accept(),
+                    OperationId::invitation_accept_channel(),
                 )],
                 terminal_success: vec![
                     TerminalSuccessKind::OperationState {
-                        operation_id: OperationId::invitation_accept(),
+                        operation_id: OperationId::invitation_accept_channel(),
                         state: OperationState::Succeeded,
                     },
                     TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::InvitationAccepted),
@@ -1313,6 +1346,129 @@ impl IntentAction {
                 terminal_failure_codes: vec![
                     "send_chat_message_issue_failed".to_string(),
                     "send_chat_message_timeout".to_string(),
+                ],
+            },
+            Self::SendFriendRequest { .. } => SharedActionContract {
+                intent: IntentKind::SendFriendRequest,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::send_friend_request(),
+                    value: SubmissionValueContract::None,
+                },
+                preconditions: vec![
+                    ActionPrecondition::Screen(ScreenId::Contacts),
+                    ActionPrecondition::Readiness(UiReadiness::Ready),
+                ],
+                barriers: SharedActionBarrierMetadata {
+                    before_issue: vec![
+                        BarrierDeclaration::Screen(ScreenId::Contacts),
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                    ],
+                    before_next_intent: vec![
+                        BarrierDeclaration::OperationState {
+                            operation_id: OperationId::send_friend_request(),
+                            state: OperationState::Succeeded,
+                        },
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                    ],
+                },
+                post_operation_convergence: None,
+                focus_semantics: FocusSemantics::Screen(ScreenId::Contacts),
+                selection_semantics: SelectionSemantics::List(ListId::Contacts),
+                transitions: vec![AuthoritativeTransitionKind::Operation(
+                    OperationId::send_friend_request(),
+                )],
+                terminal_success: vec![
+                    TerminalSuccessKind::OperationState {
+                        operation_id: OperationId::send_friend_request(),
+                        state: OperationState::Succeeded,
+                    },
+                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
+                ],
+                terminal_failure_codes: vec![
+                    "send_friend_request_issue_failed".to_string(),
+                    "send_friend_request_timeout".to_string(),
+                ],
+            },
+            Self::AcceptFriendRequest { .. } => SharedActionContract {
+                intent: IntentKind::AcceptFriendRequest,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::accept_friend_request(),
+                    value: SubmissionValueContract::None,
+                },
+                preconditions: vec![
+                    ActionPrecondition::Screen(ScreenId::Contacts),
+                    ActionPrecondition::Readiness(UiReadiness::Ready),
+                ],
+                barriers: SharedActionBarrierMetadata {
+                    before_issue: vec![
+                        BarrierDeclaration::Screen(ScreenId::Contacts),
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                    ],
+                    before_next_intent: vec![
+                        BarrierDeclaration::OperationState {
+                            operation_id: OperationId::accept_friend_request(),
+                            state: OperationState::Succeeded,
+                        },
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                    ],
+                },
+                post_operation_convergence: None,
+                focus_semantics: FocusSemantics::Screen(ScreenId::Contacts),
+                selection_semantics: SelectionSemantics::List(ListId::Contacts),
+                transitions: vec![AuthoritativeTransitionKind::Operation(
+                    OperationId::accept_friend_request(),
+                )],
+                terminal_success: vec![
+                    TerminalSuccessKind::OperationState {
+                        operation_id: OperationId::accept_friend_request(),
+                        state: OperationState::Succeeded,
+                    },
+                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
+                ],
+                terminal_failure_codes: vec![
+                    "accept_friend_request_issue_failed".to_string(),
+                    "accept_friend_request_timeout".to_string(),
+                ],
+            },
+            Self::DeclineFriendRequest { .. } => SharedActionContract {
+                intent: IntentKind::DeclineFriendRequest,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::decline_friend_request(),
+                    value: SubmissionValueContract::None,
+                },
+                preconditions: vec![
+                    ActionPrecondition::Screen(ScreenId::Contacts),
+                    ActionPrecondition::Readiness(UiReadiness::Ready),
+                ],
+                barriers: SharedActionBarrierMetadata {
+                    before_issue: vec![
+                        BarrierDeclaration::Screen(ScreenId::Contacts),
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                    ],
+                    before_next_intent: vec![
+                        BarrierDeclaration::OperationState {
+                            operation_id: OperationId::decline_friend_request(),
+                            state: OperationState::Succeeded,
+                        },
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                    ],
+                },
+                post_operation_convergence: None,
+                focus_semantics: FocusSemantics::Screen(ScreenId::Contacts),
+                selection_semantics: SelectionSemantics::List(ListId::Contacts),
+                transitions: vec![AuthoritativeTransitionKind::Operation(
+                    OperationId::decline_friend_request(),
+                )],
+                terminal_success: vec![
+                    TerminalSuccessKind::OperationState {
+                        operation_id: OperationId::decline_friend_request(),
+                        state: OperationState::Succeeded,
+                    },
+                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
+                ],
+                terminal_failure_codes: vec![
+                    "decline_friend_request_issue_failed".to_string(),
+                    "decline_friend_request_timeout".to_string(),
                 ],
             },
         }
@@ -1518,6 +1674,9 @@ pub enum SemanticActionKind {
     InviteActorToChannel,
     SendChatCommand,
     SendChatMessage,
+    SendFriendRequest,
+    AcceptFriendRequest,
+    DeclineFriendRequest,
     PasteClipboard,
     ReadClipboard,
     Navigate,
@@ -1720,6 +1879,21 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                     message: required(value.value, "value", value.action)?,
                     channel_id: None,
                     context_id: None,
+                })
+            }
+            SemanticActionKind::SendFriendRequest => {
+                ScenarioAction::Intent(IntentAction::SendFriendRequest {
+                    authority_id: required(value.value, "value", value.action)?,
+                })
+            }
+            SemanticActionKind::AcceptFriendRequest => {
+                ScenarioAction::Intent(IntentAction::AcceptFriendRequest {
+                    authority_id: required(value.value, "value", value.action)?,
+                })
+            }
+            SemanticActionKind::DeclineFriendRequest => {
+                ScenarioAction::Intent(IntentAction::DeclineFriendRequest {
+                    authority_id: required(value.value, "value", value.action)?,
                 })
             }
             SemanticActionKind::PasteClipboard => ScenarioAction::Ui(UiAction::PasteClipboard {
@@ -2190,6 +2364,15 @@ mod tests {
                 channel_id: None,
                 context_id: None,
             },
+            IntentAction::SendFriendRequest {
+                authority_id: "authority:peer".to_string(),
+            },
+            IntentAction::AcceptFriendRequest {
+                authority_id: "authority:peer".to_string(),
+            },
+            IntentAction::DeclineFriendRequest {
+                authority_id: "authority:peer".to_string(),
+            },
         ];
         assert_eq!(samples.len(), IntentKind::ALL.len());
         for action in samples {
@@ -2259,6 +2442,15 @@ mod tests {
                 channel_id: None,
                 context_id: None,
             },
+            IntentAction::SendFriendRequest {
+                authority_id: "authority:peer".to_string(),
+            },
+            IntentAction::AcceptFriendRequest {
+                authority_id: "authority:peer".to_string(),
+            },
+            IntentAction::DeclineFriendRequest {
+                authority_id: "authority:peer".to_string(),
+            },
         ];
         for action in actions {
             let contract = action.contract();
@@ -2327,6 +2519,15 @@ mod tests {
                 channel_id: None,
                 context_id: None,
             },
+            IntentAction::SendFriendRequest {
+                authority_id: "authority:peer".to_string(),
+            },
+            IntentAction::AcceptFriendRequest {
+                authority_id: "authority:peer".to_string(),
+            },
+            IntentAction::DeclineFriendRequest {
+                authority_id: "authority:peer".to_string(),
+            },
         ];
         for action in actions {
             let contract = action.contract();
@@ -2365,7 +2566,7 @@ mod tests {
         assert_eq!(
             accept_pending_contract.barriers.before_next_intent,
             vec![BarrierDeclaration::OperationState {
-                operation_id: OperationId::invitation_accept(),
+                operation_id: OperationId::invitation_accept_channel(),
                 state: OperationState::Succeeded,
             }]
         );
@@ -2419,7 +2620,7 @@ mod tests {
 
     #[test]
     fn ui_operation_handle_accessors_round_trip() {
-        let id = OperationId::invitation_accept();
+        let id = OperationId::invitation_accept_contact();
         let instance_id = OperationInstanceId("opaque-op-1".to_string());
         let handle = UiOperationHandle::new(id.clone(), instance_id.clone());
 
@@ -2502,6 +2703,15 @@ mod tests {
                 message: "hello".to_string(),
                 channel_id: None,
                 context_id: None,
+            },
+            IntentAction::SendFriendRequest {
+                authority_id: "authority:test".to_string(),
+            },
+            IntentAction::AcceptFriendRequest {
+                authority_id: "authority:test".to_string(),
+            },
+            IntentAction::DeclineFriendRequest {
+                authority_id: "authority:test".to_string(),
             },
         ] {
             let contract = intent.contract();

@@ -1,6 +1,6 @@
 //! Context command handlers
 //!
-//! Handlers for SetContext, MovePosition, AcceptPendingHomeInvitation.
+//! Handlers for SetContext, MovePosition, AcceptPendingChannelInvitation.
 //!
 //! This module delegates to portable workflows in aura_app::ui::workflows::context
 //! and adds terminal-specific response formatting.
@@ -25,7 +25,7 @@ pub use aura_app::ui::workflows::context::{
     add_home_to_neighborhood, create_home, create_neighborhood, link_home_one_hop_link,
     move_position, set_context,
 };
-pub use aura_app::ui::workflows::invitation::accept_pending_home_invitation;
+pub use aura_app::ui::workflows::invitation::accept_pending_channel_invitation;
 
 fn is_demo_mode() -> bool {
     std::env::var("AURA_DEMO_DEVICE_ID")
@@ -159,9 +159,9 @@ pub async fn handle_context(
             }
         }
 
-        EffectCommand::AcceptPendingHomeInvitation => {
-            // Accept a pending home invitation via workflow
-            match accept_pending_home_invitation(app_core).await {
+        EffectCommand::AcceptPendingChannelInvitation => {
+            // Accept a pending channel invitation via workflow
+            match accept_pending_channel_invitation(app_core).await {
                 Ok(invitation_id) => Some(Ok(OpResponse::HomeInvitationAccepted {
                     invitation_id: invitation_id.to_string(),
                 })),
@@ -175,7 +175,7 @@ pub async fn handle_context(
                         Some(Err(super::types::OpError::InvalidArgument(message)))
                     } else {
                         Some(Err(OpError::typed(
-                            OpFailureCode::AcceptPendingHomeInvitation,
+                            OpFailureCode::AcceptPendingChannelInvitation,
                             message,
                         )))
                     }

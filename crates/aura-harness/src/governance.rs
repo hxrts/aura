@@ -868,11 +868,11 @@ mod tests {
         ));
         assert!(action_satisfies_barrier(
             &SemanticAction::Expect(Expectation::OperationStateIs {
-                operation_id: OperationId::invitation_accept(),
+                operation_id: OperationId::invitation_accept_contact(),
                 state: OperationState::Succeeded,
             }),
             &BarrierDeclaration::OperationState {
-                operation_id: OperationId::invitation_accept(),
+                operation_id: OperationId::invitation_accept_contact(),
                 state: OperationState::Succeeded,
             }
         ));

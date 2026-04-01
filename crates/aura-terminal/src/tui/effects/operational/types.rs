@@ -6,7 +6,7 @@ use aura_core::types::Epoch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpFailureCode {
-    AcceptPendingHomeInvitation,
+    AcceptPendingChannelInvitation,
     CreateHome,
     CreateNeighborhood,
     AddHomeToNeighborhood,
@@ -40,7 +40,7 @@ impl OpFailureCode {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::AcceptPendingHomeInvitation => "TUI_ACCEPT_PENDING_HOME_INVITATION",
+            Self::AcceptPendingChannelInvitation => "TUI_ACCEPT_PENDING_CHANNEL_INVITATION",
             Self::CreateHome => "TUI_CREATE_HOME",
             Self::CreateNeighborhood => "TUI_CREATE_NEIGHBORHOOD",
             Self::AddHomeToNeighborhood => "TUI_ADD_HOME_TO_NEIGHBORHOOD",

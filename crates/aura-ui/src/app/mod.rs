@@ -120,8 +120,8 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", submit_path.display()));
 
         let branch_start = source
-            .find("SimpleModalSubmitAction::AcceptInvitation => {")
-            .unwrap_or_else(|| panic!("missing AcceptInvitation branch"));
+            .find("SimpleModalSubmitAction::AcceptContactInvitation")
+            .unwrap_or_else(|| panic!("missing AcceptContactInvitation branch"));
         let branch_end = source[branch_start..]
             .find("SimpleModalSubmitAction::CreateInvitation => {")
             .map(|offset| branch_start + offset)
@@ -159,7 +159,7 @@ mod tests {
             });
 
         assert!(notifications_source.contains("PendingChannelInvitation"));
-        assert!(notifications_source.contains("handoff::accept_pending_home_invitation("));
+        assert!(notifications_source.contains("handoff::accept_pending_channel_invitation("));
     }
 
     #[test]
@@ -190,8 +190,8 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", submit_path.display()));
 
         let accept_start = source
-            .find("SimpleModalSubmitAction::AcceptInvitation => {")
-            .unwrap_or_else(|| panic!("missing AcceptInvitation branch"));
+            .find("SimpleModalSubmitAction::AcceptContactInvitation")
+            .unwrap_or_else(|| panic!("missing AcceptContactInvitation branch"));
         let create_start = source[accept_start..]
             .find("SimpleModalSubmitAction::CreateInvitation => {")
             .map(|offset| accept_start + offset)

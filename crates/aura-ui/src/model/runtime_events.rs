@@ -148,7 +148,7 @@ impl UiController {
         let invitation_state = snapshot
             .operations
             .iter()
-            .find(|operation| operation.id == OperationId::invitation_accept())
+            .find(|operation| operation.id == OperationId::invitation_accept_contact())
             .map(|operation| format!("{:?}", operation.state))
             .unwrap_or_else(|| "Missing".to_string());
         tracing::info!(

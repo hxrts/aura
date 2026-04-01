@@ -45,7 +45,8 @@ pub enum ModalId {
     Help,
     CreateInvitation,
     InvitationCode,
-    AcceptInvitation,
+    AcceptContactInvitation,
+    AcceptChannelInvitation,
     CreateHome,
     CreateChannel,
     SetChannelTopic,
@@ -223,7 +224,8 @@ impl ModalId {
             Self::Help => "aura-modal-help",
             Self::CreateInvitation => "aura-modal-create-invitation",
             Self::InvitationCode => "aura-modal-invitation-code",
-            Self::AcceptInvitation => "aura-modal-accept-invitation",
+            Self::AcceptContactInvitation => "aura-modal-accept-contact-invitation",
+            Self::AcceptChannelInvitation => "aura-modal-accept-channel-invitation",
             Self::CreateHome => "aura-modal-create-home",
             Self::CreateChannel => "aura-modal-create-channel",
             Self::SetChannelTopic => "aura-modal-set-channel-topic",
@@ -905,7 +907,6 @@ pub enum SemanticOperationKind {
     CreateGuardianInvitation,
     ExportInvitation,
     AcceptContactInvitation,
-    AcceptPendingHomeInvitation,
     DeclineInvitation,
     RevokeInvitation,
     InviteActorToChannel,
@@ -1353,7 +1354,7 @@ pub fn bridged_operation_statuses(
 
     if contact_link_ready {
         for (operation_id, _instance_id, _causality, status) in &mut bridged {
-            if *operation_id == OperationId::invitation_accept()
+            if *operation_id == OperationId::invitation_accept_contact()
                 && status.kind == SemanticOperationKind::AcceptContactInvitation
                 && !status.phase.is_terminal()
             {
@@ -1415,13 +1416,13 @@ impl OperationId {
     }
 
     #[must_use]
-    pub fn invitation_accept() -> Self {
-        Self("invitation_accept".to_string())
+    pub fn invitation_accept_contact() -> Self {
+        Self("invitation_accept_contact".to_string())
     }
 
     #[must_use]
-    pub fn home_invitation_accept() -> Self {
-        Self("home_invitation_accept".to_string())
+    pub fn invitation_accept_channel() -> Self {
+        Self("invitation_accept_channel".to_string())
     }
 
     #[must_use]
@@ -2701,7 +2702,12 @@ pub const SHARED_MODAL_SUPPORT: &[SharedModalSupport] = &[
         tui: FlowAvailability::Supported,
     },
     SharedModalSupport {
-        modal: ModalId::AcceptInvitation,
+        modal: ModalId::AcceptContactInvitation,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SharedModalSupport {
+        modal: ModalId::AcceptChannelInvitation,
         web: FlowAvailability::Supported,
         tui: FlowAvailability::Supported,
     },
@@ -4222,7 +4228,7 @@ mod tests {
     #[test]
     fn authoritative_semantic_fact_operation_status_bridge_extracts_status() {
         let fact = AuthoritativeSemanticFact::OperationStatus {
-            operation_id: OperationId::invitation_accept(),
+            operation_id: OperationId::invitation_accept_contact(),
             instance_id: Some(OperationInstanceId("accept-1".to_string())),
             causality: Some(SemanticOperationCausality::new(
                 OwnerEpoch::new(1),
@@ -4237,7 +4243,7 @@ mod tests {
         assert_eq!(
             fact.operation_status_bridge(),
             Some((
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_contact(),
                 Some(OperationInstanceId("accept-1".to_string())),
                 Some(SemanticOperationCausality::new(
                     OwnerEpoch::new(1),
@@ -4279,7 +4285,7 @@ mod tests {
     fn bridged_operation_statuses_finalize_contact_accept_on_contact_link_ready() {
         let statuses = super::bridged_operation_statuses(&[
             AuthoritativeSemanticFact::OperationStatus {
-                operation_id: OperationId::invitation_accept(),
+                operation_id: OperationId::invitation_accept_contact(),
                 instance_id: None,
                 causality: None,
                 status: SemanticOperationStatus::new(
@@ -4296,7 +4302,7 @@ mod tests {
         assert_eq!(
             statuses,
             vec![(
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_contact(),
                 None,
                 None,
                 SemanticOperationStatus::new(
@@ -4879,7 +4885,8 @@ mod tests {
             ControlId::Modal(ModalId::Help),
             ControlId::Modal(ModalId::CreateInvitation),
             ControlId::Modal(ModalId::InvitationCode),
-            ControlId::Modal(ModalId::AcceptInvitation),
+            ControlId::Modal(ModalId::AcceptContactInvitation),
+            ControlId::Modal(ModalId::AcceptChannelInvitation),
             ControlId::Modal(ModalId::CreateHome),
             ControlId::Modal(ModalId::CreateChannel),
             ControlId::Modal(ModalId::SetChannelTopic),
@@ -4911,12 +4918,12 @@ mod tests {
     fn render_heartbeat_is_typed_and_serializable() {
         let heartbeat = RenderHeartbeat {
             screen: ScreenId::Chat,
-            open_modal: Some(ModalId::AcceptInvitation),
+            open_modal: Some(ModalId::AcceptContactInvitation),
             render_seq: 7,
         };
         let json = serde_json::to_string(&heartbeat).expect("heartbeat should serialize");
         assert!(json.contains("\"screen\":\"chat\""));
-        assert!(json.contains("\"open_modal\":\"accept_invitation\""));
+        assert!(json.contains("\"open_modal\":\"accept_contact_invitation\""));
         assert!(json.contains("\"render_seq\":7"));
     }
 
@@ -4925,7 +4932,7 @@ mod tests {
         let snapshot = UiSnapshot {
             screen: ScreenId::Chat,
             focused_control: Some(ControlId::Screen(ScreenId::Chat)),
-            open_modal: Some(ModalId::AcceptInvitation),
+            open_modal: Some(ModalId::AcceptContactInvitation),
             readiness: UiReadiness::Ready,
             revision: ProjectionRevision {
                 semantic_seq: 1,
@@ -4941,7 +4948,7 @@ mod tests {
         };
         let heartbeat = RenderHeartbeat {
             screen: ScreenId::Chat,
-            open_modal: Some(ModalId::AcceptInvitation),
+            open_modal: Some(ModalId::AcceptContactInvitation),
             render_seq: 7,
         };
 
@@ -5301,7 +5308,7 @@ mod tests {
             FlowAvailability::Supported
         );
         assert_eq!(
-            shared_modal_support(ModalId::AcceptInvitation).tui,
+            shared_modal_support(ModalId::AcceptContactInvitation).tui,
             FlowAvailability::Supported
         );
         assert_eq!(
@@ -5414,7 +5421,7 @@ mod tests {
                 content: "hello".to_string(),
             }],
             operations: vec![OperationSnapshot {
-                id: OperationId::invitation_accept(),
+                id: OperationId::invitation_accept_contact(),
                 instance_id: OperationInstanceId("web-op".to_string()),
                 state: OperationState::Succeeded,
             }],

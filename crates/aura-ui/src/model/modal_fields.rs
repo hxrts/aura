@@ -204,7 +204,7 @@ impl ActiveModal {
     pub(super) fn field_descriptor(&self) -> Option<ModalFieldDescriptor> {
         match self {
             Self::CreateInvitation(state) => Some(state.field_descriptor()),
-            Self::AcceptInvitation(_) => {
+            Self::AcceptContactInvitation(_) | Self::AcceptChannelInvitation(_) => {
                 Some(ModalFieldDescriptor::Direct(FieldId::InvitationCode))
             }
             Self::CreateHome(_) => Some(ModalFieldDescriptor::Direct(FieldId::HomeName)),
@@ -226,7 +226,8 @@ impl ActiveModal {
     pub(super) fn text_value(&self) -> Option<String> {
         match self {
             Self::CreateInvitation(state) => Some(state.text_value()),
-            Self::AcceptInvitation(state)
+            Self::AcceptContactInvitation(state)
+            | Self::AcceptChannelInvitation(state)
             | Self::CreateHome(state)
             | Self::SetChannelTopic(state)
             | Self::EditNickname(state)
@@ -242,7 +243,8 @@ impl ActiveModal {
     pub(super) fn set_text_value(&mut self, value: String) {
         match self {
             Self::CreateInvitation(state) => state.set_text_value(value),
-            Self::AcceptInvitation(state)
+            Self::AcceptContactInvitation(state)
+            | Self::AcceptChannelInvitation(state)
             | Self::CreateHome(state)
             | Self::SetChannelTopic(state)
             | Self::EditNickname(state)

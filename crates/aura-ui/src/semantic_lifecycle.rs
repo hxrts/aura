@@ -141,7 +141,8 @@ pub fn apply_handed_off_terminal_status(
         )
     })?;
     let kind_matches = terminal.status.kind == kind
-        || (operation_id == OperationId::invitation_accept()
+        || ((operation_id == OperationId::invitation_accept_contact()
+            || operation_id == OperationId::invitation_accept_channel())
             && matches!(
                 kind,
                 SemanticOperationKind::AcceptContactInvitation
@@ -565,7 +566,7 @@ mod tests {
         let controller = controller();
         let owner = UiWorkflowHandoffOwner::submit(
             controller,
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             SemanticOperationKind::AcceptContactInvitation,
         );
         let original_instance = owner

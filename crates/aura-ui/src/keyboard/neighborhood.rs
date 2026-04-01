@@ -12,7 +12,9 @@ pub(super) fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
         }
         'a' => {
             model.modal_hint = "Accept Invitation".to_string();
-            model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState::default()));
+            model.active_modal = Some(ActiveModal::AcceptChannelInvitation(
+                TextModalState::default(),
+            ));
         }
         'm' => {}
         'v' => {}

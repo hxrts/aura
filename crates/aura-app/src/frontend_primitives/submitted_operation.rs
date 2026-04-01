@@ -581,7 +581,7 @@ mod tests {
     #[test]
     fn release_run_workflow_reports_panics_with_context() {
         let release = SubmittedOperationRelease {
-            operation_id: OperationId::invitation_accept(),
+            operation_id: OperationId::invitation_accept_contact(),
             instance_id: OperationInstanceId("ui-op-2".to_string()),
             kind: SemanticOperationKind::AcceptContactInvitation,
         };
@@ -673,7 +673,7 @@ mod tests {
         let publisher = TestPublisher::default();
         let workflow = block_on(WorkflowHandoffSubmission::submit(
             publisher.clone(),
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             SemanticOperationKind::AcceptContactInvitation,
             |_| OperationInstanceId("test-op-4".to_string()),
         ));
@@ -689,7 +689,7 @@ mod tests {
 
         assert_eq!(
             workflow_release.operation_id(),
-            &OperationId::invitation_accept()
+            &OperationId::invitation_accept_contact()
         );
         assert_eq!(
             workflow_release.kind(),

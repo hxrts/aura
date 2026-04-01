@@ -499,10 +499,11 @@ impl TuiState {
 mod tests {
     use super::*;
 
-    fn parity_critical_operation_ids() -> [OperationId; 4] {
+    fn parity_critical_operation_ids() -> [OperationId; 5] {
         [
             OperationId::invitation_create(),
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
+            OperationId::invitation_accept_channel(),
             OperationId("join_channel".to_string()),
             OperationId::send_message(),
         ]
@@ -680,7 +681,7 @@ mod tests {
     fn operation_tracker_preserves_instance_id_for_authoritative_updates() {
         let mut state = TuiState::new();
         state.set_authoritative_operation_state(
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             None,
             None,
             OperationState::Submitting,
@@ -689,7 +690,7 @@ mod tests {
         let first_instance = first[0].instance_id.clone();
 
         state.set_authoritative_operation_state(
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             None,
             None,
             OperationState::Submitting,
@@ -698,7 +699,7 @@ mod tests {
         assert_eq!(second[0].instance_id, first_instance);
 
         state.set_authoritative_operation_state(
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             None,
             None,
             OperationState::Succeeded,
@@ -786,7 +787,7 @@ mod tests {
     #[test]
     fn authoritative_terminal_regression_without_instance_allocates_new_instance() {
         let mut state = TuiState::new();
-        let operation_id = OperationId::invitation_accept();
+        let operation_id = OperationId::invitation_accept_contact();
         state.set_authoritative_operation_state(
             operation_id.clone(),
             None,
@@ -806,7 +807,7 @@ mod tests {
     #[test]
     fn authoritative_terminal_regression_for_same_instance_is_ignored() {
         let mut state = TuiState::new();
-        let operation_id = OperationId::invitation_accept();
+        let operation_id = OperationId::invitation_accept_contact();
         state.set_authoritative_operation_state(
             operation_id.clone(),
             None,
@@ -831,7 +832,7 @@ mod tests {
     #[test]
     fn authoritative_update_for_older_instance_does_not_replace_newer_submission() {
         let mut state = TuiState::new();
-        let operation_id = OperationId::invitation_accept();
+        let operation_id = OperationId::invitation_accept_contact();
 
         state.set_authoritative_operation_state(
             operation_id.clone(),
@@ -862,7 +863,7 @@ mod tests {
     #[test]
     fn authoritative_update_uses_causality_before_instance_suffix_ordering() {
         let mut state = TuiState::new();
-        let operation_id = OperationId::invitation_accept();
+        let operation_id = OperationId::invitation_accept_contact();
 
         state.set_authoritative_operation_state(
             operation_id.clone(),

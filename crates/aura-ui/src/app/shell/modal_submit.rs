@@ -181,7 +181,8 @@ enum ObservedModalSubmitAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SimpleModalSubmitAction {
     CreateHome,
-    AcceptInvitation,
+    AcceptContactInvitation,
+    AcceptChannelInvitation,
     CreateInvitation,
     SetChannelTopic,
     EditNickname,
@@ -269,11 +270,14 @@ fn classify_modal_submit(
         Some(ModalState::CreateHome) => Some(ModalSubmitClass::SimpleDispatch(
             SimpleModalSubmitAction::CreateHome,
         )),
-        Some(ModalState::AcceptInvitation) => Some(ModalSubmitClass::SimpleDispatch(
-            SimpleModalSubmitAction::AcceptInvitation,
+        Some(ModalState::AcceptContactInvitation) => Some(ModalSubmitClass::SimpleDispatch(
+            SimpleModalSubmitAction::AcceptContactInvitation,
+        )),
+        Some(ModalState::AcceptChannelInvitation) => Some(ModalSubmitClass::SimpleDispatch(
+            SimpleModalSubmitAction::AcceptChannelInvitation,
         )),
         Some(ModalState::ImportDeviceEnrollmentCode) => Some(ModalSubmitClass::SimpleDispatch(
-            SimpleModalSubmitAction::AcceptInvitation,
+            SimpleModalSubmitAction::AcceptContactInvitation,
         )),
         Some(ModalState::CreateInvitation) => Some(ModalSubmitClass::SimpleDispatch(
             SimpleModalSubmitAction::CreateInvitation,
@@ -686,7 +690,8 @@ fn submit_simple_modal_action(
             });
             true
         }
-        SimpleModalSubmitAction::AcceptInvitation => {
+        SimpleModalSubmitAction::AcceptContactInvitation
+        | SimpleModalSubmitAction::AcceptChannelInvitation => {
             let code = modal_text_value.trim().to_string();
             if code.is_empty() {
                 controller.runtime_error_toast("Invitation code is required");
@@ -706,7 +711,7 @@ fn submit_simple_modal_action(
             let operation_id = if device_import_modal {
                 OperationId::device_enrollment()
             } else {
-                OperationId::invitation_accept()
+                OperationId::invitation_accept_contact()
             };
             let base_kind = if device_import_modal {
                 SemanticOperationKind::ImportDeviceEnrollmentCode

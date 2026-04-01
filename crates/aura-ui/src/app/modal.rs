@@ -9,7 +9,8 @@ pub(in crate::app) fn active_modal_title(model: &UiModel) -> Option<String> {
         match modal {
             ModalState::Help => "Help",
             ModalState::CreateInvitation => "Invite Contacts",
-            ModalState::AcceptInvitation => "Accept Invitation",
+            ModalState::AcceptContactInvitation => "Accept Contact Invitation",
+            ModalState::AcceptChannelInvitation => "Accept Channel Invitation",
             ModalState::CreateHome => "Create New Home",
             ModalState::CreateChannel => "New Chat Group",
             ModalState::SetChannelTopic => "Set Channel Topic",
@@ -76,8 +77,16 @@ pub(in crate::app) fn modal_view(
                 value: modal_state.ttl_hours.to_string(),
             });
         }
-        ModalState::AcceptInvitation => {
-            details.push("Paste an invite code, then press Enter.".to_string());
+        ModalState::AcceptContactInvitation => {
+            details.push("Paste a contact invite code, then press Enter.".to_string());
+            inputs.push(ModalInputView {
+                label: "Invite Code".to_string(),
+                field_id: FieldId::InvitationCode,
+                value: model.modal_text_value().unwrap_or_default(),
+            });
+        }
+        ModalState::AcceptChannelInvitation => {
+            details.push("Paste a channel invite code, then press Enter.".to_string());
             inputs.push(ModalInputView {
                 label: "Invite Code".to_string(),
                 field_id: FieldId::InvitationCode,
@@ -606,6 +615,7 @@ fn help_modal_content(screen: ScreenId) -> (Vec<String>, Vec<(String, String)>) 
                 "up / down".to_string(),
                 "Move notification selection".to_string(),
             ),
+            ("a".to_string(), "Accept channel invitation".to_string()),
             (
                 "click actions".to_string(),
                 "Accept, decline, export, or approve from the detail pane".to_string(),

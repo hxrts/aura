@@ -1719,9 +1719,9 @@ pub mod handoff {
         pub operation_instance_id: Option<OperationInstanceId>,
     }
 
-    /// Inputs for accepting the current pending home invitation.
+    /// Inputs for accepting the current pending channel invitation.
     #[derive(Debug, Clone, Default)]
-    pub struct PendingHomeInvitationRequest {
+    pub struct PendingChannelInvitationRequest {
         /// Optional frontend-owned semantic instance id.
         pub operation_instance_id: Option<OperationInstanceId>,
     }
@@ -1823,12 +1823,12 @@ pub mod handoff {
         .await
     }
 
-    /// Accept the current pending home invitation.
-    pub async fn accept_pending_home_invitation(
+    /// Accept the current pending channel invitation.
+    pub async fn accept_pending_channel_invitation(
         app_core: &Arc<RwLock<AppCore>>,
-        request: PendingHomeInvitationRequest,
+        request: PendingChannelInvitationRequest,
     ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationId> {
-        super::accept_pending_home_invitation_with_terminal_status(
+        super::accept_pending_channel_invitation_with_terminal_status(
             app_core,
             request.operation_instance_id,
         )
@@ -2701,9 +2701,13 @@ pub async fn accept_invitation_with_instance(
     } else {
         SemanticOperationKind::AcceptPendingChannelInvitation
     };
+    let operation_id = match operation_kind {
+        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+        _ => OperationId::invitation_accept_contact(),
+    };
     let owner = SemanticWorkflowOwner::new(
         app_core,
-        OperationId::invitation_accept(),
+        operation_id,
         instance_id.clone(),
         operation_kind,
     );
@@ -2962,9 +2966,13 @@ pub async fn accept_imported_invitation_with_instance(
     instance_id: Option<OperationInstanceId>,
 ) -> Result<(), AuraError> {
     let operation_kind = semantic_kind_for_bridge_invitation(invitation.info());
+    let operation_id = match operation_kind {
+        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+        _ => OperationId::invitation_accept_contact(),
+    };
     let owner = SemanticWorkflowOwner::new(
         app_core,
-        OperationId::invitation_accept(),
+        operation_id,
         instance_id.clone(),
         operation_kind,
     );
@@ -2982,9 +2990,13 @@ pub async fn accept_imported_invitation_with_terminal_status(
     instance_id: Option<OperationInstanceId>,
 ) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
     let operation_kind = semantic_kind_for_bridge_invitation(invitation.info());
+    let operation_id = match operation_kind {
+        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+        _ => OperationId::invitation_accept_contact(),
+    };
     let owner = SemanticWorkflowOwner::new(
         app_core,
-        OperationId::invitation_accept(),
+        operation_id,
         instance_id.clone(),
         operation_kind,
     );
@@ -3263,9 +3275,13 @@ pub async fn accept_invitation_by_str_with_terminal_status(
         .as_ref()
         .map(semantic_kind_for_bridge_invitation)
         .unwrap_or(SemanticOperationKind::AcceptContactInvitation);
+    let operation_id = match kind {
+        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+        _ => OperationId::invitation_accept_contact(),
+    };
     let owner = SemanticWorkflowOwner::new(
         app_core,
-        OperationId::invitation_accept(),
+        operation_id,
         instance_id,
         kind,
     );
@@ -3656,18 +3672,18 @@ pub fn format_invitation_type_detailed(inv_type: InvitationType, context: Option
 /// **Returns**: Invitation ID that was accepted
 /// **Signal pattern**: RuntimeBridge handles signal emission
 ///
-/// This is used by UI to quickly accept a pending home invitation without
+/// This is used by UI to quickly accept a pending channel invitation without
 /// requiring the user to select a specific invitation ID.
 /// Returns the typed InvitationId of the accepted invitation.
-pub async fn accept_pending_home_invitation(
+pub async fn accept_pending_channel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<InvitationId, AuraError> {
-    accept_pending_home_invitation_with_instance(app_core, None).await
+    accept_pending_channel_invitation_with_instance(app_core, None).await
 }
 
 #[aura_macros::semantic_owner(
-    owner = "accept_pending_home_invitation_id_owned",
-    wrapper = "accept_pending_home_invitation_with_instance",
+    owner = "accept_pending_channel_invitation_id_owned",
+    wrapper = "accept_pending_channel_invitation_with_instance",
     terminal = "publish_success_with",
     postcondition = "pending_invitation_consumed",
     proof = crate::workflows::semantic_facts::PendingInvitationConsumedProof,
@@ -3676,7 +3692,7 @@ pub async fn accept_pending_home_invitation(
     child_ops = "accept_imported_invitation",
     category = "move_owned"
 )]
-async fn accept_pending_home_invitation_id_owned(
+async fn accept_pending_channel_invitation_id_owned(
     app_core: &Arc<RwLock<AppCore>>,
     owner: &SemanticWorkflowOwner,
     _instance_id: Option<OperationInstanceId>,
@@ -3704,7 +3720,7 @@ async fn accept_pending_home_invitation_id_owned(
         return fail_pending_invitation_accept_owned(
             owner,
             AcceptInvitationError::AcceptFailed {
-                detail: "No pending home invitation found".to_string(),
+                detail: "No pending channel invitation found".to_string(),
             },
         )
         .await;
@@ -3720,38 +3736,38 @@ async fn accept_pending_home_invitation_id_owned(
     Ok(invitation_id)
 }
 
-/// Accept the current pending home invitation and attribute the semantic operation to a specific UI instance.
-pub async fn accept_pending_home_invitation_with_instance(
+/// Accept the current pending channel invitation and attribute the semantic operation to a specific UI instance.
+pub async fn accept_pending_channel_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
     instance_id: Option<OperationInstanceId>,
 ) -> Result<InvitationId, AuraError> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
-        OperationId::invitation_accept(),
+        OperationId::invitation_accept_channel(),
         instance_id.clone(),
         SemanticOperationKind::AcceptPendingChannelInvitation,
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    accept_pending_home_invitation_id_owned(app_core, &owner, instance_id, None).await
+    accept_pending_channel_invitation_id_owned(app_core, &owner, instance_id, None).await
 }
 
-/// Accept the current pending home invitation and return the directly-settled
+/// Accept the current pending channel invitation and return the directly-settled
 /// terminal status for frontend handoff consumers.
-pub async fn accept_pending_home_invitation_with_terminal_status(
+pub async fn accept_pending_channel_invitation_with_terminal_status(
     app_core: &Arc<RwLock<AppCore>>,
     instance_id: Option<OperationInstanceId>,
 ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationId> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
-        OperationId::invitation_accept(),
+        OperationId::invitation_accept_channel(),
         instance_id.clone(),
         SemanticOperationKind::AcceptPendingChannelInvitation,
     );
     let result = async {
         publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
             .await?;
-        accept_pending_home_invitation_id_owned(app_core, &owner, instance_id, None).await
+        accept_pending_channel_invitation_id_owned(app_core, &owner, instance_id, None).await
     }
     .await;
     crate::ui_contract::WorkflowTerminalOutcome {
@@ -3845,7 +3861,7 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
 {
     let owner = SemanticWorkflowOwner::new(
         app_core,
-        OperationId::invitation_accept(),
+        OperationId::invitation_accept_channel(),
         instance_id.clone(),
         SemanticOperationKind::AcceptPendingChannelInvitation,
     );
@@ -3873,7 +3889,7 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
             return fail_pending_invitation_accept_owned(
                 &owner,
                 AcceptInvitationError::AcceptFailed {
-                    detail: "No pending home invitation found".to_string(),
+                    detail: "No pending channel invitation found".to_string(),
                 },
             )
             .await;
@@ -3945,14 +3961,14 @@ mod tests {
     // === Invitation Role Parsing Tests ===
 
     #[test]
-    fn accept_pending_home_invitation_owned_boundary_is_declared_and_wrapped() {
+    fn accept_pending_channel_invitation_owned_boundary_is_declared_and_wrapped() {
         let source = fs::read_to_string(
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/workflows/invitation.rs"),
         )
         .expect("invitation workflow source should be readable");
 
-        assert!(source.contains("owner = \"accept_pending_home_invitation_id_owned\""));
-        assert!(source.contains("async fn accept_pending_home_invitation_id_owned("));
+        assert!(source.contains("owner = \"accept_pending_channel_invitation_id_owned\""));
+        assert!(source.contains("async fn accept_pending_channel_invitation_id_owned("));
         assert!(source.contains(
             "let _ = accept_imported_invitation_inner(app_core, &invitation, owner).await?;"
         ));
@@ -4494,7 +4510,8 @@ mod tests {
 
     #[cfg(feature = "signals")]
     #[tokio::test]
-    async fn accept_pending_home_invitation_without_pending_invites_publishes_terminal_failure() {
+    async fn accept_pending_channel_invitation_without_pending_invites_publishes_terminal_failure()
+    {
         let our_authority = AuthorityId::new_from_entropy([69u8; 32]);
         let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = Arc::new(
             crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority),
@@ -4511,7 +4528,7 @@ mod tests {
 
         let instance_id = OperationInstanceId("pending-accept-1".to_string());
         let result =
-            accept_pending_home_invitation_with_instance(&app_core, Some(instance_id.clone()))
+            accept_pending_channel_invitation_with_instance(&app_core, Some(instance_id.clone()))
                 .await;
 
         assert!(result.is_err());
@@ -4519,7 +4536,7 @@ mod tests {
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         crate::workflows::semantic_facts::assert_terminal_failure_or_cancelled(
             &facts,
-            &OperationId::invitation_accept(),
+            &OperationId::invitation_accept_channel(),
             &instance_id,
             SemanticOperationKind::AcceptPendingChannelInvitation,
         );
@@ -4568,7 +4585,7 @@ mod tests {
 
         crate::workflows::semantic_facts::SemanticWorkflowOwner::new(
             &app_core,
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_channel(),
             Some(instance_id.clone()),
             SemanticOperationKind::AcceptPendingChannelInvitation,
         )
@@ -4595,7 +4612,7 @@ mod tests {
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         crate::workflows::semantic_facts::assert_succeeded_with_postcondition(
             &facts,
-            &OperationId::invitation_accept(),
+            &OperationId::invitation_accept_channel(),
             &instance_id,
             SemanticOperationKind::AcceptPendingChannelInvitation,
             |facts| {
@@ -4683,7 +4700,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn accept_pending_home_invitation_with_terminal_status_returns_direct_failure_status() {
+    async fn accept_pending_channel_invitation_with_terminal_status_returns_direct_failure_status()
+    {
         let our_authority = AuthorityId::new_from_entropy([111u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
@@ -4698,7 +4716,7 @@ mod tests {
                 .unwrap();
         }
 
-        let outcome = accept_pending_home_invitation_with_terminal_status(
+        let outcome = accept_pending_channel_invitation_with_terminal_status(
             &app_core,
             Some(OperationInstanceId("accept-pending-direct-1".to_string())),
         )

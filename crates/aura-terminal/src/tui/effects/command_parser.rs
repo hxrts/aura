@@ -116,8 +116,8 @@ pub enum EffectCommand {
         /// Optional home name
         name: Option<String>,
     },
-    /// Accept pending home invitation
-    AcceptPendingHomeInvitation,
+    /// Accept pending channel invitation
+    AcceptPendingChannelInvitation,
     /// Send home invitation to contact
     SendHomeInvitation {
         /// Contact ID to invite
@@ -506,7 +506,7 @@ impl EffectCommand {
             | Self::AcceptInvitation { .. }
             | Self::DeclineInvitation { .. }
             | Self::CancelInvitation { .. }
-            | Self::AcceptPendingHomeInvitation
+            | Self::AcceptPendingChannelInvitation
             | Self::SendHomeInvitation { .. }
             | Self::CreateNeighborhood { .. }
             | Self::AddHomeToNeighborhood { .. }

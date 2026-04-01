@@ -18,7 +18,9 @@ pub(super) fn handle_contacts_char(model: &mut UiModel, ch: char) {
         }
         'a' => {
             model.modal_hint = "Accept Invitation".to_string();
-            model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState::default()));
+            model.active_modal = Some(ActiveModal::AcceptContactInvitation(
+                TextModalState::default(),
+            ));
         }
         'e' => {
             model.modal_hint = "Edit Nickname".to_string();

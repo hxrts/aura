@@ -991,7 +991,7 @@ mod tests {
 
     fn operation_handle() -> UiOperationHandle {
         UiOperationHandle::new(
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             OperationInstanceId("test-op-1".to_string()),
         )
     }

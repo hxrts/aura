@@ -110,7 +110,7 @@ pub(super) fn NotificationsScreen(
                                                         spawn_ui(async move {
                                                             let operation = UiWorkflowHandoffOwner::submit(
                                                                 controller.clone(),
-                                                                OperationId::invitation_accept(),
+                                                                OperationId::invitation_accept_contact(),
                                                                 SemanticOperationKind::AcceptContactInvitation,
                                                             );
                                                             let workflow_instance_id = operation.workflow_instance_id();
@@ -205,7 +205,7 @@ pub(super) fn NotificationsScreen(
                                                         spawn_ui(async move {
                                                             let operation = UiWorkflowHandoffOwner::submit(
                                                                 controller.clone(),
-                                                                OperationId::invitation_accept(),
+                                                                OperationId::invitation_accept_channel(),
                                                                 SemanticOperationKind::AcceptPendingChannelInvitation,
                                                             );
                                                             let workflow_instance_id = operation.workflow_instance_id();
@@ -215,10 +215,10 @@ pub(super) fn NotificationsScreen(
                                                             match transfer
                                                                 .run_workflow(
                                                                     controller.clone(),
-                                                                    "accept_pending_home_invitation",
-                                                                    invitation_workflows::handoff::accept_pending_home_invitation(
+                                                                    "accept_pending_channel_invitation",
+                                                                    invitation_workflows::handoff::accept_pending_channel_invitation(
                                                                         &app_core,
-                                                                        invitation_workflows::handoff::PendingHomeInvitationRequest {
+                                                                        invitation_workflows::handoff::PendingChannelInvitationRequest {
                                                                             operation_instance_id: workflow_instance_id,
                                                                         },
                                                                     ),

@@ -10,6 +10,7 @@ use aura_app::ui::scenarios::{
 use aura_app::ui::signals::SETTINGS_SIGNAL;
 use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::ceremonies as ceremony_workflows;
+use aura_app::ui::workflows::contacts as contacts_workflows;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_app::ui::workflows::messaging as messaging_workflows;
@@ -172,6 +173,15 @@ enum RoutedSemanticIntent {
     SendChatMessage {
         message: String,
         channel_id: ChannelId,
+    },
+    SendFriendRequest {
+        authority_id: AuthorityId,
+    },
+    AcceptFriendRequest {
+        authority_id: AuthorityId,
+    },
+    DeclineFriendRequest {
+        authority_id: AuthorityId,
     },
 }
 
@@ -660,6 +670,27 @@ async fn route_semantic_intent(
                 channel_id,
             })
         }
+        IntentAction::SendFriendRequest { authority_id } => {
+            Ok(RoutedSemanticIntent::SendFriendRequest {
+                authority_id: authority_id
+                    .parse::<AuthorityId>()
+                    .map_err(RouteSemanticIntentError::invalid_authority_id)?,
+            })
+        }
+        IntentAction::AcceptFriendRequest { authority_id } => {
+            Ok(RoutedSemanticIntent::AcceptFriendRequest {
+                authority_id: authority_id
+                    .parse::<AuthorityId>()
+                    .map_err(RouteSemanticIntentError::invalid_authority_id)?,
+            })
+        }
+        IntentAction::DeclineFriendRequest { authority_id } => {
+            Ok(RoutedSemanticIntent::DeclineFriendRequest {
+                authority_id: authority_id
+                    .parse::<AuthorityId>()
+                    .map_err(RouteSemanticIntentError::invalid_authority_id)?,
+            })
+        }
     }
 }
 
@@ -929,7 +960,7 @@ async fn execute_semantic_intent(
             let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
                 &contract,
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_contact(),
                 SemanticOperationKind::AcceptContactInvitation,
                 UiOperationTransferScope::AcceptInvitation,
             )?;
@@ -1072,7 +1103,7 @@ async fn execute_semantic_intent(
             let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
                 &contract,
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_channel(),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
                 UiOperationTransferScope::AcceptPendingChannelInvitation,
             )?;
@@ -1251,6 +1282,63 @@ async fn execute_semantic_intent(
                     .map(|_| ())
                     .map_err(|error| JsValue::from_str(&error.to_string()))
             });
+            declared_handle_unit_response(&contract, handle)
+        }
+        RoutedSemanticIntent::SendFriendRequest { authority_id } => {
+            let handle = begin_declared_exact_ui_operation(
+                controller.clone(),
+                &contract,
+                OperationId::send_friend_request(),
+            )?;
+            let app_core = controller.app_core().clone();
+            let timestamp_ms = context_workflows::current_time_ms(&app_core)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            contacts_workflows::send_friend_request(
+                &app_core,
+                &authority_id.to_string(),
+                timestamp_ms,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            declared_handle_unit_response(&contract, handle)
+        }
+        RoutedSemanticIntent::AcceptFriendRequest { authority_id } => {
+            let handle = begin_declared_exact_ui_operation(
+                controller.clone(),
+                &contract,
+                OperationId::accept_friend_request(),
+            )?;
+            let app_core = controller.app_core().clone();
+            let timestamp_ms = context_workflows::current_time_ms(&app_core)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            contacts_workflows::accept_friend_request(
+                &app_core,
+                &authority_id.to_string(),
+                timestamp_ms,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            declared_handle_unit_response(&contract, handle)
+        }
+        RoutedSemanticIntent::DeclineFriendRequest { authority_id } => {
+            let handle = begin_declared_exact_ui_operation(
+                controller.clone(),
+                &contract,
+                OperationId::decline_friend_request(),
+            )?;
+            let app_core = controller.app_core().clone();
+            let timestamp_ms = context_workflows::current_time_ms(&app_core)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            contacts_workflows::decline_friend_request(
+                &app_core,
+                &authority_id.to_string(),
+                timestamp_ms,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
             declared_handle_unit_response(&contract, handle)
         }
     }

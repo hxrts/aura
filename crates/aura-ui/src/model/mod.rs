@@ -1162,7 +1162,7 @@ mod tests {
     fn semantic_snapshot_includes_tracked_operation_state() {
         let mut model = UiModel::new("authority-local".to_string());
         model.set_authoritative_operation_state(
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             None,
             None,
             OperationState::Submitting,
@@ -1172,7 +1172,7 @@ mod tests {
         let operation_state = snapshot
             .operations
             .iter()
-            .find(|operation| operation.id == OperationId::invitation_accept())
+            .find(|operation| operation.id == OperationId::invitation_accept_contact())
             .map(|operation| operation.state);
 
         assert_eq!(operation_state, Some(OperationState::Submitting));
@@ -1182,7 +1182,7 @@ mod tests {
     fn restarting_operation_generates_new_operation_instance_id() {
         let mut model = UiModel::new("authority-local".to_string());
         model.set_authoritative_operation_state(
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             None,
             None,
             OperationState::Submitting,
@@ -1191,20 +1191,20 @@ mod tests {
             .semantic_snapshot()
             .operations
             .into_iter()
-            .find(|operation| operation.id == OperationId::invitation_accept())
+            .find(|operation| operation.id == OperationId::invitation_accept_contact())
         else {
             panic!("first operation should exist");
         };
         let first_instance = first_instance.instance_id;
 
         model.set_authoritative_operation_state(
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             None,
             None,
             OperationState::Succeeded,
         );
         model.set_authoritative_operation_state(
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             None,
             None,
             OperationState::Submitting,
@@ -1213,7 +1213,7 @@ mod tests {
             .semantic_snapshot()
             .operations
             .into_iter()
-            .find(|operation| operation.id == OperationId::invitation_accept())
+            .find(|operation| operation.id == OperationId::invitation_accept_contact())
         else {
             panic!("second operation should exist");
         };
@@ -1226,7 +1226,7 @@ mod tests {
     fn authoritative_operation_replay_does_not_regress_terminal_state_for_same_instance() {
         let mut model = UiModel::new("authority-local".to_string());
         let instance_id = OperationInstanceId("op-1".to_string());
-        let operation_id = OperationId::invitation_accept();
+        let operation_id = OperationId::invitation_accept_contact();
 
         model.set_authoritative_operation_state(
             operation_id.clone(),
@@ -1308,7 +1308,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         assert_eq!(model.modal_text_value_or_empty(), "");
 
-        model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState {
+        model.active_modal = Some(ActiveModal::AcceptContactInvitation(TextModalState {
             value: "invite-code".to_string(),
         }));
 

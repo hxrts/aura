@@ -411,7 +411,7 @@ pub(super) fn execute_harness_followup_command(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_contact(),
                 SemanticOperationKind::AcceptContactInvitation,
             );
             let handle = operation.harness_handle();
@@ -434,12 +434,17 @@ pub(super) fn execute_harness_followup_command(
             let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected else {
                 return Err("Select a received invitation to accept".to_string());
             };
+            let accept_kind = semantic_accept_kind_for_invitation(shared_invitations, &invitation_id);
+            let operation_id = match accept_kind {
+                SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+                _ => OperationId::invitation_accept_contact(),
+            };
             let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
-                OperationId::invitation_accept(),
-                semantic_accept_kind_for_invitation(shared_invitations, &invitation_id),
+                operation_id,
+                accept_kind,
             );
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
@@ -465,7 +470,7 @@ pub(super) fn execute_harness_followup_command(
             (cb.chat.on_join_channel)(channel_name, operation);
             Ok(Some(handle))
         }
-        TuiCommand::Dispatch(DispatchCommand::AcceptPendingHomeInvitation) => {
+        TuiCommand::Dispatch(DispatchCommand::AcceptPendingChannelInvitation) => {
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Chat callbacks are unavailable".to_string());
             };
@@ -476,7 +481,7 @@ pub(super) fn execute_harness_followup_command(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_channel(),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
             );
             let handle = operation.harness_handle();

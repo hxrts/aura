@@ -101,7 +101,7 @@ pub(super) fn map_modal(modal: &QueuedModal) -> Option<ModalId> {
         QueuedModal::ChatTopic(_) => Some(ModalId::SetChannelTopic),
         QueuedModal::ChatInfo(_) => Some(ModalId::ChannelInfo),
         QueuedModal::ContactsNickname(_) => Some(ModalId::EditNickname),
-        QueuedModal::ContactsImport(_) => Some(ModalId::AcceptInvitation),
+        QueuedModal::ContactsImport(_) => Some(ModalId::AcceptContactInvitation),
         QueuedModal::ContactsCreate(_) => Some(ModalId::CreateInvitation),
         QueuedModal::ContactsCode(_) => Some(ModalId::InvitationCode),
         QueuedModal::GuardianSetup(_) => Some(ModalId::GuardianSetup),
@@ -427,7 +427,7 @@ pub(crate) fn apply_harness_command(
         HarnessUiCommand::AcceptPendingChannelInvitation => {
             state.router.go_to(Screen::Chat);
             Ok(vec![TuiCommand::Dispatch(
-                DispatchCommand::AcceptPendingHomeInvitation,
+                DispatchCommand::AcceptPendingChannelInvitation,
             )])
         }
         HarnessUiCommand::JoinChannel { channel_name } => {

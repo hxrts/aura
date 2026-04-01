@@ -342,7 +342,7 @@ fn apply_modal_overlay(
                 };
             }
         }
-        ModalState::AcceptInvitation => {
+        ModalState::AcceptContactInvitation | ModalState::AcceptChannelInvitation => {
             if row_idx == 0 {
                 *center = model.modal_hint.clone();
             } else if row_idx == 1 {

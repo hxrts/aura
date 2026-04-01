@@ -33,9 +33,10 @@ pub(super) fn handle_modal_enter(
             });
             dismiss_modal(model);
         }
-        ModalState::AcceptInvitation => {
+        ModalState::AcceptContactInvitation | ModalState::AcceptChannelInvitation => {
             let value = match model.active_modal.as_ref() {
-                Some(ActiveModal::AcceptInvitation(state)) => state.value.trim(),
+                Some(ActiveModal::AcceptContactInvitation(state))
+                | Some(ActiveModal::AcceptChannelInvitation(state)) => state.value.trim(),
                 _ => "",
             };
             if !value.is_empty() {

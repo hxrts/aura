@@ -2991,7 +2991,7 @@ const PARITY_CRITICAL_EFFECT_COMMANDS: &[&str] = &[
     "DeclineInvitation",
     "CancelInvitation",
     "ImportInvitation",
-    "AcceptPendingHomeInvitation",
+    "AcceptPendingChannelInvitation",
     "ToggleContactGuardian",
     "RemoveContact",
     "StartRecovery",

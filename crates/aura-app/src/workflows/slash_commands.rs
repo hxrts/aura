@@ -553,8 +553,8 @@ fn slash_command_semantic_operation(kind: SlashCommandKind) -> SlashCommandSeman
             kind: SemanticOperationKind::CreateHomeInvitation,
         },
         SlashCommandKind::HomeAccept => SlashCommandSemanticOperation {
-            operation_id: OperationId::home_invitation_accept(),
-            kind: SemanticOperationKind::AcceptPendingHomeInvitation,
+            operation_id: OperationId::invitation_accept_channel(),
+            kind: SemanticOperationKind::AcceptPendingChannelInvitation,
         },
         SlashCommandKind::Kick => SlashCommandSemanticOperation {
             operation_id: OperationId::kick_actor(),

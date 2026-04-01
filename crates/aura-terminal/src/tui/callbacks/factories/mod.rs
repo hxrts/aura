@@ -335,7 +335,7 @@ async fn run_invitation_import_flow(
     operation: WorkflowHandoffOperationOwner,
 ) {
     let app_core = ctx.app_core_raw().clone();
-    let operation_id = OperationId::invitation_accept();
+    let operation_id = OperationId::invitation_accept_contact();
     let kind = SemanticOperationKind::AcceptContactInvitation;
     let operation_instance_id = operation.harness_handle().instance_id().clone();
     let workflow_instance_id = operation.workflow_instance_id();

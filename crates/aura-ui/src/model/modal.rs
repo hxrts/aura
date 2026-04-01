@@ -9,7 +9,8 @@ use aura_core::types::identifiers::CeremonyId;
 pub enum ModalState {
     Help,
     CreateInvitation,
-    AcceptInvitation,
+    AcceptContactInvitation,
+    AcceptChannelInvitation,
     CreateHome,
     CreateChannel,
     SetChannelTopic,
@@ -35,7 +36,8 @@ impl ModalState {
         match self {
             Self::Help => ModalId::Help,
             Self::CreateInvitation => ModalId::CreateInvitation,
-            Self::AcceptInvitation => ModalId::AcceptInvitation,
+            Self::AcceptContactInvitation => ModalId::AcceptContactInvitation,
+            Self::AcceptChannelInvitation => ModalId::AcceptChannelInvitation,
             Self::CreateHome => ModalId::CreateHome,
             Self::CreateChannel => ModalId::CreateChannel,
             Self::SetChannelTopic => ModalId::SetChannelTopic,
@@ -210,7 +212,8 @@ impl Default for AccessOverrideModalState {
 pub enum ActiveModal {
     Help,
     CreateInvitation(CreateInvitationModalState),
-    AcceptInvitation(TextModalState),
+    AcceptContactInvitation(TextModalState),
+    AcceptChannelInvitation(TextModalState),
     CreateHome(TextModalState),
     CreateChannel(CreateChannelModalState),
     SetChannelTopic(TextModalState),
@@ -236,7 +239,8 @@ impl ActiveModal {
         match self {
             Self::Help => ModalState::Help,
             Self::CreateInvitation(_) => ModalState::CreateInvitation,
-            Self::AcceptInvitation(_) => ModalState::AcceptInvitation,
+            Self::AcceptContactInvitation(_) => ModalState::AcceptContactInvitation,
+            Self::AcceptChannelInvitation(_) => ModalState::AcceptChannelInvitation,
             Self::CreateHome(_) => ModalState::CreateHome,
             Self::CreateChannel(_) => ModalState::CreateChannel,
             Self::SetChannelTopic(_) => ModalState::SetChannelTopic,

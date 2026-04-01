@@ -8,6 +8,7 @@ mod contacts;
 mod modal;
 mod navigation;
 mod neighborhood;
+mod notifications;
 mod settings;
 mod wizard;
 
@@ -193,7 +194,7 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
         ScreenId::Contacts => handle_contacts_char(model, ch),
         ScreenId::Neighborhood => handle_neighborhood_char(model, ch),
         ScreenId::Settings => handle_settings_char(model, ch),
-        ScreenId::Notifications => {}
+        ScreenId::Notifications => notifications::handle_notifications_char(model, ch),
     }
 }
 
@@ -340,13 +341,13 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState {
+        model.active_modal = Some(ActiveModal::AcceptContactInvitation(TextModalState {
             value: "1".to_string(),
         }));
         apply_named_key(&mut model, "enter", 1, &clipboard);
         assert!(model.contacts.iter().any(|row| row.name == "Alice"));
 
-        model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState {
+        model.active_modal = Some(ActiveModal::AcceptContactInvitation(TextModalState {
             value: "2".to_string(),
         }));
         apply_named_key(&mut model, "enter", 1, &clipboard);

@@ -1446,7 +1446,7 @@ mod tests {
             &app_core,
             ExactOperationLifecyclePublication::phase(
                 semantic_lifecycle_publication_capability(),
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_channel(),
                 OperationInstanceId("tui-op-invitation_accept-3".to_string()),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
                 SemanticOperationPhase::Succeeded,
@@ -1457,7 +1457,7 @@ mod tests {
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         assert!(facts.contains(&AuthoritativeSemanticFact::OperationStatus {
-            operation_id: OperationId::invitation_accept(),
+            operation_id: OperationId::invitation_accept_channel(),
             instance_id: Some(OperationInstanceId(
                 "tui-op-invitation_accept-3".to_string()
             )),
@@ -1478,7 +1478,7 @@ mod tests {
 
         let mut invitation_context = issue_operation_context(
             &SEMANTIC_OPERATION_CONTEXT_CAPABILITY,
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_channel(),
             OperationInstanceId("tui-op-invitation_accept-7".to_string()),
             OwnerEpoch::new(2),
             PublicationSequence::new(5),
@@ -1522,7 +1522,7 @@ mod tests {
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         assert!(facts.contains(&AuthoritativeSemanticFact::OperationStatus {
-            operation_id: OperationId::invitation_accept(),
+            operation_id: OperationId::invitation_accept_channel(),
             instance_id: Some(OperationInstanceId(
                 "tui-op-invitation_accept-7".to_string()
             )),
@@ -1558,7 +1558,7 @@ mod tests {
 
         let owner = SemanticWorkflowOwner::new(
             &app_core,
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             Some(OperationInstanceId(
                 "tui-op-invitation_accept-batched".to_string(),
             )),
@@ -1591,7 +1591,7 @@ mod tests {
     fn exact_operation_lifecycle_from_context_carries_causality() {
         let mut context = issue_operation_context(
             &SEMANTIC_OPERATION_CONTEXT_CAPABILITY,
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_channel(),
             OperationInstanceId("tui-op-invitation_accept-3".to_string()),
             OwnerEpoch::new(7),
             PublicationSequence::new(11),
@@ -1611,7 +1611,7 @@ mod tests {
         assert_eq!(
             fact,
             AuthoritativeSemanticFact::OperationStatus {
-                operation_id: OperationId::invitation_accept(),
+                operation_id: OperationId::invitation_accept_channel(),
                 instance_id: Some(OperationInstanceId(
                     "tui-op-invitation_accept-3".to_string()
                 )),

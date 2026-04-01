@@ -1899,7 +1899,7 @@ async fn execute_general(
             .await?;
             Ok(Some("home invitation sent".to_string()))
         }
-        ResolvedCommand::HomeAccept => invitation::accept_pending_home_invitation(app_core)
+        ResolvedCommand::HomeAccept => invitation::accept_pending_channel_invitation(app_core)
             .await
             .map(|_| Some("home invitation accepted".to_string())),
         ResolvedCommand::Topic { text } => {

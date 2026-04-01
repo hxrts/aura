@@ -1395,6 +1395,43 @@ fn execute_semantic_intent(
             )?;
             Ok(())
         }
+        IntentAction::SendFriendRequest { .. }
+        | IntentAction::AcceptFriendRequest { .. }
+        | IntentAction::DeclineFriendRequest { .. } => {
+            let operation = match &intent {
+                IntentAction::SendFriendRequest { .. } => "send_friend_request",
+                IntentAction::AcceptFriendRequest { .. } => "accept_friend_request",
+                IntentAction::DeclineFriendRequest { .. } => "decline_friend_request",
+                _ => unreachable!(),
+            };
+            let response = submit_shared_intent(
+                &metadata_step,
+                tool_api,
+                context,
+                &instance_id,
+                intent.clone(),
+            )?;
+            let operation_handle = require_semantic_unit_submission_with_exact_handle(
+                &metadata_step,
+                operation,
+                response,
+            )?;
+            record_submission_handle(context, &instance_id, Some(operation_handle.clone()));
+            wait_for_contract_barriers(
+                &metadata_step,
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle: Some(operation_handle),
+                    channel_binding: None,
+                    runtime_event_detail: None,
+                },
+            )?;
+            Ok(())
+        }
         IntentAction::JoinChannel { channel_name } => {
             let response = submit_shared_intent(
                 &metadata_step,
@@ -1707,6 +1744,15 @@ fn resolve_intent_templates(
                 .map(|context_id| resolve_template(&context_id, context))
                 .transpose()?,
         },
+        IntentAction::SendFriendRequest { authority_id } => IntentAction::SendFriendRequest {
+            authority_id: resolve_template(authority_id, context)?,
+        },
+        IntentAction::AcceptFriendRequest { authority_id } => IntentAction::AcceptFriendRequest {
+            authority_id: resolve_template(authority_id, context)?,
+        },
+        IntentAction::DeclineFriendRequest { authority_id } => IntentAction::DeclineFriendRequest {
+            authority_id: resolve_template(authority_id, context)?,
+        },
     })
 }
 
@@ -1975,6 +2021,9 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             IntentAction::JoinChannel { .. } => "join_channel",
             IntentAction::InviteActorToChannel { .. } => "invite_actor_to_channel",
             IntentAction::SendChatMessage { .. } => "send_chat_message",
+            IntentAction::SendFriendRequest { .. } => "send_friend_request",
+            IntentAction::AcceptFriendRequest { .. } => "accept_friend_request",
+            IntentAction::DeclineFriendRequest { .. } => "decline_friend_request",
             IntentAction::SwitchAuthority { .. } => "switch_authority",
         },
         SemanticAction::Variables(variable) => match variable {
@@ -3460,7 +3509,8 @@ fn semantic_modal_name(modal: ModalId) -> &'static str {
         ModalId::Help => "help",
         ModalId::CreateInvitation => "create_invitation",
         ModalId::InvitationCode => "invitation_code",
-        ModalId::AcceptInvitation => "accept_invitation",
+        ModalId::AcceptContactInvitation => "accept_contact_invitation",
+        ModalId::AcceptChannelInvitation => "accept_channel_invitation",
         ModalId::CreateHome => "create_home",
         ModalId::CreateChannel => "create_channel",
         ModalId::SetChannelTopic => "set_channel_topic",
@@ -4712,7 +4762,7 @@ mod tests {
         let step = crate::config::CompatibilityStep {
             id: "wait-op".to_string(),
             action: crate::config::CompatibilityAction::WaitFor,
-            operation_id: Some(OperationId::invitation_accept()),
+            operation_id: Some(OperationId::invitation_accept_contact()),
             operation_state: Some(OperationState::Succeeded),
             ..Default::default()
         };
@@ -4727,7 +4777,7 @@ mod tests {
             lists: Vec::new(),
             messages: Vec::new(),
             operations: vec![OperationSnapshot {
-                id: OperationId::invitation_accept(),
+                id: OperationId::invitation_accept_contact(),
                 instance_id: OperationInstanceId("test-operation-instance".to_string()),
                 state: OperationState::Succeeded,
             }],
@@ -4743,7 +4793,7 @@ mod tests {
         let step = crate::config::CompatibilityStep {
             id: "wait-op-handle".to_string(),
             action: crate::config::CompatibilityAction::WaitFor,
-            operation_id: Some(OperationId::invitation_accept()),
+            operation_id: Some(OperationId::invitation_accept_contact()),
             operation_state: Some(OperationState::Succeeded),
             ..Default::default()
         };
@@ -4759,12 +4809,12 @@ mod tests {
             messages: Vec::new(),
             operations: vec![
                 OperationSnapshot {
-                    id: OperationId::invitation_accept(),
+                    id: OperationId::invitation_accept_contact(),
                     instance_id: OperationInstanceId("stale-instance".to_string()),
                     state: OperationState::Failed,
                 },
                 OperationSnapshot {
-                    id: OperationId::invitation_accept(),
+                    id: OperationId::invitation_accept_contact(),
                     instance_id: OperationInstanceId("fresh-instance".to_string()),
                     state: OperationState::Succeeded,
                 },
@@ -4776,7 +4826,7 @@ mod tests {
         context.last_operation_handle.insert(
             "alice".to_string(),
             UiOperationHandle::new(
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_contact(),
                 OperationInstanceId("fresh-instance".to_string()),
             ),
         );
@@ -4794,7 +4844,7 @@ mod tests {
     #[test]
     fn operation_handle_match_requires_matching_instance_and_state() {
         let handle = UiOperationHandle::new(
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             OperationInstanceId("handle-instance".to_string()),
         );
         let matching_snapshot = UiSnapshot {
@@ -4808,7 +4858,7 @@ mod tests {
             lists: Vec::new(),
             messages: Vec::new(),
             operations: vec![OperationSnapshot {
-                id: OperationId::invitation_accept(),
+                id: OperationId::invitation_accept_contact(),
                 instance_id: OperationInstanceId("handle-instance".to_string()),
                 state: OperationState::Succeeded,
             }],
@@ -4817,7 +4867,7 @@ mod tests {
         };
         let wrong_instance_snapshot = UiSnapshot {
             operations: vec![OperationSnapshot {
-                id: OperationId::invitation_accept(),
+                id: OperationId::invitation_accept_contact(),
                 instance_id: OperationInstanceId("other-instance".to_string()),
                 state: OperationState::Succeeded,
             }],
@@ -4825,7 +4875,7 @@ mod tests {
         };
         let wrong_state_snapshot = UiSnapshot {
             operations: vec![OperationSnapshot {
-                id: OperationId::invitation_accept(),
+                id: OperationId::invitation_accept_contact(),
                 instance_id: OperationInstanceId("handle-instance".to_string()),
                 state: OperationState::Failed,
             }],
@@ -5480,7 +5530,7 @@ mod tests {
         let quiescence =
             WaitContractRef::Quiescence(aura_app::ui_contract::QuiescenceState::Settled);
         let operation = WaitContractRef::OperationState {
-            operation_id: OperationId::invitation_accept(),
+            operation_id: OperationId::invitation_accept_contact(),
             state: OperationState::Succeeded,
             label: "accept_contact_invitation",
         };

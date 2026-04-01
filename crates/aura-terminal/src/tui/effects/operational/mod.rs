@@ -121,7 +121,7 @@ impl OperationalHandler {
             // Context + Home
             EffectCommand::SetContext { .. }
             | EffectCommand::MovePosition { .. }
-            | EffectCommand::AcceptPendingHomeInvitation
+            | EffectCommand::AcceptPendingChannelInvitation
             | EffectCommand::CreateHome { .. }
             | EffectCommand::CreateNeighborhood { .. }
             | EffectCommand::AddHomeToNeighborhood { .. }

@@ -932,7 +932,7 @@ mod tests {
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(16);
 
-        let operation_id = OperationId::invitation_accept();
+        let operation_id = OperationId::invitation_accept_channel();
 
         // First owner: submit and handoff to app workflow.
         let first_owner = SubmittedWorkflowOperationOwner::submit(
@@ -1046,7 +1046,7 @@ mod tests {
             app_core,
             tasks.clone(),
             tx,
-            OperationId::invitation_accept(),
+            OperationId::invitation_accept_contact(),
             SemanticOperationKind::AcceptContactInvitation,
         );
 

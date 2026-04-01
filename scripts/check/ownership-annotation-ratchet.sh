@@ -194,7 +194,7 @@ check_semantic_owner_completeness() {
     "crates/aura-app/src/workflows/context.rs:create_home_owned"
     "crates/aura-app/src/workflows/invitation.rs:accept_invitation_id_owned"
     "crates/aura-app/src/workflows/invitation.rs:accept_imported_invitation_owned"
-    "crates/aura-app/src/workflows/invitation.rs:accept_pending_home_invitation_id_owned"
+    "crates/aura-app/src/workflows/invitation.rs:accept_pending_channel_invitation_id_owned"
     "crates/aura-app/src/workflows/invitation.rs:create_channel_invitation_owned"
     "crates/aura-app/src/workflows/messaging.rs:join_channel_by_name_owned"
     "crates/aura-app/src/workflows/messaging.rs:send_message_ref_owned"

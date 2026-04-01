@@ -684,7 +684,7 @@ pub(super) fn handle_dispatch_command_match(
             new_state.router.go_to(Screen::Chat);
             (cb.chat.on_join_channel)(channel_name, operation);
         }
-        DispatchCommand::AcceptPendingHomeInvitation => {
+        DispatchCommand::AcceptPendingChannelInvitation => {
             let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
@@ -693,7 +693,7 @@ pub(super) fn handle_dispatch_command_match(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_channel(),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
             );
             new_state.router.go_to(Screen::Chat);
@@ -1330,15 +1330,20 @@ pub(super) fn handle_dispatch_command_match(
             );
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
                 if let Some(update_tx) = update_tx_for_dispatch {
+                    let accept_kind = semantic_accept_kind_for_invitation(
+                        shared_invitations_for_dispatch,
+                        &invitation_id,
+                    );
+                    let operation_id = match accept_kind {
+                        SemanticOperationKind::AcceptPendingChannelInvitation => OperationId::invitation_accept_channel(),
+                        _ => OperationId::invitation_accept_contact(),
+                    };
                     let operation = submit_workflow_handoff_operation(
                         app_ctx_for_dispatch.app_core.raw().clone(),
                         app_ctx_for_dispatch.tasks(),
                         update_tx,
-                        OperationId::invitation_accept(),
-                        semantic_accept_kind_for_invitation(
-                            shared_invitations_for_dispatch,
-                            &invitation_id,
-                        ),
+                        operation_id,
+                        accept_kind,
                     );
                     new_state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
                     (cb.invitations.on_accept)(invitation_id, operation);
@@ -1412,7 +1417,7 @@ pub(super) fn handle_dispatch_command_match(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
-                OperationId::invitation_accept(),
+                OperationId::invitation_accept_contact(),
                 SemanticOperationKind::AcceptContactInvitation,
             );
             new_state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
