@@ -46,7 +46,7 @@ impl crate::ProtocolErrorCode for AmpChannelError {
 }
 
 /// AMP message header (additional authenticated data)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AmpHeader {
     pub context: ContextId,
     pub channel: ChannelId,

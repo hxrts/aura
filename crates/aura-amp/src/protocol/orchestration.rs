@@ -10,7 +10,7 @@ use crate::core::{nonce_from_header, ratchet_from_epoch_state};
 use crate::get_channel_state;
 use crate::wire::{deserialize_message, serialize_message, AmpMessage};
 use crate::{AmpEvidenceEffects, AmpJournalEffects};
-use aura_core::effects::amp::{AmpCiphertext, AmpHeader as CoreAmpHeader};
+use aura_core::effects::amp::{AmpCiphertext, AmpHeader};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{
     CryptoEffects, NetworkEffects, RandomEffects, SecureStorageCapability, SecureStorageEffects,
@@ -27,36 +27,14 @@ use aura_journal::fact::{
 };
 use aura_journal::ChannelEpochState;
 use aura_transport::amp::{
-    derive_for_recv, derive_for_send, AmpError, AmpHeader as TransportAmpHeader, RatchetDerivation,
+    derive_for_recv, derive_for_send, AmpError, RatchetDerivation,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::instrument;
 
-// ============================================================================
-// Header Conversions
-// ============================================================================
-// Note: Can't use From/Into due to orphan rules (both types are foreign).
-
-#[inline]
-fn to_core_header(h: TransportAmpHeader) -> CoreAmpHeader {
-    CoreAmpHeader {
-        context: h.context,
-        channel: h.channel,
-        chan_epoch: h.chan_epoch,
-        ratchet_gen: h.ratchet_gen,
-    }
-}
-
-#[inline]
-fn to_transport_header(h: &CoreAmpHeader) -> TransportAmpHeader {
-    TransportAmpHeader {
-        context: h.context,
-        channel: h.channel,
-        chan_epoch: h.chan_epoch,
-        ratchet_gen: h.ratchet_gen,
-    }
-}
+// AmpHeader is now unified — defined in aura-core, re-exported by aura-transport.
+// No conversion functions needed.
 
 // ============================================================================
 // Types
@@ -141,7 +119,7 @@ async fn derive_bootstrap_message_key<E: SecureStorageEffects>(
     context: ContextId,
     channel: ChannelId,
     bootstrap_id: aura_core::Hash32,
-    header: &TransportAmpHeader,
+    header: &AmpHeader,
 ) -> Result<aura_core::Hash32> {
     let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
     let key_bytes = effects
@@ -190,7 +168,7 @@ pub async fn prepare_send<E: AmpJournalEffects>(
 /// Validate an incoming AMP header against reduced state and derive recv keys.
 pub fn validate_header(
     state: &ChannelEpochState,
-    header: TransportAmpHeader,
+    header: AmpHeader,
 ) -> Result<(RatchetDerivation, (u64, u64))> {
     let ratchet_state = ratchet_from_epoch_state(state);
     let bounds = aura_transport::amp::window_bounds(
@@ -344,7 +322,7 @@ where
         })?;
 
     // Phase 3: Serialize
-    let core_header = to_core_header(header);
+    let core_header = header;
     let msg = AmpMessage::new(core_header.clone(), sealed.clone());
     let bytes = serialize_message(&msg).map_err(|e| {
         AMP_TELEMETRY.log_send_failure(context, channel, &e);
@@ -424,13 +402,13 @@ where
     // Phase 2: Context validation
     if wire.header.context != context {
         let err = AuraError::invalid("AMP context mismatch");
-        let transport_header = to_transport_header(&wire.header);
+        let transport_header = wire.header;
         AMP_TELEMETRY.log_receive_failure(context, Some(&transport_header), None, &err);
         return Err(err);
     }
 
     // Phase 3: Window/epoch validation
-    let transport_header = to_transport_header(&wire.header);
+    let transport_header = wire.header;
     let state = get_channel_state(effects, context, transport_header.channel).await?;
     let (deriv, window_validation) =
         validate_and_build_result(&state, transport_header).map_err(|(e, validation)| {
@@ -493,13 +471,13 @@ where
         &window_validation,
     );
 
-    Ok(AmpMessage::new(to_core_header(transport_header), opened))
+    Ok(AmpMessage::new(transport_header, opened))
 }
 
 /// Helper to validate header and build window validation result.
 fn validate_and_build_result(
     state: &ChannelEpochState,
-    header: TransportAmpHeader,
+    header: AmpHeader,
 ) -> std::result::Result<
     (RatchetDerivation, WindowValidationResult),
     (AuraError, Option<WindowValidationResult>),

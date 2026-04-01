@@ -22,7 +22,7 @@
 //! This crate provides the complete AMP implementation including:
 //! - Journal adapters and reduction helpers
 //! - Channel lifecycle management
-//! - Transport protocol (send/recv)
+//! - Protocol orchestration (send/recv through guard chain)
 //! - Telemetry and observability
 //! - Consensus integration for epoch bumps
 //! - Choreography annotations for MPST integration
@@ -44,7 +44,7 @@ pub mod core;
 pub mod evidence;
 pub mod journal;
 pub mod prelude;
-pub mod transport;
+pub mod protocol;
 pub mod wire;
 
 // ============================================================================
@@ -70,10 +70,10 @@ pub use evidence::{
 pub use channel::{AmpChannelCoordinator, ChannelMembershipFact, ChannelParticipantEvent};
 
 // ============================================================================
-// Re-exports: Transport
+// Re-exports: Protocol Orchestration
 // ============================================================================
 
-pub use transport::{
+pub use protocol::{
     amp_recv, amp_recv_with_receipt, amp_send, commit_bump_with_consensus, emit_proposed_bump,
     emit_soft_safe_bump, prepare_send, validate_header, AmpDelivery, AmpReceipt, AmpTelemetry,
     WindowValidationResult, AMP_TELEMETRY,

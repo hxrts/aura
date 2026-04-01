@@ -3,7 +3,8 @@
 //! This module contains effect-free utilities for AMP state derivation.
 
 use aura_journal::ChannelEpochState;
-use aura_transport::amp::{AmpHeader, AmpRatchetState};
+use aura_core::effects::amp::AmpHeader;
+use aura_transport::amp::AmpRatchetState;
 
 /// Derive nonce from AMP header using centralized crypto utilities.
 pub fn nonce_from_header(header: &AmpHeader) -> [u8; 12] {

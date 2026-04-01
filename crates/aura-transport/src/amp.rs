@@ -5,26 +5,11 @@
 
 #![allow(missing_docs)] // Macro-generated variants/fields
 
+pub use aura_core::effects::amp::AmpHeader;
 use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_core::Hash32;
 use aura_macros::aura_error_types;
 use serde::{Deserialize, Serialize};
-
-/// AMP message header used as AEAD associated data
-///
-/// Contains the contextual and ratchet state information that uniquely identifies
-/// a message in the AMP (Asynchronous Message Protocol) system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AmpHeader {
-    /// Relational context in which this message is sent
-    pub context: ContextId,
-    /// Channel identifier for the message
-    pub channel: ChannelId,
-    /// Channel epoch for epoch-based ratcheting
-    pub chan_epoch: u64,
-    /// Current ratchet generation counter
-    pub ratchet_gen: u64,
-}
 
 /// Simplified ratchet state for AMP operations
 ///
