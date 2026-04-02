@@ -11,16 +11,18 @@ use crate::runtime::services::ceremony_runner::{
 };
 use crate::runtime::{AuraEffectSystem, TaskSupervisor};
 use async_trait::async_trait;
-use aura_core::effects::PhysicalTimeEffects;
+use aura_core::effects::{AdmissionError, PhysicalTimeEffects, RuntimeCapabilityEffects};
 use aura_core::threshold::{AgreementMode, ParticipantIdentity};
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::Epoch;
 use aura_core::{AuraError, DeviceId, Hash32};
+use aura_effects::RuntimeCapabilityHandler;
 use aura_mpst::upstream::runtime::{
     ChoreoHandler, ChoreoHandlerExt, ChoreoResult, ChoreographyError as TelltaleChoreographyError,
     LabelId, RoleId,
 };
 use aura_mpst::GeneratedChoreographyRuntime;
+use aura_protocol::admission::manifest_admission_requirements;
 use aura_sync::protocols::ota_ceremony::telltale_session_types_ota_activation::ota_activation::{
     runners::run_coordinator, OTAActivationProtocolRole as OtaActivationRole,
 };
@@ -632,6 +634,31 @@ fn map_ota_error(error: AuraError) -> AgentError {
     AgentError::runtime(error.to_string())
 }
 
+fn map_admission_error(error: AdmissionError) -> AgentError {
+    match error {
+        AdmissionError::MissingCapability { capability } => AgentError::choreography(format!(
+            "missing runtime capability `{capability}` for OTA activation"
+        )),
+        AdmissionError::MissingTheoremPack { theorem_pack } => AgentError::choreography(format!(
+            "missing required theorem pack `{theorem_pack}` for OTA activation"
+        )),
+        AdmissionError::MissingTheoremPackCapability {
+            theorem_pack,
+            capability,
+        } => AgentError::choreography(format!(
+            "missing theorem-pack capability `{capability}` for `{theorem_pack}`"
+        )),
+        AdmissionError::InventoryUnavailable { reason } | AdmissionError::Internal { reason } => {
+            AgentError::choreography(format!(
+                "OTA activation theorem-pack admission failed: {reason}"
+            ))
+        }
+        AdmissionError::MissingRuntimeContracts => AgentError::choreography(
+            "OTA activation theorem-pack admission requires runtime contracts".to_string(),
+        ),
+    }
+}
+
 fn map_runtime_error(error: AgentError) -> TelltaleChoreographyError {
     TelltaleChoreographyError::ExecutionError(error.to_string())
 }
@@ -683,6 +710,7 @@ fn validate_ota_proposal(
 pub struct OtaActivationServiceApi {
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: CeremonyRunner,
+    runtime_capabilities: RuntimeCapabilityHandler,
     authority_context: AuthorityContext,
     shared: Arc<OtaActivationShared>,
     config: OTACeremonyConfig,
@@ -695,12 +723,14 @@ impl OtaActivationServiceApi {
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         ceremony_runner: CeremonyRunner,
+        runtime_capabilities: RuntimeCapabilityHandler,
         tasks: Arc<TaskSupervisor>,
     ) -> AgentResult<Self> {
         Self::new_with_runner_and_config(
             effects,
             authority_context,
             ceremony_runner,
+            runtime_capabilities,
             OTACeremonyConfig::default(),
             tasks,
         )
@@ -711,12 +741,14 @@ impl OtaActivationServiceApi {
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         ceremony_runner: CeremonyRunner,
+        runtime_capabilities: RuntimeCapabilityHandler,
         config: OTACeremonyConfig,
         tasks: Arc<TaskSupervisor>,
     ) -> AgentResult<Self> {
         Ok(Self {
             effects,
             ceremony_runner,
+            runtime_capabilities,
             authority_context,
             shared: Arc::new(OtaActivationShared {
                 ceremonies: RwLock::new(HashMap::new()),
@@ -734,6 +766,31 @@ impl OtaActivationServiceApi {
         compute_ota_ceremony_prestate_hash(&*self.effects)
             .await
             .map_err(map_ota_error)
+    }
+
+    async fn admit_protocol_manifest(&self) -> AgentResult<()> {
+        let manifest = aura_sync::protocols::ota_ceremony::telltale_session_types_ota_activation::vm_artifacts::composition_manifest();
+        let admission = manifest_admission_requirements(&manifest).map_err(map_admission_error)?;
+        self.runtime_capabilities
+            .require_capabilities(&admission.required_runtime_capabilities)
+            .await
+            .map_err(map_admission_error)?;
+        for theorem_pack in admission.theorem_pack_requirements {
+            self.runtime_capabilities
+                .require_capabilities(&theorem_pack.required_runtime_capabilities)
+                .await
+                .map_err(|error| match error {
+                    AdmissionError::MissingCapability { capability }
+                    | AdmissionError::MissingTheoremPackCapability { capability, .. } => {
+                        AgentError::choreography(format!(
+                            "missing theorem-pack capability `{capability}` for `{}`",
+                            theorem_pack.theorem_pack
+                        ))
+                    }
+                    other => map_admission_error(other),
+                })?;
+        }
+        Ok(())
     }
 
     fn spawn_coordinator_protocol(
@@ -802,6 +859,8 @@ impl OtaActivationServiceApi {
         participants: Vec<DeviceId>,
         threshold_k: u16,
     ) -> AgentResult<OTACeremonyId> {
+        self.admit_protocol_manifest().await?;
+
         let total_n = u16::try_from(participants.len()).map_err(|_| {
             AgentError::config("OTA ceremony participants exceed supported size".to_string())
         })?;
@@ -972,5 +1031,149 @@ impl OtaActivationServiceApi {
 
         self.remove_session(ceremony_id).await;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use crate::runtime::services::CeremonyTracker;
+    use aura_core::effects::time::PhysicalTimeEffects;
+    use aura_core::{AuthorityId, SemanticVersion};
+    use aura_protocol::admission::{
+        CAPABILITY_OWNERSHIP_RECEIPT, CAPABILITY_PROTOCOL_ENVELOPE_BRIDGE,
+        CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADHERENCE,
+        CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADMISSION, CAPABILITY_RECONFIGURATION_SAFETY,
+        CAPABILITY_RECONFIGURATION_TRANSITION, CAPABILITY_SEMANTIC_HANDOFF,
+        CAPABILITY_THEOREM_PACK_CAPABILITIES,
+    };
+    use uuid::Uuid;
+
+    fn create_test_authority(seed: u8) -> AuthorityContext {
+        AuthorityContext::new(AuthorityId::new_from_entropy([seed; 32]))
+    }
+
+    fn effects_for(authority: &AuthorityContext, salt: u64) -> Arc<AuraEffectSystem> {
+        let config = AgentConfig {
+            device_id: authority.device_id(),
+            ..Default::default()
+        };
+        Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+                &config,
+                authority.authority_id(),
+                salt,
+            )
+            .expect("effect system"),
+        )
+    }
+
+    fn transition_safety_runtime_capabilities() -> RuntimeCapabilityHandler {
+        RuntimeCapabilityHandler::from_pairs([
+            ("reconfiguration", true),
+            (CAPABILITY_THEOREM_PACK_CAPABILITIES, true),
+            (CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADHERENCE, true),
+            (CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADMISSION, true),
+            (CAPABILITY_PROTOCOL_ENVELOPE_BRIDGE, true),
+            (CAPABILITY_RECONFIGURATION_SAFETY, true),
+            (CAPABILITY_OWNERSHIP_RECEIPT, true),
+            (CAPABILITY_SEMANTIC_HANDOFF, true),
+            (CAPABILITY_RECONFIGURATION_TRANSITION, true),
+        ])
+    }
+
+    fn service_for(
+        authority_context: AuthorityContext,
+        effects: Arc<AuraEffectSystem>,
+        runtime_capabilities: RuntimeCapabilityHandler,
+    ) -> OtaActivationServiceApi {
+        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let ceremony_runner = CeremonyRunner::new(CeremonyTracker::new(time_effects));
+        OtaActivationServiceApi::new_with_runner_and_config(
+            effects,
+            authority_context,
+            ceremony_runner,
+            runtime_capabilities,
+            OTACeremonyConfig::default(),
+            Arc::new(TaskSupervisor::new()),
+        )
+        .expect("service")
+    }
+
+    fn proposal_for(coordinator: DeviceId) -> UpgradeProposal {
+        UpgradeProposal {
+            proposal_id: Uuid::from_u128(1),
+            package_id: Uuid::from_u128(2),
+            version: SemanticVersion::new(2, 0, 0),
+            kind: aura_sync::protocols::ota::UpgradeKind::HardFork,
+            package_hash: Hash32::from_bytes(&[7; 32]),
+            activation_epoch: Epoch::new(250),
+            coordinator,
+        }
+    }
+
+    fn participants() -> Vec<DeviceId> {
+        [11_u128, 12, 13]
+            .into_iter()
+            .map(|raw| DeviceId::from_uuid(Uuid::from_u128(raw)))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn initiate_activation_rejects_missing_transition_safety_support() {
+        let authority_context = create_test_authority(1);
+        let effects = effects_for(&authority_context, 1);
+        let service = service_for(
+            authority_context.clone(),
+            effects,
+            RuntimeCapabilityHandler::from_pairs([(CAPABILITY_THEOREM_PACK_CAPABILITIES, false)]),
+        );
+
+        let error = service
+            .initiate_activation(
+                proposal_for(authority_context.device_id()),
+                Epoch::new(1),
+                participants(),
+                2,
+            )
+            .await
+            .expect_err("missing theorem-pack support must fail closed");
+        assert!(matches!(
+            error,
+            AgentError::Choreography(message)
+                if message.contains("missing runtime capability")
+                    || message.contains("missing theorem-pack capability")
+        ));
+    }
+
+    #[tokio::test]
+    async fn initiate_activation_launches_when_transition_safety_support_is_present() {
+        let authority_context = create_test_authority(2);
+        let effects = effects_for(&authority_context, 2);
+        let service = service_for(
+            authority_context.clone(),
+            effects,
+            transition_safety_runtime_capabilities(),
+        );
+
+        let ceremony_id = service
+            .initiate_activation(
+                proposal_for(authority_context.device_id()),
+                Epoch::new(1),
+                participants(),
+                2,
+            )
+            .await
+            .expect("theorem-pack-supported OTA launch should succeed");
+        assert!(
+            service
+                .shared
+                .ceremonies
+                .read()
+                .await
+                .contains_key(&ceremony_id),
+            "successful launch should register the OTA ceremony session"
+        );
     }
 }

@@ -52,6 +52,27 @@ Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic replication semantics.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines anti-entropy and integrity guarantees.
 
+### InvariantSyncTheoremPackAdmission
+
+The OTA activation and device-epoch-rotation choreographies must remain
+explicitly theorem-pack-gated through `AuraTransitionSafety`.
+
+Enforcement locus:
+- `src/protocols/ota_activation.tell` and
+  `src/protocols/device_epoch_rotation.tell` declare the theorem pack in source.
+- generated manifest metadata carries the required theorem pack and capability
+  set.
+- runtime launch in `aura-agent` fails closed when the admitted runtime does
+  not expose the transition-safety capability surface.
+
+Failure mode:
+- OTA or device-epoch ceremonies can start on a runtime that lacks the
+  transition / receipt / bridge guarantees those flows assume.
+
+Verification hooks:
+- `cargo test -p aura-sync theorem_pack_protocols -- --nocapture`
+- `cargo test -p aura-agent theorem -- --nocapture`
+
 ## Ownership Model
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)

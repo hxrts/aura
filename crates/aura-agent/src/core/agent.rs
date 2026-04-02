@@ -254,6 +254,7 @@ impl ServiceRegistry {
                     self.effects.clone(),
                     self.authority_context.clone(),
                     self.ceremony_runner.clone(),
+                    self.reconfiguration_manager.runtime_capability_handler(),
                     self.runtime_tasks.clone(),
                 )
             })

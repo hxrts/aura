@@ -257,6 +257,12 @@ impl ReconfigurationManager {
         }
     }
 
+    /// Clone the runtime capability admission snapshot used by this manager.
+    #[must_use]
+    pub fn runtime_capability_handler(&self) -> RuntimeCapabilityHandler {
+        self.runtime_capabilities.clone()
+    }
+
     async fn require_reconfiguration_capability(
         &self,
         operation: &'static str,

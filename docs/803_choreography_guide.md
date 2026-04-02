@@ -230,6 +230,12 @@ converges on the canonical Telltale 10 shape.
 Aura should add theorem packs only where they drive a real runtime admission
 decision. They are not importance labels.
 
+The first production protocols now using this boundary are
+`aura.sync.ota_activation` and `aura.sync.device_epoch_rotation`. Both declare
+`AuraTransitionSafety`, and Aura rejects launch before protocol start when the
+runtime lacks the theorem-pack capability surface needed for transition
+receipts, bridge admission, and reconfiguration safety.
+
 ### Current Protocol Split
 
 First-wave theorem-pack candidates:

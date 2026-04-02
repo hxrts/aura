@@ -24,7 +24,9 @@ fn production_manifests() -> Vec<CompositionManifest> {
         aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest(),
         aura_recovery::guardian_setup::telltale_session_types_guardian_setup::vm_artifacts::composition_manifest(),
         aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::composition_manifest(),
+        aura_sync::protocols::ota_ceremony::telltale_session_types_ota_activation::vm_artifacts::composition_manifest(),
         aura_sync::protocols::epochs::telltale_session_types_epoch_rotation::vm_artifacts::composition_manifest(),
+        aura_sync::protocols::device_epoch_rotation::telltale_session_types_device_epoch_rotation::vm_artifacts::composition_manifest(),
         aura_agent::handlers::sessions::coordination::telltale_session_types_session_coordination::vm_artifacts::composition_manifest(),
     ]
 }

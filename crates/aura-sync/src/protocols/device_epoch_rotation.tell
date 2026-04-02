@@ -1,6 +1,8 @@
 module device_epoch_rotation exposing (DeviceEpochRotationProtocol)
 
-protocol DeviceEpochRotationProtocol =
+proof_bundle AuraTransitionSafety version "1.0.0" issuer "did:aura:runtime-admission" constraint "typed_transition_receipts" requires [protocol_machine_envelope_adherence, protocol_machine_envelope_admission, protocol_envelope_bridge, reconfiguration_safety]
+
+protocol DeviceEpochRotationProtocol requires AuraTransitionSafety =
   roles Initiator, Participant
 
   Initiator { guard_capability = "sync:device_epoch:propose"

@@ -716,8 +716,19 @@ fn generate_vm_projection_artifacts(
         let name = role.name().to_string();
         LitStr::new(&name, proc_macro2::Span::call_site())
     });
+    let required_theorem_pack_names = manifest
+        .required_theorem_packs
+        .iter()
+        .map(|name| LitStr::new(name, proc_macro2::Span::call_site()))
+        .collect::<Vec<_>>();
 
     Ok(quote! {
+        /// Generated proof-status metadata exposed to Aura/runtime consumers.
+        pub mod proof_status {
+            #[allow(dead_code)]
+            pub const REQUIRED_THEOREM_PACKS: &[&str] = &[#(#required_theorem_pack_names),*];
+        }
+
         /// VM projection artifacts derived from the authoritative choreography source.
         pub mod vm_artifacts {
             use std::collections::BTreeMap;

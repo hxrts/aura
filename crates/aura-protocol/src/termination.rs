@@ -74,6 +74,7 @@ impl TerminationProtocolClass {
             "aura.consensus" | "aura.consensus.fallback" => Some(Self::ConsensusFallback),
             "aura.consensus.fast_path" => Some(Self::ConsensusFastPath),
             "aura.sync.epoch_rotation"
+            | "aura.sync.ota_activation"
             | "aura.sync.device_epoch_rotation"
             | "aura.sync.anti_entropy" => Some(Self::SyncAntiEntropy),
             "aura.dkg.ceremony" => Some(Self::DkgCeremony),

@@ -439,8 +439,18 @@ pub fn startup_defaults_for_qualified_name(qualified_name: &str) -> CompositionS
         "session_coordination.SessionCoordinationChoreography" => {
             CompositionStartupDefaults::production_default("aura.session.coordination")
         }
+        "ota_activation.OTAActivationProtocol" => CompositionStartupDefaults {
+            protocol_id: Some("aura.sync.ota_activation"),
+            required_capabilities: &[],
+            determinism_policy_ref: "aura.vm.recovery_grant.prod",
+        },
         "epoch_rotation.EpochRotationProtocol" => CompositionStartupDefaults {
             protocol_id: Some("aura.sync.epoch_rotation"),
+            required_capabilities: &["termination_bounded"],
+            determinism_policy_ref: "aura.vm.sync_anti_entropy.prod",
+        },
+        "device_epoch_rotation.DeviceEpochRotationProtocol" => CompositionStartupDefaults {
+            protocol_id: Some("aura.sync.device_epoch_rotation"),
             required_capabilities: &["termination_bounded"],
             determinism_policy_ref: "aura.vm.sync_anti_entropy.prod",
         },
@@ -530,8 +540,16 @@ mod tests {
                 "aura.session.coordination",
             ),
             (
+                "ota_activation.OTAActivationProtocol",
+                "aura.sync.ota_activation",
+            ),
+            (
                 "epoch_rotation.EpochRotationProtocol",
                 "aura.sync.epoch_rotation",
+            ),
+            (
+                "device_epoch_rotation.DeviceEpochRotationProtocol",
+                "aura.sync.device_epoch_rotation",
             ),
         ];
 

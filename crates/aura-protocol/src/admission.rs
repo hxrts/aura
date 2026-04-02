@@ -52,6 +52,8 @@ pub const THEOREM_PACK_AURA_CONSENSUS_DEPLOYMENT: &str = "AuraConsensusDeploymen
 pub const PROTOCOL_AURA_CONSENSUS: &str = "aura.consensus";
 /// Aura protocol id for sync epoch-rotation choreography admission.
 pub const PROTOCOL_SYNC_EPOCH_ROTATION: &str = "aura.sync.epoch_rotation";
+/// Aura protocol id for OTA activation choreography admission.
+pub const PROTOCOL_SYNC_OTA_ACTIVATION: &str = "aura.sync.ota_activation";
 /// Aura protocol id for device-scoped epoch rotation choreography.
 pub const PROTOCOL_SYNC_DEVICE_EPOCH_ROTATION: &str = "aura.sync.device_epoch_rotation";
 /// Aura protocol id for DKG ceremony execution.
@@ -126,6 +128,9 @@ pub fn protocol_admission_profile(protocol_id: &str) -> Option<ProtocolAdmission
         }),
         PROTOCOL_SYNC_EPOCH_ROTATION => Some(ProtocolAdmissionProfile {
             required_artifacts: &[CAPABILITY_TERMINATION_BOUNDED],
+        }),
+        PROTOCOL_SYNC_OTA_ACTIVATION => Some(ProtocolAdmissionProfile {
+            required_artifacts: &[],
         }),
         PROTOCOL_SYNC_DEVICE_EPOCH_ROTATION => Some(ProtocolAdmissionProfile {
             required_artifacts: &[CAPABILITY_TERMINATION_BOUNDED],
