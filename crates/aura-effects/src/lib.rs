@@ -72,6 +72,12 @@
 //!     .build();
 //! ```
 
+#[cfg(all(feature = "transparent_onion", not(any(test, debug_assertions))))]
+compile_error!(
+    "Feature `transparent_onion` is a debug/test/simulation-only tool and must \
+     not be enabled in release production builds."
+);
+
 use cfg_if::cfg_if;
 
 pub mod biometric;
@@ -93,6 +99,7 @@ pub mod noise;
 pub mod query;
 pub mod random;
 pub mod reactive;
+pub mod route_crypto;
 pub mod runtime_capability;
 pub mod secure;
 #[cfg(feature = "simulation")]
@@ -141,6 +148,7 @@ pub use query::{
 };
 pub use random::RealRandomHandler;
 pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
+pub use route_crypto::RealRouteCryptoHandler;
 pub use runtime_capability::RuntimeCapabilityHandler;
 pub use secure::RealSecureStorageHandler;
 #[cfg(feature = "simulation")]

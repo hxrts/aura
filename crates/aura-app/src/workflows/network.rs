@@ -297,8 +297,13 @@ async fn emit_discovered_peers_signal(
     )
     .await?
     .map_err(|e| AuraError::from(super::error::runtime_call("refresh discovered peers", e)))?;
+    // Bootstrap candidates are an advisory augmentation of discovered-peer state.
+    // If the broker is temporarily unreachable, keep the refresh path alive and
+    // surface the rendezvous-backed peer view rather than failing the whole
+    // discovered-peer publication.
+    #[allow(clippy::manual_unwrap_or_default)]
     let bootstrap_candidates: Vec<crate::runtime_bridge::BootstrapCandidateInfo> =
-        timeout_runtime_call(
+        match timeout_runtime_call(
             &runtime,
             "emit_discovered_peers_signal",
             "try_get_bootstrap_candidates",
@@ -306,7 +311,10 @@ async fn emit_discovered_peers_signal(
             || runtime.try_get_bootstrap_candidates(),
         )
         .await?
-        .unwrap_or_default();
+        {
+            Ok(candidates) => candidates,
+            Err(_error) => Vec::new(),
+        };
 
     // Get invited peer IDs to mark peers as invited
     let invited_ids: HashSet<AuthorityId> = timeout_runtime_call(

@@ -64,6 +64,12 @@
 //! }
 //! ```
 
+#[cfg(all(feature = "transparent_onion", not(any(test, debug_assertions))))]
+compile_error!(
+    "Feature `transparent_onion` is a debug/test/simulation-only tool and must \
+     not be enabled in release production builds."
+);
+
 // Core modules following unified effect system architecture
 pub use aura_amp as amp;
 pub use aura_anti_entropy as sync;

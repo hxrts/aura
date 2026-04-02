@@ -53,10 +53,7 @@ proptest! {
     fn prop_escape_exits_insert(chars in prop::collection::vec(any::<char>().prop_filter("printable", |c| c.is_ascii_graphic()), 0..50)) {
         let mut tui = TestTui::new();
 
-        if tui.screen() == Screen::Neighborhood {
-            tui.state.neighborhood.home_count = 1;
-            tui.send_enter();
-        }
+        tui.send_char('2');
         tui.send_char('i');
         prop_assert!(tui.is_insert_mode());
 

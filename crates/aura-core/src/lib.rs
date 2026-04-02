@@ -58,6 +58,12 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
+#[cfg(all(feature = "transparent_onion", not(any(test, debug_assertions))))]
+compile_error!(
+    "Feature `transparent_onion` is a debug/test/simulation-only tool and must \
+     not be enabled in release production builds."
+);
+
 #[doc(hidden)]
 pub mod __private {
     pub use paste;
@@ -182,19 +188,25 @@ pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,
 };
 pub use service::{
-    AccountabilityReplyBlock, AnonymousHopView, EstablishDescriptor, EstablishPath,
-    EstablishedPath, EstablishedPathRef, HeldObject, HoldAuditReplyBlock, HoldDepositReplyBlock,
-    HoldDepositRequest, HoldDescriptor, HoldRequestError, HoldRetentionMetadata,
-    HoldRetrievalReplyBlock, HoldRetrievalRequest, LinkEndpoint, LinkProtectionMode, LinkProtocol,
-    LocalEstablishDecision, LocalHealthSnapshot, LocalHoldDecision, LocalMoveDecision,
-    LocalRoutingProfile, LocalSelectionProfile, MessageClassRoutingConstraint, MoveDescriptor,
-    MoveEnvelope, MovePath, MovePathBinding, MoveReceiptReplyBlock, MoveToHoldHandoff,
-    PathProtectionMode, PolicySurface, PrivacyMessageClass, ProviderCandidate, ProviderEvidence,
-    RelayHop, ReplyBlockError, RetrievalCapability, RetrievalCapabilityError, Route,
-    SchedulerClass, SecurityControlClass, SelectionState, ServiceDescriptor,
-    ServiceDescriptorHeader, ServiceDescriptorKind, ServiceFamily, ServiceLimits,
-    ServiceObjectCategory, ServiceProfile, ServiceQualityHints, TransparentAnonymousSetupLayer,
-    TransparentAnonymousSetupObject, TransparentMoveEnvelope, TransparentMoveTrafficClass,
+    AccountabilityReplyBlock, AnonymousHopView, BootstrapContactHint, BootstrapIntroductionHint,
+    EncryptedAnonymousSetupLayer, EncryptedAnonymousSetupObject, EstablishDescriptor,
+    EstablishPath, EstablishedPath, EstablishedPathRef, HeldObject, HoldAuditReplyBlock,
+    HoldDepositReplyBlock, HoldDepositRequest, HoldDescriptor, HoldRequestError,
+    HoldRetentionMetadata, HoldRetrievalReplyBlock, HoldRetrievalRequest, LinkEndpoint,
+    LinkProtectionMode, LinkProtocol, LocalEstablishDecision, LocalHealthSnapshot,
+    LocalHoldDecision, LocalMoveDecision, LocalRoutingProfile, LocalSelectionProfile,
+    MessageClassRoutingConstraint, MoveDescriptor, MoveEnvelope, MovePath, MovePathBinding,
+    MoveReceiptReplyBlock, MoveToHoldHandoff, NeighborhoodReentryHint, PathProtectionMode,
+    PolicySurface, PrivacyMessageClass, ProviderCandidate, ProviderEvidence, RelayHop,
+    ReplyBlockError, RetrievalCapability, RetrievalCapabilityError, Route, SchedulerClass,
+    SecurityControlClass, SelectionState, ServiceDescriptor, ServiceDescriptorHeader,
+    ServiceDescriptorKind, ServiceFamily, ServiceLimits, ServiceObjectCategory, ServiceProfile,
+    ServiceQualityHints,
+};
+#[cfg(feature = "transparent_onion")]
+pub use service::{
+    TransparentAnonymousSetupLayer, TransparentAnonymousSetupObject, TransparentMoveEnvelope,
+    TransparentMoveTrafficClass,
 };
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{
@@ -302,6 +314,9 @@ pub use effects::{
     RetryContext,
     RetryPolicy,
     RetryResult,
+    RouteCryptoEffects,
+    RouteCryptoError,
+    RouteHopKeyMaterial,
     SigningEffects,
     SnapshotEffects,
     // Unified threshold signing effects

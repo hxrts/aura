@@ -17,12 +17,18 @@ for file in "${required_files[@]}"; do
 done
 
 social_role_neutral_files=(
-  "crates/aura-core/src/service.rs"
-  "crates/aura-rendezvous/src/facts.rs"
   "crates/aura-rendezvous/src/descriptor.rs"
   "crates/aura-rendezvous/src/service.rs"
   "crates/aura-agent/src/runtime/services/move_manager.rs"
 )
+
+# `aura-core/src/service.rs` and `aura-rendezvous/src/facts.rs` also own the
+# authoritative bootstrap hint shapes and subtype registry entries. Names like
+# `NeighborhoodReentryHint` are intentional shared discovery objects from the
+# adaptive-privacy design, not Establish/Move interface drift. The compile-fail
+# service-surface tests already guard the actual abstract service-boundary
+# types, so this shell policy only sweeps the concrete Establish/Move
+# implementation surfaces above.
 
 for file in "${social_role_neutral_files[@]}"; do
   if rg -n '\b(home|neighborhood|guardian|friend|fof)\b' "$file" >/dev/null; then

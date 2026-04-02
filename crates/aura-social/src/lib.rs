@@ -45,6 +45,12 @@
 //! let same_home_members = topology.same_home_members();
 //! ```
 
+#[cfg(all(feature = "transparent_onion", not(any(test, debug_assertions))))]
+compile_error!(
+    "Feature `transparent_onion` is a debug/test/simulation-only tool and must \
+     not be enabled in release production builds."
+);
+
 pub mod access;
 pub mod availability;
 pub mod error;
@@ -74,6 +80,7 @@ pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("social:neighborhood-join", "B"),
     ("social:neighborhood-propose-join", "B"),
     ("social:neighborhood-accept-join", "B"),
+    ("social:neighborhood-publish-reentry", "B"),
     // Category C: non-monotone neighborhood mutations
     ("social:neighborhood-remove-member", "C"),
     ("social:neighborhood-policy-change", "C"),

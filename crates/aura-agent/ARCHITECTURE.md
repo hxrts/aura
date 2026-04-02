@@ -65,10 +65,11 @@ Summary:
   route-shaped descriptor field.
 - Transparent adaptive-privacy routing uses one shared envelope family for `Move`, held-object deposit and retrieval, sync-blended retrieval, cover traffic, and accountability replies. Retrieval and accountability must not regain separate transport families or mailbox-shaped network semantics inside `aura-agent`.
 - Harness and shared-flow lanes must remain independent of `transparent_onion`; transparent mode is debug/test/simulation-only and may not become a parity-critical dependency.
-- `AnonymousPathManager` may host transparent anonymous establish control
-  sessions only behind `transparent_onion`; that debug/simulation visibility
-  does not transfer ownership of adaptive policy or path selection away from
-  the runtime-owned services.
+- `AnonymousPathManager` owns encrypted anonymous established-path lifecycle in
+  production. `transparent_onion` may expose debug/simulation-only setup and
+  envelope objects for inspection, but those objects stay quarantined to the
+  explicit transparent debug surface and do not transfer ownership of adaptive
+  policy or path selection away from the runtime-owned services.
 - Contacts/friend projections derive `ContactRelationshipState` from relational facts inside `aura-agent`; frontend shells consume the emitted projection and do not keep separate friendship state machines.
 - Runtime-owned service declarations should prefer the `#[actor_owned(...)]` layer where a service exposes a stable long-lived command/ingress boundary; changed-files ratchets in `just ci-ownership-policy` enforce this incrementally.
 - Task-supervision service roots that do not expose a stable command-ingress surface should use `#[actor_root(...)]` instead of forcing the store-style `#[actor_owned(...)]` command-enum pattern.

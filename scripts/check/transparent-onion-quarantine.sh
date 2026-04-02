@@ -32,4 +32,23 @@ if [[ -n "$violations" ]]; then
   fail "harness and shared-flow lanes must not enable or depend on transparent_onion"
 fi
 
+allowed_source_files=(
+  "crates/aura-core/src/service.rs"
+  "crates/aura-core/src/lib.rs"
+  "crates/aura-agent/src/lib.rs"
+  "crates/aura-effects/src/lib.rs"
+  "crates/aura-protocol/src/lib.rs"
+  "crates/aura-social/src/lib.rs"
+  "crates/aura-sync/src/lib.rs"
+)
+
+source_violations="$(
+  rg -n 'TransparentAnonymousSetup|TransparentMoveEnvelope|TransparentMoveTrafficClass|transparent_headers|PathProtectionMode::TransparentDebug|feature *= *"transparent_onion"' crates \
+    $(printf " --glob '!%s'" "${allowed_source_files[@]}") || true
+)"
+if [[ -n "$source_violations" ]]; then
+  echo "$source_violations" >&2
+  fail "transparent debug surfaces must remain quarantined to the explicit allowlist"
+fi
+
 echo "transparent-onion-quarantine: ok"

@@ -34,7 +34,7 @@ Adaptive privacy policy is runtime-owned local state, not shared truth.
   into runtime-local `LocalSelectionProfile` and `SelectionState`
 - `LocalHealthObserver` owns smoothing, hysteresis, and local health snapshots
 - `AnonymousPathManager` owns reusable anonymous established-path lifecycle and
-  protected establish-session state
+  protected encrypted establish-session state
 - `CoverTrafficGenerator` owns cover-floor planning and reserved cover budget
 
 This split is strict:
@@ -51,6 +51,8 @@ This split is strict:
 `transparent_onion` is a debug, test, and simulation tool only.
 
 - it may expose transparent anonymous setup and envelope headers for inspection
+- the production runtime path is encrypted; transparent objects exist only on
+  the explicit debug/simulation feature surface
 - it must remain excluded from parity-critical harness and shared-flow lanes
 - production policy ownership does not change when the feature is enabled
 - the feature must not become an implicit dependency of browser, TUI, or

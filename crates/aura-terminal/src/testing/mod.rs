@@ -25,6 +25,7 @@
 //!     tui.assert_screen(Screen::Chat);
 //!
 //!     // Type a message
+//!     tui.send_event(events::char('2')); // Navigate to Chat
 //!     tui.send_events(vec![events::char('i')]); // Enter insert mode
 //!     tui.type_text("Hello, world!");
 //!     tui.send_events(vec![events::enter()]);
@@ -424,14 +425,12 @@ mod tests {
     fn test_tui_insert_mode() {
         let mut tui = TestTui::new();
 
-        // Start in Neighborhood screen
+        // Start in Neighborhood screen, then navigate to Chat.
         tui.assert_normal_mode();
+        tui.send_event(events::char('2'));
+        tui.assert_screen(Screen::Chat);
 
-        // Set up state: need at least one home to enter detail mode
-        tui.state_mut().neighborhood.home_count = 1;
-
-        // Enter home detail mode, then insert mode
-        tui.send_event(events::enter());
+        // Enter insert mode on the chat input.
         tui.send_event(events::char('i'));
         tui.assert_insert_mode();
 

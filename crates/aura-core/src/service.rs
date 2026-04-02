@@ -177,6 +177,9 @@ pub struct RelayHop {
     pub authority_id: AuthorityId,
     /// Connectivity endpoint for this hop.
     pub link_endpoint: LinkEndpoint,
+    /// Optional route-layer public key advertised for this hop.
+    #[serde(default)]
+    pub route_layer_public_key: Option<[u8; 32]>,
 }
 
 /// Routed connectivity path.
@@ -336,6 +339,35 @@ pub struct TransparentAnonymousSetupObject {
     pub root: Option<Box<TransparentAnonymousSetupLayer>>,
 }
 
+/// One encrypted anonymous setup layer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncryptedAnonymousSetupLayer {
+    /// Hop authority responsible for this encrypted layer when one relay owns it.
+    #[serde(default)]
+    pub hop_authority: Option<AuthorityId>,
+    /// Explicit nonce for the encrypted payload.
+    pub nonce: [u8; 12],
+    /// Encrypted hop-local setup payload.
+    #[serde(with = "serde_bytes")]
+    pub ciphertext: Vec<u8>,
+}
+
+/// Encrypted anonymous path-setup object for production routing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncryptedAnonymousSetupObject {
+    /// Established path reference yielded by the setup.
+    pub established_path: EstablishedPathRef,
+    /// Link-layer protection outside the path payload.
+    pub link_protection: LinkProtectionMode,
+    /// Encrypted path-layer protection mode.
+    pub path_protection: PathProtectionMode,
+    /// Total hop count represented by the encrypted setup.
+    pub hop_count: u8,
+    /// Root encrypted setup layer.
+    #[serde(default)]
+    pub root: Option<Box<EncryptedAnonymousSetupLayer>>,
+}
+
 /// Hop-local knowledge view extracted from a transparent setup object.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnonymousHopView {
@@ -390,6 +422,13 @@ impl TransparentAnonymousSetupObject {
             current_index += 1;
         }
         None
+    }
+}
+
+impl EncryptedAnonymousSetupObject {
+    /// Return whether the encrypted setup carries at least one layer.
+    pub fn has_root_layer(&self) -> bool {
+        self.root.is_some()
     }
 }
 
@@ -458,6 +497,10 @@ pub struct ServiceDescriptorHeader {
     pub valid_until: u64,
     /// Epoch binding for rotation/invalidation.
     pub epoch: u64,
+    /// Public route-layer material advertised for anonymous-path setup when
+    /// the provider exposes one.
+    #[serde(default)]
+    pub route_layer_public_key: Option<[u8; 32]>,
     /// Operational family described by this descriptor.
     pub family: ServiceFamily,
     /// Shared family limits.
@@ -472,6 +515,11 @@ impl ServiceDescriptorHeader {
     /// Check whether the descriptor is valid at the provided time.
     pub fn is_valid(&self, now_ms: u64) -> bool {
         now_ms >= self.valid_from && now_ms < self.valid_until
+    }
+
+    /// Return whether this descriptor exposes route-layer public material.
+    pub fn has_route_layer_key(&self) -> bool {
+        self.route_layer_public_key.is_some()
     }
 }
 
@@ -583,6 +631,105 @@ impl ServiceDescriptor {
     /// Validate that the header family matches the descriptor body family.
     pub fn has_consistent_family(&self) -> bool {
         self.header.family == self.kind.family()
+    }
+}
+
+/// Signed remembered-contact or prior-provider re-entry record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BootstrapContactHint {
+    /// Scope this hint belongs to.
+    pub scope: ContextId,
+    /// Authority advertised by the hint.
+    pub authority_id: AuthorityId,
+    /// Optional device for device-scoped bootstrap.
+    #[serde(default)]
+    pub device_id: Option<DeviceId>,
+    /// Connectivity endpoints carried by the hint.
+    #[serde(default)]
+    pub link_endpoints: Vec<LinkEndpoint>,
+    /// Optional route-layer public key remembered alongside the hint.
+    #[serde(default)]
+    pub route_layer_public_key: Option<[u8; 32]>,
+    /// When the hint was freshly observed or refreshed.
+    pub freshest_observed_at_ms: u64,
+    /// Hard expiry for using this hint.
+    pub valid_until: u64,
+    /// Replay-bound publication identifier.
+    pub replay_window_id: [u8; 32],
+}
+
+impl BootstrapContactHint {
+    /// Return whether this hint is valid at the provided time.
+    pub fn is_valid_at(&self, now_ms: u64) -> bool {
+        now_ms < self.valid_until
+    }
+}
+
+/// Signed neighborhood-scoped re-entry board record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeighborhoodReentryHint {
+    /// Scope this re-entry hint belongs to.
+    pub scope: ContextId,
+    /// Publishing authority for the board entry.
+    pub publisher_authority: AuthorityId,
+    /// Re-entry authority surfaced by the board entry.
+    pub advertised_authority: AuthorityId,
+    /// Optional device for device-scoped re-entry.
+    #[serde(default)]
+    pub advertised_device: Option<DeviceId>,
+    /// Connectivity endpoints advertised by the board entry.
+    #[serde(default)]
+    pub link_endpoints: Vec<LinkEndpoint>,
+    /// Optional route-layer public key advertised by the board entry.
+    #[serde(default)]
+    pub route_layer_public_key: Option<[u8; 32]>,
+    /// Publication time for the board entry.
+    pub published_at_ms: u64,
+    /// Hard expiry for using this board entry.
+    pub valid_until: u64,
+    /// Replay-bound publication identifier.
+    pub replay_window_id: [u8; 32],
+}
+
+impl NeighborhoodReentryHint {
+    /// Return whether this hint is valid at the provided time.
+    pub fn is_valid_at(&self, now_ms: u64) -> bool {
+        now_ms < self.valid_until
+    }
+}
+
+/// Bounded bootstrap introduction record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BootstrapIntroductionHint {
+    /// Scope this introduction belongs to.
+    pub scope: ContextId,
+    /// Introducing authority.
+    pub introducer_authority: AuthorityId,
+    /// Introduced authority.
+    pub introduced_authority: AuthorityId,
+    /// Optional introduced device.
+    #[serde(default)]
+    pub introduced_device: Option<DeviceId>,
+    /// Connectivity endpoints carried by the introduction.
+    #[serde(default)]
+    pub link_endpoints: Vec<LinkEndpoint>,
+    /// Optional route-layer public key carried by the introduction.
+    #[serde(default)]
+    pub route_layer_public_key: Option<[u8; 32]>,
+    /// Maximum remaining introduction depth.
+    pub remaining_depth: u8,
+    /// Maximum allowed fan-out from this introduction.
+    pub max_fanout: u8,
+    /// Hard expiry for using this introduction.
+    pub valid_until: u64,
+    /// Replay-bound introduction identifier.
+    pub replay_window_id: [u8; 32],
+}
+
+impl BootstrapIntroductionHint {
+    /// Return whether this hint is valid at the provided time.
+    pub fn is_valid_at(&self, now_ms: u64) -> bool {
+        now_ms < self.valid_until
     }
 }
 
@@ -1069,6 +1216,9 @@ pub struct ProviderCandidate {
     /// Advertised connectivity endpoints.
     #[serde(default)]
     pub link_endpoints: Vec<LinkEndpoint>,
+    /// Optional route-layer public key advertised for anonymous setup.
+    #[serde(default)]
+    pub route_layer_public_key: Option<[u8; 32]>,
     /// Runtime-local reachability bit.
     pub reachable: bool,
 }
@@ -1129,6 +1279,7 @@ mod tests {
             hops: vec![RelayHop {
                 authority_id: authority(3),
                 link_endpoint: endpoint("10.0.0.5:7443"),
+                route_layer_public_key: Some([0x33; 32]),
             }],
             destination,
         };
@@ -1147,6 +1298,7 @@ mod tests {
                 valid_from: 100,
                 valid_until: 200,
                 epoch: 4,
+                route_layer_public_key: Some([0x44; 32]),
                 family: ServiceFamily::Move,
                 limits: ServiceLimits {
                     max_payload_bytes: Some(1024),
@@ -1168,6 +1320,7 @@ mod tests {
 
         assert!(descriptor.has_consistent_family());
         assert!(descriptor.header.is_valid(150));
+        assert!(descriptor.header.has_route_layer_key());
         assert!(!descriptor.header.is_valid(250));
     }
 
@@ -1177,6 +1330,7 @@ mod tests {
             hops: vec![RelayHop {
                 authority_id: authority(5),
                 link_endpoint: LinkEndpoint::relay(authority(7)),
+                route_layer_public_key: Some([0x55; 32]),
             }],
             destination: endpoint("10.0.0.4:9443"),
         };
@@ -1222,7 +1376,41 @@ mod tests {
             family: ServiceFamily::Hold,
             evidence: vec![ProviderEvidence::Neighborhood],
             link_endpoints: vec![endpoint("127.0.0.1:5555")],
+            route_layer_public_key: Some([0x66; 32]),
             reachable: true,
+        };
+        let bootstrap_contact = BootstrapContactHint {
+            scope: context(4),
+            authority_id: authority(10),
+            device_id: Some(device(2)),
+            link_endpoints: vec![endpoint("127.0.0.1:5556")],
+            route_layer_public_key: Some([10; 32]),
+            freshest_observed_at_ms: 120,
+            valid_until: 600,
+            replay_window_id: [11; 32],
+        };
+        let neighborhood_reentry = NeighborhoodReentryHint {
+            scope: context(4),
+            publisher_authority: authority(11),
+            advertised_authority: authority(12),
+            advertised_device: Some(device(3)),
+            link_endpoints: vec![endpoint("127.0.0.1:5557")],
+            route_layer_public_key: Some([11; 32]),
+            published_at_ms: 130,
+            valid_until: 650,
+            replay_window_id: [12; 32],
+        };
+        let bootstrap_intro = BootstrapIntroductionHint {
+            scope: context(4),
+            introducer_authority: authority(13),
+            introduced_authority: authority(14),
+            introduced_device: Some(device(4)),
+            link_endpoints: vec![endpoint("127.0.0.1:5558")],
+            route_layer_public_key: Some([12; 32]),
+            remaining_depth: 1,
+            max_fanout: 2,
+            valid_until: 700,
+            replay_window_id: [13; 32],
         };
         let state = SelectionState {
             family: ServiceFamily::Hold,
@@ -1242,6 +1430,12 @@ mod tests {
             .unwrap_or_else(|err| panic!("serialize retrieval cap: {err}"));
         let candidate_json = serde_json::to_vec(&candidate)
             .unwrap_or_else(|err| panic!("serialize provider candidate: {err}"));
+        let bootstrap_contact_json = serde_json::to_vec(&bootstrap_contact)
+            .unwrap_or_else(|err| panic!("serialize bootstrap contact hint: {err}"));
+        let neighborhood_reentry_json = serde_json::to_vec(&neighborhood_reentry)
+            .unwrap_or_else(|err| panic!("serialize neighborhood reentry hint: {err}"));
+        let bootstrap_intro_json = serde_json::to_vec(&bootstrap_intro)
+            .unwrap_or_else(|err| panic!("serialize bootstrap introduction hint: {err}"));
         let state_json = serde_json::to_vec(&state)
             .unwrap_or_else(|err| panic!("serialize selection state: {err}"));
 
@@ -1269,6 +1463,21 @@ mod tests {
             serde_json::from_slice::<ProviderCandidate>(&candidate_json)
                 .unwrap_or_else(|err| panic!("deserialize provider candidate: {err}")),
             candidate
+        );
+        assert_eq!(
+            serde_json::from_slice::<BootstrapContactHint>(&bootstrap_contact_json)
+                .unwrap_or_else(|err| panic!("deserialize bootstrap contact hint: {err}")),
+            bootstrap_contact
+        );
+        assert_eq!(
+            serde_json::from_slice::<NeighborhoodReentryHint>(&neighborhood_reentry_json)
+                .unwrap_or_else(|err| panic!("deserialize neighborhood reentry hint: {err}")),
+            neighborhood_reentry
+        );
+        assert_eq!(
+            serde_json::from_slice::<BootstrapIntroductionHint>(&bootstrap_intro_json)
+                .unwrap_or_else(|err| panic!("deserialize bootstrap introduction hint: {err}")),
+            bootstrap_intro
         );
         assert_eq!(
             serde_json::from_slice::<SelectionState>(&state_json)
@@ -1301,10 +1510,117 @@ mod tests {
             })
         );
         assert_eq!(established.route, route);
+        assert!(bootstrap_contact.is_valid_at(500));
+        assert!(!bootstrap_contact.is_valid_at(601));
+        assert!(neighborhood_reentry.is_valid_at(649));
+        assert!(!neighborhood_reentry.is_valid_at(650));
+        assert!(bootstrap_intro.is_valid_at(699));
+        assert!(!bootstrap_intro.is_valid_at(700));
         assert_eq!(passthrough.mixing_depth, 0);
         assert_eq!(passthrough.delay_ms, 0);
         assert_eq!(passthrough.cover_rate_per_second, 0);
         assert_eq!(passthrough.path_diversity, 1);
+    }
+
+    #[test]
+    fn bootstrap_record_validity_windows_and_replay_ids_are_explicit() {
+        let contact = BootstrapContactHint {
+            scope: context(7),
+            authority_id: authority(21),
+            device_id: Some(device(1)),
+            link_endpoints: vec![endpoint("127.0.0.1:6201")],
+            route_layer_public_key: Some([21; 32]),
+            freshest_observed_at_ms: 40,
+            valid_until: 80,
+            replay_window_id: [7; 32],
+        };
+        let reentry = NeighborhoodReentryHint {
+            scope: context(7),
+            publisher_authority: authority(22),
+            advertised_authority: authority(23),
+            advertised_device: Some(device(2)),
+            link_endpoints: vec![endpoint("127.0.0.1:6202")],
+            route_layer_public_key: Some([22; 32]),
+            published_at_ms: 55,
+            valid_until: 90,
+            replay_window_id: [8; 32],
+        };
+        let introduction = BootstrapIntroductionHint {
+            scope: context(7),
+            introducer_authority: authority(24),
+            introduced_authority: authority(25),
+            introduced_device: Some(device(3)),
+            link_endpoints: vec![endpoint("127.0.0.1:6203")],
+            route_layer_public_key: Some([23; 32]),
+            remaining_depth: 2,
+            max_fanout: 3,
+            valid_until: 100,
+            replay_window_id: [9; 32],
+        };
+
+        assert!(contact.is_valid_at(79));
+        assert!(!contact.is_valid_at(80));
+        assert!(reentry.is_valid_at(89));
+        assert!(!reentry.is_valid_at(90));
+        assert!(introduction.is_valid_at(99));
+        assert!(!introduction.is_valid_at(100));
+
+        assert_ne!(contact.replay_window_id, reentry.replay_window_id);
+        assert_ne!(reentry.replay_window_id, introduction.replay_window_id);
+        assert_ne!(contact.replay_window_id, introduction.replay_window_id);
+    }
+
+    #[test]
+    fn bootstrap_record_schema_boundaries_do_not_embed_route_truth_fields() {
+        let contact = serde_json::to_value(BootstrapContactHint {
+            scope: context(8),
+            authority_id: authority(31),
+            device_id: Some(device(4)),
+            link_endpoints: vec![endpoint("127.0.0.1:6301")],
+            route_layer_public_key: Some([31; 32]),
+            freshest_observed_at_ms: 10,
+            valid_until: 50,
+            replay_window_id: [10; 32],
+        })
+        .unwrap_or_else(|err| panic!("serialize bootstrap contact hint: {err}"));
+        let reentry = serde_json::to_value(NeighborhoodReentryHint {
+            scope: context(8),
+            publisher_authority: authority(32),
+            advertised_authority: authority(33),
+            advertised_device: None,
+            link_endpoints: vec![endpoint("127.0.0.1:6302")],
+            route_layer_public_key: Some([32; 32]),
+            published_at_ms: 20,
+            valid_until: 60,
+            replay_window_id: [11; 32],
+        })
+        .unwrap_or_else(|err| panic!("serialize neighborhood reentry hint: {err}"));
+        let introduction = serde_json::to_value(BootstrapIntroductionHint {
+            scope: context(8),
+            introducer_authority: authority(34),
+            introduced_authority: authority(35),
+            introduced_device: None,
+            link_endpoints: vec![endpoint("127.0.0.1:6303")],
+            route_layer_public_key: Some([33; 32]),
+            remaining_depth: 1,
+            max_fanout: 2,
+            valid_until: 70,
+            replay_window_id: [12; 32],
+        })
+        .unwrap_or_else(|err| panic!("serialize bootstrap introduction hint: {err}"));
+
+        for value in [&contact, &reentry, &introduction] {
+            let object = value
+                .as_object()
+                .unwrap_or_else(|| panic!("expected JSON object for bootstrap record"));
+            assert!(object.contains_key("scope"));
+            assert!(object.contains_key("link_endpoints"));
+            assert!(object.contains_key("replay_window_id"));
+            assert!(!object.contains_key("family"));
+            assert!(!object.contains_key("profile"));
+            assert!(!object.contains_key("evidence"));
+            assert!(!object.contains_key("route"));
+        }
     }
 
     #[test]
@@ -1439,6 +1755,7 @@ mod tests {
                 hops: vec![RelayHop {
                     authority_id: authority(2),
                     link_endpoint: LinkEndpoint::relay(authority(3)),
+                    route_layer_public_key: Some([0x22; 32]),
                 }],
                 destination: endpoint("127.0.0.1:9000"),
             }),

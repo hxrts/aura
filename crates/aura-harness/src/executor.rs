@@ -5265,7 +5265,7 @@ mod tests {
         assert!(matches!(
             &requests[0],
             ToolRequest::SendKeys { instance_id, keys }
-            if instance_id == "alice" && keys == "ihello-semantic\n"
+            if instance_id == "alice" && keys == "ihello-semantic\n\x1b"
         ));
     }
 
