@@ -225,6 +225,159 @@ converges on the canonical Telltale 10 shape.
 - [crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell](/Users/hxrts/projects/aura/crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell):
   already canonical; keep unchanged except for style parity if needed.
 
+## 2.2 Theorem-Pack Taxonomy and Admission Policy
+
+Aura should add theorem packs only where they drive a real runtime admission
+decision. They are not importance labels.
+
+### Current Protocol Split
+
+First-wave theorem-pack candidates:
+
+- `aura.sync.ota_activation`
+- `aura.sync.device_epoch_rotation`
+
+Second-wave theorem-pack candidates:
+
+- `aura.recovery.grant`
+- `aura.recovery.guardian_setup`
+- `aura.recovery.guardian_ceremony`
+- `aura.recovery.guardian_membership_change`
+- `aura.invitation.device_enrollment` once the recovery/finalization path is
+  explicitly theorem-pack-gated end to end
+
+Later explicit evaluation target:
+
+- `aura.consensus`
+
+Current theorem-pack-free protocols:
+
+- `aura.session.coordination`
+- `aura.amp.transport`
+- `aura.dkg.ceremony`
+- `aura.authentication.guardian_auth_relational`
+- `aura.invitation.exchange`
+- `aura.invitation.guardian`
+- `aura.rendezvous.exchange`
+- `aura.rendezvous.relay`
+- `aura.sync.epoch_rotation`
+
+### Current Aura Runtime Admission Surfaces
+
+Aura already has a small runtime capability bridge and several concrete runtime
+consumers:
+
+- `aura-core::effects::RuntimeCapabilityEffects` defines the stable admission
+  interface.
+- `aura-effects::RuntimeCapabilityHandler` maps startup runtime contracts into a
+  capability inventory and public protocol-critical surfaces.
+- `aura-protocol::admission` maps protocol ids to current required runtime
+  capability keys.
+- `aura-agent::runtime::choreo_engine` and
+  `aura-agent::runtime::choreography_adapter` enforce required runtime
+  capability admission before protocol launch.
+- `aura-agent::runtime::contracts` and
+  `aura-agent::runtime::vm_hardening` already validate runtime capability
+  requirements for determinism and profile policy.
+- `aura-agent::runtime::services::threshold_signing` and
+  `aura-agent::runtime::services::reconfiguration_manager` already consume
+  protocol-critical runtime capability state on concrete execution paths.
+
+The currently published public protocol-critical surfaces are:
+
+- `runtime_admission`
+- `theorem_pack_capabilities`
+- `ownership_capability`
+- `readiness_witness`
+- `authoritative_read`
+- `materialization_proof`
+- `canonical_handle`
+- `ownership_receipt`
+- `semantic_handoff`
+- `reconfiguration_transition`
+
+These are the only current Aura-owned runtime consumers theorem-pack mapping is
+allowed to target.
+
+### Initial Aura Theorem-Pack Taxonomy
+
+Aura should keep the first taxonomy small:
+
+- `AuraTransitionSafety`
+  used for OTA/runtime-upgrade/device-epoch flows that depend on transition
+  safety, reconfiguration continuity, and bridge/admission correctness
+- `AuraAuthorityEvidence`
+  used for recovery/finalization flows that depend on authoritative read,
+  canonical materialization, and receipt/evidence-backed transitions
+- `AuraConsensusDeployment`
+  reserved for a later explicit consensus decision; do not use until Aura has a
+  concrete runtime consumer beyond the existing envelope capability checks
+
+### Pack-to-Capability Mapping
+
+`AuraTransitionSafety`:
+
+- reuse Telltale inventory keys:
+  `protocol_machine_envelope_adherence`,
+  `protocol_machine_envelope_admission`,
+  `protocol_envelope_bridge`,
+  `reconfiguration_safety`
+- current Aura runtime consumers:
+  `theorem_pack_capabilities`,
+  `ownership_receipt`,
+  `semantic_handoff`,
+  `reconfiguration_transition`
+- concrete admission checks:
+  `aura-agent::runtime::choreo_engine`,
+  `aura-agent::runtime::choreography_adapter`,
+  `aura-agent::runtime::services::reconfiguration_manager`
+
+`AuraAuthorityEvidence`:
+
+- reuse Telltale inventory keys:
+  `protocol_machine_envelope_adherence`,
+  `protocol_machine_envelope_admission`,
+  `protocol_envelope_bridge`
+- Aura-owned runtime capability names already backed by real consumers:
+  `authoritative_read`,
+  `materialization_proof`,
+  `canonical_handle`
+- concrete admission checks:
+  `aura-agent::runtime::choreo_engine`,
+  `aura-agent::runtime::contracts`,
+  recovery/guardian launch paths in `aura-agent`
+
+`AuraConsensusDeployment`:
+
+- candidate Telltale inventory keys:
+  `consensus_envelope`,
+  `atomic_broadcast_ordering`,
+  `partial_synchrony_liveness`
+- current status:
+  deferred until Aura adds a runtime admission consumer beyond
+  `byzantine_envelope` / determinism profile checks
+
+Aura-specific capability names are only allowed when they already have a real
+runtime consumer. Today that means `authoritative_read`,
+`materialization_proof`, and `canonical_handle` are allowed. New Aura-specific
+theorem-pack keys should not be added until the corresponding runtime admission
+check exists.
+
+### Acceptance Rule
+
+A choreography may add theorem-pack requirements only when all of the following
+are true:
+
+- the protocol depends on protocol-critical authority, evidence, or transition
+  semantics
+- the required pack maps to existing Telltale inventory keys or to an
+  Aura-specific runtime capability with a real admission consumer
+- Aura runtime admission fails closed before launch when that support is absent
+- a negative test proves the missing-pack admission failure
+- a positive test proves the protocol still runs when the support is present
+
+If any of those conditions is missing, keep the choreography theorem-pack-free.
+
 ### Migration Rule
 
 When converting a choreography, prefer:
