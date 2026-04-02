@@ -511,10 +511,8 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                             content,
                         }));
                     }
-                    state.chat.insert_mode = false;
-                    state.chat.insert_mode_entry_char = None;
-                    state.chat.focus = ChatFocus::Channels;
-                    // Auto-scroll to bottom (show latest messages)
+                    // Stay in insert mode after sending — user exits with Esc.
+                    // Auto-scroll to bottom to show the sent message.
                     state.chat.message_scroll = 0;
                 }
             }

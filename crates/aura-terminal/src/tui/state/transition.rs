@@ -261,12 +261,11 @@ mod tests {
         state.chat.insert_mode = true;
         state.chat.input_buffer = "hello".to_string();
 
-        // Press Enter to send
+        // Press Enter to send — stays in insert mode
         let (new_state, commands) = transition(&state, events::enter());
         assert!(new_state.chat.input_buffer.is_empty());
-        assert!(!new_state.chat.insert_mode);
-        assert!(!new_state.is_insert_mode());
-        assert_eq!(new_state.chat.focus, ChatFocus::Channels);
+        assert!(new_state.chat.insert_mode);
+        assert!(new_state.is_insert_mode());
         assert!(commands.iter().any(|c| matches!(
             c,
             TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content })
@@ -275,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reenter_insert_mode_after_send_does_not_prefix_i() {
+    fn test_stays_in_insert_mode_after_send() {
         let mut state = TuiState::new();
         state.router.go_to(Screen::Chat);
 
@@ -288,11 +287,9 @@ mod tests {
             TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content })
             if content == "h"
         )));
-        assert!(!state.is_insert_mode());
-
-        // Re-enter insert mode and type the next message starter.
-        let (state, _) = transition(&state, events::char('i'));
         assert!(state.is_insert_mode());
+
+        // Continue typing the next message without re-entering insert mode.
         let (state, _) = transition(&state, events::char('m'));
         assert_eq!(state.chat.input_buffer, "m");
     }
