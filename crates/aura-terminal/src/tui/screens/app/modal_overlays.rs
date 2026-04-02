@@ -9,7 +9,7 @@ use iocraft::prelude::*;
 
 use crate::tui::components::{
     AccountSetupModal, ConfirmModal, ContactSelectModal, DeviceSelectModal, HelpModal, ModalFrame,
-    TextInputModal,
+    ModalScaffold, TextInputModal,
 };
 use crate::tui::props::{
     ChatViewProps, ContactsViewProps, NeighborhoodViewProps, SettingsViewProps,
@@ -19,6 +19,7 @@ use crate::tui::screens::{
     GuardianSetupKind, GuardianSetupModal, HomeCreateModal, InvitationCodeModal,
     InvitationCreateModal, InvitationImportModal,
 };
+use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Contact, InvitationType};
 
 // =============================================================================
@@ -30,6 +31,7 @@ pub struct AccountSetupOverlayProps {
     pub visible: bool,
     pub nickname_suggestion: String,
     pub device_import_code: String,
+    pub bootstrap_candidates: Vec<String>,
     pub name_focused: bool,
     pub import_code_focused: bool,
     pub creating: bool,
@@ -159,6 +161,7 @@ pub fn render_account_setup_modal(global: &GlobalModalProps) -> Option<AnyElemen
                 visible: true,
                 nickname_suggestion: global.account_setup.nickname_suggestion.clone(),
                 device_import_code: global.account_setup.device_import_code.clone(),
+                bootstrap_candidates: global.account_setup.bootstrap_candidates.clone(),
                 name_focused: global.account_setup.name_focused,
                 import_code_focused: global.account_setup.import_code_focused,
                 creating: global.account_setup.creating,
@@ -417,16 +420,98 @@ pub fn render_chat_create_modal(chat: &ChatViewProps) -> Option<AnyElement<'stat
 
 pub fn render_topic_modal(chat: &ChatViewProps) -> Option<AnyElement<'static>> {
     let modal = &chat.modals.topic;
-    render_text_input_modal(TextInputOverlayProps {
-        visible: modal.visible,
-        focused: true,
-        title: "Set Channel Topic".to_string(),
-        value: modal.value.clone(),
-        placeholder: "Enter topic...".to_string(),
-        hint: String::new(),
-        error: String::new(),
-        submitting: false,
-    })
+    let active_field = modal.active_field;
+
+    let name_display = if modal.name.is_empty() {
+        "Enter channel name...".to_string()
+    } else {
+        modal.name.clone()
+    };
+    let topic_display = if modal.value.is_empty() {
+        "Enter topic...".to_string()
+    } else {
+        modal.value.clone()
+    };
+
+    let name_color = if modal.name.is_empty() {
+        Theme::TEXT_MUTED
+    } else {
+        Theme::TEXT
+    };
+    let topic_color = if modal.value.is_empty() {
+        Theme::TEXT_MUTED
+    } else {
+        Theme::TEXT
+    };
+
+    let name_border = if active_field == 0 {
+        Theme::PRIMARY
+    } else {
+        Theme::BORDER
+    };
+    let topic_border = if active_field == 1 {
+        Theme::PRIMARY
+    } else {
+        Theme::BORDER
+    };
+
+    let header_props = crate::tui::components::ModalHeaderProps::new("Edit Channel".to_string());
+    let footer_props = crate::tui::components::ModalFooterProps::new(vec![
+        crate::tui::types::KeyHint::new("Esc", "Cancel"),
+        crate::tui::types::KeyHint::new("Tab", "Switch field"),
+        crate::tui::types::KeyHint::new("Enter", "Save"),
+    ]);
+
+    render_modal(
+        modal.visible,
+        element! {
+            ModalScaffold(
+                header: header_props,
+                footer: footer_props,
+                status: crate::tui::components::ModalStatus::Idle,
+                border_color: Some(Theme::PRIMARY),
+                body_overflow: Overflow::Hidden,
+            ) {
+                // Name field
+                View(margin_bottom: Spacing::XS) {
+                    Text(
+                        content: "Name",
+                        color: if active_field == 0 { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                        weight: Weight::Bold,
+                    )
+                }
+                View(
+                    width: 100pct,
+                    flex_direction: FlexDirection::Column,
+                    border_style: crate::tui::theme::Borders::INPUT,
+                    border_color: name_border,
+                    padding: Spacing::PANEL_PADDING,
+                    margin_bottom: Spacing::SM,
+                ) {
+                    Text(content: name_display, color: name_color)
+                }
+                // Topic field
+                View(margin_bottom: Spacing::XS) {
+                    Text(
+                        content: "Description",
+                        color: if active_field == 1 { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                        weight: Weight::Bold,
+                    )
+                }
+                View(
+                    width: 100pct,
+                    flex_direction: FlexDirection::Column,
+                    border_style: crate::tui::theme::Borders::INPUT,
+                    border_color: topic_border,
+                    padding: Spacing::PANEL_PADDING,
+                    margin_bottom: Spacing::XS,
+                ) {
+                    Text(content: topic_display, color: topic_color)
+                }
+            }
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_channel_info_modal(chat: &ChatViewProps) -> Option<AnyElement<'static>> {

@@ -29,6 +29,8 @@ pub struct AccountSetupModalProps {
     pub success: bool,
     /// Error message if creation failed
     pub error: String,
+    /// Bootstrap candidates available for enrollment during first-run startup
+    pub bootstrap_candidates: Vec<String>,
 }
 
 /// Account setup modal for first-time users
@@ -47,6 +49,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     let success = props.success;
     let has_error = !props.error.is_empty();
     let error = props.error.clone();
+    let bootstrap_candidates = props.bootstrap_candidates.clone();
 
     // Show success/error result view
     if success || has_error {
@@ -159,6 +162,34 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 View(margin_top: Spacing::SM) {
                     #(Some(labeled_input(&import_props).into()))
                 }
+
+                #(if !bootstrap_candidates.is_empty() {
+                    Some(element! {
+                        View(margin_top: Spacing::SM, flex_direction: FlexDirection::Column) {
+                            Text(
+                                content: "Local devices available for enrollment",
+                                color: Theme::SECONDARY,
+                                weight: Weight::Bold,
+                            )
+                            Text(
+                                content: "Use an enrollment code from one of these devices in the field above.",
+                                color: Theme::TEXT_MUTED,
+                            )
+                            #(bootstrap_candidates.iter().map(|candidate| {
+                                element! {
+                                    View(margin_top: 1) {
+                                        Text(
+                                            content: format!("• {candidate}"),
+                                            color: Theme::TEXT_MUTED,
+                                        )
+                                    }
+                                }
+                            }).collect::<Vec<_>>())
+                        }
+                    })
+                } else {
+                    None
+                })
             }
 
             // Footer with centered button (or spinner when creating)
@@ -400,5 +431,12 @@ mod tests {
         // Typing clears error
         state.push_char('!');
         assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn account_setup_modal_mentions_bootstrap_candidates() {
+        let source = include_str!("account_setup_modal_template.rs");
+        assert!(source.contains("Local devices available for enrollment"));
+        assert!(source.contains("Use an enrollment code from one of these devices"));
     }
 }

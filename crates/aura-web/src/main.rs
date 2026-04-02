@@ -800,4 +800,21 @@ mod tests {
             "onboarding account creation should route through the shared aura-web workflow helper"
         );
     }
+
+    #[test]
+    fn web_onboarding_lists_bootstrap_candidates_separately_from_join_flow() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app_path = repo_root.join("crates/aura-web/src/shell/app.rs");
+        let source = std::fs::read_to_string(&app_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
+
+        assert!(
+            source.contains("Local devices available for enrollment"),
+            "web onboarding should surface bootstrap candidates separately"
+        );
+        assert!(
+            source.contains("Join an existing account"),
+            "web onboarding should keep the existing device-enrollment import flow"
+        );
+    }
 }

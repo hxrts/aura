@@ -1076,7 +1076,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Global modal overlays
     // =========================================================================
-    let global_modals = build_global_modals(current_screen, &tui_snapshot);
+    let discovered_peers_snapshot = {
+        let guard = shared_discovered_peers.read();
+        guard.clone()
+    };
+    let global_modals =
+        build_global_modals(current_screen, &tui_snapshot, &discovered_peers_snapshot);
 
     // Extract toast state from queue (type-enforced single toast at a time)
     let queued_toast = tui_snapshot.toast_queue.current().cloned();

@@ -1,9 +1,11 @@
 use super::*;
 use crate::tui::state::views::AccountSetupField;
+use aura_app::ui::signals::{DiscoveredPeer, DiscoveredPeerMethod};
 
 pub(super) fn build_global_modals(
     current_screen: Screen,
     tui_snapshot: &TuiState,
+    discovered_peers: &[DiscoveredPeer],
 ) -> GlobalModalProps {
     let mut global_modals = GlobalModalProps::default();
     global_modals.help.current_screen_name = current_screen.name().to_string();
@@ -22,6 +24,17 @@ pub(super) fn build_global_modals(
                 global_modals.account_setup.show_spinner = state.should_show_spinner();
                 global_modals.account_setup.success = state.success;
                 global_modals.account_setup.error = state.error.clone();
+                global_modals.account_setup.bootstrap_candidates = discovered_peers
+                    .iter()
+                    .filter(|peer| peer.method == DiscoveredPeerMethod::BootstrapCandidate)
+                    .map(|peer| {
+                        if peer.address.is_empty() {
+                            peer.authority_id.to_string()
+                        } else {
+                            format!("{} ({})", peer.address, peer.authority_id)
+                        }
+                    })
+                    .collect();
             }
             QueuedModal::GuardianSelect(state) => {
                 global_modals.guardian_picker.visible = true;
