@@ -305,6 +305,8 @@ impl EpochRotationCoordinator {
 // Choreographic Protocol Definition
 // Coordinated epoch rotation across multiple participants
 // The generated manifest carries epoch-rotation transfer link metadata for reconfiguration.
+// Runtime reconfiguration still consumes the epoch_rotation_transfer bundle
+// contract exposed by this choreography surface.
 choreography!(include_str!("src/protocols/epochs.tell"));
 
 #[cfg(test)]

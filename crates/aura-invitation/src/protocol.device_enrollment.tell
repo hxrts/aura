@@ -5,12 +5,14 @@ protocol DeviceEnrollment =
 
   Initiator { guard_capability = "invitation:device:enroll"
             , flow_cost = 2
-            , journal_facts = "InvitationFact::DeviceEnrollmentRequested" }
+            , journal_facts = "InvitationFact::DeviceEnrollmentRequested"
+            , link = "bundle=device_migration|exports=device_migration.request,device_migration.accept|imports=device_migration.accept" }
     -> Invitee : DeviceEnrollmentRequest of crate.DeviceEnrollmentRequest
 
   Invitee { guard_capability = "invitation:device:accept"
           , flow_cost = 2
-          , journal_facts = "InvitationFact::DeviceEnrollmentAccepted" }
+          , journal_facts = "InvitationFact::DeviceEnrollmentAccepted"
+          , link = "bundle=device_migration|exports=device_migration.request,device_migration.accept|imports=device_migration.request" }
     -> Initiator : DeviceEnrollmentAccept of crate.DeviceEnrollmentAccept
 
   Initiator { guard_capability = "invitation:device:enroll"

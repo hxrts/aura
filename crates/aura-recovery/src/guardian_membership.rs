@@ -92,7 +92,8 @@ pub struct ChangeCompletion {
     pub change_evidence: Vec<u8>,
 }
 
-// Guardian Membership Change Choreography - 3 phase protocol with guardian-handoff link metadata.
+// Runtime reconfiguration still consumes the guardian_handoff bundle contract
+// exposed by this choreography surface.
 choreography!(include_str!("src/guardian_membership.tell"));
 
 /// Guardian membership coordinator.

@@ -117,7 +117,9 @@ as the current style references.
 The following source patterns are migration debt and should disappear from
 first-party `.tell` files:
 
-- `link = "bundle=...|exports=...|imports=..."` choreography-local bundle hints
+- `link = "bundle=...|exports=...|imports=..."` when it is only preserving
+  historical migration lore rather than declaring a live runtime fragment
+  bundle consumed by reconfiguration or ownership code
 - choreography comments whose only purpose is to preserve pre-Telltale runtime
   bundle/link ownership lore
 - `journal_merge = true` as a choreography-local escape hatch
@@ -179,7 +181,9 @@ converges on the canonical Telltale 10 shape.
   phase-restating comments and keep it theorem-pack-free until a later explicit
   decision.
 - [crates/aura-invitation/src/protocol.device_enrollment.tell](/Users/hxrts/projects/aura/crates/aura-invitation/src/protocol.device_enrollment.tell):
-  remove `link = ...` bundle hints and the surrounding migration comments.
+  keep the live `device_migration` bundle contract, but remove surrounding
+  migration comments and any pseudo-annotations that no longer have a runtime
+  consumer.
 - [crates/aura-invitation/src/protocol.guardian_invitation.tell](/Users/hxrts/projects/aura/crates/aura-invitation/src/protocol.guardian_invitation.tell):
   structurally close; remove phase-only comments and keep only sanctioned edge
   metadata.
@@ -189,8 +193,9 @@ converges on the canonical Telltale 10 shape.
   add sanctioned Aura metadata where this protocol still requires it, normalize
   branch names and comments, and remove the bare legacy look.
 - [crates/aura-recovery/src/guardian_membership.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/guardian_membership.tell):
-  remove `link = ...`, `leakage_budget = ...`, and `journal_merge = true`;
-  keep only metadata that still has a real admission or accounting consumer.
+  keep the live `guardian_handoff` bundle contract, but remove
+  `leakage_budget = ...`, `journal_merge = true`, and the surrounding
+  migration comments.
 - [crates/aura-recovery/src/guardian_setup.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/guardian_setup.tell):
   remove `leakage_budget = ...` and `journal_merge = true`, and strip
   phase-restating comments.
@@ -204,8 +209,9 @@ converges on the canonical Telltale 10 shape.
   keep theorem-pack-free; normalize comments and preserve only real publication
   and connect metadata.
 - [crates/aura-sync/src/protocols/epochs.tell](/Users/hxrts/projects/aura/crates/aura-sync/src/protocols/epochs.tell):
-  remove `link = ...` bundle hints and surrounding migration comments; keep the
-  remaining protocol in the same shape as the OTA and device-epoch references.
+  keep the live `epoch_rotation_transfer` bundle contract, but remove the
+  surrounding migration comments and keep the rest of the protocol in the same
+  compact shape as the OTA and device-epoch references.
 
 ### Protocol-Compat Fixtures
 

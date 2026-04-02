@@ -5,30 +5,36 @@ protocol GuardianMembershipChange =
 
   ChangeInitiator { guard_capability = "recovery:membership_change:initiate"
                   , flow_cost = 350
-                  , journal_facts = "membership_change_proposed" }
+                  , journal_facts = "membership_change_proposed"
+                  , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
     -> Guardian1 : ProposeChange of crate.guardian_membership.MembershipProposal
 
   ChangeInitiator { guard_capability = "recovery:membership_change:initiate"
-                  , flow_cost = 350 }
+                  , flow_cost = 350
+                  , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
     -> Guardian2 : ProposeChange of crate.guardian_membership.MembershipProposal
 
   ChangeInitiator { guard_capability = "recovery:membership_change:initiate"
-                  , flow_cost = 350 }
+                  , flow_cost = 350
+                  , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
     -> Guardian3 : ProposeChange of crate.guardian_membership.MembershipProposal
 
   Guardian1 { guard_capability = "recovery:membership_change:vote"
             , flow_cost = 220
-            , journal_facts = "membership_vote_cast" }
+            , journal_facts = "membership_vote_cast"
+            , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
   Guardian2 { guard_capability = "recovery:membership_change:vote"
             , flow_cost = 220
-            , journal_facts = "membership_vote_cast" }
+            , journal_facts = "membership_vote_cast"
+            , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
   Guardian3 { guard_capability = "recovery:membership_change:vote"
             , flow_cost = 220
-            , journal_facts = "membership_vote_cast" }
+            , journal_facts = "membership_vote_cast"
+            , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
   ChangeInitiator { guard_capability = "recovery:membership_change:complete"

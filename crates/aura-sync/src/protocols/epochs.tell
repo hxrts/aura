@@ -5,21 +5,25 @@ protocol EpochRotationProtocol =
 
   Coordinator { guard_capability = "sync:epoch:propose_rotation"
               , flow_cost = 120
-              , journal_facts = "epoch_rotation_proposed" }
+              , journal_facts = "epoch_rotation_proposed"
+              , link = "bundle=epoch_rotation_transfer|exports=epoch_rotation.proposal,epoch_rotation.confirmation|imports=epoch_rotation.confirmation" }
     -> Participant1 : EpochRotationProposal of crate.protocols.epochs.EpochRotationProposal
 
   Coordinator { guard_capability = "sync:epoch:propose_rotation"
-              , flow_cost = 120 }
+              , flow_cost = 120
+              , link = "bundle=epoch_rotation_transfer|exports=epoch_rotation.proposal,epoch_rotation.confirmation|imports=epoch_rotation.confirmation" }
     -> Participant2 : EpochRotationProposal of crate.protocols.epochs.EpochRotationProposal
 
   Participant1 { guard_capability = "sync:epoch:confirm_readiness"
                , flow_cost = 80
-               , journal_facts = "epoch_confirmation_sent" }
+               , journal_facts = "epoch_confirmation_sent"
+               , link = "bundle=epoch_rotation_transfer|exports=epoch_rotation.proposal,epoch_rotation.confirmation|imports=epoch_rotation.proposal" }
     -> Coordinator : EpochConfirmation of crate.protocols.epochs.EpochConfirmation
 
   Participant2 { guard_capability = "sync:epoch:confirm_readiness"
                , flow_cost = 80
-               , journal_facts = "epoch_confirmation_sent" }
+               , journal_facts = "epoch_confirmation_sent"
+               , link = "bundle=epoch_rotation_transfer|exports=epoch_rotation.proposal,epoch_rotation.confirmation|imports=epoch_rotation.proposal" }
     -> Coordinator : EpochConfirmation of crate.protocols.epochs.EpochConfirmation
 
   Coordinator { guard_capability = "sync:epoch:commit_rotation"
