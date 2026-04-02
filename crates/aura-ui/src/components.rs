@@ -43,10 +43,18 @@ pub struct ModalView {
     pub details: Vec<String>,
     pub keybind_rows: Vec<(String, String)>,
     pub inputs: Vec<ModalInputView>,
+    pub selectable_items: Vec<SelectableItem>,
     pub enter_label: String,
     /// Optional shortcut buttons shown in the footer (e.g., demo invitation codes).
     /// Each entry is (label, value) where value is filled into the first input field.
     pub footer_shortcuts: Vec<(String, String)>,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct SelectableItem {
+    pub index: usize,
+    pub label: String,
+    pub selected: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -248,6 +256,7 @@ pub fn UiModal(
     on_confirm: EventHandler<()>,
     on_input_change: EventHandler<(FieldId, String)>,
     on_input_focus: EventHandler<FieldId>,
+    #[props(default)] on_toggle_selection: Option<EventHandler<usize>>,
 ) -> Element {
     rsx! {
         div {
@@ -330,6 +339,38 @@ pub fn UiModal(
                                                 on_input_change.call((field_id, evt.value()));
                                             }
                                         },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !modal.selectable_items.is_empty() {
+                        div {
+                            class: "pt-2",
+                            div {
+                                class: "max-h-48 overflow-y-auto rounded-sm border border-border bg-background/70",
+                                for item in modal.selectable_items.clone() {
+                                    button {
+                                        r#type: "button",
+                                        class: if item.selected {
+                                            "flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-foreground bg-accent/60 transition-colors hover:bg-accent"
+                                        } else {
+                                            "flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+                                        },
+                                        onclick: {
+                                            let handler = on_toggle_selection.clone();
+                                            let idx = item.index;
+                                            move |_| {
+                                                if let Some(handler) = handler.as_ref() {
+                                                    handler.call(idx);
+                                                }
+                                            }
+                                        },
+                                        span {
+                                            class: "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-border text-xs",
+                                            if item.selected { "✓" } else { "" }
+                                        }
+                                        span { "{item.label}" }
                                     }
                                 }
                             }

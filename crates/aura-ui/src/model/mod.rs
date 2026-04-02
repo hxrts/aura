@@ -1070,6 +1070,24 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn toggle_selectable_item(&self, index: usize) {
+        let mut model = write_model(&self.model);
+        if let Some(ActiveModal::CreateChannel(state)) = model.active_modal.as_mut() {
+            if let Some(position) = state
+                .selected_members
+                .iter()
+                .position(|selected| *selected == index)
+            {
+                state.selected_members.remove(position);
+            } else {
+                state.selected_members.push(index);
+                state.selected_members.sort_unstable();
+            }
+        }
+        drop(model);
+        self.request_rerender();
+    }
+
     pub fn configure_demo_contact_shortcuts(
         &self,
         alice_invite_code: impl Into<String>,

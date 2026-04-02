@@ -518,6 +518,13 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                     controller.set_modal_active_field(field_id);
                                     render_tick.set(render_tick() + 1);
                                 }
+                            },
+                            on_toggle_selection: {
+                                let controller = controller.clone();
+                                move |index: usize| {
+                                    controller.toggle_selectable_item(index);
+                                    render_tick.set(render_tick() + 1);
+                                }
                             }
                         }
                         }
@@ -674,6 +681,13 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             let controller = controller.clone();
                             move |field_id: FieldId| {
                                 controller.set_modal_active_field(field_id);
+                                render_tick.set(render_tick() + 1);
+                            }
+                        },
+                        on_toggle_selection: {
+                            let controller = controller.clone();
+                            move |index: usize| {
+                                controller.toggle_selectable_item(index);
                                 render_tick.set(render_tick() + 1);
                             }
                         }

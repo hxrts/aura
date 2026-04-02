@@ -126,20 +126,7 @@ pub(in crate::app) fn modal_view(
                         details.push("Step 2 of 3: Select members to invite.".to_string());
                         if model.contacts.is_empty() {
                             details.push("No contacts available.".to_string());
-                        } else {
-                            for (idx, contact) in model.contacts.iter().enumerate() {
-                                let focused = if idx == state.member_focus { ">" } else { " " };
-                                let selected = if state.selected_members.contains(&idx) {
-                                    "[x]"
-                                } else {
-                                    "[ ]"
-                                };
-                                details.push(format!("{focused} {selected} {}", contact.name));
-                            }
                         }
-                        details.push(
-                            "Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string(),
-                        );
                     }
                     CreateChannelWizardStep::Threshold => {
                         let participant_total = state.selected_members.len().saturating_add(1);
@@ -539,12 +526,33 @@ pub(in crate::app) fn modal_view(
         vec![]
     };
 
+    let selectable_items = match modal {
+        ModalState::CreateChannel => model
+            .create_channel_modal()
+            .filter(|state| matches!(state.step, CreateChannelWizardStep::Members))
+            .map(|state| {
+                model
+                    .contacts
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, contact)| SelectableItem {
+                        index: idx,
+                        label: contact.name.clone(),
+                        selected: state.selected_members.contains(&idx),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => vec![],
+    };
+
     Some(ModalView {
         modal_id: modal.contract_id(),
         title,
         details,
         keybind_rows,
         inputs,
+        selectable_items,
         enter_label,
         footer_shortcuts,
     })

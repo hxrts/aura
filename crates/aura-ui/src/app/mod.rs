@@ -10,7 +10,7 @@ mod shell;
 mod snapshot;
 
 use crate::components::{
-    AuthorityPickerItem, ButtonVariant, ModalInputView, ModalView, PillTone,
+    AuthorityPickerItem, ButtonVariant, ModalInputView, ModalView, PillTone, SelectableItem,
     UiAuthorityPickerModal, UiButton, UiCard, UiCardBody, UiCardFooter, UiDeviceEnrollmentModal,
     UiFooter, UiListButton, UiListItem, UiModal, UiPill,
 };
