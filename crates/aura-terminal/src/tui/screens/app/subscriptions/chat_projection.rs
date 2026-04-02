@@ -226,9 +226,6 @@ impl ChannelProjectionCoordinator {
                     .map(CommittedChannelSelection::channel_id),
             )
         };
-        if let Some(authority_id) = *self.shared_authority_id.read() {
-            stabilized.ensure_note_to_self_channel(authority_id);
-        }
         tracing::debug!(
             "CHAT_SIGNAL_UPDATE: incoming={} stabilized={}",
             chat_state.channel_count(),
@@ -255,14 +252,6 @@ impl ChannelProjectionCoordinator {
 
     fn update_authority_id(&self, authority_id: Option<AuthorityId>) {
         *self.shared_authority_id.write() = authority_id;
-
-        let Some(authority_id) = authority_id else {
-            return;
-        };
-
-        let mut chat_state = self.latest_chat_state.read().clone();
-        chat_state.ensure_note_to_self_channel(authority_id);
-        *self.latest_chat_state.write() = chat_state;
         self.publish_current_projection();
     }
 

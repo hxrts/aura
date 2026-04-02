@@ -106,11 +106,8 @@ pub(in crate::app) async fn load_chat_runtime_view(
 
     let (chat, authority_id) = {
         let core = controller.app_core().read().await;
-        let mut merged = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+        let merged = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
         let authority_id = core.authority().cloned();
-        if let Some(authority_id) = authority_id {
-            merged.ensure_note_to_self_channel(authority_id);
-        }
         (merged, authority_id)
     };
     let selected_channel_id = controller

@@ -1,7 +1,5 @@
 use super::*;
-use crate::views::chat::{
-    is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id,
-};
+use crate::views::chat::{is_note_to_self_channel_name, note_to_self_channel_id};
 use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::error::{self, WorkflowError};
 use crate::workflows::runtime::timeout_runtime_call;
@@ -171,11 +169,7 @@ pub(super) async fn context_id_for_channel(
     channel_id: ChannelId,
     local_authority: Option<AuthorityId>,
 ) -> Result<ContextId, AuraError> {
-    if let Some(authority_id) = local_authority {
-        if channel_id == note_to_self_channel_id(authority_id) {
-            return Ok(note_to_self_context_id(authority_id));
-        }
-    }
+    let _ = local_authority;
     let runtime = require_runtime(app_core).await?;
     timeout_runtime_call(
         &runtime,

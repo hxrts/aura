@@ -3707,8 +3707,6 @@ async fn send_message_ref_owned(
         let is_note_to_self = channel_id == note_to_self_channel_id(sender_id)
             || matches!(&channel, ChannelRef::Name(name) if is_note_to_self_channel_name(name));
         if is_note_to_self {
-            ensure_runtime_note_to_self_channel(app_core, &runtime, sender_id, timestamp_ms)
-                .await?;
             let context_id = note_to_self_context_id(sender_id);
             let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
             channel_context = Some(context_id);

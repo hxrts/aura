@@ -50,7 +50,7 @@ Move Note-to-self channel creation from lazy (first message send) to bootstrap (
 - [x] In `reconcile_pending_runtime_account_bootstrap` (`account.rs:466`), add a call to `ensure_runtime_note_to_self_channel` in the `(true, Some(_))` and `(true, None)` arms so existing accounts get the channel on next login
 - [x] Run `cargo test -p aura-app` and verify green
 - [x] Run `cargo check -p aura-terminal -p aura-web` and verify green
-- [ ] Commit: "Provision Note-to-self AMP channel at account bootstrap"
+- [x] Commit: "Provision Note-to-self AMP channel at account bootstrap"
 
 ## Phase 2: Remove lazy creation and UI special cases
 
@@ -58,12 +58,12 @@ Now that the channel is created at bootstrap, remove the workarounds.
 
 ### Tasks
 
-- [ ] In `messaging.rs` around line 3709, remove the `if is_note_to_self { ensure_runtime_note_to_self_channel(...) }` block from the send path. The channel already exists.
-- [ ] In `messaging/routing.rs` lines 174-178, remove the hardcoded Note-to-self bypass in `context_id_for_channel`. The normal `resolve_amp_channel_context` lookup will find it.
-- [ ] In `chat_projection.rs` (lines 230, 264), remove the `ensure_note_to_self_channel()` calls that inject the channel into ChatState as a display-only entry
-- [ ] In `aura-ui/src/app/runtime_views/chat.rs` (line 112), remove the `ensure_note_to_self_channel()` call
-- [ ] Run `cargo test -p aura-app` and verify green
-- [ ] Run `cargo check -p aura-terminal -p aura-web -p aura-ui` and verify green
+- [x] In `messaging.rs` around line 3709, remove the `if is_note_to_self { ensure_runtime_note_to_self_channel(...) }` block from the send path. The channel already exists.
+- [x] In `messaging/routing.rs` lines 174-178, remove the hardcoded Note-to-self bypass in `context_id_for_channel`. The normal `resolve_amp_channel_context` lookup will find it.
+- [x] In `chat_projection.rs` (lines 230, 264), remove the `ensure_note_to_self_channel()` calls that inject the channel into ChatState as a display-only entry
+- [x] In `aura-ui/src/app/runtime_views/chat.rs` (line 112), remove the `ensure_note_to_self_channel()` call
+- [x] Run `cargo test -p aura-app` and verify green
+- [x] Run `cargo check -p aura-terminal -p aura-web -p aura-ui` and verify green
 - [ ] Run `just demo` and verify Note-to-self channel appears in the chat screen and topic editing works
 - [ ] Commit: "Remove Note-to-self lazy creation and UI injection workarounds"
 
