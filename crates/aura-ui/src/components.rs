@@ -44,6 +44,9 @@ pub struct ModalView {
     pub keybind_rows: Vec<(String, String)>,
     pub inputs: Vec<ModalInputView>,
     pub enter_label: String,
+    /// Optional shortcut buttons shown in the footer (e.g., demo invitation codes).
+    /// Each entry is (label, value) where value is filled into the first input field.
+    pub footer_shortcuts: Vec<(String, String)>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -335,6 +338,22 @@ pub fn UiModal(
                 }
                 div {
                     class: "bg-card px-4 pt-4 pb-3 border-t border-border flex items-center justify-end gap-2",
+                        for (shortcut_label, shortcut_value) in modal.footer_shortcuts.clone() {
+                            UiButton {
+                                label: shortcut_label,
+                                variant: ButtonVariant::Secondary,
+                                width_class: None,
+                                onclick: {
+                                    let value = shortcut_value;
+                                    let first_field = modal.inputs.first().map(|i| i.field_id);
+                                    move |_| {
+                                        if let Some(field_id) = first_field {
+                                            on_input_change.call((field_id, value.clone()));
+                                        }
+                                    }
+                                },
+                            }
+                        }
                         UiButton {
                             id: Some(
                                 ControlId::ModalCancelButton

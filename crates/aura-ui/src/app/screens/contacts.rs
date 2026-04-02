@@ -192,7 +192,7 @@ pub(super) fn ContactsScreen(
                                         .to_string(),
                                 ),
                                 label: "Accept Invitation".to_string(),
-                                variant: ButtonVariant::Secondary,
+                                variant: ButtonVariant::Primary,
                                 onclick: move |_| {
                                     accept_invitation_controller.send_action_keys("a");
                                     render_tick.set(render_tick() + 1);
@@ -511,7 +511,7 @@ pub(super) fn ContactsScreen(
                                             .to_string(),
                                     ),
                                     label: "Invite to Channel".to_string(),
-                                    variant: ButtonVariant::Secondary,
+                                    variant: ButtonVariant::Primary,
                                     onclick: {
                                         let authority_id = contact.authority_id;
                                         move |_| {
@@ -586,7 +586,7 @@ pub(super) fn ContactsScreen(
                                                 .to_string(),
                                         ),
                                         label: "Add Guardian".to_string(),
-                                        variant: ButtonVariant::Secondary,
+                                        variant: ButtonVariant::Primary,
                                         onclick: {
                                             let authority_id = contact.authority_id;
                                             move |_| {

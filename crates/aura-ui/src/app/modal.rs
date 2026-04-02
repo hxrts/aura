@@ -13,7 +13,6 @@ pub(in crate::app) fn active_modal_title(model: &UiModel) -> Option<String> {
             ModalState::AcceptChannelInvitation => "Accept Channel Invitation",
             ModalState::CreateHome => "Create New Home",
             ModalState::CreateChannel => "New Chat Group",
-            ModalState::SetChannelTopic => "Set Channel Topic",
             ModalState::ChannelInfo => "Channel Info",
             ModalState::EditNickname => "Edit Nickname",
             ModalState::RemoveContact => "Remove Contact",
@@ -155,14 +154,6 @@ pub(in crate::app) fn modal_view(
                     }
                 }
             }
-        }
-        ModalState::SetChannelTopic => {
-            details.push("Set a topic for the selected channel.".to_string());
-            inputs.push(ModalInputView {
-                label: "Channel Topic".to_string(),
-                field_id: FieldId::CreateChannelTopic,
-                value: model.modal_text_value().unwrap_or_default(),
-            });
         }
         ModalState::ChannelInfo => {
             let active_channel = if chat_runtime.active_channel.is_empty() {
@@ -534,6 +525,20 @@ pub(in crate::app) fn modal_view(
         _ => "Confirm".to_string(),
     };
 
+    let footer_shortcuts = if matches!(modal, ModalState::AcceptContactInvitation) {
+        model
+            .demo_contact_shortcuts()
+            .map(|shortcuts| {
+                vec![
+                    ("Alice".to_string(), shortcuts.alice_invite_code.clone()),
+                    ("Carol".to_string(), shortcuts.carol_invite_code.clone()),
+                ]
+            })
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
     Some(ModalView {
         modal_id: modal.contract_id(),
         title,
@@ -541,6 +546,7 @@ pub(in crate::app) fn modal_view(
         keybind_rows,
         inputs,
         enter_label,
+        footer_shortcuts,
     })
 }
 
@@ -600,7 +606,7 @@ fn help_modal_content(screen: ScreenId) -> (Vec<String>, Vec<(String, String)>) 
             ),
             ("i".to_string(), "Enter message input".to_string()),
             ("n".to_string(), "Create channel".to_string()),
-            ("t".to_string(), "Set channel topic".to_string()),
+            ("e".to_string(), "Edit channel info".to_string()),
             ("o".to_string(), "Open channel info".to_string()),
             ("esc".to_string(), "Close modal / exit input".to_string()),
         ],
