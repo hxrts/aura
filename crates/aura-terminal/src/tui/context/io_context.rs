@@ -819,7 +819,7 @@ impl IoContext {
         vec![]
     }
 
-    pub async fn get_lan_peers(&self) -> Vec<(String, String)> {
+    pub async fn get_bootstrap_candidates(&self) -> Vec<(String, String)> {
         let runtime = self
             .app_core
             .raw()
@@ -833,9 +833,9 @@ impl IoContext {
         let Ok(Ok(lan_peers)) = runtime_workflows::timeout_runtime_call(
             &runtime,
             "terminal_io_context",
-            "try_get_lan_peers",
+            "try_get_bootstrap_candidates",
             std::time::Duration::from_secs(2),
-            || runtime.try_get_lan_peers(),
+            || runtime.try_get_bootstrap_candidates(),
         )
         .await
         else {

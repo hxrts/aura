@@ -1,6 +1,6 @@
 //! # Discovered Peers Panel
 //!
-//! Panel showing LAN-discovered peers that can be invited as contacts.
+//! Panel showing bootstrap candidates that can be invited as contacts.
 
 use aura_app::ui::types::EffectiveName;
 use iocraft::prelude::*;
@@ -49,7 +49,7 @@ impl PeerInvitationStatus {
     }
 }
 
-/// A discovered peer from LAN broadcast
+/// A discovered bootstrap candidate
 #[derive(Clone, Debug, Default)]
 pub struct DiscoveredPeerInfo {
     /// Authority ID (hex string)
@@ -58,7 +58,7 @@ pub struct DiscoveredPeerInfo {
     pub nickname_suggestion: Option<String>,
     /// IP address and port
     pub address: String,
-    /// Discovery method (LAN, relay, etc.)
+    /// Discovery method label
     pub discovery_method: String,
     /// Time since discovery in seconds
     pub age_secs: u64,
@@ -72,7 +72,7 @@ impl DiscoveredPeerInfo {
         Self {
             authority_id: authority_id.into(),
             address: address.into(),
-            discovery_method: "LAN".to_string(),
+            discovery_method: "bootstrap".to_string(),
             nickname_suggestion: None,
             age_secs: 0,
             invitation_status: PeerInvitationStatus::None,

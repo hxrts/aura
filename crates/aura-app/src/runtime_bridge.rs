@@ -282,16 +282,29 @@ pub struct CeremonyStatus {
     pub reversion_risk: bool,
 }
 
-/// Information about a peer discovered via LAN (mDNS/UDP broadcast)
+/// Discovery origin for a bootstrap candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootstrapCandidateOrigin {
+    /// Candidate discovered through native LAN discovery.
+    Lan,
+    /// Candidate discovered through a localhost bootstrap broker.
+    LocalBroker,
+    /// Candidate discovered through a LAN-visible bootstrap broker.
+    LanBroker,
+}
+
+/// Information about a bootstrap candidate available for enrollment.
 #[derive(Debug, Clone)]
-pub struct LanPeerInfo {
-    /// Authority ID of the discovered peer
+pub struct BootstrapCandidateInfo {
+    /// Authority ID of the discovered candidate.
     pub authority_id: AuthorityId,
-    /// Network address (IP:port)
+    /// Discovery origin for this candidate.
+    pub origin: BootstrapCandidateOrigin,
+    /// Best currently known address for the candidate bootstrap path.
     pub address: String,
-    /// When this peer was discovered (ms since epoch)
+    /// When this candidate was discovered (ms since epoch).
     pub discovered_at_ms: u64,
-    /// Nickname suggestion if available from the descriptor
+    /// Nickname suggestion if available from the descriptor.
     pub nickname_suggestion: Option<String>,
 }
 
@@ -846,21 +859,23 @@ pub trait RuntimeBridge: Send + Sync {
     async fn trigger_discovery(&self) -> Result<DiscoveryTriggerOutcome, IntentError>;
 
     // =========================================================================
-    // LAN Discovery
+    // Bootstrap Discovery
     // =========================================================================
 
-    /// Get list of peers discovered via LAN, distinguishing runtime
-    /// unavailability from a real empty LAN set.
-    async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError>;
-
-    /// Send an invitation to a LAN peer
-    ///
-    /// Sends an invite code directly to a peer discovered on the LAN.
-    /// This bypasses the need for manual code sharing when peers are on
-    /// the same local network.
-    async fn send_lan_invitation(
+    /// Get list of bootstrap candidates, distinguishing runtime
+    /// unavailability from a real empty candidate set.
+    async fn try_get_bootstrap_candidates(
         &self,
-        peer: &LanPeerInfo,
+    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError>;
+
+    /// Send an invitation to a bootstrap candidate.
+    ///
+    /// Sends an invite code directly to a discovered bootstrap candidate.
+    /// This bypasses manual code sharing when the candidate can be reached
+    /// through a supported bootstrap discovery path.
+    async fn send_bootstrap_invitation(
+        &self,
+        peer: &BootstrapCandidateInfo,
         invitation_code: &str,
     ) -> Result<(), IntentError>;
 
@@ -1785,19 +1800,21 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
+    async fn try_get_bootstrap_candidates(
+        &self,
+    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
         Err(IntentError::no_agent(
-            "LAN peers not available in offline mode",
+            "Bootstrap candidates not available in offline mode",
         ))
     }
 
-    async fn send_lan_invitation(
+    async fn send_bootstrap_invitation(
         &self,
-        _peer: &LanPeerInfo,
+        _peer: &BootstrapCandidateInfo,
         _invitation_code: &str,
     ) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
-            "LAN invitation not available in offline mode",
+            "Bootstrap invitation not available in offline mode",
         ))
     }
 
@@ -2140,7 +2157,7 @@ mod tests {
         );
         assert!(bridge.try_get_sync_peers().await.is_err());
         assert!(bridge.try_get_discovered_peers().await.is_err());
-        assert!(bridge.try_get_lan_peers().await.is_err());
+        assert!(bridge.try_get_bootstrap_candidates().await.is_err());
         assert!(bridge.try_list_pending_invitations().await.is_err());
         let settings_error = bridge
             .try_get_settings()

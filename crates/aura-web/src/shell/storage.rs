@@ -10,6 +10,7 @@ use crate::error::{log_web_error, WebUiError};
 
 const WEB_STORAGE_PREFIX: &str = "aura_";
 const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+const DEMO_SURFACE_QUERY_KEY: &str = "__aura_demo_surface";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WebStorageScope {
@@ -57,6 +58,10 @@ impl WebStorageScope {
 
     pub(crate) fn account_config_key(&self) -> String {
         format!("{}{}", self.prefix, WEB_ACCOUNT_CONFIG_STORAGE_SUFFIX)
+    }
+
+    pub(crate) fn demo_tablet_enrollment_code_key(&self) -> String {
+        format!("{}demo_tablet_enrollment_code", self.prefix)
     }
 }
 
@@ -230,6 +235,24 @@ pub(crate) fn harness_mode_enabled() -> bool {
     harness_instance_id().is_some()
 }
 
+pub(crate) fn demo_surface() -> Option<String> {
+    let window = web_sys::window()?;
+    let search = window.location().search().ok()?;
+    let query = search.strip_prefix('?').unwrap_or(&search);
+    for pair in query.split('&') {
+        if let Some((key, value)) = pair.split_once('=') {
+            if key == DEMO_SURFACE_QUERY_KEY && !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn dual_demo_web_enabled() -> bool {
+    demo_surface().as_deref() == Some("web")
+}
+
 pub(crate) fn active_storage_prefix() -> String {
     WebStorageScope::active().prefix().to_string()
 }
@@ -254,6 +277,10 @@ pub(crate) fn pending_device_enrollment_code_key(storage_prefix: &str) -> String
 
 pub(crate) fn pending_account_bootstrap_key(storage_prefix: &str) -> String {
     WebStorageScope::new(storage_prefix).pending_account_bootstrap_key()
+}
+
+pub(crate) fn demo_tablet_enrollment_code_key(storage_prefix: &str) -> String {
+    WebStorageScope::new(storage_prefix).demo_tablet_enrollment_code_key()
 }
 
 pub(crate) fn load_selected_runtime_identity(
@@ -366,5 +393,27 @@ pub(crate) fn clear_pending_device_enrollment_code(storage_key: &str) -> Result<
         WebUiOperation::ClearPendingDeviceEnrollmentCode,
         "WEB_PENDING_ENROLLMENT_CLEAR_FAILED",
         "pending device enrollment code",
+    )
+}
+
+pub(crate) fn persist_demo_tablet_enrollment_code(
+    storage_key: &str,
+    code: &str,
+) -> Result<(), WebUiError> {
+    WebLocalStorage::required(WebUiOperation::PersistPendingDeviceEnrollmentCode)?.set_string(
+        storage_key,
+        code,
+        WebUiOperation::PersistPendingDeviceEnrollmentCode,
+        "WEB_DEMO_TABLET_CODE_PERSIST_FAILED",
+        "demo tablet enrollment code",
+    )
+}
+
+pub(crate) fn clear_demo_tablet_enrollment_code(storage_key: &str) -> Result<(), WebUiError> {
+    WebLocalStorage::required(WebUiOperation::ClearPendingDeviceEnrollmentCode)?.remove(
+        storage_key,
+        WebUiOperation::ClearPendingDeviceEnrollmentCode,
+        "WEB_DEMO_TABLET_CODE_CLEAR_FAILED",
+        "demo tablet enrollment code",
     )
 }

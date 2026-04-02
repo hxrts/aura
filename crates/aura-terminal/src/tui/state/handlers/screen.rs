@@ -86,8 +86,8 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
         KeyCode::Char('n') => {
             commands.push(TuiCommand::Dispatch(DispatchCommand::OpenChatCreateWizard));
         }
-        KeyCode::Char('t') => {
-            // Open topic edit modal via dispatch (shell populates selected channel details)
+        KeyCode::Char('e') => {
+            // Open channel edit modal via dispatch (shell populates selected channel details)
             commands.push(TuiCommand::Dispatch(DispatchCommand::OpenChatTopicModal));
         }
         KeyCode::Char('o') => {
@@ -220,7 +220,7 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 if state.contacts.lan_peer_count > 0 {
                     state.contacts.list_focus = state.contacts.list_focus.toggle();
                 } else {
-                    state.toast_info("No LAN peers discovered yet.");
+                    state.toast_info("No bootstrap candidates discovered yet.");
                 }
             }
         }

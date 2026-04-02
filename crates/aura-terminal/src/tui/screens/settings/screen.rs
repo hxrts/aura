@@ -212,7 +212,7 @@ pub fn SettingsScreen(
                 let mut rendezvous_count = 0usize;
                 for peer in &state.peers {
                     match peer.method {
-                        DiscoveredPeerMethod::Lan => lan_count += 1,
+                        DiscoveredPeerMethod::BootstrapCandidate => lan_count += 1,
                         DiscoveredPeerMethod::Rendezvous => rendezvous_count += 1,
                     }
                 }
@@ -496,7 +496,7 @@ pub fn SettingsScreen(
                 ("Discovery".into(), Theme::SECONDARY),
                 (
                     format!(
-                        "Peers: {discovered_total} (LAN {discovered_lan}, Rendezvous {discovered_rendezvous})"
+                        "Peers: {discovered_total} (Bootstrap {discovered_lan}, Rendezvous {discovered_rendezvous})"
                     ),
                     Theme::TEXT,
                 ),

@@ -433,10 +433,10 @@ pub async fn ensure_runtime_peer_connectivity(
         .try_get_discovered_peers()
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("get discovered peers", e)))?;
-    let lan_peers = runtime
-        .try_get_lan_peers()
+    let bootstrap_candidates = runtime
+        .try_get_bootstrap_candidates()
         .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("get lan peers", e)))?;
+        .map_err(|e| AuraError::from(super::error::runtime_call("get bootstrap candidates", e)))?;
 
     if connected_peers == 0 {
         return Err(super::error::WorkflowError::ConnectivityRequired {
@@ -444,7 +444,7 @@ pub async fn ensure_runtime_peer_connectivity(
             connected_peers,
             sync_peers: sync_peers.len(),
             discovered_peers: discovered_peers.len(),
-            lan_peers: lan_peers.len(),
+            lan_peers: bootstrap_candidates.len(),
         }
         .into());
     }

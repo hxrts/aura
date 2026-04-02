@@ -152,8 +152,8 @@ pub use crate::core::{
 // Runtime bridge (for dependency inversion)
 pub use crate::queries::Query;
 pub use crate::runtime_bridge::{
-    BoxedRuntimeBridge, LanPeerInfo, OfflineRuntimeBridge, RendezvousStatus, RuntimeBridge,
-    RuntimeStatus, SyncStatus,
+    BootstrapCandidateInfo, BootstrapCandidateOrigin, BoxedRuntimeBridge, OfflineRuntimeBridge,
+    RendezvousStatus, RuntimeBridge, RuntimeStatus, SyncStatus,
 };
 pub use crate::scenario_contract::{
     ActorId as ScenarioActorId, EnvironmentAction as SemanticEnvironmentAction,
@@ -176,6 +176,11 @@ pub use crate::ui_contract::{
 pub use crate::views::{
     Channel, ChannelType, ChatState, ContactsState, HomeState, InvitationsState, Message,
     NeighborhoodState, RecoveryState, ViewState,
+};
+#[cfg(feature = "web-js")]
+pub use crate::workflows::demo_shortcuts::{
+    dual_frontend_web_demo_shortcuts, DualFrontendWebDemoShortcuts,
+    DUAL_FRONTEND_DEMO_WEB_TABLET_NAME,
 };
 pub use crate::workflows::harness_determinism::harness_mode_enabled;
 

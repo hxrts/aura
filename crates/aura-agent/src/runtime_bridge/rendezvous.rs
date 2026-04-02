@@ -1,5 +1,7 @@
 use super::{service_unavailable, AgentRuntimeBridge};
-use aura_app::runtime_bridge::{DiscoveryTriggerOutcome, LanPeerInfo, RendezvousStatus};
+use aura_app::runtime_bridge::{
+    BootstrapCandidateInfo, BootstrapCandidateOrigin, DiscoveryTriggerOutcome, RendezvousStatus,
+};
 use aura_app::IntentError;
 use aura_core::types::identifiers::AuthorityId;
 
@@ -39,16 +41,17 @@ pub(super) async fn trigger_discovery(
     }
 }
 
-pub(super) async fn get_lan_peers(
+pub(super) async fn get_bootstrap_candidates(
     bridge: &AgentRuntimeBridge,
-) -> Result<Vec<LanPeerInfo>, IntentError> {
+) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
         Ok(rendezvous
             .list_lan_discovered_peers()
             .await
             .into_iter()
-            .map(|peer| LanPeerInfo {
+            .map(|peer| BootstrapCandidateInfo {
                 authority_id: peer.authority_id,
+                origin: BootstrapCandidateOrigin::Lan,
                 address: peer.source_addr.clone(),
                 discovered_at_ms: peer.discovered_at_ms,
                 nickname_suggestion: peer.descriptor.nickname_suggestion.clone(),
@@ -59,9 +62,9 @@ pub(super) async fn get_lan_peers(
     }
 }
 
-pub(super) async fn send_lan_invitation(
+pub(super) async fn send_bootstrap_invitation(
     bridge: &AgentRuntimeBridge,
-    peer: &LanPeerInfo,
+    peer: &BootstrapCandidateInfo,
     invitation_code: &str,
 ) -> Result<(), IntentError> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {

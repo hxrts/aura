@@ -117,7 +117,8 @@ impl SharedDiscoveredPeers {
 /// Returns an Arc that closures can capture. The subscription updates the Arc's
 /// contents whenever discovery changes, so readers always get current data.
 ///
-/// If `update_tx` is provided, sends `LanPeersCountChanged` whenever the LAN peer count changes.
+/// If `update_tx` is provided, sends `LanPeersCountChanged` whenever the
+/// bootstrap-candidate count changes.
 pub fn use_discovered_peers_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
@@ -141,7 +142,7 @@ pub fn use_discovered_peers_subscription(
                     let lan_peers: Vec<_> = peers_state
                         .peers
                         .iter()
-                        .filter(|p| p.method == DiscoveredPeerMethod::Lan)
+                        .filter(|p| p.method == DiscoveredPeerMethod::BootstrapCandidate)
                         .cloned()
                         .collect();
 

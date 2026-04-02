@@ -169,7 +169,7 @@ pub const UNREAD_COUNT_SIGNAL_NAME: &str = "UNREAD_COUNT_SIGNAL";
 pub static UNREAD_COUNT_SIGNAL: LazyLock<Signal<usize>> =
     LazyLock::new(|| Signal::new("app:unread_count"));
 
-/// Signal for discovered peers (rendezvous + LAN)
+/// Signal for discovered peers (rendezvous + bootstrap candidates)
 pub const DISCOVERED_PEERS_SIGNAL_NAME: &str = "DISCOVERED_PEERS_SIGNAL";
 pub static DISCOVERED_PEERS_SIGNAL: LazyLock<Signal<DiscoveredPeersState>> =
     LazyLock::new(|| Signal::new("app:discovered_peers"));
@@ -252,7 +252,7 @@ pub enum NetworkStatus {
 pub struct DiscoveredPeer {
     /// Authority ID of the peer
     pub authority_id: AuthorityId,
-    /// Network address (empty for rendezvous, IP:port for LAN)
+    /// Network address (empty for rendezvous, bootstrap address when available)
     pub address: String,
     /// Discovery method
     pub method: DiscoveredPeerMethod,
@@ -264,14 +264,14 @@ pub struct DiscoveredPeer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiscoveredPeerMethod {
     Rendezvous,
-    Lan,
+    BootstrapCandidate,
 }
 
 impl DiscoveredPeerMethod {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Rendezvous => "rendezvous",
-            Self::Lan => "LAN",
+            Self::BootstrapCandidate => "bootstrap",
         }
     }
 }

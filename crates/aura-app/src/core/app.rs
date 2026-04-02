@@ -14,8 +14,8 @@
 
 use super::{IntentError, StateSnapshot};
 use crate::runtime_bridge::{
-    BridgeAuthorityInfo, BridgeDeviceInfo, LanPeerInfo, RuntimeBridge, SettingsBridgeState,
-    SyncStatus as RuntimeSyncStatus,
+    BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, RuntimeBridge,
+    SettingsBridgeState, SyncStatus as RuntimeSyncStatus,
 };
 use crate::ui_contract::AuthoritativeSemanticFact;
 use crate::views::ViewState;
@@ -884,23 +884,27 @@ impl AppCore {
         .await?
     }
 
-    /// Get LAN-discovered peers
+    /// Get bootstrap candidates currently available for enrollment.
     ///
-    /// Returns a list of peers discovered via LAN (mDNS/UDP broadcast) with their
-    /// network addresses.
-    pub async fn get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
+    /// Returns candidates discovered through the currently enabled bootstrap
+    /// discovery paths, including native LAN discovery where available.
+    pub async fn get_bootstrap_candidates(
+        &self,
+    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
         if let Some(runtime) = &self.runtime {
             return timeout_runtime_call_bounded(
                 runtime,
-                "get_lan_peers",
-                "try_get_lan_peers",
+                "get_bootstrap_candidates",
+                "try_get_bootstrap_candidates",
                 APP_RUNTIME_QUERY_TIMEOUT,
-                || runtime.try_get_lan_peers(),
+                || runtime.try_get_bootstrap_candidates(),
             )
             .await
             .map_err(|error| IntentError::internal_error(error.to_string()))?;
         } else {
-            Err(IntentError::no_agent("get_lan_peers requires a runtime"))
+            Err(IntentError::no_agent(
+                "get_bootstrap_candidates requires a runtime",
+            ))
         }
     }
 

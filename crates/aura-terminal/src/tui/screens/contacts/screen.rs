@@ -301,7 +301,7 @@ pub struct ContactsScreenProps {
     pub(crate) on_update_nickname: Option<UpdateNicknameCallback>,
     /// Callback when starting a direct chat with a contact
     pub(crate) on_start_chat: Option<StartChatCallback>,
-    /// Callback when inviting a discovered LAN peer
+    /// Callback when inviting a discovered bootstrap candidate
     pub on_invite_lan_peer: Option<InvitePeerCallback>,
 }
 
@@ -382,7 +382,7 @@ pub fn ContactsScreen(
     let invitations = reactive_invitations.read().clone();
     let own_authority_id = own_authority_id.read().clone();
 
-    // LAN discovered peers state (reactive via signal subscription)
+    // Bootstrap-candidate state (reactive via signal subscription)
     let lan_peers_state = hooks.use_state(DiscoveredPeersState::new);
 
     // Subscribe to discovered peers signal updates
@@ -395,7 +395,7 @@ pub fn ContactsScreen(
                 let discovered_peers: Vec<DiscoveredPeerInfo> = peers_state
                     .peers
                     .iter()
-                    .filter(|p| p.method == DiscoveredPeerMethod::Lan)
+                    .filter(|p| p.method == DiscoveredPeerMethod::BootstrapCandidate)
                     .map(|p| {
                         let authority_id = p.authority_id.to_string();
                         DiscoveredPeerInfo::new(&authority_id, &p.address)
@@ -492,14 +492,14 @@ pub fn ContactsScreen(
                 overflow: Overflow::Hidden,
                 gap: dim::TWO_PANEL_GAP,
             ) {
-                // Left column: LAN peers + contacts list (matches settings screen)
+                // Left column: bootstrap candidates + contacts list (matches settings screen)
                 View(
                     width: dim::TWO_PANEL_LEFT_WIDTH,
                     flex_direction: FlexDirection::Column,
                     overflow: Overflow::Hidden,
                     gap: 0,
                 ) {
-                    // Discovered LAN peers panel
+                    // Discovered bootstrap candidates panel
                     #({
                         let state = lan_peers_state.read();
                         let now_ms = props.now_ms;

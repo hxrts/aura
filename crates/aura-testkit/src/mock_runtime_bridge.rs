@@ -26,9 +26,9 @@
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     AuthenticationStatus, AuthoritativeModerationStatus, BridgeAuthorityInfo, BridgeDeviceInfo,
-    CeremonyKind, CeremonyProcessingOutcome, CeremonyStatus, DeviceEnrollmentStart,
-    DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo,
-    InvitationMutationOutcome, KeyRotationCeremonyStatus, LanPeerInfo, RendezvousStatus,
+    BootstrapCandidateInfo, CeremonyKind, CeremonyProcessingOutcome, CeremonyStatus,
+    DeviceEnrollmentStart, DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationBridgeType,
+    InvitationInfo, InvitationMutationOutcome, KeyRotationCeremonyStatus, RendezvousStatus,
     RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::CONTACTS_SIGNAL;
@@ -861,13 +861,13 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(DiscoveryTriggerOutcome::AlreadyRunning)
     }
 
-    async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
+    async fn try_get_bootstrap_candidates(&self) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
         Ok(vec![])
     }
 
-    async fn send_lan_invitation(
+    async fn send_bootstrap_invitation(
         &self,
-        _peer: &LanPeerInfo,
+        _peer: &BootstrapCandidateInfo,
         _invitation_code: &str,
     ) -> Result<(), IntentError> {
         Ok(())

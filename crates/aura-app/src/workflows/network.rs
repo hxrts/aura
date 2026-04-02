@@ -170,31 +170,31 @@ pub async fn discover_peers(
     Ok(discovered_count)
 }
 
-/// List LAN-discovered peers
+/// List bootstrap candidates currently available for enrollment.
 ///
-/// **What it does**: Queries LAN peers and emits DISCOVERED_PEERS_SIGNAL
+/// **What it does**: Queries bootstrap candidates and emits DISCOVERED_PEERS_SIGNAL
 /// **Returns**: List of peer descriptions (authority_id @ address)
 /// **Signal pattern**: Emits DISCOVERED_PEERS_SIGNAL after query
 ///
 /// # Arguments
 /// * `app_core` - The application core
 /// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
-pub async fn list_lan_peers(
+pub async fn list_bootstrap_candidates(
     app_core: &Arc<RwLock<AppCore>>,
     timestamp_ms: u64,
 ) -> Result<Vec<String>, AuraError> {
     let runtime = super::runtime::require_runtime(app_core).await?;
-    let lan_peers = timeout_runtime_call(
+    let bootstrap_candidates = timeout_runtime_call(
         &runtime,
-        "list_lan_peers",
-        "try_get_lan_peers",
+        "list_bootstrap_candidates",
+        "try_get_bootstrap_candidates",
         Duration::from_millis(5_000),
-        || runtime.try_get_lan_peers(),
+        || runtime.try_get_bootstrap_candidates(),
     )
     .await?
-    .map_err(|e| AuraError::from(super::error::runtime_call("list lan peers", e)))?;
+    .map_err(|e| AuraError::from(super::error::runtime_call("list bootstrap candidates", e)))?;
 
-    let peer_list: Vec<String> = lan_peers
+    let peer_list: Vec<String> = bootstrap_candidates
         .iter()
         .map(|peer| format!("{} ({})", peer.authority_id, peer.address))
         .collect();
@@ -259,7 +259,7 @@ pub async fn get_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> Discovered
 
 /// Re-query discovered peers from runtime and emit the signal.
 ///
-/// **What it does**: Queries rendezvous + LAN peers and emits DISCOVERED_PEERS_SIGNAL
+/// **What it does**: Queries rendezvous peers plus bootstrap candidates and emits DISCOVERED_PEERS_SIGNAL
 /// **Signal pattern**: Emits DISCOVERED_PEERS_SIGNAL
 ///
 /// Use this instead of `get_discovered_peers()` when you need to refresh from
@@ -275,7 +275,8 @@ pub async fn refresh_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> Result
 /// **Returns**: Unit result
 /// **Signal pattern**: Emits DISCOVERED_PEERS_SIGNAL
 ///
-/// This is a helper function that combines rendezvous and LAN peers into a single signal.
+/// This is a helper function that combines rendezvous peers and bootstrap
+/// candidates into a single signal.
 ///
 /// # Arguments
 /// * `app_core` - The application core
@@ -285,7 +286,8 @@ async fn emit_discovered_peers_signal(
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
     let runtime = super::runtime::require_runtime(app_core).await?;
-    // Get both rendezvous and LAN peers without holding the app-core lock across awaits.
+    // Get both rendezvous peers and bootstrap candidates without holding the
+    // app-core lock across awaits.
     let rendezvous_peers = timeout_runtime_call(
         &runtime,
         "emit_discovered_peers_signal",
@@ -295,15 +297,20 @@ async fn emit_discovered_peers_signal(
     )
     .await?
     .map_err(|e| AuraError::from(super::error::runtime_call("refresh discovered peers", e)))?;
-    let lan_peers = timeout_runtime_call(
+    let bootstrap_candidates = timeout_runtime_call(
         &runtime,
         "emit_discovered_peers_signal",
-        "try_get_lan_peers",
+        "try_get_bootstrap_candidates",
         Duration::from_millis(5_000),
-        || runtime.try_get_lan_peers(),
+        || runtime.try_get_bootstrap_candidates(),
     )
     .await?
-    .map_err(|e| AuraError::from(super::error::runtime_call("refresh lan peers", e)))?;
+    .map_err(|e| {
+        AuraError::from(super::error::runtime_call(
+            "refresh bootstrap candidates",
+            e,
+        ))
+    })?;
 
     // Get invited peer IDs to mark peers as invited
     let invited_ids: HashSet<AuthorityId> = timeout_runtime_call(
@@ -331,13 +338,14 @@ async fn emit_discovered_peers_signal(
         });
     }
 
-    // Add LAN peers (avoiding duplicates)
-    for peer in lan_peers {
+    // Add bootstrap candidates discovered through local startup paths
+    // (avoiding duplicates with rendezvous peers).
+    for peer in bootstrap_candidates {
         if !peers.iter().any(|p| p.authority_id == peer.authority_id) {
             peers.push(DiscoveredPeer {
                 authority_id: peer.authority_id,
                 address: peer.address,
-                method: DiscoveredPeerMethod::Lan,
+                method: DiscoveredPeerMethod::BootstrapCandidate,
                 invited: invited_ids.contains(&peer.authority_id),
             });
         }

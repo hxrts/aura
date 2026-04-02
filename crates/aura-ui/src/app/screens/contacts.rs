@@ -83,14 +83,14 @@ pub(super) fn ContactsScreen(
                         class: "rounded-sm bg-background/60 px-3 py-3",
                         div {
                             class: "flex items-center gap-3",
-                            p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "LAN Peers" }
+                            p { class: "m-0 text-xs font-sans font-semibold uppercase tracking-[0.08em] text-muted-foreground", "Bootstrap Candidates" }
                             p {
                                 class: "m-0 text-xs text-muted-foreground",
                                 "updates automatically"
                             }
                         }
                         if runtime.lan_peers.is_empty() {
-                            p { class: "m-0 mt-3 text-sm text-muted-foreground", "No LAN peers discovered yet." }
+                            p { class: "m-0 mt-3 text-sm text-muted-foreground", "No bootstrap candidates discovered yet." }
                         } else {
                             div { class: "mt-3 space-y-2",
                                 for peer in &runtime.lan_peers {

@@ -13,10 +13,10 @@ use crate::runtime::services::ServiceError;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
-    BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingCounts, CeremonyProcessingOutcome,
-    DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo, InvitationMutationOutcome,
-    LanPeerInfo, ReachabilityRefreshOutcome, RendezvousStatus, RuntimeBridge, SettingsBridgeState,
-    SyncStatus,
+    BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingCounts,
+    CeremonyProcessingOutcome, DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo,
+    InvitationMutationOutcome, ReachabilityRefreshOutcome, RendezvousStatus, RuntimeBridge,
+    SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::ui::workflows::authority::{authority_key_prefix, deserialize_authority};
@@ -1993,19 +1993,21 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     // =========================================================================
-    // LAN Discovery
+    // Bootstrap Discovery
     // =========================================================================
 
-    async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
-        rendezvous::get_lan_peers(self).await
+    async fn try_get_bootstrap_candidates(
+        &self,
+    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
+        rendezvous::get_bootstrap_candidates(self).await
     }
 
-    async fn send_lan_invitation(
+    async fn send_bootstrap_invitation(
         &self,
-        _peer: &LanPeerInfo,
+        _peer: &BootstrapCandidateInfo,
         _invitation_code: &str,
     ) -> Result<(), IntentError> {
-        rendezvous::send_lan_invitation(self, _peer, _invitation_code).await
+        rendezvous::send_bootstrap_invitation(self, _peer, _invitation_code).await
     }
 
     // =========================================================================
@@ -4870,7 +4872,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn try_get_lan_peers_requires_rendezvous_service() {
+    async fn try_get_bootstrap_candidates_requires_rendezvous_service() {
         let authority = AuthorityId::new_from_entropy([22u8; 32]);
         let build_context = EffectContext::new(
             authority,
@@ -4887,7 +4889,7 @@ mod tests {
         let bridge = AgentRuntimeBridge::new(agent);
 
         let error = bridge
-            .try_get_lan_peers()
+            .try_get_bootstrap_candidates()
             .await
             .expect_err("missing rendezvous service should be explicit");
         assert!(

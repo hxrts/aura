@@ -2,6 +2,8 @@ use async_lock::Mutex;
 use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::ui::contract::{ControlId, FieldId, ScreenId, UiReadiness};
 use aura_app::ui::workflows::runtime as runtime_workflows;
+use aura_app::ui_contract::RuntimeFact;
+use aura_app::DUAL_FRONTEND_DEMO_WEB_TABLET_NAME;
 use aura_ui::{AuraUiRoot, RequiredDomId};
 use dioxus::dioxus_core::schedule_update;
 use dioxus::prelude::*;
@@ -20,8 +22,9 @@ use crate::workflows::{
 
 use super::bootstrap::submit_runtime_bootstrap_handoff;
 use super::storage::{
-    active_storage_prefix, load_selected_runtime_identity, logged_optional,
-    selected_runtime_identity_key,
+    active_storage_prefix, clear_demo_tablet_enrollment_code, demo_tablet_enrollment_code_key,
+    dual_demo_web_enabled, load_selected_runtime_identity, logged_optional,
+    persist_demo_tablet_enrollment_code, selected_runtime_identity_key,
 };
 
 #[component]
@@ -110,6 +113,36 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
     let controller_account_ready = controller_snapshot.readiness == UiReadiness::Ready
         && controller_snapshot.screen != ScreenId::Onboarding;
     let account_ready = state.account_ready || controller_account_ready;
+    let dual_demo_enabled = dual_demo_web_enabled();
+    let demo_tablet_storage_key = demo_tablet_enrollment_code_key(&active_storage_prefix());
+    let latest_demo_tablet_code = if dual_demo_enabled {
+        controller_snapshot
+            .runtime_events
+            .iter()
+            .rev()
+            .find_map(|event| match &event.fact {
+                RuntimeFact::DeviceEnrollmentCodeReady {
+                    device_name,
+                    code: Some(code),
+                    ..
+                } if device_name.as_deref() == Some(DUAL_FRONTEND_DEMO_WEB_TABLET_NAME) => {
+                    Some(code.clone())
+                }
+                _ => None,
+            })
+    } else {
+        None
+    };
+
+    use_effect({
+        let latest_demo_tablet_code = latest_demo_tablet_code.clone();
+        let demo_tablet_storage_key = demo_tablet_storage_key.clone();
+        move || {
+            if let Some(code) = latest_demo_tablet_code.clone() {
+                let _ = persist_demo_tablet_enrollment_code(&demo_tablet_storage_key, &code);
+            }
+        }
+    });
 
     if account_ready {
         return rsx! {
@@ -121,6 +154,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
 
     let run_import: Arc<dyn Fn(String)> = Arc::new({
         let controller = controller.clone();
+        let demo_tablet_storage_key = demo_tablet_storage_key.clone();
         let import_error = import_error.clone();
         let importing_code = importing_code.clone();
         move |code: String| {
@@ -136,6 +170,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
 
             let controller = controller.clone();
             let scheduled_controller = controller.clone();
+            let demo_tablet_storage_key = demo_tablet_storage_key.clone();
             if let Err(error) = harness_bridge::schedule_browser_task_next_tick(move || {
                 shared_web_task_owner().spawn_local(async move {
                     let app_core = scheduled_controller.app_core().clone();
@@ -229,6 +264,10 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                     match result {
                         Ok(result) => {
                             if result.accepted {
+                                if dual_demo_web_enabled() {
+                                    let _ =
+                                        clear_demo_tablet_enrollment_code(&demo_tablet_storage_key);
+                                }
                                 web_sys::console::log_1(&"[web-import-device] finalizing_ui".into());
                                 scheduled_controller.info_toast("Device enrollment complete");
                                 scheduled_controller.finalize_account_setup(ScreenId::Neighborhood);
@@ -409,7 +448,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                             button {
                                 id: ControlId::OnboardingCreateAccountButton
                                     .required_dom_id("ControlId::OnboardingCreateAccountButton"),
-                                class: "inline-flex h-10 items-center justify-center rounded-md bg-foreground px-6 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
+                                class: "inline-flex h-10 items-center justify-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50",
                                 disabled: creating_account() || account_name().trim().is_empty(),
                                 onclick: submit_account,
                                 if creating_account() {
@@ -449,7 +488,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                             button {
                                 id: ControlId::OnboardingImportDeviceButton
                                     .required_dom_id("ControlId::OnboardingImportDeviceButton"),
-                                class: "inline-flex h-10 items-center justify-center rounded-md bg-foreground px-6 text-sm font-medium text-background transition-colors disabled:pointer-events-none disabled:opacity-50",
+                                class: "inline-flex h-10 items-center justify-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50",
                                 disabled: importing_code() || import_code().trim().is_empty(),
                                 onclick: submit_import,
                                 if importing_code() {

@@ -77,9 +77,11 @@ pub async fn handle_network(
 
         EffectCommand::ListLanPeers => {
             let now_ms = super::time::current_time_ms(app_core).await;
-            match aura_app::ui::workflows::network::list_lan_peers(app_core, now_ms).await {
+            match aura_app::ui::workflows::network::list_bootstrap_candidates(app_core, now_ms)
+                .await
+            {
                 Ok(peer_list) => {
-                    tracing::info!("Found {} LAN peers", peer_list.len());
+                    tracing::info!("Found {} bootstrap candidates", peer_list.len());
                     Some(Ok(OpResponse::LanPeersListed { peers: peer_list }))
                 }
                 Err(e) => Some(Err(OpError::Failed(e.to_string()))),
@@ -90,12 +92,12 @@ pub async fn handle_network(
             authority_id,
             address,
         } => {
-            // LAN peer invitation flow:
+            // Bootstrap-candidate invitation flow:
             // 1. Create a contact invitation for this peer
             // 2. Export the invite code
-            // 3. Send the code to the peer's address via LAN transport
+            // 3. Send the code to the peer's discovered bootstrap address
             tracing::info!(
-                "Inviting LAN peer: authority={} at address={}",
+                "Inviting bootstrap candidate: authority={} at address={}",
                 authority_id,
                 address
             );
@@ -118,17 +120,17 @@ pub async fn handle_network(
                         authority_id: authority_id.to_string(),
                         address: address.clone(),
                         message: format!(
-                            "LAN invitation queued for {authority_id} at {address} (requires runtime)"
+                            "Bootstrap invitation queued for {authority_id} at {address} (requires runtime)"
                         ),
                     }));
                 }
             };
 
-            // Get the runtime bridge to send the invitation via LAN
+            // Get the runtime bridge to send the invitation via the bootstrap path
             if let Some(runtime) = app_core_guard.runtime() {
-                // Create LanPeerInfo for the bridge call (type from ui::prelude)
-                let peer_info = LanPeerInfo {
+                let peer_info = BootstrapCandidateInfo {
                     authority_id: *authority_id,
+                    origin: BootstrapCandidateOrigin::Lan,
                     address: address.clone(),
                     discovered_at_ms: 0,
                     nickname_suggestion: None,
@@ -137,41 +139,41 @@ pub async fn handle_network(
                 match runtime_workflows::timeout_runtime_call(
                     runtime,
                     "terminal_invite_lan_peer",
-                    "send_lan_invitation",
+                    "send_bootstrap_invitation",
                     Duration::from_secs(5),
-                    || runtime.send_lan_invitation(&peer_info, &code),
+                    || runtime.send_bootstrap_invitation(&peer_info, &code),
                 )
                 .await
                 {
                     Ok(Ok(())) => {
-                        tracing::info!("Sent LAN invitation to {}", address);
+                        tracing::info!("Sent bootstrap invitation to {}", address);
                         Some(Ok(OpResponse::LanInvitationStatus {
                             authority_id: authority_id.to_string(),
                             address: address.clone(),
-                            message: format!("Invitation sent to {address} via LAN"),
+                            message: format!("Invitation sent to {address} via bootstrap discovery"),
                         }))
                     }
                     Ok(Err(e)) => {
-                        tracing::warn!("Failed to send LAN invitation: {}", e);
+                        tracing::warn!("Failed to send bootstrap invitation: {}", e);
                         // Fall back to showing the code for manual sharing
                         Some(Ok(OpResponse::LanInvitationStatus {
                             authority_id: authority_id.to_string(),
                             address: address.clone(),
                             message: format!(
-                                "LAN send failed ({}), share code manually: {}",
+                                "Bootstrap send failed ({}), share code manually: {}",
                                 e,
                                 &code[..50.min(code.len())]
                             ),
                         }))
                     }
                     Err(e) => {
-                        tracing::warn!("Failed to send LAN invitation: {}", e);
+                        tracing::warn!("Failed to send bootstrap invitation: {}", e);
                         // Fall back to showing the code for manual sharing
                         Some(Ok(OpResponse::LanInvitationStatus {
                             authority_id: authority_id.to_string(),
                             address: address.clone(),
                             message: format!(
-                                "LAN send failed ({}), share code manually: {}",
+                                "Bootstrap send failed ({}), share code manually: {}",
                                 e,
                                 &code[..50.min(code.len())]
                             ),

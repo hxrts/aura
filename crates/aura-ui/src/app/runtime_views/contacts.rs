@@ -76,7 +76,9 @@ fn build_contacts_runtime_view(
     let mut lan_peers: Vec<_> = discovered_peers
         .peers
         .into_iter()
-        .filter(|peer| peer.method == aura_app::ui::signals::DiscoveredPeerMethod::Lan)
+        .filter(|peer| {
+            peer.method == aura_app::ui::signals::DiscoveredPeerMethod::BootstrapCandidate
+        })
         .map(|peer| ContactsRuntimePeer {
             authority_id: peer.authority_id,
             address: peer.address,
@@ -197,7 +199,7 @@ mod tests {
                 DiscoveredPeer {
                     authority_id: bob,
                     address: "192.0.2.2:9000".to_string(),
-                    method: DiscoveredPeerMethod::Lan,
+                    method: DiscoveredPeerMethod::BootstrapCandidate,
                     invited: false,
                 },
                 DiscoveredPeer {
