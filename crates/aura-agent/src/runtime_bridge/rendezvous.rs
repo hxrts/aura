@@ -82,19 +82,15 @@ pub(super) async fn get_bootstrap_candidates(
                     "Failed to list bootstrap broker candidates: {error}"
                 ))
             })?;
-        candidates.extend(
-            broker_candidates
-                .into_iter()
-                .filter_map(|candidate| {
-                    Some(BootstrapCandidateInfo {
-                        authority_id: candidate.authority_id()?,
-                        origin: broker_origin(bridge),
-                        address: candidate.address,
-                        discovered_at_ms: candidate.discovered_at_ms,
-                        nickname_suggestion: candidate.nickname_suggestion,
-                    })
-                }),
-        );
+        candidates.extend(broker_candidates.into_iter().filter_map(|candidate| {
+            Some(BootstrapCandidateInfo {
+                authority_id: candidate.authority_id()?,
+                origin: broker_origin(bridge),
+                address: candidate.address,
+                discovered_at_ms: candidate.discovered_at_ms,
+                nickname_suggestion: candidate.nickname_suggestion,
+            })
+        }));
         Ok(candidates)
     } else {
         Err(service_unavailable("rendezvous_service"))
@@ -107,12 +103,25 @@ pub(super) async fn send_bootstrap_invitation(
     invitation_code: &str,
 ) -> Result<(), IntentError> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        rendezvous
-            .send_lan_invitation(&peer.authority_id, &peer.address, invitation_code)
-            .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to send LAN invitation: {}", e))
-            })
+        match peer.origin {
+            BootstrapCandidateOrigin::Lan => rendezvous
+                .send_lan_invitation(&peer.authority_id, &peer.address, invitation_code)
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!("Failed to send LAN invitation: {}", e))
+                }),
+            BootstrapCandidateOrigin::LocalBroker | BootstrapCandidateOrigin::LanBroker => {
+                rendezvous
+                    .send_bootstrap_broker_invitation(peer.authority_id, invitation_code)
+                    .await
+                    .map_err(|e| {
+                        IntentError::internal_error(format!(
+                            "Failed to send bootstrap broker invitation: {}",
+                            e
+                        ))
+                    })
+            }
+        }
     } else {
         Err(service_unavailable("rendezvous_service"))
     }

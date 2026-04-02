@@ -86,21 +86,32 @@ impl BootstrapBrokerCandidateRecord {
     }
 }
 
+/// Wire-format invitation payload relayed by the bootstrap broker.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BootstrapBrokerInvitation {
+    pub recipient_authority_id: String,
+    pub invitation_code: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Default)]
+struct BootstrapBrokerState {
+    candidates: HashMap<String, BootstrapBrokerCandidateRecord>,
+    invitations: HashMap<String, Vec<String>>,
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct LocalBootstrapBrokerService {
     listener: Arc<TcpListener>,
     public_url: String,
     registration_ttl: Duration,
-    shared: Arc<RwLock<HashMap<String, BootstrapBrokerCandidateRecord>>>,
+    shared: Arc<RwLock<BootstrapBrokerState>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl LocalBootstrapBrokerService {
-    pub async fn bind(
-        bind_addr: &str,
-        registration_ttl: Duration,
-    ) -> Result<Self, String> {
+    pub async fn bind(bind_addr: &str, registration_ttl: Duration) -> Result<Self, String> {
         let listener = TcpListener::bind(bind_addr)
             .await
             .map_err(|error| format!("bootstrap broker bind failed ({bind_addr}): {error}"))?;
@@ -112,7 +123,7 @@ impl LocalBootstrapBrokerService {
             listener: Arc::new(listener),
             public_url,
             registration_ttl,
-            shared: Arc::new(RwLock::new(HashMap::new())),
+            shared: Arc::new(RwLock::new(BootstrapBrokerState::default())),
         })
     }
 
@@ -122,7 +133,7 @@ impl LocalBootstrapBrokerService {
 
     pub async fn register(&self, registration: BootstrapBrokerRegistration, now_ms: u64) {
         let key = format!("{}@{}", registration.authority_id, registration.address);
-        self.shared.write().await.insert(
+        self.shared.write().await.candidates.insert(
             key,
             BootstrapBrokerCandidateRecord {
                 authority_id: registration.authority_id,
@@ -135,7 +146,32 @@ impl LocalBootstrapBrokerService {
 
     pub async fn list_candidates(&self, now_ms: u64) -> Vec<BootstrapBrokerCandidateRecord> {
         prune_candidates(&self.shared, now_ms, self.registration_ttl).await;
-        self.shared.read().await.values().cloned().collect()
+        self.shared
+            .read()
+            .await
+            .candidates
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    pub async fn queue_invitation(&self, invitation: BootstrapBrokerInvitation) {
+        self.shared
+            .write()
+            .await
+            .invitations
+            .entry(invitation.recipient_authority_id)
+            .or_default()
+            .push(invitation.invitation_code);
+    }
+
+    pub async fn take_invitations(&self, authority_id: &str) -> Vec<String> {
+        self.shared
+            .write()
+            .await
+            .invitations
+            .remove(authority_id)
+            .unwrap_or_default()
     }
 
     pub fn start(&self, tasks: &TaskGroup) {
@@ -146,37 +182,39 @@ impl LocalBootstrapBrokerService {
         let connection_tasks = tasks.clone();
         let _bootstrap_broker_handle =
             accept_tasks.spawn_named("bootstrap_broker_http", async move {
-            loop {
-                let Ok((stream, _addr)) = listener.accept().await else {
-                    break;
-                };
-                let shared = shared.clone();
-                let connection_tasks = connection_tasks.clone();
-                let _conn_handle =
-                    connection_tasks.spawn_named("bootstrap_broker_conn", async move {
-                        handle_http_connection(stream, shared, registration_ttl).await
-                    });
-            }
-        });
+                loop {
+                    let Ok((stream, _addr)) = listener.accept().await else {
+                        break;
+                    };
+                    let shared = shared.clone();
+                    let connection_tasks = connection_tasks.clone();
+                    let _conn_handle = connection_tasks
+                        .spawn_named("bootstrap_broker_conn", async move {
+                            handle_http_connection(stream, shared, registration_ttl).await
+                        });
+                }
+            });
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn prune_candidates(
-    shared: &Arc<RwLock<HashMap<String, BootstrapBrokerCandidateRecord>>>,
+    shared: &Arc<RwLock<BootstrapBrokerState>>,
     now_ms: u64,
     registration_ttl: Duration,
 ) {
     let max_age_ms = registration_ttl.as_millis() as u64;
-    shared.write().await.retain(|_, candidate| {
-        now_ms.saturating_sub(candidate.discovered_at_ms) < max_age_ms
-    });
+    shared
+        .write()
+        .await
+        .candidates
+        .retain(|_, candidate| now_ms.saturating_sub(candidate.discovered_at_ms) < max_age_ms);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn handle_http_connection(
     mut stream: TcpStream,
-    shared: Arc<RwLock<HashMap<String, BootstrapBrokerCandidateRecord>>>,
+    shared: Arc<RwLock<BootstrapBrokerState>>,
     registration_ttl: Duration,
 ) {
     let request = match read_http_request(&mut stream).await {
@@ -216,7 +254,7 @@ async fn handle_http_connection(
 
             let now_ms = physical_time_now_ms();
             let key = format!("{}@{}", registration.authority_id, registration.address);
-            shared.write().await.insert(
+            shared.write().await.candidates.insert(
                 key,
                 BootstrapBrokerCandidateRecord {
                     authority_id: registration.authority_id,
@@ -230,7 +268,7 @@ async fn handle_http_connection(
         ("GET", "/v1/bootstrap/candidates") => {
             let now_ms = physical_time_now_ms();
             prune_candidates(&shared, now_ms, registration_ttl).await;
-            let candidates: Vec<_> = shared.read().await.values().cloned().collect();
+            let candidates: Vec<_> = shared.read().await.candidates.values().cloned().collect();
             match serde_json::to_vec(&candidates) {
                 Ok(body) => {
                     let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
@@ -247,14 +285,59 @@ async fn handle_http_connection(
                 }
             }
         }
+        ("POST", "/v1/bootstrap/invitations") => {
+            let invitation: BootstrapBrokerInvitation = match serde_json::from_slice(&request.body)
+            {
+                Ok(invitation) => invitation,
+                Err(error) => {
+                    let body = format!("invalid invitation payload: {error}");
+                    let _ = write_http_response(
+                        &mut stream,
+                        400,
+                        "text/plain; charset=utf-8",
+                        body.as_bytes(),
+                    )
+                    .await;
+                    return;
+                }
+            };
+            shared
+                .write()
+                .await
+                .invitations
+                .entry(invitation.recipient_authority_id)
+                .or_default()
+                .push(invitation.invitation_code);
+            let _ = write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"").await;
+        }
+        ("GET", path) if path.starts_with("/v1/bootstrap/invitations/") => {
+            let authority_id = path.trim_start_matches("/v1/bootstrap/invitations/");
+            let invitations = shared
+                .write()
+                .await
+                .invitations
+                .remove(authority_id)
+                .unwrap_or_default();
+            match serde_json::to_vec(&invitations) {
+                Ok(body) => {
+                    let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
+                }
+                Err(error) => {
+                    let body = format!("failed to encode invitations: {error}");
+                    let _ = write_http_response(
+                        &mut stream,
+                        500,
+                        "text/plain; charset=utf-8",
+                        body.as_bytes(),
+                    )
+                    .await;
+                }
+            }
+        }
         _ => {
-            let _ = write_http_response(
-                &mut stream,
-                404,
-                "text/plain; charset=utf-8",
-                b"not found",
-            )
-            .await;
+            let _ =
+                write_http_response(&mut stream, 404, "text/plain; charset=utf-8", b"not found")
+                    .await;
         }
     }
 }
@@ -375,6 +458,14 @@ pub fn candidates_endpoint(base_url: &str) -> String {
     format!("{}/v1/bootstrap/candidates", normalize_base_url(base_url))
 }
 
+pub fn invitations_endpoint(base_url: &str, authority_id: &str) -> String {
+    format!(
+        "{}/v1/bootstrap/invitations/{}",
+        normalize_base_url(base_url),
+        authority_id
+    )
+}
+
 pub fn endpoint_is_loopback(raw: &str) -> bool {
     let raw = raw
         .strip_prefix("http://")
@@ -484,6 +575,33 @@ pub async fn fetch_remote_candidates(
         .map_err(|error| format!("broker candidate decode failed: {error}"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn send_remote_invitation(
+    base_url: &str,
+    invitation: &BootstrapBrokerInvitation,
+) -> Result<(), String> {
+    let body = serde_json::to_vec(invitation)
+        .map_err(|error| format!("serialize invitation failed: {error}"))?;
+    let _ = send_native_http_request(
+        "POST",
+        &format!("{}/v1/bootstrap/invitations", normalize_base_url(base_url)),
+        Some(&body),
+    )
+    .await?;
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn take_remote_invitations(
+    base_url: &str,
+    authority_id: &str,
+) -> Result<Vec<String>, String> {
+    let body = send_native_http_request("GET", &invitations_endpoint(base_url, authority_id), None)
+        .await?;
+    serde_json::from_slice(&body)
+        .map_err(|error| format!("broker invitation decode failed: {error}"))
+}
+
 #[cfg(target_arch = "wasm32")]
 pub async fn register_remote_candidate(
     base_url: &str,
@@ -513,6 +631,41 @@ pub async fn fetch_remote_candidates(
         .json::<Vec<BootstrapBrokerCandidateRecord>>()
         .await
         .map_err(|error| format!("broker candidate decode failed: {error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn send_remote_invitation(
+    base_url: &str,
+    invitation: &BootstrapBrokerInvitation,
+) -> Result<(), String> {
+    let body = serde_json::to_string(invitation)
+        .map_err(|error| format!("serialize invitation failed: {error}"))?;
+    gloo_net::http::Request::post(&format!(
+        "{}/v1/bootstrap/invitations",
+        normalize_base_url(base_url)
+    ))
+    .header("content-type", "application/json")
+    .body(body)
+    .map_err(|error| format!("build broker invitation request failed: {error}"))?
+    .send()
+    .await
+    .map_err(|error| format!("broker invitation request failed: {error}"))?;
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn take_remote_invitations(
+    base_url: &str,
+    authority_id: &str,
+) -> Result<Vec<String>, String> {
+    let response = gloo_net::http::Request::get(&invitations_endpoint(base_url, authority_id))
+        .send()
+        .await
+        .map_err(|error| format!("broker invitation request failed: {error}"))?;
+    response
+        .json::<Vec<String>>()
+        .await
+        .map_err(|error| format!("broker invitation decode failed: {error}"))
 }
 
 #[cfg(test)]
@@ -576,7 +729,43 @@ mod tests {
             .await
             .expect("remote client should list");
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].authority_id, "89abcdef-0123-4567-89ab-cdef01234567");
+        assert_eq!(
+            candidates[0].authority_id,
+            "89abcdef-0123-4567-89ab-cdef01234567"
+        );
         assert_eq!(candidates[0].address, "127.0.0.1:40124");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn native_client_round_trips_broker_invitations() {
+        let broker = LocalBootstrapBrokerService::bind("127.0.0.1:0", Duration::from_secs(60))
+            .await
+            .expect("broker should bind");
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("bootstrap_broker_invitation_test"));
+        tokio::task::yield_now().await;
+
+        send_remote_invitation(
+            broker.public_url(),
+            &BootstrapBrokerInvitation {
+                recipient_authority_id: "fedcba98-7654-3210-fedc-ba9876543210".to_string(),
+                invitation_code: "invite-123".to_string(),
+            },
+        )
+        .await
+        .expect("remote invitation send should succeed");
+
+        let invitations =
+            take_remote_invitations(broker.public_url(), "fedcba98-7654-3210-fedc-ba9876543210")
+                .await
+                .expect("remote invitation take should succeed");
+        assert_eq!(invitations, vec!["invite-123".to_string()]);
+
+        let emptied =
+            take_remote_invitations(broker.public_url(), "fedcba98-7654-3210-fedc-ba9876543210")
+                .await
+                .expect("second take should succeed");
+        assert!(emptied.is_empty());
     }
 }

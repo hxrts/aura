@@ -165,7 +165,7 @@ The canonical shared-flow coverage anchors for the current parity-critical user 
 - `scenario12-mixed-device-enrollment-removal-e2e.toml` for device add and remove
 - `shared-notifications-and-authority.toml` and `shared-settings-parity.toml` for the remaining shared settings, authority, and navigation flows
 
-Channel creation parity now includes single-participant note-to-self channels. Shared-flow and frontend-conformance coverage must not treat "has at least one contact" as a prerequisite for opening chat creation. TUI and web shells should expose the same semantic create-channel path when the only available participant is self, and scenario coverage should keep that path distinct from pairwise or group-member invitation flows.
+Note-to-self is a real AMP channel provisioned at account bootstrap, not a display-only entry. It appears as a first-class channel backed by the runtime from first use, with its own context, deterministic channel ID, and standard message delivery. Channel creation parity coverage must not treat "has at least one contact" as a prerequisite for opening chat creation. TUI and web shells should expose the same semantic create-channel path when the only available participant is self, and scenario coverage should keep that path distinct from pairwise or group-member invitation flows.
 
 The notifications shared-flow anchor remains navigation-only. Parity coverage for notifications navigation requires the TUI and web shells to expose the same semantic screen transition and detail-view contract, but notification empty-state copy is informational only and must not introduce parity-critical invitation or recovery actions outside the canonical shared workflows.
 

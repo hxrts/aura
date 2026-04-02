@@ -4,6 +4,7 @@ use aura_app::ui::contract::{ControlId, FieldId, ScreenId, UiReadiness};
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui_contract::RuntimeFact;
 use aura_app::DUAL_FRONTEND_DEMO_WEB_TABLET_NAME;
+use aura_app::{BootstrapCandidateInfo, BootstrapCandidateOrigin};
 use aura_ui::{AuraUiRoot, RequiredDomId};
 use dioxus::dioxus_core::schedule_update;
 use dioxus::prelude::*;
@@ -26,6 +27,7 @@ use super::storage::{
     dual_demo_web_enabled, load_selected_runtime_identity, logged_optional,
     persist_demo_tablet_enrollment_code, selected_runtime_identity_key,
 };
+use crate::browser_promises::browser_sleep_ms;
 
 #[component]
 pub(crate) fn App() -> Element {
@@ -109,6 +111,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
     let mut import_error = use_signal(|| Option::<WebUiError>::None);
     let importing_code = use_signal(|| false);
     let mut auto_import_started = use_signal(|| false);
+    let bootstrap_candidates = use_signal(Vec::<BootstrapCandidateInfo>::new);
     let controller_snapshot = controller.semantic_model_snapshot();
     let controller_account_ready = controller_snapshot.readiness == UiReadiness::Ready
         && controller_snapshot.screen != ScreenId::Onboarding;
@@ -151,6 +154,51 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
             }
         };
     }
+
+    use_effect({
+        let app_core = controller.app_core().clone();
+        move || {
+            let mut bootstrap_candidates = bootstrap_candidates;
+            let app_core = app_core.clone();
+            spawn(async move {
+                loop {
+                    match runtime_workflows::require_runtime(&app_core).await {
+                        Ok(runtime) => {
+                            if let Ok(candidates) = runtime.try_get_bootstrap_candidates().await {
+                                bootstrap_candidates.set(candidates);
+                            }
+                        }
+                        Err(error) => {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::BootstrapController,
+                                    "WEB_BOOTSTRAP_CANDIDATE_RUNTIME_UNAVAILABLE",
+                                    error.to_string(),
+                                ),
+                            );
+                            break;
+                        }
+                    }
+
+                    if let Err(error) = browser_sleep_ms(
+                        2_000,
+                        WebUiOperation::BootstrapController,
+                        "WEB_BOOTSTRAP_CANDIDATE_SLEEP_UNAVAILABLE",
+                        "WEB_BOOTSTRAP_CANDIDATE_SLEEP_SCHEDULE_FAILED",
+                        "WEB_BOOTSTRAP_CANDIDATE_SLEEP_DROPPED",
+                        "window unavailable for bootstrap candidate polling",
+                        "bootstrap candidate polling sleep",
+                    )
+                    .await
+                    {
+                        log_web_error("warn", &error);
+                        break;
+                    }
+                }
+            });
+        }
+    });
 
     let run_import: Arc<dyn Fn(String)> = Arc::new({
         let controller = controller.clone();
@@ -463,6 +511,37 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                             div { class: "h-px flex-1 bg-border" }
                             span { class: "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground", "or" }
                             div { class: "h-px flex-1 bg-border" }
+                        }
+                        if !bootstrap_candidates().is_empty() {
+                            div { class: "rounded-md border border-border bg-muted/20 p-3 space-y-2",
+                                div {
+                                    class: "space-y-1",
+                                    p { class: "text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground", "Local devices available for enrollment" }
+                                    p { class: "text-sm text-muted-foreground",
+                                        "Open Aura on one of these runtimes and use its invite action to send a device enrollment code here."
+                                    }
+                                }
+                                ul { class: "space-y-2",
+                                    for candidate in bootstrap_candidates().iter() {
+                                        li {
+                                            class: "rounded-sm border border-border bg-background px-3 py-2 text-sm",
+                                            div { class: "font-medium text-foreground",
+                                                "{candidate.nickname_suggestion.clone().unwrap_or_else(|| candidate.authority_id.to_string())}"
+                                            }
+                                            div { class: "text-xs text-muted-foreground",
+                                                {
+                                                    let origin_label = match candidate.origin {
+                                                        BootstrapCandidateOrigin::Lan => "LAN",
+                                                        BootstrapCandidateOrigin::LocalBroker => "Local broker",
+                                                        BootstrapCandidateOrigin::LanBroker => "LAN broker",
+                                                    };
+                                                    format!("{origin_label} • {}", candidate.address)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         // Join an existing account
                         label {

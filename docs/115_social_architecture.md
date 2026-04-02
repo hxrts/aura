@@ -85,7 +85,7 @@ The home structure contains the identifier, storage limit, configuration limits,
 
 ### 3.2 Membership and Participation
 
-Home participation derives from possessing capability bundles, meeting entry requirements defined by policy, and allocating participant-specific storage. In v1, each user belongs to exactly one home.
+Home participation derives from possessing capability bundles, meeting entry requirements defined by policy, and allocating participant-specific storage. In v1, each user belongs to exactly one home. Home creation is user-initiated: accounts do not receive a home automatically at account creation. Instead, a user creates their home from the Neighborhood screen when they are ready to start connecting with others and participating in social features.
 
 Joining a home follows a defined sequence. The authority requests capability. Home governance approves using local policy via Biscuit evaluation and consensus. The authority accepts the capability bundle and allocates storage. Historical home messages sync from current members.
 

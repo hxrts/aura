@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Prevent committing files that match gitignore patterns.
-ignored_staged=$(git diff --cached --name-only --diff-filter=A | while read -r file; do
-  if git check-ignore -q "$file" 2>/dev/null; then
+ignored_staged=$(git diff --cached --name-only | while read -r file; do
+  if git check-ignore --no-index -q "$file" 2>/dev/null; then
     echo "$file"
   fi
 done)

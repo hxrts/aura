@@ -11,15 +11,19 @@
 use super::config_profiles::impl_service_config_profiles;
 use super::service_registry::ServiceRegistry;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
-use crate::runtime::services::bootstrap_broker::{
-    BootstrapBrokerCandidateRecord, BootstrapBrokerConfig, BootstrapBrokerRegistration,
-};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::services::bootstrap_broker::{
-    fetch_remote_candidates, register_remote_candidate,
+    fetch_remote_candidates, register_remote_candidate, send_remote_invitation,
+    take_remote_invitations,
 };
 #[cfg(target_arch = "wasm32")]
-use crate::runtime::services::bootstrap_broker::fetch_remote_candidates;
+use crate::runtime::services::bootstrap_broker::{
+    fetch_remote_candidates, send_remote_invitation, take_remote_invitations,
+};
+use crate::runtime::services::bootstrap_broker::{
+    BootstrapBrokerCandidateRecord, BootstrapBrokerConfig, BootstrapBrokerInvitation,
+    BootstrapBrokerRegistration,
+};
 use crate::runtime::TaskGroup;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::DiscoveryTriggerOutcome;
@@ -588,8 +592,7 @@ impl RendezvousManager {
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        if self.config.bootstrap_broker.enabled
-            && self.config.bootstrap_broker.bind_addr.is_some()
+        if self.config.bootstrap_broker.enabled && self.config.bootstrap_broker.bind_addr.is_some()
         {
             if let Err(error) = self.start_bootstrap_broker(service_tasks.clone()).await {
                 self.shared.owner.take_commands().await;
@@ -1242,6 +1245,62 @@ impl RendezvousManager {
                 })
                 .collect();
             return Ok(candidates);
+        }
+
+        Ok(Vec::new())
+    }
+
+    pub async fn send_bootstrap_broker_invitation(
+        &self,
+        recipient_authority: AuthorityId,
+        invitation_code: &str,
+    ) -> Result<(), RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Err(RendezvousManagerError::BootstrapBroker(
+                "bootstrap broker is disabled".to_string(),
+            ));
+        }
+
+        let invitation = BootstrapBrokerInvitation {
+            recipient_authority_id: recipient_authority.to_string(),
+            invitation_code: invitation_code.to_string(),
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            broker.queue_invitation(invitation).await;
+            return Ok(());
+        }
+
+        if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
+            return send_remote_invitation(base_url, &invitation)
+                .await
+                .map_err(RendezvousManagerError::BootstrapBroker);
+        }
+
+        Err(RendezvousManagerError::BootstrapBroker(
+            "no bootstrap broker endpoint configured".to_string(),
+        ))
+    }
+
+    pub async fn take_bootstrap_broker_invitations(
+        &self,
+    ) -> Result<Vec<String>, RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Ok(Vec::new());
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            return Ok(broker
+                .take_invitations(&self.authority_id.to_string())
+                .await);
+        }
+
+        if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
+            return take_remote_invitations(base_url, &self.authority_id.to_string())
+                .await
+                .map_err(RendezvousManagerError::BootstrapBroker);
         }
 
         Ok(Vec::new())

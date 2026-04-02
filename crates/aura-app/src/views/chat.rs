@@ -31,26 +31,6 @@ pub fn is_note_to_self_channel_name(name: &str) -> bool {
     name.eq_ignore_ascii_case(NOTE_TO_SELF_CHANNEL_NAME)
 }
 
-/// Construct the canonical self channel for the given account authority.
-#[must_use]
-pub fn note_to_self_channel(authority_id: AuthorityId) -> Channel {
-    Channel {
-        id: note_to_self_channel_id(authority_id),
-        context_id: Some(note_to_self_context_id(authority_id)),
-        name: NOTE_TO_SELF_CHANNEL_NAME.to_string(),
-        topic: Some(NOTE_TO_SELF_CHANNEL_TOPIC.to_string()),
-        channel_type: ChannelType::Home,
-        unread_count: 0,
-        is_dm: false,
-        member_ids: Vec::new(),
-        member_count: 1,
-        last_message: None,
-        last_message_time: None,
-        last_activity: 0,
-        last_finalized_epoch: 0,
-    }
-}
-
 // =============================================================================
 // Serde Helper for HashMap<ChannelId, Channel>
 // =============================================================================
@@ -448,28 +428,6 @@ impl ChatState {
 
         self.channels = next_channels;
         self.channel_messages = next_channel_messages;
-    }
-
-    /// Ensure the canonical self channel exists for the given account authority.
-    pub fn ensure_note_to_self_channel(&mut self, authority_id: AuthorityId) {
-        let channel_id = note_to_self_channel_id(authority_id);
-        let canonical = note_to_self_channel(authority_id);
-        if let Some(channel) = self.channels.get_mut(&channel_id) {
-            if channel.name.trim().is_empty() || channel.name == channel.id.to_string() {
-                channel.name = canonical.name;
-            }
-            if channel.topic.is_none() {
-                channel.topic = canonical.topic;
-            }
-            if channel.context_id.is_none() {
-                channel.context_id = canonical.context_id;
-            }
-            if channel.member_count == 0 {
-                channel.member_count = 1;
-            }
-        } else {
-            self.channels.insert(channel_id, canonical);
-        }
     }
 
     /// Remove a channel by ID, returning it if it existed.
