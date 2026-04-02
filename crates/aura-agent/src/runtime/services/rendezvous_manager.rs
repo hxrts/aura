@@ -14,6 +14,10 @@ use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, Service
 use crate::runtime::services::bootstrap_broker::{
     BootstrapBrokerCandidateRecord, BootstrapBrokerConfig, BootstrapBrokerRegistration,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::runtime::services::bootstrap_broker::{
+    fetch_remote_candidates, register_remote_candidate,
+};
 #[cfg(target_arch = "wasm32")]
 use crate::runtime::services::bootstrap_broker::fetch_remote_candidates;
 use crate::runtime::TaskGroup;
@@ -1170,6 +1174,13 @@ impl RendezvousManager {
             return Ok(());
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
+            return register_remote_candidate(base_url, &registration)
+                .await
+                .map_err(RendezvousManagerError::BootstrapBroker);
+        }
+
         #[cfg(target_arch = "wasm32")]
         if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
             return super::bootstrap_broker::register_remote_candidate(base_url, &registration)
@@ -1194,6 +1205,21 @@ impl RendezvousManager {
             let candidates = broker
                 .list_candidates(now_ms)
                 .await
+                .into_iter()
+                .filter(|candidate| {
+                    candidate.authority_id != self.authority_id.to_string()
+                        && seen.insert((candidate.authority_id.clone(), candidate.address.clone()))
+                })
+                .collect();
+            return Ok(candidates);
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
+            let mut seen = HashSet::new();
+            let candidates = fetch_remote_candidates(base_url)
+                .await
+                .map_err(RendezvousManagerError::BootstrapBroker)?
                 .into_iter()
                 .filter(|candidate| {
                     candidate.authority_id != self.authority_id.to_string()

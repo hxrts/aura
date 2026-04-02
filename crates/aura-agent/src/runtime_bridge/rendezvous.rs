@@ -1,9 +1,26 @@
 use super::{service_unavailable, AgentRuntimeBridge};
+use crate::runtime::services::bootstrap_broker::endpoint_is_loopback;
 use aura_app::runtime_bridge::{
     BootstrapCandidateInfo, BootstrapCandidateOrigin, DiscoveryTriggerOutcome, RendezvousStatus,
 };
 use aura_app::IntentError;
 use aura_core::types::identifiers::AuthorityId;
+
+fn broker_origin(bridge: &AgentRuntimeBridge) -> BootstrapCandidateOrigin {
+    let Some(rendezvous) = bridge.agent.runtime().rendezvous() else {
+        return BootstrapCandidateOrigin::LocalBroker;
+    };
+    let broker_config = &rendezvous.config().bootstrap_broker;
+    let endpoint = broker_config
+        .base_url
+        .as_deref()
+        .or(broker_config.bind_addr.as_deref());
+    match endpoint {
+        Some(raw) if endpoint_is_loopback(raw) => BootstrapCandidateOrigin::LocalBroker,
+        Some(_) => BootstrapCandidateOrigin::LanBroker,
+        None => BootstrapCandidateOrigin::LocalBroker,
+    }
+}
 
 pub(super) async fn get_discovered_peers(
     bridge: &AgentRuntimeBridge,
@@ -71,7 +88,7 @@ pub(super) async fn get_bootstrap_candidates(
                 .filter_map(|candidate| {
                     Some(BootstrapCandidateInfo {
                         authority_id: candidate.authority_id()?,
-                        origin: BootstrapCandidateOrigin::LocalBroker,
+                        origin: broker_origin(bridge),
                         address: candidate.address,
                         discovered_at_ms: candidate.discovered_at_ms,
                         nickname_suggestion: candidate.nickname_suggestion,

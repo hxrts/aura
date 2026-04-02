@@ -16,7 +16,6 @@ use crate::views::PendingAccountBootstrap;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workflows::runtime::{execute_with_runtime_retry_budget, workflow_retry_policy};
 use crate::workflows::{
-    context,
     runtime::{
         execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
         warn_workflow_timeout, workflow_timeout_budget,
@@ -362,15 +361,11 @@ pub async fn has_runtime_account_config(
     .map_err(|e| AuraError::from(super::error::runtime_call("check account config", e)))
 }
 
-/// Returns true when runtime bootstrap has produced an active home context.
+/// Returns true when runtime bootstrap has completed (account config exists).
 pub async fn has_runtime_bootstrapped_account(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<bool, AuraError> {
-    match crate::workflows::context::current_home_context(app_core).await {
-        Ok(_) => Ok(true),
-        Err(AuraError::NotFound { .. }) => Ok(false),
-        Err(error) => Err(error),
-    }
+    has_runtime_account_config(app_core).await
 }
 
 /// Persist first-run account configuration for the current runtime authority.
@@ -408,9 +403,9 @@ async fn fail_initialize_runtime_account<T>(
     terminal = "publish_success_with",
     postcondition = "account_created",
     proof = crate::workflows::semantic_facts::AccountCreatedProof,
-    authoritative_inputs = "runtime,home_projection_published",
-    depends_on = "home_created,settings_refreshed,account_refreshed",
-    child_ops = "create_home",
+    authoritative_inputs = "runtime",
+    child_ops = "",
+    depends_on = "settings_refreshed,account_refreshed",
     category = "move_owned"
 )]
 async fn initialize_runtime_account_owned(
@@ -444,19 +439,18 @@ async fn initialize_runtime_account_owned(
         return fail_initialize_runtime_account(owner, error.to_string()).await;
     }
 
-    let home_id = match finalize_runtime_account_bootstrap_inner(
+    if let Err(error) = finalize_runtime_account_bootstrap_inner(
         app_core,
         pending_bootstrap.nickname_suggestion,
     )
     .await
     {
-        Ok(home_id) => home_id,
-        Err(error) => return fail_initialize_runtime_account(owner, error.to_string()).await,
-    };
+        return fail_initialize_runtime_account(owner, error.to_string()).await;
+    }
 
     owner
         .publish_success_with(
-            crate::workflows::semantic_facts::issue_account_created_proof(home_id),
+            crate::workflows::semantic_facts::issue_account_created_proof(),
         )
         .await?;
     Ok(())
@@ -524,37 +518,27 @@ async fn ensure_note_to_self_on_login(app_core: &Arc<RwLock<AppCore>>) {
 ///
 /// This path is used when a frontend has already persisted explicit bootstrap
 /// identity state and then restarts into a real runtime that must finish
-/// provisioning local home state, signing keys, and reactive projections.
+/// provisioning signing keys, the Note-to-self channel, and reactive projections.
 pub async fn finalize_runtime_account_bootstrap(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
 ) -> Result<(), AuraError> {
-    finalize_runtime_account_bootstrap_inner(app_core, nickname_suggestion)
-        .await
-        .map(|_| ())
+    finalize_runtime_account_bootstrap_inner(app_core, nickname_suggestion).await
 }
 
 async fn finalize_runtime_account_bootstrap_inner(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
-) -> Result<aura_core::ChannelId, AuraError> {
-    let nickname_suggestion = validate_nickname_suggestion(&nickname_suggestion)
+) -> Result<(), AuraError> {
+    let _nickname_suggestion = validate_nickname_suggestion(&nickname_suggestion)
         .map_err(|error| AuraError::invalid(error.to_string()))?;
-    let home_name = format!("{nickname_suggestion}'s Home");
-    let authority_id = {
+    let _authority_id = {
         let core = app_core.read().await;
         core.runtime()
             .map(|runtime| runtime.authority_id())
             .or_else(|| core.authority().copied())
     }
     .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
-    let home_id = run_account_bootstrap_stage(
-        app_core,
-        "create_home",
-        ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
-        || async { context::create_home(app_core, Some(home_name.clone()), None).await },
-    )
-    .await?;
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -637,7 +621,7 @@ async fn finalize_runtime_account_bootstrap_inner(
             super::messaging::ensure_runtime_note_to_self_channel(
                 app_core,
                 &runtime,
-                authority_id,
+                _authority_id,
                 timestamp_ms,
             )
             .await?;
@@ -660,16 +644,7 @@ async fn finalize_runtime_account_bootstrap_inner(
         || async { system::refresh_account(app_core).await },
     )
     .await?;
-    run_account_bootstrap_stage(
-        app_core,
-        "ensure_local_home_projection",
-        ACCOUNT_RUNTIME_QUERY_TIMEOUT,
-        || async {
-            context::ensure_local_home_projection(app_core, home_id, home_name, authority_id).await
-        },
-    )
-    .await?;
-    Ok(home_id)
+    Ok(())
 }
 
 // =============================================================================

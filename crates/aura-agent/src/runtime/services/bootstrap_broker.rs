@@ -363,19 +363,125 @@ fn physical_time_now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-#[cfg(target_arch = "wasm32")]
 fn normalize_base_url(base_url: &str) -> String {
     base_url.trim_end_matches('/').to_string()
 }
 
-#[cfg(target_arch = "wasm32")]
 pub fn register_endpoint(base_url: &str) -> String {
     format!("{}/v1/bootstrap/register", normalize_base_url(base_url))
 }
 
-#[cfg(target_arch = "wasm32")]
 pub fn candidates_endpoint(base_url: &str) -> String {
     format!("{}/v1/bootstrap/candidates", normalize_base_url(base_url))
+}
+
+pub fn endpoint_is_loopback(raw: &str) -> bool {
+    let raw = raw
+        .strip_prefix("http://")
+        .or_else(|| raw.strip_prefix("https://"))
+        .unwrap_or(raw);
+    let host = raw
+        .split('/')
+        .next()
+        .unwrap_or(raw)
+        .split(':')
+        .next()
+        .unwrap_or(raw);
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|addr| addr.is_loopback())
+            .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_http_endpoint(url: &str) -> Result<(String, String), String> {
+    let without_scheme = url
+        .strip_prefix("http://")
+        .ok_or_else(|| format!("unsupported bootstrap broker url (expected http://): {url}"))?;
+    let (host_port, path) = match without_scheme.split_once('/') {
+        Some((host_port, path)) => (host_port.to_string(), format!("/{}", path)),
+        None => (without_scheme.to_string(), "/".to_string()),
+    };
+    if host_port.is_empty() {
+        return Err(format!("bootstrap broker url missing host: {url}"));
+    }
+    Ok((host_port, path))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn send_native_http_request(
+    method: &str,
+    url: &str,
+    body: Option<&[u8]>,
+) -> Result<Vec<u8>, String> {
+    let (host_port, path) = parse_http_endpoint(url)?;
+    let mut stream = TcpStream::connect(&host_port)
+        .await
+        .map_err(|error| format!("bootstrap broker connect failed ({host_port}): {error}"))?;
+    let body = body.unwrap_or_default();
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n",
+        body.len()
+    );
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|error| format!("bootstrap broker request write failed: {error}"))?;
+    if !body.is_empty() {
+        stream
+            .write_all(body)
+            .await
+            .map_err(|error| format!("bootstrap broker body write failed: {error}"))?;
+    }
+    stream
+        .flush()
+        .await
+        .map_err(|error| format!("bootstrap broker flush failed: {error}"))?;
+
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .await
+        .map_err(|error| format!("bootstrap broker response read failed: {error}"))?;
+    let header_end = response
+        .windows(4)
+        .position(|chunk| chunk == b"\r\n\r\n")
+        .map(|offset| offset + 4)
+        .ok_or_else(|| "bootstrap broker response missing headers".to_string())?;
+    let header_text = std::str::from_utf8(&response[..header_end])
+        .map_err(|error| format!("bootstrap broker header decode failed: {error}"))?;
+    let status = header_text
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| "bootstrap broker response missing status".to_string())?;
+    if !(200..300).contains(&status) {
+        let body_text = String::from_utf8_lossy(&response[header_end..]).to_string();
+        return Err(format!("bootstrap broker returned {status}: {body_text}"));
+    }
+    Ok(response[header_end..].to_vec())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn register_remote_candidate(
+    base_url: &str,
+    registration: &BootstrapBrokerRegistration,
+) -> Result<(), String> {
+    let body = serde_json::to_vec(registration)
+        .map_err(|error| format!("serialize registration failed: {error}"))?;
+    let _ = send_native_http_request("POST", &register_endpoint(base_url), Some(&body)).await?;
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_remote_candidates(
+    base_url: &str,
+) -> Result<Vec<BootstrapBrokerCandidateRecord>, String> {
+    let body = send_native_http_request("GET", &candidates_endpoint(base_url), None).await?;
+    serde_json::from_slice(&body)
+        .map_err(|error| format!("broker candidate decode failed: {error}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -412,6 +518,8 @@ pub async fn fetch_remote_candidates(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::runtime::TaskSupervisor;
 
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
@@ -441,5 +549,34 @@ mod tests {
                 discovered_at_ms: 42,
             }
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn native_client_round_trips_against_local_broker_http() {
+        let broker = LocalBootstrapBrokerService::bind("127.0.0.1:0", Duration::from_secs(60))
+            .await
+            .expect("broker should bind");
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("bootstrap_broker_test"));
+        tokio::task::yield_now().await;
+
+        register_remote_candidate(
+            broker.public_url(),
+            &BootstrapBrokerRegistration {
+                authority_id: "89abcdef-0123-4567-89ab-cdef01234567".to_string(),
+                address: "127.0.0.1:40124".to_string(),
+                nickname_suggestion: Some("Browser".to_string()),
+            },
+        )
+        .await
+        .expect("remote client should register");
+
+        let candidates = fetch_remote_candidates(broker.public_url())
+            .await
+            .expect("remote client should list");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].authority_id, "89abcdef-0123-4567-89ab-cdef01234567");
+        assert_eq!(candidates[0].address, "127.0.0.1:40124");
     }
 }
