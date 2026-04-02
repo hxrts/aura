@@ -395,6 +395,24 @@ real admission, evidence, transition, or simulation semantics. It must not be
 used for onion data-plane forwarding, per-hop `Move` envelopes, cover traffic,
 or ordinary transport forwarding.
 
+The current adaptive-privacy Telltale control-plane inventory is:
+
+- `AnonymousPathEstablishProtocol`
+- `MoveReceiptReplyBlockProtocol`
+- `HoldDepositReplyBlockProtocol`
+- `HoldRetrievalReplyBlockProtocol`
+- `HoldAuditReplyBlockProtocol`
+
+Bootstrap and stale-node re-entry remain runtime-local for now. They are still
+hint lookup and cache-refresh logic, not canonical multi-party
+admission/evidence protocols.
+
+These adaptive-privacy control-plane protocols are intentionally
+theorem-pack-free today. Aura does not add a new theorem pack for them until a
+dedicated runtime-admission surface exists beyond ordinary protocol-machine
+admission and the current local control services are no longer the canonical
+executors.
+
 ### Admission Boundary
 
 Aura consumes theorem-pack metadata only through the generated

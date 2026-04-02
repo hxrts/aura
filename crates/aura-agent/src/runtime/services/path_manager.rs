@@ -2,6 +2,11 @@
 //!
 //! Owns reusable anonymous path lifecycle: encrypted setup-object creation,
 //! replay suppression, expiry-bounded path state, and runtime-local path reuse.
+//! The host-local control session remains the live executor until
+//! `crate::adaptive_privacy_control::AnonymousPathEstablishProtocol` is wired
+//! through admitted VM execution. Owner: `path_manager`. Removal condition:
+//! delete the local control state machine once the choreography becomes the
+//! canonical runtime execution path.
 #![allow(dead_code)]
 
 use super::config_profiles::impl_service_config_profiles;

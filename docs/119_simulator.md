@@ -331,6 +331,19 @@ lifecycle in Aura-local simulator scenario state. Use
 - `anonymous_path_establish`
 - `reply_block_accountability`
 
+Those simulator lanes correspond to the current adaptive-privacy control-plane
+protocol inventory in `aura-agent`:
+
+- `AnonymousPathEstablishProtocol`
+- `MoveReceiptReplyBlockProtocol`
+- `HoldDepositReplyBlockProtocol`
+- `HoldRetrievalReplyBlockProtocol`
+- `HoldAuditReplyBlockProtocol`
+
+Bootstrap and stale-node re-entry are not part of these lanes because they
+remain runtime-local bootstrap/hint logic rather than canonical multi-party
+control protocols.
+
 ### Canonical Surface Mapping
 
 Telltale parity lanes use one canonical mapping:

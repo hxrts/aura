@@ -110,6 +110,8 @@ mod token_profiles;
 
 // Handler modules (public for service access)
 #[cfg(feature = "choreo-backend-telltale-machine")]
+pub mod adaptive_privacy_control;
+#[cfg(feature = "choreo-backend-telltale-machine")]
 pub mod handlers;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 mod reconfiguration;

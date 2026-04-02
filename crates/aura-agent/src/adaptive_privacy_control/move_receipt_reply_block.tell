@@ -1,0 +1,22 @@
+module move_receipt_reply_block exposing (MoveReceiptReplyBlockProtocol)
+
+protocol MoveReceiptReplyBlockProtocol =
+  roles AdjacentHop, Verifier
+
+  AdjacentHop { guard_capability = "adaptive_privacy:reply_block:move_receipt:submit_witness"
+              , flow_cost = 15
+              , journal_facts = "move_receipt_witness_submitted" }
+    -> Verifier : MoveReceiptWitnessSubmission of crate.adaptive_privacy_control.MoveReceiptWitnessSubmission
+
+  choice at Verifier
+    | Accepted ->
+        Verifier { guard_capability = "adaptive_privacy:reply_block:move_receipt:accept_witness"
+                 , flow_cost = 10
+                 , journal_facts = "move_receipt_witness_accepted" }
+          -> AdjacentHop : MoveReceiptWitnessAccepted of crate.adaptive_privacy_control.MoveReceiptWitnessAccepted
+
+    | Rejected ->
+        Verifier { guard_capability = "adaptive_privacy:reply_block:move_receipt:reject_witness"
+                 , flow_cost = 10
+                 , journal_facts = "move_receipt_witness_rejected" }
+          -> AdjacentHop : MoveReceiptWitnessRejected of crate.adaptive_privacy_control.MoveReceiptWitnessRejected

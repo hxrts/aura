@@ -3,6 +3,11 @@
 //! Owns shared `Hold` substrate state for deferred delivery and cache replicas:
 //! selector-based retrieval, bounded rotating holder selection, local GC, and
 //! verified-only accountability updates.
+//! The reply-block registry and verified-witness application remain local to
+//! this runtime service until the adaptive-privacy reply-block choreographies
+//! are promoted to the canonical execution path. Owner: `hold_manager`.
+//! Removal condition: delete the parallel local reply-block lifecycle once
+//! choreography execution owns witness submission and decision flow end to end.
 
 use super::config_profiles::impl_service_config_profiles;
 use super::service_registry::ServiceRegistry;

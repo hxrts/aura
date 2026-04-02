@@ -8,6 +8,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use aura_agent::{
+    adaptive_privacy_control::{
+        control_plane_manifests, ADAPTIVE_PRIVACY_CONTROL_PROTOCOLS, CONTROL_PATH_EXCEPTIONS,
+    },
     CoverTrafficGenerator, CoverTrafficGeneratorConfig, HoldManagerConfig, LocalHealthObserver,
     LocalHealthObserverConfig, SelectionManager, SelectionManagerConfig, ServiceRegistry,
 };
@@ -741,6 +744,32 @@ fn phase_six_control_plane_reports_are_archived() {
     assert!(archived
         .values()
         .any(|lane| lane.contains("reply_block_accountability")));
+}
+
+#[test]
+fn adaptive_privacy_control_plane_inventory_matches_telltale_lanes() {
+    let manifests = control_plane_manifests();
+    assert_eq!(manifests.len(), ADAPTIVE_PRIVACY_CONTROL_PROTOCOLS.len());
+    assert!(manifests
+        .iter()
+        .any(|manifest| manifest.protocol_name == "AnonymousPathEstablishProtocol"));
+    assert_eq!(
+        manifests
+            .iter()
+            .filter(|manifest| manifest.protocol_name.contains("ReplyBlockProtocol"))
+            .count(),
+        4,
+        "reply-block accountability should stay grouped under the shared simulator lane"
+    );
+    assert!(TelltaleControlPlaneScenario::phase_six_profiles()
+        .iter()
+        .any(|scenario| scenario.id.contains("anonymous-establish")));
+    assert!(TelltaleControlPlaneScenario::phase_six_profiles()
+        .iter()
+        .any(|scenario| scenario.id.contains("reply-block")));
+    assert!(CONTROL_PATH_EXCEPTIONS
+        .iter()
+        .any(|exception| exception.surface == "bootstrap_reentry"));
 }
 
 #[test]

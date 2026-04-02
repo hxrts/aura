@@ -1,0 +1,22 @@
+module hold_audit_reply_block exposing (HoldAuditReplyBlockProtocol)
+
+protocol HoldAuditReplyBlockProtocol =
+  roles Auditor, Verifier
+
+  Auditor { guard_capability = "adaptive_privacy:reply_block:hold_audit:submit_witness"
+          , flow_cost = 15
+          , journal_facts = "hold_audit_witness_submitted" }
+    -> Verifier : HoldAuditWitnessSubmission of crate.adaptive_privacy_control.HoldAuditWitnessSubmission
+
+  choice at Verifier
+    | Accepted ->
+        Verifier { guard_capability = "adaptive_privacy:reply_block:hold_audit:accept_witness"
+                 , flow_cost = 10
+                 , journal_facts = "hold_audit_witness_accepted" }
+          -> Auditor : HoldAuditWitnessAccepted of crate.adaptive_privacy_control.HoldAuditWitnessAccepted
+
+    | Rejected ->
+        Verifier { guard_capability = "adaptive_privacy:reply_block:hold_audit:reject_witness"
+                 , flow_cost = 10
+                 , journal_facts = "hold_audit_witness_rejected" }
+          -> Auditor : HoldAuditWitnessRejected of crate.adaptive_privacy_control.HoldAuditWitnessRejected

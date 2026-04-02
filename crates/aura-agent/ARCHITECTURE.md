@@ -57,6 +57,18 @@ Summary:
 - Bootstrap discovery is runtime-owned and separate from ordinary rendezvous peer state. Native LAN discovery and broker-backed browser startup both surface `bootstrap candidates`, but those candidates must not be published as ordinary peers until enrollment/acceptance completes.
 - The actor-owned runtime service set includes rendezvous descriptor selection for `Establish`, the bounded `MoveManager` for current movement queues, replay suppression, flush scheduling, and congestion state, and the `HoldManager` for shared custody, selector rotation, bounded holder residency, local GC, and verified-only accountability updates.
 - Adaptive privacy runtime-owned services include `SelectionManager`, `LocalHealthObserver`, `CoverTrafficGenerator`, and `AnonymousPathManager`; they own local health smoothing, weighted selection, cover planning, and anonymous established-path lifecycle inside `aura-agent`.
+- `src/adaptive_privacy_control.rs` owns the Telltale-native protocol
+  definitions for adaptive-privacy control-plane execution only:
+  `AnonymousPathEstablishProtocol`, `MoveReceiptReplyBlockProtocol`,
+  `HoldDepositReplyBlockProtocol`, `HoldRetrievalReplyBlockProtocol`, and
+  `HoldAuditReplyBlockProtocol`.
+- Those adaptive-privacy control-plane choreographies remain theorem-pack-free
+  until Aura has a dedicated runtime-admission surface beyond ordinary
+  protocol-machine admission and the current local runtime executors have been
+  removed.
+- Bootstrap and stale-node re-entry remain runtime-local in `aura-agent`
+  because they are still broker/hint lookup and cache-refresh logic, not
+  canonical multi-party admission/evidence protocols.
 - `LocalSelectionProfile` is runtime-local. It must not be published as authoritative shared state, surfaced through frontend-facing shared contracts, or mirrored into Layer 5 facts. The sanctioned query surface is the runtime-owned `ServiceRegistry` selection snapshot path.
 - `SelectionManager` fuses `Neighborhood Plane` and `Web of Trust Plane`
   permit inputs with descriptor snapshots, local health, and runtime budgets.
