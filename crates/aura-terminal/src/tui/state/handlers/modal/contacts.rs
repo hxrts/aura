@@ -138,7 +138,7 @@ pub(super) fn handle_import_invitation_key_queue(
     let has_demo_carol_code = !state.contacts.demo_carol_code.is_empty();
     let empty_code = modal_state.code.is_empty();
 
-    // Demo shortcuts: Ctrl+A / Ctrl+L fill Alice/Carol invite codes.
+    // Demo shortcuts: a/l, A/L, or Ctrl+A / Ctrl+L fill Alice/Carol invite codes.
     //
     // These are handled at the state machine layer so they work consistently
     // for the Contacts invitation import workflow.
@@ -156,22 +156,21 @@ pub(super) fn handle_import_invitation_key_queue(
         empty_code && has_demo_alice_code && matches!(key.code, KeyCode::Char('A'));
     let is_demo_shift_l =
         empty_code && has_demo_carol_code && matches!(key.code, KeyCode::Char('L'));
-    let is_demo_digit_1 =
-        empty_code && has_demo_alice_code && matches!(key.code, KeyCode::Char('1'));
-    let is_demo_digit_2 =
-        empty_code && has_demo_carol_code && matches!(key.code, KeyCode::Char('2'));
-
+    let is_demo_lower_a =
+        empty_code && has_demo_alice_code && matches!(key.code, KeyCode::Char('a'));
+    let is_demo_lower_l =
+        empty_code && has_demo_carol_code && matches!(key.code, KeyCode::Char('l'));
     if is_ctrl_a
         || is_ctrl_l
+        || is_demo_lower_a
+        || is_demo_lower_l
         || is_demo_shift_a
         || is_demo_shift_l
-        || is_demo_digit_1
-        || is_demo_digit_2
     {
         // Dismiss the demo hint toast since the user used a shortcut
         state.toast_queue.dismiss();
 
-        let code = if is_ctrl_a || is_demo_shift_a || is_demo_digit_1 {
+        let code = if is_ctrl_a || is_demo_lower_a || is_demo_shift_a {
             state.contacts.demo_alice_code.clone()
         } else {
             state.contacts.demo_carol_code.clone()

@@ -41,8 +41,8 @@ pub(super) fn handle_modal_enter(
             };
             if !value.is_empty() {
                 let contact_name = match value {
-                    "1" => "Alice",
-                    "2" => "Carol",
+                    "a" | "A" => "Alice",
+                    "l" | "L" => "Carol",
                     _ => "Alice",
                 };
                 model.ensure_contact(contact_name);
@@ -477,6 +477,31 @@ pub(super) fn handle_modal_char(
     clipboard: &dyn ClipboardPort,
 ) -> bool {
     match modal {
+        ModalState::AcceptContactInvitation => {
+            let Some(shortcuts) = model.demo_contact_shortcuts() else {
+                return false;
+            };
+            let code = match ch {
+                'a' | 'A' => Some(shortcuts.alice_invite_code.clone()),
+                'l' | 'L' => Some(shortcuts.carol_invite_code.clone()),
+                _ => None,
+            };
+            let Some(code) = code else {
+                return false;
+            };
+            let is_empty = matches!(
+                model.active_modal.as_ref(),
+                Some(ActiveModal::AcceptContactInvitation(state)) if state.value.trim().is_empty()
+            );
+            if !is_empty {
+                return false;
+            }
+            if let Some(ActiveModal::AcceptContactInvitation(state)) = model.active_modal.as_mut() {
+                state.value = code;
+                return true;
+            }
+            false
+        }
         ModalState::AddDeviceStep1 => {
             handle_add_device_modal_char(model, ch, clipboard);
             true

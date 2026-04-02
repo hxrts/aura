@@ -337,18 +337,18 @@ mod tests {
     }
 
     #[test]
-    fn accept_invitation_digit_shortcuts_map_to_demo_contacts() {
+    fn accept_invitation_letter_shortcuts_map_to_demo_contacts() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
         model.active_modal = Some(ActiveModal::AcceptContactInvitation(TextModalState {
-            value: "1".to_string(),
+            value: "a".to_string(),
         }));
         apply_named_key(&mut model, "enter", 1, &clipboard);
         assert!(model.contacts.iter().any(|row| row.name == "Alice"));
 
         model.active_modal = Some(ActiveModal::AcceptContactInvitation(TextModalState {
-            value: "2".to_string(),
+            value: "l".to_string(),
         }));
         apply_named_key(&mut model, "enter", 1, &clipboard);
         assert!(model.contacts.iter().any(|row| row.name == "Carol"));

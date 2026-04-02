@@ -358,7 +358,7 @@ pub fn UiModal(
                                             "flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
                                         },
                                         onclick: {
-                                            let handler = on_toggle_selection.clone();
+                                            let handler = on_toggle_selection;
                                             let idx = item.index;
                                             move |_| {
                                                 if let Some(handler) = handler.as_ref() {

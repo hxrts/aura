@@ -16,7 +16,8 @@
 //! - **Accept Invitation (a)**: Accept a contact invite code received out-of-band
 //! - **Send Invitation (n)**: Generate a new invite code to share with others
 //!
-//! In demo mode, Ctrl+A and Ctrl+L fill Alice's and Carol's codes respectively.
+//! In demo mode, `a` and `l` fill Alice's and Carol's codes respectively,
+//! with Ctrl aliases available when the terminal preserves modifiers.
 //!
 //! ## Pure View Component
 //!
