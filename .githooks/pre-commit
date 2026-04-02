@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+# Prevent committing files that match gitignore patterns.
+ignored_staged=$(git diff --cached --name-only --diff-filter=A | while read -r file; do
+  if git check-ignore -q "$file" 2>/dev/null; then
+    echo "$file"
+  fi
+done)
+
+if [[ -n "${ignored_staged}" ]]; then
+  echo "error: gitignored files must not be included in source control:" >&2
+  echo "${ignored_staged}" | sed 's/^/  /' >&2
+  echo "" >&2
+  echo "Remove them with: git reset HEAD <file>" >&2
+  exit 1
+fi
+
 just fmt-check
 just clippy-strict
