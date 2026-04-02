@@ -19,6 +19,10 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
                     padding-top: 1.25rem !important;
                     padding-bottom: 1.25rem !important;
                 }}
+
+                button:focus-visible {{
+                    outline: none;
+                }}
                 "#
             }
             div {
