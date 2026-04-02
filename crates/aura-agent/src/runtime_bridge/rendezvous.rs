@@ -1,5 +1,6 @@
 use super::{service_unavailable, AgentRuntimeBridge};
 use crate::runtime::services::bootstrap_broker::endpoint_is_loopback;
+use crate::runtime::system::register_bootstrap_candidate_with;
 use aura_app::runtime_bridge::{
     BootstrapCandidateInfo, BootstrapCandidateOrigin, DiscoveryTriggerOutcome, RendezvousStatus,
 };
@@ -125,4 +126,23 @@ pub(super) async fn send_bootstrap_invitation(
     } else {
         Err(service_unavailable("rendezvous_service"))
     }
+}
+
+pub(super) async fn refresh_bootstrap_candidate_registration(
+    bridge: &AgentRuntimeBridge,
+) -> Result<(), IntentError> {
+    let Some(rendezvous) = bridge.agent.runtime().rendezvous() else {
+        return Err(service_unavailable("rendezvous_service"));
+    };
+    let Some(lan_transport) = bridge.agent.runtime().effects().lan_transport() else {
+        return Err(service_unavailable("lan_transport_service"));
+    };
+
+    register_bootstrap_candidate_with(rendezvous, lan_transport.as_ref())
+        .await
+        .map_err(|error| {
+            IntentError::internal_error(format!(
+                "Failed to refresh bootstrap candidate registration: {error}"
+            ))
+        })
 }

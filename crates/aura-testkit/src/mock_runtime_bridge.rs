@@ -867,6 +867,10 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(vec![])
     }
 
+    async fn refresh_bootstrap_candidate_registration(&self) -> Result<(), IntentError> {
+        Ok(())
+    }
+
     async fn send_bootstrap_invitation(
         &self,
         _peer: &BootstrapCandidateInfo,

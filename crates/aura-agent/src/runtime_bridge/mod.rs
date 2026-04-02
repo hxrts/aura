@@ -2002,6 +2002,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         rendezvous::get_bootstrap_candidates(self).await
     }
 
+    async fn refresh_bootstrap_candidate_registration(&self) -> Result<(), IntentError> {
+        rendezvous::refresh_bootstrap_candidate_registration(self).await
+    }
+
     async fn send_bootstrap_invitation(
         &self,
         _peer: &BootstrapCandidateInfo,

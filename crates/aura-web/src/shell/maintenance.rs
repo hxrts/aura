@@ -366,6 +366,34 @@ async fn run_background_sync_pass(app_core: Arc<RwLock<AppCore>>) {
                 ),
             );
         }
+        if let Err(error) = yield_browser_maintenance_step(
+            WebUiOperation::BackgroundSync,
+            "WEB_BACKGROUND_SYNC_YIELD_FAILED",
+            "background sync before refresh_bootstrap_candidate_registration",
+        )
+        .await
+        {
+            log_web_error("warn", &error);
+            return;
+        }
+        if let Err(error) = runtime_workflows::timeout_runtime_call(
+            &runtime,
+            "web_background_sync",
+            "refresh_bootstrap_candidate_registration",
+            std::time::Duration::from_secs(3),
+            || runtime.refresh_bootstrap_candidate_registration(),
+        )
+        .await
+        {
+            log_web_error(
+                "warn",
+                &WebUiError::operation(
+                    WebUiOperation::BackgroundSync,
+                    "WEB_BOOTSTRAP_REGISTRATION_REFRESH_FAILED",
+                    error.to_string(),
+                ),
+            );
+        }
     }
     if let Err(error) = yield_browser_maintenance_step(
         WebUiOperation::BackgroundSync,

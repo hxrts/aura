@@ -1147,15 +1147,6 @@ impl RendezvousManager {
             .and_then(|snapshot| snapshot.bootstrap_broker)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    async fn now_ms(&self) -> Result<u64, RendezvousManagerError> {
-        self.time
-            .physical_time()
-            .await
-            .map(|time| time.ts_ms)
-            .map_err(|error| RendezvousManagerError::BootstrapBroker(error.to_string()))
-    }
-
     pub async fn register_bootstrap_candidate(
         &self,
         address: String,
@@ -1172,8 +1163,7 @@ impl RendezvousManager {
         };
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(broker) = self.local_bootstrap_broker().await {
-            let now_ms = self.now_ms().await?;
-            broker.register(registration, now_ms).await;
+            broker.register(registration).await;
             return Ok(());
         }
 
@@ -1203,10 +1193,9 @@ impl RendezvousManager {
 
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(broker) = self.local_bootstrap_broker().await {
-            let now_ms = self.now_ms().await?;
             let mut seen = HashSet::new();
             let candidates = broker
-                .list_candidates(now_ms)
+                .list_candidates()
                 .await
                 .into_iter()
                 .filter(|candidate| {

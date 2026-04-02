@@ -151,7 +151,8 @@ impl LocalBootstrapBrokerService {
         &self.public_url
     }
 
-    pub async fn register(&self, registration: BootstrapBrokerRegistration, now_ms: u64) {
+    pub async fn register(&self, registration: BootstrapBrokerRegistration) {
+        let now_ms = broker_elapsed_ms(&self.shared).await;
         let key = format!("{}@{}", registration.authority_id, registration.address);
         self.shared.write().await.candidates.insert(
             key,
@@ -164,7 +165,8 @@ impl LocalBootstrapBrokerService {
         );
     }
 
-    pub async fn list_candidates(&self, now_ms: u64) -> Vec<BootstrapBrokerCandidateRecord> {
+    pub async fn list_candidates(&self) -> Vec<BootstrapBrokerCandidateRecord> {
+        let now_ms = broker_elapsed_ms(&self.shared).await;
         prune_candidates(&self.shared, now_ms, self.registration_ttl).await;
         self.shared
             .read()
@@ -696,27 +698,21 @@ mod tests {
             .await
             .expect("broker should bind");
         broker
-            .register(
-                BootstrapBrokerRegistration {
-                    authority_id: "01234567-89ab-cdef-0123-456789abcdef".to_string(),
-                    address: "127.0.0.1:40123".to_string(),
-                    nickname_suggestion: Some("Alice".to_string()),
-                },
-                42,
-            )
-            .await;
-
-        let candidates = broker.list_candidates(42).await;
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(
-            candidates[0],
-            BootstrapBrokerCandidateRecord {
+            .register(BootstrapBrokerRegistration {
                 authority_id: "01234567-89ab-cdef-0123-456789abcdef".to_string(),
                 address: "127.0.0.1:40123".to_string(),
                 nickname_suggestion: Some("Alice".to_string()),
-                discovered_at_ms: 42,
-            }
+            })
+            .await;
+
+        let candidates = broker.list_candidates().await;
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].authority_id,
+            "01234567-89ab-cdef-0123-456789abcdef"
         );
+        assert_eq!(candidates[0].address, "127.0.0.1:40123");
+        assert_eq!(candidates[0].nickname_suggestion.as_deref(), Some("Alice"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -868,6 +868,12 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
     ) -> Result<Vec<BootstrapCandidateInfo>, IntentError>;
 
+    /// Refresh this runtime's bootstrap-candidate self-registration.
+    ///
+    /// Browser runtimes use this to advertise themselves to a broker-backed
+    /// startup discovery plane after the broker becomes reachable.
+    async fn refresh_bootstrap_candidate_registration(&self) -> Result<(), IntentError>;
+
     /// Send an invitation to a bootstrap candidate.
     ///
     /// Sends an invite code directly to a discovered bootstrap candidate.
@@ -1805,6 +1811,12 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
         Err(IntentError::no_agent(
             "Bootstrap candidates not available in offline mode",
+        ))
+    }
+
+    async fn refresh_bootstrap_candidate_registration(&self) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Bootstrap registration not available in offline mode",
         ))
     }
 
