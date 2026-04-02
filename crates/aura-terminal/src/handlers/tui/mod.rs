@@ -21,8 +21,8 @@ use std::time::Duration;
 use async_lock::RwLock;
 use aura_agent::core::config::{NetworkConfig, StorageConfig};
 use aura_agent::{
-    core::default_context_id_for_authority, AgentBuilder, AgentConfig, AuraAgent, EffectContext,
-    SyncManagerConfig,
+    core::default_context_id_for_authority, AgentBuilder, AgentConfig, AuraAgent,
+    BootstrapBrokerConfig, EffectContext, SyncManagerConfig,
 };
 use aura_app::ui::prelude::*;
 use aura_app::ui::types::{BootstrapEvent, BootstrapEventKind, BootstrapSurface};
@@ -246,6 +246,7 @@ impl RuntimeLaunchSpec<'_> {
             ..AgentConfig::default()
         };
         harness_lan_discovery_override(&mut config);
+        bootstrap_broker_override(&mut config);
         config
     }
 
@@ -303,6 +304,23 @@ fn harness_lan_discovery_override(current: &mut aura_agent::core::config::AgentC
     current.lan_discovery.bind_addr = bind_addr;
     current.lan_discovery.broadcast_addr = broadcast_addr;
     current.lan_discovery.port = port;
+}
+
+fn bootstrap_broker_override(current: &mut aura_agent::core::config::AgentConfig) {
+    let bind_addr = std::env::var("AURA_BOOTSTRAP_BROKER_BIND").ok();
+    let base_url = std::env::var("AURA_BOOTSTRAP_BROKER_URL").ok();
+    if bind_addr.is_none() && base_url.is_none() {
+        return;
+    }
+
+    let mut broker = BootstrapBrokerConfig::default().enabled(true);
+    if let Some(bind_addr) = bind_addr {
+        broker = broker.with_bind_addr(bind_addr);
+    }
+    if let Some(base_url) = base_url {
+        broker = broker.with_base_url(base_url);
+    }
+    current.bootstrap_broker = broker;
 }
 
 fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {

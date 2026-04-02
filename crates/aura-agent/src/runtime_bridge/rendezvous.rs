@@ -45,7 +45,7 @@ pub(super) async fn get_bootstrap_candidates(
     bridge: &AgentRuntimeBridge,
 ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        Ok(rendezvous
+        let mut candidates: Vec<BootstrapCandidateInfo> = rendezvous
             .list_lan_discovered_peers()
             .await
             .into_iter()
@@ -56,7 +56,29 @@ pub(super) async fn get_bootstrap_candidates(
                 discovered_at_ms: peer.discovered_at_ms,
                 nickname_suggestion: peer.descriptor.nickname_suggestion.clone(),
             })
-            .collect())
+            .collect();
+        let broker_candidates = rendezvous
+            .list_bootstrap_broker_candidates()
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!(
+                    "Failed to list bootstrap broker candidates: {error}"
+                ))
+            })?;
+        candidates.extend(
+            broker_candidates
+                .into_iter()
+                .filter_map(|candidate| {
+                    Some(BootstrapCandidateInfo {
+                        authority_id: candidate.authority_id()?,
+                        origin: BootstrapCandidateOrigin::LocalBroker,
+                        address: candidate.address,
+                        discovered_at_ms: candidate.discovered_at_ms,
+                        nickname_suggestion: candidate.nickname_suggestion,
+                    })
+                }),
+        );
+        Ok(candidates)
     } else {
         Err(service_unavailable("rendezvous_service"))
     }

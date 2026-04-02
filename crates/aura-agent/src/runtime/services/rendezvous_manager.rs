@@ -11,6 +11,11 @@
 use super::config_profiles::impl_service_config_profiles;
 use super::service_registry::ServiceRegistry;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
+use crate::runtime::services::bootstrap_broker::{
+    BootstrapBrokerCandidateRecord, BootstrapBrokerConfig, BootstrapBrokerRegistration,
+};
+#[cfg(target_arch = "wasm32")]
+use crate::runtime::services::bootstrap_broker::fetch_remote_candidates;
 use crate::runtime::TaskGroup;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::DiscoveryTriggerOutcome;
@@ -32,11 +37,15 @@ use aura_rendezvous::{
 };
 use cfg_if::cfg_if;
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::bootstrap_broker::LocalBootstrapBrokerService;
 use super::lan_discovery::{LanDiscoveryMetrics, LanDiscoveryService};
 use super::service_actor::{
     validate_actor_transition, ActorLifecyclePhase, ActorOwnedServiceRoot, ServiceActorHandle,
@@ -68,6 +77,9 @@ pub struct RendezvousManagerConfig {
 
     /// LAN discovery configuration
     pub lan_discovery: LanDiscoveryConfig,
+
+    /// Bootstrap broker configuration
+    pub bootstrap_broker: BootstrapBrokerConfig,
 }
 
 impl Default for RendezvousManagerConfig {
@@ -80,6 +92,7 @@ impl Default for RendezvousManagerConfig {
             cleanup_interval: Duration::from_secs(60),
             default_transport_hints: Vec::new(),
             lan_discovery: LanDiscoveryConfig::default(),
+            bootstrap_broker: BootstrapBrokerConfig::default(),
         }
     }
 }
@@ -100,6 +113,7 @@ impl_service_config_profiles!(RendezvousManagerConfig {
                 enabled: false, // Disabled by default in tests
                 ..Default::default()
             },
+            bootstrap_broker: BootstrapBrokerConfig::default(),
         }
     }
 
@@ -129,6 +143,12 @@ impl RendezvousManagerConfig {
     /// Enable or disable LAN discovery
     pub fn lan_discovery_enabled(mut self, enabled: bool) -> Self {
         self.lan_discovery.enabled = enabled;
+        self
+    }
+
+    /// Set bootstrap broker configuration.
+    pub fn with_bootstrap_broker(mut self, config: BootstrapBrokerConfig) -> Self {
+        self.bootstrap_broker = config;
         self
     }
 }
@@ -173,12 +193,16 @@ pub enum RendezvousManagerError {
     LanInvitationSend(#[source] aura_effects::NetworkError),
     #[error("LAN discovery not running")]
     LanDiscoveryUnavailable,
+    #[error("bootstrap broker operation failed: {0}")]
+    BootstrapBroker(String),
 }
 
 struct RendezvousState {
     status: RendezvousManagerState,
     service: Option<Arc<RendezvousService>>,
     lan_discovery: Option<Arc<LanDiscoveryService>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    bootstrap_broker: Option<Arc<LocalBootstrapBrokerService>>,
     lan_discovered_peers: HashMap<AuthorityId, DiscoveredPeer>,
 }
 
@@ -187,6 +211,8 @@ struct RendezvousSnapshot {
     status: RendezvousManagerState,
     service: Option<Arc<RendezvousService>>,
     lan_discovery: Option<Arc<LanDiscoveryService>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    bootstrap_broker: Option<Arc<LocalBootstrapBrokerService>>,
 }
 
 enum RendezvousCommand {
@@ -202,7 +228,16 @@ enum RendezvousCommand {
         service: Arc<LanDiscoveryService>,
         reply: oneshot::Sender<()>,
     },
+    #[cfg(not(target_arch = "wasm32"))]
+    InstallBootstrapBroker {
+        service: Arc<LocalBootstrapBrokerService>,
+        reply: oneshot::Sender<()>,
+    },
     ClearLanDiscovery {
+        reply: oneshot::Sender<()>,
+    },
+    #[cfg(not(target_arch = "wasm32"))]
+    ClearBootstrapBroker {
         reply: oneshot::Sender<()>,
     },
     PruneLanPeers {
@@ -232,6 +267,8 @@ impl RendezvousState {
             status: RendezvousManagerState::Running,
             service: Some(service),
             lan_discovery: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            bootstrap_broker: None,
             lan_discovered_peers: HashMap::new(),
         }
     }
@@ -407,6 +444,8 @@ impl RendezvousManager {
                             status: state.status,
                             service: state.service.clone(),
                             lan_discovery: state.lan_discovery.clone(),
+                            #[cfg(not(target_arch = "wasm32"))]
+                            bootstrap_broker: state.bootstrap_broker.clone(),
                         });
                     }
                     RendezvousCommand::CacheDiscoveredPeer {
@@ -431,8 +470,18 @@ impl RendezvousManager {
                         state.lan_discovery = Some(service);
                         let _ = reply.send(());
                     }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    RendezvousCommand::InstallBootstrapBroker { service, reply } => {
+                        state.bootstrap_broker = Some(service);
+                        let _ = reply.send(());
+                    }
                     RendezvousCommand::ClearLanDiscovery { reply } => {
                         state.lan_discovery = None;
+                        let _ = reply.send(());
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    RendezvousCommand::ClearBootstrapBroker { reply } => {
+                        state.bootstrap_broker = None;
                         let _ = reply.send(());
                     }
                     RendezvousCommand::PruneLanPeers {
@@ -534,6 +583,23 @@ impl RendezvousManager {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.config.bootstrap_broker.enabled
+            && self.config.bootstrap_broker.bind_addr.is_some()
+        {
+            if let Err(error) = self.start_bootstrap_broker(service_tasks.clone()).await {
+                self.shared.owner.take_commands().await;
+                self.shared
+                    .owner
+                    .set_state(RendezvousManagerState::Failed)
+                    .await;
+                let _ = service_tasks
+                    .shutdown_with_timeout(Self::SHUTDOWN_TIMEOUT)
+                    .await;
+                return Err(error);
+            }
+        }
+
         self.shared.owner.install_tasks(service_tasks).await;
 
         tracing::info!(
@@ -563,6 +629,8 @@ impl RendezvousManager {
             .await;
 
         self.stop_lan_discovery().await;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.stop_bootstrap_broker().await;
         self.shared.owner.take_commands().await;
 
         let task_shutdown_error = if let Some(tasks) = self.shared.owner.take_tasks().await {
@@ -1022,6 +1090,135 @@ impl RendezvousManager {
             port = self.config.lan_discovery.port,
             "LAN discovery stopped"
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn start_bootstrap_broker(&self, tasks: TaskGroup) -> Result<(), ServiceError> {
+        let Some(bind_addr) = self.config.bootstrap_broker.bind_addr.as_deref() else {
+            return Ok(());
+        };
+
+        let broker = LocalBootstrapBrokerService::bind(
+            bind_addr,
+            self.config.bootstrap_broker.registration_ttl(),
+        )
+        .await
+        .map_err(|error| ServiceError::startup_failed(self.name(), error))?;
+        broker.start(&tasks);
+        let broker = Arc::new(broker);
+        self.command_handle()
+            .await?
+            .request(|reply| RendezvousCommand::InstallBootstrapBroker {
+                service: broker.clone(),
+                reply,
+            })
+            .await?;
+
+        tracing::info!(
+            event = "runtime.service.rendezvous.bootstrap_broker_started",
+            bind_addr,
+            public_url = %broker.public_url(),
+            "Bootstrap broker started"
+        );
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn stop_bootstrap_broker(&self) {
+        if let Ok(commands) = self.command_handle().await {
+            let _ = commands
+                .request(|reply| RendezvousCommand::ClearBootstrapBroker { reply })
+                .await;
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn local_bootstrap_broker(&self) -> Option<Arc<LocalBootstrapBrokerService>> {
+        self.snapshot()
+            .await
+            .ok()
+            .and_then(|snapshot| snapshot.bootstrap_broker)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn now_ms(&self) -> Result<u64, RendezvousManagerError> {
+        self.time
+            .physical_time()
+            .await
+            .map(|time| time.ts_ms)
+            .map_err(|error| RendezvousManagerError::BootstrapBroker(error.to_string()))
+    }
+
+    pub async fn register_bootstrap_candidate(
+        &self,
+        address: String,
+        nickname_suggestion: Option<String>,
+    ) -> Result<(), RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Ok(());
+        }
+
+        let registration = BootstrapBrokerRegistration {
+            authority_id: self.authority_id.to_string(),
+            address,
+            nickname_suggestion,
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            let now_ms = self.now_ms().await?;
+            broker.register(registration, now_ms).await;
+            return Ok(());
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
+            return super::bootstrap_broker::register_remote_candidate(base_url, &registration)
+                .await
+                .map_err(RendezvousManagerError::BootstrapBroker);
+        }
+
+        Ok(())
+    }
+
+    pub async fn list_bootstrap_broker_candidates(
+        &self,
+    ) -> Result<Vec<BootstrapBrokerCandidateRecord>, RendezvousManagerError> {
+        if !self.config.bootstrap_broker.enabled {
+            return Ok(Vec::new());
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(broker) = self.local_bootstrap_broker().await {
+            let now_ms = self.now_ms().await?;
+            let mut seen = HashSet::new();
+            let candidates = broker
+                .list_candidates(now_ms)
+                .await
+                .into_iter()
+                .filter(|candidate| {
+                    candidate.authority_id != self.authority_id.to_string()
+                        && seen.insert((candidate.authority_id.clone(), candidate.address.clone()))
+                })
+                .collect();
+            return Ok(candidates);
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
+            let mut seen = std::collections::HashSet::new();
+            let candidates = fetch_remote_candidates(base_url)
+                .await
+                .map_err(RendezvousManagerError::BootstrapBroker)?
+                .into_iter()
+                .filter(|candidate| {
+                    candidate.authority_id != self.authority_id.to_string()
+                        && seen.insert((candidate.authority_id.clone(), candidate.address.clone()))
+                })
+                .collect();
+            return Ok(candidates);
+        }
+
+        Ok(Vec::new())
     }
 
     /// Set the descriptor to announce on LAN

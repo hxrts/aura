@@ -25,7 +25,8 @@ cfg_if! {
 
         pub(crate) use shell::{
             active_storage_prefix, clear_pending_device_enrollment_code, clear_storage_key,
-            device_enrollment_bootstrap_name, harness_instance_id, harness_mode_enabled,
+            bootstrap_broker_url, device_enrollment_bootstrap_name,
+            dual_demo_web_enabled, harness_instance_id, harness_mode_enabled,
             load_pending_account_bootstrap, load_pending_device_enrollment_code,
             load_selected_runtime_identity, logged_optional, pending_account_bootstrap_key,
             pending_device_enrollment_code_key, persist_pending_device_enrollment_code,

@@ -11,6 +11,7 @@ use crate::error::{log_web_error, WebUiError};
 const WEB_STORAGE_PREFIX: &str = "aura_";
 const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
 const DEMO_SURFACE_QUERY_KEY: &str = "__aura_demo_surface";
+const BOOTSTRAP_BROKER_QUERY_KEY: &str = "__aura_bootstrap_broker";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WebStorageScope {
@@ -236,12 +237,20 @@ pub(crate) fn harness_mode_enabled() -> bool {
 }
 
 pub(crate) fn demo_surface() -> Option<String> {
+    query_value(DEMO_SURFACE_QUERY_KEY)
+}
+
+pub(crate) fn bootstrap_broker_url() -> Option<String> {
+    query_value(BOOTSTRAP_BROKER_QUERY_KEY)
+}
+
+fn query_value(target_key: &str) -> Option<String> {
     let window = web_sys::window()?;
     let search = window.location().search().ok()?;
     let query = search.strip_prefix('?').unwrap_or(&search);
     for pair in query.split('&') {
         if let Some((key, value)) = pair.split_once('=') {
-            if key == DEMO_SURFACE_QUERY_KEY && !value.is_empty() {
+            if key == target_key && !value.is_empty() {
                 return Some(value.to_string());
             }
         }

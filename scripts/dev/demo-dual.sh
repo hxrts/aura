@@ -104,6 +104,9 @@ browser_log="$logs_dir/browser-launch.log"
 web_pid_file="$pids_dir/web-static.pid"
 meta_file="$pids_dir/demo-meta.env"
 web_url="http://127.0.0.1:${web_port}/"
+bootstrap_broker_port="43102"
+bootstrap_broker_url="http://127.0.0.1:${bootstrap_broker_port}"
+web_app_url="${web_url}?__aura_demo_surface=web&__aura_bootstrap_broker=${bootstrap_broker_url}"
 tui_device_id="demo:tui"
 manual_browser_cmd=""
 browser_display_name=""
@@ -208,6 +211,8 @@ write_metadata() {
 MODE=$mode
 WEB_PORT=$web_port
 WEB_URL=$web_url
+WEB_APP_URL=$web_app_url
+BOOTSTRAP_BROKER_URL=$bootstrap_broker_url
 TUI_BIND_ADDRESS=$tui_bind_address
 TUI_DATA_DIR=$tui_data_dir
 TUI_DEVICE_ID=$tui_device_id
@@ -283,9 +288,9 @@ start_web_server() {
 
 set_manual_browser_command() {
   if [[ "$OSTYPE" == darwin* ]]; then
-    manual_browser_cmd="open -na \"Google Chrome\" --args --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_url\""
+    manual_browser_cmd="open -na \"Google Chrome\" --args --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_app_url\""
   else
-    manual_browser_cmd="google-chrome --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_url\""
+    manual_browser_cmd="google-chrome --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_app_url\""
   fi
 }
 
@@ -300,14 +305,14 @@ select_browser() {
     if [[ "$browser" == "auto" || "$browser" == "chrome" ]]; then
       if open -Ra "Google Chrome" >/dev/null 2>&1; then
         browser_display_name="Google Chrome"
-        manual_browser_cmd="open -na \"Google Chrome\" --args --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_url\""
+        manual_browser_cmd="open -na \"Google Chrome\" --args --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_app_url\""
         return 0
       fi
     fi
     if [[ "$browser" == "auto" || "$browser" == "chromium" ]]; then
       if open -Ra "Chromium" >/dev/null 2>&1; then
         browser_display_name="Chromium"
-        manual_browser_cmd="open -na \"Chromium\" --args --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_url\""
+        manual_browser_cmd="open -na \"Chromium\" --args --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_app_url\""
         return 0
       fi
     fi
@@ -326,7 +331,7 @@ select_browser() {
   for candidate in "${candidates[@]}"; do
     if command -v "$candidate" >/dev/null 2>&1; then
       browser_display_name="$candidate"
-      manual_browser_cmd="$candidate --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_url\""
+      manual_browser_cmd="$candidate --user-data-dir=\"$web_profile_dir\" --no-first-run --new-window \"$web_app_url\""
       return 0
     fi
   done
@@ -347,11 +352,11 @@ launch_browser() {
   if ! select_browser; then
     echo "[demo] no Chrome/Chromium found; opening default browser" >&2
     if [[ "$OSTYPE" == darwin* ]]; then
-      open "$web_url" >>"$browser_log" 2>&1 || true
+      open "$web_app_url" >>"$browser_log" 2>&1 || true
     elif command -v xdg-open >/dev/null 2>&1; then
-      xdg-open "$web_url" >>"$browser_log" 2>&1 || true
+      xdg-open "$web_app_url" >>"$browser_log" 2>&1 || true
     else
-      echo "[demo] no browser opener found; open manually: $web_url" >&2
+      echo "[demo] no browser opener found; open manually: $web_app_url" >&2
     fi
     return 0
   fi
@@ -383,7 +388,9 @@ print_runtime_summary() {
 [demo] mode: $mode
 [demo] reset: $reset
 [demo] web url: $web_url
+[demo] web app url: $web_app_url
 [demo] web port: $web_port
+[demo] bootstrap broker: $bootstrap_broker_url
 [demo] web log: $web_log
 [demo] browser profile: $web_profile_dir
 [demo] browser log: $browser_log
@@ -409,6 +416,8 @@ check_tui_prereqs() {
 
 run_tui() {
   check_tui_prereqs
+  export AURA_BOOTSTRAP_BROKER_BIND="127.0.0.1:${bootstrap_broker_port}"
+  export AURA_BOOTSTRAP_BROKER_URL="$bootstrap_broker_url"
   "$repo_root/bin/aura" tui \
     --data-dir "$tui_data_dir" \
     --device-id "$tui_device_id" \

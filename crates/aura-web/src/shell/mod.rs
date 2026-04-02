@@ -14,9 +14,9 @@ pub(crate) use maintenance::{
 };
 pub(crate) use storage::{
     active_storage_prefix, clear_pending_device_enrollment_code, clear_storage_key,
-    harness_instance_id, harness_mode_enabled, load_pending_account_bootstrap,
-    load_pending_device_enrollment_code, load_selected_runtime_identity, logged_optional,
-    pending_account_bootstrap_key, pending_device_enrollment_code_key,
-    persist_pending_device_enrollment_code, persist_selected_runtime_identity,
-    selected_runtime_identity_key,
+    bootstrap_broker_url, dual_demo_web_enabled, harness_instance_id, harness_mode_enabled,
+    load_pending_account_bootstrap, load_pending_device_enrollment_code,
+    load_selected_runtime_identity, logged_optional, pending_account_bootstrap_key,
+    pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
+    persist_selected_runtime_identity, selected_runtime_identity_key,
 };

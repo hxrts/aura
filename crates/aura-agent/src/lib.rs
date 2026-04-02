@@ -239,12 +239,14 @@ pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceMana
 
 // Rendezvous service types
 #[cfg(feature = "choreo-backend-telltale-machine")]
-pub use runtime::services::{RendezvousManager, RendezvousManagerConfig};
-#[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{
     CoverTrafficGenerator, CoverTrafficGeneratorConfig, LocalHealthObserver,
     LocalHealthObserverConfig, SelectionManager, SelectionManagerConfig, ServiceRegistry,
 };
+#[cfg(feature = "choreo-backend-telltale-machine")]
+pub use runtime::services::{RendezvousManager, RendezvousManagerConfig};
+#[cfg(feature = "choreo-backend-telltale-machine")]
+pub use runtime::services::bootstrap_broker::BootstrapBrokerConfig;
 
 // Social service types
 #[cfg(feature = "choreo-backend-telltale-machine")]

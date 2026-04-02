@@ -3,6 +3,7 @@
 //! Configuration types for agent runtime behavior, including guardian consensus policy.
 
 use super::guardian::GuardianConsensusPolicy;
+use crate::runtime::services::bootstrap_broker::BootstrapBrokerConfig;
 use crate::runtime::services::rendezvous_manager::RendezvousManagerConfig;
 use aura_core::hash;
 use aura_core::DeviceId;
@@ -57,6 +58,10 @@ pub struct AgentConfig {
     /// LAN discovery configuration
     #[serde(default, skip)]
     pub lan_discovery: LanDiscoveryConfig,
+
+    /// Bootstrap broker configuration for mixed native/browser startup discovery.
+    #[serde(default)]
+    pub bootstrap_broker: BootstrapBrokerConfig,
 }
 
 /// Storage configuration
@@ -175,6 +180,7 @@ impl Default for AgentConfig {
             choreography: ChoreographyConfig::default(),
             guardian: GuardianConsensusPolicy::default(),
             lan_discovery: LanDiscoveryConfig::default(),
+            bootstrap_broker: BootstrapBrokerConfig::default(),
         }
     }
 }
@@ -225,12 +231,20 @@ impl AgentConfig {
 
     /// Get a rendezvous manager config with LAN discovery settings from this agent config
     pub fn rendezvous_config(&self) -> RendezvousManagerConfig {
-        RendezvousManagerConfig::default().with_lan_discovery(self.lan_discovery.clone())
+        RendezvousManagerConfig::default()
+            .with_lan_discovery(self.lan_discovery.clone())
+            .with_bootstrap_broker(self.bootstrap_broker.clone())
     }
 
     /// Enable LAN discovery
     pub fn with_lan_discovery_enabled(mut self, enabled: bool) -> Self {
         self.lan_discovery.enabled = enabled;
+        self
+    }
+
+    /// Configure bootstrap broker usage for browser-involved startup discovery.
+    pub fn with_bootstrap_broker(mut self, config: BootstrapBrokerConfig) -> Self {
+        self.bootstrap_broker = config;
         self
     }
 }

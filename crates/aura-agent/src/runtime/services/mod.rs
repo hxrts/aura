@@ -8,6 +8,7 @@
 pub mod auth_manager;
 pub mod authority_manager;
 pub mod authority_state;
+pub mod bootstrap_broker;
 pub mod ceremony_runner;
 pub mod ceremony_tracker;
 mod config_profiles;

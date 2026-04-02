@@ -1556,6 +1556,22 @@ pub(crate) async fn publish_lan_descriptor_with(
     let descriptor = require_published_lan_descriptor(result, device_id)?;
     install_lan_descriptor(rendezvous_manager, descriptor).await?;
 
+    if let Some(address) = websocket_addrs
+        .first()
+        .cloned()
+        .or_else(|| tcp_addrs.first().cloned())
+    {
+        if let Err(error) = rendezvous_manager
+            .register_bootstrap_candidate(address, None)
+            .await
+        {
+            tracing::debug!(
+                error = %error,
+                "Failed to register bootstrap candidate after publishing LAN descriptor"
+            );
+        }
+    }
+
     Ok(())
 }
 

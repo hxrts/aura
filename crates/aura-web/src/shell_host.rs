@@ -8,6 +8,7 @@ use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
 use aura_app::ui::workflows::system as system_workflows;
+use aura_app::{dual_frontend_web_demo_shortcuts, DUAL_FRONTEND_DEMO_WEB_TABLET_NAME};
 use aura_app::{AppConfig, AppCore};
 use aura_core::types::identifiers::AuthorityId;
 use aura_ui::UiController;
@@ -26,13 +27,15 @@ use crate::shell::{cancel_generation_maintenance_loops, spawn_generation_mainten
 use crate::task_owner::shared_web_task_owner;
 use crate::web_clipboard::WebClipboardAdapter;
 use crate::{
-    active_storage_prefix, clear_storage_key, harness_instance_id, harness_mode_enabled,
-    load_pending_account_bootstrap, load_pending_device_enrollment_code,
+    active_storage_prefix, clear_storage_key, dual_demo_web_enabled, harness_instance_id,
+    harness_mode_enabled, load_pending_account_bootstrap, load_pending_device_enrollment_code,
     load_selected_runtime_identity, logged_optional, pending_account_bootstrap_key,
     pending_device_enrollment_code_key, persist_selected_runtime_identity,
     selected_runtime_identity_key, submit_runtime_bootstrap_handoff,
+    bootstrap_broker_url,
     workflows::{self, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest, RebootstrapPolicy},
 };
+use aura_agent::BootstrapBrokerConfig;
 
 thread_local! {
     static HARNESS_UI_SNAPSHOT_PUBLISH_COUNT: Cell<u64> = const { Cell::new(0) };
@@ -585,10 +588,15 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
                 });
         let authority_id = runtime_identity.authority_id;
         let device_id = runtime_identity.device_id;
-        let config = aura_agent::core::AgentConfig {
+        let mut config = aura_agent::core::AgentConfig {
             device_id,
             ..Default::default()
         };
+        if let Some(base_url) = bootstrap_broker_url() {
+            config.bootstrap_broker = BootstrapBrokerConfig::default()
+                .enabled(true)
+                .with_base_url(base_url);
+        }
         phase.advance_to(BootstrapPhase::BuildAgent)?;
         let agent = Arc::new(
             AgentBuilder::web()
@@ -719,6 +727,17 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
                 });
             })),
         ));
+        if dual_demo_web_enabled() {
+            let shortcuts = dual_frontend_web_demo_shortcuts();
+            controller.configure_demo_contact_shortcuts(
+                shortcuts.alice_invite_code,
+                shortcuts.carol_invite_code,
+            );
+            controller.configure_demo_device_shortcut(
+                DUAL_FRONTEND_DEMO_WEB_TABLET_NAME,
+                shortcuts.tablet_invitee_authority_id,
+            );
+        }
         phase.advance_to(BootstrapPhase::ReconcilePendingEnrollment)?;
         if let Some(pending_code) = pending_device_enrollment_code
             .as_ref()
