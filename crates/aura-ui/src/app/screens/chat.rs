@@ -127,11 +127,10 @@ pub(super) fn ChatScreen(
                                                 .to_string(),
                                         ),
                                         label: "Edit".to_string(),
-                                        variant: ButtonVariant::Secondary,
+                                        variant: ButtonVariant::Primary,
                                         onclick: {
-                                            let edit_controller = controller.clone();
                                             move |_| {
-                                                edit_controller.send_action_keys("e");
+                                                controller.send_action_keys("e");
                                                 render_tick.set(render_tick() + 1);
                                             }
                                         }
@@ -299,7 +298,7 @@ pub(super) fn ChatScreen(
                                                     .to_string()
                                             ),
                                             label: "Retry".to_string(),
-                                            variant: ButtonVariant::Secondary,
+                                            variant: ButtonVariant::Primary,
                                             onclick: {
                                                 let active_channel = active_channel.clone();
                                                 move |_| {

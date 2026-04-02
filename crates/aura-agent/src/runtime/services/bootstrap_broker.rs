@@ -17,6 +17,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::RwLock;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::Instant;
 
 /// Broker configuration for mixed native/browser bootstrap discovery.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,10 +96,22 @@ pub struct BootstrapBrokerInvitation {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct BootstrapBrokerState {
     candidates: HashMap<String, BootstrapBrokerCandidateRecord>,
     invitations: HashMap<String, Vec<String>>,
+    started_at: Instant,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl BootstrapBrokerState {
+    fn new() -> Self {
+        Self {
+            candidates: HashMap::new(),
+            invitations: HashMap::new(),
+            started_at: Instant::now(),
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -123,7 +137,7 @@ impl LocalBootstrapBrokerService {
             listener: Arc::new(listener),
             public_url,
             registration_ttl,
-            shared: Arc::new(RwLock::new(BootstrapBrokerState::default())),
+            shared: Arc::new(RwLock::new(BootstrapBrokerState::new())),
         })
     }
 
@@ -188,9 +202,9 @@ impl LocalBootstrapBrokerService {
                     };
                     let shared = shared.clone();
                     let connection_tasks = connection_tasks.clone();
-                    let _conn_handle = connection_tasks
-                        .spawn_named("bootstrap_broker_conn", async move {
-                            handle_http_connection(stream, shared, registration_ttl).await
+                    let _conn_handle =
+                        connection_tasks.spawn_named("bootstrap_broker_conn", async move {
+                            handle_http_connection(stream, shared, registration_ttl).await;
                         });
                 }
             });
@@ -252,7 +266,7 @@ async fn handle_http_connection(
                     }
                 };
 
-            let now_ms = physical_time_now_ms();
+            let now_ms = broker_elapsed_ms(&shared).await;
             let key = format!("{}@{}", registration.authority_id, registration.address);
             shared.write().await.candidates.insert(
                 key,
@@ -266,7 +280,7 @@ async fn handle_http_connection(
             let _ = write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"").await;
         }
         ("GET", "/v1/bootstrap/candidates") => {
-            let now_ms = physical_time_now_ms();
+            let now_ms = broker_elapsed_ms(&shared).await;
             prune_candidates(&shared, now_ms, registration_ttl).await;
             let candidates: Vec<_> = shared.read().await.candidates.values().cloned().collect();
             match serde_json::to_vec(&candidates) {
@@ -437,13 +451,8 @@ async fn write_http_response(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn physical_time_now_ms() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
+async fn broker_elapsed_ms(shared: &Arc<RwLock<BootstrapBrokerState>>) -> u64 {
+    shared.read().await.started_at.elapsed().as_millis() as u64
 }
 
 fn normalize_base_url(base_url: &str) -> String {

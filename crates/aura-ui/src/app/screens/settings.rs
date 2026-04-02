@@ -9,6 +9,7 @@ pub(super) fn SettingsScreen(
     mut theme: dioxus_shadcn::theme::ThemeContext,
     resolved_scheme: ColorScheme,
 ) -> Element {
+    let demo_device_shortcut = model.demo_device_shortcut().cloned();
     rsx! {
         div {
             class: "grid w-full gap-3 lg:grid-cols-12 lg:h-full lg:min-h-0 lg:[grid-template-rows:minmax(0,1fr)]",
@@ -188,6 +189,23 @@ pub(super) fn SettingsScreen(
                         UiCardFooter {
                             extra_class: None,
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
+                                if let Some(ref shortcut) = demo_device_shortcut {
+                                    UiButton {
+                                        label: format!("Add {}", shortcut.name),
+                                        variant: ButtonVariant::Primary,
+                                        onclick: {
+                                            let controller = controller.clone();
+                                            let name = shortcut.name.clone();
+                                            move |_| {
+                                                controller.set_settings_section(SettingsSection::Devices);
+                                                controller.send_action_keys("a");
+                                                controller.set_modal_field_value(FieldId::DeviceName, &name);
+                                                controller.send_key_named("enter", 1);
+                                                render_tick.set(render_tick() + 1);
+                                            }
+                                        }
+                                    }
+                                }
                                 UiButton {
                                     id: Some(
                                         ControlId::SettingsAddDeviceButton
@@ -214,7 +232,7 @@ pub(super) fn SettingsScreen(
                                             .to_string(),
                                     ),
                                     label: "Import Code".to_string(),
-                                    variant: ButtonVariant::Secondary,
+                                    variant: ButtonVariant::Primary,
                                     onclick: {
                                         let controller = controller.clone();
                                         move |_| {
@@ -315,7 +333,7 @@ pub(super) fn SettingsScreen(
                                             .to_string(),
                                     ),
                                     label: "Configure MFA".to_string(),
-                                    variant: ButtonVariant::Secondary,
+                                    variant: ButtonVariant::Primary,
                                     onclick: {
                                         let controller = controller;
                                         move |_| {
