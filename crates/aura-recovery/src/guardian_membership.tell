@@ -1,64 +1,45 @@
 module guardian_membership_change exposing (GuardianMembershipChange)
 
--- Guardian membership change protocol with link annotations for safe handoff.
--- Links enable typed composition with the guardian_handoff bundle.
-
 protocol GuardianMembershipChange =
   roles ChangeInitiator, Guardian1, Guardian2, Guardian3
 
-  -- Phase 1: Propose membership change to all guardians
-  -- Link: exports proposal/vote endpoints for guardian handoff
   ChangeInitiator { guard_capability = "recovery:membership_change:initiate"
                   , flow_cost = 350
-                  , journal_facts = "membership_change_proposed"
-                  , leakage_budget = "1, 0, 0"
-                  , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
+                  , journal_facts = "membership_change_proposed" }
     -> Guardian1 : ProposeChange of crate.guardian_membership.MembershipProposal
 
   ChangeInitiator { guard_capability = "recovery:membership_change:initiate"
-                  , flow_cost = 350
-                  , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
+                  , flow_cost = 350 }
     -> Guardian2 : ProposeChange of crate.guardian_membership.MembershipProposal
 
   ChangeInitiator { guard_capability = "recovery:membership_change:initiate"
-                  , flow_cost = 350
-                  , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
+                  , flow_cost = 350 }
     -> Guardian3 : ProposeChange of crate.guardian_membership.MembershipProposal
 
-  -- Phase 2: Guardians cast votes
-  -- Link: imports proposal endpoint, exports vote endpoint
   Guardian1 { guard_capability = "recovery:membership_change:vote"
             , flow_cost = 220
-            , journal_facts = "membership_vote_cast"
-            , leakage_budget = "0, 1, 0"
-            , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
+            , journal_facts = "membership_vote_cast" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
   Guardian2 { guard_capability = "recovery:membership_change:vote"
             , flow_cost = 220
-            , journal_facts = "membership_vote_cast"
-            , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
+            , journal_facts = "membership_vote_cast" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
   Guardian3 { guard_capability = "recovery:membership_change:vote"
             , flow_cost = 220
-            , journal_facts = "membership_vote_cast"
-            , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
+            , journal_facts = "membership_vote_cast" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
-  -- Phase 3: Complete change with journal merge
   ChangeInitiator { guard_capability = "recovery:membership_change:complete"
                   , flow_cost = 180
-                  , journal_facts = "membership_change_completed"
-                  , journal_merge = true }
+                  , journal_facts = "membership_change_completed" }
     -> Guardian1 : CompleteChange of crate.guardian_membership.ChangeCompletion
 
   ChangeInitiator { guard_capability = "recovery:membership_change:complete"
-                  , flow_cost = 180
-                  , journal_merge = true }
+                  , flow_cost = 180 }
     -> Guardian2 : CompleteChange of crate.guardian_membership.ChangeCompletion
 
   ChangeInitiator { guard_capability = "recovery:membership_change:complete"
-                  , flow_cost = 180
-                  , journal_merge = true }
+                  , flow_cost = 180 }
     -> Guardian3 : CompleteChange of crate.guardian_membership.ChangeCompletion

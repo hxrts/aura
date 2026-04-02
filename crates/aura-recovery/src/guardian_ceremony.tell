@@ -3,15 +3,12 @@ module guardian_ceremony exposing (GuardianCeremony)
 protocol GuardianCeremony =
   roles Initiator, Guardian1, Guardian2
 
-  -- Phase 1: Propose rotation to all guardians
   Initiator -> Guardian1 : ProposeRotation of crate.guardian_ceremony.CeremonyProposal
   Initiator -> Guardian2 : ProposeRotation of crate.guardian_ceremony.CeremonyProposal
 
-  -- Phase 2: Guardians respond
   Guardian1 -> Initiator : RespondCeremony of crate.guardian_ceremony.CeremonyResponseMsg
   Guardian2 -> Initiator : RespondCeremony of crate.guardian_ceremony.CeremonyResponseMsg
 
-  -- Phase 3: Initiator decides outcome
   choice at Initiator
     | finalize ->
         Initiator -> Guardian1 : CommitCeremony of crate.guardian_ceremony.CeremonyCommit

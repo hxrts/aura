@@ -3,22 +3,18 @@ module recovery_protocol exposing (RecoveryProtocol)
 protocol RecoveryProtocol =
   roles Account, Guardian, Coordinator
 
-  -- Phase 1: Account initiates recovery
   Account { guard_capability = "recovery:initiate"
           , flow_cost = 100 }
     -> Coordinator : InitiateRecovery of crate.RecoveryRequest
 
-  -- Phase 2: Coordinator distributes to guardian
   Coordinator { guard_capability = "recovery:coordinate"
               , flow_cost = 50 }
     -> Guardian : DistributeRecoveryRequest of crate.RecoveryRequest
 
-  -- Phase 3: Guardian submits approval
   Guardian { guard_capability = "recovery:approve"
            , flow_cost = 50 }
     -> Coordinator : SubmitApproval of crate.recovery_protocol.GuardianApproval
 
-  -- Phase 4: Recovery complete
   Coordinator { guard_capability = "recovery:finalize"
               , flow_cost = 100 }
     -> Account : RecoveryComplete of crate.RecoveryOutcome

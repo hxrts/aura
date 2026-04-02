@@ -1,16 +1,11 @@
 module guardian_setup exposing (GuardianSetup)
 
--- Guardian setup protocol: establishes threshold guardian relationships.
--- Initiator invites guardians, receives acceptances, then completes setup.
-
 protocol GuardianSetup =
   roles SetupInitiator, Guardian1, Guardian2, Guardian3
 
-  -- Phase 1: Send invitations to all guardians
   SetupInitiator { guard_capability = "recovery:guardian_setup:initiate"
                  , flow_cost = 300
-                 , journal_facts = "guardian_setup_initiated"
-                 , leakage_budget = "1, 0, 0" }
+                 , journal_facts = "guardian_setup_initiated" }
     -> Guardian1 : SendInvitation of crate.guardian_setup.GuardianInvitation
 
   SetupInitiator { guard_capability = "recovery:guardian_setup:initiate"
@@ -21,11 +16,9 @@ protocol GuardianSetup =
                  , flow_cost = 300 }
     -> Guardian3 : SendInvitation of crate.guardian_setup.GuardianInvitation
 
-  -- Phase 2: Guardians accept invitations
   Guardian1 { guard_capability = "recovery:guardian_setup:accept_invitation"
             , flow_cost = 200
-            , journal_facts = "guardian_setup_accepted"
-            , leakage_budget = "0, 1, 0" }
+            , journal_facts = "guardian_setup_accepted" }
     -> SetupInitiator : AcceptInvitation of crate.guardian_setup.GuardianAcceptance
 
   Guardian2 { guard_capability = "recovery:guardian_setup:accept_invitation"
@@ -38,19 +31,15 @@ protocol GuardianSetup =
             , journal_facts = "guardian_setup_accepted" }
     -> SetupInitiator : AcceptInvitation of crate.guardian_setup.GuardianAcceptance
 
-  -- Phase 3: Complete setup with journal merge
   SetupInitiator { guard_capability = "recovery:guardian_setup:complete"
                  , flow_cost = 150
-                 , journal_facts = "guardian_setup_completed"
-                 , journal_merge = true }
+                 , journal_facts = "guardian_setup_completed" }
     -> Guardian1 : CompleteSetup of crate.guardian_setup.SetupCompletion
 
   SetupInitiator { guard_capability = "recovery:guardian_setup:complete"
-                 , flow_cost = 150
-                 , journal_merge = true }
+                 , flow_cost = 150 }
     -> Guardian2 : CompleteSetup of crate.guardian_setup.SetupCompletion
 
   SetupInitiator { guard_capability = "recovery:guardian_setup:complete"
-                 , flow_cost = 150
-                 , journal_merge = true }
+                 , flow_cost = 150 }
     -> Guardian3 : CompleteSetup of crate.guardian_setup.SetupCompletion
