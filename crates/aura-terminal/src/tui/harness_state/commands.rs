@@ -98,7 +98,7 @@ pub(super) fn map_modal(modal: &QueuedModal) -> Option<ModalId> {
     match modal {
         QueuedModal::Help { .. } => Some(ModalId::Help),
         QueuedModal::ChatCreate(_) => Some(ModalId::CreateChannel),
-        QueuedModal::ChatTopic(_) => Some(ModalId::SetChannelTopic),
+        QueuedModal::ChatTopic(_) => Some(ModalId::EditChannelInfo),
         QueuedModal::ChatInfo(_) => Some(ModalId::ChannelInfo),
         QueuedModal::ContactsNickname(_) => Some(ModalId::EditNickname),
         QueuedModal::ContactsImport(_) => Some(ModalId::AcceptContactInvitation),

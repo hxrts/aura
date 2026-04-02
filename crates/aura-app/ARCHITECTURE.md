@@ -10,7 +10,7 @@ Portable, platform-agnostic application core containing pure business logic (int
 |---|---|
 | Pure workflow logic (intents, reducers, views) | Runtime assembly or lifecycle management (`aura-agent`) |
 | Shared UI contract surfaces (`UiSnapshot`, `RenderHeartbeat`, `SHARED_FLOW_SUPPORT`, etc.) | Direct effect implementations |
-| Shared semantic command-plane types | Long-lived mutable async state (`ActorOwned`) |
+| Shared semantic command-plane types | General long-lived mutable async state (`ActorOwned`) outside the narrow shared frontend task-root primitive |
 | Opaque operation handles and owner tokens | Platform-specific rendering logic (`aura-terminal`, `aura-web`) |
 | Reactive signals (`CHAT_SIGNAL`, `SYNC_STATUS_SIGNAL`, etc.) | Handler composition or multi-handler coordination |
 | `RuntimeBridge`, `OfflineRuntimeBridge`, `QueryHandler`, `ReactiveHandler` | Direct impure I/O or runtime imports from `aura-agent` |
@@ -29,6 +29,7 @@ Portable, platform-agnostic application core containing pure business logic (int
 - **Dependency inversion**: `aura-agent` depends on `aura-app`, never vice versa.
 - **Push-based reactive flow**: Intent -> Journal -> Reduce -> ViewState -> Signal -> UI.
 - **Frontend agnostic**: works with multiple platform frontends.
+- **Shared frontend task-root exception is narrow**: `frontend_primitives::FrontendTaskManager` may own cancellation/spawn state for Layer 7 shells, but `aura-app` must not grow general runtime service ownership.
 - **Shared-flow contract authority**: semantic UI ids, flow support declarations, typed command-plane metadata, and typed diagnostics are defined here.
 - **Shared semantic ownership authority**: parity-critical semantic operation categories, typed terminal lifecycle, and owner-routed handles/tokens are defined here rather than in frontend-local crates.
 - **Contacts relationship authority**: `ContactRelationshipState` and shared friend-management control availability are defined here and derived from runtime-fed projections rather than frontend-local state machines.

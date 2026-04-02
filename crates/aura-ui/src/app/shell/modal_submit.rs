@@ -37,6 +37,13 @@ pub(crate) fn next_device_enrollment_invitee_authority_id(
     controller: &UiController,
     device_name: &str,
 ) -> AuthorityId {
+    if let Some(authority_id) = controller
+        .ui_model()
+        .and_then(|model| model.demo_device_invitee_authority_id(device_name))
+    {
+        return authority_id;
+    }
+
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
     let seed = format!(
@@ -184,7 +191,6 @@ enum SimpleModalSubmitAction {
     AcceptContactInvitation,
     AcceptChannelInvitation,
     CreateInvitation,
-    SetChannelTopic,
     EditNickname,
     RemoveContact,
     RequestRecovery,
@@ -282,9 +288,6 @@ fn classify_modal_submit(
         )),
         Some(ModalState::CreateInvitation) => Some(ModalSubmitClass::SimpleDispatch(
             SimpleModalSubmitAction::CreateInvitation,
-        )),
-        Some(ModalState::SetChannelTopic) => Some(ModalSubmitClass::SimpleDispatch(
-            SimpleModalSubmitAction::SetChannelTopic,
         )),
         Some(ModalState::EditNickname) => Some(ModalSubmitClass::SimpleDispatch(
             SimpleModalSubmitAction::EditNickname,
@@ -924,53 +927,6 @@ fn submit_simple_modal_action(
                     }
                 }
                 tracing::info!("create_invitation rerender");
-            });
-            true
-        }
-        SimpleModalSubmitAction::SetChannelTopic => {
-            let channel_name = chat_runtime.active_channel.trim().to_string();
-            let topic = modal_text_value.trim().to_string();
-            if channel_name.is_empty() {
-                controller.runtime_error_toast("Select a channel first");
-                rerender();
-                return true;
-            }
-
-            let operation = UiLocalOperationOwner::submit(
-                controller.clone(),
-                OperationId::set_channel_topic(),
-                SemanticOperationKind::SetChannelTopic,
-            );
-            let app_core = controller.app_core().clone();
-            let rerender_for_topic = rerender.clone();
-            spawn_ui(async move {
-                let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
-                    Ok(value) => value,
-                    Err(error) => {
-                        operation.fail_with(invitation_command_failure(error.to_string()));
-                        controller.runtime_error_toast(error.to_string());
-                        rerender_for_topic();
-                        return;
-                    }
-                };
-                match messaging_workflows::set_topic_by_name(
-                    &app_core,
-                    &channel_name,
-                    &topic,
-                    timestamp_ms,
-                )
-                .await
-                {
-                    Ok(()) => {
-                        operation.succeed(None);
-                        controller.complete_runtime_modal_success("Topic updated");
-                    }
-                    Err(error) => {
-                        operation.fail_with(invitation_command_failure(error.to_string()));
-                        controller.runtime_error_toast(error.to_string());
-                    }
-                }
-                rerender_for_topic();
             });
             true
         }

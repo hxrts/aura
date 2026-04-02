@@ -25,8 +25,8 @@
 
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    AuthenticationStatus, AuthoritativeModerationStatus, BridgeAuthorityInfo, BridgeDeviceInfo,
-    BootstrapCandidateInfo, CeremonyKind, CeremonyProcessingOutcome, CeremonyStatus,
+    AuthenticationStatus, AuthoritativeModerationStatus, BootstrapCandidateInfo,
+    BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyKind, CeremonyProcessingOutcome, CeremonyStatus,
     DeviceEnrollmentStart, DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationBridgeType,
     InvitationInfo, InvitationMutationOutcome, KeyRotationCeremonyStatus, RendezvousStatus,
     RuntimeBridge, SettingsBridgeState, SyncStatus,
@@ -861,7 +861,9 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(DiscoveryTriggerOutcome::AlreadyRunning)
     }
 
-    async fn try_get_bootstrap_candidates(&self) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
+    async fn try_get_bootstrap_candidates(
+        &self,
+    ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
         Ok(vec![])
     }
 

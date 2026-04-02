@@ -39,9 +39,8 @@ pub use aura_app::ui::contract::ScreenId;
 pub use modal::{
     AccessOverrideModalState, ActiveModal, AddDeviceModalState, AddDeviceWizardStep,
     CapabilityConfigModalState, CreateChannelDetailsField, CreateChannelModalState,
-    CreateChannelWizardStep, CreateInvitationModalState, EditChannelInfoModalState,
-    ModalState, SelectDeviceModalState, TextModalState, ThresholdWizardModalState,
-    ThresholdWizardStep,
+    CreateChannelWizardStep, CreateInvitationModalState, EditChannelInfoModalState, ModalState,
+    SelectDeviceModalState, TextModalState, ThresholdWizardModalState, ThresholdWizardStep,
 };
 pub use settings::{
     AccessOverrideLevel, CapabilityTier, SettingsSection, DEFAULT_CAPABILITY_FULL,
@@ -89,6 +88,18 @@ impl AccessDepth {
             Self::Full => Self::Limited,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DemoContactShortcuts {
+    pub alice_invite_code: String,
+    pub carol_invite_code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DemoDeviceShortcut {
+    pub name: String,
+    pub invitee_authority_id: AuthorityId,
 }
 
 fn demo_authority_id(seed: &str) -> AuthorityId {
@@ -186,6 +197,8 @@ pub struct UiModel {
     pub selected_neighborhood_member_key: Option<NeighborhoodMemberSelectionKey>,
     pub selected_notification_id: Option<NotificationSelectionId>,
     pub contact_details: bool,
+    pub demo_contact_shortcuts: Option<DemoContactShortcuts>,
+    pub demo_device_shortcut: Option<DemoDeviceShortcut>,
 }
 
 macro_rules! modal_state_accessors {
@@ -247,6 +260,8 @@ impl UiModel {
             selected_neighborhood_member_key: None,
             selected_notification_id: None,
             contact_details: false,
+            demo_contact_shortcuts: None,
+            demo_device_shortcut: None,
         }
     }
 
@@ -776,6 +791,45 @@ impl UiModel {
         self.secondary_device_name.as_deref()
     }
 
+    pub fn demo_contact_shortcuts(&self) -> Option<&DemoContactShortcuts> {
+        self.demo_contact_shortcuts.as_ref()
+    }
+
+    pub fn demo_device_shortcut(&self) -> Option<&DemoDeviceShortcut> {
+        self.demo_device_shortcut.as_ref()
+    }
+
+    pub fn configure_demo_contact_shortcuts(
+        &mut self,
+        alice_invite_code: impl Into<String>,
+        carol_invite_code: impl Into<String>,
+    ) {
+        self.demo_contact_shortcuts = Some(DemoContactShortcuts {
+            alice_invite_code: alice_invite_code.into(),
+            carol_invite_code: carol_invite_code.into(),
+        });
+    }
+
+    pub fn configure_demo_device_shortcut(
+        &mut self,
+        name: impl Into<String>,
+        invitee_authority_id: AuthorityId,
+    ) {
+        self.demo_device_shortcut = Some(DemoDeviceShortcut {
+            name: name.into(),
+            invitee_authority_id,
+        });
+    }
+
+    pub fn demo_device_invitee_authority_id(&self, device_name: &str) -> Option<AuthorityId> {
+        self.demo_device_shortcut.as_ref().and_then(|shortcut| {
+            shortcut
+                .name
+                .eq_ignore_ascii_case(device_name)
+                .then_some(shortcut.invitee_authority_id)
+        })
+    }
+
     pub fn set_secondary_device_name(&mut self, value: Option<String>) {
         self.secondary_device_name = value;
     }
@@ -1012,6 +1066,28 @@ impl UiController {
     pub fn remember_invitation_code(&self, code: &str) {
         let mut model = write_model(&self.model);
         model.last_invite_code = Some(code.to_string());
+        drop(model);
+        self.request_rerender();
+    }
+
+    pub fn configure_demo_contact_shortcuts(
+        &self,
+        alice_invite_code: impl Into<String>,
+        carol_invite_code: impl Into<String>,
+    ) {
+        let mut model = write_model(&self.model);
+        model.configure_demo_contact_shortcuts(alice_invite_code, carol_invite_code);
+        drop(model);
+        self.request_rerender();
+    }
+
+    pub fn configure_demo_device_shortcut(
+        &self,
+        name: impl Into<String>,
+        invitee_authority_id: AuthorityId,
+    ) {
+        let mut model = write_model(&self.model);
+        model.configure_demo_device_shortcut(name, invitee_authority_id);
         drop(model);
         self.request_rerender();
     }

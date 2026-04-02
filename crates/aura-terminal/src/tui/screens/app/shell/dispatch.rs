@@ -827,6 +827,7 @@ fn open_chat_modal_from_authoritative_selection(
             if let Some(channel) = channels.get(idx) {
                 let modal_state = crate::tui::state::TopicModalState::for_channel(
                     &channel.id,
+                    &channel.name,
                     channel.topic.as_deref().unwrap_or(""),
                 );
                 new_state

@@ -117,7 +117,7 @@ const CHAT_BINDINGS: &[KeyBinding] = &[
     ),
     KeyBinding::new("n", "n", "New", "Create new channel", "Chat", true),
     KeyBinding::new("o", "o", "Info", "Open channel info", "Chat", true),
-    KeyBinding::new("t", "t", "Topic", "Set channel topic", "Chat", true),
+    KeyBinding::new("e", "e", "Edit", "Edit channel info", "Chat", true),
     KeyBinding::new("r", "r", "Retry", "Retry failed message", "Chat", true),
     KeyBinding::new(
         "Tab",

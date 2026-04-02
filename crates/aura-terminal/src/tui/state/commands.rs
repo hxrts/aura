@@ -180,8 +180,9 @@ pub enum DispatchCommand {
         members: Vec<AuthorityId>,
         threshold_k: ThresholdK,
     },
-    SetChannelTopic {
+    EditChannelInfo {
         channel_id: ChannelId,
+        name: String,
         topic: String,
     },
     DeleteChannel {

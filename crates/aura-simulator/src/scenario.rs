@@ -475,18 +475,23 @@ mod tests {
         AdaptivePrivacyMetric, AdaptivePrivacyValidationProfile, AdaptiveTopologyKind,
         BoundaryScenario, BoundaryScenarioFocus, ControlPlaneFailureMode, HoldValidationProfile,
         MetadataMinimizationFocus, MetadataMinimizationScenario, ObserverInferenceTarget,
-        ObserverModelScenario, OrganicTrafficProfile, ReachableSetSize, SecurityControlTrafficClass,
-        StarvationScenario, SyncOpportunityProfile, TelltaleControlPlaneScenario,
+        ObserverModelScenario, OrganicTrafficProfile, ReachableSetSize,
+        SecurityControlTrafficClass, StarvationScenario, SyncOpportunityProfile,
+        TelltaleControlPlaneScenario,
     };
 
     #[test]
     fn phase_six_validation_matrix_covers_required_dimensions() {
         let matrix = AdaptivePrivacyValidationProfile::phase_six_matrix();
-        assert!(matrix.iter().any(|profile| profile.reachable_set_size == ReachableSetSize::Small));
+        assert!(matrix
+            .iter()
+            .any(|profile| profile.reachable_set_size == ReachableSetSize::Small));
         assert!(matrix
             .iter()
             .any(|profile| profile.reachable_set_size == ReachableSetSize::Medium));
-        assert!(matrix.iter().any(|profile| profile.reachable_set_size == ReachableSetSize::Large));
+        assert!(matrix
+            .iter()
+            .any(|profile| profile.reachable_set_size == ReachableSetSize::Large));
         assert!(matrix
             .iter()
             .any(|profile| profile.topology == AdaptiveTopologyKind::ClusteredHumanSocial));
@@ -496,24 +501,22 @@ mod tests {
         assert!(matrix.iter().any(|profile| profile.partition_heal_cycles));
         assert!(matrix.iter().any(|profile| profile.provider_saturation));
         assert!(matrix.iter().any(|profile| profile.churn_spikes));
-        assert!(matrix.iter().any(
-            |profile| profile.organic_traffic == OrganicTrafficProfile::LowOrganicHighCover
-        ));
+        assert!(matrix
+            .iter()
+            .any(|profile| profile.organic_traffic == OrganicTrafficProfile::LowOrganicHighCover));
         assert!(matrix
             .iter()
             .any(|profile| profile.sync_opportunities == SyncOpportunityProfile::Sparse));
         assert!(matrix
             .iter()
             .any(|profile| profile.sync_opportunities == SyncOpportunityProfile::Heavy));
-        assert!(matrix.iter().any(
-            |profile| profile.hold_profile == HoldValidationProfile::DeferredDeliveryWeakConnectivity
-        ));
-        assert!(matrix.iter().any(
-            |profile| profile.hold_profile == HoldValidationProfile::DistributedCacheSeedingRecovery
-        ));
-        assert!(matrix.iter().any(
-            |profile| profile.organic_traffic == OrganicTrafficProfile::CeremonyLatencyBound
-        ));
+        assert!(matrix.iter().any(|profile| profile.hold_profile
+            == HoldValidationProfile::DeferredDeliveryWeakConnectivity));
+        assert!(matrix.iter().any(|profile| profile.hold_profile
+            == HoldValidationProfile::DistributedCacheSeedingRecovery));
+        assert!(matrix
+            .iter()
+            .any(|profile| profile.organic_traffic == OrganicTrafficProfile::CeremonyLatencyBound));
     }
 
     #[test]
@@ -528,9 +531,12 @@ mod tests {
         assert!(observer_profiles
             .iter()
             .any(|profile| profile.target == ObserverInferenceTarget::IntroductionProvenance));
-        assert!(observer_profiles.iter().any(
-            |profile| profile.target == ObserverInferenceTarget::PartialPathCompromiseLinkage
-        ));
+        assert!(
+            observer_profiles
+                .iter()
+                .any(|profile| profile.target
+                    == ObserverInferenceTarget::PartialPathCompromiseLinkage)
+        );
 
         let starvation_profiles = StarvationScenario::phase_six_profiles();
         assert!(starvation_profiles.iter().any(|profile| {
@@ -539,9 +545,10 @@ mod tests {
         assert!(starvation_profiles.iter().any(|profile| {
             profile.protected_class == SecurityControlTrafficClass::CapabilityTrustUpdates
         }));
-        assert!(starvation_profiles.iter().any(
-            |profile| profile.protected_class == SecurityControlTrafficClass::AccountabilityReplies
-        ));
+        assert!(starvation_profiles
+            .iter()
+            .any(|profile| profile.protected_class
+                == SecurityControlTrafficClass::AccountabilityReplies));
         assert!(starvation_profiles.iter().any(|profile| {
             profile.protected_class == SecurityControlTrafficClass::RetrievalCapabilityRotation
         }));
@@ -550,26 +557,34 @@ mod tests {
     #[test]
     fn phase_six_metadata_control_plane_boundary_and_metric_profiles_are_complete() {
         let metadata_profiles = MetadataMinimizationScenario::phase_six_profiles();
-        assert!(metadata_profiles.iter().any(
-            |profile| profile.focus == MetadataMinimizationFocus::RetrievalNotRecipientAddressed
-        ));
+        assert!(metadata_profiles
+            .iter()
+            .any(|profile| profile.focus
+                == MetadataMinimizationFocus::RetrievalNotRecipientAddressed));
         assert!(metadata_profiles
             .iter()
             .any(|profile| profile.focus == MetadataMinimizationFocus::DeliveryNotMailboxShaped));
 
         let control_plane_profiles = TelltaleControlPlaneScenario::phase_six_profiles();
-        assert!(control_plane_profiles.iter().any(
-            |profile| profile.failure_mode == ControlPlaneFailureMode::TimeoutAndCancellation
-        ));
-        assert!(control_plane_profiles.iter().any(
-            |profile| profile.failure_mode == ControlPlaneFailureMode::WitnessReturnSuccessFailure
-        ));
-        assert!(control_plane_profiles.iter().any(
-            |profile| profile.failure_mode == ControlPlaneFailureMode::StaleOwnerAfterHandoff
-        ));
-        assert!(control_plane_profiles.iter().any(
-            |profile| profile.failure_mode == ControlPlaneFailureMode::ReplayVisibleFailure
-        ));
+        assert!(
+            control_plane_profiles
+                .iter()
+                .any(|profile| profile.failure_mode
+                    == ControlPlaneFailureMode::TimeoutAndCancellation)
+        );
+        assert!(control_plane_profiles
+            .iter()
+            .any(|profile| profile.failure_mode
+                == ControlPlaneFailureMode::WitnessReturnSuccessFailure));
+        assert!(
+            control_plane_profiles
+                .iter()
+                .any(|profile| profile.failure_mode
+                    == ControlPlaneFailureMode::StaleOwnerAfterHandoff)
+        );
+        assert!(control_plane_profiles
+            .iter()
+            .any(|profile| profile.failure_mode == ControlPlaneFailureMode::ReplayVisibleFailure));
 
         let boundary_profiles = BoundaryScenario::phase_six_profiles();
         assert!(boundary_profiles
@@ -584,8 +599,9 @@ mod tests {
         assert!(metrics.contains(&AdaptivePrivacyMetric::SecurityControlTrafficLatencyUnderLoad));
         assert!(metrics.contains(&AdaptivePrivacyMetric::HomeMembershipInferencePrecisionRecall));
         assert!(metrics.contains(&AdaptivePrivacyMetric::ReplyTimingCorrelationPrecisionRecall));
-        assert!(metrics
-            .contains(&AdaptivePrivacyMetric::PartialPathCompromiseLinkagePrecisionRecall));
+        assert!(
+            metrics.contains(&AdaptivePrivacyMetric::PartialPathCompromiseLinkagePrecisionRecall)
+        );
         assert_eq!(metrics.len(), 17);
     }
 }

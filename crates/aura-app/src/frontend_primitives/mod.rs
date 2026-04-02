@@ -20,4 +20,4 @@ pub use submitted_operation::{
     SubmittedOperationPublisher, SubmittedOperationRelease, SubmittedOperationWorkflowError,
     WorkflowHandoffRelease, WorkflowHandoffSubmission,
 };
-pub use task_owner::{FrontendTaskOwner, FrontendTaskRuntime};
+pub use task_owner::{FrontendTaskManager, FrontendTaskOwner, FrontendTaskRuntime};

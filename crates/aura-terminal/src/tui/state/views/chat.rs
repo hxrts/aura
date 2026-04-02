@@ -165,34 +165,42 @@ impl CreateChannelModalState {
     }
 }
 
-/// State for topic edit modal
+/// State for channel edit modal (name + topic)
 ///
 /// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct TopicModalState {
+    /// Channel name input value
+    pub name: String,
     /// Topic input value
     pub value: String,
     /// Channel ID being edited
     pub channel_id: String,
+    /// Active field index (0 = name, 1 = topic)
+    pub active_field: usize,
     /// Error message if any
     pub error: Option<String>,
 }
 
 impl TopicModalState {
-    /// Create initialized state for a channel topic edit
+    /// Create initialized state for a channel edit
     #[must_use]
-    pub fn for_channel(channel_id: &str, current_topic: &str) -> Self {
+    pub fn for_channel(channel_id: &str, current_name: &str, current_topic: &str) -> Self {
         Self {
             channel_id: channel_id.to_string(),
+            name: current_name.to_string(),
             value: current_topic.to_string(),
+            active_field: 0,
             error: None,
         }
     }
 
     /// Reset state (called when dismissed)
     pub fn reset(&mut self) {
+        self.name.clear();
         self.value.clear();
         self.channel_id.clear();
+        self.active_field = 0;
         self.error = None;
     }
 }

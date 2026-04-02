@@ -94,26 +94,27 @@ fn test_chat_create_channel_modal() {
 }
 
 #[test]
-fn test_chat_set_topic_modal() {
+fn test_chat_edit_channel_modal() {
     let mut tui = TestTui::new();
     tui.go_to_screen(Screen::Chat);
 
-    tui.send_char('t');
+    tui.send_char('e');
     tui.assert_dispatch(|d| matches!(d, DispatchCommand::OpenChatTopicModal));
 
     tui.state
         .modal_queue
         .enqueue(QueuedModal::ChatTopic(TopicModalState::for_channel(
-            "ch-123", "",
+            "ch-123", "general", "",
         )));
 
     tui.assert_has_modal();
     assert!(tui.state.is_chat_topic_modal_active());
 
-    tui.type_text("Welcome to the channel!");
+    // Active field starts at 0 (name), type into name field
+    tui.type_text("new-name");
     assert_eq!(
-        tui.state.chat_topic_modal_state().unwrap().value,
-        "Welcome to the channel!"
+        tui.state.chat_topic_modal_state().unwrap().name,
+        "generalnew-name"
     );
 
     tui.clear_commands();
@@ -122,8 +123,8 @@ fn test_chat_set_topic_modal() {
     tui.assert_dispatch(|d| {
         matches!(
             d,
-            DispatchCommand::SetChannelTopic { channel_id, topic }
-                if channel_id == "ch-123" && topic == "Welcome to the channel!"
+            DispatchCommand::EditChannelInfo { channel_id, name, topic }
+                if channel_id == "ch-123" && name == "generalnew-name" && topic.is_empty()
         )
     });
 }

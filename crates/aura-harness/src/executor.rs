@@ -3515,7 +3515,6 @@ fn semantic_modal_name(modal: ModalId) -> &'static str {
         ModalId::AcceptChannelInvitation => "accept_channel_invitation",
         ModalId::CreateHome => "create_home",
         ModalId::CreateChannel => "create_channel",
-        ModalId::SetChannelTopic => "set_channel_topic",
         ModalId::ChannelInfo => "channel_info",
         ModalId::EditNickname => "edit_nickname",
         ModalId::RemoveContact => "remove_contact",

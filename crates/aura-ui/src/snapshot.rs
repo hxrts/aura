@@ -378,13 +378,6 @@ fn apply_modal_overlay(
                 }
             }
         }
-        ModalState::SetChannelTopic => {
-            if row_idx == 0 {
-                *center = "Set Channel Topic".to_string();
-            } else if row_idx == 1 {
-                *center = model.modal_text_value_or_empty();
-            }
-        }
         ModalState::ChannelInfo => {
             if row_idx == 0 {
                 *center = model.modal_hint.clone();

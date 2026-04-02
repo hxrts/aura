@@ -108,7 +108,7 @@ impl FrontendTaskSpawnerImpl {
         }
 
         let cancellation_state = self.cancellation_state.clone();
-        (self.runtime.spawn_local)(Box::pin(async move {
+        (self.runtime.spawn)(Box::pin(async move {
             for waiter in cancellation_state.waiters.drain().await {
                 let _ = waiter.send(());
             }
@@ -159,13 +159,21 @@ impl TaskSpawner for FrontendTaskSpawnerImpl {
 /// Owns a cancellation state and a platform-specific spawn runtime.
 /// On drop (or explicit shutdown), all cancellable tasks are signalled.
 #[derive(Clone, Debug)]
-pub struct FrontendTaskOwner {
+#[aura_macros::actor_root(
+    owner = "shared_frontend_task_manager",
+    domain = "frontend_task_runtime",
+    supervision = "frontend_task_root",
+    category = "actor_owned"
+)]
+pub struct FrontendTaskManager {
     inner: Arc<FrontendTaskSpawnerImpl>,
     owner_liveness: Arc<()>,
     spawner: OwnedTaskSpawner,
 }
 
-impl FrontendTaskOwner {
+pub type FrontendTaskOwner = FrontendTaskManager;
+
+impl FrontendTaskManager {
     #[must_use]
     pub fn new(runtime: FrontendTaskRuntime) -> Self {
         let cancellation_state = Arc::new(FrontendTaskCancellationState::default());
@@ -212,12 +220,17 @@ impl FrontendTaskOwner {
         self.spawner.clone()
     }
 
+    #[must_use]
+    pub fn shutdown_token(&self) -> &OwnedShutdownToken {
+        self.spawner.shutdown_token()
+    }
+
     pub fn shutdown(&self) {
         self.inner.signal_shutdown();
     }
 }
 
-impl Drop for FrontendTaskOwner {
+impl Drop for FrontendTaskManager {
     fn drop(&mut self) {
         if Arc::strong_count(&self.owner_liveness) == 1 {
             self.inner.signal_shutdown();

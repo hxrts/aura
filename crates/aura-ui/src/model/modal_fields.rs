@@ -208,9 +208,6 @@ impl ActiveModal {
                 Some(ModalFieldDescriptor::Direct(FieldId::InvitationCode))
             }
             Self::CreateHome(_) => Some(ModalFieldDescriptor::Direct(FieldId::HomeName)),
-            Self::SetChannelTopic(_) => {
-                Some(ModalFieldDescriptor::Direct(FieldId::CreateChannelTopic))
-            }
             Self::EditNickname(_) => Some(ModalFieldDescriptor::Direct(FieldId::Nickname)),
             Self::ImportDeviceEnrollmentCode(_) => {
                 Some(ModalFieldDescriptor::Direct(FieldId::DeviceImportCode))
@@ -232,7 +229,6 @@ impl ActiveModal {
             Self::AcceptContactInvitation(state)
             | Self::AcceptChannelInvitation(state)
             | Self::CreateHome(state)
-            | Self::SetChannelTopic(state)
             | Self::EditNickname(state)
             | Self::ImportDeviceEnrollmentCode(state) => Some(state.value.clone()),
             Self::CreateChannel(state) => state.text_value(),
@@ -250,7 +246,6 @@ impl ActiveModal {
             Self::AcceptContactInvitation(state)
             | Self::AcceptChannelInvitation(state)
             | Self::CreateHome(state)
-            | Self::SetChannelTopic(state)
             | Self::EditNickname(state)
             | Self::ImportDeviceEnrollmentCode(state) => state.value = value,
             Self::CreateChannel(state) => state.set_text_value(value),

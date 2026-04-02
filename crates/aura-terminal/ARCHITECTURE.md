@@ -29,6 +29,9 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - Terminal interfaces must remain a presentation layer over aura-app.
 - Parity-critical IDs, focus semantics, and action metadata must come from `aura-app::ui_contract`, not frontend-local derivation.
 - Harness mode may add instrumentation or render-stability hooks but must not bypass normal execution semantics for parity-critical flows.
+- Terminal-local async task ownership must reuse the shared frontend task-root
+  from `aura-app::frontend_primitives`; `src/tui/tasks.rs` may add terminal
+  spawn wiring, but it may not keep a forked task-owner implementation.
 - The TUI must expose shared semantic command ingress through its real update/event loop; command handling may not depend on render-time polling.
 - `src/tui/screens/app/shell/dispatch.rs` is the sanctioned event-loop-owned command ingress boundary for shell dispatch preparation, local owner allocation, and shell-state coordination.
 - Direct semantic owner allocation stays behind the sanctioned submit helpers in

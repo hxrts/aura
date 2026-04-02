@@ -63,6 +63,7 @@ aura-maintenance = { path = "../aura-maintenance", version = "0.1.0" }
 aura-chat = { path = "../aura-chat", version = "0.1.0" }
 aura-journal = { path = "../aura-journal", version = "0.1.0" }
 aura-relational = { path = "../aura-relational", version = "0.1.0" }
+aura-macros = { path = "../aura-macros", version = "0.1.0" }
 
 aura-simulator = { path = "../aura-simulator", optional = true }
 aura-testkit = { path = "../aura-testkit", optional = true, features = ["full-effect-system"] }
@@ -95,7 +96,6 @@ arboard = "3"
 
 [dev-dependencies]
 aura-testkit = { path = "../aura-testkit", features = ["full-effect-system"] }
-aura-macros = { path = "../aura-macros" }
 tempfile = { workspace = true }
 insta = "1.34"
 proptest = { workspace = true }

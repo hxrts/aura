@@ -110,18 +110,6 @@ pub(super) fn handle_modal_enter(
                 }
             }
         }
-        ModalState::SetChannelTopic => {
-            let value = match model.active_modal.as_ref() {
-                Some(ActiveModal::SetChannelTopic(state)) => state.value.trim().to_string(),
-                _ => String::new(),
-            };
-            model.set_selected_channel_topic(value);
-            model.toast = Some(ToastState {
-                icon: '✓',
-                message: "Topic updated".to_string(),
-            });
-            dismiss_modal(model);
-        }
         ModalState::EditChannelInfo => {
             if let Some(ActiveModal::EditChannelInfo(state)) = model.active_modal.as_ref() {
                 let topic = state.topic.trim().to_string();

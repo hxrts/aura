@@ -525,6 +525,7 @@ fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<St
     if !is_frontend_portability_path(&path) {
         return Vec::new();
     }
+    let is_frontend_task_owner_adapter = is_frontend_task_owner_adapter_path(&path);
 
     let mut violations = Vec::new();
     let patterns = [
@@ -584,8 +585,11 @@ fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<St
     let filtered_patterns = patterns
         .into_iter()
         .filter(|(pattern, _)| {
-            !(path == "crates/aura-web/src/task_owner.rs"
-                && *pattern == "wasm_bindgen_futures::spawn_local")
+            !(is_frontend_task_owner_adapter
+                && matches!(
+                    *pattern,
+                    "wasm_bindgen_futures::spawn_local" | "tokio::spawn" | "dioxus::prelude::spawn"
+                ))
         })
         .collect::<Vec<_>>();
     scan_line_patterns(
@@ -595,6 +599,52 @@ fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<St
         &ignored_test_lines(syntax),
         &mut violations,
     );
+
+    if is_frontend_task_owner_adapter {
+        if !source.contains("aura_app::frontend_primitives") {
+            violations.push(format_violation(
+                file,
+                Span::call_site(),
+                "frontend shell task-owner modules must delegate to aura-app::frontend_primitives instead of defining standalone ownership roots".to_string(),
+            ));
+        }
+
+        if !source.contains("FrontendTaskRuntime::new(") {
+            violations.push(format_violation(
+                file,
+                Span::call_site(),
+                "frontend shell task-owner modules must construct the shared FrontendTaskRuntime instead of bypassing the sanctioned adapter surface".to_string(),
+            ));
+        }
+
+        for (pattern, message) in [
+            (
+                "impl TaskSpawner for",
+                "frontend shell task-owner modules may not define their own TaskSpawner implementation; reuse the shared frontend task root",
+            ),
+            (
+                "impl CancellationToken for",
+                "frontend shell task-owner modules may not define their own CancellationToken implementation; reuse the shared frontend task root",
+            ),
+            (
+                "OwnedTaskSpawner::new(",
+                "frontend shell task-owner modules may not mint a parallel OwnedTaskSpawner root; reuse aura-app::frontend_primitives",
+            ),
+            (
+                "OwnedShutdownToken::attached(",
+                "frontend shell task-owner modules may not attach a parallel shutdown root; reuse aura-app::frontend_primitives",
+            ),
+        ] {
+            if source.contains(pattern) {
+                violations.push(format_violation(
+                    file,
+                    Span::call_site(),
+                    message.to_string(),
+                ));
+            }
+        }
+    }
+
     violations
 }
 
@@ -726,9 +776,16 @@ fn scan_semantic_bridge_contracts(file: &Path, syntax: &File) -> Vec<String> {
 
 fn is_frontend_portability_path(path: &str) -> bool {
     path.starts_with("crates/aura-app/src/frontend_primitives/")
+        || path == "crates/aura-terminal/src/tui/tasks.rs"
         || path == "crates/aura-terminal/src/tui/semantic_lifecycle.rs"
         || path == "crates/aura-ui/src/semantic_lifecycle.rs"
         || path == "crates/aura-web/src/task_owner.rs"
+}
+
+fn is_frontend_task_owner_adapter_path(path: &str) -> bool {
+    path == "crates/aura-terminal/src/tui/tasks.rs"
+        || path == "crates/aura-web/src/task_owner.rs"
+        || path == "crates/aura-ui/src/task_owner.rs"
 }
 
 fn is_semantic_bridge_contract_path(path: &str) -> bool {
@@ -1390,12 +1447,18 @@ fn is_mock_handler_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_frontend_portability_path, is_semantic_bridge_contract_path};
+    use super::{
+        is_frontend_portability_path, is_frontend_task_owner_adapter_path,
+        is_semantic_bridge_contract_path,
+    };
 
     #[test]
     fn frontend_portability_scope_covers_shared_frontend_owners() {
         assert!(is_frontend_portability_path(
             "crates/aura-app/src/frontend_primitives/task_owner.rs"
+        ));
+        assert!(is_frontend_portability_path(
+            "crates/aura-terminal/src/tui/tasks.rs"
         ));
         assert!(is_frontend_portability_path(
             "crates/aura-terminal/src/tui/semantic_lifecycle.rs"
@@ -1408,6 +1471,22 @@ mod tests {
         ));
         assert!(!is_frontend_portability_path(
             "crates/aura-web/src/harness/install.rs"
+        ));
+    }
+
+    #[test]
+    fn frontend_task_owner_adapter_scope_is_explicit() {
+        assert!(is_frontend_task_owner_adapter_path(
+            "crates/aura-terminal/src/tui/tasks.rs"
+        ));
+        assert!(is_frontend_task_owner_adapter_path(
+            "crates/aura-web/src/task_owner.rs"
+        ));
+        assert!(is_frontend_task_owner_adapter_path(
+            "crates/aura-ui/src/task_owner.rs"
+        ));
+        assert!(!is_frontend_task_owner_adapter_path(
+            "crates/aura-terminal/src/tui/semantic_lifecycle.rs"
         ));
     }
 

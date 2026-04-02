@@ -12,7 +12,9 @@ use aura_agent::{
     LocalHealthObserverConfig, SelectionManager, SelectionManagerConfig, ServiceRegistry,
 };
 use aura_core::effects::RandomCoreEffects;
-use aura_core::service::{LinkEndpoint, LinkProtocol, ProviderCandidate, ProviderEvidence, ServiceFamily};
+use aura_core::service::{
+    LinkEndpoint, LinkProtocol, ProviderCandidate, ProviderEvidence, ServiceFamily,
+};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{
     AuraConformanceArtifactV1, AuraConformanceRunMetadataV1, AuraConformanceSurfaceV1,
@@ -287,7 +289,13 @@ fn move_candidates(profile: &AdaptivePrivacyValidationProfile) -> Vec<ProviderCa
 fn hold_candidates(profile: &AdaptivePrivacyValidationProfile) -> Vec<ProviderCandidate> {
     let signals = profile_signals(profile);
     (0..signals.reachable_candidates.min(4))
-        .map(|index| candidate((index + 21) as u8, ServiceFamily::Hold, ProviderEvidence::Neighborhood))
+        .map(|index| {
+            candidate(
+                (index + 21) as u8,
+                ServiceFamily::Hold,
+                ProviderEvidence::Neighborhood,
+            )
+        })
         .collect()
 }
 
@@ -448,7 +456,8 @@ async fn evaluate_profile(
     if profile_view.move_decision.routing_profile.path_diversity < requirements.min_path_diversity {
         findings.push(format!(
             "path diversity floor too low: required at least {}, observed {}",
-            requirements.min_path_diversity, profile_view.move_decision.routing_profile.path_diversity
+            requirements.min_path_diversity,
+            profile_view.move_decision.routing_profile.path_diversity
         ));
     }
     if profile_view.move_decision.routing_profile.delay_ms > requirements.max_delay_ms {
@@ -477,9 +486,7 @@ async fn evaluate_profile(
     {
         findings.push("low-organic profile fell below synthetic cover floor".to_string());
     }
-    if profile.provider_saturation
-        && profile_view.security_control_floor < 2
-    {
+    if profile.provider_saturation && profile_view.security_control_floor < 2 {
         findings.push("security-control traffic floor dropped below 2".to_string());
     }
 
@@ -492,7 +499,10 @@ async fn evaluate_profile(
         expected_min_rotation_window_ms: requirements.min_rotation_window_ms,
         selected_route_hops,
         selected_delay_ms: profile_view.move_decision.routing_profile.delay_ms,
-        selected_cover_rate_per_second: profile_view.move_decision.routing_profile.cover_rate_per_second,
+        selected_cover_rate_per_second: profile_view
+            .move_decision
+            .routing_profile
+            .cover_rate_per_second,
         selected_path_diversity: profile_view.move_decision.routing_profile.path_diversity,
         synthetic_cover_packets: cover_plan.synthetic_cover_packets,
         hold_retention_ms: hold_config.max_retention_ms,
@@ -584,8 +594,11 @@ fn write_json<T: Serialize>(path: &PathBuf, value: &T) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create artifact parent");
     }
-    fs::write(path, serde_json::to_vec_pretty(value).expect("serialize json"))
-        .expect("write json artifact");
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(value).expect("serialize json"),
+    )
+    .expect("write json artifact");
 }
 
 fn artifact(target: &str, effect_suffixes: &[&str]) -> AuraConformanceArtifactV1 {
@@ -721,8 +734,12 @@ fn phase_six_control_plane_reports_are_archived() {
     }
 
     write_json(&root.join("index.json"), &archived);
-    assert!(archived.values().any(|lane| lane.contains("anonymous_path_establish")));
-    assert!(archived.values().any(|lane| lane.contains("reply_block_accountability")));
+    assert!(archived
+        .values()
+        .any(|lane| lane.contains("anonymous_path_establish")));
+    assert!(archived
+        .values()
+        .any(|lane| lane.contains("reply_block_accountability")));
 }
 
 #[test]

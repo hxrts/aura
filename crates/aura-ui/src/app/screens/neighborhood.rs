@@ -350,7 +350,7 @@ pub(super) fn NeighborhoodScreen(
                                     }
                                     UiButton {
                                         label: "Access Override".to_string(),
-                                        variant: ButtonVariant::Secondary,
+                                        variant: ButtonVariant::Primary,
                                         onclick: move |_| {
                                             detail_access_override_controller.send_action_keys("x");
                                             render_tick.set(render_tick() + 1);
@@ -358,7 +358,7 @@ pub(super) fn NeighborhoodScreen(
                                     }
                                     UiButton {
                                         label: "Capability Config".to_string(),
-                                        variant: ButtonVariant::Secondary,
+                                        variant: ButtonVariant::Primary,
                                         onclick: move |_| {
                                             detail_capability_controller.send_action_keys("p");
                                             render_tick.set(render_tick() + 1);

@@ -12,7 +12,7 @@ use crate::tui::screens::Screen;
 
 use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::QueuedModal;
-use super::super::views::{ChatFocus, DetailFocus};
+use super::super::views::ChatFocus;
 use super::super::TuiState;
 
 /// Handle a mouse event
@@ -160,9 +160,15 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
                 return;
             }
             QueuedModal::ChatTopic(modal_state) => {
-                modal_state
-                    .value
-                    .push_str(truncate_paste(&modal_state.value, text));
+                if modal_state.active_field == 0 {
+                    modal_state
+                        .name
+                        .push_str(truncate_paste(&modal_state.name, text));
+                } else {
+                    modal_state
+                        .value
+                        .push_str(truncate_paste(&modal_state.value, text));
+                }
                 return;
             }
 

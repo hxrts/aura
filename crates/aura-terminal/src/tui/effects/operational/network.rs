@@ -150,7 +150,9 @@ pub async fn handle_network(
                         Some(Ok(OpResponse::LanInvitationStatus {
                             authority_id: authority_id.to_string(),
                             address: address.clone(),
-                            message: format!("Invitation sent to {address} via bootstrap discovery"),
+                            message: format!(
+                                "Invitation sent to {address} via bootstrap discovery"
+                            ),
                         }))
                     }
                     Ok(Err(e)) => {

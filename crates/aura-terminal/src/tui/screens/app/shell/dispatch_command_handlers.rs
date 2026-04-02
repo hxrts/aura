@@ -918,7 +918,11 @@ pub(super) fn handle_dispatch_command_match(
                 operation,
             );
         }
-        DispatchCommand::SetChannelTopic { channel_id, topic } => {
+        DispatchCommand::EditChannelInfo {
+            channel_id,
+            name,
+            topic,
+        } => {
             let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
@@ -931,6 +935,8 @@ pub(super) fn handle_dispatch_command_match(
                 SemanticOperationKind::SetChannelTopic,
             );
             (cb.chat.on_set_topic)(channel_id.to_string(), topic, operation);
+            // Note: channel name update will be handled when the backend supports it
+            let _ = name;
         }
         DispatchCommand::DeleteChannel { channel_id } => {
             let Some(update_tx) = update_tx_for_events else {

@@ -52,7 +52,9 @@ pub struct ChatCreateModalViewProps {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ChatTopicModalViewProps {
     pub visible: bool,
+    pub name: String,
     pub value: String,
+    pub active_field: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -142,9 +144,12 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
         ),
     };
 
-    let (topic_visible, topic_value) = match state.modal_queue.current() {
-        Some(QueuedModal::ChatTopic(s)) => (true, s.value.clone()),
-        _ => (false, String::new()),
+    let (topic_visible, topic_name, topic_value, topic_active_field) = match state
+        .modal_queue
+        .current()
+    {
+        Some(QueuedModal::ChatTopic(s)) => (true, s.name.clone(), s.value.clone(), s.active_field),
+        _ => (false, String::new(), String::new(), 0),
     };
 
     let (info_visible, info_channel_name, info_topic, info_participants) =
@@ -182,7 +187,9 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
             },
             topic: ChatTopicModalViewProps {
                 visible: topic_visible,
+                name: topic_name,
                 value: topic_value,
+                active_field: topic_active_field,
             },
             info: ChatInfoModalViewProps {
                 visible: info_visible,

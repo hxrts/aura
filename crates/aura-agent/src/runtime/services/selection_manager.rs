@@ -412,7 +412,11 @@ impl SelectionManagerService {
         let max_select = if family == ServiceFamily::Hold {
             3
         } else {
-            usize::from(self.config.max_mixing_depth.max(self.config.min_mixing_depth))
+            usize::from(
+                self.config
+                    .max_mixing_depth
+                    .max(self.config.min_mixing_depth),
+            )
         };
         let mut selected_evidence = Vec::new();
         for _ in 0..max_select {

@@ -76,6 +76,8 @@ pub mod config;
 pub mod contacts;
 pub mod context;
 pub mod demo_config;
+#[cfg(feature = "web-js")]
+pub mod demo_shortcuts;
 pub mod error;
 pub mod harness_determinism;
 pub(crate) mod home_scope;

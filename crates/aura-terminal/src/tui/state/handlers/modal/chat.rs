@@ -305,7 +305,7 @@ pub(super) fn handle_chat_member_select_key_queue(
     }
 }
 
-/// Handle chat topic edit modal keys (queue-based)
+/// Handle chat channel edit modal keys (queue-based)
 pub(super) fn handle_chat_topic_key_queue(
     state: &mut TuiState,
     commands: &mut Vec<TuiCommand>,
@@ -316,9 +316,17 @@ pub(super) fn handle_chat_topic_key_queue(
         KeyCode::Esc => {
             state.modal_queue.dismiss();
         }
+        KeyCode::Tab | KeyCode::BackTab => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::ChatTopic(ref mut s) = modal {
+                    s.active_field = if s.active_field == 0 { 1 } else { 0 };
+                }
+            });
+        }
         KeyCode::Enter => {
-            commands.push(TuiCommand::Dispatch(DispatchCommand::SetChannelTopic {
+            commands.push(TuiCommand::Dispatch(DispatchCommand::EditChannelInfo {
                 channel_id: modal_state.channel_id.clone().into(),
+                name: modal_state.name,
                 topic: modal_state.value,
             }));
             state.modal_queue.dismiss();
@@ -326,14 +334,22 @@ pub(super) fn handle_chat_topic_key_queue(
         KeyCode::Char(c) => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::ChatTopic(ref mut s) = modal {
-                    s.value.push(c);
+                    if s.active_field == 0 {
+                        s.name.push(c);
+                    } else {
+                        s.value.push(c);
+                    }
                 }
             });
         }
         KeyCode::Backspace => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::ChatTopic(ref mut s) = modal {
-                    s.value.pop();
+                    if s.active_field == 0 {
+                        s.name.pop();
+                    } else {
+                        s.value.pop();
+                    }
                 }
             });
         }

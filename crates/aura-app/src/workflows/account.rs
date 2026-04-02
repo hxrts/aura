@@ -439,19 +439,15 @@ async fn initialize_runtime_account_owned(
         return fail_initialize_runtime_account(owner, error.to_string()).await;
     }
 
-    if let Err(error) = finalize_runtime_account_bootstrap_inner(
-        app_core,
-        pending_bootstrap.nickname_suggestion,
-    )
-    .await
+    if let Err(error) =
+        finalize_runtime_account_bootstrap_inner(app_core, pending_bootstrap.nickname_suggestion)
+            .await
     {
         return fail_initialize_runtime_account(owner, error.to_string()).await;
     }
 
     owner
-        .publish_success_with(
-            crate::workflows::semantic_facts::issue_account_created_proof(),
-        )
+        .publish_success_with(crate::workflows::semantic_facts::issue_account_created_proof())
         .await?;
     Ok(())
 }
