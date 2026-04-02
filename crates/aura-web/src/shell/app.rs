@@ -270,7 +270,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                                 }
                                 web_sys::console::log_1(&"[web-import-device] finalizing_ui".into());
                                 scheduled_controller.info_toast("Device enrollment complete");
-                                scheduled_controller.finalize_account_setup(ScreenId::Neighborhood);
+                                scheduled_controller.finalize_account_setup(ScreenId::Chat);
                                 harness_bridge::publish_semantic_controller_snapshot(
                                     scheduled_controller.clone(),
                                 );
@@ -352,7 +352,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                     Ok(result) => {
                         web_sys::console::log_1(&"[web-onboarding] submit_account ok".into());
                         if result.mode == AccountCreationStageMode::RuntimeInitialized {
-                            controller.finalize_account_setup(ScreenId::Neighborhood);
+                            controller.finalize_account_setup(ScreenId::Chat);
                         } else {
                             controller.info_toast("Finishing account bootstrap");
                         }

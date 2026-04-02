@@ -141,7 +141,7 @@ pub struct Router {
 
 impl Default for Router {
     fn default() -> Self {
-        Self::new(Screen::Neighborhood)
+        Self::new(Screen::Chat)
     }
 }
 

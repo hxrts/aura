@@ -30,7 +30,8 @@ use crate::{
     active_storage_prefix, clear_storage_key, dual_demo_web_enabled, harness_instance_id,
     harness_mode_enabled, load_pending_account_bootstrap, load_pending_device_enrollment_code,
     load_selected_runtime_identity, logged_optional, pending_account_bootstrap_key,
-    pending_device_enrollment_code_key, persist_selected_runtime_identity,
+    pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
+    persist_selected_runtime_identity,
     selected_runtime_identity_key, submit_runtime_bootstrap_handoff,
     bootstrap_broker_url,
     workflows::{self, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest, RebootstrapPolicy},
@@ -547,7 +548,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         logged_optional(load_selected_runtime_identity(&runtime_identity_key));
     let pending_account_bootstrap =
         logged_optional(load_pending_account_bootstrap(&pending_account_key));
-    let pending_device_enrollment_code = logged_optional(load_pending_device_enrollment_code(
+    let mut pending_device_enrollment_code = logged_optional(load_pending_device_enrollment_code(
         &pending_code_storage_key,
     ));
     web_sys::console::log_1(
@@ -621,6 +622,38 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             )
             .into(),
         );
+        if pending_device_enrollment_code
+            .as_ref()
+            .map_or(true, |code| code.is_empty())
+        {
+            if let Some(rendezvous) = agent.runtime().rendezvous() {
+                match rendezvous.take_bootstrap_broker_invitations().await {
+                    Ok(mut pending_invitations) => {
+                        if let Some(code) = pending_invitations.pop() {
+                            persist_pending_device_enrollment_code(&pending_code_storage_key, &code)
+                                .map_err(|error| {
+                                    phase.error(
+                                        WebUiOperation::BootstrapController,
+                                        "WEB_BOOTSTRAP_PENDING_CODE_PERSIST_FAILED",
+                                        error.user_message(),
+                                    )
+                                })?;
+                            pending_device_enrollment_code = Some(code);
+                        }
+                    }
+                    Err(error) => {
+                        log_web_error(
+                            "warn",
+                            &phase.error(
+                                WebUiOperation::BootstrapController,
+                                "WEB_BOOTSTRAP_BROKER_INVITATION_FETCH_FAILED",
+                                error.to_string(),
+                            ),
+                        );
+                    }
+                }
+            }
+        }
 
         phase.advance_to(BootstrapPhase::InitAppCore)?;
         let app_core = Arc::new(RwLock::new(
@@ -766,7 +799,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         }
         controller.set_account_setup_state(account_ready, "", None);
         if account_ready {
-            controller.finalize_account_setup(aura_app::ui::contract::ScreenId::Neighborhood);
+            controller.finalize_account_setup(aura_app::ui::contract::ScreenId::Chat);
         }
         phase.advance_to(BootstrapPhase::InstallHarness)?;
         install_harness_instrumentation(controller.clone(), generation_id);

@@ -69,7 +69,7 @@ mod tests {
     #[test]
     fn test_initial_state() {
         let state = TuiState::new();
-        assert_eq!(state.screen(), Screen::Neighborhood);
+        assert_eq!(state.screen(), Screen::Chat);
         assert!(!state.has_modal());
         assert!(!state.is_insert_mode());
     }
