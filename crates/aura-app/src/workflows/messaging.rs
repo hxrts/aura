@@ -991,7 +991,7 @@ async fn deliver_message_fact_remotely(
     Ok(())
 }
 
-async fn ensure_runtime_note_to_self_channel(
+pub(crate) async fn ensure_runtime_note_to_self_channel(
     _app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     authority_id: AuthorityId,

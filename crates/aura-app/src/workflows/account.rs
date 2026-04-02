@@ -476,15 +476,48 @@ pub async fn reconcile_pending_runtime_account_bootstrap(
                 action: PendingRuntimeBootstrapAction::InitializedFromPending,
             })
         }
-        (true, Some(_)) => Ok(PendingRuntimeBootstrapResolution {
-            account_ready: true,
-            action: PendingRuntimeBootstrapAction::ClearedStalePending,
-        }),
-        (ready, None) => Ok(PendingRuntimeBootstrapResolution {
-            account_ready: ready,
-            action: PendingRuntimeBootstrapAction::None,
-        }),
+        (true, Some(_)) => {
+            #[cfg(feature = "signals")]
+            ensure_note_to_self_on_login(app_core).await;
+            Ok(PendingRuntimeBootstrapResolution {
+                account_ready: true,
+                action: PendingRuntimeBootstrapAction::ClearedStalePending,
+            })
+        }
+        (ready, None) => {
+            #[cfg(feature = "signals")]
+            if ready {
+                ensure_note_to_self_on_login(app_core).await;
+            }
+            Ok(PendingRuntimeBootstrapResolution {
+                account_ready: ready,
+                action: PendingRuntimeBootstrapAction::None,
+            })
+        }
     }
+}
+
+/// Best-effort Note-to-self channel provisioning for existing accounts.
+/// Idempotent: does nothing if the channel already exists.
+#[cfg(feature = "signals")]
+async fn ensure_note_to_self_on_login(app_core: &Arc<RwLock<AppCore>>) {
+    let result: Result<(), AuraError> = async {
+        let runtime = require_runtime(app_core).await?;
+        let authority_id = runtime.authority_id();
+        let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
+            .await
+            .map_err(|e| AuraError::agent(e.to_string()))?;
+        super::messaging::ensure_runtime_note_to_self_channel(
+            app_core,
+            &runtime,
+            authority_id,
+            timestamp_ms,
+        )
+        .await?;
+        Ok(())
+    }
+    .await;
+    let _ = result;
 }
 
 /// Complete first-run runtime bootstrap after account metadata already exists.
@@ -588,6 +621,30 @@ async fn finalize_runtime_account_bootstrap_inner(
             .map_err(|e| AuraError::agent(e.to_string()))?;
         }
     }
+
+    // Provision the Note-to-self AMP channel so it is a real runtime-backed
+    // channel from first use. This must happen after signing keys are ready.
+    #[cfg(feature = "signals")]
+    run_account_bootstrap_stage(
+        app_core,
+        "ensure_note_to_self_channel",
+        ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
+        || async {
+            let runtime = require_runtime(app_core).await?;
+            let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
+                .await
+                .map_err(|e| AuraError::agent(e.to_string()))?;
+            super::messaging::ensure_runtime_note_to_self_channel(
+                app_core,
+                &runtime,
+                authority_id,
+                timestamp_ms,
+            )
+            .await?;
+            Ok(())
+        },
+    )
+    .await?;
 
     run_account_bootstrap_stage(
         app_core,
