@@ -247,12 +247,8 @@ pub(super) fn handle_create_invitation_key_queue(
                 return;
             }
 
-            // Convert type_index to stable invitation type string
-            let invitation_type = match modal_state.type_index {
-                0 => super::super::super::commands::InvitationKind::Guardian,
-                1 => super::super::super::commands::InvitationKind::Contact,
-                _ => super::super::super::commands::InvitationKind::Channel,
-            };
+            // Contacts page always creates contact invitations
+            let invitation_type = super::super::super::commands::InvitationKind::Contact;
 
             commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
                 receiver_id: match parse_authority_id(
@@ -287,16 +283,8 @@ pub(super) fn handle_create_invitation_key_queue(
             });
         }
         KeyCode::Left => {
-            // Change value: cycle backward for Type and TTL fields
+            // Change value: cycle backward for TTL field
             match modal_state.focused_field {
-                CreateInvitationField::Receiver => {}
-                CreateInvitationField::Type => {
-                    state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::ContactsCreate(ref mut s) = modal {
-                            s.type_prev();
-                        }
-                    });
-                }
                 CreateInvitationField::Ttl => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::ContactsCreate(ref mut s) = modal {
@@ -304,22 +292,12 @@ pub(super) fn handle_create_invitation_key_queue(
                         }
                     });
                 }
-                CreateInvitationField::Message => {
-                    // No-op for message field (could move cursor left in future)
-                }
+                CreateInvitationField::Receiver | CreateInvitationField::Message => {}
             }
         }
         KeyCode::Right => {
-            // Change value: cycle forward for Type and TTL fields
+            // Change value: cycle forward for TTL field
             match modal_state.focused_field {
-                CreateInvitationField::Receiver => {}
-                CreateInvitationField::Type => {
-                    state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::ContactsCreate(ref mut s) = modal {
-                            s.type_next();
-                        }
-                    });
-                }
                 CreateInvitationField::Ttl => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::ContactsCreate(ref mut s) = modal {
@@ -327,9 +305,7 @@ pub(super) fn handle_create_invitation_key_queue(
                         }
                     });
                 }
-                CreateInvitationField::Message => {
-                    // No-op for message field (could move cursor right in future)
-                }
+                CreateInvitationField::Receiver | CreateInvitationField::Message => {}
             }
         }
         KeyCode::Char(c) => match modal_state.focused_field {
@@ -347,7 +323,7 @@ pub(super) fn handle_create_invitation_key_queue(
                     }
                 });
             }
-            CreateInvitationField::Type | CreateInvitationField::Ttl => {}
+            CreateInvitationField::Ttl => {}
         },
         KeyCode::Backspace => match modal_state.focused_field {
             CreateInvitationField::Receiver => {
@@ -364,7 +340,7 @@ pub(super) fn handle_create_invitation_key_queue(
                     }
                 });
             }
-            CreateInvitationField::Type | CreateInvitationField::Ttl => {}
+            CreateInvitationField::Ttl => {}
         },
         _ => {}
     }

@@ -19,7 +19,6 @@ pub use aura_app::ui::types::{
 pub enum CreateInvitationField {
     #[default]
     Receiver,
-    Type,
     Message,
     Ttl,
 }
@@ -33,8 +32,6 @@ pub struct CreateInvitationModalState {
     pub receiver_id: String,
     /// Best-effort receiver display name (for UI hints)
     pub receiver_name: String,
-    /// Invitation type selection index (0=Guardian, 1=Contact, 2=Channel)
-    pub type_index: usize,
     /// Optional message
     pub message: String,
     /// TTL in hours
@@ -52,7 +49,6 @@ impl CreateInvitationModalState {
         Self {
             receiver_id: String::new(),
             receiver_name: String::new(),
-            type_index: 0,
             message: String::new(),
             ttl_hours: DEFAULT_INVITATION_TTL_HOURS,
             focused_field: CreateInvitationField::Receiver,
@@ -73,7 +69,6 @@ impl CreateInvitationModalState {
     pub fn reset(&mut self) {
         self.receiver_id.clear();
         self.receiver_name.clear();
-        self.type_index = 0;
         self.message.clear();
         self.ttl_hours = DEFAULT_INVITATION_TTL_HOURS;
         self.focused_field = CreateInvitationField::Receiver;
@@ -83,8 +78,7 @@ impl CreateInvitationModalState {
     /// Move focus to next field
     pub fn focus_next(&mut self) {
         self.focused_field = match self.focused_field {
-            CreateInvitationField::Receiver => CreateInvitationField::Type,
-            CreateInvitationField::Type => CreateInvitationField::Message,
+            CreateInvitationField::Receiver => CreateInvitationField::Message,
             CreateInvitationField::Message => CreateInvitationField::Ttl,
             CreateInvitationField::Ttl => CreateInvitationField::Receiver,
         };
@@ -94,23 +88,8 @@ impl CreateInvitationModalState {
     pub fn focus_prev(&mut self) {
         self.focused_field = match self.focused_field {
             CreateInvitationField::Receiver => CreateInvitationField::Ttl,
-            CreateInvitationField::Type => CreateInvitationField::Receiver,
-            CreateInvitationField::Message => CreateInvitationField::Type,
+            CreateInvitationField::Message => CreateInvitationField::Receiver,
             CreateInvitationField::Ttl => CreateInvitationField::Message,
-        };
-    }
-
-    /// Cycle type to next option
-    pub fn type_next(&mut self) {
-        self.type_index = (self.type_index + 1) % 3;
-    }
-
-    /// Cycle type to previous option
-    pub fn type_prev(&mut self) {
-        self.type_index = if self.type_index == 0 {
-            2
-        } else {
-            self.type_index - 1
         };
     }
 
@@ -270,8 +249,6 @@ impl Validatable for ImportInvitationFormData {
 pub struct CreateInvitationFormData {
     /// Receiver authority ID (required)
     pub receiver_id: String,
-    /// Invitation type index
-    pub type_index: usize,
     /// Optional message
     pub message: String,
     /// TTL in hours

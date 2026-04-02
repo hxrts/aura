@@ -18,11 +18,9 @@ use crate::tui::components::{modal_header, status_message, ModalHeaderProps, Mod
 use crate::tui::layout::dim;
 use crate::tui::state::CreateInvitationField;
 use crate::tui::theme::{Borders, Spacing, Theme};
-use crate::tui::types::InvitationType;
 
 /// Callback type for invitation creation
-pub type CreateInvitationCallback =
-    Arc<dyn Fn(InvitationType, Option<String>, Option<u64>) + Send + Sync>;
+pub type CreateInvitationCallback = Arc<dyn Fn(Option<String>, Option<u64>) + Send + Sync>;
 
 /// Callback type for modal cancellation
 pub type CancelCallback = Arc<dyn Fn() + Send + Sync>;
@@ -44,8 +42,6 @@ pub struct InvitationCreateModalProps {
     pub receiver_id: String,
     /// Receiver display name hint
     pub receiver_name: String,
-    /// Currently selected invitation type
-    pub invitation_type: InvitationType,
     /// Optional message for the invitation
     pub message: String,
     /// TTL in hours (0 = no expiry)
@@ -70,28 +66,18 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     let error = props.error.clone();
     let receiver_id = props.receiver_id.clone();
     let receiver_name = props.receiver_name.clone();
-    let invitation_type = props.invitation_type;
     let message = props.message.clone();
     let ttl_hours = props.ttl_hours;
     let focused_field = props.focused_field;
 
     let can_submit = !creating;
 
-    // Type selection display
-    let type_label = invitation_type.label();
-
     // Field focus colors
     let receiver_focused = focused_field == CreateInvitationField::Receiver;
-    let type_focused = focused_field == CreateInvitationField::Type;
     let message_focused = focused_field == CreateInvitationField::Message;
     let ttl_focused = focused_field == CreateInvitationField::Ttl;
 
     let receiver_border = if receiver_focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
-    let type_border = if type_focused {
         Theme::BORDER_FOCUS
     } else {
         Theme::BORDER
@@ -109,7 +95,6 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
 
     // Focus indicator
     let receiver_pointer = if receiver_focused { "▸ " } else { "  " };
-    let type_pointer = if type_focused { "▸ " } else { "  " };
     let message_pointer = if message_focused { "▸ " } else { "  " };
     let ttl_pointer = if ttl_focused { "▸ " } else { "  " };
 
@@ -180,16 +165,9 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
         }
     };
 
-    // Type display with arrows when focused (no icon)
-    let type_display = if type_focused {
-        format!("◀ {type_label} ▶")
-    } else {
-        type_label.to_string()
-    };
-
     // Header props
-    let header_props = ModalHeaderProps::new("Create Invitation")
-        .with_subtitle("Invite someone to connect with you");
+    let header_props = ModalHeaderProps::new("Create Contact Invitation")
+        .with_subtitle("Add someone as a contact for messaging");
 
     // Status for error
     let status = if has_error {
@@ -238,38 +216,6 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                         padding_right: Spacing::PANEL_PADDING,
                     ) {
                         Text(content: receiver_display, color: receiver_color)
-                    }
-                }
-
-                // Invitation Type selector
-                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
-                    View(flex_direction: FlexDirection::Row) {
-                        Text(content: type_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
-                        Text(content: "Type", color: if type_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
-                        Text(content: " - ", color: Theme::TEXT_MUTED)
-                        #(match invitation_type {
-                            InvitationType::Contact => element! {
-                                Text(content: "Add as a contact for messaging", color: Theme::TEXT_MUTED)
-                            },
-                            InvitationType::Guardian => element! {
-                                Text(content: "Invite to be a guardian for recovery", color: Theme::TEXT_MUTED)
-                            },
-                            InvitationType::Channel => element! {
-                                Text(content: "Invite to join a chat channel", color: Theme::TEXT_MUTED)
-                            },
-                        })
-                    }
-                    View(
-                        margin_left: 2,
-                        width: 18,
-                        flex_direction: FlexDirection::Row,
-                        gap: Spacing::XS,
-                        border_style: Borders::INPUT,
-                        border_color: type_border,
-                        padding_left: Spacing::PANEL_PADDING,
-                        padding_right: Spacing::PANEL_PADDING,
-                    ) {
-                        Text(content: type_display, color: if type_focused { Theme::PRIMARY } else { Theme::TEXT })
                     }
                 }
 

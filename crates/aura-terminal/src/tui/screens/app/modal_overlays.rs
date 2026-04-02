@@ -20,7 +20,7 @@ use crate::tui::screens::{
     InvitationCreateModal, InvitationImportModal,
 };
 use crate::tui::theme::{Spacing, Theme};
-use crate::tui::types::{Contact, InvitationType};
+use crate::tui::types::Contact;
 
 // =============================================================================
 // Global Modal Props
@@ -268,11 +268,6 @@ pub fn render_contacts_import_modal(contacts: &ContactsViewProps) -> Option<AnyE
 
 pub fn render_contacts_create_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
     let modal = &contacts.modals.create_invitation;
-    let invitation_type = match modal.type_index {
-        0 => InvitationType::Guardian,
-        1 => InvitationType::Contact,
-        _ => InvitationType::Channel,
-    };
     render_modal(
         modal.visible,
         element! {
@@ -284,7 +279,6 @@ pub fn render_contacts_create_modal(contacts: &ContactsViewProps) -> Option<AnyE
                 error: String::new(),
                 receiver_id: modal.receiver_id.clone(),
                 receiver_name: modal.receiver_name.clone(),
-                invitation_type: invitation_type,
                 message: modal.message.clone(),
                 ttl_hours: modal.ttl_hours as u32,
             )

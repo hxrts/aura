@@ -183,35 +183,6 @@ fn build_authoritative_ui_snapshot(
         selected_notification_id,
     );
 
-    if let Some(QueuedModal::ContactsCreate(modal_state)) = state.modal_queue.current() {
-        let invitation_type_ids = [
-            "guardian".to_string(),
-            "contact".to_string(),
-            "channel".to_string(),
-        ];
-        let invitation_type_items = invitation_type_ids
-            .iter()
-            .enumerate()
-            .map(|(idx, id)| ListItemSnapshot {
-                id: id.clone(),
-                selected: idx == modal_state.type_index,
-                confirmation: ConfirmationState::Confirmed,
-                is_current: false,
-            })
-            .collect::<Vec<_>>();
-        let selected_invitation_type_id = invitation_type_items
-            .iter()
-            .find(|item| item.selected)
-            .map(|item| item.id.clone());
-        push_list(
-            &mut lists,
-            &mut selections,
-            ListId::InvitationTypes,
-            invitation_type_items,
-            selected_invitation_type_id,
-        );
-    }
-
     let home_ids = visible_home_ids(app_snapshot);
     let home_items = home_ids
         .iter()
