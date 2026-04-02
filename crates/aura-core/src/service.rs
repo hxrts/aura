@@ -105,6 +105,8 @@ impl<T: ?Sized> ServiceSurfaceDeclaration<T> {
 pub enum ServiceProfile {
     /// Establish bootstrap and refresh.
     DirectBootstrap,
+    /// Anonymous multi-hop path establishment over the shared establish family.
+    AnonymousPathEstablish,
     /// Opaque movement through relay/transit surfaces.
     RelayTransport,
     /// Deferred-delivery hold profile over the shared custody substrate.
@@ -213,6 +215,67 @@ impl Route {
     }
 }
 
+/// Reusable path anchor returned by the establish family.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EstablishedPath {
+    /// Stable runtime-local path identifier.
+    pub path_id: [u8; 32],
+    /// Scope this established path belongs to.
+    pub scope: ContextId,
+    /// Establish profile that created this path.
+    pub profile: ServiceProfile,
+    /// Bound route for subsequent movement.
+    pub route: Route,
+    /// Timestamp when the path was established.
+    pub established_at_ms: u64,
+    /// Timestamp when the path expires.
+    pub valid_until: u64,
+    /// Link-layer protection remains distinct from path-layer protection.
+    pub link_protection: LinkProtectionMode,
+    /// Path-layer protection mode for this established path.
+    pub path_protection: PathProtectionMode,
+    /// Per-hop forward path-key material.
+    #[serde(default)]
+    pub forward_hop_keys: Vec<[u8; 32]>,
+    /// Per-hop backward path-key material.
+    #[serde(default)]
+    pub backward_hop_keys: Vec<[u8; 32]>,
+}
+
+impl EstablishedPath {
+    /// Return whether this established path is valid at the provided time.
+    pub fn is_valid_at(&self, now_ms: u64) -> bool {
+        now_ms < self.valid_until
+    }
+
+    /// Return a compact reference suitable for move-envelope binding.
+    pub fn as_ref(&self) -> EstablishedPathRef {
+        EstablishedPathRef {
+            scope: self.scope,
+            path_id: self.path_id,
+            valid_until: self.valid_until,
+        }
+    }
+}
+
+/// Compact move-facing reference to one established path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EstablishedPathRef {
+    /// Scope this path belongs to.
+    pub scope: ContextId,
+    /// Stable runtime-local path identifier.
+    pub path_id: [u8; 32],
+    /// Timestamp when the path expires.
+    pub valid_until: u64,
+}
+
+impl EstablishedPathRef {
+    /// Return whether this reference is valid at the provided time.
+    pub fn is_valid_at(&self, now_ms: u64) -> bool {
+        now_ms < self.valid_until
+    }
+}
+
 /// Explicit establish-family path object.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EstablishPath {
@@ -231,6 +294,102 @@ impl EstablishPath {
     /// Return whether the establish path is direct.
     pub fn is_direct(&self) -> bool {
         self.route.is_direct()
+    }
+}
+
+/// One backwards-built transparent anonymous setup layer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransparentAnonymousSetupLayer {
+    /// Hop authority responsible for this layer, when one concrete relay owns it.
+    #[serde(default)]
+    pub hop_authority: Option<AuthorityId>,
+    /// Immediate predecessor visible to this hop.
+    #[serde(default)]
+    pub predecessor: Option<LinkEndpoint>,
+    /// Immediate successor visible to this hop.
+    #[serde(default)]
+    pub successor: Option<LinkEndpoint>,
+    /// Expiry visible to this hop.
+    pub valid_until: u64,
+    /// Replay-window binding visible to this hop.
+    pub replay_window_id: [u8; 32],
+    /// Forward path-key material for this hop.
+    pub forward_path_secret: [u8; 32],
+    /// Backward path-key material for this hop.
+    pub backward_path_secret: [u8; 32],
+    /// Inner setup material for the next hop.
+    #[serde(default)]
+    pub next: Option<Box<TransparentAnonymousSetupLayer>>,
+}
+
+/// Transparent anonymous path-setup object for debug/simulation lanes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransparentAnonymousSetupObject {
+    /// Established path reference yielded by the setup.
+    pub established_path: EstablishedPathRef,
+    /// Link-layer protection outside the path payload.
+    pub link_protection: LinkProtectionMode,
+    /// Transparent path-layer protection for debug/simulation-only setup.
+    pub path_protection: PathProtectionMode,
+    /// Backwards-built root layer.
+    #[serde(default)]
+    pub root: Option<Box<TransparentAnonymousSetupLayer>>,
+}
+
+/// Hop-local knowledge view extracted from a transparent setup object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnonymousHopView {
+    /// Hop authority responsible for this layer, when one concrete relay owns it.
+    #[serde(default)]
+    pub hop_authority: Option<AuthorityId>,
+    /// Immediate predecessor visible to this hop.
+    #[serde(default)]
+    pub predecessor: Option<LinkEndpoint>,
+    /// Immediate successor visible to this hop.
+    #[serde(default)]
+    pub successor: Option<LinkEndpoint>,
+    /// Expiry visible to this hop.
+    pub valid_until: u64,
+    /// Replay-window binding visible to this hop.
+    pub replay_window_id: [u8; 32],
+    /// Forward path-key material for this hop.
+    pub forward_path_secret: [u8; 32],
+    /// Backward path-key material for this hop.
+    pub backward_path_secret: [u8; 32],
+}
+
+impl TransparentAnonymousSetupObject {
+    /// Return the number of setup layers in this object.
+    pub fn hop_count(&self) -> usize {
+        let mut count = 0;
+        let mut current = self.root.as_deref();
+        while let Some(layer) = current {
+            count += 1;
+            current = layer.next.as_deref();
+        }
+        count
+    }
+
+    /// Return the hop-local view for one indexed setup layer.
+    pub fn hop_view(&self, index: usize) -> Option<AnonymousHopView> {
+        let mut current = self.root.as_deref();
+        let mut current_index = 0;
+        while let Some(layer) = current {
+            if current_index == index {
+                return Some(AnonymousHopView {
+                    hop_authority: layer.hop_authority,
+                    predecessor: layer.predecessor.clone(),
+                    successor: layer.successor.clone(),
+                    valid_until: layer.valid_until,
+                    replay_window_id: layer.replay_window_id,
+                    forward_path_secret: layer.forward_path_secret,
+                    backward_path_secret: layer.backward_path_secret,
+                });
+            }
+            current = layer.next.as_deref();
+            current_index += 1;
+        }
+        None
     }
 }
 
@@ -427,15 +586,78 @@ impl ServiceDescriptor {
     }
 }
 
+/// Move-family path binding after explicit path establishment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MovePathBinding {
+    /// Direct or pre-established explicit path object.
+    Direct(MovePath),
+    /// Reusable established path reference.
+    Established(EstablishedPathRef),
+}
+
+/// Transparent envelope traffic class for debug/simulation-only onion-shape validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransparentMoveTrafficClass {
+    Move,
+    HoldDeposit,
+    HoldRetrieval,
+    DeferredDelivery,
+    CacheSeed,
+    AccountabilityReply,
+    Cover,
+}
+
+/// Transparent onion-identical header for debug/simulation-only movement validation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransparentMoveEnvelope {
+    /// Bound direct path or established path reference.
+    pub binding: MovePathBinding,
+    /// Link-layer protection outside the path payload.
+    pub link_protection: LinkProtectionMode,
+    /// Path-layer protection for the debug/simulation envelope body.
+    pub path_protection: PathProtectionMode,
+    /// Traffic class carried by the envelope.
+    pub traffic_class: TransparentMoveTrafficClass,
+    /// Hop index currently processing the envelope.
+    pub hop_index: u8,
+    /// Total hop count for the established path.
+    pub hop_count: u8,
+    /// Previous hop visible at this layer.
+    #[serde(default)]
+    pub previous_hop: Option<AuthorityId>,
+    /// Next hop visible at this layer.
+    #[serde(default)]
+    pub next_hop: Option<AuthorityId>,
+}
+
 /// Opaque movement object used across relay, retrieval-in-flight, and cache seeding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MoveEnvelope {
-    /// Move path selected for the envelope, if already bound.
+    /// Move path binding selected for the envelope, if already bound.
     #[serde(default)]
-    pub path: Option<MovePath>,
+    pub binding: Option<MovePathBinding>,
+    /// Transparent onion-identical header for debug/simulation-only lanes.
+    #[serde(default)]
+    pub transparent_headers: Option<TransparentMoveEnvelope>,
     /// Opaque application/protocol payload bytes.
     #[serde(with = "serde_bytes")]
     pub payload: Vec<u8>,
+}
+
+/// Explicit link-layer protection mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LinkProtectionMode {
+    /// The underlying transport link remains independently protected.
+    TransportLink,
+}
+
+/// Explicit path-layer protection mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PathProtectionMode {
+    /// Transparent headers or payloads for debug and simulation only.
+    TransparentDebug,
+    /// Encrypted path-layer payloads for production anonymous routing.
+    Encrypted,
 }
 
 /// Runtime-local routing profile derived from local conditions.
@@ -459,6 +681,154 @@ impl LocalRoutingProfile {
             delay_ms: 0,
             cover_rate_per_second: 0,
             path_diversity: 1,
+        }
+    }
+}
+
+/// Runtime-local health snapshot derived only from local observations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalHealthSnapshot {
+    pub generated_at_ms: u64,
+    pub reachable_provider_count: u32,
+    pub ema_rtt_ms: u32,
+    pub ema_loss_bps: u32,
+    pub traffic_volume_bytes: u64,
+    #[serde(default)]
+    pub sync_blended_retrieval_bytes: u64,
+    #[serde(default)]
+    pub accountability_reply_bytes: u64,
+    pub churn_events: u32,
+    pub observed_route_diversity: u8,
+    pub queue_pressure: u32,
+    pub hold_success_bps: u32,
+    pub sync_opportunity_count: u32,
+}
+
+/// Scheduling class layered over the shared move substrate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SchedulerClass {
+    SyncBlended,
+    BoundedDeadlineReply,
+    SyntheticCover,
+}
+
+/// Security-control traffic that must retain bounded scheduler capacity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SecurityControlClass {
+    AnonymousPathEstablish,
+    CapabilityTrustUpdate,
+    AccountabilityReply,
+    RetrievalCapabilityRotation,
+}
+
+/// Runtime-local message classes that may need routing-policy overrides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrivacyMessageClass {
+    Application,
+    SyncRetrieval,
+    AccountabilityReply,
+    Ceremony,
+    Consensus,
+}
+
+/// Runtime-local override constraints layered over the general routing profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageClassRoutingConstraint {
+    pub message_class: PrivacyMessageClass,
+    #[serde(default)]
+    pub force_scheduler_class: Option<SchedulerClass>,
+    #[serde(default)]
+    pub max_mixing_depth: Option<u8>,
+    #[serde(default)]
+    pub max_delay_ms: Option<u64>,
+}
+
+/// Runtime-local establish decision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalEstablishDecision {
+    pub profile: ServiceProfile,
+    pub route: Route,
+    #[serde(default)]
+    pub retain_path_until_ms: Option<u64>,
+    #[serde(default)]
+    pub scheduler_class: Option<SchedulerClass>,
+}
+
+/// Runtime-local move decision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalMoveDecision {
+    pub routing_profile: LocalRoutingProfile,
+    pub binding: MovePathBinding,
+    pub scheduler_class: SchedulerClass,
+    pub metadata_minimized: bool,
+}
+
+/// Runtime-local hold decision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalHoldDecision {
+    pub profile: ServiceProfile,
+    pub selected_authorities: Vec<AuthorityId>,
+    #[serde(default)]
+    pub bounded_residency_remaining: Option<u32>,
+}
+
+/// Runtime-local adaptive selection output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalSelectionProfile {
+    pub scope: ContextId,
+    pub health: LocalHealthSnapshot,
+    #[serde(default)]
+    pub establish: Option<LocalEstablishDecision>,
+    pub move_decision: LocalMoveDecision,
+    #[serde(default)]
+    pub hold: Option<LocalHoldDecision>,
+    pub security_control_floor: u32,
+    #[serde(default)]
+    pub security_controls: Vec<SecurityControlClass>,
+    #[serde(default)]
+    pub message_class_constraints: Vec<MessageClassRoutingConstraint>,
+    pub synthetic_cover_gap_per_second: u32,
+}
+
+impl TransparentMoveEnvelope {
+    /// Build a transparent onion-identical header for debug/simulation lanes.
+    pub fn new(
+        binding: MovePathBinding,
+        traffic_class: TransparentMoveTrafficClass,
+        hop_index: u8,
+        hop_count: u8,
+        previous_hop: Option<AuthorityId>,
+        next_hop: Option<AuthorityId>,
+    ) -> Self {
+        Self {
+            binding,
+            link_protection: LinkProtectionMode::TransportLink,
+            path_protection: PathProtectionMode::TransparentDebug,
+            traffic_class,
+            hop_index,
+            hop_count,
+            previous_hop,
+            next_hop,
+        }
+    }
+}
+
+impl MoveEnvelope {
+    /// Build an opaque envelope bound to a direct or established path.
+    pub fn opaque(binding: MovePathBinding, payload: Vec<u8>) -> Self {
+        Self {
+            binding: Some(binding),
+            transparent_headers: None,
+            payload,
+        }
+    }
+
+    /// Build a transparent debug/simulation envelope.
+    pub fn transparent(headers: TransparentMoveEnvelope, payload: Vec<u8>) -> Self {
+        Self {
+            binding: Some(headers.binding.clone()),
+            transparent_headers: Some(headers),
+            payload,
         }
     }
 }
@@ -810,13 +1180,30 @@ mod tests {
             }],
             destination: endpoint("10.0.0.4:9443"),
         };
-
-        let envelope = MoveEnvelope {
-            path: Some(MovePath {
-                route: route.clone(),
-            }),
-            payload: vec![1, 2, 3, 4],
+        let established = EstablishedPath {
+            path_id: [4; 32],
+            scope: context(4),
+            profile: ServiceProfile::AnonymousPathEstablish,
+            route: route.clone(),
+            established_at_ms: 50,
+            valid_until: 500,
+            link_protection: LinkProtectionMode::TransportLink,
+            path_protection: PathProtectionMode::TransparentDebug,
+            forward_hop_keys: vec![[5; 32], [6; 32]],
+            backward_hop_keys: vec![[7; 32], [8; 32]],
         };
+
+        let envelope = MoveEnvelope::transparent(
+            TransparentMoveEnvelope::new(
+                MovePathBinding::Established(established.as_ref()),
+                TransparentMoveTrafficClass::Move,
+                0,
+                2,
+                None,
+                Some(authority(5)),
+            ),
+            vec![1, 2, 3, 4],
+        );
         let held = HeldObject {
             content_id: ContentId::from_bytes(b"held-object"),
             scope: context(4),
@@ -845,6 +1232,8 @@ mod tests {
         };
         let passthrough = LocalRoutingProfile::passthrough();
 
+        let established_json = serde_json::to_vec(&established)
+            .unwrap_or_else(|err| panic!("serialize established path: {err}"));
         let envelope_json = serde_json::to_vec(&envelope)
             .unwrap_or_else(|err| panic!("serialize move envelope: {err}"));
         let held_json =
@@ -856,6 +1245,11 @@ mod tests {
         let state_json = serde_json::to_vec(&state)
             .unwrap_or_else(|err| panic!("serialize selection state: {err}"));
 
+        assert_eq!(
+            serde_json::from_slice::<EstablishedPath>(&established_json)
+                .unwrap_or_else(|err| panic!("deserialize established path: {err}")),
+            established
+        );
         assert_eq!(
             serde_json::from_slice::<MoveEnvelope>(&envelope_json)
                 .unwrap_or_else(|err| panic!("deserialize move envelope: {err}")),
@@ -881,11 +1275,157 @@ mod tests {
                 .unwrap_or_else(|err| panic!("deserialize selection state: {err}")),
             state
         );
-        assert_eq!(envelope.path, Some(MovePath { route }));
+        assert_eq!(
+            envelope.binding,
+            Some(MovePathBinding::Established(EstablishedPathRef {
+                scope: context(4),
+                path_id: [4; 32],
+                valid_until: 500,
+            }))
+        );
+        assert_eq!(
+            envelope.transparent_headers,
+            Some(TransparentMoveEnvelope {
+                binding: MovePathBinding::Established(EstablishedPathRef {
+                    scope: context(4),
+                    path_id: [4; 32],
+                    valid_until: 500,
+                }),
+                link_protection: LinkProtectionMode::TransportLink,
+                path_protection: PathProtectionMode::TransparentDebug,
+                traffic_class: TransparentMoveTrafficClass::Move,
+                hop_index: 0,
+                hop_count: 2,
+                previous_hop: None,
+                next_hop: Some(authority(5)),
+            })
+        );
+        assert_eq!(established.route, route);
         assert_eq!(passthrough.mixing_depth, 0);
         assert_eq!(passthrough.delay_ms, 0);
         assert_eq!(passthrough.cover_rate_per_second, 0);
         assert_eq!(passthrough.path_diversity, 1);
+    }
+
+    #[test]
+    fn transparent_anonymous_setup_exposes_only_hop_local_views() {
+        let setup = TransparentAnonymousSetupObject {
+            established_path: EstablishedPathRef {
+                scope: context(9),
+                path_id: [9; 32],
+                valid_until: 1000,
+            },
+            link_protection: LinkProtectionMode::TransportLink,
+            path_protection: PathProtectionMode::TransparentDebug,
+            root: Some(Box::new(TransparentAnonymousSetupLayer {
+                hop_authority: Some(authority(1)),
+                predecessor: None,
+                successor: Some(endpoint("10.0.0.1:7000")),
+                valid_until: 1000,
+                replay_window_id: [1; 32],
+                forward_path_secret: [2; 32],
+                backward_path_secret: [3; 32],
+                next: Some(Box::new(TransparentAnonymousSetupLayer {
+                    hop_authority: Some(authority(2)),
+                    predecessor: Some(endpoint("10.0.0.1:7000")),
+                    successor: Some(endpoint("10.0.0.2:7001")),
+                    valid_until: 1000,
+                    replay_window_id: [4; 32],
+                    forward_path_secret: [5; 32],
+                    backward_path_secret: [6; 32],
+                    next: None,
+                })),
+            })),
+        };
+
+        assert_eq!(setup.hop_count(), 2);
+        assert_eq!(
+            setup.hop_view(0),
+            Some(AnonymousHopView {
+                hop_authority: Some(authority(1)),
+                predecessor: None,
+                successor: Some(endpoint("10.0.0.1:7000")),
+                valid_until: 1000,
+                replay_window_id: [1; 32],
+                forward_path_secret: [2; 32],
+                backward_path_secret: [3; 32],
+            })
+        );
+        assert_eq!(
+            setup.hop_view(1),
+            Some(AnonymousHopView {
+                hop_authority: Some(authority(2)),
+                predecessor: Some(endpoint("10.0.0.1:7000")),
+                successor: Some(endpoint("10.0.0.2:7001")),
+                valid_until: 1000,
+                replay_window_id: [4; 32],
+                forward_path_secret: [5; 32],
+                backward_path_secret: [6; 32],
+            })
+        );
+        assert_eq!(setup.hop_view(2), None);
+    }
+
+    #[test]
+    fn transparent_move_envelope_supports_move_hold_and_cover_classes() {
+        let path = EstablishedPathRef {
+            scope: context(7),
+            path_id: [7; 32],
+            valid_until: 700,
+        };
+
+        let deposit = TransparentMoveEnvelope::new(
+            MovePathBinding::Established(path.clone()),
+            TransparentMoveTrafficClass::HoldDeposit,
+            0,
+            3,
+            Some(authority(2)),
+            Some(authority(3)),
+        );
+        let retrieval = TransparentMoveEnvelope::new(
+            MovePathBinding::Established(path),
+            TransparentMoveTrafficClass::HoldRetrieval,
+            1,
+            3,
+            Some(authority(2)),
+            Some(authority(3)),
+        );
+        let accountability = TransparentMoveEnvelope::new(
+            MovePathBinding::Direct(MovePath::direct(endpoint("127.0.0.1:7100"))),
+            TransparentMoveTrafficClass::AccountabilityReply,
+            0,
+            1,
+            Some(authority(4)),
+            Some(authority(5)),
+        );
+        let cover = TransparentMoveEnvelope::new(
+            MovePathBinding::Direct(MovePath::direct(endpoint("127.0.0.1:7000"))),
+            TransparentMoveTrafficClass::Cover,
+            0,
+            1,
+            None,
+            None,
+        );
+
+        let encoded = serde_json::to_vec(&retrieval)
+            .unwrap_or_else(|err| panic!("encode move header: {err}"));
+        let decoded = serde_json::from_slice::<TransparentMoveEnvelope>(&encoded)
+            .unwrap_or_else(|err| panic!("decode move header: {err}"));
+        assert_eq!(decoded, retrieval);
+        assert!(matches!(
+            deposit.traffic_class,
+            TransparentMoveTrafficClass::HoldDeposit
+        ));
+        assert!(matches!(
+            accountability.traffic_class,
+            TransparentMoveTrafficClass::AccountabilityReply
+        ));
+        assert!(matches!(
+            cover.traffic_class,
+            TransparentMoveTrafficClass::Cover
+        ));
+        assert_eq!(cover.link_protection, LinkProtectionMode::TransportLink);
+        assert_eq!(cover.path_protection, PathProtectionMode::TransparentDebug);
     }
 
     #[test]

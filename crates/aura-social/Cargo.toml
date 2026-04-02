@@ -29,6 +29,7 @@ proptest = { workspace = true }
 
 [features]
 default = []
+transparent_onion = ["aura-core/transparent_onion"]
 
 [lints]
 workspace = true

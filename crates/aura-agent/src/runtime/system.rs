@@ -3,12 +3,15 @@
 //! Main runtime system that orchestrates all agent operations.
 
 use super::services::ceremony_runner::CeremonyRunner;
+#[cfg(feature = "transparent_onion")]
+use super::services::AnonymousPathManager;
 use super::services::{
-    AuthorityManager, AuthorityStatus, CeremonyTracker, ContextManager, FlowBudgetManager,
-    HoldManager, LanTransportListenerService, LanTransportService, MoveManager,
-    ReactivePipelineService, ReceiptManager, ReconfigurationManager, RendezvousManager,
-    RuntimeMaintenanceService, RuntimeService, RuntimeServiceContext, ServiceError,
-    ServiceErrorKind, ServiceHealth, SocialManager, SyncServiceManager, ThresholdSigningService,
+    AuthorityManager, AuthorityStatus, CeremonyTracker, ContextManager, CoverTrafficGenerator,
+    FlowBudgetManager, HoldManager, LanTransportListenerService, LanTransportService,
+    LocalHealthObserver, MoveManager, ReactivePipelineService, ReceiptManager,
+    ReconfigurationManager, RendezvousManager, RuntimeMaintenanceService, RuntimeService,
+    RuntimeServiceContext, SelectionManager, ServiceError, ServiceErrorKind, ServiceHealth,
+    SocialManager, SyncServiceManager, ThresholdSigningService,
 };
 use super::{
     AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager, RuntimeDiagnosticSink,
@@ -186,8 +189,21 @@ pub struct RuntimeSystem {
     /// Move manager for bounded movement planning and delivery.
     move_manager: Option<MoveManager>,
 
+    /// Local health observer for adaptive privacy policy.
+    local_health_observer: Option<LocalHealthObserver>,
+
+    /// Runtime-owned adaptive selection manager.
+    selection_manager: Option<SelectionManager>,
+
+    /// Anonymous path manager for reusable established anonymous paths.
+    #[cfg(feature = "transparent_onion")]
+    anonymous_path_manager: Option<AnonymousPathManager>,
+
     /// Hold manager for shared custody and selector-based retrieval.
     hold_manager: Option<HoldManager>,
+
+    /// Cover traffic generator for shared move-substrate cover planning.
+    cover_traffic_generator: Option<CoverTrafficGenerator>,
 
     /// Social manager (optional, for social topology and relay selection)
     social_manager: Option<SocialManager>,
@@ -280,7 +296,12 @@ impl RuntimeSystem {
             sync_manager: None,
             rendezvous_manager: None,
             move_manager: None,
+            local_health_observer: None,
+            selection_manager: None,
+            #[cfg(feature = "transparent_onion")]
+            anonymous_path_manager: None,
             hold_manager: None,
+            cover_traffic_generator: None,
             social_manager: None,
             ceremony_tracker,
             ceremony_runner,
@@ -347,7 +368,12 @@ impl RuntimeSystem {
             sync_manager: Some(sync_manager),
             rendezvous_manager: None,
             move_manager: None,
+            local_health_observer: None,
+            selection_manager: None,
+            #[cfg(feature = "transparent_onion")]
+            anonymous_path_manager: None,
             hold_manager: None,
+            cover_traffic_generator: None,
             social_manager: None,
             ceremony_tracker,
             ceremony_runner,
@@ -414,7 +440,12 @@ impl RuntimeSystem {
             sync_manager: None,
             rendezvous_manager: Some(rendezvous_manager),
             move_manager: None,
+            local_health_observer: None,
+            selection_manager: None,
+            #[cfg(feature = "transparent_onion")]
+            anonymous_path_manager: None,
             hold_manager: None,
+            cover_traffic_generator: None,
             social_manager: None,
             ceremony_tracker,
             ceremony_runner,
@@ -444,7 +475,11 @@ impl RuntimeSystem {
         sync_manager: Option<SyncServiceManager>,
         rendezvous_manager: Option<RendezvousManager>,
         move_manager: Option<MoveManager>,
+        local_health_observer: Option<LocalHealthObserver>,
+        selection_manager: Option<SelectionManager>,
+        #[cfg(feature = "transparent_onion")] anonymous_path_manager: Option<AnonymousPathManager>,
         hold_manager: Option<HoldManager>,
+        cover_traffic_generator: Option<CoverTrafficGenerator>,
         rendezvous_handler: Option<RendezvousHandler>,
         lan_transport: Option<Arc<LanTransportService>>,
         social_manager: Option<SocialManager>,
@@ -489,7 +524,12 @@ impl RuntimeSystem {
             sync_manager,
             rendezvous_manager,
             move_manager,
+            local_health_observer,
+            selection_manager,
+            #[cfg(feature = "transparent_onion")]
+            anonymous_path_manager,
             hold_manager,
+            cover_traffic_generator,
             social_manager,
             ceremony_tracker,
             ceremony_runner,
@@ -655,8 +695,21 @@ impl RuntimeSystem {
         if let Some(move_manager) = &self.move_manager {
             services.push(move_manager);
         }
+        if let Some(local_health_observer) = &self.local_health_observer {
+            services.push(local_health_observer);
+        }
+        if let Some(selection_manager) = &self.selection_manager {
+            services.push(selection_manager);
+        }
+        #[cfg(feature = "transparent_onion")]
+        if let Some(anonymous_path_manager) = &self.anonymous_path_manager {
+            services.push(anonymous_path_manager);
+        }
         if let Some(hold_manager) = &self.hold_manager {
             services.push(hold_manager);
+        }
+        if let Some(cover_traffic_generator) = &self.cover_traffic_generator {
+            services.push(cover_traffic_generator);
         }
         if let Some(sync_manager) = &self.sync_manager {
             services.push(sync_manager);

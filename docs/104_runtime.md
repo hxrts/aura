@@ -23,6 +23,39 @@ No runtime, frontend, or harness path should keep a parallel terminal publicatio
 
 The same visibility rule applies to runtime-owned mutation helpers. Raw VM admission helpers, fragment ownership registry mutation, and the mutable reconfiguration controller stay inside `aura-agent` runtime internals. Shared consumers go through sanctioned ingress, session-owner, or manager surfaces.
 
+## Adaptive Privacy Runtime Ownership
+
+Adaptive privacy policy is runtime-owned local state, not shared truth.
+
+- the `Neighborhood Plane` and `Web of Trust Plane` provide permit and
+  candidate inputs
+- rendezvous descriptor views provide service-surface advertisement inputs
+- `SelectionManager` fuses those inputs with local health and budget signals
+  into runtime-local `LocalSelectionProfile` and `SelectionState`
+- `LocalHealthObserver` owns smoothing, hysteresis, and local health snapshots
+- `AnonymousPathManager` owns reusable anonymous established-path lifecycle and
+  protected establish-session state
+- `CoverTrafficGenerator` owns cover-floor planning and reserved cover budget
+
+This split is strict:
+
+- final route, holder, and path reuse decisions are runtime-local
+- those decisions must not be published as authoritative facts or descriptor
+  fields
+- retrieval, cover, accountability replies, and ordinary movement share one
+  `MoveEnvelope` family where applicable rather than regaining separate
+  transport families
+
+### Transparent Onion Quarantine
+
+`transparent_onion` is a debug, test, and simulation tool only.
+
+- it may expose transparent anonymous setup and envelope headers for inspection
+- it must remain excluded from parity-critical harness and shared-flow lanes
+- production policy ownership does not change when the feature is enabled
+- the feature must not become an implicit dependency of browser, TUI, or
+  conformance behavior
+
 ## Ownership Categories In The Runtime
 
 The runtime is the main place where Aura's ownership categories become concrete:

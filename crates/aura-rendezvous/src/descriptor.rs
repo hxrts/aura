@@ -1,10 +1,11 @@
-//! Transport Descriptor and Selection
+//! Transport Descriptor and Probing
 //!
-//! This module provides transport hint selection, descriptor building,
-//! and transport probing for peer discovery.
+//! This module provides descriptor building and transport probing for peer
+//! discovery. Final establish-path selection is runtime-owned and lives in
+//! `aura-agent`.
 
 use crate::facts::{RendezvousDescriptor, TransportAddress, TransportHint};
-use aura_core::service::{EstablishPath, LinkEndpoint, LinkProtocol, Route};
+use aura_core::service::{LinkEndpoint, LinkProtocol};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
 use sha2::{Digest, Sha256};
@@ -17,72 +18,6 @@ fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
     let mut out = [0u8; 32];
     out.copy_from_slice(&result);
     out
-}
-
-// =============================================================================
-// Transport Selector
-// =============================================================================
-
-/// Selects the best transport from a descriptor's split connectivity view
-///
-/// Priority order:
-/// 1. Direct QUIC (lowest latency)
-/// 2. Reflexive QUIC (NAT traversal)
-/// 3. Direct TCP (fallback)
-/// 4. WebSocket Relay (last resort)
-pub struct TransportSelector {
-    /// Timeout for probes in milliseconds
-    probe_timeout_ms: u64,
-}
-
-impl TransportSelector {
-    /// Create a new transport selector
-    pub fn new(probe_timeout_ms: u64) -> Self {
-        Self { probe_timeout_ms }
-    }
-
-    /// Get the probe timeout
-    pub fn probe_timeout_ms(&self) -> u64 {
-        self.probe_timeout_ms
-    }
-
-    /// Select best establish path from descriptor
-    ///
-    /// This performs a quick selection based on link-endpoint priority.
-    /// For actual connectivity testing, use `TransportProber`.
-    pub fn select_establish_path(
-        &self,
-        descriptor: &RendezvousDescriptor,
-    ) -> AuraResult<EstablishPath> {
-        let mut paths = descriptor.advertised_establish_paths();
-        paths.sort_by_key(|path| establish_path_priority(&path.route));
-        paths
-            .into_iter()
-            .next()
-            .ok_or_else(|| AuraError::not_found("No reachable establish path in descriptor"))
-    }
-
-    /// Select establish path with connectivity probing
-    ///
-    /// This actually tests connectivity to each hint before selection.
-    pub async fn select_establish_path_with_probing(
-        &self,
-        descriptor: &RendezvousDescriptor,
-        prober: &TransportProber,
-    ) -> AuraResult<EstablishPath> {
-        let mut paths = descriptor.advertised_establish_paths();
-        paths.sort_by_key(|path| establish_path_priority(&path.route));
-
-        for path in paths {
-            if path_is_reachable(&path.route, prober).await? {
-                return Ok(path);
-            }
-        }
-
-        Err(AuraError::not_found(
-            "No reachable establish path after probing",
-        ))
-    }
 }
 
 // =============================================================================
@@ -321,61 +256,6 @@ fn compute_psk_commitment(context_id: ContextId, authority_id: &AuthorityId) -> 
     let mut commitment = [0u8; 32];
     commitment.copy_from_slice(&result);
     commitment
-}
-
-fn endpoint_priority(endpoint: &LinkEndpoint) -> u8 {
-    match endpoint.protocol {
-        LinkProtocol::Quic => 0,
-        LinkProtocol::QuicReflexive => 1,
-        LinkProtocol::Tcp => 2,
-        LinkProtocol::WebSocket => 3,
-        LinkProtocol::WebSocketRelay => 4,
-    }
-}
-
-fn establish_path_priority(route: &Route) -> u8 {
-    if let Some(first_hop) = route.hops.first() {
-        endpoint_priority(&first_hop.link_endpoint)
-    } else {
-        endpoint_priority(&route.destination)
-    }
-}
-
-async fn path_is_reachable(route: &Route, prober: &TransportProber) -> AuraResult<bool> {
-    let target = route
-        .hops
-        .first()
-        .map(|hop| &hop.link_endpoint)
-        .unwrap_or(&route.destination);
-    endpoint_is_reachable(target, prober).await
-}
-
-async fn endpoint_is_reachable(
-    endpoint: &LinkEndpoint,
-    prober: &TransportProber,
-) -> AuraResult<bool> {
-    match endpoint.protocol {
-        LinkProtocol::Quic | LinkProtocol::Tcp | LinkProtocol::WebSocket => {
-            if let Some(address) = endpoint.address.as_deref() {
-                Ok(prober.probe_endpoint(address).await.is_ok())
-            } else {
-                Ok(false)
-            }
-        }
-        LinkProtocol::QuicReflexive => {
-            if let Some(stun_server) = endpoint.stun_server.as_deref() {
-                if prober.stun_probe(stun_server).await.is_ok() {
-                    return Ok(true);
-                }
-            }
-            if let Some(address) = endpoint.address.as_deref() {
-                Ok(prober.probe_endpoint(address).await.is_ok())
-            } else {
-                Ok(false)
-            }
-        }
-        LinkProtocol::WebSocketRelay => Ok(endpoint.relay_authority.is_some()),
-    }
 }
 
 // =============================================================================

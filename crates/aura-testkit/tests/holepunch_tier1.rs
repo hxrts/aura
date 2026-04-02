@@ -4,25 +4,12 @@
 
 use std::time::Duration;
 
-use aura_protocol::handlers::{
-    CandidateGeneration, CandidateKind, ConnectionCandidate, NetworkGeneration, PeerConnectionActor,
-};
+use aura_protocol::handlers::{CandidateGeneration, NetworkGeneration, PeerConnectionActor};
 use proptest::prelude::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Candidate {
-    kind: CandidateKind,
-    recoverable: bool,
-}
-
-impl ConnectionCandidate for Candidate {
-    fn kind(&self) -> CandidateKind {
-        self.kind
-    }
-
-    fn is_recoverable(&self) -> bool {
-        self.recoverable
-    }
+    label: &'static str,
 }
 
 fn new_actor() -> PeerConnectionActor<Candidate> {
@@ -30,42 +17,27 @@ fn new_actor() -> PeerConnectionActor<Candidate> {
 }
 
 #[test]
-fn path_selection_prefers_recoverable_relay_then_direct() {
+fn runtime_selected_path_is_preserved_without_non_runtime_reselection() {
     let mut actor = new_actor();
-    let candidates = vec![
-        Candidate {
-            kind: CandidateKind::Direct,
-            recoverable: true,
-        },
-        Candidate {
-            kind: CandidateKind::Relay,
-            recoverable: true,
-        },
-    ];
-    actor.on_candidates_changed(CandidateGeneration(1), &candidates);
+    let relay = Candidate {
+        label: "relay-selected-by-runtime",
+    };
+    actor.on_selected_path_changed(CandidateGeneration(1), Some(relay.clone()));
 
     let Some(selected) = actor.selected_path() else {
         panic!("selected path");
     };
-    assert_eq!(selected.kind(), CandidateKind::Relay);
+    assert_eq!(selected, &relay);
 
-    let mut actor = new_actor();
-    let candidates = vec![
-        Candidate {
-            kind: CandidateKind::Relay,
-            recoverable: false,
-        },
-        Candidate {
-            kind: CandidateKind::Direct,
-            recoverable: true,
-        },
-    ];
-    actor.on_candidates_changed(CandidateGeneration(2), &candidates);
+    let direct = Candidate {
+        label: "direct-selected-by-runtime",
+    };
+    actor.on_selected_path_changed(CandidateGeneration(2), Some(direct.clone()));
 
     let Some(selected) = actor.selected_path() else {
         panic!("selected path");
     };
-    assert_eq!(selected.kind(), CandidateKind::Direct);
+    assert_eq!(selected, &direct);
 }
 
 #[test]

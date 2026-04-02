@@ -85,6 +85,13 @@ web-sys = { version = "0.3", features = ["Window", "Location"] }
 default = ["choreo-backend-telltale-machine"]
 real-android-keystore = []
 simulation = ["aura-core/simulation"]
+transparent_onion = [
+    "aura-core/transparent_onion",
+    "aura-effects/transparent_onion",
+    "aura-protocol/transparent_onion",
+    "aura-social/transparent_onion",
+    "aura-sync/transparent_onion",
+]
 choreo-backend-telltale-machine = [
     "dep:telltale-machine",
     "aura-effects/telltale-runtime-capability",

@@ -18,6 +18,7 @@ workspace = true
 default = []
 simulation = ["aura-core/simulation"]
 telltale-runtime-capability = ["dep:telltale-machine"]
+transparent_onion = ["aura-core/transparent_onion"]
 
 [dependencies]
 aura-core = { path = "../aura-core", version = "0.1.0" }

@@ -17,6 +17,7 @@ default = []
 simulation = ["aura-core/simulation"]
 # Choreography-based CRDT sync; alternative to digest-based sync in aura-anti-entropy
 crdt-sync = []
+transparent_onion = ["aura-core/transparent_onion", "aura-effects/transparent_onion"]
 
 [dependencies]
 aura-core = { path = "../aura-core", version = "0.1.0" }

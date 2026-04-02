@@ -641,6 +641,8 @@ ci-user-flow-policy:
 
 ci-harness-ownership-policy:
     bash scripts/check/ownership-category-declarations.sh
+    bash scripts/check/adaptive-privacy-runtime-locality.sh
+    bash scripts/check/adaptive-privacy-phase5-legacy-sweep.sh
     bash scripts/check/harness-actor-vs-move-ownership.sh
     just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
     just _ownership-lint terminal-shell-explicit-exit-intent crates/aura-terminal/src

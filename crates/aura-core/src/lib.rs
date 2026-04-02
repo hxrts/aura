@@ -182,14 +182,19 @@ pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,
 };
 pub use service::{
-    AccountabilityReplyBlock, EstablishDescriptor, EstablishPath, HeldObject, HoldAuditReplyBlock,
-    HoldDepositReplyBlock, HoldDepositRequest, HoldDescriptor, HoldRequestError,
-    HoldRetentionMetadata, HoldRetrievalReplyBlock, HoldRetrievalRequest, LinkEndpoint,
-    LinkProtocol, LocalRoutingProfile, MoveDescriptor, MoveEnvelope, MovePath,
-    MoveReceiptReplyBlock, MoveToHoldHandoff, PolicySurface, ProviderCandidate, ProviderEvidence,
+    AccountabilityReplyBlock, AnonymousHopView, EstablishDescriptor, EstablishPath,
+    EstablishedPath, EstablishedPathRef, HeldObject, HoldAuditReplyBlock, HoldDepositReplyBlock,
+    HoldDepositRequest, HoldDescriptor, HoldRequestError, HoldRetentionMetadata,
+    HoldRetrievalReplyBlock, HoldRetrievalRequest, LinkEndpoint, LinkProtectionMode, LinkProtocol,
+    LocalEstablishDecision, LocalHealthSnapshot, LocalHoldDecision, LocalMoveDecision,
+    LocalRoutingProfile, LocalSelectionProfile, MessageClassRoutingConstraint, MoveDescriptor,
+    MoveEnvelope, MovePath, MovePathBinding, MoveReceiptReplyBlock, MoveToHoldHandoff,
+    PathProtectionMode, PolicySurface, PrivacyMessageClass, ProviderCandidate, ProviderEvidence,
     RelayHop, ReplyBlockError, RetrievalCapability, RetrievalCapabilityError, Route,
-    SelectionState, ServiceDescriptor, ServiceDescriptorHeader, ServiceDescriptorKind,
-    ServiceFamily, ServiceLimits, ServiceObjectCategory, ServiceProfile, ServiceQualityHints,
+    SchedulerClass, SecurityControlClass, SelectionState, ServiceDescriptor,
+    ServiceDescriptorHeader, ServiceDescriptorKind, ServiceFamily, ServiceLimits,
+    ServiceObjectCategory, ServiceProfile, ServiceQualityHints, TransparentAnonymousSetupLayer,
+    TransparentAnonymousSetupObject, TransparentMoveEnvelope, TransparentMoveTrafficClass,
 };
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{

@@ -312,8 +312,8 @@ pub use timeout_coordinator::TimeoutCoordinator;
 
 pub mod peer_connection;
 pub use peer_connection::{
-    AttemptBudget, BackoffWindow, CandidateGeneration, CandidateKind, ConnectionCandidate,
-    Degraded, Direct, NetworkGeneration, PeerConnection, PeerConnectionActor, RelayOnly, Upgrading,
+    AttemptBudget, BackoffWindow, CandidateGeneration, Degraded, Direct, NetworkGeneration,
+    PeerConnection, PeerConnectionActor, RelayOnly, Upgrading,
 };
 
 pub mod transport_coordinator;

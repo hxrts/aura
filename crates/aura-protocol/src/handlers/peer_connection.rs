@@ -95,21 +95,6 @@ fn deterministic_jitter(attempt_index: u8) -> (u64, bool) {
     (jitter_pct, jitter_sign)
 }
 
-/// Candidate path kind for relay-first selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CandidateKind {
-    Relay,
-    Direct,
-}
-
-/// Candidate abstraction used by `PeerConnectionActor`.
-pub trait ConnectionCandidate {
-    /// Path kind used for relay-first ordering.
-    fn kind(&self) -> CandidateKind;
-    /// Whether the candidate remains recoverable with current local state.
-    fn is_recoverable(&self) -> bool;
-}
-
 /// `RelayOnly` typestate marker.
 #[derive(Debug, Clone, Copy)]
 pub struct RelayOnly;
@@ -123,7 +108,7 @@ pub struct Direct;
 #[derive(Debug, Clone, Copy)]
 pub struct Degraded;
 
-/// Typestate-wrapped peer connection with path selection payload.
+/// Typestate-wrapped peer connection with runtime-selected path payload.
 #[derive(Debug, Clone)]
 pub struct PeerConnection<S, C> {
     candidate: Option<C>,
@@ -192,7 +177,7 @@ pub struct PeerConnectionActor<C> {
 
 impl<C> PeerConnectionActor<C>
 where
-    C: Clone + ConnectionCandidate,
+    C: Clone,
 {
     /// Create a new actor with bounded retry/backoff settings.
     pub fn new(max_attempts: u8, base_backoff: Duration, max_backoff: Duration) -> Self {
@@ -205,13 +190,17 @@ where
         }
     }
 
-    /// Update candidates and reset retry state when generation changes.
-    pub fn on_candidates_changed(&mut self, generation: CandidateGeneration, candidates: &[C]) {
+    /// Update the runtime-selected path and reset retry state when generation changes.
+    pub fn on_selected_path_changed(
+        &mut self,
+        generation: CandidateGeneration,
+        selected_path: Option<C>,
+    ) {
         if generation != self.candidate_generation {
             self.candidate_generation = generation;
             self.attempt_budget.reset();
         }
-        self.selected_path = self.select_relay_first(candidates);
+        self.selected_path = selected_path;
     }
 
     /// Apply a network-generation change and reset retry state.
@@ -245,42 +234,15 @@ where
     pub fn max_attempts(&self) -> u8 {
         self.attempt_budget.max_attempts()
     }
-
-    fn select_relay_first(&self, candidates: &[C]) -> Option<C> {
-        let relay = candidates.iter().find(|candidate| {
-            candidate.kind() == CandidateKind::Relay && candidate.is_recoverable()
-        });
-        if let Some(candidate) = relay {
-            return Some(candidate.clone());
-        }
-
-        candidates
-            .iter()
-            .find(|candidate| {
-                candidate.kind() == CandidateKind::Direct && candidate.is_recoverable()
-            })
-            .cloned()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     struct Candidate {
-        kind: CandidateKind,
-        recoverable: bool,
-    }
-
-    impl ConnectionCandidate for Candidate {
-        fn kind(&self) -> CandidateKind {
-            self.kind
-        }
-
-        fn is_recoverable(&self) -> bool {
-            self.recoverable
-        }
+        label: &'static str,
     }
 
     #[test]
@@ -298,28 +260,26 @@ mod tests {
     }
 
     #[test]
-    fn relay_first_selection_prefers_relay_when_recoverable() {
+    fn runtime_selected_path_is_preserved_without_non_runtime_reselection() {
         let mut actor = PeerConnectionActor::<Candidate>::new(
             3,
             Duration::from_millis(20),
             Duration::from_millis(200),
         );
-        let candidates = vec![
-            Candidate {
-                kind: CandidateKind::Direct,
-                recoverable: true,
-            },
-            Candidate {
-                kind: CandidateKind::Relay,
-                recoverable: true,
-            },
-        ];
-        actor.on_candidates_changed(CandidateGeneration(1), &candidates);
+        let relay = Candidate {
+            label: "relay-selected-by-runtime",
+        };
+        actor.on_selected_path_changed(CandidateGeneration(1), Some(relay.clone()));
 
-        assert_eq!(
-            actor.selected_path().map(|candidate| candidate.kind()),
-            Some(CandidateKind::Relay)
-        );
+        assert_eq!(actor.selected_path(), Some(&relay));
+
+        let direct = Candidate {
+            label: "direct-selected-by-runtime",
+        };
+        actor.on_selected_path_changed(CandidateGeneration(2), Some(direct.clone()));
+
+        assert_eq!(actor.selected_path(), Some(&direct));
+        assert_eq!(actor.attempts_used(), 0);
     }
 
     #[test]

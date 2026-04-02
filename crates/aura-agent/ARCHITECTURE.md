@@ -55,6 +55,19 @@ Summary:
 - For shared semantic flows, `aura-agent` is the primary `ActorOwned` crate. It may own long-lived mutable async runtime state, but it must not leak that ownership into frontend-local semantic lifecycle authorship.
 - Mutable runtime service views such as rendezvous descriptors, provider health, selector state, and hold observations are owned by the actor-owned service registry in `src/runtime/services/service_registry.rs`.
 - The actor-owned runtime service set includes rendezvous descriptor selection for `Establish`, the bounded `MoveManager` for current movement queues, replay suppression, flush scheduling, and congestion state, and the `HoldManager` for shared custody, selector rotation, bounded holder residency, local GC, and verified-only accountability updates.
+- Adaptive privacy runtime-owned services include `SelectionManager`, `LocalHealthObserver`, `CoverTrafficGenerator`, and `AnonymousPathManager`; they own local health smoothing, weighted selection, cover planning, and anonymous established-path lifecycle inside `aura-agent`.
+- `LocalSelectionProfile` is runtime-local. It must not be published as authoritative shared state, surfaced through frontend-facing shared contracts, or mirrored into Layer 5 facts. The sanctioned query surface is the runtime-owned `ServiceRegistry` selection snapshot path.
+- `SelectionManager` fuses `Neighborhood Plane` and `Web of Trust Plane`
+  permit inputs with descriptor snapshots, local health, and runtime budgets.
+  That fused policy remains runtime-local in `SelectionState` and
+  `LocalSelectionProfile`; it does not become a shared trust tier or
+  route-shaped descriptor field.
+- Transparent adaptive-privacy routing uses one shared envelope family for `Move`, held-object deposit and retrieval, sync-blended retrieval, cover traffic, and accountability replies. Retrieval and accountability must not regain separate transport families or mailbox-shaped network semantics inside `aura-agent`.
+- Harness and shared-flow lanes must remain independent of `transparent_onion`; transparent mode is debug/test/simulation-only and may not become a parity-critical dependency.
+- `AnonymousPathManager` may host transparent anonymous establish control
+  sessions only behind `transparent_onion`; that debug/simulation visibility
+  does not transfer ownership of adaptive policy or path selection away from
+  the runtime-owned services.
 - Contacts/friend projections derive `ContactRelationshipState` from relational facts inside `aura-agent`; frontend shells consume the emitted projection and do not keep separate friendship state machines.
 - Runtime-owned service declarations should prefer the `#[actor_owned(...)]` layer where a service exposes a stable long-lived command/ingress boundary; changed-files ratchets in `just ci-ownership-policy` enforce this incrementally.
 - Task-supervision service roots that do not expose a stable command-ingress surface should use `#[actor_root(...)]` instead of forcing the store-style `#[actor_owned(...)]` command-enum pattern.

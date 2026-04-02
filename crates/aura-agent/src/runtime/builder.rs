@@ -242,20 +242,36 @@ impl EffectSystemBuilder {
             .social_config
             .map(|social_config| super::services::SocialManager::new(authority_id, social_config));
 
+        let service_registry = rendezvous_manager
+            .as_ref()
+            .map(|manager| manager.registry())
+            .unwrap_or_else(|| Arc::new(super::services::ServiceRegistry::new()));
+
         let move_manager = Some(super::services::MoveManager::new(
             super::services::MoveManagerConfig::default(),
-            rendezvous_manager
-                .as_ref()
-                .map(|manager| manager.registry())
-                .unwrap_or_else(|| Arc::new(super::services::ServiceRegistry::new())),
+            service_registry.clone(),
+        ));
+        let local_health_observer_instance = super::services::LocalHealthObserver::new(
+            super::services::LocalHealthObserverConfig::default(),
+        );
+        let local_health_observer = Some(local_health_observer_instance.clone());
+        let selection_manager = Some(super::services::SelectionManager::new(
+            super::services::SelectionManagerConfig::default(),
+            service_registry.clone(),
+            local_health_observer_instance,
+        ));
+        #[cfg(feature = "transparent_onion")]
+        let anonymous_path_manager = Some(super::services::AnonymousPathManager::new(
+            super::services::AnonymousPathManagerConfig::default(),
+            service_registry.clone(),
         ));
         let hold_manager = Some(super::services::HoldManager::new(
             authority_id,
             super::services::HoldManagerConfig::default(),
-            rendezvous_manager
-                .as_ref()
-                .map(|manager| manager.registry())
-                .unwrap_or_else(|| Arc::new(super::services::ServiceRegistry::new())),
+            service_registry,
+        ));
+        let cover_traffic_generator = Some(super::services::CoverTrafficGenerator::new(
+            super::services::CoverTrafficGeneratorConfig::default(),
         ));
 
         // Create optional LAN transport service (used for LAN advertising + future TCP ingress)
@@ -347,7 +363,12 @@ impl EffectSystemBuilder {
             sync_manager,
             rendezvous_manager,
             move_manager,
+            local_health_observer,
+            selection_manager,
+            #[cfg(feature = "transparent_onion")]
+            anonymous_path_manager,
             hold_manager,
+            cover_traffic_generator,
             rendezvous_handler,
             lan_transport,
             social_manager,

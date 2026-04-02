@@ -754,7 +754,7 @@ impl Parse for ServiceSurfaceAttr {
             } else if meta.path.is_ident("select") {
                 select = Some(expect_string_literal(&meta, "select", "service_surface")?);
             } else if meta.path.is_ident("authoritative") {
-                authoritative = Some(parse_required_list_literal(&expect_string_literal(
+                authoritative = Some(parse_optional_list_literal(&expect_string_literal(
                     &meta,
                     "authoritative",
                     "service_surface",

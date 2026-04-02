@@ -113,7 +113,7 @@ pub use service::{
 };
 
 // Re-export descriptor types
-pub use descriptor::{DescriptorBuilder, StunConfig, TransportProber, TransportSelector};
+pub use descriptor::{DescriptorBuilder, StunConfig, TransportProber};
 
 // Re-export channel types
 pub use new_channel::{

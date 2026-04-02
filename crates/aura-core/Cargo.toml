@@ -43,6 +43,7 @@ proptest = { workspace = true, optional = true }
 default = []
 proptest = ["dep:proptest"]
 simulation = []
+transparent_onion = []
 
 [dev-dependencies]
 proptest = { workspace = true }
