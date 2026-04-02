@@ -370,6 +370,11 @@ Aura should keep the first taxonomy small:
 - current status:
   deferred until Aura adds a runtime admission consumer beyond
   `byzantine_envelope` / determinism profile checks
+- revisit only when:
+  the consensus choreography itself owns authoritative admission or evidence
+  branching for those guarantees, and Aura can fail closed on those exact
+  choreography-level requirements instead of the current runtime-local
+  consensus-profile checks
 
 Aura-specific capability names are only allowed when they already have a real
 runtime consumer. Today that means `authoritative_read`,

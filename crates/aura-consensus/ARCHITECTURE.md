@@ -46,6 +46,11 @@ Strong-agreement protocol for single-operation consensus using FROST threshold s
 - No journal mutations inside protocol (charge-before-send at bridge).
 - Progress requires honest threshold participation.
 - Type-level guarantees: `ThresholdShareSet::combine()` only after threshold proven.
+- The choreography remains theorem-pack-free until consensus profile admission
+  moves from runtime-owned `byzantine_envelope` checks into a real
+  choreography-level admission/evidence/transition surface. Revisit only when
+  the choreography itself owns concrete envelope, ordering, or synchrony
+  requirements and Aura exposes a matching runtime admission consumer.
 
 ### InvariantUniqueCommitPerInstance
 

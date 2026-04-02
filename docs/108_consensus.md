@@ -148,6 +148,22 @@ Ordering of committed facts relies on `OrderTime` (or session/consensus sequenci
 
 Consensus-backed ceremonies (including BFT-DKG finalization) are admitted only after runtime capability checks for the consensus profile. Aura currently enforces theorem-pack/runtime capability requirements such as `byzantine_envelope` before executing DKG and threshold-signing paths.
 
+Today this admission lives in the runtime bridge and threshold-signing
+services, not in the consensus choreography source. The current
+`AuraConsensus` `.tell` file remains theorem-pack-free because it still models
+the message skeleton rather than the authoritative admission/evidence profile.
+Adding a theorem pack there now would be decorative.
+
+Aura should revisit consensus theorem packs only when all of the following are
+true:
+
+- the choreography owns a concrete consensus-profile admission surface rather
+  than relying on runtime-local capability checks
+- the required guarantee is better expressed as a choreography-level envelope,
+  ordering, or synchrony contract
+- Aura has a real runtime admission consumer for those choreography-level
+  requirements beyond the existing `byzantine_envelope` capability gate
+
 At admission, Aura captures a `CapabilitySnapshot` and records a `ByzantineSafetyAttestation` with:
 
 - protocol id (`aura.consensus`)

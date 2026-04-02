@@ -109,6 +109,24 @@ fn production_manifests_emit_sorted_unique_guard_capabilities() {
 }
 
 #[test]
+fn consensus_manifest_remains_theorem_pack_free_until_profile_admission_moves_into_choreography() {
+    let manifest =
+        aura_consensus::protocol::telltale_session_types_aura_consensus::vm_artifacts::composition_manifest();
+    assert!(
+        manifest.theorem_packs.is_empty(),
+        "consensus production manifest should not declare theorem packs yet",
+    );
+    assert!(
+        manifest.required_theorem_packs.is_empty(),
+        "consensus production manifest should remain theorem-pack-free until choreography-level consensus admission exists",
+    );
+    assert!(
+        manifest.required_theorem_pack_capabilities.is_empty(),
+        "consensus production manifest should not require theorem-pack capabilities yet",
+    );
+}
+
+#[test]
 fn production_manifests_declare_only_admitted_guard_capabilities() {
     for manifest in production_manifests() {
         manifest
