@@ -319,8 +319,6 @@ pub fn handle_neighborhood_key(
             KeyCode::Esc => {
                 state.neighborhood.mode = NeighborhoodMode::Map;
                 state.neighborhood.enter_depth = AccessLevel::Limited;
-                state.neighborhood.insert_mode = false;
-                state.neighborhood.insert_mode_entry_char = None;
                 state.neighborhood.entered_home_id = None;
                 state.neighborhood.detail_focus = DetailFocus::Channels;
             }
@@ -372,10 +370,6 @@ pub fn handle_neighborhood_key(
                 }
                 DetailFocus::Messages | DetailFocus::Input => {}
             },
-            KeyCode::Char('i') => {
-                state.neighborhood.insert_mode = true;
-                state.neighborhood.insert_mode_entry_char = Some('i');
-            }
             KeyCode::Char('o') => {
                 if state.neighborhood.moderator_actions_enabled {
                     commands.push(TuiCommand::Dispatch(

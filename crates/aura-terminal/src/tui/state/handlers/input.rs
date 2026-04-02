@@ -418,11 +418,6 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                 // Auto-scroll to bottom (show latest messages)
                 state.chat.message_scroll = 0;
             }
-            Screen::Neighborhood => {
-                state.neighborhood.insert_mode = false;
-                state.neighborhood.insert_mode_entry_char = None;
-                state.neighborhood.detail_focus = DetailFocus::Channels;
-            }
             _ => {}
         }
         return;
@@ -431,7 +426,6 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
     // Get the entry char to check if we need to consume it
     let entry_char = match screen {
         Screen::Chat => state.chat.insert_mode_entry_char,
-        Screen::Neighborhood => state.neighborhood.insert_mode_entry_char,
         _ => None,
     };
 
@@ -441,7 +435,6 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
             if entry_char == Some(c) {
                 match screen {
                     Screen::Chat => state.chat.insert_mode_entry_char = None,
-                    Screen::Neighborhood => state.neighborhood.insert_mode_entry_char = None,
                     _ => {}
                 }
             } else {
@@ -451,9 +444,6 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                         state.chat.insert_mode_entry_char = None;
                         state.chat.input_buffer.push(c);
                     }
-                    Screen::Neighborhood => {
-                        let _ = c;
-                    }
                     _ => {}
                 }
             }
@@ -462,9 +452,6 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
             Screen::Chat => {
                 state.chat.insert_mode_entry_char = None;
                 state.chat.input_buffer.pop();
-            }
-            Screen::Neighborhood => {
-                // Neighborhood insert mode is disabled; ignore character edits.
             }
             _ => {}
         },
@@ -515,9 +502,6 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                     // Auto-scroll to bottom to show the sent message.
                     state.chat.message_scroll = 0;
                 }
-            }
-            Screen::Neighborhood => {
-                // Neighborhood insert mode is disabled; Enter does not dispatch messaging.
             }
             _ => {}
         },

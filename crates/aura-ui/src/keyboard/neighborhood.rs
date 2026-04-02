@@ -61,14 +61,6 @@ pub(super) fn handle_neighborhood_char(model: &mut UiModel, ch: char) {
                 CapabilityConfigModalState::default(),
             ));
         }
-        'i' if matches!(
-            model.neighborhood_mode,
-            crate::model::NeighborhoodMode::Detail
-        ) =>
-        {
-            model.input_mode = true;
-            model.input_buffer.clear();
-        }
         _ => {}
     }
 }

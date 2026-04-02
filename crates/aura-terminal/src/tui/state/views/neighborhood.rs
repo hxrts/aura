@@ -65,8 +65,6 @@ pub struct NeighborhoodViewState {
     pub member_count: usize,
 
     /// Messaging
-    pub insert_mode: bool,
-    pub insert_mode_entry_char: Option<char>,
     pub input_buffer: String,
     pub message_scroll: usize,
     pub message_count: usize,
@@ -91,8 +89,6 @@ impl Default for NeighborhoodViewState {
             channel_count: 0,
             selected_member: 0,
             member_count: 0,
-            insert_mode: false,
-            insert_mode_entry_char: None,
             input_buffer: String::new(),
             message_scroll: 0,
             message_count: 0,

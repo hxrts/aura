@@ -195,14 +195,7 @@ value = "Entry access:"
 timeout_ms = 10000
 
 [[steps]]
-id = "alice-send-detail-message"
-action = "input_text"
-actor = "alice"
-value = "in7-map-detail-msg\n"
-timeout_ms = 2000
-
-[[steps]]
-id = "alice-detail-still-visible-after-send"
+id = "alice-detail-still-visible"
 action = "diagnostic_screen_contains"
 actor = "alice"
 value = "Entry access:"
