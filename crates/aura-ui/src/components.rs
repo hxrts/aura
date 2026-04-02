@@ -223,9 +223,9 @@ pub fn UiPill(label: String, tone: PillTone) -> Element {
 #[component]
 pub fn UiListItem(label: String, secondary: Option<String>, active: bool) -> Element {
     let class = if active {
-        "aura-list-item border-b border-primary/40 bg-primary/10 px-2.5 py-2.5 min-w-0 overflow-hidden"
+        "aura-list-item rounded-sm border-b border-primary/40 bg-primary/10 px-2.5 py-2.5 min-w-0 overflow-hidden"
     } else {
-        "aura-list-item border-b border-border px-2.5 py-2.5 min-w-0 overflow-hidden"
+        "aura-list-item rounded-sm border-b border-border px-2.5 py-2.5 min-w-0 overflow-hidden"
     };
     rsx! {
         div {
