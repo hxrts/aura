@@ -3,12 +3,10 @@ module amp_transport exposing (AmpTransport)
 protocol AmpTransport =
   roles Sender, Receiver
 
-  -- Data transmission
   Sender { guard_capability = "amp:send"
          , journal_facts = "amp_send_msg" }
     -> Receiver : AmpData of crate.AmpMessage
 
-  -- Acknowledgment
   Receiver { guard_capability = "amp:receive"
            , journal_facts = "amp_recv_ack" }
     -> Sender : AmpAck of crate.AmpReceipt
