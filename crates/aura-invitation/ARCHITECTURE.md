@@ -33,6 +33,8 @@ Invitation protocol for establishing relationships between authorities, includin
 - Facts with known context must reduce under their matching `ContextId`.
 - Invitation identifiers are treated as stable binding keys.
 - Invitation redemption creates mutual relational context.
+- Invitation choreographies remain theorem-pack-free until they move onto a
+  Telltale-native authority/evidence path with a concrete runtime consumer.
 
 ### InvariantInvitationRedemptionUniqueness
 

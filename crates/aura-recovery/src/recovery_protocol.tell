@@ -1,6 +1,8 @@
 module recovery_protocol exposing (RecoveryProtocol)
 
-protocol RecoveryProtocol =
+proof_bundle AuraAuthorityEvidence version "1.0.0" issuer "did:aura:runtime-admission" constraint "authoritative_recovery_evidence" requires [protocol_machine_envelope_adherence, protocol_machine_envelope_admission, protocol_envelope_bridge]
+
+protocol RecoveryProtocol requires AuraAuthorityEvidence =
   roles Account, Guardian, Coordinator
 
   Account { guard_capability = "recovery:initiate"

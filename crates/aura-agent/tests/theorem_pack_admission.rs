@@ -10,9 +10,16 @@ use aura_agent::{
 };
 use aura_mpst::{CompositionManifest, CompositionTheoremPack};
 use aura_protocol::admission::{
-    CAPABILITY_PROTOCOL_ENVELOPE_BRIDGE, CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADHERENCE,
-    CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADMISSION, CAPABILITY_RECONFIGURATION_SAFETY,
+    manifest_admission_requirements, CAPABILITY_AUTHORITATIVE_READ, CAPABILITY_CANONICAL_HANDLE,
+    CAPABILITY_MATERIALIZATION_PROOF, CAPABILITY_PROTOCOL_ENVELOPE_BRIDGE,
+    CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADHERENCE, CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADMISSION,
+    CAPABILITY_RECONFIGURATION_SAFETY, THEOREM_PACK_AURA_AUTHORITY_EVIDENCE,
     THEOREM_PACK_AURA_TRANSITION_SAFETY,
+};
+use aura_recovery::{
+    guardian_ceremony::telltale_session_types_guardian_ceremony,
+    guardian_setup::telltale_session_types_guardian_setup,
+    recovery_protocol::telltale_session_types_recovery_protocol,
 };
 use aura_sync::protocols::{
     device_epoch_rotation::telltale_session_types_device_epoch_rotation,
@@ -68,7 +75,7 @@ fn build_engine(
     .expect("engine")
 }
 
-fn runtime_contracts_missing_transition_pack_support() -> RuntimeContracts {
+fn runtime_contracts_missing_protocol_machine_admission_support() -> RuntimeContracts {
     let mut contracts = RuntimeContracts::full();
     for (capability, admitted) in &mut contracts.execution_profile.theorem_pack_eligibility {
         if capability == CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADMISSION {
@@ -84,6 +91,18 @@ fn ota_activation_manifest() -> CompositionManifest {
 
 fn device_epoch_rotation_manifest() -> CompositionManifest {
     telltale_session_types_device_epoch_rotation::vm_artifacts::composition_manifest()
+}
+
+fn recovery_protocol_manifest() -> CompositionManifest {
+    telltale_session_types_recovery_protocol::vm_artifacts::composition_manifest()
+}
+
+fn guardian_setup_manifest() -> CompositionManifest {
+    telltale_session_types_guardian_setup::vm_artifacts::composition_manifest()
+}
+
+fn guardian_ceremony_manifest() -> CompositionManifest {
+    telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest()
 }
 
 #[tokio::test]
@@ -170,7 +189,9 @@ async fn ota_activation_manifest_rejects_missing_transition_safety_support() {
 
 #[tokio::test]
 async fn device_epoch_rotation_manifest_rejects_missing_transition_safety_support() {
-    let engine = build_engine(Some(runtime_contracts_missing_transition_pack_support()));
+    let engine = build_engine(Some(
+        runtime_contracts_missing_protocol_machine_admission_support(),
+    ));
     let error = engine
         .admit_manifest(&device_epoch_rotation_manifest())
         .await
@@ -186,6 +207,136 @@ async fn device_epoch_rotation_manifest_rejects_missing_transition_safety_suppor
 async fn phase_two_manifests_admit_with_full_runtime_contracts() {
     let engine = build_engine(Some(RuntimeContracts::full()));
     for manifest in [ota_activation_manifest(), device_epoch_rotation_manifest()] {
+        engine
+            .admit_manifest(&manifest)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("manifest should admit with full runtime contracts: {error:?}")
+            });
+    }
+}
+
+#[test]
+fn phase_three_manifests_require_authority_evidence_pack() {
+    for manifest in [
+        recovery_protocol_manifest(),
+        guardian_setup_manifest(),
+        guardian_ceremony_manifest(),
+    ] {
+        let mut capabilities = manifest.required_theorem_pack_capabilities.clone();
+        capabilities.sort();
+        assert_eq!(
+            manifest.required_theorem_packs,
+            vec![THEOREM_PACK_AURA_AUTHORITY_EVIDENCE.to_string()],
+            "phase-three protocol should require AuraAuthorityEvidence: {}",
+            manifest.protocol_id
+        );
+        assert_eq!(
+            capabilities,
+            vec![
+                CAPABILITY_PROTOCOL_ENVELOPE_BRIDGE.to_string(),
+                CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADHERENCE.to_string(),
+                CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADMISSION.to_string(),
+            ],
+            "phase-three protocol should surface authority-evidence manifest metadata: {}",
+            manifest.protocol_id
+        );
+    }
+}
+
+#[test]
+fn phase_three_manifests_map_authority_evidence_to_runtime_authority_surfaces() {
+    for manifest in [
+        recovery_protocol_manifest(),
+        guardian_setup_manifest(),
+        guardian_ceremony_manifest(),
+    ] {
+        let admission =
+            manifest_admission_requirements(&manifest).expect("manifest admission requirements");
+        let authority_pack = admission
+            .theorem_pack_requirements
+            .iter()
+            .find(|requirement| requirement.theorem_pack == THEOREM_PACK_AURA_AUTHORITY_EVIDENCE)
+            .expect("phase-three manifest should resolve AuraAuthorityEvidence");
+        let required = authority_pack
+            .required_runtime_capabilities
+            .iter()
+            .map(|capability| capability.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            required.contains(&CAPABILITY_AUTHORITATIVE_READ),
+            "authority-evidence admission should require authoritative_read: {}",
+            manifest.protocol_id
+        );
+        assert!(
+            required.contains(&CAPABILITY_MATERIALIZATION_PROOF),
+            "authority-evidence admission should require materialization_proof: {}",
+            manifest.protocol_id
+        );
+        assert!(
+            required.contains(&CAPABILITY_CANONICAL_HANDLE),
+            "authority-evidence admission should require canonical_handle: {}",
+            manifest.protocol_id
+        );
+    }
+}
+
+#[tokio::test]
+async fn recovery_protocol_manifest_rejects_missing_authority_evidence_support() {
+    let engine = build_engine(Some(
+        runtime_contracts_missing_protocol_machine_admission_support(),
+    ));
+    let error = engine
+        .admit_manifest(&recovery_protocol_manifest())
+        .await
+        .expect_err("recovery protocol should fail closed without authority-evidence support");
+    assert!(matches!(
+        error,
+        AuraChoreoEngineError::MissingTheoremPackCapability { theorem_pack, .. }
+            if theorem_pack == THEOREM_PACK_AURA_AUTHORITY_EVIDENCE
+    ));
+}
+
+#[tokio::test]
+async fn guardian_setup_manifest_rejects_missing_authority_evidence_support() {
+    let engine = build_engine(Some(
+        runtime_contracts_missing_protocol_machine_admission_support(),
+    ));
+    let error = engine
+        .admit_manifest(&guardian_setup_manifest())
+        .await
+        .expect_err("guardian setup should fail closed without authority-evidence support");
+    assert!(matches!(
+        error,
+        AuraChoreoEngineError::MissingTheoremPackCapability { theorem_pack, .. }
+            if theorem_pack == THEOREM_PACK_AURA_AUTHORITY_EVIDENCE
+    ));
+}
+
+#[tokio::test]
+async fn guardian_ceremony_manifest_rejects_missing_authority_evidence_support() {
+    let engine = build_engine(Some(
+        runtime_contracts_missing_protocol_machine_admission_support(),
+    ));
+    let error = engine
+        .admit_manifest(&guardian_ceremony_manifest())
+        .await
+        .expect_err("guardian ceremony should fail closed without authority-evidence support");
+    assert!(matches!(
+        error,
+        AuraChoreoEngineError::MissingTheoremPackCapability { theorem_pack, .. }
+            if theorem_pack == THEOREM_PACK_AURA_AUTHORITY_EVIDENCE
+    ));
+}
+
+#[tokio::test]
+async fn phase_three_manifests_admit_with_full_runtime_contracts() {
+    let engine = build_engine(Some(RuntimeContracts::full()));
+    for manifest in [
+        recovery_protocol_manifest(),
+        guardian_setup_manifest(),
+        guardian_ceremony_manifest(),
+    ] {
         engine
             .admit_manifest(&manifest)
             .await

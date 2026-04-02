@@ -273,6 +273,44 @@ impl RecoveryProtocol {
     }
 }
 
+#[cfg(test)]
+mod theorem_pack_tests {
+    use aura_protocol::admission::{
+        CAPABILITY_PROTOCOL_ENVELOPE_BRIDGE, CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADHERENCE,
+        CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADMISSION, THEOREM_PACK_AURA_AUTHORITY_EVIDENCE,
+    };
+
+    use super::telltale_session_types_recovery_protocol;
+
+    #[test]
+    fn recovery_proof_status_exposes_required_authority_pack() {
+        assert_eq!(
+            telltale_session_types_recovery_protocol::proof_status::REQUIRED_THEOREM_PACKS,
+            &[THEOREM_PACK_AURA_AUTHORITY_EVIDENCE]
+        );
+    }
+
+    #[test]
+    fn recovery_manifest_emits_authority_evidence_metadata() {
+        let manifest =
+            telltale_session_types_recovery_protocol::vm_artifacts::composition_manifest();
+        let mut capabilities = manifest.required_theorem_pack_capabilities.clone();
+        capabilities.sort();
+        assert_eq!(
+            manifest.required_theorem_packs,
+            vec![THEOREM_PACK_AURA_AUTHORITY_EVIDENCE.to_string()]
+        );
+        assert_eq!(
+            capabilities,
+            vec![
+                CAPABILITY_PROTOCOL_ENVELOPE_BRIDGE.to_string(),
+                CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADHERENCE.to_string(),
+                CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADMISSION.to_string(),
+            ]
+        );
+    }
+}
+
 // Recovery Protocol Choreography
 choreography!(include_str!("src/recovery_protocol.tell"));
 

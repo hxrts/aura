@@ -352,6 +352,14 @@ Aura should keep the first taxonomy small:
   `aura-agent::runtime::choreo_engine`,
   `aura-agent::runtime::contracts`,
   recovery/guardian launch paths in `aura-agent`
+- current adopted production protocols:
+  `aura.recovery.grant`,
+  `aura.recovery.guardian_setup`,
+  `aura.recovery.guardian_ceremony`
+- current explicit non-goals in the recovery/invitation area:
+  `aura.recovery.guardian_membership_change`,
+  `aura.invitation.guardian`,
+  `aura.invitation.device_enrollment`
 
 `AuraConsensusDeployment`:
 

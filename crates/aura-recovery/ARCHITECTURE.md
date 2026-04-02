@@ -32,6 +32,8 @@ Guardian-based recovery protocol enabling threshold key recovery through social 
 - Facts must be reduced under their matching `ContextId`.
 - Recovery and guardian membership transitions are consensus-gated (Category C).
 - Guardian threshold must be satisfied for successful recovery.
+- `RecoveryProtocol`, `GuardianSetup`, and `GuardianCeremony` require the
+  `AuraAuthorityEvidence` theorem pack at launch time.
 
 ### InvariantRecoveryThresholdEnforcement
 
@@ -51,6 +53,25 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines monotone state transitions.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines threshold safety expectations.
+
+### InvariantRecoveryAuthorityEvidenceAdmission
+
+The recovery flows that depend on authoritative read/materialization semantics
+must fail closed unless the runtime admits `AuraAuthorityEvidence`.
+
+Enforcement locus:
+- `src/recovery_protocol.tell`
+- `src/guardian_setup.tell`
+- `src/guardian_ceremony.tell`
+- Aura runtime admission through `aura-agent::runtime::choreo_engine`
+
+Failure mode:
+- Recovery launch proceeds on a runtime that cannot honor authoritative
+  evidence/materialization assumptions.
+
+Verification hooks:
+- `cargo test -p aura-recovery`
+- `cargo test -p aura-agent recovery -- --nocapture`
 
 ## Ownership Model
 
@@ -99,6 +120,7 @@ cargo test -p aura-recovery
 | Independent fact reduction non-commutative | `src/view.rs` `test_reduction_commutes_for_independent_facts` | Covered |
 | Recovery disputed after approval | `src/state.rs` `test_recovery_disputed` | Covered |
 | Protocol choreography incoherent | `tests/ceremony/` `recovery_protocol_choreography_is_coherent_and_orphan_free` | Covered |
+| Authority-evidence theorem-pack metadata drifts | `src/recovery_protocol.rs`, `src/guardian_setup.rs`, `src/guardian_ceremony.rs` theorem-pack tests | Covered |
 
 ## Operation Categories
 

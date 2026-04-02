@@ -1,6 +1,8 @@
 module guardian_setup exposing (GuardianSetup)
 
-protocol GuardianSetup =
+proof_bundle AuraAuthorityEvidence version "1.0.0" issuer "did:aura:runtime-admission" constraint "authoritative_recovery_evidence" requires [protocol_machine_envelope_adherence, protocol_machine_envelope_admission, protocol_envelope_bridge]
+
+protocol GuardianSetup requires AuraAuthorityEvidence =
   roles SetupInitiator, Guardian1, Guardian2, Guardian3
 
   SetupInitiator { guard_capability = "recovery:guardian_setup:initiate"
