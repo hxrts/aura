@@ -77,7 +77,8 @@ use async_trait::async_trait;
 pub use composition::{
     startup_defaults_for_qualified_name, AdmittedModuleGuardCapabilities,
     CompositionDelegationConstraint, CompositionLinkSpec, CompositionManifest,
-    GuardCapabilityAdmission, GuardCapabilityAdmissionError, ModuleGuardCapabilityError,
+    CompositionTheoremPack, GuardCapabilityAdmission, GuardCapabilityAdmissionError,
+    ModuleGuardCapabilityError,
 };
 
 /// Aura-owned runtime hooks required by generated choreography runners.

@@ -631,6 +631,31 @@ fn generate_vm_projection_artifacts(
     let protocol_name = choreography.name.to_string();
     let qualified_name = aura_mpst::CompositionManifest::qualified_name(namespace, &protocol_name);
     let startup_defaults = aura_mpst::startup_defaults_for_qualified_name(&qualified_name);
+    let theorem_packs = choreography
+        .theorem_packs()
+        .into_iter()
+        .map(|pack| aura_mpst::CompositionTheoremPack {
+            name: pack.name,
+            capabilities: pack.capabilities,
+            version: pack.version,
+            issuer: pack.issuer,
+            constraints: pack.constraints,
+        })
+        .collect::<Vec<_>>();
+    let mut required_theorem_packs = choreography.required_theorem_packs();
+    required_theorem_packs.sort();
+    required_theorem_packs.dedup();
+    let mut required_theorem_pack_capabilities = theorem_packs
+        .iter()
+        .filter(|pack| {
+            required_theorem_packs
+                .iter()
+                .any(|required| required == &pack.name)
+        })
+        .flat_map(|pack| pack.capabilities.iter().cloned())
+        .collect::<Vec<_>>();
+    required_theorem_pack_capabilities.sort();
+    required_theorem_pack_capabilities.dedup();
     let mut guard_capabilities = annotations
         .iter()
         .filter_map(|annotation| match annotation {
@@ -658,6 +683,9 @@ fn generate_vm_projection_artifacts(
             .iter()
             .map(|capability| (*capability).to_string())
             .collect(),
+        theorem_packs,
+        required_theorem_packs,
+        required_theorem_pack_capabilities,
         guard_capabilities,
         determinism_policy_ref: Some(startup_defaults.determinism_policy_ref.to_string()),
         link_specs: annotations

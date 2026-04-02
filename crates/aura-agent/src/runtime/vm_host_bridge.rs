@@ -14,6 +14,7 @@ use aura_core::effects::{VmBridgeEffects, VmBridgePendingSend};
 use aura_core::AuraVmDeterminismProfileV1;
 use aura_mpst::upstream::types::{GlobalType, LocalTypeR};
 use aura_mpst::{CompositionManifest, GuardCapabilityAdmission};
+use aura_protocol::admission::manifest_admission_requirements;
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -80,6 +81,11 @@ pub enum AuraVmSessionOpenError {
     },
     #[error("failed to admit declared guard capabilities for protocol {protocol_id}: {message}")]
     ManifestGuardCapability {
+        protocol_id: String,
+        message: String,
+    },
+    #[error("failed to admit declared theorem packs for protocol {protocol_id}: {message}")]
+    ManifestTheoremPack {
         protocol_id: String,
         message: String,
     },
@@ -442,6 +448,7 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
     determinism_policy_ref: Option<&str>,
     scheduler_signals: AuraVmSchedulerSignals,
     required_capabilities: &[&str],
+    manifest: Option<&CompositionManifest>,
 ) -> Result<
     (
         AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
@@ -502,18 +509,28 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
         policy_ref: effective_policy.policy_ref.to_string(),
         source,
     })?;
-    let sid = engine
-        .open_protocol_machine_session_for_policy_admitted(
-            &runtime_image,
-            effective_policy,
-            required_capabilities,
-        )
-        .await
-        .map_err(|source| AuraVmSessionOpenError::SessionOpen {
-            protocol_id: protocol_id.to_string(),
-            policy_ref: admission.effective_policy_ref().to_string(),
-            source,
-        })?;
+    let sid = if let Some(manifest) = manifest {
+        engine
+            .open_protocol_machine_session_for_manifest_admitted(
+                &runtime_image,
+                effective_policy,
+                manifest,
+            )
+            .await
+    } else {
+        engine
+            .open_protocol_machine_session_for_policy_admitted(
+                &runtime_image,
+                effective_policy,
+                required_capabilities,
+            )
+            .await
+    }
+    .map_err(|source| AuraVmSessionOpenError::SessionOpen {
+        protocol_id: protocol_id.to_string(),
+        policy_ref: admission.effective_policy_ref().to_string(),
+        source,
+    })?;
     Ok((engine, handler, sid))
 }
 
@@ -538,13 +555,14 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
             protocol_id: manifest.protocol_id.clone(),
             message: error.to_string(),
         })?;
+    let _theorem_pack_admission = manifest_admission_requirements(manifest).map_err(|error| {
+        AuraVmSessionOpenError::ManifestTheoremPack {
+            protocol_id: manifest.protocol_id.clone(),
+            message: error.to_string(),
+        }
+    })?;
     let role_names = manifest
         .role_names
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    let required_capabilities = manifest
-        .required_capabilities
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
@@ -569,7 +587,8 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
         manifest.protocol_id.as_str(),
         manifest.determinism_policy_ref.as_deref(),
         scheduler_signals,
-        required_capabilities.as_slice(),
+        &[],
+        Some(manifest),
     )
     .await;
     if open_result.is_err() && claimed_session_id.is_some() {
@@ -892,6 +911,9 @@ mod tests {
             protocol_id: protocol_id.to_string(),
             role_names: vec!["Role".to_string()],
             required_capabilities: Vec::new(),
+            theorem_packs: Vec::new(),
+            required_theorem_packs: Vec::new(),
+            required_theorem_pack_capabilities: Vec::new(),
             guard_capabilities: Vec::new(),
             determinism_policy_ref: None,
             delegation_constraints: Vec::new(),
@@ -1120,6 +1142,7 @@ mod tests {
                 None,
                 AuraVmSchedulerSignals::default(),
                 &[],
+                None,
             )
             .await
             .expect("envelope-admitted host bridge session opens");
@@ -1255,6 +1278,9 @@ mod tests {
             protocol_id: "aura.sync.anti_entropy".to_string(),
             role_names: vec!["Role".to_string()],
             required_capabilities: Vec::new(),
+            theorem_packs: Vec::new(),
+            required_theorem_packs: Vec::new(),
+            required_theorem_pack_capabilities: Vec::new(),
             guard_capabilities: Vec::new(),
             determinism_policy_ref: Some(
                 crate::runtime::AURA_VM_POLICY_SYNC_ANTI_ENTROPY.to_string(),

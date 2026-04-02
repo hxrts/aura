@@ -363,6 +363,30 @@ runtime consumer. Today that means `authoritative_read`,
 theorem-pack keys should not be added until the corresponding runtime admission
 check exists.
 
+### Admission Boundary
+
+Aura consumes theorem-pack metadata only through the generated
+`CompositionManifest` boundary:
+
+- generated manifests carry theorem-pack declarations
+- generated manifests carry required theorem-pack names
+- generated manifests carry the flattened required theorem-pack capability set
+
+`aura-protocol::admission` is the single Aura-owned translation layer that maps
+required theorem packs onto concrete runtime-admission requirements. That layer
+must stay small and fail closed:
+
+- a required theorem pack with no matching generated declaration is rejected
+- a required theorem pack with no Aura admission policy is rejected
+- a theorem-pack declaration whose declared capability set drifts from Aura's
+  supported taxonomy is rejected
+- runtime launch rejects missing required theorem-pack capability coverage
+  before protocol execution begins
+
+`aura-agent::runtime::vm_host_bridge`, `aura-agent::runtime::choreo_engine`,
+and `aura-agent::runtime::choreography_adapter` consume that resolved boundary;
+they do not invent parallel theorem-pack policy tables.
+
 ### Acceptance Rule
 
 A choreography may add theorem-pack requirements only when all of the following

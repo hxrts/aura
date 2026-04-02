@@ -191,8 +191,19 @@ pub struct CompositionManifest {
     /// Declared choreography roles in source order.
     pub role_names: Vec<String>,
     /// Required runtime capability identifiers for admission.
+    #[serde(default)]
     pub required_capabilities: Vec<String>,
+    /// Typed theorem-pack declarations emitted from the authoritative DSL.
+    #[serde(default)]
+    pub theorem_packs: Vec<CompositionTheoremPack>,
+    /// Required theorem packs emitted from the authoritative DSL.
+    #[serde(default)]
+    pub required_theorem_packs: Vec<String>,
+    /// Flattened required theorem-pack capabilities emitted from the authoritative DSL.
+    #[serde(default)]
+    pub required_theorem_pack_capabilities: Vec<String>,
     /// Canonical guard capabilities declared by the choreography source.
+    #[serde(default)]
     pub guard_capabilities: Vec<CapabilityName>,
     /// Determinism/scheduler policy selector reference.
     pub determinism_policy_ref: Option<String>,
@@ -200,6 +211,25 @@ pub struct CompositionManifest {
     pub link_specs: Vec<CompositionLinkSpec>,
     /// Delegation boundary constraints required for runtime reconfiguration.
     pub delegation_constraints: Vec<CompositionDelegationConstraint>,
+}
+
+/// Typed theorem-pack declaration metadata extracted from choreography source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompositionTheoremPack {
+    /// Stable theorem-pack name.
+    pub name: String,
+    /// Capability names declared by the theorem pack.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    /// Optional theorem-pack version.
+    #[serde(default)]
+    pub version: Option<String>,
+    /// Optional theorem-pack issuer.
+    #[serde(default)]
+    pub issuer: Option<String>,
+    /// Optional theorem-pack constraints.
+    #[serde(default)]
+    pub constraints: Vec<String>,
 }
 
 impl CompositionManifest {
@@ -524,6 +554,9 @@ mod tests {
             protocol_id: "test.protocol".to_string(),
             role_names: vec!["Alice".to_string(), "Bob".to_string()],
             required_capabilities: Vec::new(),
+            theorem_packs: Vec::new(),
+            required_theorem_packs: Vec::new(),
+            required_theorem_pack_capabilities: Vec::new(),
             guard_capabilities: vec![
                 CapabilityName::parse("chat:message:send")?,
                 CapabilityName::parse("amp:receive")?,
@@ -547,6 +580,9 @@ mod tests {
             protocol_id: "legacy.protocol".to_string(),
             role_names: vec!["Alice".to_string(), "Bob".to_string()],
             required_capabilities: Vec::new(),
+            theorem_packs: Vec::new(),
+            required_theorem_packs: Vec::new(),
+            required_theorem_pack_capabilities: Vec::new(),
             guard_capabilities: vec![CapabilityName::parse("send_message")?],
             determinism_policy_ref: None,
             link_specs: Vec::new(),
@@ -613,6 +649,9 @@ mod tests {
             protocol_id: "module.protocol".to_string(),
             role_names: vec!["Alice".to_string(), "Bob".to_string()],
             required_capabilities: Vec::new(),
+            theorem_packs: Vec::new(),
+            required_theorem_packs: Vec::new(),
+            required_theorem_pack_capabilities: Vec::new(),
             guard_capabilities: vec![
                 CapabilityName::parse("module:alpha_module:calendar:sync")?,
                 CapabilityName::parse("module:beta_module:calendar:sync")?,
@@ -642,6 +681,9 @@ mod tests {
             protocol_id: "module.protocol".to_string(),
             role_names: vec!["Alice".to_string(), "Bob".to_string()],
             required_capabilities: Vec::new(),
+            theorem_packs: Vec::new(),
+            required_theorem_packs: Vec::new(),
+            required_theorem_pack_capabilities: Vec::new(),
             guard_capabilities: vec![CapabilityName::parse(
                 "module:calendar_pack:calendar:write",
             )?],

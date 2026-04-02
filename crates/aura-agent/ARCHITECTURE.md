@@ -161,6 +161,7 @@ Runtime telltale integration consumes bridge artifacts but does not redefine bri
 
 Enforcement locus:
 - `src/runtime/choreo_engine.rs` and `src/runtime/choreography_adapter.rs` enforce runtime capability admission.
+- generated `CompositionManifest` theorem-pack metadata is translated exactly once by `aura-protocol::admission`, then consumed by `src/runtime/vm_host_bridge.rs` and `src/runtime/choreo_engine.rs`.
 - `tests/telltale_machine_parity.rs` and `tests/telltale_machine_scenario_contracts.rs` run runtime parity and contract lanes for the admitted protocol-machine path.
 
 Failure mode:
@@ -174,6 +175,7 @@ Verification hooks:
 Contract alignment:
 - [Formal Verification Reference](../../docs/120_verification.md) defines runtime parity lanes.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines runtime admission guarantees.
+- [Choreography Guide](../../docs/803_choreography_guide.md) defines the theorem-pack admission boundary and taxonomy.
 
 ### InvariantFatalViolations
 

@@ -40,7 +40,8 @@ use aura_mpst::upstream::runtime::{ChoreoHandler, ChoreoHandlerExt, ChoreoResult
 use aura_mpst::upstream::runtime::{
     ChoreographyError as TelltaleChoreographyError, LabelId, RoleId,
 };
-use aura_mpst::GeneratedChoreographyRuntime;
+use aura_mpst::{CompositionManifest, GeneratedChoreographyRuntime};
+use aura_protocol::admission::manifest_admission_requirements;
 use aura_protocol::effects::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError as AuraChoreographyError, RoleIndex,
 };
@@ -407,6 +408,21 @@ where
         self
     }
 
+    /// Configure runtime capability admission from one generated composition manifest.
+    pub fn with_manifest_runtime_capability_admission(
+        mut self,
+        capability_effects: Arc<dyn RuntimeCapabilityEffects>,
+        manifest: &CompositionManifest,
+    ) -> Result<Self, AdmissionError> {
+        let admission = manifest_admission_requirements(manifest)?;
+        self.runtime_admission = Some(RuntimeAdmissionConfig {
+            capability_effects,
+            required_capabilities: admission.required_runtime_capabilities,
+            admitted: false,
+        });
+        Ok(self)
+    }
+
     /// Get a reference to the journal coupler if configured.
     pub fn journal_coupler(&self) -> Option<&JournalCoupler> {
         self.journal_coupler.as_ref()
@@ -450,6 +466,17 @@ where
             let reason = match &error {
                 AdmissionError::MissingCapability { capability } => format!(
                     "TheoremPackAdmission failed: missing runtime capability ref={}",
+                    capability_key_ref(capability.as_str())
+                ),
+                AdmissionError::MissingTheoremPack { theorem_pack } => format!(
+                    "TheoremPackAdmission failed: missing theorem pack {}",
+                    capability_key_ref(theorem_pack)
+                ),
+                AdmissionError::MissingTheoremPackCapability {
+                    theorem_pack: _,
+                    capability,
+                } => format!(
+                    "TheoremPackAdmission failed: missing theorem-pack capability ref={}",
                     capability_key_ref(capability.as_str())
                 ),
                 AdmissionError::MissingRuntimeContracts => {

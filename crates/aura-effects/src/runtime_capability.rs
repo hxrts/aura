@@ -37,12 +37,13 @@ pub struct RuntimeCapabilityHandler {
 impl RuntimeCapabilityHandler {
     /// Create a handler from an explicit capability snapshot.
     pub fn new(snapshot: Vec<(CapabilityKey, bool)>) -> Self {
-        let inventory = snapshot.into_iter().collect::<BTreeMap<_, _>>();
+        let mut inventory = snapshot.into_iter().collect::<BTreeMap<_, _>>();
+        let protocol_critical_surfaces =
+            protocol_surface_inventory_from_aura_capabilities(&inventory);
+        merge_protocol_surfaces_into_inventory(&mut inventory, &protocol_critical_surfaces);
         Self {
             inventory: Arc::new(inventory),
-            protocol_critical_surfaces: Arc::new(
-                protocol_surface_inventory_from_aura_capabilities(&BTreeMap::new()),
-            ),
+            protocol_critical_surfaces: Arc::new(protocol_critical_surfaces),
         }
     }
 
@@ -50,14 +51,15 @@ impl RuntimeCapabilityHandler {
     pub fn from_pairs(
         snapshot: impl IntoIterator<Item = (impl Into<CapabilityKey>, bool)>,
     ) -> Self {
-        let inventory = snapshot
+        let mut inventory = snapshot
             .into_iter()
             .map(|(key, admitted)| (key.into(), admitted))
             .collect::<BTreeMap<_, _>>();
+        let protocol_critical_surfaces =
+            protocol_surface_inventory_from_aura_capabilities(&inventory);
+        merge_protocol_surfaces_into_inventory(&mut inventory, &protocol_critical_surfaces);
         Self {
-            protocol_critical_surfaces: Arc::new(
-                protocol_surface_inventory_from_aura_capabilities(&inventory),
-            ),
+            protocol_critical_surfaces: Arc::new(protocol_critical_surfaces),
             inventory: Arc::new(inventory),
         }
     }
@@ -107,6 +109,15 @@ impl RuntimeCapabilityHandler {
                 .into_iter()
                 .map(|(key, admitted)| (CapabilityKey::new(key), admitted))
                 .collect::<BTreeMap<_, _>>();
+        for (key, admitted) in &contracts.execution_profile.theorem_pack_eligibility {
+            inventory.insert(CapabilityKey::new(key.as_str()), *admitted);
+        }
+        let reconfiguration_enabled = contracts
+            .capabilities
+            .contains(&telltale_machine::runtime_contracts::RuntimeCapability::LiveMigration)
+            && contracts.capabilities.contains(
+                &telltale_machine::runtime_contracts::RuntimeCapability::PlacementRefinement,
+            );
         let protocol_critical_surfaces =
             protocol_surface_inventory_from_runtime_contracts(contracts);
 
@@ -135,6 +146,11 @@ impl RuntimeCapabilityHandler {
             CapabilityKey::new("vmEnvelopeAdherence"),
             contracts.determinism_artifacts.full,
         );
+        inventory.insert(
+            CapabilityKey::new("reconfiguration_safety"),
+            reconfiguration_enabled,
+        );
+        merge_protocol_surfaces_into_inventory(&mut inventory, &protocol_critical_surfaces);
 
         Self {
             inventory: Arc::new(inventory),
@@ -157,6 +173,15 @@ fn protocol_surface_inventory_from_aura_capabilities(
     #[cfg(not(feature = "telltale-runtime-capability"))]
     {
         protocol_surface_inventory_from_known_surfaces(reconfiguration_enabled)
+    }
+}
+
+fn merge_protocol_surfaces_into_inventory(
+    inventory: &mut BTreeMap<CapabilityKey, bool>,
+    protocol_critical_surfaces: &BTreeMap<String, bool>,
+) {
+    for (surface, admitted) in protocol_critical_surfaces {
+        inventory.insert(CapabilityKey::new(surface.as_str()), *admitted);
     }
 }
 
@@ -275,10 +300,12 @@ mod tests {
             .capability_inventory()
             .await
             .expect("inventory should be available");
-        assert_eq!(inventory.len(), 3);
         assert!(inventory.contains(&(CapabilityKey::new("capA"), true)));
         assert!(inventory.contains(&(CapabilityKey::new("capB"), false)));
         assert!(inventory.contains(&(CapabilityKey::new("capC"), true)));
+        assert!(inventory.contains(&(CapabilityKey::new("theorem_pack_capabilities"), true)));
+        assert!(inventory.contains(&(CapabilityKey::new("authoritative_read"), true)));
+        assert!(inventory.contains(&(CapabilityKey::new("reconfiguration_transition"), false)));
     }
 
     #[cfg(feature = "telltale-runtime-capability")]

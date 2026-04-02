@@ -46,6 +46,15 @@ pub enum AdmissionError {
     /// A required runtime capability is missing or disabled.
     #[error("missing runtime capability: {capability}")]
     MissingCapability { capability: CapabilityKey },
+    /// A required theorem pack is not declared or not admitted by Aura.
+    #[error("missing required theorem pack: {theorem_pack}")]
+    MissingTheoremPack { theorem_pack: String },
+    /// One required theorem-pack capability is missing or disabled.
+    #[error("missing theorem-pack capability `{capability}` for `{theorem_pack}`")]
+    MissingTheoremPackCapability {
+        theorem_pack: String,
+        capability: CapabilityKey,
+    },
     /// Capability inventory could not be loaded.
     #[error("runtime capability inventory unavailable: {reason}")]
     InventoryUnavailable { reason: String },

@@ -13,6 +13,8 @@ use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects
 use aura_core::hash::hash;
 use aura_effects::RuntimeCapabilityHandler;
 use aura_mpst::termination::{compute_weighted_measure, SessionBufferSnapshot};
+use aura_mpst::CompositionManifest;
+use aura_protocol::admission::manifest_admission_requirements;
 use aura_protocol::termination::{
     TerminationBudget, TerminationBudgetConfig, TerminationBudgetError, TerminationProtocolClass,
 };
@@ -68,6 +70,20 @@ pub enum AuraChoreoEngineError {
     /// Required runtime capability is missing for bundle admission.
     #[error("missing runtime capability: {capability}")]
     MissingRuntimeCapability {
+        /// Missing capability identifier.
+        capability: String,
+    },
+    /// Required theorem pack is missing from the manifest or unsupported by Aura.
+    #[error("missing theorem pack: {theorem_pack}")]
+    MissingTheoremPack {
+        /// Missing theorem-pack name.
+        theorem_pack: String,
+    },
+    /// Required theorem-pack capability is missing for bundle admission.
+    #[error("missing theorem-pack capability for `{theorem_pack}`: {capability}")]
+    MissingTheoremPackCapability {
+        /// The theorem pack whose coverage failed.
+        theorem_pack: String,
         /// Missing capability identifier.
         capability: String,
     },
@@ -385,6 +401,18 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
                         capability: capability_key_ref(capability.as_str()),
                     });
                 }
+                AdmissionError::MissingTheoremPack { theorem_pack } => {
+                    return Err(AuraChoreoEngineError::MissingTheoremPack { theorem_pack });
+                }
+                AdmissionError::MissingTheoremPackCapability {
+                    theorem_pack,
+                    capability,
+                } => {
+                    return Err(AuraChoreoEngineError::MissingTheoremPackCapability {
+                        theorem_pack,
+                        capability: capability_key_ref(capability.as_str()),
+                    });
+                }
                 AdmissionError::MissingRuntimeContracts => {
                     return Err(AuraChoreoEngineError::MissingRuntimeContracts);
                 }
@@ -400,6 +428,76 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Admit one generated choreography manifest, including theorem-pack requirements.
+    pub async fn admit_manifest(
+        &self,
+        manifest: &CompositionManifest,
+    ) -> Result<(), AuraChoreoEngineError> {
+        let admission = manifest_admission_requirements(manifest).map_err(|error| match error {
+            AdmissionError::MissingTheoremPack { theorem_pack } => {
+                AuraChoreoEngineError::MissingTheoremPack { theorem_pack }
+            }
+            AdmissionError::MissingTheoremPackCapability {
+                theorem_pack,
+                capability,
+            } => AuraChoreoEngineError::MissingTheoremPackCapability {
+                theorem_pack,
+                capability: capability_key_ref(capability.as_str()),
+            },
+            AdmissionError::MissingCapability { capability } => {
+                AuraChoreoEngineError::MissingRuntimeCapability {
+                    capability: capability_key_ref(capability.as_str()),
+                }
+            }
+            AdmissionError::MissingRuntimeContracts => {
+                AuraChoreoEngineError::MissingRuntimeContracts
+            }
+            AdmissionError::InventoryUnavailable { .. } | AdmissionError::Internal { .. } => {
+                AuraChoreoEngineError::Interpreter {
+                    message: "runtime capability admission failed".to_string(),
+                }
+            }
+        })?;
+
+        let required_runtime_capabilities = admission
+            .required_runtime_capabilities
+            .iter()
+            .map(CapabilityKey::as_str)
+            .collect::<Vec<_>>();
+        self.admit_bundle(required_runtime_capabilities.as_slice())
+            .await?;
+
+        for theorem_pack in admission.theorem_pack_requirements {
+            if let Err(error) = self
+                .runtime_capabilities
+                .require_capabilities(&theorem_pack.required_runtime_capabilities)
+                .await
+            {
+                return Err(match error {
+                    AdmissionError::MissingCapability { capability }
+                    | AdmissionError::MissingTheoremPackCapability { capability, .. } => {
+                        AuraChoreoEngineError::MissingTheoremPackCapability {
+                            theorem_pack: theorem_pack.theorem_pack,
+                            capability: capability_key_ref(capability.as_str()),
+                        }
+                    }
+                    AdmissionError::MissingTheoremPack { theorem_pack } => {
+                        AuraChoreoEngineError::MissingTheoremPack { theorem_pack }
+                    }
+                    AdmissionError::MissingRuntimeContracts => {
+                        AuraChoreoEngineError::MissingRuntimeContracts
+                    }
+                    AdmissionError::InventoryUnavailable { .. }
+                    | AdmissionError::Internal { .. } => AuraChoreoEngineError::Interpreter {
+                        message: "runtime capability admission failed".to_string(),
+                    },
+                });
+            }
+        }
+
         Ok(())
     }
 
@@ -1064,6 +1162,39 @@ impl<H: ProtocolMachineEffectHandler + AuraVmSchedulerSignalsProvider> AuraChore
             }
         }
         self.admit_bundle(admission_capabilities.as_slice()).await?;
+        validate_protocol_execution_policy(&self.vm_config, policy).map_err(|error| {
+            AuraChoreoEngineError::Interpreter {
+                message: format!("unsupported VM runtime profile for protocol: {error}"),
+            }
+        })?;
+        let scheduler_input = scheduler_control_input_for_protocol_machine_image(
+            runtime_image,
+            policy.protocol_class,
+            configured_guard_capacity(&self.vm_config),
+            self.handler.scheduler_signals(),
+        );
+        validate_scheduler_execution_policy(&self.vm_config, scheduler_input).map_err(|error| {
+            AuraChoreoEngineError::Interpreter {
+                message: format!("unsupported VM scheduler profile for protocol: {error}"),
+            }
+        })?;
+        let sid = self.open_protocol_machine_session(runtime_image)?;
+        self.session_runtime_selectors
+            .insert(sid, AuraVmRuntimeSelector::for_policy(policy));
+        self.session_protocol_classes
+            .insert(sid, policy.protocol_class);
+        self.session_determinism_profiles.insert(sid, policy);
+        Ok(sid)
+    }
+
+    /// Admit one generated manifest plus runtime policy, then open a current protocol-machine image.
+    pub async fn open_protocol_machine_session_for_manifest_admitted(
+        &mut self,
+        runtime_image: &ProtocolMachineCodeImage,
+        policy: AuraVmProtocolExecutionPolicy,
+        manifest: &CompositionManifest,
+    ) -> Result<SessionId, AuraChoreoEngineError> {
+        self.admit_manifest(manifest).await?;
         validate_protocol_execution_policy(&self.vm_config, policy).map_err(|error| {
             AuraChoreoEngineError::Interpreter {
                 message: format!("unsupported VM runtime profile for protocol: {error}"),
