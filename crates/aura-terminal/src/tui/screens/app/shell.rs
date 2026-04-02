@@ -100,7 +100,7 @@ use dispatch::{
 use events::{handle_channel_selection_change, resolve_committed_selected_channel_id};
 use input::transition_from_terminal_event;
 use props::{IoAppProps, RuntimeShellPropsSeed};
-use render::{build_global_modals, state_indicator_label};
+use render::build_global_modals;
 use runtime::build_runtime_app;
 use runtime_support::{
     authoritative_app_snapshot_with_retry, authoritative_settings_authorities_for_command,
@@ -574,8 +574,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Discovered Peers Auto-Refresh
     //
-    // Keep LAN/rendezvous peer discovery fresh in the background so the
-    // Contacts screen can stay purely reactive.
+    // Keep bootstrap-aware peer discovery fresh in the background so the
+    // Contacts screen and footer stay reactive without manual refreshes.
     // =========================================================================
     hooks.use_future({
         let app_core = app_ctx.app_core.raw().clone();
@@ -585,16 +585,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 if shutdown.load(std::sync::atomic::Ordering::Acquire) {
                     break;
                 }
-                let timestamp_ms =
-                    match aura_app::ui::workflows::time::current_time_ms(&app_core).await {
-                        Ok(ts) => ts,
-                        Err(e) => {
-                            tracing::debug!(error = %e, "current_time_ms failed in peer discovery");
-                            0
-                        }
-                    };
-                if let Err(e) = network_workflows::discover_peers(&app_core, timestamp_ms).await {
-                    tracing::debug!(error = %e, "discover_peers failed");
+                if let Err(e) = network_workflows::refresh_discovered_peers(&app_core).await {
+                    tracing::debug!(error = %e, "refresh_discovered_peers failed");
+                }
+                if let Err(e) = aura_app::ui::workflows::system::refresh_account(&app_core).await {
+                    tracing::debug!(error = %e, "refresh_account failed after peer refresh");
                 }
                 effect_sleep(network_workflows::DISCOVERED_PEERS_REFRESH_INTERVAL).await;
             }
@@ -1091,8 +1086,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let global_hints = global_footer_hints();
     let screen_hints = screen_footer_hints(current_screen);
 
-    let state_indicator = state_indicator_label(&tui_snapshot);
-
     let tasks_for_events = tasks.clone();
     hooks.use_terminal_events({
         let mut screen = screen.clone();
@@ -1270,7 +1263,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Nav bar status is updated reactively from signals.
     let network_status = nav_signals.network_status.get();
     let now_ms = nav_signals.now_ms.get();
-    let transport_peers = nav_signals.transport_peers.get();
+    let reachable_peers = nav_signals.reachable_peers.get();
     let known_online = nav_signals.known_online.get();
 
     // Layout: NavBar (3 rows) + Content (25 rows) + Footer (3 rows) = 31 = TOTAL_HEIGHT
@@ -1379,9 +1372,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 disabled: is_insert_mode,
                 network_status,
                 now_ms: now_ms,
-                transport_peers: transport_peers,
+                reachable_peers,
                 known_online: known_online,
-                state_indicator: Some(state_indicator),
+                state_indicator: None,
             )
 
             // === GLOBAL MODALS ===

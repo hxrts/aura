@@ -111,6 +111,7 @@ tui_device_id="demo:tui"
 manual_browser_cmd=""
 browser_display_name=""
 web_server_pid=""
+web_supervisor_pid=""
 
 require_command() {
   local cmd="$1"
@@ -193,7 +194,16 @@ cleanup_web_server() {
   fi
 }
 
+cleanup_web_supervisor() {
+  if [[ -n "$web_supervisor_pid" ]] && kill -0 "$web_supervisor_pid" 2>/dev/null; then
+    kill "$web_supervisor_pid" 2>/dev/null || true
+    wait "$web_supervisor_pid" 2>/dev/null || true
+  fi
+  web_supervisor_pid=""
+}
+
 cleanup() {
+  cleanup_web_supervisor
   cleanup_web_server
 }
 
@@ -245,7 +255,7 @@ start_web_server() {
 
   : >"$web_log"
   printf "[demo] building web frontend... (0/? crates, 0s)" >&2
-  ./scripts/web/serve-static.sh "$web_port" >"$web_log" 2>&1 &
+  nohup ./scripts/web/serve-static.sh "$web_port" >"$web_log" 2>&1 &
   web_server_pid=$!
   echo "$web_server_pid" >"$web_pid_file"
 
@@ -284,6 +294,32 @@ start_web_server() {
     exit 1
   fi
   printf "\r[demo] web server ready at %s%s\n" "$web_url" "$(printf ' %.0s' {1..30})" >&2
+}
+
+web_server_healthy() {
+  if [[ ! -f "$web_pid_file" ]]; then
+    return 1
+  fi
+  local pid
+  pid="$(cat "$web_pid_file" 2>/dev/null || true)"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    return 1
+  fi
+  curl -fsS "$web_url" >/dev/null 2>&1
+}
+
+start_web_server_supervisor() {
+  cleanup_web_supervisor
+  (
+    while true; do
+      sleep 2
+      if ! web_server_healthy; then
+        echo "[demo] static web server became unavailable; restarting" >&2
+        start_web_server
+      fi
+    done
+  ) &
+  web_supervisor_pid=$!
 }
 
 set_manual_browser_command() {
@@ -442,6 +478,7 @@ write_metadata
 case "$mode" in
   dual)
     start_web_server
+    start_web_server_supervisor
     select_browser
     write_metadata
     launch_browser
@@ -455,6 +492,7 @@ case "$mode" in
     ;;
   web)
     start_web_server
+    start_web_server_supervisor
     select_browser
     write_metadata
     launch_browser

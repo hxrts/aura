@@ -485,7 +485,7 @@ async fn handle_tui_launch(
                     .with_config(runtime_spec.agent_config())
                     .with_authority(authority)
                     .with_sync_config(runtime_spec.sync_config())
-                    .with_rendezvous()
+                    .with_rendezvous_config(runtime_spec.agent_config().rendezvous_config())
                     .build_production(&runtime_spec.effect_context())
                     .await
                     .map_err(|error| {
@@ -510,6 +510,9 @@ async fn handle_tui_launch(
                                 .with_config(runtime_spec.agent_config())
                                 .with_authority(authority)
                                 .with_sync_config(runtime_spec.sync_config())
+                                .with_rendezvous_config(
+                                    runtime_spec.agent_config().rendezvous_config(),
+                                )
                                 .build_simulation_async_with_shared_transport(
                                     seed,
                                     &runtime_spec.effect_context(),
@@ -788,7 +791,7 @@ async fn handle_tui_launch(
                         .with_config(runtime_spec.agent_config())
                         .with_authority(runtime_authority)
                         .with_sync_config(runtime_spec.sync_config())
-                        .with_rendezvous()
+                        .with_rendezvous_config(runtime_spec.agent_config().rendezvous_config())
                         .build_production(&runtime_spec.effect_context())
                         .await
                         .map_err(|error| {
@@ -800,6 +803,7 @@ async fn handle_tui_launch(
                         .with_config(runtime_spec.agent_config())
                         .with_authority(runtime_authority)
                         .with_sync_config(runtime_spec.sync_config())
+                        .with_rendezvous_config(runtime_spec.agent_config().rendezvous_config())
                         .build_simulation_async(seed, &runtime_spec.effect_context())
                         .await
                         .map_err(|error| {
@@ -965,4 +969,25 @@ async fn handle_tui_launch(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn demo_runtime_paths_keep_rendezvous_enabled() {
+        let source = include_str!("mod.rs");
+
+        assert!(
+            source.contains(
+                ".with_sync_config(runtime_spec.sync_config())\n                                .with_rendezvous_config(\n                                    runtime_spec.agent_config().rendezvous_config(),\n                                )\n                                .build_simulation_async_with_shared_transport("
+            ),
+            "demo shared-transport runtime must enable rendezvous so bootstrap discovery stays live"
+        );
+        assert!(
+            source.contains(
+                ".with_sync_config(runtime_spec.sync_config())\n                        .with_rendezvous_config(runtime_spec.agent_config().rendezvous_config())\n                        .build_simulation_async(seed, &runtime_spec.effect_context())"
+            ),
+            "demo provisional runtime must enable rendezvous so bootstrap discovery starts before enrollment"
+        );
+    }
 }

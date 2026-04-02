@@ -35,8 +35,8 @@ pub struct FooterProps {
     pub network_status: NetworkStatus,
     /// Current time (ms since epoch) from runtime, for relative formatting
     pub now_ms: Option<u64>,
-    /// Transport-level peers (active network connections)
-    pub transport_peers: usize,
+    /// Reachable peers discovered through runtime networking/bootstrap.
+    pub reachable_peers: usize,
     /// Online contacts (people you know who are currently online)
     pub known_online: usize,
     /// Optional persistent state indicator text.
@@ -98,7 +98,7 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
 
     // Format: "123 P, 45 On" - must fit in STATUS_COL_WIDTH (15 chars)
     // Max realistic: "999 P, 99 On" = 12 chars
-    let peer_status = format!("{} P, {} On", props.transport_peers, props.known_online);
+    let peer_status = format!("{} P, {} On", props.reachable_peers, props.known_online);
     let bottom_status = props.state_indicator.clone().unwrap_or(peer_status);
     let screen_hint_views = screen_hints_text
         .iter()

@@ -3,6 +3,7 @@
 //! Main runtime system that orchestrates all agent operations.
 
 use super::services::ceremony_runner::CeremonyRunner;
+use super::services::rendezvous_manager::RendezvousManagerError;
 #[cfg(feature = "transparent_onion")]
 use super::services::AnonymousPathManager;
 use super::services::{
@@ -1556,23 +1557,33 @@ pub(crate) async fn publish_lan_descriptor_with(
     let descriptor = require_published_lan_descriptor(result, device_id)?;
     install_lan_descriptor(rendezvous_manager, descriptor).await?;
 
-    if let Some(address) = websocket_addrs
-        .first()
-        .cloned()
-        .or_else(|| tcp_addrs.first().cloned())
-    {
-        if let Err(error) = rendezvous_manager
-            .register_bootstrap_candidate(address, None)
-            .await
-        {
-            tracing::debug!(
-                error = %error,
-                "Failed to register bootstrap candidate after publishing LAN descriptor"
-            );
-        }
+    if let Err(error) = register_bootstrap_candidate_with(rendezvous_manager, lan_transport).await {
+        tracing::debug!(
+            error = %error,
+            "Failed to register bootstrap candidate after publishing LAN descriptor"
+        );
     }
 
     Ok(())
+}
+
+pub(crate) async fn register_bootstrap_candidate_with(
+    rendezvous_manager: &RendezvousManager,
+    lan_transport: &LanTransportService,
+) -> Result<(), RendezvousManagerError> {
+    let tcp_addrs = lan_transport.advertised_addrs();
+    let websocket_addrs = lan_transport.websocket_addrs();
+    let Some(address) = websocket_addrs
+        .first()
+        .cloned()
+        .or_else(|| tcp_addrs.first().cloned())
+    else {
+        return Ok(());
+    };
+
+    rendezvous_manager
+        .register_bootstrap_candidate(address, None)
+        .await
 }
 
 fn require_published_lan_descriptor(

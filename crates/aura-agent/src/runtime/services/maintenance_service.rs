@@ -8,7 +8,9 @@ use crate::core::AuthorityContext;
 use crate::handlers::{
     device_epoch_rotation::DeviceEpochRotationService, InvitationHandler, RendezvousHandler,
 };
-use crate::runtime::system::{publish_lan_descriptor_with, sync_peer_reconcile_interval};
+use crate::runtime::system::{
+    publish_lan_descriptor_with, register_bootstrap_candidate_with, sync_peer_reconcile_interval,
+};
 use crate::runtime::AuraEffectSystem;
 use crate::runtime::TaskGroup;
 use async_trait::async_trait;
@@ -456,15 +458,18 @@ impl RuntimeMaintenanceService {
             let authority_id = self.authority_id;
             let device_id = self.device_id;
             let lan_refresh_service = self.clone();
+            let descriptor_time_effects = time_effects.clone();
+            let descriptor_rendezvous_manager = rendezvous_manager.clone();
+            let descriptor_lan_transport = lan_transport.clone();
             cfg_if::cfg_if! {
                 if #[cfg(target_arch = "wasm32")] {
                     let _descriptor_refresh_task_handle = tasks.spawn_local_interval_until_named(
                         "lan_descriptor_refresh",
-                        time_effects,
+                        descriptor_time_effects,
                         Duration::from_secs(60),
                         move || {
-                            let rendezvous_manager = rendezvous_manager.clone();
-                            let lan_transport = lan_transport.clone();
+                            let rendezvous_manager = descriptor_rendezvous_manager.clone();
+                            let lan_transport = descriptor_lan_transport.clone();
                             let effects = effects.clone();
                             let lan_refresh_service = lan_refresh_service.clone();
                             async move {
@@ -518,11 +523,11 @@ impl RuntimeMaintenanceService {
                 } else {
                     let _descriptor_refresh_task_handle = tasks.spawn_interval_until_named(
                         "lan_descriptor_refresh",
-                        time_effects,
+                        descriptor_time_effects,
                         Duration::from_secs(60),
                         move || {
-                            let rendezvous_manager = rendezvous_manager.clone();
-                            let lan_transport = lan_transport.clone();
+                            let rendezvous_manager = descriptor_rendezvous_manager.clone();
+                            let lan_transport = descriptor_lan_transport.clone();
                             let effects = effects.clone();
                             let lan_refresh_service = lan_refresh_service.clone();
                             async move {
@@ -568,6 +573,82 @@ impl RuntimeMaintenanceService {
                                         )
                                         .await;
                                     }
+                                }
+                                true
+                            }
+                        },
+                    );
+                }
+            }
+
+            let bootstrap_refresh_service = self.clone();
+            let bootstrap_time_effects = time_effects.clone();
+            let bootstrap_rendezvous_manager = rendezvous_manager.clone();
+            let bootstrap_lan_transport = lan_transport.clone();
+            cfg_if::cfg_if! {
+                if #[cfg(target_arch = "wasm32")] {
+                    let _bootstrap_refresh_task_handle = tasks.spawn_local_interval_until_named(
+                        "bootstrap_candidate_refresh",
+                        bootstrap_time_effects,
+                        Duration::from_secs(5),
+                        move || {
+                            let rendezvous_manager = bootstrap_rendezvous_manager.clone();
+                            let lan_transport = bootstrap_lan_transport.clone();
+                            let bootstrap_refresh_service = bootstrap_refresh_service.clone();
+                            async move {
+                                if let Err(error) = register_bootstrap_candidate_with(
+                                    &rendezvous_manager,
+                                    lan_transport.as_ref(),
+                                )
+                                .await
+                                {
+                                    bootstrap_refresh_service
+                                        .record_degraded_reason(format!(
+                                            "bootstrap_candidate_refresh: {error}"
+                                        ))
+                                        .await;
+                                    tracing::debug!(
+                                        error = %error,
+                                        "Failed to refresh bootstrap candidate registration"
+                                    );
+                                } else {
+                                    bootstrap_refresh_service
+                                        .clear_degraded_reason_contains("bootstrap_candidate_refresh")
+                                        .await;
+                                }
+                                true
+                            }
+                        },
+                    );
+                } else {
+                    let _bootstrap_refresh_task_handle = tasks.spawn_interval_until_named(
+                        "bootstrap_candidate_refresh",
+                        bootstrap_time_effects,
+                        Duration::from_secs(5),
+                        move || {
+                            let rendezvous_manager = bootstrap_rendezvous_manager.clone();
+                            let lan_transport = bootstrap_lan_transport.clone();
+                            let bootstrap_refresh_service = bootstrap_refresh_service.clone();
+                            async move {
+                                if let Err(error) = register_bootstrap_candidate_with(
+                                    &rendezvous_manager,
+                                    lan_transport.as_ref(),
+                                )
+                                .await
+                                {
+                                    bootstrap_refresh_service
+                                        .record_degraded_reason(format!(
+                                            "bootstrap_candidate_refresh: {error}"
+                                        ))
+                                        .await;
+                                    tracing::debug!(
+                                        error = %error,
+                                        "Failed to refresh bootstrap candidate registration"
+                                    );
+                                } else {
+                                    bootstrap_refresh_service
+                                        .clear_degraded_reason_contains("bootstrap_candidate_refresh")
+                                        .await;
                                 }
                                 true
                             }

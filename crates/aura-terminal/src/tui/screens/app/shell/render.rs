@@ -101,24 +101,3 @@ pub(super) fn build_global_modals(
 
     global_modals
 }
-
-pub(super) fn state_indicator_label(tui_snapshot: &TuiState) -> String {
-    let pending_actions = usize::from(tui_snapshot.modal_queue.is_active())
-        + tui_snapshot.modal_queue.pending_count()
-        + usize::from(tui_snapshot.toast_queue.is_active())
-        + tui_snapshot.toast_queue.pending_count();
-    let depth_label = match tui_snapshot.neighborhood.enter_depth {
-        AccessLevel::Limited => "Lim",
-        AccessLevel::Partial => "Par",
-        AccessLevel::Full => "Full",
-    };
-    let moderator_label = if tui_snapshot.neighborhood.moderator_actions_enabled {
-        "On"
-    } else {
-        "Off"
-    };
-    format!(
-        "D:{depth_label} M:{moderator_label} P:{pending_actions} S:{}",
-        tui_snapshot.degraded_subscription_count()
-    )
-}

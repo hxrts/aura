@@ -20,7 +20,7 @@ use aura_app::ui::signals::{
     ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, NetworkStatus,
     AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
     DISCOVERED_PEERS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
-    NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+    NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
 };
 use aura_app::ui::workflows::time as time_workflows;
 use aura_app::ui_contract::{

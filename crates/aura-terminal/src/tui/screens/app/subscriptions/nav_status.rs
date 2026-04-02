@@ -2,7 +2,7 @@ use super::*;
 use aura_core::AuthorityId;
 
 use crate::tui::screens::app::subscriptions::contracts::{
-    subscribe_lifecycle_signal, subscribe_update_bridge_signal, StructuralDegradationSink,
+    subscribe_update_bridge_signal, StructuralDegradationSink,
 };
 
 /// Shared authority id state for UI dispatch handlers.
@@ -87,7 +87,7 @@ pub fn use_authority_id_subscription(
 pub struct NavStatusSignals {
     pub network_status: State<NetworkStatus>,
     pub known_online: State<usize>,
-    pub transport_peers: State<usize>,
+    pub reachable_peers: State<usize>,
     pub now_ms: State<Option<u64>>,
 }
 
@@ -100,7 +100,7 @@ pub fn use_nav_status_signals(
 ) -> NavStatusSignals {
     let network_status = hooks.use_state(|| initial_network_status);
     let known_online = hooks.use_state(|| initial_known_online);
-    let transport_peers = hooks.use_state(|| initial_transport_peers);
+    let reachable_peers = hooks.use_state(|| initial_transport_peers);
     let now_ms = use_display_clock_state(hooks, app_ctx);
     let tasks = app_ctx.tasks();
 
@@ -149,15 +149,16 @@ pub fn use_nav_status_signals(
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let mut transport_peers = transport_peers.clone();
+        let mut reachable_peers = reachable_peers.clone();
         let degradation = StructuralDegradationSink::new(tasks, None);
         async move {
-            subscribe_lifecycle_signal(
+            subscribe_update_bridge_signal(
                 app_core,
-                &*TRANSPORT_PEERS_SIGNAL,
-                move |count| {
-                    if transport_peers.get() != count {
-                        transport_peers.set(count);
+                &*DISCOVERED_PEERS_SIGNAL,
+                move |state| {
+                    let count = state.peers.len();
+                    if reachable_peers.get() != count {
+                        reachable_peers.set(count);
                     }
                 },
                 degradation,
@@ -169,7 +170,7 @@ pub fn use_nav_status_signals(
     NavStatusSignals {
         network_status,
         known_online,
-        transport_peers,
+        reachable_peers,
         now_ms,
     }
 }

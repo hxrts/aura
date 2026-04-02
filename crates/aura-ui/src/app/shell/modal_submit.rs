@@ -786,6 +786,7 @@ fn submit_simple_modal_action(
                                     if let InvitationBridgeType::Contact { nickname } =
                                         &invitation_info.invitation_type
                                     {
+                                        let accepted_authority_id = invitation_info.sender_id;
                                         let display_name = nickname
                                             .clone()
                                             .filter(|value| !value.trim().is_empty())
@@ -794,9 +795,21 @@ fn submit_simple_modal_action(
                                             });
                                         controller_for_import
                                             .complete_runtime_contact_invitation_acceptance(
-                                                invitation_info.sender_id,
+                                                accepted_authority_id,
                                                 display_name,
                                             );
+                                        let post_accept_app_core = app_core.clone();
+                                        spawn_ui(async move {
+                                            invitation_workflows::run_post_contact_accept_followups(
+                                                &post_accept_app_core,
+                                                accepted_authority_id,
+                                            )
+                                            .await;
+                                            let _ = aura_app::ui::workflows::system::refresh_account(
+                                                &post_accept_app_core,
+                                            )
+                                            .await;
+                                        });
                                         controller_for_import
                                             .push_log("accept_invitation complete generic");
                                         harness_log("accept_invitation complete generic");

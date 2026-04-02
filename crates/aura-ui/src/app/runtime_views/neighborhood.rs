@@ -1,7 +1,7 @@
 use crate::model::UiController;
 use aura_app::ui::signals::{
-    CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
-    TRANSPORT_PEERS_SIGNAL,
+    CHAT_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL,
+    NETWORK_STATUS_SIGNAL,
 };
 use aura_app::ui::types::{
     format_network_status_with_severity, ChatState, ContactsState, HomeRole, HomesState,
@@ -48,7 +48,7 @@ pub(in crate::app) struct NeighborhoodRuntimeView {
     pub(in crate::app) members: Vec<NeighborhoodRuntimeMember>,
     pub(in crate::app) channels: Vec<NeighborhoodRuntimeChannel>,
     pub(in crate::app) network_status: String,
-    pub(in crate::app) transport_peers: usize,
+    pub(in crate::app) reachable_peers: usize,
     pub(in crate::app) online_contacts: usize,
 }
 
@@ -142,7 +142,7 @@ fn build_neighborhood_runtime_view(
     contacts: ContactsState,
     chat: ChatState,
     network_status: aura_app::ui::signals::NetworkStatus,
-    transport_peers: usize,
+    reachable_peers: usize,
 ) -> NeighborhoodRuntimeView {
     let neighborhood_name = neighborhood
         .neighborhood_name
@@ -226,7 +226,7 @@ fn build_neighborhood_runtime_view(
         members,
         channels,
         network_status,
-        transport_peers,
+        reachable_peers,
         online_contacts,
     }
 }
@@ -256,11 +256,13 @@ pub(in crate::app) async fn load_neighborhood_runtime_view(
         let core = controller.app_core().read().await;
         core.read(&*NETWORK_STATUS_SIGNAL).await.unwrap_or_default()
     };
-    let transport_peers = {
+    let reachable_peers = {
         let core = controller.app_core().read().await;
-        core.read(&*TRANSPORT_PEERS_SIGNAL)
+        core.read(&*DISCOVERED_PEERS_SIGNAL)
             .await
             .unwrap_or_default()
+            .peers
+            .len()
     };
 
     build_neighborhood_runtime_view(
@@ -270,6 +272,6 @@ pub(in crate::app) async fn load_neighborhood_runtime_view(
         contacts,
         chat,
         network_status,
-        transport_peers,
+        reachable_peers,
     )
 }

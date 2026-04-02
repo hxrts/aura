@@ -11,16 +11,19 @@ cfg_if! {
         use tokio::sync::RwLock;
 
         const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+        const DEMO_SURFACE_QUERY_KEY: &str = "__aura_demo_surface";
 
-        fn harness_browser_transport_addr() -> Option<String> {
+        fn browser_transport_addr() -> Option<String> {
             let window = web_sys::window()?;
             let search = window.location().search().ok()?;
             let query = search.strip_prefix('?').unwrap_or(&search);
-            let harness_mode = query.split('&').any(|pair: &str| {
-                pair.split_once('=')
-                    .is_some_and(|(key, value)| key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty())
+            let allow_transport_advertisement = query.split('&').any(|pair: &str| {
+                pair.split_once('=').is_some_and(|(key, value)| {
+                    (key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty())
+                        || (key == DEMO_SURFACE_QUERY_KEY && value == "web")
+                })
             });
-            if !harness_mode {
+            if !allow_transport_advertisement {
                 return None;
             }
 
@@ -70,7 +73,7 @@ cfg_if! {
             /// WASM runtimes cannot bind TCP listeners directly, so this returns an empty
             /// transport placeholder.
             pub async fn bind(_bind_addr: &str) -> Result<Self, String> {
-                let websocket_addrs = harness_browser_transport_addr()
+                let websocket_addrs = browser_transport_addr()
                     .into_iter()
                     .collect::<Vec<_>>();
                 Ok(Self {

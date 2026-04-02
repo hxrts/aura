@@ -38,7 +38,7 @@ impl ShellRuntimeSnapshots {
         if self.neighborhood.loaded {
             ShellFooterState {
                 network_status: self.neighborhood.network_status.clone(),
-                peer_count: self.neighborhood.transport_peers.to_string(),
+                peer_count: self.neighborhood.reachable_peers.to_string(),
                 online_count: self.neighborhood.online_contacts.to_string(),
             }
         } else {
