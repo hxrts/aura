@@ -10,7 +10,7 @@ use aura_core::service::{LocalHealthSnapshot, ProviderCandidate};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LocalHealthObserverCommand {
     ObserveProviderSet,
