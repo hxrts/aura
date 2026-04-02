@@ -30,7 +30,7 @@ use aura_core::{
 use std::sync::Arc;
 
 const MISSING_ACTIVE_HOME_MESSAGE: &str =
-    "No active home selected. Open Neighborhood and create or select a home.";
+    "No home exists yet. Create a home from the Neighborhood screen to start group channels.";
 
 /// Source of active-home resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

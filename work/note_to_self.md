@@ -109,11 +109,11 @@ Group channel creation requires a home context. Now that homes are not auto-crea
 
 ### Tasks
 
-- [ ] In `create_channel_with_authoritative_binding` (`messaging.rs`), when `current_home_context()` returns `NotFound`, return a user-facing error like "Create a home from the Neighborhood screen before creating group channels"
-- [ ] In the TUI create-channel wizard, if no home exists, show the error as a toast instead of opening the wizard
-- [ ] In the webapp create-channel flow, show the same error in the UI
-- [ ] Run `cargo test -p aura-app` and verify green
-- [ ] Run `just demo` and verify: attempting to create a group channel without a home shows a clear message
+- [x] Update `MISSING_ACTIVE_HOME_MESSAGE` in `context.rs` to guide users to create a home from Neighborhood for group channels
+- [x] TUI create-channel wizard already surfaces the error as a toast through the callback error path
+- [x] Webapp create-channel flow already surfaces the error through the workflow error handler
+- [x] Run `cargo test -p aura-app` and verify green
+- [ ] Run `just demo` and verify: attempting to create a group channel without a home shows a clear message (manual)
 - [ ] Commit: "Show clear error when creating group channels without a home"
 
 ## Phase 6: Cleanup and documentation
