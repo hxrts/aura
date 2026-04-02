@@ -122,13 +122,11 @@ impl SemanticSuccessProof for HomeCreatedProof {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workflows) struct AccountCreatedProof {
-    home_id: ChannelId,
-}
+pub(in crate::workflows) struct AccountCreatedProof;
 
 impl AccountCreatedProof {
-    pub(in crate::workflows) fn new(home_id: ChannelId) -> Self {
-        Self { home_id }
+    pub(in crate::workflows) fn new() -> Self {
+        Self
     }
 }
 
@@ -572,9 +570,9 @@ pub(in crate::workflows) fn issue_home_created_proof(home_id: ChannelId) -> Home
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[allow(dead_code)]
-pub(in crate::workflows) fn issue_account_created_proof(home_id: ChannelId) -> AccountCreatedProof {
+pub(in crate::workflows) fn issue_account_created_proof() -> AccountCreatedProof {
     let _ = semantic_postcondition_proof_capability();
-    AccountCreatedProof::new(home_id)
+    AccountCreatedProof::new()
 }
 
 #[allow(dead_code)]
