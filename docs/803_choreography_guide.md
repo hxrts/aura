@@ -83,6 +83,153 @@ validated `CapabilityName`s and fails closed on invalid or legacy names. In
 Rust code outside `.tell` or `choreography!` inputs, prefer typed capability
 families from the owning crate.
 
+### Canonical Telltale 10 Shape
+
+Aura choreographies should converge on one source shape before theorem-pack
+rollout expands.
+
+The canonical shape is:
+
+- one `module ... exposing (...)` header
+- one `protocol ... =` declaration
+- one compact `roles ...` declaration using scalar roles or role families like
+  `Devices[N]`
+- message edges whose semantics live in the protocol structure itself:
+  sequencing, fan-out, and `choice at ...`
+- sanctioned Aura edge metadata only where it still represents real policy or
+  accounting at the source boundary:
+  `guard_capability`
+  `flow_cost`
+  `journal_facts`
+  `leak`
+  `parallel`
+- no choreography-local ownership or migration scaffolding that should instead
+  live in Telltale runtime admission, runtime transition artifacts, or Aura's
+  Rust-side protocol/runtime glue
+
+Use [crates/aura-sync/src/protocols/ota_activation.tell](/Users/hxrts/projects/aura/crates/aura-sync/src/protocols/ota_activation.tell)
+and
+[crates/aura-sync/src/protocols/device_epoch_rotation.tell](/Users/hxrts/projects/aura/crates/aura-sync/src/protocols/device_epoch_rotation.tell)
+as the current style references.
+
+#### Legacy-Only Source Surfaces To Remove
+
+The following source patterns are migration debt and should disappear from
+first-party `.tell` files:
+
+- `link = "bundle=...|exports=...|imports=..."` choreography-local bundle hints
+- choreography comments whose only purpose is to preserve pre-Telltale runtime
+  bundle/link ownership lore
+- `journal_merge = true` as a choreography-local escape hatch
+- `leakage_budget = "..."` tuple syntax
+- repeated phase comments that restate obvious linear protocol structure rather
+  than documenting a real protocol invariant
+
+These semantics should not remain embedded in source once the runtime and
+admission layers own them explicitly.
+
+#### Aura Annotations That Remain Valid On The Clean Surface
+
+These annotations remain valid on the canonical surface because they still map
+to real Aura admission, accounting, or observation behavior:
+
+- `guard_capability`
+- `flow_cost`
+- `journal_facts`
+- `leak`
+- `parallel`
+
+Later theorem-pack phases may add Telltale-native theorem-pack declarations and
+`requires` clauses, but those are additive and should not bring back legacy
+bundle or migration hints.
+
+#### Semantics That Must Move Out Of Source Over Time
+
+The following concerns should move out of comments or source-local hints and
+into proper Telltale 10 DSL/runtime constructs or Aura runtime glue:
+
+- reconfiguration and runtime-upgrade bundle ownership
+- fragment/link transfer semantics
+- journal-merge behavior that is really runtime transition behavior
+- recovery or membership handoff lore expressed only in comments
+- admission/evidence requirements that should become theorem packs and runtime
+  admission checks
+
+## 2.1 Current Choreography Convergence Inventory
+
+This inventory defines the target for each current `.tell` file while Aura
+converges on the canonical Telltale 10 shape.
+
+### First-Party Protocols
+
+- [crates/aura-agent/src/handlers/sessions/coordination.tell](/Users/hxrts/projects/aura/crates/aura-agent/src/handlers/sessions/coordination.tell):
+  already structurally close; remove phase-restating comments and the
+  legacy `journal_merge = true` source hint.
+- [crates/aura-amp/src/choreography.tell](/Users/hxrts/projects/aura/crates/aura-amp/src/choreography.tell):
+  already structurally close; normalize onto the same compact source style and
+  remove redundant “data transmission / acknowledgment” comments.
+- [crates/aura-authentication/src/dkd.tell](/Users/hxrts/projects/aura/crates/aura-authentication/src/dkd.tell):
+  structurally close; remove phase-only comments and keep only sanctioned edge
+  metadata.
+- [crates/aura-authentication/src/guardian_auth_relational.tell](/Users/hxrts/projects/aura/crates/aura-authentication/src/guardian_auth_relational.tell):
+  structurally close; remove phase-only comments and keep the protocol free of
+  source-local coordination lore.
+- [crates/aura-consensus/src/protocol/choreography.tell](/Users/hxrts/projects/aura/crates/aura-consensus/src/protocol/choreography.tell):
+  close to canonical shape; preserve `parallel` and `leak`, but remove
+  phase-restating comments and keep it theorem-pack-free until a later explicit
+  decision.
+- [crates/aura-invitation/src/protocol.device_enrollment.tell](/Users/hxrts/projects/aura/crates/aura-invitation/src/protocol.device_enrollment.tell):
+  remove `link = ...` bundle hints and the surrounding migration comments.
+- [crates/aura-invitation/src/protocol.guardian_invitation.tell](/Users/hxrts/projects/aura/crates/aura-invitation/src/protocol.guardian_invitation.tell):
+  structurally close; remove phase-only comments and keep only sanctioned edge
+  metadata.
+- [crates/aura-invitation/src/protocol.invitation_exchange.tell](/Users/hxrts/projects/aura/crates/aura-invitation/src/protocol.invitation_exchange.tell):
+  structurally close; remove phase-only comments and keep the source minimal.
+- [crates/aura-recovery/src/guardian_ceremony.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/guardian_ceremony.tell):
+  add sanctioned Aura metadata where this protocol still requires it, normalize
+  branch names and comments, and remove the bare legacy look.
+- [crates/aura-recovery/src/guardian_membership.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/guardian_membership.tell):
+  remove `link = ...`, `leakage_budget = ...`, and `journal_merge = true`;
+  keep only metadata that still has a real admission or accounting consumer.
+- [crates/aura-recovery/src/guardian_setup.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/guardian_setup.tell):
+  remove `leakage_budget = ...` and `journal_merge = true`, and strip
+  phase-restating comments.
+- [crates/aura-recovery/src/recovery_protocol.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/recovery_protocol.tell):
+  structurally close; remove phase-only comments and keep the source ready for
+  later theorem-pack adoption only if the recovery semantics justify it.
+- [crates/aura-rendezvous/src/protocol.relayed_rendezvous.tell](/Users/hxrts/projects/aura/crates/aura-rendezvous/src/protocol.relayed_rendezvous.tell):
+  keep theorem-pack-free; normalize comments and preserve only real route-flow
+  metadata like `guard_capability`, `flow_cost`, and `leak`.
+- [crates/aura-rendezvous/src/protocol.rendezvous_exchange.tell](/Users/hxrts/projects/aura/crates/aura-rendezvous/src/protocol.rendezvous_exchange.tell):
+  keep theorem-pack-free; normalize comments and preserve only real publication
+  and connect metadata.
+- [crates/aura-sync/src/protocols/epochs.tell](/Users/hxrts/projects/aura/crates/aura-sync/src/protocols/epochs.tell):
+  remove `link = ...` bundle hints and surrounding migration comments; keep the
+  remaining protocol in the same shape as the OTA and device-epoch references.
+
+### Protocol-Compat Fixtures
+
+- [crates/aura-testkit/fixtures/protocol_compat/breaking_baseline.tell](/Users/hxrts/projects/aura/crates/aura-testkit/fixtures/protocol_compat/breaking_baseline.tell):
+  already canonical; no migration needed beyond keeping fixture style minimal.
+- [crates/aura-testkit/fixtures/protocol_compat/breaking_current.tell](/Users/hxrts/projects/aura/crates/aura-testkit/fixtures/protocol_compat/breaking_current.tell):
+  remove the explanatory inline comment so the compatibility edge is expressed
+  only by the message-shape difference.
+- [crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.tell](/Users/hxrts/projects/aura/crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.tell):
+  already canonical; keep unchanged except for style parity if needed.
+- [crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell](/Users/hxrts/projects/aura/crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell):
+  already canonical; keep unchanged except for style parity if needed.
+
+### Migration Rule
+
+When converting a choreography, prefer:
+
+- deleting legacy source hints rather than renaming them
+- moving ownership or transition semantics into Rust/runtime admission when they
+  are not true choreography structure
+- keeping theorem packs out until the protocol has a real runtime admission
+  consumer
+- matching the source compactness of the OTA and device-epoch references
+
 Select the narrowest `TimeStamp` domain for each time field. See [Effect System](103_effect_system.md) for time domains.
 
 ### Phase 3: Runtime Wiring
