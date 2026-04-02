@@ -481,6 +481,12 @@ ci-harness-frontend-conformance-matrix:
 ci-lan-smoke:
     cargo test -p aura-agent --test lan_integration -q
 
+ci-bootstrap-discovery:
+    cargo test -p aura-agent native_client_round_trips_against_local_broker_http --lib -q
+    cargo test -p aura-agent native_client_round_trips_broker_invitations --lib -q
+    cargo test -p aura-terminal account_setup_modal_mentions_bootstrap_candidates --lib -q
+    cargo test -p aura-web web_onboarding_lists_bootstrap_candidates_separately_from_join_flow -q
+
 # LAN deep lane for serialized end-to-end coverage
 ci-lan-deep:
     cargo test -p aura-agent --test lan_integration -q -- --ignored
@@ -1075,6 +1081,7 @@ ci-dry-run profile="push":
 
         # CI / Deep LAN (push)
         add_step "LAN Smoke"                 "nix develop --command just ci-lan-smoke"
+        add_step "Bootstrap Discovery"      "nix develop --command just ci-bootstrap-discovery"
 
         # CI / Deep Verify (push)
         add_step "Lean Proofs"               "nix develop --command bash -lc 'just ci-lean-build && just ci-lean-check-sorry'"

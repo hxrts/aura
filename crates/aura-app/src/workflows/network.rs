@@ -297,20 +297,16 @@ async fn emit_discovered_peers_signal(
     )
     .await?
     .map_err(|e| AuraError::from(super::error::runtime_call("refresh discovered peers", e)))?;
-    let bootstrap_candidates = timeout_runtime_call(
-        &runtime,
-        "emit_discovered_peers_signal",
-        "try_get_bootstrap_candidates",
-        Duration::from_millis(5_000),
-        || runtime.try_get_bootstrap_candidates(),
-    )
-    .await?
-    .map_err(|e| {
-        AuraError::from(super::error::runtime_call(
-            "refresh bootstrap candidates",
-            e,
-        ))
-    })?;
+    let bootstrap_candidates: Vec<crate::runtime_bridge::BootstrapCandidateInfo> =
+        timeout_runtime_call(
+            &runtime,
+            "emit_discovered_peers_signal",
+            "try_get_bootstrap_candidates",
+            Duration::from_millis(5_000),
+            || runtime.try_get_bootstrap_candidates(),
+        )
+        .await?
+        .unwrap_or_default();
 
     // Get invited peer IDs to mark peers as invited
     let invited_ids: HashSet<AuthorityId> = timeout_runtime_call(

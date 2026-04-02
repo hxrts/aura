@@ -160,13 +160,18 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
         move || {
             let mut bootstrap_candidates = bootstrap_candidates;
             let app_core = app_core.clone();
-            spawn(async move {
+            shared_web_task_owner().spawn_local(async move {
                 loop {
-                    match runtime_workflows::require_runtime(&app_core).await {
-                        Ok(runtime) => {
-                            if let Ok(candidates) = runtime.try_get_bootstrap_candidates().await {
-                                bootstrap_candidates.set(candidates);
-                            }
+                    let candidate_result = {
+                        let app = app_core.read().await;
+                        app.get_bootstrap_candidates()
+                            .await
+                            .map_err(|error| error.to_string())
+                    };
+
+                    match candidate_result {
+                        Ok(candidates) => {
+                            bootstrap_candidates.set(candidates);
                         }
                         Err(error) => {
                             log_web_error(

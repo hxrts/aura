@@ -1,184 +1,91 @@
 //! Sanctioned frontend task owner for TUI async work.
 //!
-//! The TUI remains an observed frontend layer. When it needs local background
-//! work for update-loop mechanics or non-authoritative adaptation, it consumes
-//! the shared `aura-core` owned task primitives instead of defining a parallel
-//! raw Tokio registry model.
+//! The terminal shell stays an observed frontend layer. Its local async work
+//! uses the shared Layer 7 frontend task root from `aura-app` rather than a
+//! terminal-local parallel task-owner implementation.
 
 use std::future::Future;
-use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
-use aura_core::effects::task::{CancellationToken, TaskSpawner};
+use aura_app::frontend_primitives::{FrontendTaskOwner, FrontendTaskRuntime};
 use aura_core::{OwnedShutdownToken, OwnedTaskSpawner};
+use aura_macros::actor_root;
 use futures::future::{BoxFuture, LocalBoxFuture};
-use tokio::sync::watch;
-use tokio::task::JoinHandle;
 
-#[derive(Clone)]
-struct UiTaskCancellationToken {
-    shutdown_tx: watch::Sender<bool>,
+fn spawn_boxed(fut: BoxFuture<'static, ()>) {
+    tokio::spawn(fut);
 }
 
-#[async_trait]
-impl CancellationToken for UiTaskCancellationToken {
-    async fn cancelled(&self) {
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        if *shutdown_rx.borrow() {
-            return;
-        }
-
-        loop {
-            if shutdown_rx.changed().await.is_err() {
-                return;
-            }
-            if *shutdown_rx.borrow() {
-                return;
-            }
-        }
-    }
-
-    fn is_cancelled(&self) -> bool {
-        *self.shutdown_tx.borrow()
-    }
-}
-
-#[derive(Debug)]
-struct UiTaskSpawnerImpl {
-    shutdown_tx: watch::Sender<bool>,
-    handles: Mutex<Vec<JoinHandle<()>>>,
-}
-
-impl UiTaskSpawnerImpl {
-    fn new(shutdown_tx: watch::Sender<bool>) -> Self {
-        Self {
-            shutdown_tx,
-            handles: Mutex::new(Vec::new()),
-        }
-    }
-
-    fn record(&self, handle: JoinHandle<()>) {
-        if let Ok(mut handles) = self.handles.lock() {
-            handles.push(handle);
-        }
-    }
-
-    fn abort_all(&self) {
-        let _ = self.shutdown_tx.send(true);
-        if let Ok(mut handles) = self.handles.lock() {
-            for handle in handles.drain(..) {
-                handle.abort();
-            }
-        }
-    }
-}
-
-impl TaskSpawner for UiTaskSpawnerImpl {
-    fn spawn(&self, fut: BoxFuture<'static, ()>) {
-        self.record(tokio::spawn(fut));
-    }
-
-    fn spawn_cancellable(&self, fut: BoxFuture<'static, ()>, token: Arc<dyn CancellationToken>) {
-        self.record(tokio::spawn(async move {
-            tokio::select! {
-                _ = token.cancelled() => {}
-                _ = fut => {}
-            }
-        }));
-    }
-
-    fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>) {
-        self.record(tokio::task::spawn_local(fut));
-    }
-
-    fn spawn_local_cancellable(
-        &self,
-        fut: LocalBoxFuture<'static, ()>,
-        token: Arc<dyn CancellationToken>,
-    ) {
-        self.record(tokio::task::spawn_local(async move {
-            tokio::select! {
-                _ = token.cancelled() => {}
-                _ = fut => {}
-            }
-        }));
-    }
-
-    fn cancellation_token(&self) -> Arc<dyn CancellationToken> {
-        Arc::new(UiTaskCancellationToken {
-            shutdown_tx: self.shutdown_tx.clone(),
-        })
-    }
+fn spawn_local_boxed(fut: LocalBoxFuture<'static, ()>) {
+    tokio::task::spawn_local(fut);
 }
 
 #[derive(Clone, Debug)]
-pub struct UiTaskOwner {
-    inner: Arc<UiTaskSpawnerImpl>,
-    spawner: OwnedTaskSpawner,
+#[actor_root(
+    owner = "terminal_ui_task_manager",
+    domain = "terminal_ui_task_runtime",
+    supervision = "terminal_ui_task_root",
+    category = "actor_owned"
+)]
+pub struct UiTaskManager {
+    inner: FrontendTaskOwner,
 }
 
-impl UiTaskOwner {
+pub type UiTaskOwner = UiTaskManager;
+
+impl UiTaskManager {
     #[must_use]
     pub fn new() -> Self {
-        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        let inner = Arc::new(UiTaskSpawnerImpl::new(shutdown_tx));
-        let shutdown = OwnedShutdownToken::attached(inner.cancellation_token());
-        let spawner = OwnedTaskSpawner::new(inner.clone(), shutdown);
-        Self { inner, spawner }
+        Self {
+            inner: FrontendTaskOwner::new(FrontendTaskRuntime::new(spawn_boxed, spawn_local_boxed)),
+        }
     }
 
     pub fn spawn<F>(&self, fut: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawner.spawn(Box::pin(fut));
+        self.inner.spawn(fut);
     }
 
     pub fn spawn_cancellable<F>(&self, fut: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawner.spawn_cancellable(Box::pin(fut));
+        self.inner.spawn_cancellable(fut);
     }
 
     pub fn spawn_local<F>(&self, fut: F)
     where
         F: Future<Output = ()> + 'static,
     {
-        self.spawner.spawn_local(Box::pin(fut));
+        self.inner.spawn_local(fut);
     }
 
     pub fn spawn_local_cancellable<F>(&self, fut: F)
     where
         F: Future<Output = ()> + 'static,
     {
-        self.spawner.spawn_local_cancellable(Box::pin(fut));
+        self.inner.spawn_local_cancellable(fut);
     }
 
     #[must_use]
     pub fn owned_spawner(&self) -> OwnedTaskSpawner {
-        self.spawner.clone()
+        self.inner.owned_spawner()
     }
 
     #[must_use]
     pub fn shutdown_token(&self) -> &OwnedShutdownToken {
-        self.spawner.shutdown_token()
+        self.inner.shutdown_token()
     }
 
     pub fn shutdown(&self) {
-        self.inner.abort_all();
+        self.inner.shutdown();
     }
 }
 
-impl Default for UiTaskOwner {
+impl Default for UiTaskManager {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl Drop for UiTaskOwner {
-    fn drop(&mut self) {
-        self.inner.abort_all();
     }
 }
 

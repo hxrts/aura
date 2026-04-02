@@ -12,6 +12,13 @@ Rendezvous does not establish global identity. All operations are scoped to a `C
 
 Rendezvous descriptor exchange can run in provisional (A1) or soft-safe (A2) modes to enable rapid connectivity under poor network conditions, but durable channel epochs and membership changes must be finalized via consensus (A3). Soft-safe flows should emit convergence and reversion facts so participants can reason about reversion risk while channels are warming.
 
+Bootstrap discovery is a separate concern. First-run startup may surface same-machine or same-LAN
+`bootstrap candidates` before any enrollment or acceptance has completed. Those candidates are not
+ordinary rendezvous peers, must not inflate ordinary peer counts, and must not be treated as
+context-scoped descriptor participants yet. Browser runtimes cannot join the native UDP LAN path,
+so browser-involved startup uses a real bootstrap broker path that publishes ephemeral bootstrap
+descriptors and then hands control back to the existing invitation/device-enrollment flow.
+
 ### 1.1 Secure‑Channel Lifecycle (A1/A2/A3)
 
 - **A1**: Provisional `Descriptor` / handshake facts allow immediate connectivity.
@@ -51,6 +58,24 @@ Rendezvous descriptors carry two kinds of information. One surface describes con
 Connectivity endpoints describe how a peer may be reached. Service advertisements describe what the peer is willing to provide. Runtime policy combines both surfaces with local permit state, health, and trust evidence. Descriptor publication itself does not commit the final route choice.
 
 The current implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data. That compatibility layer is explicitly quarantined. Owner: `adaptive_privacy_phase6`. Removal condition: encrypted `EstablishedPath` rollout and invitation bootstrap no longer need the legacy hint bridge. New code should consume `LinkEndpoint`, `ServiceDescriptor`, `EstablishPath`, `MovePath`, and `HoldDescriptor` views rather than treating transport hints as final routing policy.
+
+### 3.1 Bootstrap Discovery Plane
+
+Aura now uses two distinct discovery planes during startup:
+
+1. Native rendezvous/LAN discovery for native-to-native startup on the same LAN.
+2. Broker-backed bootstrap discovery for any startup shape that involves the browser, including
+   same-machine TUI <-> Web and same-LAN TUI <-> Web or Web <-> Web.
+
+The bootstrap broker publishes ephemeral bootstrap descriptors only. It exists to help first-run
+instances discover one another and exchange invitation/device-enrollment material through the
+existing enrollment path. It does not create an ordinary rendezvous relationship on its own.
+
+Operationally, browser/native first-run startup may become bootstrap-visible only after the first
+native account runtime exists and begins hosting the broker automatically. For example, in a TUI +
+Web startup, the user may create the web account first and the TUI account second; once the TUI
+runtime is live, both instances should surface one another as bootstrap candidates without any
+extra user setup steps.
 
 ### 3.1 Holepunching and Upgrade Policy
 

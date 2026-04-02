@@ -31,7 +31,7 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Browser shell DOM-id resolution reuses the shared typed helper surface from
   `aura-ui` rather than re-opening `web_dom_id().expect(...)` chains at each
   browser callsite.
-- Browser task ownership reuses the shared `FrontendTaskOwner` from
+- Browser task ownership reuses the shared `FrontendTaskManager` / `FrontendTaskOwner` from
   `aura-app::frontend_primitives` with browser-specific spawn wiring
   (`wasm_bindgen_futures::spawn_local`) rather than keeping a forked stack.
 - Harness bridge methods are deterministic and backwards-compatible.
@@ -51,6 +51,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   `AccountConfig` metadata separately so preserved-profile restarts can rebind
   one active generation and recover the canonical runtime bootstrap path
   without browser-local semantic repair.
+- Browser startup discovery uses the broker-backed bootstrap plane rather than
+  native UDP LAN discovery. Broker results are surfaced as bootstrap
+  candidates for enrollment and must not be counted or rendered as ordinary
+  peers before invitation/device-enrollment succeeds.
 - Browser bootstrap/rebootstrap bridge promises resolve on completion of the
   owned bootstrap transition, not merely on enqueue, so harness/browser callers
   do not mistake acceptance for success.
@@ -197,7 +201,7 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 | Browser semantic lifecycle rendering | `Observed` | authoritative semantic facts from `aura-app` | browser presentation state only | harness, user-visible rendering |
 | Render-convergence and projection publication | `Observed` | browser projection/export path | `aura-web::harness::publication` only | Playwright/harness |
 | Web onboarding/bootstrap command helpers for shared flows | `Observed` shell over upstream `MoveOwned`/`ActorOwned` coordination | shared workflow/runtime coordinators | browser-local UI state only; never terminal truth | harness, DOM/render readers |
-| Shared browser task-owner cancellation/spawn mechanics | `ActorOwned` helper from `aura-app::frontend_primitives` | shared frontend task-owner implementation | browser shell wiring only | harness, render layer |
+| Shared browser task-owner cancellation/spawn mechanics | `ActorOwned` helper from `aura-app::frontend_primitives` | shared frontend task-manager implementation | browser shell wiring only | harness, render layer |
 
 ### Capability-Gated Points
 

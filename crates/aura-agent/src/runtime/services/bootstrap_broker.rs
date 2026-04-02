@@ -116,6 +116,12 @@ impl BootstrapBrokerState {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
+#[aura_macros::actor_root(
+    owner = "bootstrap_broker_service",
+    domain = "bootstrap_discovery",
+    supervision = "bootstrap_broker_task_root",
+    category = "actor_owned"
+)]
 pub struct LocalBootstrapBrokerService {
     listener: Arc<TcpListener>,
     public_url: String,
