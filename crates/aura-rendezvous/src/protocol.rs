@@ -373,6 +373,34 @@ mod tests {
     }
 
     #[test]
+    fn rendezvous_exchange_manifest_remains_theorem_pack_free() {
+        let manifest =
+            exchange::telltale_session_types_rendezvous::vm_artifacts::composition_manifest();
+        assert!(
+            manifest.theorem_packs.is_empty(),
+            "rendezvous exchange should remain theorem-pack-free"
+        );
+        assert!(
+            manifest.required_theorem_packs.is_empty(),
+            "rendezvous exchange should not require theorem packs"
+        );
+    }
+
+    #[test]
+    fn relayed_rendezvous_manifest_remains_theorem_pack_free() {
+        let manifest =
+            relayed::telltale_session_types_rendezvous_relay::vm_artifacts::composition_manifest();
+        assert!(
+            manifest.theorem_packs.is_empty(),
+            "relayed rendezvous should remain theorem-pack-free"
+        );
+        assert!(
+            manifest.required_theorem_packs.is_empty(),
+            "relayed rendezvous should not require theorem packs"
+        );
+    }
+
+    #[test]
     fn test_handshake_init_serialization() {
         let init = HandshakeInit {
             handshake: NoiseHandshake {

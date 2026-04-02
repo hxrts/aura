@@ -8,11 +8,15 @@ const BASELINE_PATH: &str = "../fixtures/protocol_compat/compatible_baseline.tel
 const CURRENT_PATH: &str = "../fixtures/protocol_compat/compatible_current.tell";
 const BREAKING_BASELINE_PATH: &str = "../fixtures/protocol_compat/breaking_baseline.tell";
 const BREAKING_CURRENT_PATH: &str = "../fixtures/protocol_compat/breaking_current.tell";
+const INVITATION_EXCHANGE_PATH: &str =
+    "../../aura-invitation/src/protocol.invitation_exchange.tell";
 
 const BASELINE: &str = include_str!("../fixtures/protocol_compat/compatible_baseline.tell");
 const CURRENT: &str = include_str!("../fixtures/protocol_compat/compatible_current.tell");
 const BREAKING_BASELINE: &str = include_str!("../fixtures/protocol_compat/breaking_baseline.tell");
 const BREAKING_CURRENT: &str = include_str!("../fixtures/protocol_compat/breaking_current.tell");
+const INVITATION_EXCHANGE: &str =
+    include_str!("../../aura-invitation/src/protocol.invitation_exchange.tell");
 
 #[test]
 fn compatible_protocol_fixture_pair_remains_async_subtype_compatible() {
@@ -32,6 +36,37 @@ fn breaking_protocol_fixture_pair_is_not_async_subtype_compatible() {
             "expected `{BREAKING_CURRENT_PATH}` to fail async-subtype compatibility with `{BREAKING_BASELINE_PATH}`"
         );
     }
+}
+
+#[test]
+fn protocol_compat_fixtures_remain_theorem_pack_free() {
+    for (path, source) in [
+        (BASELINE_PATH, BASELINE),
+        (CURRENT_PATH, CURRENT),
+        (BREAKING_BASELINE_PATH, BREAKING_BASELINE),
+        (BREAKING_CURRENT_PATH, BREAKING_CURRENT),
+    ] {
+        assert!(
+            !source.contains("proof_bundle"),
+            "protocol-compat fixture must stay theorem-pack-free: {path}"
+        );
+        assert!(
+            !source.contains("requires Aura"),
+            "protocol-compat fixture must not require Aura theorem packs: {path}"
+        );
+    }
+}
+
+#[test]
+fn protocol_compat_plain_invitation_exchange_remains_theorem_pack_free() {
+    assert!(
+        !INVITATION_EXCHANGE.contains("proof_bundle"),
+        "plain invitation exchange must stay theorem-pack-free: {INVITATION_EXCHANGE_PATH}"
+    );
+    assert!(
+        !INVITATION_EXCHANGE.contains("requires Aura"),
+        "plain invitation exchange must not require Aura theorem packs: {INVITATION_EXCHANGE_PATH}"
+    );
 }
 
 #[test]

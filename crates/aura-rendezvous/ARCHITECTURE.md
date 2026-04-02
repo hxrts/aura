@@ -36,6 +36,8 @@ Peer discovery and channel establishment protocol including descriptor exchange,
 - Establish flows consume explicit path objects rather than overloaded transport hints.
 - Descriptor views may advertise generic `Hold` service profiles, but they must not encode mailbox identity, trust-tier role fields, or runtime-local selector policy.
 - Flood packets use nonce-based replay protection.
+- Rendezvous and relay choreographies remain theorem-pack-free until they grow a
+  concrete control-plane admission/evidence need.
 
 ### InvariantSecureChannelLifecycle
 

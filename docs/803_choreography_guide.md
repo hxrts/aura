@@ -377,6 +377,24 @@ runtime consumer. Today that means `authoritative_read`,
 theorem-pack keys should not be added until the corresponding runtime admission
 check exists.
 
+### Explicit Non-Goals
+
+The following protocol groups remain theorem-pack-free until they acquire a
+concrete control-plane admission or evidence need:
+
+- rendezvous exchange and relayed rendezvous
+- plain invitation exchange
+- protocol-compat fixture choreographies
+
+Symmetry is not a valid reason to add theorem packs to these flows.
+
+### Adaptive-Privacy Control Plane Only
+
+Adaptive-privacy theorem-pack usage is reserved for control-plane protocols with
+real admission, evidence, transition, or simulation semantics. It must not be
+used for onion data-plane forwarding, per-hop `Move` envelopes, cover traffic,
+or ordinary transport forwarding.
+
 ### Admission Boundary
 
 Aura consumes theorem-pack metadata only through the generated
