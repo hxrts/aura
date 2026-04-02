@@ -738,6 +738,9 @@ ci-service-surface-policy:
 ci-service-registry-ownership:
     bash scripts/check/service-registry-ownership.sh
 
+ci-adaptive-privacy-phase6:
+    bash scripts/check/adaptive-privacy-phase6.sh
+
 ci-actor-lifecycle:
     just _ownership-lint actor-owned-task-spawn crates/aura-agent/src crates/aura-app/src crates/aura-core/src crates/aura-effects/src crates/aura-harness/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src
 

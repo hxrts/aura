@@ -193,6 +193,7 @@ enum SimpleModalSubmitAction {
     SwitchAuthority,
     AccessOverride,
     CapabilityConfig,
+    EditChannelInfo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,6 +309,9 @@ fn classify_modal_submit(
         )),
         Some(ModalState::CapabilityConfig) => Some(ModalSubmitClass::SimpleDispatch(
             SimpleModalSubmitAction::CapabilityConfig,
+        )),
+        Some(ModalState::EditChannelInfo) => Some(ModalSubmitClass::SimpleDispatch(
+            SimpleModalSubmitAction::EditChannelInfo,
         )),
         _ => None,
     }
@@ -1363,6 +1367,58 @@ fn submit_simple_modal_action(
                     Err(error) => controller.runtime_error_toast(error.to_string()),
                 }
                 rerender_for_caps();
+            });
+            true
+        }
+        SimpleModalSubmitAction::EditChannelInfo => {
+            let channel_name = chat_runtime.active_channel.trim().to_string();
+            if channel_name.is_empty() {
+                controller.runtime_error_toast("Select a channel first");
+                rerender();
+                return true;
+            }
+
+            let topic = current_model
+                .as_ref()
+                .and_then(|model| model.edit_channel_info())
+                .map(|state| state.topic.trim().to_string())
+                .unwrap_or_default();
+
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                OperationId::set_channel_topic(),
+                SemanticOperationKind::SetChannelTopic,
+            );
+            let app_core = controller.app_core().clone();
+            let rerender_for_edit = rerender.clone();
+            spawn_ui(async move {
+                let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
+                    Ok(value) => value,
+                    Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                        rerender_for_edit();
+                        return;
+                    }
+                };
+                match messaging_workflows::set_topic_by_name(
+                    &app_core,
+                    &channel_name,
+                    &topic,
+                    timestamp_ms,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        operation.succeed(None);
+                        controller.complete_runtime_modal_success("Channel info updated");
+                    }
+                    Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
+                }
+                rerender_for_edit();
             });
             true
         }

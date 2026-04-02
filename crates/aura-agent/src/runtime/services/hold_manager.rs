@@ -65,9 +65,13 @@ impl Default for HoldManagerConfig {
         Self {
             max_active_holders: 3,
             residency_window_turns: 2,
-            max_retention_ms: 60_000,
+            // Phase-6 tuning increased the neighborhood hold window so sparse
+            // sync and weak-connectivity profiles still retain availability.
+            max_retention_ms: 120_000,
             capability_ttl_ms: 30_000,
-            capability_rotation_window_ms: 5_000,
+            // Selector rotation now starts earlier so weak/sparse profiles can
+            // refresh before expiry without falling back to stale selectors.
+            capability_rotation_window_ms: 10_000,
             reply_block_ttl_ms: 15_000,
             reply_jitter_ms: 250,
             sync_batch_size: 16,

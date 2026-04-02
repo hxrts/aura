@@ -39,8 +39,9 @@ pub use aura_app::ui::contract::ScreenId;
 pub use modal::{
     AccessOverrideModalState, ActiveModal, AddDeviceModalState, AddDeviceWizardStep,
     CapabilityConfigModalState, CreateChannelDetailsField, CreateChannelModalState,
-    CreateChannelWizardStep, CreateInvitationModalState, ModalState, SelectDeviceModalState,
-    TextModalState, ThresholdWizardModalState, ThresholdWizardStep,
+    CreateChannelWizardStep, CreateInvitationModalState, EditChannelInfoModalState,
+    ModalState, SelectDeviceModalState, TextModalState, ThresholdWizardModalState,
+    ThresholdWizardStep,
 };
 pub use settings::{
     AccessOverrideLevel, CapabilityTier, SettingsSection, DEFAULT_CAPABILITY_FULL,
@@ -345,6 +346,13 @@ impl UiModel {
             access_override,
             access_override_mut,
             AccessOverrideModalState
+        ),
+        (
+            edit_channel_info,
+            edit_channel_info_mut,
+            edit_channel_info,
+            edit_channel_info_mut,
+            EditChannelInfoModalState
         )
     );
 

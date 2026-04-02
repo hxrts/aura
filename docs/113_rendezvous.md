@@ -50,7 +50,7 @@ Rendezvous descriptors carry two kinds of information. One surface describes con
 
 Connectivity endpoints describe how a peer may be reached. Service advertisements describe what the peer is willing to provide. Runtime policy combines both surfaces with local permit state, health, and trust evidence. Descriptor publication itself does not commit the final route choice.
 
-The current implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data. That compatibility layer is explicitly quarantined and slated for removal after the pre-onion `Hold` rollout is complete. New code should consume `LinkEndpoint`, `ServiceDescriptor`, `EstablishPath`, `MovePath`, and `HoldDescriptor` views rather than treating transport hints as final routing policy.
+The current implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data. That compatibility layer is explicitly quarantined. Owner: `adaptive_privacy_phase6`. Removal condition: encrypted `EstablishedPath` rollout and invitation bootstrap no longer need the legacy hint bridge. New code should consume `LinkEndpoint`, `ServiceDescriptor`, `EstablishPath`, `MovePath`, and `HoldDescriptor` views rather than treating transport hints as final routing policy.
 
 ### 3.1 Holepunching and Upgrade Policy
 

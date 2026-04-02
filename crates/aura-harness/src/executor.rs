@@ -3530,6 +3530,7 @@ fn semantic_modal_name(modal: ModalId) -> &'static str {
         ModalId::SwitchAuthority => "switch_authority",
         ModalId::AccessOverride => "access_override",
         ModalId::CapabilityConfig => "capability_config",
+        ModalId::EditChannelInfo => "edit_channel_info",
     }
 }
 

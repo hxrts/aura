@@ -28,6 +28,7 @@ pub enum ModalState {
     SwitchAuthority,
     AccessOverride,
     CapabilityConfig,
+    EditChannelInfo,
 }
 
 impl ModalState {
@@ -55,6 +56,7 @@ impl ModalState {
             Self::SwitchAuthority => ModalId::SwitchAuthority,
             Self::AccessOverride => ModalId::AccessOverride,
             Self::CapabilityConfig => ModalId::CapabilityConfig,
+            Self::EditChannelInfo => ModalId::EditChannelInfo,
         }
     }
 }
@@ -208,6 +210,12 @@ impl Default for AccessOverrideModalState {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct EditChannelInfoModalState {
+    pub name: String,
+    pub topic: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum ActiveModal {
     Help,
@@ -231,6 +239,7 @@ pub enum ActiveModal {
     SwitchAuthority,
     AccessOverride(AccessOverrideModalState),
     CapabilityConfig(CapabilityConfigModalState),
+    EditChannelInfo(EditChannelInfoModalState),
 }
 
 impl ActiveModal {
@@ -258,6 +267,7 @@ impl ActiveModal {
             Self::SwitchAuthority => ModalState::SwitchAuthority,
             Self::AccessOverride(_) => ModalState::AccessOverride,
             Self::CapabilityConfig(_) => ModalState::CapabilityConfig,
+            Self::EditChannelInfo(_) => ModalState::EditChannelInfo,
         }
     }
 }
@@ -322,6 +332,12 @@ active_modal_accessors!(
         access_override_mut,
         AccessOverride,
         AccessOverrideModalState
+    ),
+    (
+        edit_channel_info,
+        edit_channel_info_mut,
+        EditChannelInfo,
+        EditChannelInfoModalState
     )
 );
 

@@ -122,6 +122,17 @@ pub(super) fn handle_modal_enter(
             });
             dismiss_modal(model);
         }
+        ModalState::EditChannelInfo => {
+            if let Some(ActiveModal::EditChannelInfo(state)) = model.active_modal.as_ref() {
+                let topic = state.topic.trim().to_string();
+                model.set_selected_channel_topic(topic);
+            }
+            model.toast = Some(ToastState {
+                icon: '✓',
+                message: "Channel info updated".to_string(),
+            });
+            dismiss_modal(model);
+        }
         ModalState::EditNickname => {
             let value = match model.active_modal.as_ref() {
                 Some(ActiveModal::EditNickname(state)) => state.value.trim().to_string(),

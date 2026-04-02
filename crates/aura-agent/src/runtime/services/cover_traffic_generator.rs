@@ -23,7 +23,9 @@ pub struct CoverTrafficGeneratorConfig {
 impl Default for CoverTrafficGeneratorConfig {
     fn default() -> Self {
         Self {
-            activity_cover_floor_per_second: 1,
+            // Kept aligned with the tuned adaptive routing cover baseline so
+            // sparse-traffic profiles do not fall back to a one-packet floor.
+            activity_cover_floor_per_second: 2,
             mixing_mass_target_per_second: 4,
             reserved_budget_units: 2,
         }

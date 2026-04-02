@@ -1,5 +1,7 @@
 use super::wizard::open_create_channel_wizard;
-use crate::model::{ActiveModal, ChannelRow, TextModalState, ToastState, UiModel};
+use crate::model::{
+    ActiveModal, ChannelRow, EditChannelInfoModalState, TextModalState, ToastState, UiModel,
+};
 use aura_app::ui::types::parse_chat_command;
 use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
 
@@ -16,6 +18,18 @@ pub(super) fn handle_chat_char(model: &mut UiModel, ch: char) {
             model.modal_hint = "Set Channel Topic".to_string();
             model.active_modal = Some(ActiveModal::SetChannelTopic(TextModalState {
                 value: model.selected_channel_topic().to_string(),
+            }));
+        }
+        'e' => {
+            let channel_name = model
+                .selected_channel_name()
+                .unwrap_or(NOTE_TO_SELF_CHANNEL_NAME)
+                .to_string();
+            let topic = model.selected_channel_topic().to_string();
+            model.modal_hint = "Edit Channel".to_string();
+            model.active_modal = Some(ActiveModal::EditChannelInfo(EditChannelInfoModalState {
+                name: channel_name,
+                topic,
             }));
         }
         'o' => {

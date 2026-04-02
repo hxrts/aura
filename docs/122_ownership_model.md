@@ -592,6 +592,55 @@ For proof-bearing postconditions specifically, the desired enforcement order is:
 
 Scripts alone are not sufficient. The API must make the wrong pattern hard or impossible first.
 
+### Service-Family Enforcement Map
+
+For new `Establish`, `Move`, or `Hold` surfaces, keep the enforcement split
+explicit:
+
+- type-enforced:
+  - runtime-local policy stays inside runtime-owned services
+  - strongest typed reference continues after authoritative context exists
+  - capability-gated mutation/publication boundaries
+- proc-macro declaration-enforced:
+  - `#[service_surface(...)]`
+  - `#[actor_owned(...)]`, `#[semantic_owner(...)]`, or the narrower ownership declaration that matches the boundary
+- compile-fail-enforced:
+  - service-surface misuse and private-constructor misuse in `trybuild` suites
+  - stale-owner / wrong-capability / wrong-layer misuse when the API shape can reject it
+- lint-enforced:
+  - `aura-macros` ownership and architecture lint binaries run through
+    `just ci-ownership-policy` and `just lint-arch-syntax`
+- script-enforced:
+  - thin repo-wide integration/governance gates such as
+    `scripts/check/service-surface-declarations.sh`,
+    `scripts/check/service-registry-ownership.sh`,
+    `scripts/check/adaptive-privacy-phase5-legacy-sweep.sh`, and
+    `scripts/check/adaptive-privacy-phase6.sh`
+
+The default contributor path for service-family boundary work is:
+
+1. `just lint-arch-syntax`
+2. `just ci-ownership-policy`
+3. `just check-arch`
+4. `just ci-adaptive-privacy-phase6` when the change affects adaptive privacy
+   policy, simulator evidence, or control-plane parity artifacts
+
+### Same-Change Checklist
+
+Any new service-family composition or service-surface type must include, in the
+same change:
+
+1. the declaration macros for the boundary and owner category
+2. typed/runtime-local state placement that keeps shared truth separate from local policy
+3. compile-fail or invariant coverage for the strongest misuse shape the API can reject
+4. lint or script wiring for the remaining syntax/integration boundary
+5. doc updates in the affected crate `ARCHITECTURE.md` and any authoritative guide that owns the contract
+6. removal of the superseded helper, adapter, allowlist, compatibility branch, or migration note
+
+If item 6 cannot be completed immediately, record the owner and explicit
+removal condition in the active migration inventory rather than leaving a silent
+compatibility path behind.
+
 ## Review Checklist
 
 When adding or modifying a parity-critical path, ask these questions:

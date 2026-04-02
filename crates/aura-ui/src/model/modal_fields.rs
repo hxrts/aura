@@ -219,6 +219,9 @@ impl ActiveModal {
             Self::GuardianSetup(state) | Self::MfaSetup(state) => state.field_descriptor(),
             Self::AddDevice(state) => state.field_descriptor(),
             Self::CapabilityConfig(state) => Some(state.field_descriptor()),
+            Self::EditChannelInfo(_) => {
+                Some(ModalFieldDescriptor::Direct(FieldId::CreateChannelName))
+            }
             _ => None,
         }
     }
@@ -236,6 +239,7 @@ impl ActiveModal {
             Self::GuardianSetup(state) | Self::MfaSetup(state) => state.text_value(),
             Self::AddDevice(state) => state.text_value(),
             Self::CapabilityConfig(state) => Some(state.text_value()),
+            Self::EditChannelInfo(state) => Some(state.name.clone()),
             _ => None,
         }
     }
@@ -253,6 +257,9 @@ impl ActiveModal {
             Self::GuardianSetup(state) | Self::MfaSetup(state) => state.set_text_value(value),
             Self::AddDevice(state) => state.set_text_value(value),
             Self::CapabilityConfig(state) => state.set_text_value(value),
+            Self::EditChannelInfo(state) => {
+                state.name = value;
+            }
             _ => {}
         }
     }
@@ -266,6 +273,14 @@ impl ActiveModal {
             if state.set_field_value(field_id, value.clone()) {
                 return;
             }
+        }
+        if let Self::EditChannelInfo(state) = self {
+            match field_id {
+                FieldId::CreateChannelName => state.name = value,
+                FieldId::CreateChannelTopic => state.topic = value,
+                _ => {}
+            }
+            return;
         }
         self.set_text_value(value);
     }

@@ -28,6 +28,7 @@ pub(in crate::app) fn active_modal_title(model: &UiModel) -> Option<String> {
             ModalState::SwitchAuthority => "Switch Authority",
             ModalState::AccessOverride => "Access Override",
             ModalState::CapabilityConfig => "Home Capability Configuration",
+            ModalState::EditChannelInfo => "Edit Channel",
         }
         .to_string(),
     )
@@ -479,6 +480,23 @@ pub(in crate::app) fn modal_view(
                 value: model.modal_text_value().unwrap_or_default(),
             });
         }
+        ModalState::EditChannelInfo => {
+            details.push("Edit the channel name and topic.".to_string());
+            let (name_val, topic_val) = model
+                .edit_channel_info()
+                .map(|state| (state.name.clone(), state.topic.clone()))
+                .unwrap_or_default();
+            inputs.push(ModalInputView {
+                label: "Channel Name".to_string(),
+                field_id: FieldId::CreateChannelName,
+                value: name_val,
+            });
+            inputs.push(ModalInputView {
+                label: "Channel Topic".to_string(),
+                field_id: FieldId::CreateChannelTopic,
+                value: topic_val,
+            });
+        }
     }
 
     let enter_label = match modal {
@@ -512,7 +530,7 @@ pub(in crate::app) fn modal_view(
         },
         ModalState::SwitchAuthority => "Switch".to_string(),
         ModalState::AccessOverride => "Apply".to_string(),
-        ModalState::CapabilityConfig => "Save".to_string(),
+        ModalState::CapabilityConfig | ModalState::EditChannelInfo => "Save".to_string(),
         _ => "Confirm".to_string(),
     };
 

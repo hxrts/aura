@@ -3006,9 +3006,6 @@ const OBSERVED_DISPATCH_HELPERS: &[&str] = &[
     "spawn_observed_result_callback",
 ];
 
-// All known violations remediated. Empty allowlist retained as documentation anchor.
-const PARITY_CRITICAL_CALLBACK_SETTLEMENT_ALLOWLIST: &[&str] = &[];
-
 fn scan_parity_critical_callback_settlement(file: &Path, syntax: &File) -> Vec<String> {
     let file_str = file.to_string_lossy();
 
@@ -3018,14 +3015,6 @@ fn scan_parity_critical_callback_settlement(file: &Path, syntax: &File) -> Vec<S
 
     let mut violations = Vec::new();
     scan_parity_critical_callback_settlement_items(file, &syntax.items, &mut violations);
-
-    // Filter out allowlisted files for known violations under active remediation.
-    if PARITY_CRITICAL_CALLBACK_SETTLEMENT_ALLOWLIST
-        .iter()
-        .any(|suffix| file_str.ends_with(suffix))
-    {
-        return Vec::new();
-    }
 
     violations
 }

@@ -587,6 +587,13 @@ fn apply_modal_overlay(
                 *right = "Use Tab to switch".to_string();
             }
         }
+        ModalState::EditChannelInfo => {
+            if row_idx == 0 {
+                *center = "Edit Channel".to_string();
+            } else if row_idx == 1 {
+                *center = model.modal_text_value_or_empty();
+            }
+        }
     }
 }
 

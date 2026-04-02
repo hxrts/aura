@@ -259,6 +259,28 @@ The async host boundary enforces several constraints. Requests process in submis
 
 ### Transcript Artifacts
 
+## Adaptive Privacy Phase 6 Evidence
+
+Phase 6 adaptive-privacy validation uses one deterministic artifact lane instead
+of ad hoc local sweeps. Run:
+
+```bash
+just ci-adaptive-privacy-phase6
+```
+
+That lane writes the canonical archive under
+`artifacts/adaptive-privacy/phase6/` with:
+
+- `tuning_report.json` for the provisional-vs-fixed policy comparison
+- `matrix_results.json` for the canonical Phase 6 validation matrix
+- `control-plane/` telltale-backed parity reports for anonymous path
+  establishment and reply-block accountability
+- `parity/report.json` for the generic telltale parity lane used by the same
+  archive contract
+
+These artifacts are the evidence source for tuned adaptive-privacy constants.
+They are observational outputs, not new semantic truth.
+
 ```rust
 use aura_simulator::AsyncHostTranscriptEntry;
 
@@ -300,6 +322,14 @@ The simulator exposes telltale parity as an artifact-level boundary. The boundar
 Use `TelltaleParityInput` and `TelltaleParityRunner` when both baseline and candidate artifacts are already in memory. Use `run_telltale_parity_file_lane` with `TelltaleParityFileRun` for file-driven CI workflows.
 
 The file lane accepts baseline and candidate artifact paths, a comparison profile, and an output report path. It emits one stable JSON report artifact.
+
+Protocol-critical control-plane lifecycles should use the dedicated telltale
+control-plane lanes instead of reimplementing the same ownership/timeout/replay
+lifecycle in Aura-local simulator scenario state. Use
+`run_telltale_control_plane_file_lane` with `TelltaleControlPlaneFileRun` for:
+
+- `anonymous_path_establish`
+- `reply_block_accountability`
 
 ### Canonical Surface Mapping
 

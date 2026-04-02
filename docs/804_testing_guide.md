@@ -117,6 +117,31 @@ The authoritative frontend matrix for converted shared scenarios comes from `sce
 
 Changes to the browser harness bridge request, response, or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit.
 
+For service-family work, keep the test/evidence split concrete:
+
+- type/API and proc-macro boundaries first
+- `trybuild` compile-fail tests for misuse that should not compile
+- `aura-macros` lint binaries for syntax-owned rules
+- thin shell scripts only for integration-wide or artifact-governance checks
+
+The default contributor verification path for this class of change is:
+
+1. `just lint-arch-syntax`
+2. `just ci-ownership-policy`
+3. `just check-arch`
+4. `just ci-adaptive-privacy-phase6` if the change touches adaptive privacy
+   policy constants, simulator evidence, or telltale-backed control-plane parity
+
+When a new `Establish`, `Move`, or `Hold` surface lands, the same change should
+also add:
+
+- the service-surface declaration macros
+- compile-fail or invariant coverage for the strongest rejectable misuse
+- any required `aura-macros` lint coverage or thin script glue
+- the updated crate `ARCHITECTURE.md` and authoritative docs
+- removal of the superseded compatibility helper or explicit inventorying of
+  the deferred cleanup
+
 ### Browser Compatibility Surface
 
 The browser compatibility surface includes the explicit `stage_runtime_identity` bootstrap handoff entrypoint plus the page-owned semantic submission queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`). The browser also publishes page-owned semantic submit readiness metadata. This includes whether the enqueue surface is installed (`enqueue_ready`), the active vs ready generation boundary, controller presence, current shell phase, and any in-flight bootstrap transition detail. Driver startup and recovery waits bind to product-owned bootstrap and rebinding state instead of stale driver-local probes.

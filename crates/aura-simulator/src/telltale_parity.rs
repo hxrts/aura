@@ -67,6 +67,38 @@ pub struct TelltaleParityFileRun {
     pub profile: DifferentialProfile,
 }
 
+/// Protocol-critical control-plane lane kinds that should use telltale parity
+/// instead of Aura-local scenario lifecycle reimplementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TelltaleControlPlaneLane {
+    AnonymousPathEstablish,
+    ReplyBlockAccountability,
+}
+
+impl TelltaleControlPlaneLane {
+    fn lane_suffix(self) -> &'static str {
+        match self {
+            Self::AnonymousPathEstablish => "anonymous_path_establish",
+            Self::ReplyBlockAccountability => "reply_block_accountability",
+        }
+    }
+}
+
+/// File-based telltale run for one protocol-critical control-plane lifecycle.
+#[derive(Debug, Clone)]
+pub struct TelltaleControlPlaneFileRun {
+    /// Which control-plane lifecycle this lane covers.
+    pub control_plane_lane: TelltaleControlPlaneLane,
+    /// Baseline Aura artifact path.
+    pub baseline_path: PathBuf,
+    /// Telltale-candidate artifact path.
+    pub telltale_candidate_path: PathBuf,
+    /// Output path for stable parity report JSON.
+    pub output_report_path: PathBuf,
+    /// Comparison profile.
+    pub profile: DifferentialProfile,
+}
+
 /// Stable simulator parity artifact payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TelltaleParityReportV1 {
@@ -153,6 +185,25 @@ pub fn run_telltale_parity_file_lane(
         differential,
     };
 
+    write_parity_report(&input.output_report_path, &report)?;
+    Ok(report)
+}
+
+/// Run a protocol-critical telltale parity lane for a named control-plane
+/// lifecycle and emit one stable report artifact.
+pub fn run_telltale_control_plane_file_lane(
+    input: &TelltaleControlPlaneFileRun,
+) -> Result<TelltaleParityReportV1, TelltaleParityError> {
+    let mut report = run_telltale_parity_file_lane(&TelltaleParityFileRun {
+        baseline_path: input.baseline_path.clone(),
+        telltale_candidate_path: input.telltale_candidate_path.clone(),
+        output_report_path: input.output_report_path.clone(),
+        profile: input.profile,
+    })?;
+    report.lane = format!(
+        "aura-simulator:telltale-control-plane:{}",
+        input.control_plane_lane.lane_suffix()
+    );
     write_parity_report(&input.output_report_path, &report)?;
     Ok(report)
 }
@@ -390,5 +441,47 @@ mod tests {
         assert_eq!(report.comparison_classification, "strict");
         assert!(report.first_mismatch_surface.is_some());
         assert!(report.first_mismatch_step_index.is_some());
+    }
+
+    #[test]
+    fn control_plane_lane_writes_profiled_report_name() {
+        let dir = tempdir().expect("tempdir");
+        let baseline_path = dir.path().join("baseline.json");
+        let candidate_path = dir.path().join("candidate.json");
+        let report_path = dir.path().join("control-plane-report.json");
+
+        let baseline = artifact("aura", &["a", "b"]);
+        let candidate = artifact("telltale_machine", &["b", "a"]);
+        std::fs::write(
+            &baseline_path,
+            serde_json::to_vec_pretty(&baseline).expect("serialize baseline"),
+        )
+        .expect("write baseline");
+        std::fs::write(
+            &candidate_path,
+            serde_json::to_vec_pretty(&candidate).expect("serialize candidate"),
+        )
+        .expect("write candidate");
+
+        let report = run_telltale_control_plane_file_lane(&TelltaleControlPlaneFileRun {
+            control_plane_lane: TelltaleControlPlaneLane::AnonymousPathEstablish,
+            baseline_path,
+            telltale_candidate_path: candidate_path,
+            output_report_path: report_path.clone(),
+            profile: DifferentialProfile::EnvelopeBounded,
+        })
+        .expect("run control-plane lane");
+        assert_eq!(
+            report.lane,
+            "aura-simulator:telltale-control-plane:anonymous_path_establish"
+        );
+
+        let written: TelltaleParityReportV1 =
+            serde_json::from_slice(&std::fs::read(report_path).expect("read report"))
+                .expect("decode report");
+        assert_eq!(
+            written.lane,
+            "aura-simulator:telltale-control-plane:anonymous_path_establish"
+        );
     }
 }

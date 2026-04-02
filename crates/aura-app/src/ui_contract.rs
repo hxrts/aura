@@ -64,6 +64,7 @@ pub enum ModalId {
     SwitchAuthority,
     AccessOverride,
     CapabilityConfig,
+    EditChannelInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -243,6 +244,7 @@ impl ModalId {
             Self::SwitchAuthority => "aura-modal-switch-authority",
             Self::AccessOverride => "aura-modal-access-override",
             Self::CapabilityConfig => "aura-modal-capability-config",
+            Self::EditChannelInfo => "aura-modal-edit-channel-info",
         }
     }
 
@@ -635,6 +637,7 @@ pub enum ControlId {
     ContactsEditNicknameButton,
     ContactsRemoveContactButton,
     ChatNewGroupButton,
+    ChatEditChannelButton,
     ChatCloseChannelButton,
     ChatRetryMessageButton,
     ContactsStartChatButton,
@@ -693,6 +696,7 @@ impl ControlId {
             Self::ContactsEditNicknameButton => Some("aura-contacts-edit-nickname"),
             Self::ContactsRemoveContactButton => Some("aura-contacts-remove-contact"),
             Self::ChatNewGroupButton => Some("aura-chat-new-group"),
+            Self::ChatEditChannelButton => Some("aura-chat-edit-channel"),
             Self::ChatCloseChannelButton => Some("aura-chat-close-channel"),
             Self::ChatRetryMessageButton => Some("aura-chat-retry-message"),
             Self::ContactsStartChatButton => Some("aura-contacts-start-chat"),
@@ -752,6 +756,7 @@ impl ControlId {
             Self::ContactsInviteToChannelButton => Some("i"),
             Self::ContactsAddGuardianButton => Some("g"),
             Self::ChatNewGroupButton => Some("n"),
+            Self::ChatEditChannelButton => Some("e"),
             Self::ChatCloseChannelButton => Some("x"),
             Self::ChatRetryMessageButton => Some("r"),
             Self::ContactsStartChatButton => Some("c"),

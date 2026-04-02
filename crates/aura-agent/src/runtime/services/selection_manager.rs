@@ -55,11 +55,18 @@ impl Default for SelectionManagerConfig {
             privacy_mode_enabled: false,
             min_mixing_depth: 1,
             max_mixing_depth: 3,
-            path_diversity_floor: 1,
-            cover_floor_per_second: 1,
+            // Phase-6 tuning keeps small/medium profiles off the degenerate
+            // one-hop floor while still allowing larger reachable sets to
+            // climb to the configured mixing-depth ceiling.
+            path_diversity_floor: 2,
+            // The fixed privacy policy keeps a non-zero baseline even when
+            // organic traffic and sync windows are sparse.
+            cover_floor_per_second: 2,
             cover_gain_per_rtt_bucket: 1,
             delay_gain_numerator: 1,
-            delay_gain_denominator: 2,
+            // Phase-6 tuning reduced default delay growth after evidence from
+            // partition-heal and ceremony-latency validation profiles.
+            delay_gain_denominator: 3,
             delay_hysteresis_ms: 25,
             cover_hysteresis_per_second: 1,
             diversity_hysteresis: 1,
@@ -321,14 +328,18 @@ impl SelectionManagerService {
             .max(self.config.min_mixing_depth)
             .min(self.config.max_mixing_depth)
             .min(diversity_target.max(1));
-        let delay_ms = ((health.ema_rtt_ms as u64)
-            .saturating_mul(self.config.delay_gain_numerator as u64))
-            / (self.config.delay_gain_denominator.max(1) as u64);
+        let delay_ms = div_ceil_u64(
+            (health.ema_rtt_ms as u64).saturating_mul(self.config.delay_gain_numerator as u64),
+            self.config.delay_gain_denominator.max(1) as u64,
+        );
         let cover_rate_per_second = self
             .config
             .cover_floor_per_second
-            .saturating_add(health.ema_rtt_ms / 100 * self.config.cover_gain_per_rtt_bucket)
-            .saturating_add((health.queue_pressure / 25).max(1));
+            .saturating_add(
+                div_ceil_u32(health.ema_rtt_ms, 100)
+                    .saturating_mul(self.config.cover_gain_per_rtt_bucket),
+            )
+            .saturating_add(div_ceil_u32(health.queue_pressure, 32));
         LocalRoutingProfile {
             mixing_depth,
             delay_ms,
@@ -398,7 +409,11 @@ impl SelectionManagerService {
             })
             .collect::<Vec<_>>();
         let mut selected = Vec::new();
-        let max_select = if family == ServiceFamily::Hold { 3 } else { 2 };
+        let max_select = if family == ServiceFamily::Hold {
+            3
+        } else {
+            usize::from(self.config.max_mixing_depth.max(self.config.min_mixing_depth))
+        };
         let mut selected_evidence = Vec::new();
         for _ in 0..max_select {
             if weighted.is_empty() {
@@ -458,6 +473,20 @@ impl SelectionManagerService {
         }
         Ok(selected)
     }
+}
+
+fn div_ceil_u32(value: u32, divisor: u32) -> u32 {
+    if value == 0 {
+        return 0;
+    }
+    (value.saturating_add(divisor.saturating_sub(1))) / divisor.max(1)
+}
+
+fn div_ceil_u64(value: u64, divisor: u64) -> u64 {
+    if value == 0 {
+        return 0;
+    }
+    (value.saturating_add(divisor.saturating_sub(1))) / divisor.max(1)
 }
 
 fn sanitize_config_for_build(config: SelectionManagerConfig) -> SelectionManagerConfig {
@@ -786,6 +815,7 @@ mod tests {
             candidate(1, true, ProviderEvidence::DirectFriend),
             candidate(2, true, ProviderEvidence::Neighborhood),
             candidate(3, true, ProviderEvidence::IntroducedFof),
+            candidate(4, true, ProviderEvidence::Neighborhood),
         ];
         let first = manager
             .select_profile(

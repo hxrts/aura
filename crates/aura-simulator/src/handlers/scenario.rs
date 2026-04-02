@@ -208,6 +208,113 @@ pub enum InjectionAction {
         target: String,
         validation_steps: Vec<String>,
     },
+    /// Apply an adaptive privacy transition to simulator state.
+    AdaptivePrivacyTransition(AdaptivePrivacyTransition),
+}
+
+/// Density class for sync opportunities in adaptive privacy scenarios.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncOpportunityDensity {
+    Sparse,
+    Balanced,
+    Heavy,
+}
+
+/// Adaptive privacy transition applied by scenario actions.
+#[derive(Debug, Clone)]
+pub enum AdaptivePrivacyTransition {
+    ConfigureMovement {
+        profile_id: String,
+        clusters: Vec<String>,
+        home_locality_bias: f64,
+        neighborhood_locality_bias: f64,
+    },
+    EstablishAnonymousPath {
+        path_id: String,
+        initiator: String,
+        destination: String,
+        hops: Vec<String>,
+        ttl_ticks: u64,
+        reusable: bool,
+    },
+    ReuseEstablishedPath {
+        path_id: String,
+    },
+    ExpireEstablishedPath {
+        path_id: String,
+    },
+    RecordEstablishFlow {
+        flow_id: String,
+        source: String,
+        destination: String,
+        path_id: Option<String>,
+    },
+    RecordMoveBatch {
+        batch_id: String,
+        envelope_count: usize,
+    },
+    ObserveLocalHealth {
+        provider: String,
+        score: f64,
+        latency_ms: u64,
+    },
+    RecordCoverTraffic {
+        provider: String,
+        envelope_count: usize,
+    },
+    RecordAccountabilityReply {
+        reply_id: String,
+        deadline_ticks: u64,
+        completed_after_ticks: Option<u64>,
+    },
+    RecordRouteDiversity {
+        selector_id: String,
+        unique_paths: usize,
+        dominant_provider: Option<String>,
+    },
+    RecordHonestHopCompromise {
+        path_id: String,
+        compromised_hops: Vec<String>,
+        honest_hops_remaining: usize,
+    },
+    RecordPartitionHealCycle {
+        cycle_id: String,
+        partition_groups: Vec<Vec<String>>,
+        heal_after_ticks: u64,
+    },
+    RecordChurnBurst {
+        burst_id: String,
+        affected_participants: Vec<String>,
+        entering: usize,
+        leaving: usize,
+    },
+    RecordProviderSaturation {
+        provider: String,
+        queue_depth: usize,
+        utilization: f64,
+    },
+    RecordHeldObjectRetention {
+        object_id: String,
+        selector: String,
+        retention_ticks: u64,
+        seeded_from_move: bool,
+    },
+    RecordSelectorRetrieval {
+        retrieval_id: String,
+        selector: String,
+        expected_objects: usize,
+        sync_profile: String,
+    },
+    RecordSyncOpportunity {
+        profile_id: String,
+        density: SyncOpportunityDensity,
+        peers: Vec<String>,
+    },
+    RecordMoveToHoldSeed {
+        batch_id: String,
+        object_id: String,
+        selector: String,
+    },
 }
 
 impl ScenarioDefinition {
@@ -354,6 +461,8 @@ struct ScenarioState {
     checkpoints: HashMap<String, ScenarioCheckpoint>,
     events: Vec<SimulationEvent>,
     metrics: HashMap<String, MetricValue>,
+    parameters: HashMap<String, String>,
+    behaviors: HashMap<String, String>,
     enable_randomization: bool,
     injection_probability: f64,
     max_concurrent_injections: usize,
@@ -367,6 +476,7 @@ struct ScenarioState {
     recovery_state: HashMap<String, RecoveryInfo>,
     current_tick: u64,
     network_conditions: Vec<NetworkCondition>,
+    adaptive_privacy: AdaptivePrivacyState,
 }
 
 #[derive(Debug, Clone)]
@@ -470,6 +580,187 @@ struct NetworkCondition {
     expires_at_tick: u64,
 }
 
+#[derive(Debug, Clone)]
+struct AdaptivePrivacyState {
+    movement_profiles: HashMap<String, MovementProfile>,
+    anonymous_paths: HashMap<String, AnonymousPathState>,
+    establish_flows: HashMap<String, EstablishFlowState>,
+    move_batches: HashMap<String, MoveBatchState>,
+    local_health: HashMap<String, LocalHealthObservation>,
+    cover_events: Vec<CoverTrafficRecord>,
+    accountability_replies: HashMap<String, AccountabilityReplyState>,
+    route_diversity: HashMap<String, RouteDiversityObservation>,
+    honest_hop_compromise_patterns: Vec<HonestHopCompromisePattern>,
+    partition_heal_cycles: HashMap<String, PartitionHealCycle>,
+    churn_bursts: HashMap<String, ChurnBurstState>,
+    provider_saturation: HashMap<String, ProviderSaturationState>,
+    held_objects: HashMap<String, HeldObjectRetentionState>,
+    selector_retrievals: HashMap<String, SelectorRetrievalState>,
+    sync_opportunities: HashMap<String, SyncOpportunityState>,
+    move_to_hold_seeds: HashMap<String, MoveToHoldSeedState>,
+}
+
+impl AdaptivePrivacyState {
+    fn new() -> Self {
+        Self {
+            movement_profiles: HashMap::new(),
+            anonymous_paths: HashMap::new(),
+            establish_flows: HashMap::new(),
+            move_batches: HashMap::new(),
+            local_health: HashMap::new(),
+            cover_events: Vec::new(),
+            accountability_replies: HashMap::new(),
+            route_diversity: HashMap::new(),
+            honest_hop_compromise_patterns: Vec::new(),
+            partition_heal_cycles: HashMap::new(),
+            churn_bursts: HashMap::new(),
+            provider_saturation: HashMap::new(),
+            held_objects: HashMap::new(),
+            selector_retrievals: HashMap::new(),
+            sync_opportunities: HashMap::new(),
+            move_to_hold_seeds: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MovementProfile {
+    id: String,
+    clusters: Vec<String>,
+    home_locality_bias: f64,
+    neighborhood_locality_bias: f64,
+    recorded_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct AnonymousPathState {
+    id: String,
+    initiator: String,
+    destination: String,
+    hops: Vec<String>,
+    established_at: SimTimestamp,
+    expires_at_tick: u64,
+    reusable: bool,
+    reuse_count: u64,
+    expired: bool,
+}
+
+#[derive(Debug, Clone)]
+struct EstablishFlowState {
+    id: String,
+    source: String,
+    destination: String,
+    path_id: Option<String>,
+    established_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct MoveBatchState {
+    id: String,
+    envelope_count: usize,
+    created_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct LocalHealthObservation {
+    provider: String,
+    score: f64,
+    latency_ms: u64,
+    observed_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct CoverTrafficRecord {
+    provider: String,
+    envelope_count: usize,
+    recorded_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct AccountabilityReplyState {
+    id: String,
+    deadline_tick: u64,
+    completed_at_tick: Option<u64>,
+    within_deadline: bool,
+}
+
+#[derive(Debug, Clone)]
+struct RouteDiversityObservation {
+    selector_id: String,
+    unique_paths: usize,
+    dominant_provider: Option<String>,
+    recorded_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct HonestHopCompromisePattern {
+    path_id: String,
+    compromised_hops: Vec<String>,
+    honest_hops_remaining: usize,
+    recorded_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct PartitionHealCycle {
+    id: String,
+    partition_groups: Vec<Vec<String>>,
+    partitioned_at: SimTimestamp,
+    heals_at_tick: u64,
+    healed: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ChurnBurstState {
+    id: String,
+    affected_participants: Vec<String>,
+    entering: usize,
+    leaving: usize,
+    recorded_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct ProviderSaturationState {
+    provider: String,
+    queue_depth: usize,
+    utilization: f64,
+    recorded_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct HeldObjectRetentionState {
+    object_id: String,
+    selector: String,
+    retained_at: SimTimestamp,
+    retention_until_tick: u64,
+    seeded_from_move: bool,
+    expired: bool,
+}
+
+#[derive(Debug, Clone)]
+struct SelectorRetrievalState {
+    retrieval_id: String,
+    selector: String,
+    expected_objects: usize,
+    sync_profile: String,
+    recorded_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct SyncOpportunityState {
+    profile_id: String,
+    density: SyncOpportunityDensity,
+    peers: Vec<String>,
+    recorded_at: SimTimestamp,
+}
+
+#[derive(Debug, Clone)]
+struct MoveToHoldSeedState {
+    batch_id: String,
+    object_id: String,
+    selector: String,
+    seeded_at: SimTimestamp,
+}
+
 struct SimulationScenarioShared {
     state: Mutex<ScenarioState>,
 }
@@ -490,6 +781,8 @@ impl SimulationScenarioHandler {
                     checkpoints: HashMap::new(),
                     events: Vec::new(),
                     metrics: HashMap::new(),
+                    parameters: HashMap::new(),
+                    behaviors: HashMap::new(),
                     enable_randomization: false,
                     injection_probability: 0.1,
                     max_concurrent_injections: 3,
@@ -502,6 +795,7 @@ impl SimulationScenarioHandler {
                     recovery_state: HashMap::new(),
                     current_tick: 0,
                     network_conditions: Vec::new(),
+                    adaptive_privacy: AdaptivePrivacyState::new(),
                 }),
             }),
         }
@@ -1469,6 +1763,15 @@ impl SimulationScenarioHandler {
             "injection_probability".to_string(),
             state.injection_probability.to_string(),
         );
+        stats.insert(
+            "applied_actions".to_string(),
+            state
+                .active_injections
+                .iter()
+                .map(|injection| injection.actions_applied.len())
+                .sum::<usize>()
+                .to_string(),
+        );
 
         Ok(stats)
     }
@@ -1487,6 +1790,7 @@ impl SimulationScenarioHandler {
         state
             .network_conditions
             .retain(|c| c.expires_at_tick > current_tick);
+        Self::cleanup_expired_adaptive_privacy_locked(state);
     }
 
     fn cleanup_expired_injections_locked(state: &mut ScenarioState) {
@@ -1497,6 +1801,28 @@ impl SimulationScenarioHandler {
                 None => true, // Permanent injections stay active
             }
         });
+    }
+
+    fn cleanup_expired_adaptive_privacy_locked(state: &mut ScenarioState) {
+        let current_tick = state.current_tick;
+
+        for path in state.adaptive_privacy.anonymous_paths.values_mut() {
+            if current_tick >= path.expires_at_tick {
+                path.expired = true;
+            }
+        }
+
+        for cycle in state.adaptive_privacy.partition_heal_cycles.values_mut() {
+            if current_tick >= cycle.heals_at_tick {
+                cycle.healed = true;
+            }
+        }
+
+        for held_object in state.adaptive_privacy.held_objects.values_mut() {
+            if current_tick >= held_object.retention_until_tick {
+                held_object.expired = true;
+            }
+        }
     }
 
     fn activate_scenario_locked(
@@ -1510,14 +1836,12 @@ impl SimulationScenarioHandler {
             });
         }
 
-        let scenario =
-            state
-                .scenarios
-                .get(scenario_id)
-                .ok_or_else(|| TestingError::EventRecordingError {
-                    event_type: "scenario_trigger".to_string(),
-                    reason: format!("Scenario '{scenario_id}' not found"),
-                })?;
+        let scenario = state.scenarios.get(scenario_id).cloned().ok_or_else(|| {
+            TestingError::EventRecordingError {
+                event_type: "scenario_trigger".to_string(),
+                reason: format!("Scenario '{scenario_id}' not found"),
+            }
+        })?;
 
         if state
             .active_injections
@@ -1527,11 +1851,12 @@ impl SimulationScenarioHandler {
             return Ok(());
         }
 
+        let actions_applied = Self::apply_scenario_actions_locked(state, &scenario)?;
         let injection = ActiveInjection {
             scenario_id: scenario_id.to_string(),
             start_tick: state.current_tick,
             duration_ms: scenario.duration.map(|d| d.as_millis() as u64),
-            actions_applied: Vec::new(),
+            actions_applied,
         };
 
         state.active_injections.push(injection);
@@ -1597,17 +1922,469 @@ impl SimulationScenarioHandler {
         Ok(())
     }
 
-    /// Create a chat group for multi-actor scenarios
-    pub fn create_chat_group(
-        &self,
+    fn apply_scenario_actions_locked(
+        state: &mut ScenarioState,
+        scenario: &ScenarioDefinition,
+    ) -> Result<Vec<String>, TestingError> {
+        let mut applied = Vec::with_capacity(scenario.actions.len());
+        for action in scenario.actions.clone() {
+            applied.push(Self::apply_injection_action_locked(state, action)?);
+        }
+        Ok(applied)
+    }
+
+    fn apply_injection_action_locked(
+        state: &mut ScenarioState,
+        action: InjectionAction,
+    ) -> Result<String, TestingError> {
+        match action {
+            InjectionAction::ModifyParameter { key, value } => {
+                state.parameters.insert(key.clone(), value.clone());
+                Self::push_event_locked(
+                    state,
+                    "scenario_modify_parameter",
+                    HashMap::from([
+                        ("key".to_string(), key.clone()),
+                        ("value".to_string(), value),
+                    ]),
+                );
+                Ok(format!("modify_parameter:{key}"))
+            }
+            InjectionAction::InjectEvent { event_type, data } => {
+                Self::push_event_locked(state, &event_type, data);
+                Ok(format!("inject_event:{event_type}"))
+            }
+            InjectionAction::ModifyBehavior {
+                component,
+                behavior,
+            } => {
+                state.behaviors.insert(component.clone(), behavior.clone());
+                Self::push_event_locked(
+                    state,
+                    "scenario_modify_behavior",
+                    HashMap::from([
+                        ("component".to_string(), component.clone()),
+                        ("behavior".to_string(), behavior),
+                    ]),
+                );
+                Ok(format!("modify_behavior:{component}"))
+            }
+            InjectionAction::TriggerFault { fault } => {
+                let payload = serde_json::to_string(&fault).map_err(|error| {
+                    TestingError::EventRecordingError {
+                        event_type: "scenario_trigger_fault".to_string(),
+                        reason: format!("failed to serialize fault payload: {error}"),
+                    }
+                })?;
+                Self::push_event_locked(
+                    state,
+                    "scenario_trigger_fault",
+                    HashMap::from([("fault".to_string(), payload)]),
+                );
+                Ok("trigger_fault".to_string())
+            }
+            InjectionAction::CreateChatGroup {
+                group_name,
+                creator,
+                initial_members,
+            } => {
+                let group_id =
+                    Self::create_chat_group_locked(state, &group_name, &creator, initial_members)?;
+                Ok(format!("create_chat_group:{group_id}"))
+            }
+            InjectionAction::SendChatMessage {
+                group_id,
+                sender,
+                message,
+            } => {
+                Self::send_chat_message_locked(state, &group_id, &sender, &message)?;
+                Ok(format!("send_chat_message:{group_id}:{sender}"))
+            }
+            InjectionAction::SimulateDataLoss {
+                target_participant,
+                loss_type,
+                recovery_required,
+            } => {
+                Self::simulate_data_loss_locked(
+                    state,
+                    &target_participant,
+                    &loss_type,
+                    recovery_required,
+                )?;
+                Ok(format!("simulate_data_loss:{target_participant}"))
+            }
+            InjectionAction::ValidateMessageHistory {
+                participant,
+                expected_message_count,
+                include_pre_recovery,
+            } => {
+                let valid = Self::validate_message_history_locked(
+                    state,
+                    &participant,
+                    expected_message_count,
+                    include_pre_recovery,
+                )?;
+                Self::push_event_locked(
+                    state,
+                    "scenario_validate_message_history",
+                    HashMap::from([
+                        ("participant".to_string(), participant.clone()),
+                        ("valid".to_string(), valid.to_string()),
+                    ]),
+                );
+                Ok(format!("validate_message_history:{participant}"))
+            }
+            InjectionAction::InitiateGuardianRecovery {
+                target,
+                guardians,
+                threshold,
+            } => {
+                Self::initiate_guardian_recovery_locked(state, &target, guardians, threshold)?;
+                Ok(format!("initiate_guardian_recovery:{target}"))
+            }
+            InjectionAction::VerifyRecoverySuccess {
+                target,
+                validation_steps,
+            } => {
+                Self::verify_recovery_success_locked(state, &target, validation_steps)?;
+                Ok(format!("verify_recovery_success:{target}"))
+            }
+            InjectionAction::AdaptivePrivacyTransition(transition) => {
+                Self::apply_adaptive_privacy_transition_locked(state, transition)
+            }
+        }
+    }
+
+    fn apply_adaptive_privacy_transition_locked(
+        state: &mut ScenarioState,
+        transition: AdaptivePrivacyTransition,
+    ) -> Result<String, TestingError> {
+        match transition {
+            AdaptivePrivacyTransition::ConfigureMovement {
+                profile_id,
+                clusters,
+                home_locality_bias,
+                neighborhood_locality_bias,
+            } => {
+                state.adaptive_privacy.movement_profiles.insert(
+                    profile_id.clone(),
+                    MovementProfile {
+                        id: profile_id.clone(),
+                        clusters,
+                        home_locality_bias,
+                        neighborhood_locality_bias,
+                        recorded_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:movement:{profile_id}"))
+            }
+            AdaptivePrivacyTransition::EstablishAnonymousPath {
+                path_id,
+                initiator,
+                destination,
+                hops,
+                ttl_ticks,
+                reusable,
+            } => {
+                state.adaptive_privacy.anonymous_paths.insert(
+                    path_id.clone(),
+                    AnonymousPathState {
+                        id: path_id.clone(),
+                        initiator,
+                        destination,
+                        hops,
+                        established_at: state.current_tick,
+                        expires_at_tick: state.current_tick.saturating_add(ttl_ticks),
+                        reusable,
+                        reuse_count: 0,
+                        expired: false,
+                    },
+                );
+                Ok(format!("adaptive_privacy:path_established:{path_id}"))
+            }
+            AdaptivePrivacyTransition::ReuseEstablishedPath { path_id } => {
+                let path = state
+                    .adaptive_privacy
+                    .anonymous_paths
+                    .get_mut(&path_id)
+                    .ok_or_else(|| TestingError::StateInspectionError {
+                        component: "adaptive_privacy".to_string(),
+                        path: format!("path:{path_id}"),
+                        reason: "anonymous path not found".to_string(),
+                    })?;
+                path.reuse_count = path.reuse_count.saturating_add(1);
+                Ok(format!("adaptive_privacy:path_reused:{path_id}"))
+            }
+            AdaptivePrivacyTransition::ExpireEstablishedPath { path_id } => {
+                let path = state
+                    .adaptive_privacy
+                    .anonymous_paths
+                    .get_mut(&path_id)
+                    .ok_or_else(|| TestingError::StateInspectionError {
+                        component: "adaptive_privacy".to_string(),
+                        path: format!("path:{path_id}"),
+                        reason: "anonymous path not found".to_string(),
+                    })?;
+                path.expired = true;
+                Ok(format!("adaptive_privacy:path_expired:{path_id}"))
+            }
+            AdaptivePrivacyTransition::RecordEstablishFlow {
+                flow_id,
+                source,
+                destination,
+                path_id,
+            } => {
+                state.adaptive_privacy.establish_flows.insert(
+                    flow_id.clone(),
+                    EstablishFlowState {
+                        id: flow_id.clone(),
+                        source,
+                        destination,
+                        path_id,
+                        established_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:establish_flow:{flow_id}"))
+            }
+            AdaptivePrivacyTransition::RecordMoveBatch {
+                batch_id,
+                envelope_count,
+            } => {
+                state.adaptive_privacy.move_batches.insert(
+                    batch_id.clone(),
+                    MoveBatchState {
+                        id: batch_id.clone(),
+                        envelope_count,
+                        created_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:move_batch:{batch_id}"))
+            }
+            AdaptivePrivacyTransition::ObserveLocalHealth {
+                provider,
+                score,
+                latency_ms,
+            } => {
+                state.adaptive_privacy.local_health.insert(
+                    provider.clone(),
+                    LocalHealthObservation {
+                        provider: provider.clone(),
+                        score,
+                        latency_ms,
+                        observed_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:local_health:{provider}"))
+            }
+            AdaptivePrivacyTransition::RecordCoverTraffic {
+                provider,
+                envelope_count,
+            } => {
+                state.adaptive_privacy.cover_events.push(CoverTrafficRecord {
+                    provider: provider.clone(),
+                    envelope_count,
+                    recorded_at: state.current_tick,
+                });
+                Ok(format!("adaptive_privacy:cover:{provider}"))
+            }
+            AdaptivePrivacyTransition::RecordAccountabilityReply {
+                reply_id,
+                deadline_ticks,
+                completed_after_ticks,
+            } => {
+                let completed_at_tick =
+                    completed_after_ticks.map(|delta| state.current_tick.saturating_add(delta));
+                let deadline_tick = state.current_tick.saturating_add(deadline_ticks);
+                let within_deadline =
+                    completed_at_tick.is_none_or(|completed| completed <= deadline_tick);
+                state.adaptive_privacy.accountability_replies.insert(
+                    reply_id.clone(),
+                    AccountabilityReplyState {
+                        id: reply_id.clone(),
+                        deadline_tick,
+                        completed_at_tick,
+                        within_deadline,
+                    },
+                );
+                Ok(format!("adaptive_privacy:accountability_reply:{reply_id}"))
+            }
+            AdaptivePrivacyTransition::RecordRouteDiversity {
+                selector_id,
+                unique_paths,
+                dominant_provider,
+            } => {
+                state.adaptive_privacy.route_diversity.insert(
+                    selector_id.clone(),
+                    RouteDiversityObservation {
+                        selector_id: selector_id.clone(),
+                        unique_paths,
+                        dominant_provider,
+                        recorded_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:route_diversity:{selector_id}"))
+            }
+            AdaptivePrivacyTransition::RecordHonestHopCompromise {
+                path_id,
+                compromised_hops,
+                honest_hops_remaining,
+            } => {
+                state
+                    .adaptive_privacy
+                    .honest_hop_compromise_patterns
+                    .push(HonestHopCompromisePattern {
+                        path_id: path_id.clone(),
+                        compromised_hops,
+                        honest_hops_remaining,
+                        recorded_at: state.current_tick,
+                    });
+                Ok(format!("adaptive_privacy:honest_hop_compromise:{path_id}"))
+            }
+            AdaptivePrivacyTransition::RecordPartitionHealCycle {
+                cycle_id,
+                partition_groups,
+                heal_after_ticks,
+            } => {
+                let heals_at_tick = state.current_tick.saturating_add(heal_after_ticks);
+                state.adaptive_privacy.partition_heal_cycles.insert(
+                    cycle_id.clone(),
+                    PartitionHealCycle {
+                        id: cycle_id.clone(),
+                        partition_groups,
+                        partitioned_at: state.current_tick,
+                        heals_at_tick,
+                        healed: false,
+                    },
+                );
+                Ok(format!("adaptive_privacy:partition_heal:{cycle_id}"))
+            }
+            AdaptivePrivacyTransition::RecordChurnBurst {
+                burst_id,
+                affected_participants,
+                entering,
+                leaving,
+            } => {
+                state.adaptive_privacy.churn_bursts.insert(
+                    burst_id.clone(),
+                    ChurnBurstState {
+                        id: burst_id.clone(),
+                        affected_participants,
+                        entering,
+                        leaving,
+                        recorded_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:churn:{burst_id}"))
+            }
+            AdaptivePrivacyTransition::RecordProviderSaturation {
+                provider,
+                queue_depth,
+                utilization,
+            } => {
+                state.adaptive_privacy.provider_saturation.insert(
+                    provider.clone(),
+                    ProviderSaturationState {
+                        provider: provider.clone(),
+                        queue_depth,
+                        utilization,
+                        recorded_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:provider_saturation:{provider}"))
+            }
+            AdaptivePrivacyTransition::RecordHeldObjectRetention {
+                object_id,
+                selector,
+                retention_ticks,
+                seeded_from_move,
+            } => {
+                state.adaptive_privacy.held_objects.insert(
+                    object_id.clone(),
+                    HeldObjectRetentionState {
+                        object_id: object_id.clone(),
+                        selector,
+                        retained_at: state.current_tick,
+                        retention_until_tick: state.current_tick.saturating_add(retention_ticks),
+                        seeded_from_move,
+                        expired: false,
+                    },
+                );
+                Ok(format!("adaptive_privacy:held_object:{object_id}"))
+            }
+            AdaptivePrivacyTransition::RecordSelectorRetrieval {
+                retrieval_id,
+                selector,
+                expected_objects,
+                sync_profile,
+            } => {
+                state.adaptive_privacy.selector_retrievals.insert(
+                    retrieval_id.clone(),
+                    SelectorRetrievalState {
+                        retrieval_id: retrieval_id.clone(),
+                        selector,
+                        expected_objects,
+                        sync_profile,
+                        recorded_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:selector_retrieval:{retrieval_id}"))
+            }
+            AdaptivePrivacyTransition::RecordSyncOpportunity {
+                profile_id,
+                density,
+                peers,
+            } => {
+                state.adaptive_privacy.sync_opportunities.insert(
+                    profile_id.clone(),
+                    SyncOpportunityState {
+                        profile_id: profile_id.clone(),
+                        density,
+                        peers,
+                        recorded_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:sync_opportunity:{profile_id}"))
+            }
+            AdaptivePrivacyTransition::RecordMoveToHoldSeed {
+                batch_id,
+                object_id,
+                selector,
+            } => {
+                if let Some(held) = state.adaptive_privacy.held_objects.get_mut(&object_id) {
+                    held.seeded_from_move = true;
+                }
+                state.adaptive_privacy.move_to_hold_seeds.insert(
+                    object_id.clone(),
+                    MoveToHoldSeedState {
+                        batch_id: batch_id.clone(),
+                        object_id: object_id.clone(),
+                        selector,
+                        seeded_at: state.current_tick,
+                    },
+                );
+                Ok(format!("adaptive_privacy:move_to_hold_seed:{batch_id}:{object_id}"))
+            }
+        }
+    }
+
+    fn push_event_locked(
+        state: &mut ScenarioState,
+        event_type: &str,
+        data: HashMap<String, String>,
+    ) {
+        state.events.push(SimulationEvent {
+            event_type: event_type.to_string(),
+            timestamp: state.current_tick,
+            data,
+        });
+    }
+
+    fn create_chat_group_locked(
+        state: &mut ScenarioState,
         group_name: &str,
         creator: &str,
         initial_members: Vec<String>,
     ) -> Result<String, TestingError> {
-        let mut state = self.shared.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
-        })?;
-
         let mut hasher = DefaultHasher::new();
         group_name.hash(&mut hasher);
         creator.hash(&mut hasher);
@@ -1632,18 +2409,12 @@ impl SimulationScenarioHandler {
         Ok(group_id)
     }
 
-    /// Send a chat message in a scenario
-    pub fn send_chat_message(
-        &self,
+    fn send_chat_message_locked(
+        state: &mut ScenarioState,
         group_id: &str,
         sender: &str,
         message: &str,
     ) -> Result<(), TestingError> {
-        let mut state = self.shared.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
-        })?;
-
-        // Verify group exists and sender is a member
         let group =
             state
                 .chat_groups
@@ -1670,25 +2441,18 @@ impl SimulationScenarioHandler {
         };
 
         #[allow(clippy::unwrap_used)]
-        // Simulation code - group_id is guaranteed to exist in test scenarios
         let messages = state.message_history.get_mut(group_id).unwrap();
         messages.push(chat_message);
 
         Ok(())
     }
 
-    /// Simulate data loss for a participant
-    pub fn simulate_data_loss(
-        &self,
+    fn simulate_data_loss_locked(
+        state: &mut ScenarioState,
         target_participant: &str,
         loss_type: &str,
         recovery_required: bool,
     ) -> Result<(), TestingError> {
-        let mut state = self.shared.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
-        })?;
-
-        // Count messages participant had access to before loss
         let pre_loss_count: usize = state
             .message_history
             .values()
@@ -1696,7 +2460,6 @@ impl SimulationScenarioHandler {
                 messages
                     .iter()
                     .filter(|_msg| {
-                        // Count messages in groups where participant is a member
                         state
                             .chat_groups
                             .values()
@@ -1721,17 +2484,12 @@ impl SimulationScenarioHandler {
         Ok(())
     }
 
-    /// Validate message history for a participant across recovery
-    pub fn validate_message_history(
-        &self,
+    fn validate_message_history_locked(
+        state: &ScenarioState,
         participant: &str,
         expected_message_count: usize,
         include_pre_recovery: bool,
     ) -> Result<bool, TestingError> {
-        let state = self.shared.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
-        })?;
-
         let actual_count: usize = state
             .message_history
             .values()
@@ -1739,7 +2497,6 @@ impl SimulationScenarioHandler {
                 messages
                     .iter()
                     .filter(|_msg| {
-                        // Count messages in groups where participant is a member
                         state
                             .chat_groups
                             .values()
@@ -1751,7 +2508,6 @@ impl SimulationScenarioHandler {
 
         if include_pre_recovery {
             if let Some(loss_info) = state.participant_data_loss.get(participant) {
-                // For recovery scenarios, participant should be able to see pre-loss messages
                 Ok(actual_count >= loss_info.pre_loss_message_count
                     && actual_count >= expected_message_count)
             } else {
@@ -1762,17 +2518,12 @@ impl SimulationScenarioHandler {
         }
     }
 
-    /// Initiate guardian recovery for a participant
-    pub fn initiate_guardian_recovery(
-        &self,
+    fn initiate_guardian_recovery_locked(
+        state: &mut ScenarioState,
         target: &str,
         guardians: Vec<String>,
         threshold: usize,
     ) -> Result<(), TestingError> {
-        let mut state = self.shared.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
-        })?;
-
         if guardians.len() < threshold {
             return Err(TestingError::EventRecordingError {
                 event_type: "guardian_recovery".to_string(),
@@ -1800,6 +2551,94 @@ impl SimulationScenarioHandler {
         Ok(())
     }
 
+    fn verify_recovery_success_locked(
+        state: &mut ScenarioState,
+        target: &str,
+        validation_steps: Vec<String>,
+    ) -> Result<bool, TestingError> {
+        if let Some(recovery_info) = state.recovery_state.get_mut(target) {
+            recovery_info.completed = true;
+            recovery_info.validation_steps = validation_steps;
+            state.participant_data_loss.remove(target);
+            Ok(true)
+        } else {
+            Err(TestingError::EventRecordingError {
+                event_type: "recovery_verification".to_string(),
+                reason: format!("No recovery process found for target '{target}'"),
+            })
+        }
+    }
+
+    /// Create a chat group for multi-actor scenarios
+    pub fn create_chat_group(
+        &self,
+        group_name: &str,
+        creator: &str,
+        initial_members: Vec<String>,
+    ) -> Result<String, TestingError> {
+        let mut state = self.shared.state.lock().map_err(|e| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
+        })?;
+        Self::create_chat_group_locked(&mut state, group_name, creator, initial_members)
+    }
+
+    /// Send a chat message in a scenario
+    pub fn send_chat_message(
+        &self,
+        group_id: &str,
+        sender: &str,
+        message: &str,
+    ) -> Result<(), TestingError> {
+        let mut state = self.shared.state.lock().map_err(|e| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
+        })?;
+        Self::send_chat_message_locked(&mut state, group_id, sender, message)
+    }
+
+    /// Simulate data loss for a participant
+    pub fn simulate_data_loss(
+        &self,
+        target_participant: &str,
+        loss_type: &str,
+        recovery_required: bool,
+    ) -> Result<(), TestingError> {
+        let mut state = self.shared.state.lock().map_err(|e| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
+        })?;
+        Self::simulate_data_loss_locked(&mut state, target_participant, loss_type, recovery_required)
+    }
+
+    /// Validate message history for a participant across recovery
+    pub fn validate_message_history(
+        &self,
+        participant: &str,
+        expected_message_count: usize,
+        include_pre_recovery: bool,
+    ) -> Result<bool, TestingError> {
+        let state = self.shared.state.lock().map_err(|e| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
+        })?;
+        Self::validate_message_history_locked(
+            &state,
+            participant,
+            expected_message_count,
+            include_pre_recovery,
+        )
+    }
+
+    /// Initiate guardian recovery for a participant
+    pub fn initiate_guardian_recovery(
+        &self,
+        target: &str,
+        guardians: Vec<String>,
+        threshold: usize,
+    ) -> Result<(), TestingError> {
+        let mut state = self.shared.state.lock().map_err(|e| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
+        })?;
+        Self::initiate_guardian_recovery_locked(&mut state, target, guardians, threshold)
+    }
+
     /// Verify recovery completion
     pub fn verify_recovery_success(
         &self,
@@ -1809,21 +2648,7 @@ impl SimulationScenarioHandler {
         let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
-
-        if let Some(recovery_info) = state.recovery_state.get_mut(target) {
-            recovery_info.completed = true;
-            recovery_info.validation_steps = validation_steps;
-
-            // Clear data loss status if recovery is successful
-            state.participant_data_loss.remove(target);
-
-            Ok(true)
-        } else {
-            Err(TestingError::EventRecordingError {
-                event_type: "recovery_verification".to_string(),
-                reason: format!("No recovery process found for target '{target}'"),
-            })
-        }
+        Self::verify_recovery_success_locked(&mut state, target, validation_steps)
     }
 
     /// Get chat group statistics
@@ -1959,6 +2784,10 @@ impl TestingEffects for SimulationScenarioHandler {
                     Ok(Box::new(state.scenarios.len()))
                 } else if path == "active" {
                     Ok(Box::new(state.active_injections.len()))
+                } else if let Some(key) = path.strip_prefix("parameter:") {
+                    Ok(Box::new(state.parameters.get(key).cloned().unwrap_or_default()))
+                } else if let Some(key) = path.strip_prefix("behavior:") {
+                    Ok(Box::new(state.behaviors.get(key).cloned().unwrap_or_default()))
                 } else {
                     Err(TestingError::StateInspectionError {
                         component: component.to_string(),
@@ -2022,6 +2851,174 @@ impl TestingEffects for SimulationScenarioHandler {
                     reason: "Unknown simulation path".to_string(),
                 }),
             },
+            "adaptive_privacy" => {
+                if path == "movement_profiles" {
+                    Ok(Box::new(state.adaptive_privacy.movement_profiles.len()))
+                } else if path == "anonymous_paths" {
+                    Ok(Box::new(state.adaptive_privacy.anonymous_paths.len()))
+                } else if path == "active_anonymous_paths" {
+                    Ok(Box::new(
+                        state
+                            .adaptive_privacy
+                            .anonymous_paths
+                            .values()
+                            .filter(|path| !path.expired)
+                            .count(),
+                    ))
+                } else if path == "expired_anonymous_paths" {
+                    Ok(Box::new(
+                        state
+                            .adaptive_privacy
+                            .anonymous_paths
+                            .values()
+                            .filter(|path| path.expired)
+                            .count(),
+                    ))
+                } else if path == "establish_flows" {
+                    Ok(Box::new(state.adaptive_privacy.establish_flows.len()))
+                } else if path == "move_batches" {
+                    Ok(Box::new(state.adaptive_privacy.move_batches.len()))
+                } else if path == "local_health_observations" {
+                    Ok(Box::new(state.adaptive_privacy.local_health.len()))
+                } else if path == "cover_events" {
+                    Ok(Box::new(state.adaptive_privacy.cover_events.len()))
+                } else if path == "accountability_replies" {
+                    Ok(Box::new(state.adaptive_privacy.accountability_replies.len()))
+                } else if path == "late_accountability_replies" {
+                    Ok(Box::new(
+                        state
+                            .adaptive_privacy
+                            .accountability_replies
+                            .values()
+                            .filter(|reply| !reply.within_deadline)
+                            .count(),
+                    ))
+                } else if path == "route_diversity" {
+                    Ok(Box::new(state.adaptive_privacy.route_diversity.len()))
+                } else if path == "honest_hop_compromise_patterns" {
+                    Ok(Box::new(
+                        state
+                            .adaptive_privacy
+                            .honest_hop_compromise_patterns
+                            .len(),
+                    ))
+                } else if path == "partition_heal_cycles" {
+                    Ok(Box::new(state.adaptive_privacy.partition_heal_cycles.len()))
+                } else if path == "healed_partition_cycles" {
+                    Ok(Box::new(
+                        state
+                            .adaptive_privacy
+                            .partition_heal_cycles
+                            .values()
+                            .filter(|cycle| cycle.healed)
+                            .count(),
+                    ))
+                } else if path == "churn_bursts" {
+                    Ok(Box::new(state.adaptive_privacy.churn_bursts.len()))
+                } else if path == "provider_saturation" {
+                    Ok(Box::new(state.adaptive_privacy.provider_saturation.len()))
+                } else if path == "held_objects" {
+                    Ok(Box::new(state.adaptive_privacy.held_objects.len()))
+                } else if path == "active_held_objects" {
+                    Ok(Box::new(
+                        state
+                            .adaptive_privacy
+                            .held_objects
+                            .values()
+                            .filter(|object| !object.expired)
+                            .count(),
+                    ))
+                } else if path == "selector_retrievals" {
+                    Ok(Box::new(state.adaptive_privacy.selector_retrievals.len()))
+                } else if path == "sync_opportunities" {
+                    Ok(Box::new(state.adaptive_privacy.sync_opportunities.len()))
+                } else if path == "move_to_hold_seeds" {
+                    Ok(Box::new(state.adaptive_privacy.move_to_hold_seeds.len()))
+                } else if let Some(rest) = path.strip_prefix("path:") {
+                    let parts: Vec<&str> = rest.split(':').collect();
+                    if parts.len() != 2 {
+                        return Err(TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Expected path:<id>:<field>".to_string(),
+                        });
+                    }
+                    let path_state = state.adaptive_privacy.anonymous_paths.get(parts[0]).ok_or_else(
+                        || TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Anonymous path not found".to_string(),
+                        },
+                    )?;
+                    match parts[1] {
+                        "reuse_count" => Ok(Box::new(path_state.reuse_count)),
+                        "expired" => Ok(Box::new(path_state.expired)),
+                        "hop_count" => Ok(Box::new(path_state.hops.len())),
+                        _ => Err(TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Unknown path field".to_string(),
+                        }),
+                    }
+                } else if let Some(rest) = path.strip_prefix("held:") {
+                    let parts: Vec<&str> = rest.split(':').collect();
+                    if parts.len() != 2 {
+                        return Err(TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Expected held:<id>:<field>".to_string(),
+                        });
+                    }
+                    let held_object = state.adaptive_privacy.held_objects.get(parts[0]).ok_or_else(
+                        || TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Held object not found".to_string(),
+                        },
+                    )?;
+                    match parts[1] {
+                        "expired" => Ok(Box::new(held_object.expired)),
+                        "seeded_from_move" => Ok(Box::new(held_object.seeded_from_move)),
+                        _ => Err(TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Unknown held-object field".to_string(),
+                        }),
+                    }
+                } else if let Some(rest) = path.strip_prefix("reply:") {
+                    let parts: Vec<&str> = rest.split(':').collect();
+                    if parts.len() != 2 {
+                        return Err(TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Expected reply:<id>:<field>".to_string(),
+                        });
+                    }
+                    let reply = state
+                        .adaptive_privacy
+                        .accountability_replies
+                        .get(parts[0])
+                        .ok_or_else(|| TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Reply not found".to_string(),
+                        })?;
+                    match parts[1] {
+                        "within_deadline" => Ok(Box::new(reply.within_deadline)),
+                        _ => Err(TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Unknown reply field".to_string(),
+                        }),
+                    }
+                } else {
+                    Err(TestingError::StateInspectionError {
+                        component: component.to_string(),
+                        path: path.to_string(),
+                        reason: "Unknown adaptive privacy path".to_string(),
+                    })
+                }
+            }
             _ => Err(TestingError::StateInspectionError {
                 component: component.to_string(),
                 path: path.to_string(),
@@ -2366,6 +3363,415 @@ mod tests {
             2,                         // But need 2
         );
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_scenario_actions_apply_parameter_and_behavior_state() {
+        let handler = SimulationScenarioHandler::new(123);
+
+        handler
+            .register_scenario(ScenarioDefinition {
+                id: "action_apply".to_string(),
+                name: "Action Apply".to_string(),
+                actions: vec![
+                    InjectionAction::ModifyParameter {
+                        key: "sync_density".to_string(),
+                        value: "sparse".to_string(),
+                    },
+                    InjectionAction::ModifyBehavior {
+                        component: "selector".to_string(),
+                        behavior: "weighted_rotation".to_string(),
+                    },
+                ],
+                trigger: TriggerCondition::Immediate,
+                duration: Some(Duration::from_secs(5)),
+                priority: 1,
+            })
+            .expect("register scenario");
+
+        handler
+            .trigger_scenario("action_apply")
+            .expect("trigger scenario");
+
+        let parameter = handler
+            .inspect_state("scenarios", "parameter:sync_density")
+            .await
+            .expect("inspect parameter")
+            .downcast::<String>()
+            .expect("parameter type");
+        assert_eq!(&*parameter, "sparse");
+
+        let behavior = handler
+            .inspect_state("scenarios", "behavior:selector")
+            .await
+            .expect("inspect behavior")
+            .downcast::<String>()
+            .expect("behavior type");
+        assert_eq!(&*behavior, "weighted_rotation");
+    }
+
+    #[tokio::test]
+    async fn test_adaptive_privacy_scenario_support_covers_phase_six_surface() {
+        let handler = SimulationScenarioHandler::new(123);
+
+        handler
+            .register_scenario(ScenarioDefinition {
+                id: "adaptive_privacy_surface".to_string(),
+                name: "Adaptive Privacy Surface".to_string(),
+                actions: vec![
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::ConfigureMovement {
+                            profile_id: "clustered_social".to_string(),
+                            clusters: vec!["home-a".to_string(), "neighborhood-1".to_string()],
+                            home_locality_bias: 0.9,
+                            neighborhood_locality_bias: 0.7,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::EstablishAnonymousPath {
+                            path_id: "path-a".to_string(),
+                            initiator: "alice".to_string(),
+                            destination: "bob".to_string(),
+                            hops: vec![
+                                "relay-1".to_string(),
+                                "relay-2".to_string(),
+                                "relay-3".to_string(),
+                            ],
+                            ttl_ticks: 5,
+                            reusable: true,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::ReuseEstablishedPath {
+                            path_id: "path-a".to_string(),
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordEstablishFlow {
+                            flow_id: "flow-a".to_string(),
+                            source: "alice".to_string(),
+                            destination: "bob".to_string(),
+                            path_id: Some("path-a".to_string()),
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordMoveBatch {
+                            batch_id: "batch-a".to_string(),
+                            envelope_count: 3,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::ObserveLocalHealth {
+                            provider: "provider-a".to_string(),
+                            score: 0.87,
+                            latency_ms: 24,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordCoverTraffic {
+                            provider: "provider-a".to_string(),
+                            envelope_count: 2,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordAccountabilityReply {
+                            reply_id: "reply-a".to_string(),
+                            deadline_ticks: 3,
+                            completed_after_ticks: Some(2),
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordRouteDiversity {
+                            selector_id: "selector-a".to_string(),
+                            unique_paths: 3,
+                            dominant_provider: Some("provider-a".to_string()),
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordHonestHopCompromise {
+                            path_id: "path-a".to_string(),
+                            compromised_hops: vec!["relay-1".to_string()],
+                            honest_hops_remaining: 2,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordPartitionHealCycle {
+                            cycle_id: "cycle-a".to_string(),
+                            partition_groups: vec![
+                                vec!["alice".to_string(), "carol".to_string()],
+                                vec!["bob".to_string()],
+                            ],
+                            heal_after_ticks: 4,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordChurnBurst {
+                            burst_id: "churn-a".to_string(),
+                            affected_participants: vec![
+                                "alice".to_string(),
+                                "bob".to_string(),
+                                "carol".to_string(),
+                            ],
+                            entering: 2,
+                            leaving: 1,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordProviderSaturation {
+                            provider: "provider-a".to_string(),
+                            queue_depth: 12,
+                            utilization: 0.94,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordHeldObjectRetention {
+                            object_id: "held-a".to_string(),
+                            selector: "selector:alpha".to_string(),
+                            retention_ticks: 6,
+                            seeded_from_move: false,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordSelectorRetrieval {
+                            retrieval_id: "retrieval-a".to_string(),
+                            selector: "selector:alpha".to_string(),
+                            expected_objects: 2,
+                            sync_profile: "sparse".to_string(),
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordSyncOpportunity {
+                            profile_id: "sync-sparse".to_string(),
+                            density: SyncOpportunityDensity::Sparse,
+                            peers: vec!["alice".to_string(), "bob".to_string()],
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordMoveToHoldSeed {
+                            batch_id: "batch-a".to_string(),
+                            object_id: "held-a".to_string(),
+                            selector: "selector:alpha".to_string(),
+                        },
+                    ),
+                ],
+                trigger: TriggerCondition::Immediate,
+                duration: Some(Duration::from_secs(5)),
+                priority: 10,
+            })
+            .expect("register scenario");
+
+        handler
+            .trigger_scenario("adaptive_privacy_surface")
+            .expect("trigger adaptive privacy scenario");
+
+        let movement_profiles = handler
+            .inspect_state("adaptive_privacy", "movement_profiles")
+            .await
+            .expect("movement profiles")
+            .downcast::<usize>()
+            .expect("movement type");
+        assert_eq!(*movement_profiles, 1);
+
+        let active_paths = handler
+            .inspect_state("adaptive_privacy", "active_anonymous_paths")
+            .await
+            .expect("active paths")
+            .downcast::<usize>()
+            .expect("active path type");
+        assert_eq!(*active_paths, 1);
+
+        let reuse_count = handler
+            .inspect_state("adaptive_privacy", "path:path-a:reuse_count")
+            .await
+            .expect("path reuse")
+            .downcast::<u64>()
+            .expect("reuse type");
+        assert_eq!(*reuse_count, 1);
+
+        let establish_flows = handler
+            .inspect_state("adaptive_privacy", "establish_flows")
+            .await
+            .expect("establish flows")
+            .downcast::<usize>()
+            .expect("establish flows type");
+        assert_eq!(*establish_flows, 1);
+
+        let move_batches = handler
+            .inspect_state("adaptive_privacy", "move_batches")
+            .await
+            .expect("move batches")
+            .downcast::<usize>()
+            .expect("move batches type");
+        assert_eq!(*move_batches, 1);
+
+        let local_health = handler
+            .inspect_state("adaptive_privacy", "local_health_observations")
+            .await
+            .expect("local health")
+            .downcast::<usize>()
+            .expect("local health type");
+        assert_eq!(*local_health, 1);
+
+        let cover_events = handler
+            .inspect_state("adaptive_privacy", "cover_events")
+            .await
+            .expect("cover events")
+            .downcast::<usize>()
+            .expect("cover type");
+        assert_eq!(*cover_events, 1);
+
+        let accountability_replies = handler
+            .inspect_state("adaptive_privacy", "accountability_replies")
+            .await
+            .expect("accountability replies")
+            .downcast::<usize>()
+            .expect("accountability type");
+        assert_eq!(*accountability_replies, 1);
+
+        let within_deadline = handler
+            .inspect_state("adaptive_privacy", "reply:reply-a:within_deadline")
+            .await
+            .expect("reply deadline state")
+            .downcast::<bool>()
+            .expect("reply deadline type");
+        assert!(*within_deadline);
+
+        let route_diversity = handler
+            .inspect_state("adaptive_privacy", "route_diversity")
+            .await
+            .expect("route diversity")
+            .downcast::<usize>()
+            .expect("route diversity type");
+        assert_eq!(*route_diversity, 1);
+
+        let honest_hop_compromise_patterns = handler
+            .inspect_state("adaptive_privacy", "honest_hop_compromise_patterns")
+            .await
+            .expect("compromise patterns")
+            .downcast::<usize>()
+            .expect("compromise pattern type");
+        assert_eq!(*honest_hop_compromise_patterns, 1);
+
+        let partition_cycles = handler
+            .inspect_state("adaptive_privacy", "partition_heal_cycles")
+            .await
+            .expect("partition cycles")
+            .downcast::<usize>()
+            .expect("partition cycle type");
+        assert_eq!(*partition_cycles, 1);
+
+        let churn_bursts = handler
+            .inspect_state("adaptive_privacy", "churn_bursts")
+            .await
+            .expect("churn bursts")
+            .downcast::<usize>()
+            .expect("churn type");
+        assert_eq!(*churn_bursts, 1);
+
+        let provider_saturation = handler
+            .inspect_state("adaptive_privacy", "provider_saturation")
+            .await
+            .expect("provider saturation")
+            .downcast::<usize>()
+            .expect("provider saturation type");
+        assert_eq!(*provider_saturation, 1);
+
+        let held_objects = handler
+            .inspect_state("adaptive_privacy", "held_objects")
+            .await
+            .expect("held objects")
+            .downcast::<usize>()
+            .expect("held object type");
+        assert_eq!(*held_objects, 1);
+
+        let seeded_from_move = handler
+            .inspect_state("adaptive_privacy", "held:held-a:seeded_from_move")
+            .await
+            .expect("move to hold seed")
+            .downcast::<bool>()
+            .expect("seeded from move type");
+        assert!(*seeded_from_move);
+
+        let selector_retrievals = handler
+            .inspect_state("adaptive_privacy", "selector_retrievals")
+            .await
+            .expect("selector retrievals")
+            .downcast::<usize>()
+            .expect("selector retrieval type");
+        assert_eq!(*selector_retrievals, 1);
+
+        let sync_opportunities = handler
+            .inspect_state("adaptive_privacy", "sync_opportunities")
+            .await
+            .expect("sync opportunities")
+            .downcast::<usize>()
+            .expect("sync opportunity type");
+        assert_eq!(*sync_opportunities, 1);
+
+        let move_to_hold_seeds = handler
+            .inspect_state("adaptive_privacy", "move_to_hold_seeds")
+            .await
+            .expect("move to hold seeds")
+            .downcast::<usize>()
+            .expect("move to hold seed type");
+        assert_eq!(*move_to_hold_seeds, 1);
+    }
+
+    #[tokio::test]
+    async fn test_adaptive_privacy_path_and_hold_expiry_follows_simulated_time() {
+        let handler = SimulationScenarioHandler::new(123);
+
+        handler
+            .register_scenario(ScenarioDefinition {
+                id: "adaptive_privacy_expiry".to_string(),
+                name: "Adaptive Privacy Expiry".to_string(),
+                actions: vec![
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::EstablishAnonymousPath {
+                            path_id: "path-exp".to_string(),
+                            initiator: "alice".to_string(),
+                            destination: "bob".to_string(),
+                            hops: vec!["relay-1".to_string(), "relay-2".to_string()],
+                            ttl_ticks: 2,
+                            reusable: true,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordHeldObjectRetention {
+                            object_id: "held-exp".to_string(),
+                            selector: "selector:exp".to_string(),
+                            retention_ticks: 2,
+                            seeded_from_move: false,
+                        },
+                    ),
+                ],
+                trigger: TriggerCondition::Immediate,
+                duration: Some(Duration::from_secs(5)),
+                priority: 1,
+            })
+            .expect("register expiry scenario");
+
+        handler
+            .trigger_scenario("adaptive_privacy_expiry")
+            .expect("trigger expiry scenario");
+
+        handler.wait_ticks(2).expect("advance ticks to expiry");
+
+        let path_expired = handler
+            .inspect_state("adaptive_privacy", "path:path-exp:expired")
+            .await
+            .expect("path expired")
+            .downcast::<bool>()
+            .expect("path expired type");
+        assert!(*path_expired);
+
+        let held_expired = handler
+            .inspect_state("adaptive_privacy", "held:held-exp:expired")
+            .await
+            .expect("held object expired")
+            .downcast::<bool>()
+            .expect("held object expired type");
+        assert!(*held_expired);
     }
 
     #[tokio::test]

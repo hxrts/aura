@@ -121,6 +121,23 @@ pub(super) fn ChatScreen(
                                 if can_close_channel {
                                     UiButton {
                                         id: Some(
+                                            ControlId::ChatEditChannelButton
+                                                .web_dom_id()
+                                                .required_dom_id("ControlId::ChatEditChannelButton must define a web DOM id")
+                                                .to_string(),
+                                        ),
+                                        label: "Edit".to_string(),
+                                        variant: ButtonVariant::Secondary,
+                                        onclick: {
+                                            let edit_controller = controller.clone();
+                                            move |_| {
+                                                edit_controller.send_action_keys("e");
+                                                render_tick.set(render_tick() + 1);
+                                            }
+                                        }
+                                    }
+                                    UiButton {
+                                        id: Some(
                                             ControlId::ChatCloseChannelButton
                                                 .web_dom_id()
                                                 .required_dom_id("ControlId::ChatCloseChannelButton must define a web DOM id")
