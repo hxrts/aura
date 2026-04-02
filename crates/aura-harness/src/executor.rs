@@ -2593,9 +2593,11 @@ fn execute_semantic_send_clipboard(
 
 #[cfg(test)]
 fn plan_tui_send_chat_message_request(instance_id: &str, message: &str) -> Vec<ToolRequest> {
+    // Enter insert mode, type message, send with Enter, then Escape to exit
+    // insert mode so subsequent navigation keys are not captured as text.
     vec![ToolRequest::SendKeys {
         instance_id: instance_id.to_string(),
-        keys: format!("i{message}\n"),
+        keys: format!("i{message}\n\x1b"),
     }]
 }
 
