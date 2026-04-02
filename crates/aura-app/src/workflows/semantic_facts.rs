@@ -108,7 +108,6 @@ impl SemanticSuccessProof for ChannelMembershipReadyProof {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workflows) struct HomeCreatedProof {
     home_id: ChannelId,
