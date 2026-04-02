@@ -387,6 +387,7 @@ mod tests {
                 LinkProtocol::Tcp,
                 format!("127.0.0.1:{}", 8000 + seed as u16),
             )],
+            route_layer_public_key: Some([seed; 32]),
             reachable,
         }
     }

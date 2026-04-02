@@ -64,6 +64,12 @@ Direct friendship is modeled as a bilateral relational context between authoriti
 
 The context stores lifecycle facts such as proposal, acceptance, and revocation. It may also store bounded trust-introduction artifacts. Those artifacts carry expiry, remaining depth, and fan-out limits. Runtime policy may use the resulting evidence as permit input, but the shared facts do not hard-code runtime policy tiers.
 
+Bounded bootstrap introductions follow the same model. A direct friend may publish an introduction
+artifact that helps stale-node re-entry or first-contact bootstrap, but the artifact remains scoped
+to the relational context, carries explicit expiry and replay bounds, and does not materialize a
+shared friend-of-friend graph. Runtime code may amplify re-entry attempts from that evidence only
+within the stated depth and fan-out limits.
+
 ### GuardianConfigContext
 
 Stores `GuardianBinding` facts:
@@ -192,6 +198,10 @@ A relational context does not reveal its participants. The `ContextId` is opaque
 Profile information shared inside a context stays local to that context. Nickname suggestions and contact attributes do not leave the context journal. Each context forms a separate identity boundary. Authorities can maintain many unrelated relationships without cross linking.
 
 Trust evidence must follow the same boundary rule. Shared facts may record bilateral friend lifecycle state and bounded introductions. They must not expose wire-visible service classes such as `direct_friend_relay` or `introduced_hold`. Any coarse policy tier is derived locally in the runtime from evidence provenance.
+
+Bootstrap use does not change that rule. A bounded bootstrap introduction is evidence, not a route
+commitment. It can seed local runtime discovery or stale-node re-entry, but it must not become a
+canonical shared topology edge or a shared provider-class label.
 
 ## 9. Implementation Patterns
 

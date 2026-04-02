@@ -76,6 +76,12 @@ pub struct ChannelContext {
 
 This structure defines the active context state for a channel. All guard chain checks use these values.
 
+Bootstrap and stale-node re-entry surfaces fit this model as discovery inputs, not as transport
+exceptions. Shared bootstrap contact hints, neighborhood re-entry hints, and bounded bootstrap
+introductions may advertise scoped link endpoints plus expiry and replay bounds. Runtime code can
+merge those records into local bootstrap selection state, but the transport layer still uses the
+same guarded `Establish`, `Move`, and `Hold` path objects after a candidate is chosen.
+
 ## 6. Failure Modes and Observability
 
 The guard chain defines three categories of failure. A denial failure occurs when capability requirements are not met. A block failure occurs when a flow budget check fails. A commit failure occurs when journal coupling fails.
@@ -97,6 +103,10 @@ Secure channels follow a lifecycle aligned with rendezvous and epoch semantics.
 Establishment begins with rendezvous per [Rendezvous Architecture](113_rendezvous.md) to exchange descriptors inside the [Relational Contexts](114_relational_contexts.md) journal. Each descriptor contains transport hints, a handshake PSK derived from the context key, and a `punch_nonce`. Once both parties receive offer/answer envelopes, they perform Noise IKpsk2 using context-derived keys and establish a QUIC or relay-backed channel bound to `(ContextId, peer)`.
 
 During steady state, the guard chain enforces CapGuard, FlowGuard, and JournalCoupler for every send. FlowBudget receipts created on each hop are inserted into the [Relational Contexts](114_relational_contexts.md) journal so downstream peers can audit path compliance.
+
+Bootstrap discovery does not bypass this lifecycle. Broker-backed or board-backed discovery can
+surface candidates, but once a candidate is selected the resulting channel or movement setup uses
+the same guarded transport machinery, receipt flow, and context scoping as any other path.
 
 When the account or context epoch changes, the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys. Existing receipts are marked invalid for the new epoch, preventing replay. Channels close explicitly when contexts end or when FlowGuard hits the configured budget limit. Receipts emitted during teardown propagate through the relational context journal so guardians or auditors can verify all hops charged their budgets. Tying establishment and teardown to relational context journals ensures receipts become part of the same fact set tracked in [Distributed Maintenance Architecture](116_maintenance.md).
 

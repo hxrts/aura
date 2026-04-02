@@ -281,6 +281,46 @@ pub mod types {
         }
     }
 
+    /// Bootstrap observer-model inference targets for stale-node re-entry.
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+    pub enum BootstrapObserverInferenceTarget {
+        NeighborhoodAdjacencyFromBoardContents,
+        BridgeAuthorityCentralityFromRepeatedReentry,
+        FofProvenanceFromBootstrapHintSelection,
+        StaleNodeIdentityFromWidenedReentry,
+    }
+
+    /// One bootstrap observer scenario row.
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct BootstrapObserverScenario {
+        pub id: String,
+        pub target: BootstrapObserverInferenceTarget,
+    }
+
+    impl BootstrapObserverScenario {
+        pub fn phase_six_profiles() -> Vec<Self> {
+            vec![
+                Self {
+                    id: "bootstrap-observer-board-adjacency".to_string(),
+                    target:
+                        BootstrapObserverInferenceTarget::NeighborhoodAdjacencyFromBoardContents,
+                },
+                Self {
+                    id: "bootstrap-observer-bridge-centrality".to_string(),
+                    target: BootstrapObserverInferenceTarget::BridgeAuthorityCentralityFromRepeatedReentry,
+                },
+                Self {
+                    id: "bootstrap-observer-fof-provenance".to_string(),
+                    target: BootstrapObserverInferenceTarget::FofProvenanceFromBootstrapHintSelection,
+                },
+                Self {
+                    id: "bootstrap-observer-stale-node-identity".to_string(),
+                    target: BootstrapObserverInferenceTarget::StaleNodeIdentityFromWidenedReentry,
+                },
+            ]
+        }
+    }
+
     /// Security-control traffic classes that must resist starvation.
     #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
     pub enum SecurityControlTrafficClass {
@@ -473,7 +513,8 @@ pub mod types {
 mod tests {
     use super::types::{
         AdaptivePrivacyMetric, AdaptivePrivacyValidationProfile, AdaptiveTopologyKind,
-        BoundaryScenario, BoundaryScenarioFocus, ControlPlaneFailureMode, HoldValidationProfile,
+        BootstrapObserverInferenceTarget, BootstrapObserverScenario, BoundaryScenario,
+        BoundaryScenarioFocus, ControlPlaneFailureMode, HoldValidationProfile,
         MetadataMinimizationFocus, MetadataMinimizationScenario, ObserverInferenceTarget,
         ObserverModelScenario, OrganicTrafficProfile, ReachableSetSize,
         SecurityControlTrafficClass, StarvationScenario, SyncOpportunityProfile,
@@ -551,6 +592,23 @@ mod tests {
                 == SecurityControlTrafficClass::AccountabilityReplies));
         assert!(starvation_profiles.iter().any(|profile| {
             profile.protected_class == SecurityControlTrafficClass::RetrievalCapabilityRotation
+        }));
+
+        let bootstrap_observer_profiles = BootstrapObserverScenario::phase_six_profiles();
+        assert!(bootstrap_observer_profiles.iter().any(|profile| {
+            profile.target
+                == BootstrapObserverInferenceTarget::NeighborhoodAdjacencyFromBoardContents
+        }));
+        assert!(bootstrap_observer_profiles.iter().any(|profile| {
+            profile.target
+                == BootstrapObserverInferenceTarget::BridgeAuthorityCentralityFromRepeatedReentry
+        }));
+        assert!(bootstrap_observer_profiles.iter().any(|profile| {
+            profile.target
+                == BootstrapObserverInferenceTarget::FofProvenanceFromBootstrapHintSelection
+        }));
+        assert!(bootstrap_observer_profiles.iter().any(|profile| {
+            profile.target == BootstrapObserverInferenceTarget::StaleNodeIdentityFromWidenedReentry
         }));
     }
 

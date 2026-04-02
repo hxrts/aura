@@ -4,8 +4,9 @@
 //! These facts are stored in context journals and propagated via `aura-sync`.
 
 use aura_core::service::{
-    EstablishDescriptor, EstablishPath, HoldDescriptor, LinkEndpoint, LinkProtocol, MoveDescriptor,
-    MovePath, ServiceDescriptor as AdvertisedServiceDescriptor, ServiceDescriptorHeader,
+    BootstrapContactHint, BootstrapIntroductionHint, EstablishDescriptor, EstablishPath,
+    HoldDescriptor, LinkEndpoint, LinkProtocol, MoveDescriptor, MovePath, NeighborhoodReentryHint,
+    ServiceDescriptor as AdvertisedServiceDescriptor, ServiceDescriptorHeader,
     ServiceDescriptorKind, ServiceFamily, ServiceLimits, ServiceProfile,
 };
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
@@ -59,6 +60,106 @@ pub const RENDEZVOUS_FACT_TYPE_ID: &str = "rendezvous";
 pub struct RendezvousFactKey {
     pub sub_type: &'static str,
     pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapHintKey {
+    pub sub_type: &'static str,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BootstrapHintValidationError {
+    EmptyScope,
+    MissingLinkEndpoints,
+    ZeroReplayWindow,
+    InvalidValidityWindow,
+    InvalidIntroductionBounds,
+}
+
+fn is_zero_context(context_id: &ContextId) -> bool {
+    context_id.as_bytes() == &[0u8; 16]
+}
+
+pub fn validate_bootstrap_contact_hint(
+    hint: &BootstrapContactHint,
+) -> Result<(), BootstrapHintValidationError> {
+    if is_zero_context(&hint.scope) {
+        return Err(BootstrapHintValidationError::EmptyScope);
+    }
+    if hint.link_endpoints.is_empty() {
+        return Err(BootstrapHintValidationError::MissingLinkEndpoints);
+    }
+    if hint.replay_window_id == [0; 32] {
+        return Err(BootstrapHintValidationError::ZeroReplayWindow);
+    }
+    if hint.valid_until <= hint.freshest_observed_at_ms {
+        return Err(BootstrapHintValidationError::InvalidValidityWindow);
+    }
+    Ok(())
+}
+
+pub fn validate_neighborhood_reentry_hint(
+    hint: &NeighborhoodReentryHint,
+) -> Result<(), BootstrapHintValidationError> {
+    if is_zero_context(&hint.scope) {
+        return Err(BootstrapHintValidationError::EmptyScope);
+    }
+    if hint.link_endpoints.is_empty() {
+        return Err(BootstrapHintValidationError::MissingLinkEndpoints);
+    }
+    if hint.replay_window_id == [0; 32] {
+        return Err(BootstrapHintValidationError::ZeroReplayWindow);
+    }
+    if hint.valid_until <= hint.published_at_ms {
+        return Err(BootstrapHintValidationError::InvalidValidityWindow);
+    }
+    Ok(())
+}
+
+pub fn validate_bootstrap_introduction_hint(
+    hint: &BootstrapIntroductionHint,
+) -> Result<(), BootstrapHintValidationError> {
+    if is_zero_context(&hint.scope) {
+        return Err(BootstrapHintValidationError::EmptyScope);
+    }
+    if hint.link_endpoints.is_empty() {
+        return Err(BootstrapHintValidationError::MissingLinkEndpoints);
+    }
+    if hint.replay_window_id == [0; 32] {
+        return Err(BootstrapHintValidationError::ZeroReplayWindow);
+    }
+    if hint.remaining_depth == 0 || hint.max_fanout == 0 {
+        return Err(BootstrapHintValidationError::InvalidIntroductionBounds);
+    }
+    Ok(())
+}
+
+pub fn bootstrap_contact_hint_key(hint: &BootstrapContactHint) -> BootstrapHintKey {
+    let mut data = authority_hash_bytes(&hint.authority_id).to_vec();
+    data.extend_from_slice(&hint.replay_window_id);
+    BootstrapHintKey {
+        sub_type: "bootstrap-contact-hint",
+        data,
+    }
+}
+
+pub fn neighborhood_reentry_hint_key(hint: &NeighborhoodReentryHint) -> BootstrapHintKey {
+    let mut data = authority_hash_bytes(&hint.publisher_authority).to_vec();
+    data.extend_from_slice(&hint.replay_window_id);
+    BootstrapHintKey {
+        sub_type: "neighborhood-reentry-hint",
+        data,
+    }
+}
+
+pub fn bootstrap_introduction_hint_key(hint: &BootstrapIntroductionHint) -> BootstrapHintKey {
+    let mut data = authority_hash_bytes(&hint.introducer_authority).to_vec();
+    data.extend_from_slice(&hint.replay_window_id);
+    BootstrapHintKey {
+        sub_type: "bootstrap-introduction-hint",
+        data,
+    }
 }
 
 /// Rendezvous domain facts stored in context journals
@@ -188,6 +289,11 @@ impl RendezvousDescriptor {
             .collect()
     }
 
+    /// Route-layer public key advertised for anonymous-path setup when present.
+    pub fn route_layer_public_key(&self) -> Option<[u8; 32]> {
+        (self.public_key != [0u8; 32]).then_some(self.public_key)
+    }
+
     /// Explicit establish paths derived from the advertised establish surface.
     pub fn advertised_establish_paths(&self) -> Vec<EstablishPath> {
         self.advertised_service_descriptors()
@@ -271,6 +377,7 @@ impl RendezvousDescriptor {
             valid_from: self.valid_from,
             valid_until: self.valid_until,
             epoch: 0,
+            route_layer_public_key: self.route_layer_public_key(),
             family,
             limits: match family {
                 ServiceFamily::Establish => ServiceLimits::default(),
@@ -951,7 +1058,7 @@ mod tests {
                 TransportHint::websocket_relay(AuthorityId::new_from_entropy([9u8; 32])),
             ],
             handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            public_key: [7u8; 32],
             device_id: None,
             valid_from: 1000,
             valid_until: 2000,
@@ -970,6 +1077,9 @@ mod tests {
         assert!(descriptor.supports_family(ServiceFamily::Establish));
         assert!(descriptor.supports_family(ServiceFamily::Move));
         assert!(descriptor.supports_family(ServiceFamily::Hold));
+        assert!(services
+            .iter()
+            .all(|descriptor| descriptor.header.route_layer_public_key == Some([7u8; 32])));
         assert!(services.iter().any(|descriptor| {
             descriptor.profile == ServiceProfile::DeferredDeliveryHold
                 && matches!(descriptor.kind, ServiceDescriptorKind::Hold(_))
@@ -978,6 +1088,103 @@ mod tests {
             descriptor.profile == ServiceProfile::CacheReplicaHold
                 && matches!(descriptor.kind, ServiceDescriptorKind::Hold(_))
         }));
+    }
+
+    #[test]
+    fn bootstrap_hint_validators_accept_signed_expiring_schema() {
+        let contact = BootstrapContactHint {
+            scope: test_context(),
+            authority_id: test_authority(),
+            device_id: Some(DeviceId::from_bytes([5u8; 32])),
+            link_endpoints: vec![LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:7444")],
+            route_layer_public_key: Some([5u8; 32]),
+            freshest_observed_at_ms: 10,
+            valid_until: 20,
+            replay_window_id: [1u8; 32],
+        };
+        let reentry = NeighborhoodReentryHint {
+            scope: test_context(),
+            publisher_authority: test_authority(),
+            advertised_authority: AuthorityId::new_from_entropy([6u8; 32]),
+            advertised_device: None,
+            link_endpoints: vec![LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:7445")],
+            route_layer_public_key: Some([6u8; 32]),
+            published_at_ms: 11,
+            valid_until: 21,
+            replay_window_id: [2u8; 32],
+        };
+        let introduction = BootstrapIntroductionHint {
+            scope: test_context(),
+            introducer_authority: test_authority(),
+            introduced_authority: AuthorityId::new_from_entropy([7u8; 32]),
+            introduced_device: None,
+            link_endpoints: vec![LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:7446")],
+            route_layer_public_key: Some([7u8; 32]),
+            remaining_depth: 1,
+            max_fanout: 2,
+            valid_until: 25,
+            replay_window_id: [3u8; 32],
+        };
+
+        assert!(validate_bootstrap_contact_hint(&contact).is_ok());
+        assert!(validate_neighborhood_reentry_hint(&reentry).is_ok());
+        assert!(validate_bootstrap_introduction_hint(&introduction).is_ok());
+        assert_eq!(bootstrap_contact_hint_key(&contact).data.len(), 64);
+        assert_eq!(neighborhood_reentry_hint_key(&reentry).data.len(), 64);
+        assert_eq!(
+            bootstrap_introduction_hint_key(&introduction).data.len(),
+            64
+        );
+    }
+
+    #[test]
+    fn bootstrap_hint_validators_reject_invalid_windows_and_replay_ids() {
+        let invalid_contact = BootstrapContactHint {
+            scope: test_context(),
+            authority_id: test_authority(),
+            device_id: None,
+            link_endpoints: vec![LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:7447")],
+            route_layer_public_key: None,
+            freshest_observed_at_ms: 20,
+            valid_until: 20,
+            replay_window_id: [0u8; 32],
+        };
+        let invalid_reentry = NeighborhoodReentryHint {
+            scope: test_context(),
+            publisher_authority: test_authority(),
+            advertised_authority: AuthorityId::new_from_entropy([8u8; 32]),
+            advertised_device: None,
+            link_endpoints: Vec::new(),
+            route_layer_public_key: None,
+            published_at_ms: 30,
+            valid_until: 29,
+            replay_window_id: [4u8; 32],
+        };
+        let invalid_introduction = BootstrapIntroductionHint {
+            scope: ContextId::new_from_entropy([0u8; 32]),
+            introducer_authority: test_authority(),
+            introduced_authority: AuthorityId::new_from_entropy([9u8; 32]),
+            introduced_device: None,
+            link_endpoints: vec![LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:7448")],
+            route_layer_public_key: None,
+            remaining_depth: 0,
+            max_fanout: 1,
+            valid_until: 40,
+            replay_window_id: [5u8; 32],
+        };
+
+        assert_eq!(
+            validate_bootstrap_contact_hint(&invalid_contact),
+            Err(BootstrapHintValidationError::ZeroReplayWindow)
+        );
+        assert_eq!(
+            validate_neighborhood_reentry_hint(&invalid_reentry),
+            Err(BootstrapHintValidationError::MissingLinkEndpoints)
+        );
+        assert_eq!(
+            validate_bootstrap_introduction_hint(&invalid_introduction),
+            Err(BootstrapHintValidationError::EmptyScope)
+        );
     }
 
     #[test]

@@ -1475,6 +1475,7 @@ mod tests {
             family: ServiceFamily::Hold,
             evidence: vec![ProviderEvidence::Neighborhood],
             link_endpoints: Vec::new(),
+            route_layer_public_key: None,
             reachable: true,
         }
     }

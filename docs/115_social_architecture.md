@@ -137,6 +137,12 @@ pub enum DiscoveryLayer {
 
 The discovery layer determines locality-aware discovery strategy and flow costs. `aura-social` may classify neighborhood candidates using these layers, but it does not own the final route choice. Runtime policy in `aura-agent` fuses neighborhood candidates with web-of-trust evidence and descriptor views.
 
+Neighborhood discovery boards are bounded hint surfaces inside this plane. A board publication may
+advertise a signed, expiring, replay-bounded re-entry hint for stale-node bootstrap, but it is not
+a topology map. The publication does not enumerate the neighborhood graph and does not commit a
+runtime route. It only exposes enough scoped hint material for local runtime discovery to try a
+candidate.
+
 ### 5.2 Movement Rules
 
 Movement is possible when a Biscuit capability authorizes entry, neighborhood policy allows movement along a 1-hop link, and home policy or invitations allow deeper access levels. Movement does not replicate pinned data. Visitors operate on ephemeral local state.
@@ -223,6 +229,10 @@ visitable(Target) <-
 ```
 
 The first query finds all participants of a home. The second finds homes a user can visit from their current position via 1-hop links.
+
+Neighborhood discovery-board records are intentionally separate from these canonical topology facts.
+They are advisory publications consumed by runtime-local bootstrap selection. They must not change
+`Neighborhood`, `SocialTopology`, or other canonical neighborhood views into route-truth owners.
 
 ## 8. IRC-Style Commands
 

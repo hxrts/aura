@@ -260,7 +260,6 @@ impl EffectSystemBuilder {
             service_registry.clone(),
             local_health_observer_instance,
         ));
-        #[cfg(feature = "transparent_onion")]
         let anonymous_path_manager = Some(super::services::AnonymousPathManager::new(
             super::services::AnonymousPathManagerConfig::default(),
             service_registry.clone(),
@@ -365,7 +364,6 @@ impl EffectSystemBuilder {
             move_manager,
             local_health_observer,
             selection_manager,
-            #[cfg(feature = "transparent_onion")]
             anonymous_path_manager,
             hold_manager,
             cover_traffic_generator,

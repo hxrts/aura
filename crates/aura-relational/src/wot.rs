@@ -5,9 +5,9 @@
 //! fan-out metadata. Runtime selection stays out of this crate; this module only
 //! exposes pure evidence derivation.
 
-use aura_core::service::ProviderEvidence;
+use aura_core::service::{BootstrapIntroductionHint, LinkEndpoint, ProviderEvidence};
 use aura_core::time::PhysicalTime;
-use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
@@ -169,6 +169,39 @@ impl TrustIntroductionFact {
         FriendshipFactKey {
             sub_type: "trust-introduction",
             data,
+        }
+    }
+
+    /// Convert an issued bounded introduction into a runtime-consumable
+    /// bootstrap hint without promoting it into canonical topology state.
+    pub fn bootstrap_hint(
+        &self,
+        introduced_device: Option<DeviceId>,
+        link_endpoints: Vec<LinkEndpoint>,
+        replay_window_id: [u8; 32],
+    ) -> Option<BootstrapIntroductionHint> {
+        match self {
+            Self::Issued {
+                context_id,
+                introducer,
+                introduced_authority,
+                expires_at,
+                remaining_depth,
+                max_fanout,
+                ..
+            } => Some(BootstrapIntroductionHint {
+                scope: *context_id,
+                introducer_authority: *introducer,
+                introduced_authority: *introduced_authority,
+                introduced_device,
+                link_endpoints,
+                route_layer_public_key: None,
+                remaining_depth: *remaining_depth,
+                max_fanout: *max_fanout,
+                valid_until: expires_at.ts_ms,
+                replay_window_id,
+            }),
+            Self::Revoked { .. } => None,
         }
     }
 }
@@ -476,5 +509,58 @@ mod tests {
 
         let evidence = index.provider_evidence(50);
         assert!(!evidence.iter().any(|entry| entry.authority_id == fof));
+    }
+
+    #[test]
+    fn issued_introduction_converts_to_bounded_bootstrap_hint() {
+        let fact = TrustIntroductionFact::Issued {
+            context_id: context(4),
+            introducer: authority(2),
+            introduced_authority: authority(3),
+            issued_at: time(20),
+            expires_at: time(120),
+            remaining_depth: 2,
+            max_fanout: 3,
+        };
+
+        let hint = fact
+            .bootstrap_hint(
+                Some(DeviceId::from_bytes([7u8; 32])),
+                vec![LinkEndpoint::direct(
+                    aura_core::service::LinkProtocol::Tcp,
+                    "127.0.0.1:7551",
+                )],
+                [9u8; 32],
+            )
+            .unwrap_or_else(|| panic!("issued introduction should produce bootstrap hint"));
+
+        assert_eq!(hint.scope, context(4));
+        assert_eq!(hint.introducer_authority, authority(2));
+        assert_eq!(hint.introduced_authority, authority(3));
+        assert_eq!(hint.remaining_depth, 2);
+        assert_eq!(hint.max_fanout, 3);
+        assert_eq!(hint.valid_until, 120);
+        assert_eq!(hint.replay_window_id, [9u8; 32]);
+    }
+
+    #[test]
+    fn revoked_introduction_does_not_produce_bootstrap_hint() {
+        let fact = TrustIntroductionFact::Revoked {
+            context_id: context(4),
+            introducer: authority(2),
+            introduced_authority: authority(3),
+            revoked_at: time(20),
+        };
+
+        assert!(fact
+            .bootstrap_hint(
+                None,
+                vec![LinkEndpoint::direct(
+                    aura_core::service::LinkProtocol::Tcp,
+                    "127.0.0.1:7552"
+                )],
+                [10u8; 32],
+            )
+            .is_none());
     }
 }

@@ -21,8 +21,8 @@ use aura_core::{
     ConformanceSurfaceName,
 };
 use aura_simulator::scenario::types::{
-    AdaptivePrivacyValidationProfile, HoldValidationProfile, OrganicTrafficProfile,
-    ReachableSetSize, SyncOpportunityProfile, TelltaleControlPlaneScenario,
+    AdaptivePrivacyValidationProfile, BootstrapObserverScenario, HoldValidationProfile,
+    OrganicTrafficProfile, ReachableSetSize, SyncOpportunityProfile, TelltaleControlPlaneScenario,
 };
 use aura_simulator::{
     run_telltale_control_plane_file_lane, run_telltale_parity_file_lane, DifferentialProfile,
@@ -164,6 +164,7 @@ fn candidate(seed: u8, family: ServiceFamily, evidence: ProviderEvidence) -> Pro
             LinkProtocol::Tcp,
             format!("127.0.0.1:{}", 8100 + seed as u16),
         )],
+        route_layer_public_key: Some([seed; 32]),
         reachable: true,
     }
 }
@@ -740,6 +741,29 @@ fn phase_six_control_plane_reports_are_archived() {
     assert!(archived
         .values()
         .any(|lane| lane.contains("reply_block_accountability")));
+}
+
+#[test]
+fn phase_six_bootstrap_observer_reports_are_archived() {
+    let root = artifact_root().join("bootstrap-observer");
+    let scenarios = BootstrapObserverScenario::phase_six_profiles();
+    let archived = scenarios
+        .into_iter()
+        .map(|scenario| {
+            (
+                scenario.id,
+                serde_json::json!({
+                    "target": format!("{:?}", scenario.target),
+                    "evidence": "phase_six_bootstrap_observer"
+                }),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    write_json(&root.join("index.json"), &archived);
+    assert!(archived.keys().any(|id| id.contains("board-adjacency")));
+    assert!(archived.keys().any(|id| id.contains("bridge-centrality")));
+    assert!(archived.keys().any(|id| id.contains("fof-provenance")));
+    assert!(archived.keys().any(|id| id.contains("stale-node-identity")));
 }
 
 #[test]

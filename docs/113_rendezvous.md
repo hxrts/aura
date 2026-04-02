@@ -71,6 +71,12 @@ The bootstrap broker publishes ephemeral bootstrap descriptors only. It exists t
 instances discover one another and exchange invitation/device-enrollment material through the
 existing enrollment path. It does not create an ordinary rendezvous relationship on its own.
 
+Bootstrap and stale-node re-entry remain distributed surfaces. Aura does not define a singleton
+bootstrap registry. Instead, runtime code may combine remembered direct contacts, neighborhood
+discovery-board publications, bounded bootstrap introductions, and broker-backed ephemeral startup
+descriptors. `aura-rendezvous` owns schema validation for bootstrap contact hints and neighborhood
+re-entry hints, but it does not own final route choice or a global bootstrap cache.
+
 Operationally, browser/native first-run startup may become bootstrap-visible only after the first
 native account runtime exists and begins hosting the broker automatically. For example, in a TUI +
 Web startup, the user may create the web account first and the TUI account second; once the TUI
@@ -151,6 +157,10 @@ pub struct RendezvousDescriptor {
 ```
 
 `RendezvousDescriptor` is the authoritative shared object in the journal. Callers derive `LinkEndpoint` and `ServiceDescriptor` views from it. This keeps the fact schema stable during migration while preventing route policy from hardening into the fact format.
+
+Bootstrap records follow the same rule. Shared bootstrap contact hints and neighborhood re-entry
+hints are typed, expiring, replay-bounded records. They are valid only inside their scoped
+contexts. They do not encode final route policy, trust tier, or canonical provider ranking.
 
 ### 4.3 Split Connectivity and Service Surfaces
 

@@ -27,6 +27,7 @@
 //! let restored = SocialFact::from_bytes(&fact.to_bytes());
 //! ```
 
+use aura_core::service::NeighborhoodReentryHint;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::Hash32;
@@ -1053,6 +1054,18 @@ pub enum SocialFact {
         /// When the home left
         left_at: PhysicalTime,
     },
+    /// Signed, expiring neighborhood discovery-board hint used only for
+    /// bounded stale-node re-entry.
+    NeighborhoodReentryPublished {
+        /// Neighborhood that scoped the board publication.
+        neighborhood_id: NeighborhoodId,
+        /// Relational context for the publication.
+        context_id: ContextId,
+        /// When the board entry was published.
+        published_at: PhysicalTime,
+        /// Signed board hint payload.
+        hint: NeighborhoodReentryHint,
+    },
 }
 
 impl SocialFact {
@@ -1079,12 +1092,28 @@ impl SocialFact {
             SocialFact::NeighborhoodCreated { created_at, .. } => created_at.ts_ms,
             SocialFact::HomeJoinedNeighborhood { joined_at, .. } => joined_at.ts_ms,
             SocialFact::HomeLeftNeighborhood { left_at, .. } => left_at.ts_ms,
+            SocialFact::NeighborhoodReentryPublished { published_at, .. } => published_at.ts_ms,
         }
     }
 
     /// Validate that this fact can be reduced under the provided context.
     pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
-        self.context_id() == context_id
+        if self.context_id() != context_id {
+            return false;
+        }
+
+        match self {
+            SocialFact::NeighborhoodReentryPublished {
+                published_at, hint, ..
+            } => {
+                hint.scope == context_id
+                    && hint.published_at_ms == published_at.ts_ms
+                    && hint.valid_until > hint.published_at_ms
+                    && !hint.link_endpoints.is_empty()
+                    && hint.replay_window_id != [0; 32]
+            }
+            _ => true,
+        }
     }
 
     /// Derive the relational binding subtype and key data for this fact.
@@ -1161,6 +1190,18 @@ impl SocialFact {
                 data.extend_from_slice(neighborhood_id.as_bytes());
                 SocialFactKey {
                     sub_type: "home-left-neighborhood",
+                    data,
+                }
+            }
+            SocialFact::NeighborhoodReentryPublished {
+                neighborhood_id,
+                hint,
+                ..
+            } => {
+                let mut data = neighborhood_id.as_bytes().to_vec();
+                data.extend_from_slice(&hint.replay_window_id);
+                SocialFactKey {
+                    sub_type: "neighborhood-reentry-published",
                     data,
                 }
             }
@@ -1286,6 +1327,24 @@ impl SocialFact {
                 ts_ms: configured_at_ms,
                 uncertainty: None,
             },
+        }
+    }
+
+    /// Create a NeighborhoodReentryPublished fact with millisecond timestamps.
+    pub fn neighborhood_reentry_published_ms(
+        neighborhood_id: NeighborhoodId,
+        context_id: ContextId,
+        published_at_ms: u64,
+        hint: NeighborhoodReentryHint,
+    ) -> Self {
+        Self::NeighborhoodReentryPublished {
+            neighborhood_id,
+            context_id,
+            published_at: PhysicalTime {
+                ts_ms: published_at_ms,
+                uncertainty: None,
+            },
+            hint,
         }
     }
 }
@@ -1461,6 +1520,97 @@ mod tests {
         assert_eq!(binding1.binding_type, binding2.binding_type);
         assert_eq!(binding1.context_id, binding2.context_id);
         assert_eq!(binding1.data, binding2.data);
+    }
+
+    #[test]
+    fn neighborhood_reentry_publication_roundtrips_and_reduces() {
+        let reducer = SocialFactReducer;
+        let neighborhood_id = NeighborhoodId::from_bytes([9u8; 32]);
+        let fact = SocialFact::neighborhood_reentry_published_ms(
+            neighborhood_id,
+            test_context_id(),
+            1234,
+            NeighborhoodReentryHint {
+                scope: test_context_id(),
+                publisher_authority: test_authority_id(),
+                advertised_authority: AuthorityId::new_from_entropy([3u8; 32]),
+                advertised_device: None,
+                link_endpoints: vec![aura_core::service::LinkEndpoint::direct(
+                    aura_core::service::LinkProtocol::Tcp,
+                    "127.0.0.1:7441",
+                )],
+                route_layer_public_key: Some([3u8; 32]),
+                published_at_ms: 1234,
+                valid_until: 2234,
+                replay_window_id: [7u8; 32],
+            },
+        );
+
+        let restored = SocialFact::from_bytes(&fact.to_bytes())
+            .unwrap_or_else(|| panic!("should deserialize discovery-board fact"));
+        assert_eq!(restored, fact);
+
+        let binding = reducer
+            .reduce_envelope(test_context_id(), &fact.to_envelope())
+            .unwrap_or_else(|| panic!("valid discovery-board fact should reduce"));
+        match binding.binding_type {
+            RelationalBindingType::Generic(sub_type) => {
+                assert_eq!(sub_type, "neighborhood-reentry-published");
+            }
+            _ => panic!("expected generic binding type"),
+        }
+    }
+
+    #[test]
+    fn neighborhood_reentry_publication_rejects_scope_or_replay_boundary_drift() {
+        let reducer = SocialFactReducer;
+        let neighborhood_id = NeighborhoodId::from_bytes([10u8; 32]);
+        let context_id = test_context_id();
+        let mismatched_scope = SocialFact::neighborhood_reentry_published_ms(
+            neighborhood_id,
+            context_id,
+            1234,
+            NeighborhoodReentryHint {
+                scope: ContextId::new_from_entropy([8u8; 32]),
+                publisher_authority: test_authority_id(),
+                advertised_authority: AuthorityId::new_from_entropy([4u8; 32]),
+                advertised_device: None,
+                link_endpoints: vec![aura_core::service::LinkEndpoint::direct(
+                    aura_core::service::LinkProtocol::Tcp,
+                    "127.0.0.1:7442",
+                )],
+                route_layer_public_key: Some([4u8; 32]),
+                published_at_ms: 1234,
+                valid_until: 2234,
+                replay_window_id: [8u8; 32],
+            },
+        );
+        let zero_replay = SocialFact::neighborhood_reentry_published_ms(
+            neighborhood_id,
+            context_id,
+            1234,
+            NeighborhoodReentryHint {
+                scope: context_id,
+                publisher_authority: test_authority_id(),
+                advertised_authority: AuthorityId::new_from_entropy([5u8; 32]),
+                advertised_device: None,
+                link_endpoints: vec![aura_core::service::LinkEndpoint::direct(
+                    aura_core::service::LinkProtocol::Tcp,
+                    "127.0.0.1:7443",
+                )],
+                route_layer_public_key: None,
+                published_at_ms: 1234,
+                valid_until: 2234,
+                replay_window_id: [0u8; 32],
+            },
+        );
+
+        assert!(reducer
+            .reduce_envelope(context_id, &mismatched_scope.to_envelope())
+            .is_none());
+        assert!(reducer
+            .reduce_envelope(context_id, &zero_replay.to_envelope())
+            .is_none());
     }
 
     fn test_timestamp() -> TimeStamp {

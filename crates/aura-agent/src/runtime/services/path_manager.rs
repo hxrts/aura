@@ -1,6 +1,6 @@
 //! Runtime-owned anonymous established-path service.
 //!
-//! Owns reusable anonymous path lifecycle: transparent setup-object creation,
+//! Owns reusable anonymous path lifecycle: encrypted setup-object creation,
 //! replay suppression, expiry-bounded path state, and runtime-local path reuse.
 #![allow(dead_code)]
 
@@ -9,15 +9,17 @@ use super::service_registry::ServiceRegistry;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::runtime::TaskGroup;
 use async_trait::async_trait;
-use aura_core::effects::time::PhysicalTimeEffects;
+use aura_core::effects::{time::PhysicalTimeEffects, RouteCryptoEffects};
 use aura_core::hash::hash;
 use aura_core::service::{
-    EstablishedPath, EstablishedPathRef, LinkProtectionMode, PathProtectionMode, Route,
-    SelectionState, ServiceFamily, ServiceProfile, TransparentAnonymousSetupLayer,
-    TransparentAnonymousSetupObject,
+    AnonymousHopView, EncryptedAnonymousSetupLayer, EncryptedAnonymousSetupObject, EstablishedPath,
+    EstablishedPathRef, LinkProtectionMode, PathProtectionMode, Route, SelectionState,
+    ServiceFamily, ServiceProfile,
 };
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization;
+use aura_effects::RealRouteCryptoHandler;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,7 +35,7 @@ use telltale_machine::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AnonymousPathManagerCommand {
     OpenEstablishSession,
-    EstablishTransparentPath,
+    EstablishEncryptedPath,
     CancelEstablishSession,
     ReuseEstablishedPath,
     CleanupExpiredPaths,
@@ -151,6 +153,10 @@ pub struct AnonymousPathEstablishControl {
 pub enum AnonymousPathManagerError {
     #[error("anonymous establish requires at least one relay hop")]
     DirectRouteNotAnonymous,
+    #[error("anonymous establish requires route-layer public material for every hop")]
+    MissingRouteLayerPublicKey,
+    #[error("route-layer cryptography failed: {0}")]
+    RouteCrypto(String),
     #[error("transparent anonymous setup replay rejected for control session {session_id}")]
     ReplayRejected {
         session_id: u64,
@@ -178,6 +184,13 @@ pub enum AnonymousPathManagerError {
     PathNotFound,
     #[error("established path expired at {valid_until}, now {now_ms}")]
     PathExpired { valid_until: u64, now_ms: u64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct EncryptedSetupPayload {
+    hop_view: AnonymousHopView,
+    #[serde(default)]
+    next: Option<Box<EncryptedAnonymousSetupLayer>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,7 +283,7 @@ impl PathState {
     permit = "runtime_capability_budget_and_path_admission",
     transfer = "anonymous_path_manager_setup_and_path_reuse",
     select = "anonymous_path_manager_and_service_registry",
-    authoritative = "EstablishedPath,TransparentAnonymousSetupObject",
+    authoritative = "EstablishedPath,EncryptedAnonymousSetupObject",
     runtime_local = "established_paths,path_replay_window,path_cleanup_state",
     category = "service_surface"
 )]
@@ -286,14 +299,24 @@ impl PathState {
 pub struct AnonymousPathManager {
     config: AnonymousPathManagerConfig,
     registry: Arc<ServiceRegistry>,
+    route_crypto: Arc<dyn RouteCryptoEffects + Send + Sync>,
     state: Arc<RwLock<PathState>>,
 }
 
 impl AnonymousPathManager {
     pub fn new(config: AnonymousPathManagerConfig, registry: Arc<ServiceRegistry>) -> Self {
+        Self::with_route_crypto(config, registry, Arc::new(RealRouteCryptoHandler::new()))
+    }
+
+    pub fn with_route_crypto(
+        config: AnonymousPathManagerConfig,
+        registry: Arc<ServiceRegistry>,
+        route_crypto: Arc<dyn RouteCryptoEffects + Send + Sync>,
+    ) -> Self {
         Self {
             config,
             registry,
+            route_crypto,
             state: Arc::new(RwLock::new(PathState::default())),
         }
     }
@@ -352,31 +375,24 @@ impl AnonymousPathManager {
         Ok(control)
     }
 
-    pub async fn establish_transparent_path(
+    pub async fn establish_path(
         &self,
         scope: ContextId,
         destination: AuthorityId,
         route: Route,
         setup_nonce: [u8; 32],
         now_ms: u64,
-    ) -> Result<(EstablishedPath, TransparentAnonymousSetupObject), AnonymousPathManagerError> {
+    ) -> Result<(EstablishedPath, EncryptedAnonymousSetupObject), AnonymousPathManagerError> {
         let control = self
             .open_establish_session(scope, destination, &route, "anonymous_path_manager", now_ms)
             .await?;
         let (path, setup, _) = self
-            .establish_transparent_path_with_control(
-                &control,
-                scope,
-                destination,
-                route,
-                setup_nonce,
-                now_ms,
-            )
+            .establish_path_with_control(&control, scope, destination, route, setup_nonce, now_ms)
             .await?;
         Ok((path, setup))
     }
 
-    pub async fn establish_transparent_path_with_control(
+    pub async fn establish_path_with_control(
         &self,
         control: &AnonymousPathEstablishControl,
         scope: ContextId,
@@ -387,7 +403,7 @@ impl AnonymousPathManager {
     ) -> Result<
         (
             EstablishedPath,
-            TransparentAnonymousSetupObject,
+            EncryptedAnonymousSetupObject,
             AnonymousPathEstablishControl,
         ),
         AnonymousPathManagerError,
@@ -455,8 +471,12 @@ impl AnonymousPathManager {
         let replay_window_id = replay_window_id(scope, destination, &route, setup_nonce)?;
         let path_id = path_id(scope, destination, &route, setup_nonce)?;
         let valid_until = now_ms.saturating_add(self.config.path_ttl.as_millis() as u64);
-        let forward_hop_keys = derive_hop_key_stream(path_id, route.hops.len(), b"forward");
-        let backward_hop_keys = derive_hop_key_stream(path_id, route.hops.len(), b"backward");
+        let route_secret_seed = route_secret_seed(path_id, &route)?;
+        let hop_keys = self
+            .derive_hop_key_materials(route_secret_seed, route.hops.len())
+            .await?;
+        let forward_hop_keys = hop_keys.iter().map(|keys| keys.0).collect::<Vec<_>>();
+        let backward_hop_keys = hop_keys.iter().map(|keys| keys.1).collect::<Vec<_>>();
         let path = EstablishedPath {
             path_id,
             scope,
@@ -465,22 +485,25 @@ impl AnonymousPathManager {
             established_at_ms: now_ms,
             valid_until,
             link_protection: LinkProtectionMode::TransportLink,
-            path_protection: PathProtectionMode::TransparentDebug,
+            path_protection: PathProtectionMode::Encrypted,
             forward_hop_keys: forward_hop_keys.clone(),
             backward_hop_keys: backward_hop_keys.clone(),
         };
 
-        let setup = TransparentAnonymousSetupObject {
+        let setup = EncryptedAnonymousSetupObject {
             established_path: path.as_ref(),
             link_protection: LinkProtectionMode::TransportLink,
-            path_protection: PathProtectionMode::TransparentDebug,
-            root: build_setup_layers(
-                &route,
-                valid_until,
-                replay_window_id,
-                &forward_hop_keys,
-                &backward_hop_keys,
-            ),
+            path_protection: PathProtectionMode::Encrypted,
+            hop_count: route.hops.len() as u8,
+            root: self
+                .build_encrypted_setup_layers(
+                    &route,
+                    valid_until,
+                    replay_window_id,
+                    &forward_hop_keys,
+                    &backward_hop_keys,
+                )
+                .await?,
         };
 
         let mut state = self.state.write().await;
@@ -613,6 +636,130 @@ impl AnonymousPathManager {
         removed
     }
 
+    async fn derive_hop_key_materials(
+        &self,
+        route_secret_seed: [u8; 32],
+        hop_count: usize,
+    ) -> Result<Vec<([u8; 32], [u8; 32])>, AnonymousPathManagerError> {
+        let mut keys = Vec::with_capacity(hop_count);
+        for index in 0..hop_count {
+            let material = self
+                .route_crypto
+                .derive_hop_key_material(route_secret_seed, index as u16)
+                .await
+                .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
+            keys.push((material.forward_key, material.backward_key));
+        }
+        Ok(keys)
+    }
+
+    async fn build_encrypted_setup_layers(
+        &self,
+        route: &Route,
+        valid_until: u64,
+        replay_window_id: [u8; 32],
+        forward_hop_keys: &[[u8; 32]],
+        backward_hop_keys: &[[u8; 32]],
+    ) -> Result<Option<Box<EncryptedAnonymousSetupLayer>>, AnonymousPathManagerError> {
+        let mut next = None;
+        for (index, hop) in route.hops.iter().enumerate().rev() {
+            let predecessor = if index == 0 {
+                None
+            } else {
+                Some(route.hops[index - 1].link_endpoint.clone())
+            };
+            let successor = if index + 1 < route.hops.len() {
+                Some(route.hops[index + 1].link_endpoint.clone())
+            } else {
+                Some(route.destination.clone())
+            };
+            let payload = EncryptedSetupPayload {
+                hop_view: AnonymousHopView {
+                    hop_authority: Some(hop.authority_id),
+                    predecessor,
+                    successor,
+                    valid_until,
+                    replay_window_id,
+                    forward_path_secret: forward_hop_keys[index],
+                    backward_path_secret: backward_hop_keys[index],
+                },
+                next,
+            };
+            let plaintext = serialization::to_vec(&payload)
+                .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))?;
+            let nonce = setup_layer_nonce(index as u16);
+            let aad = setup_layer_aad(hop.authority_id, index as u16)?;
+            let ciphertext = self
+                .route_crypto
+                .encrypt_hop_layer(forward_hop_keys[index], nonce, &aad, &plaintext)
+                .await
+                .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
+            next = Some(Box::new(EncryptedAnonymousSetupLayer {
+                hop_authority: Some(hop.authority_id),
+                nonce,
+                ciphertext,
+            }));
+        }
+        Ok(next)
+    }
+
+    pub async fn peel_setup_layer(
+        &self,
+        layer: &EncryptedAnonymousSetupLayer,
+        hop_index: usize,
+        forward_key: [u8; 32],
+    ) -> Result<
+        (AnonymousHopView, Option<Box<EncryptedAnonymousSetupLayer>>),
+        AnonymousPathManagerError,
+    > {
+        let aad = setup_layer_aad(
+            layer.hop_authority.ok_or_else(|| {
+                AnonymousPathManagerError::RouteCrypto("missing hop authority".into())
+            })?,
+            hop_index as u16,
+        )?;
+        let plaintext = self
+            .route_crypto
+            .decrypt_hop_layer(forward_key, layer.nonce, &aad, &layer.ciphertext)
+            .await
+            .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
+        let payload = serialization::from_slice::<EncryptedSetupPayload>(&plaintext)
+            .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))?;
+        Ok((payload.hop_view, payload.next))
+    }
+
+    pub async fn wrap_reply_payload(
+        &self,
+        path: &EstablishedPath,
+        terminal_payload: &[u8],
+    ) -> Result<Vec<u8>, AnonymousPathManagerError> {
+        let mut current = terminal_payload.to_vec();
+        for index in (0..path.backward_hop_keys.len()).rev() {
+            let nonce = reply_layer_nonce(index as u16);
+            let aad = reply_layer_aad(path.path_id, index as u16)?;
+            current = self
+                .route_crypto
+                .encrypt_hop_layer(path.backward_hop_keys[index], nonce, &aad, &current)
+                .await
+                .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
+        }
+        Ok(current)
+    }
+
+    pub async fn peel_reply_layer(
+        &self,
+        path: &EstablishedPath,
+        hop_index: usize,
+        layer: &[u8],
+    ) -> Result<Vec<u8>, AnonymousPathManagerError> {
+        let nonce = reply_layer_nonce(hop_index as u16);
+        let aad = reply_layer_aad(path.path_id, hop_index as u16)?;
+        self.route_crypto
+            .decrypt_hop_layer(path.backward_hop_keys[hop_index], nonce, &aad, layer)
+            .await
+            .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))
+    }
+
     fn spawn_cleanup_task(
         &self,
         tasks: TaskGroup,
@@ -695,7 +842,7 @@ fn path_id(
 ) -> Result<[u8; 32], AnonymousPathManagerError> {
     let bytes = serialization::to_vec(&(scope, destination, route, setup_nonce, "path"))
         .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))?;
-    Ok(hash(&bytes).into())
+    Ok(hash(&bytes))
 }
 
 fn control_scope_keys(
@@ -916,46 +1063,57 @@ fn replay_window_id(
 ) -> Result<[u8; 32], AnonymousPathManagerError> {
     let bytes = serialization::to_vec(&(scope, destination, route, setup_nonce, "replay"))
         .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))?;
-    Ok(hash(&bytes).into())
+    Ok(hash(&bytes))
 }
 
-fn derive_hop_key_stream(path_id: [u8; 32], hops: usize, domain: &[u8]) -> Vec<[u8; 32]> {
-    (0..hops)
-        .map(|index| hash(&[domain, &path_id, &(index as u64).to_le_bytes()].concat()).into())
-        .collect()
-}
-
-fn build_setup_layers(
+fn route_secret_seed(
+    path_id: [u8; 32],
     route: &Route,
-    valid_until: u64,
-    replay_window_id: [u8; 32],
-    forward_hop_keys: &[[u8; 32]],
-    backward_hop_keys: &[[u8; 32]],
-) -> Option<Box<TransparentAnonymousSetupLayer>> {
-    let mut next = None;
-    for (index, hop) in route.hops.iter().enumerate().rev() {
-        let predecessor = if index == 0 {
-            None
-        } else {
-            Some(route.hops[index - 1].link_endpoint.clone())
-        };
-        let successor = if index + 1 < route.hops.len() {
-            Some(route.hops[index + 1].link_endpoint.clone())
-        } else {
-            Some(route.destination.clone())
-        };
-        next = Some(Box::new(TransparentAnonymousSetupLayer {
-            hop_authority: Some(hop.authority_id),
-            predecessor,
-            successor,
-            valid_until,
-            replay_window_id,
-            forward_path_secret: forward_hop_keys[index],
-            backward_path_secret: backward_hop_keys[index],
-            next,
-        }));
+) -> Result<[u8; 32], AnonymousPathManagerError> {
+    if route
+        .hops
+        .iter()
+        .any(|hop| hop.route_layer_public_key.is_none())
+    {
+        return Err(AnonymousPathManagerError::MissingRouteLayerPublicKey);
     }
-    next
+    let mut material = path_id.to_vec();
+    for (index, hop) in route.hops.iter().enumerate() {
+        material.extend_from_slice(&(index as u64).to_le_bytes());
+        material.extend_from_slice(&hop.authority_id.to_bytes());
+        material.extend_from_slice(&hop.route_layer_public_key.expect("validated above"));
+    }
+    Ok(hash(&material))
+}
+
+fn setup_layer_nonce(hop_index: u16) -> [u8; 12] {
+    let mut nonce = [0u8; 12];
+    nonce[..2].copy_from_slice(&hop_index.to_le_bytes());
+    nonce[2..].copy_from_slice(b"asetup-hop");
+    nonce
+}
+
+fn reply_layer_nonce(hop_index: u16) -> [u8; 12] {
+    let mut nonce = [0u8; 12];
+    nonce[..2].copy_from_slice(&hop_index.to_le_bytes());
+    nonce[2..].copy_from_slice(b"reply-hop-");
+    nonce
+}
+
+fn setup_layer_aad(
+    authority_id: AuthorityId,
+    hop_index: u16,
+) -> Result<Vec<u8>, AnonymousPathManagerError> {
+    serialization::to_vec(&(b"aura.setup.layer.v1", authority_id, hop_index))
+        .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))
+}
+
+fn reply_layer_aad(
+    path_id: [u8; 32],
+    hop_index: u16,
+) -> Result<Vec<u8>, AnonymousPathManagerError> {
+    serialization::to_vec(&(b"aura.reply.layer.v1", path_id, hop_index))
+        .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))
 }
 
 fn remember_replay_marker(state: &mut PathState, marker: [u8; 32], max_entries: usize) {
@@ -994,10 +1152,12 @@ mod tests {
                 RelayHop {
                     authority_id: authority(2),
                     link_endpoint: endpoint(7000),
+                    route_layer_public_key: Some([2; 32]),
                 },
                 RelayHop {
                     authority_id: authority(3),
                     link_endpoint: endpoint(7001),
+                    route_layer_public_key: Some([3; 32]),
                 },
             ],
             destination: endpoint(9000),
@@ -1005,18 +1165,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transparent_anonymous_path_establishment_creates_reusable_path() {
+    async fn encrypted_anonymous_path_establishment_creates_reusable_path() {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
 
         let (path, setup) = manager
-            .establish_transparent_path(context(1), authority(9), route(), [7; 32], 100)
+            .establish_path(context(1), authority(9), route(), [7; 32], 100)
             .await
-            .expect("establish transparent path");
+            .expect("establish encrypted path");
 
         assert_eq!(path.profile, ServiceProfile::AnonymousPathEstablish);
-        assert_eq!(setup.hop_count(), 2);
+        assert_eq!(setup.hop_count, 2);
+        assert!(setup.has_root_layer());
         let path_ref = path.as_ref();
         let first_move = MoveEnvelope::opaque(
             MovePathBinding::Established(path_ref.clone()),
@@ -1028,9 +1189,9 @@ mod tests {
         );
         assert_eq!(first_move.binding, second_move.binding);
         assert_eq!(path.link_protection, LinkProtectionMode::TransportLink);
-        assert_eq!(path.path_protection, PathProtectionMode::TransparentDebug);
+        assert_eq!(path.path_protection, PathProtectionMode::Encrypted);
         assert_eq!(setup.link_protection, LinkProtectionMode::TransportLink);
-        assert_eq!(setup.path_protection, PathProtectionMode::TransparentDebug);
+        assert_eq!(setup.path_protection, PathProtectionMode::Encrypted);
         let reused = manager
             .reuse_established_path(&path_ref, 101)
             .await
@@ -1039,17 +1200,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transparent_anonymous_path_rejects_replay() {
+    async fn encrypted_setup_peels_forward_one_hop_at_a_time() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let manager =
+            AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+
+        let (path, setup) = manager
+            .establish_path(context(1), authority(9), route(), [7; 32], 100)
+            .await
+            .expect("establish encrypted path");
+        let root = setup.root.as_ref().expect("root layer");
+        let (first_view, next) = manager
+            .peel_setup_layer(root, 0, path.forward_hop_keys[0])
+            .await
+            .expect("peel first layer");
+        assert_eq!(first_view.hop_authority, Some(authority(2)));
+        assert_eq!(first_view.successor, Some(endpoint(7001)));
+        let next = next.expect("second encrypted layer");
+        let wrong_key_error = manager
+            .peel_setup_layer(&next, 1, path.forward_hop_keys[0])
+            .await
+            .expect_err("wrong hop key should not inspect deeper layer");
+        assert!(matches!(
+            wrong_key_error,
+            AnonymousPathManagerError::RouteCrypto(_)
+        ));
+        let (second_view, terminal) = manager
+            .peel_setup_layer(&next, 1, path.forward_hop_keys[1])
+            .await
+            .expect("peel second layer");
+        assert_eq!(second_view.hop_authority, Some(authority(3)));
+        assert_eq!(second_view.successor, Some(endpoint(9000)));
+        assert!(terminal.is_none());
+    }
+
+    #[tokio::test]
+    async fn encrypted_reply_layers_relayer_backwards_without_exposing_inner_payload() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let manager =
+            AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+
+        let (path, _) = manager
+            .establish_path(context(1), authority(9), route(), [4; 32], 100)
+            .await
+            .expect("establish encrypted path");
+        let wrapped = manager
+            .wrap_reply_payload(&path, b"terminal-reply")
+            .await
+            .expect("wrap backward reply");
+        let first_hop = manager
+            .peel_reply_layer(&path, 0, &wrapped)
+            .await
+            .expect("first backward peel");
+        assert_ne!(first_hop, b"terminal-reply");
+        let terminal = manager
+            .peel_reply_layer(&path, 1, &first_hop)
+            .await
+            .expect("second backward peel");
+        assert_eq!(terminal, b"terminal-reply");
+    }
+
+    #[tokio::test]
+    async fn encrypted_anonymous_path_rejects_replay() {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
 
         manager
-            .establish_transparent_path(context(1), authority(9), route(), [5; 32], 100)
+            .establish_path(context(1), authority(9), route(), [5; 32], 100)
             .await
             .expect("first establish");
         let error = manager
-            .establish_transparent_path(context(1), authority(9), route(), [5; 32], 101)
+            .establish_path(context(1), authority(9), route(), [5; 32], 101)
             .await
             .expect_err("duplicate setup should reject");
         assert!(matches!(
@@ -1059,13 +1281,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transparent_anonymous_path_rejects_expired_reuse() {
+    async fn encrypted_anonymous_path_rejects_expired_reuse() {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
 
         let (path, _) = manager
-            .establish_transparent_path(context(1), authority(9), route(), [4; 32], 100)
+            .establish_path(context(1), authority(9), route(), [4; 32], 100)
             .await
             .expect("establish path");
         let error = manager
@@ -1079,13 +1301,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transparent_anonymous_path_requires_non_direct_route() {
+    async fn encrypted_anonymous_path_requires_non_direct_route() {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
 
         let error = manager
-            .establish_transparent_path(
+            .establish_path(
                 context(1),
                 authority(9),
                 Route::direct(endpoint(9000)),
@@ -1110,14 +1332,7 @@ mod tests {
             .await
             .expect("open establish session");
         let (_path, _setup, completed) = manager
-            .establish_transparent_path_with_control(
-                &control,
-                context(1),
-                authority(9),
-                route(),
-                [8; 32],
-                110,
-            )
+            .establish_path_with_control(&control, context(1), authority(9), route(), [8; 32], 110)
             .await
             .expect("complete controlled establish");
         assert!(matches!(
@@ -1139,14 +1354,7 @@ mod tests {
             .expect("open establish session");
         control.ownership_capability.generation = 99;
         let error = manager
-            .establish_transparent_path_with_control(
-                &control,
-                context(1),
-                authority(9),
-                route(),
-                [9; 32],
-                110,
-            )
+            .establish_path_with_control(&control, context(1), authority(9), route(), [9; 32], 110)
             .await
             .expect_err("stale owner should reject");
         match error {
@@ -1167,14 +1375,7 @@ mod tests {
             .await
             .expect("open establish session");
         let error = manager
-            .establish_transparent_path_with_control(
-                &control,
-                context(1),
-                authority(9),
-                route(),
-                [6; 32],
-                250,
-            )
+            .establish_path_with_control(&control, context(1), authority(9), route(), [6; 32], 250)
             .await
             .expect_err("timed out control should reject");
         match error {

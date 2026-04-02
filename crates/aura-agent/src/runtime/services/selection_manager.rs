@@ -8,13 +8,18 @@ use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, Service
 use async_trait::async_trait;
 use aura_core::effects::RandomEffects;
 use aura_core::service::{
-    LinkEndpoint, LocalEstablishDecision, LocalHealthSnapshot, LocalHoldDecision,
-    LocalMoveDecision, LocalRoutingProfile, LocalSelectionProfile, MessageClassRoutingConstraint,
-    MovePath, MovePathBinding, PrivacyMessageClass, ProviderCandidate, ProviderEvidence, Route,
+    BootstrapContactHint, BootstrapIntroductionHint, LinkEndpoint, LocalEstablishDecision,
+    LocalHealthSnapshot, LocalHoldDecision, LocalMoveDecision, LocalRoutingProfile,
+    LocalSelectionProfile, MessageClassRoutingConstraint, MovePath, MovePathBinding,
+    NeighborhoodReentryHint, PrivacyMessageClass, ProviderCandidate, ProviderEvidence, Route,
     SchedulerClass, SecurityControlClass, SelectionState, ServiceFamily, ServiceProfile,
 };
-use aura_core::types::identifiers::{AuthorityId, ContextId};
-use std::collections::{BTreeMap, HashMap};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_rendezvous::{
+    validate_bootstrap_contact_hint, validate_bootstrap_introduction_hint,
+    validate_neighborhood_reentry_hint,
+};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -102,6 +107,7 @@ impl_service_config_profiles!(SelectionManagerConfig {
 struct SelectionManagerState {
     last_profiles: HashMap<ContextId, LocalSelectionProfile>,
     residency: HashMap<(ContextId, AuthorityId), u32>,
+    bootstrap: HashMap<ContextId, BootstrapScopeState>,
     lifecycle: ServiceHealth,
 }
 
@@ -110,6 +116,7 @@ impl Default for SelectionManagerState {
         Self {
             last_profiles: HashMap::new(),
             residency: HashMap::new(),
+            bootstrap: HashMap::new(),
             lifecycle: ServiceHealth::NotStarted,
         }
     }
@@ -121,6 +128,70 @@ pub enum SelectionManagerError {
     NoReachableCandidates { family: ServiceFamily },
     #[error("privacy mode requires at least one anonymous relay candidate")]
     NoAnonymousRelayCandidates,
+    #[error("invalid bootstrap record ({kind}): {reason}")]
+    InvalidBootstrapRecord { kind: &'static str, reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BootstrapHintSource {
+    RememberedDirectContact,
+    PriorProvider,
+    NeighborhoodDiscoveryBoard,
+    WebOfTrustIntroduction,
+    BootstrapBridge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapHint {
+    pub authority_id: AuthorityId,
+    pub device_id: Option<DeviceId>,
+    pub link_endpoints: Vec<LinkEndpoint>,
+    pub route_layer_public_key: Option<[u8; 32]>,
+    pub source: BootstrapHintSource,
+    pub observed_at_ms: u64,
+    pub reliability_bps: u16,
+    pub breadth_hint: u8,
+    pub bridge_cluster: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BootstrapReentryStage {
+    RememberedContacts,
+    NeighborhoodBoards,
+    WebOfTrustIntroductions,
+    BootstrapBridges,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapReentryDecision {
+    pub stage: BootstrapReentryStage,
+    pub candidate_authorities: Vec<AuthorityId>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct BootstrapAttemptState {
+    attempts: u32,
+    last_attempt_at_ms: Option<u64>,
+    last_success_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct BootstrapCandidateState {
+    authority_id: AuthorityId,
+    device_id: Option<DeviceId>,
+    link_endpoints: Vec<LinkEndpoint>,
+    route_layer_public_key: Option<[u8; 32]>,
+    sources: BTreeSet<BootstrapHintSource>,
+    freshest_observed_at_ms: u64,
+    reliability_bps: u16,
+    breadth_hint: u8,
+    bridge_cluster: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct BootstrapScopeState {
+    candidates: HashMap<AuthorityId, BootstrapCandidateState>,
+    attempts: BTreeMap<BootstrapReentryStage, BootstrapAttemptState>,
 }
 
 #[aura_macros::service_surface(
@@ -183,11 +254,31 @@ impl SelectionManagerService {
             }
         }
         let health = self.health.snapshot().await;
+        let move_candidates = self
+            .merge_bootstrap_candidates(scope, ServiceFamily::Move, move_candidates, now_ms)
+            .await;
+        let hold_candidates = self
+            .merge_bootstrap_candidates(scope, ServiceFamily::Hold, hold_candidates, now_ms)
+            .await;
         let selected_move_authorities: Vec<AuthorityId> = self
-            .pick_authorities(scope, move_candidates, ServiceFamily::Move, &health, random)
+            .pick_authorities(
+                scope,
+                &move_candidates,
+                ServiceFamily::Move,
+                &health,
+                now_ms,
+                random,
+            )
             .await?;
         let selected_hold_authorities: Vec<AuthorityId> = self
-            .pick_authorities(scope, hold_candidates, ServiceFamily::Hold, &health, random)
+            .pick_authorities(
+                scope,
+                &hold_candidates,
+                ServiceFamily::Hold,
+                &health,
+                now_ms,
+                random,
+            )
             .await
             .unwrap_or_default();
 
@@ -203,7 +294,8 @@ impl SelectionManagerService {
             }
             let route = build_route(
                 &selected_move_authorities,
-                &move_candidates_by_authority(move_candidates),
+                &move_candidates,
+                &move_candidates_by_authority(&move_candidates),
                 destination.clone(),
             );
             Some(LocalEstablishDecision {
@@ -314,6 +406,198 @@ impl SelectionManagerService {
         Ok(profile)
     }
 
+    pub async fn remember_bootstrap_hints(&self, scope: ContextId, hints: &[BootstrapHint]) {
+        let mut state = self.state.write().await;
+        let scope_state = state.bootstrap.entry(scope).or_default();
+        for hint in hints {
+            let entry = scope_state
+                .candidates
+                .entry(hint.authority_id)
+                .or_insert_with(|| BootstrapCandidateState {
+                    authority_id: hint.authority_id,
+                    device_id: hint.device_id,
+                    link_endpoints: hint.link_endpoints.clone(),
+                    route_layer_public_key: hint.route_layer_public_key,
+                    sources: BTreeSet::new(),
+                    freshest_observed_at_ms: hint.observed_at_ms,
+                    reliability_bps: hint.reliability_bps,
+                    breadth_hint: hint.breadth_hint,
+                    bridge_cluster: hint.bridge_cluster,
+                });
+            entry.device_id = entry.device_id.or(hint.device_id);
+            for endpoint in &hint.link_endpoints {
+                if !entry.link_endpoints.contains(endpoint) {
+                    entry.link_endpoints.push(endpoint.clone());
+                }
+            }
+            if entry.route_layer_public_key.is_none() {
+                entry.route_layer_public_key = hint.route_layer_public_key;
+            }
+            entry.sources.insert(hint.source);
+            entry.freshest_observed_at_ms = entry.freshest_observed_at_ms.max(hint.observed_at_ms);
+            entry.reliability_bps = entry.reliability_bps.max(hint.reliability_bps);
+            entry.breadth_hint = entry.breadth_hint.max(hint.breadth_hint);
+            entry.bridge_cluster = entry.bridge_cluster.or(hint.bridge_cluster);
+        }
+    }
+
+    pub async fn remember_bootstrap_contact_records(
+        &self,
+        scope: ContextId,
+        records: &[BootstrapContactHint],
+    ) -> Result<usize, SelectionManagerError> {
+        let hints = records
+            .iter()
+            .map(|record| {
+                validate_bootstrap_contact_hint(record).map_err(|error| {
+                    SelectionManagerError::InvalidBootstrapRecord {
+                        kind: "bootstrap_contact_hint",
+                        reason: format!("{error:?}"),
+                    }
+                })?;
+                Ok(BootstrapHint {
+                    authority_id: record.authority_id,
+                    device_id: record.device_id,
+                    link_endpoints: record.link_endpoints.clone(),
+                    route_layer_public_key: record.route_layer_public_key,
+                    source: BootstrapHintSource::RememberedDirectContact,
+                    observed_at_ms: record.freshest_observed_at_ms,
+                    reliability_bps: 9_000,
+                    breadth_hint: 1,
+                    bridge_cluster: None,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.remember_bootstrap_hints(scope, &hints).await;
+        Ok(hints.len())
+    }
+
+    pub async fn remember_neighborhood_reentry_records(
+        &self,
+        scope: ContextId,
+        records: &[NeighborhoodReentryHint],
+    ) -> Result<usize, SelectionManagerError> {
+        let hints = records
+            .iter()
+            .map(|record| {
+                validate_neighborhood_reentry_hint(record).map_err(|error| {
+                    SelectionManagerError::InvalidBootstrapRecord {
+                        kind: "neighborhood_reentry_hint",
+                        reason: format!("{error:?}"),
+                    }
+                })?;
+                Ok(BootstrapHint {
+                    authority_id: record.advertised_authority,
+                    device_id: record.advertised_device,
+                    link_endpoints: record.link_endpoints.clone(),
+                    route_layer_public_key: record.route_layer_public_key,
+                    source: BootstrapHintSource::NeighborhoodDiscoveryBoard,
+                    observed_at_ms: record.published_at_ms,
+                    reliability_bps: 7_000,
+                    breadth_hint: 3,
+                    bridge_cluster: None,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.remember_bootstrap_hints(scope, &hints).await;
+        Ok(hints.len())
+    }
+
+    pub async fn remember_bootstrap_introduction_records(
+        &self,
+        scope: ContextId,
+        records: &[BootstrapIntroductionHint],
+        observed_at_ms: u64,
+    ) -> Result<usize, SelectionManagerError> {
+        let hints = records
+            .iter()
+            .map(|record| {
+                validate_bootstrap_introduction_hint(record).map_err(|error| {
+                    SelectionManagerError::InvalidBootstrapRecord {
+                        kind: "bootstrap_introduction_hint",
+                        reason: format!("{error:?}"),
+                    }
+                })?;
+                Ok(BootstrapHint {
+                    authority_id: record.introduced_authority,
+                    device_id: record.introduced_device,
+                    link_endpoints: record.link_endpoints.clone(),
+                    route_layer_public_key: record.route_layer_public_key,
+                    source: BootstrapHintSource::WebOfTrustIntroduction,
+                    observed_at_ms,
+                    reliability_bps: 8_000,
+                    breadth_hint: record.max_fanout,
+                    bridge_cluster: None,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.remember_bootstrap_hints(scope, &hints).await;
+        Ok(hints.len())
+    }
+
+    pub async fn record_reentry_attempt(
+        &self,
+        scope: ContextId,
+        stage: BootstrapReentryStage,
+        now_ms: u64,
+        succeeded: bool,
+    ) {
+        let mut state = self.state.write().await;
+        let attempt = state
+            .bootstrap
+            .entry(scope)
+            .or_default()
+            .attempts
+            .entry(stage)
+            .or_default();
+        attempt.attempts = attempt.attempts.saturating_add(1);
+        attempt.last_attempt_at_ms = Some(now_ms);
+        if succeeded {
+            attempt.last_success_at_ms = Some(now_ms);
+        }
+    }
+
+    pub async fn stale_reentry_decision(
+        &self,
+        scope: ContextId,
+        now_ms: u64,
+    ) -> Option<BootstrapReentryDecision> {
+        let state = self.state.read().await;
+        let scope_state = state.bootstrap.get(&scope)?;
+        let stages = [
+            BootstrapReentryStage::RememberedContacts,
+            BootstrapReentryStage::NeighborhoodBoards,
+            BootstrapReentryStage::WebOfTrustIntroductions,
+            BootstrapReentryStage::BootstrapBridges,
+        ];
+        for stage in stages {
+            let attempts = scope_state
+                .attempts
+                .get(&stage)
+                .map(|attempt| attempt.attempts)
+                .unwrap_or(0);
+            if attempts >= 2 {
+                continue;
+            }
+            let mut authorities = scope_state
+                .candidates
+                .values()
+                .filter(|candidate| candidate_matches_reentry_stage(candidate, stage))
+                .filter(|candidate| freshness_score(candidate, now_ms) > 0)
+                .map(|candidate| candidate.authority_id)
+                .collect::<Vec<_>>();
+            authorities.sort();
+            authorities.dedup();
+            if !authorities.is_empty() {
+                return Some(BootstrapReentryDecision {
+                    stage,
+                    candidate_authorities: authorities,
+                });
+            }
+        }
+        None
+    }
+
     fn continuous_routing_profile(
         &self,
         health: &LocalHealthSnapshot,
@@ -375,6 +659,7 @@ impl SelectionManagerService {
         candidates: &[ProviderCandidate],
         family: ServiceFamily,
         local_health: &LocalHealthSnapshot,
+        now_ms: u64,
         random: &E,
     ) -> Result<Vec<AuthorityId>, SelectionManagerError> {
         let reachable = candidates
@@ -386,7 +671,10 @@ impl SelectionManagerService {
         }
 
         let projection = self.registry.projection(Some(scope), u64::MAX).await;
-        let residency = self.state.read().await.residency.clone();
+        let state = self.state.read().await;
+        let residency = state.residency.clone();
+        let bootstrap_scope = state.bootstrap.get(&scope).cloned().unwrap_or_default();
+        drop(state);
         let mut weighted = reachable
             .iter()
             .map(|candidate| {
@@ -404,6 +692,8 @@ impl SelectionManagerService {
                             .get(&(scope, candidate.authority_id))
                             .copied()
                             .unwrap_or(0),
+                        bootstrap_scope.candidates.get(&candidate.authority_id),
+                        now_ms,
                     ),
                 )
             })
@@ -460,7 +750,26 @@ impl SelectionManagerService {
                         .filter(|evidence| selected_evidence.iter().any(|seen| seen == *evidence))
                         .count() as u32
                         * 10;
-                    *weight = weight.saturating_sub(diversity_penalty);
+                    let bridge_diversity_penalty =
+                        bootstrap_scope
+                            .candidates
+                            .get(candidate_authority)
+                            .and_then(|candidate_state| candidate_state.bridge_cluster)
+                            .map(|cluster| {
+                                selected
+                                    .iter()
+                                    .filter(|selected_authority| {
+                                        bootstrap_scope.candidates.get(selected_authority).and_then(
+                                            |selected_state| selected_state.bridge_cluster,
+                                        ) == Some(cluster)
+                                    })
+                                    .count() as u32
+                                    * 12
+                            })
+                            .unwrap_or(0);
+                    *weight = weight
+                        .saturating_sub(diversity_penalty)
+                        .saturating_sub(bridge_diversity_penalty);
                 }
             }
         }
@@ -476,6 +785,58 @@ impl SelectionManagerService {
                 .insert((scope, *authority), self.config.residency_turns);
         }
         Ok(selected)
+    }
+
+    async fn merge_bootstrap_candidates(
+        &self,
+        scope: ContextId,
+        family: ServiceFamily,
+        candidates: &[ProviderCandidate],
+        now_ms: u64,
+    ) -> Vec<ProviderCandidate> {
+        if family == ServiceFamily::Hold {
+            return candidates.to_vec();
+        }
+        let state = self.state.read().await;
+        let Some(scope_state) = state.bootstrap.get(&scope) else {
+            return candidates.to_vec();
+        };
+        let mut merged = candidates
+            .iter()
+            .cloned()
+            .map(|candidate| (candidate.authority_id, candidate))
+            .collect::<BTreeMap<_, _>>();
+        for candidate_state in scope_state.candidates.values() {
+            if freshness_score(candidate_state, now_ms) == 0 {
+                continue;
+            }
+            let entry = merged
+                .entry(candidate_state.authority_id)
+                .or_insert_with(|| ProviderCandidate {
+                    authority_id: candidate_state.authority_id,
+                    device_id: candidate_state.device_id,
+                    family,
+                    evidence: vec![ProviderEvidence::DescriptorFallback],
+                    link_endpoints: candidate_state.link_endpoints.clone(),
+                    route_layer_public_key: None,
+                    reachable: !candidate_state.link_endpoints.is_empty(),
+                });
+            if entry.device_id.is_none() {
+                entry.device_id = candidate_state.device_id;
+            }
+            for endpoint in &candidate_state.link_endpoints {
+                if !entry.link_endpoints.contains(endpoint) {
+                    entry.link_endpoints.push(endpoint.clone());
+                }
+            }
+            if !entry.reachable && !candidate_state.link_endpoints.is_empty() {
+                entry.reachable = true;
+            }
+            if entry.route_layer_public_key.is_none() {
+                entry.route_layer_public_key = candidate_state.route_layer_public_key;
+            }
+        }
+        merged.into_values().collect()
     }
 }
 
@@ -534,9 +895,18 @@ fn move_candidates_by_authority(
 
 fn build_route(
     authorities: &[AuthorityId],
+    candidates: &[ProviderCandidate],
     endpoints: &BTreeMap<AuthorityId, Vec<LinkEndpoint>>,
     destination: LinkEndpoint,
 ) -> Route {
+    let route_keys = candidates
+        .iter()
+        .filter_map(|candidate| {
+            candidate
+                .route_layer_public_key
+                .map(|public_key| (candidate.authority_id, public_key))
+        })
+        .collect::<BTreeMap<_, _>>();
     Route {
         hops: authorities
             .iter()
@@ -546,6 +916,7 @@ fn build_route(
                     .get(authority_id)
                     .and_then(|values| values.first().cloned())
                     .unwrap_or_else(|| LinkEndpoint::relay(*authority_id)),
+                route_layer_public_key: route_keys.get(authority_id).copied(),
             })
             .collect(),
         destination,
@@ -558,6 +929,8 @@ fn score_candidate(
     local_health: &LocalHealthSnapshot,
     family: ServiceFamily,
     residency_penalty_turns: u32,
+    bootstrap: Option<&BootstrapCandidateState>,
+    now_ms: u64,
 ) -> u32 {
     let evidence_score = candidate
         .evidence
@@ -584,6 +957,13 @@ fn score_candidate(
     } else {
         0
     };
+    let bootstrap_freshness = bootstrap
+        .map(|candidate| freshness_score(candidate, now_ms))
+        .unwrap_or(0);
+    let bootstrap_source = bootstrap.map(source_score).unwrap_or(0);
+    let bootstrap_breadth = bootstrap
+        .map(|candidate| u32::from(candidate.breadth_hint).saturating_mul(4))
+        .unwrap_or(0);
     let availability_score = local_health
         .sync_opportunity_count
         .min(10)
@@ -594,9 +974,65 @@ fn score_candidate(
         .saturating_add(evidence_score)
         .saturating_add(health_score)
         .saturating_add(hold_quality)
+        .saturating_add(bootstrap_freshness)
+        .saturating_add(bootstrap_source)
+        .saturating_add(bootstrap_breadth)
         .saturating_add(availability_score)
         .saturating_add(diversity_score)
         .saturating_sub(residency_penalty_turns.saturating_mul(20))
+}
+
+fn freshness_score(candidate: &BootstrapCandidateState, now_ms: u64) -> u32 {
+    let age_ms = now_ms.saturating_sub(candidate.freshest_observed_at_ms);
+    let age_bucket: u32 = match age_ms {
+        0..=5_000 => 30,
+        5_001..=30_000 => 22,
+        30_001..=120_000 => 14,
+        120_001..=600_000 => 6,
+        _ => 0,
+    };
+    let reliability = u32::from(candidate.reliability_bps) / 250;
+    age_bucket.saturating_add(reliability)
+}
+
+fn source_score(candidate: &BootstrapCandidateState) -> u32 {
+    candidate
+        .sources
+        .iter()
+        .map(|source| match source {
+            BootstrapHintSource::RememberedDirectContact => 24,
+            BootstrapHintSource::PriorProvider => 18,
+            BootstrapHintSource::NeighborhoodDiscoveryBoard => 12,
+            BootstrapHintSource::WebOfTrustIntroduction => 16,
+            BootstrapHintSource::BootstrapBridge => 8,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn candidate_matches_reentry_stage(
+    candidate: &BootstrapCandidateState,
+    stage: BootstrapReentryStage,
+) -> bool {
+    match stage {
+        BootstrapReentryStage::RememberedContacts => {
+            candidate
+                .sources
+                .contains(&BootstrapHintSource::RememberedDirectContact)
+                || candidate
+                    .sources
+                    .contains(&BootstrapHintSource::PriorProvider)
+        }
+        BootstrapReentryStage::NeighborhoodBoards => candidate
+            .sources
+            .contains(&BootstrapHintSource::NeighborhoodDiscoveryBoard),
+        BootstrapReentryStage::WebOfTrustIntroductions => candidate
+            .sources
+            .contains(&BootstrapHintSource::WebOfTrustIntroduction),
+        BootstrapReentryStage::BootstrapBridges => candidate
+            .sources
+            .contains(&BootstrapHintSource::BootstrapBridge),
+    }
 }
 
 fn apply_profile_hysteresis(
@@ -699,7 +1135,32 @@ mod tests {
                 LinkProtocol::Tcp,
                 format!("127.0.0.1:{}", 7000 + seed as u16),
             )],
+            route_layer_public_key: Some([seed; 32]),
             reachable,
+        }
+    }
+
+    fn bootstrap_hint(
+        seed: u8,
+        source: BootstrapHintSource,
+        observed_at_ms: u64,
+        reliability_bps: u16,
+        breadth_hint: u8,
+        bridge_cluster: Option<u64>,
+    ) -> BootstrapHint {
+        BootstrapHint {
+            authority_id: authority(seed),
+            device_id: Some(DeviceId::new_from_entropy([seed; 32])),
+            link_endpoints: vec![LinkEndpoint::direct(
+                LinkProtocol::Tcp,
+                format!("127.0.0.1:{}", 7600 + seed as u16),
+            )],
+            route_layer_public_key: Some([seed; 32]),
+            source,
+            observed_at_ms,
+            reliability_bps,
+            breadth_hint,
+            bridge_cluster,
         }
     }
 
@@ -854,5 +1315,354 @@ mod tests {
             .hops
             .iter()
             .any(|hop| hop.authority_id != authority(1)));
+    }
+
+    #[tokio::test]
+    async fn selection_manager_consumes_bootstrap_hints_when_shared_candidates_are_empty() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let health = LocalHealthObserverService::new(LocalHealthObserverConfig::for_testing());
+        health.observe_provider_set(&[], 1, 50).await;
+        let manager =
+            SelectionManagerService::new(SelectionManagerConfig::for_testing(), registry, health);
+        manager
+            .remember_bootstrap_hints(
+                context(5),
+                &[
+                    bootstrap_hint(
+                        8,
+                        BootstrapHintSource::RememberedDirectContact,
+                        45,
+                        9_000,
+                        2,
+                        None,
+                    ),
+                    bootstrap_hint(
+                        9,
+                        BootstrapHintSource::BootstrapBridge,
+                        48,
+                        6_000,
+                        4,
+                        Some(1),
+                    ),
+                ],
+            )
+            .await;
+
+        let profile = manager
+            .select_profile(
+                context(5),
+                LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:9400"),
+                &[],
+                &[],
+                50,
+                &TestRandom(1),
+            )
+            .await
+            .expect("bootstrap hints should provide move candidates");
+        let establish = profile.establish.expect("establish decision");
+        assert!(establish
+            .route
+            .hops
+            .iter()
+            .any(|hop| hop.authority_id == authority(8)));
+    }
+
+    #[tokio::test]
+    async fn stale_reentry_decisions_progress_from_contacts_to_bridges() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let health = LocalHealthObserverService::new(LocalHealthObserverConfig::for_testing());
+        let manager =
+            SelectionManagerService::new(SelectionManagerConfig::for_testing(), registry, health);
+        manager
+            .remember_bootstrap_hints(
+                context(6),
+                &[
+                    bootstrap_hint(
+                        1,
+                        BootstrapHintSource::RememberedDirectContact,
+                        100,
+                        9_000,
+                        1,
+                        None,
+                    ),
+                    bootstrap_hint(
+                        2,
+                        BootstrapHintSource::NeighborhoodDiscoveryBoard,
+                        100,
+                        7_000,
+                        3,
+                        None,
+                    ),
+                    bootstrap_hint(
+                        3,
+                        BootstrapHintSource::WebOfTrustIntroduction,
+                        100,
+                        8_000,
+                        2,
+                        None,
+                    ),
+                    bootstrap_hint(
+                        4,
+                        BootstrapHintSource::BootstrapBridge,
+                        100,
+                        5_000,
+                        4,
+                        Some(7),
+                    ),
+                ],
+            )
+            .await;
+
+        let first = manager
+            .stale_reentry_decision(context(6), 120)
+            .await
+            .expect("contacts-first decision");
+        assert_eq!(first.stage, BootstrapReentryStage::RememberedContacts);
+        manager
+            .record_reentry_attempt(context(6), first.stage, 121, false)
+            .await;
+        manager
+            .record_reentry_attempt(context(6), first.stage, 122, false)
+            .await;
+
+        let second = manager
+            .stale_reentry_decision(context(6), 123)
+            .await
+            .expect("board decision");
+        assert_eq!(second.stage, BootstrapReentryStage::NeighborhoodBoards);
+        manager
+            .record_reentry_attempt(context(6), second.stage, 124, false)
+            .await;
+        manager
+            .record_reentry_attempt(context(6), second.stage, 125, false)
+            .await;
+
+        let third = manager
+            .stale_reentry_decision(context(6), 126)
+            .await
+            .expect("introduction decision");
+        assert_eq!(third.stage, BootstrapReentryStage::WebOfTrustIntroductions);
+        manager
+            .record_reentry_attempt(context(6), third.stage, 127, false)
+            .await;
+        manager
+            .record_reentry_attempt(context(6), third.stage, 128, false)
+            .await;
+
+        let fourth = manager
+            .stale_reentry_decision(context(6), 129)
+            .await
+            .expect("bridge decision");
+        assert_eq!(fourth.stage, BootstrapReentryStage::BootstrapBridges);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_weighting_prefers_fresher_hints_without_collapsing_to_one_bridge_cluster() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let health = LocalHealthObserverService::new(LocalHealthObserverConfig::for_testing());
+        health.observe_provider_set(&[], 2, 200).await;
+        let manager =
+            SelectionManagerService::new(SelectionManagerConfig::for_testing(), registry, health);
+        manager
+            .remember_bootstrap_hints(
+                context(7),
+                &[
+                    bootstrap_hint(
+                        10,
+                        BootstrapHintSource::NeighborhoodDiscoveryBoard,
+                        195,
+                        8_500,
+                        3,
+                        Some(1),
+                    ),
+                    bootstrap_hint(
+                        11,
+                        BootstrapHintSource::NeighborhoodDiscoveryBoard,
+                        194,
+                        8_000,
+                        3,
+                        Some(2),
+                    ),
+                    bootstrap_hint(
+                        12,
+                        BootstrapHintSource::BootstrapBridge,
+                        130,
+                        5_500,
+                        4,
+                        Some(1),
+                    ),
+                    bootstrap_hint(
+                        13,
+                        BootstrapHintSource::BootstrapBridge,
+                        192,
+                        7_500,
+                        4,
+                        Some(3),
+                    ),
+                ],
+            )
+            .await;
+
+        let profile = manager
+            .select_profile(
+                context(7),
+                LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:9500"),
+                &[],
+                &[],
+                200,
+                &TestRandom(42),
+            )
+            .await
+            .expect("bootstrap weighted profile");
+        let route = profile.establish.expect("establish").route;
+        let unique_hops = route
+            .hops
+            .iter()
+            .map(|hop| hop.authority_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(unique_hops.len() > 1);
+        assert!(route
+            .hops
+            .iter()
+            .any(|hop| hop.authority_id == authority(10)));
+        assert!(route
+            .hops
+            .iter()
+            .any(|hop| hop.authority_id != authority(12)));
+    }
+
+    #[tokio::test]
+    async fn selection_manager_merges_validated_shared_bootstrap_records_locally() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let health = LocalHealthObserverService::new(LocalHealthObserverConfig::for_testing());
+        health.observe_provider_set(&[], 3, 300).await;
+        let manager =
+            SelectionManagerService::new(SelectionManagerConfig::for_testing(), registry, health);
+
+        manager
+            .remember_bootstrap_contact_records(
+                context(8),
+                &[BootstrapContactHint {
+                    scope: context(8),
+                    authority_id: authority(20),
+                    device_id: Some(DeviceId::new_from_entropy([20; 32])),
+                    link_endpoints: vec![LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:7620")],
+                    route_layer_public_key: Some([20; 32]),
+                    freshest_observed_at_ms: 290,
+                    valid_until: 390,
+                    replay_window_id: [20; 32],
+                }],
+            )
+            .await
+            .expect("contact hint should merge");
+        manager
+            .remember_neighborhood_reentry_records(
+                context(8),
+                &[NeighborhoodReentryHint {
+                    scope: context(8),
+                    publisher_authority: authority(21),
+                    advertised_authority: authority(21),
+                    advertised_device: Some(DeviceId::new_from_entropy([21; 32])),
+                    link_endpoints: vec![LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:7621")],
+                    route_layer_public_key: Some([21; 32]),
+                    published_at_ms: 291,
+                    valid_until: 391,
+                    replay_window_id: [21; 32],
+                }],
+            )
+            .await
+            .expect("reentry hint should merge");
+        manager
+            .remember_bootstrap_introduction_records(
+                context(8),
+                &[BootstrapIntroductionHint {
+                    scope: context(8),
+                    introducer_authority: authority(22),
+                    introduced_authority: authority(22),
+                    introduced_device: Some(DeviceId::new_from_entropy([22; 32])),
+                    link_endpoints: vec![LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:7622")],
+                    route_layer_public_key: Some([22; 32]),
+                    remaining_depth: 1,
+                    max_fanout: 2,
+                    valid_until: 392,
+                    replay_window_id: [22; 32],
+                }],
+                295,
+            )
+            .await
+            .expect("introduction hint should merge");
+
+        let profile = manager
+            .select_profile(
+                context(8),
+                LinkEndpoint::direct(LinkProtocol::Tcp, "127.0.0.1:9600"),
+                &[],
+                &[],
+                300,
+                &TestRandom(5),
+            )
+            .await
+            .expect("shared bootstrap records should become local candidates");
+
+        let route = profile.establish.expect("establish").route;
+        let authorities = route
+            .hops
+            .iter()
+            .map(|hop| hop.authority_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(authorities.contains(&authority(20)));
+        assert!(authorities.contains(&authority(21)) || authorities.contains(&authority(22)));
+        assert!(route
+            .hops
+            .iter()
+            .all(|hop| hop.route_layer_public_key.is_some()));
+        assert!(matches!(
+            profile.move_decision.binding,
+            MovePathBinding::Established(_) | MovePathBinding::Direct(_)
+        ));
+        let reentry = manager
+            .stale_reentry_decision(context(8), 300)
+            .await
+            .expect("shared records should support stale-node re-entry");
+        assert_eq!(reentry.stage, BootstrapReentryStage::RememberedContacts);
+    }
+
+    #[tokio::test]
+    async fn selection_manager_rejects_invalid_shared_bootstrap_records() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let health = LocalHealthObserverService::new(LocalHealthObserverConfig::for_testing());
+        let manager =
+            SelectionManagerService::new(SelectionManagerConfig::for_testing(), registry, health);
+
+        let error = manager
+            .remember_neighborhood_reentry_records(
+                context(9),
+                &[NeighborhoodReentryHint {
+                    scope: context(9),
+                    publisher_authority: authority(30),
+                    advertised_authority: authority(31),
+                    advertised_device: None,
+                    link_endpoints: Vec::new(),
+                    route_layer_public_key: None,
+                    published_at_ms: 10,
+                    valid_until: 20,
+                    replay_window_id: [30; 32],
+                }],
+            )
+            .await
+            .expect_err("invalid board hint should be rejected");
+
+        assert!(matches!(
+            error,
+            SelectionManagerError::InvalidBootstrapRecord {
+                kind: "neighborhood_reentry_hint",
+                ..
+            }
+        ));
+
+        assert!(manager
+            .stale_reentry_decision(context(9), 30)
+            .await
+            .is_none());
     }
 }

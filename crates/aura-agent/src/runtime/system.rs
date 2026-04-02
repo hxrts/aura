@@ -4,7 +4,6 @@
 
 use super::services::ceremony_runner::CeremonyRunner;
 use super::services::rendezvous_manager::RendezvousManagerError;
-#[cfg(feature = "transparent_onion")]
 use super::services::AnonymousPathManager;
 use super::services::{
     AuthorityManager, AuthorityStatus, CeremonyTracker, ContextManager, CoverTrafficGenerator,
@@ -197,7 +196,6 @@ pub struct RuntimeSystem {
     selection_manager: Option<SelectionManager>,
 
     /// Anonymous path manager for reusable established anonymous paths.
-    #[cfg(feature = "transparent_onion")]
     anonymous_path_manager: Option<AnonymousPathManager>,
 
     /// Hold manager for shared custody and selector-based retrieval.
@@ -299,7 +297,6 @@ impl RuntimeSystem {
             move_manager: None,
             local_health_observer: None,
             selection_manager: None,
-            #[cfg(feature = "transparent_onion")]
             anonymous_path_manager: None,
             hold_manager: None,
             cover_traffic_generator: None,
@@ -371,7 +368,6 @@ impl RuntimeSystem {
             move_manager: None,
             local_health_observer: None,
             selection_manager: None,
-            #[cfg(feature = "transparent_onion")]
             anonymous_path_manager: None,
             hold_manager: None,
             cover_traffic_generator: None,
@@ -443,7 +439,6 @@ impl RuntimeSystem {
             move_manager: None,
             local_health_observer: None,
             selection_manager: None,
-            #[cfg(feature = "transparent_onion")]
             anonymous_path_manager: None,
             hold_manager: None,
             cover_traffic_generator: None,
@@ -478,7 +473,7 @@ impl RuntimeSystem {
         move_manager: Option<MoveManager>,
         local_health_observer: Option<LocalHealthObserver>,
         selection_manager: Option<SelectionManager>,
-        #[cfg(feature = "transparent_onion")] anonymous_path_manager: Option<AnonymousPathManager>,
+        anonymous_path_manager: Option<AnonymousPathManager>,
         hold_manager: Option<HoldManager>,
         cover_traffic_generator: Option<CoverTrafficGenerator>,
         rendezvous_handler: Option<RendezvousHandler>,
@@ -527,7 +522,6 @@ impl RuntimeSystem {
             move_manager,
             local_health_observer,
             selection_manager,
-            #[cfg(feature = "transparent_onion")]
             anonymous_path_manager,
             hold_manager,
             cover_traffic_generator,
@@ -702,7 +696,6 @@ impl RuntimeSystem {
         if let Some(selection_manager) = &self.selection_manager {
             services.push(selection_manager);
         }
-        #[cfg(feature = "transparent_onion")]
         if let Some(anonymous_path_manager) = &self.anonymous_path_manager {
             services.push(anonymous_path_manager);
         }

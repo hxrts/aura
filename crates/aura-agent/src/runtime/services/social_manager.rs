@@ -256,6 +256,7 @@ impl SocialManager {
                     family,
                     evidence: Vec::new(),
                     link_endpoints: Vec::new(),
+                    route_layer_public_key: None,
                     reachable: reachability(&evidence.authority_id),
                 });
             if !entry.evidence.contains(&evidence.evidence) {

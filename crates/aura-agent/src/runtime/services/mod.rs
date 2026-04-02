@@ -25,7 +25,6 @@ pub mod local_health_observer;
 pub mod logical_clock_manager;
 pub mod maintenance_service;
 pub mod move_manager;
-#[cfg(feature = "transparent_onion")]
 pub mod path_manager;
 pub mod reactive_pipeline_service;
 pub mod receipt_manager;
@@ -70,7 +69,6 @@ pub use maintenance_service::RuntimeMaintenanceService;
 #[allow(unused_imports)]
 pub use move_manager::{MoveDeliveryPlan, MoveManager, MoveManagerConfig, MoveProjection};
 #[allow(unused_imports)] // Public runtime service API.
-#[cfg(feature = "transparent_onion")]
 pub use path_manager::{
     AnonymousPathManager, AnonymousPathManagerConfig, AnonymousPathManagerError,
     AnonymousPathProjection,

@@ -235,6 +235,7 @@ impl SocialTopology {
                     | RelayRelationship::NeighborhoodHop { .. } => ProviderEvidence::Neighborhood,
                 }],
                 link_endpoints: Vec::new(),
+                route_layer_public_key: None,
                 reachable: candidate.reachable,
             })
             .collect()
