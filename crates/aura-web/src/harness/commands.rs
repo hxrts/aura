@@ -730,7 +730,7 @@ async fn execute_semantic_intent(
                     .map_err(|error| JsValue::from_str(&error.user_message()))?;
             if stage_result.mode == AccountCreationStageMode::RuntimeInitialized {
                 update_semantic_debug("create_account_runtime_path", Some(&account_name));
-                controller.finalize_account_setup(ScreenId::Chat);
+                controller.finalize_account_setup(ScreenId::Neighborhood);
                 crate::harness_bridge::publish_semantic_controller_snapshot(controller);
             } else {
                 update_semantic_debug("create_account_stage_start", Some(&account_name));
@@ -860,7 +860,7 @@ async fn execute_semantic_intent(
             crate::harness_bridge::apply_browser_ui_mutation(
                 controller.clone(),
                 move |controller| {
-                    controller.finalize_account_setup(ScreenId::Chat);
+                    controller.finalize_account_setup(ScreenId::Neighborhood);
                 },
             );
             declared_immediate_unit_response(&contract)

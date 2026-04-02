@@ -27,13 +27,12 @@ use crate::shell::{cancel_generation_maintenance_loops, spawn_generation_mainten
 use crate::task_owner::shared_web_task_owner;
 use crate::web_clipboard::WebClipboardAdapter;
 use crate::{
-    active_storage_prefix, clear_storage_key, dual_demo_web_enabled, harness_instance_id,
-    harness_mode_enabled, load_pending_account_bootstrap, load_pending_device_enrollment_code,
-    load_selected_runtime_identity, logged_optional, pending_account_bootstrap_key,
-    pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
-    persist_selected_runtime_identity,
+    active_storage_prefix, bootstrap_broker_url, clear_storage_key, dual_demo_web_enabled,
+    harness_instance_id, harness_mode_enabled, load_pending_account_bootstrap,
+    load_pending_device_enrollment_code, load_selected_runtime_identity, logged_optional,
+    pending_account_bootstrap_key, pending_device_enrollment_code_key,
+    persist_pending_device_enrollment_code, persist_selected_runtime_identity,
     selected_runtime_identity_key, submit_runtime_bootstrap_handoff,
-    bootstrap_broker_url,
     workflows::{self, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest, RebootstrapPolicy},
 };
 use aura_agent::BootstrapBrokerConfig;
@@ -630,14 +629,17 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
                 match rendezvous.take_bootstrap_broker_invitations().await {
                     Ok(mut pending_invitations) => {
                         if let Some(code) = pending_invitations.pop() {
-                            persist_pending_device_enrollment_code(&pending_code_storage_key, &code)
-                                .map_err(|error| {
-                                    phase.error(
-                                        WebUiOperation::BootstrapController,
-                                        "WEB_BOOTSTRAP_PENDING_CODE_PERSIST_FAILED",
-                                        error.user_message(),
-                                    )
-                                })?;
+                            persist_pending_device_enrollment_code(
+                                &pending_code_storage_key,
+                                &code,
+                            )
+                            .map_err(|error| {
+                                phase.error(
+                                    WebUiOperation::BootstrapController,
+                                    "WEB_BOOTSTRAP_PENDING_CODE_PERSIST_FAILED",
+                                    error.user_message(),
+                                )
+                            })?;
                             pending_device_enrollment_code = Some(code);
                         }
                     }
@@ -799,7 +801,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         }
         controller.set_account_setup_state(account_ready, "", None);
         if account_ready {
-            controller.finalize_account_setup(aura_app::ui::contract::ScreenId::Chat);
+            controller.finalize_account_setup(aura_app::ui::contract::ScreenId::Neighborhood);
         }
         phase.advance_to(BootstrapPhase::InstallHarness)?;
         install_harness_instrumentation(controller.clone(), generation_id);
