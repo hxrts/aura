@@ -1254,9 +1254,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     if render_should_exit {
         system.exit();
-        return element! { View {} };
-    }
-    if render_short_circuit {
+        // Fall through to render the normal UI as the last frame so the user
+        // does not see a blank flash before the process re-execs (bootstrap
+        // reload).  If app_snapshot is unavailable we still have to bail out.
+        if app_snapshot.is_none() {
+            return element! { View {} };
+        }
+    } else if render_short_circuit {
         return element! { View {} };
     }
 
