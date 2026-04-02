@@ -2180,11 +2180,14 @@ impl SimulationScenarioHandler {
                 provider,
                 envelope_count,
             } => {
-                state.adaptive_privacy.cover_events.push(CoverTrafficRecord {
-                    provider: provider.clone(),
-                    envelope_count,
-                    recorded_at: state.current_tick,
-                });
+                state
+                    .adaptive_privacy
+                    .cover_events
+                    .push(CoverTrafficRecord {
+                        provider: provider.clone(),
+                        envelope_count,
+                        recorded_at: state.current_tick,
+                    });
                 Ok(format!("adaptive_privacy:cover:{provider}"))
             }
             AdaptivePrivacyTransition::RecordAccountabilityReply {
@@ -2196,7 +2199,7 @@ impl SimulationScenarioHandler {
                     completed_after_ticks.map(|delta| state.current_tick.saturating_add(delta));
                 let deadline_tick = state.current_tick.saturating_add(deadline_ticks);
                 let within_deadline =
-                    completed_at_tick.is_none_or(|completed| completed <= deadline_tick);
+                    completed_at_tick.map_or(true, |completed| completed <= deadline_tick);
                 state.adaptive_privacy.accountability_replies.insert(
                     reply_id.clone(),
                     AccountabilityReplyState {
@@ -2229,15 +2232,14 @@ impl SimulationScenarioHandler {
                 compromised_hops,
                 honest_hops_remaining,
             } => {
-                state
-                    .adaptive_privacy
-                    .honest_hop_compromise_patterns
-                    .push(HonestHopCompromisePattern {
+                state.adaptive_privacy.honest_hop_compromise_patterns.push(
+                    HonestHopCompromisePattern {
                         path_id: path_id.clone(),
                         compromised_hops,
                         honest_hops_remaining,
                         recorded_at: state.current_tick,
-                    });
+                    },
+                );
                 Ok(format!("adaptive_privacy:honest_hop_compromise:{path_id}"))
             }
             AdaptivePrivacyTransition::RecordPartitionHealCycle {
@@ -2327,7 +2329,9 @@ impl SimulationScenarioHandler {
                         recorded_at: state.current_tick,
                     },
                 );
-                Ok(format!("adaptive_privacy:selector_retrieval:{retrieval_id}"))
+                Ok(format!(
+                    "adaptive_privacy:selector_retrieval:{retrieval_id}"
+                ))
             }
             AdaptivePrivacyTransition::RecordSyncOpportunity {
                 profile_id,
@@ -2362,7 +2366,9 @@ impl SimulationScenarioHandler {
                         seeded_at: state.current_tick,
                     },
                 );
-                Ok(format!("adaptive_privacy:move_to_hold_seed:{batch_id}:{object_id}"))
+                Ok(format!(
+                    "adaptive_privacy:move_to_hold_seed:{batch_id}:{object_id}"
+                ))
             }
         }
     }
@@ -2605,7 +2611,12 @@ impl SimulationScenarioHandler {
         let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
-        Self::simulate_data_loss_locked(&mut state, target_participant, loss_type, recovery_required)
+        Self::simulate_data_loss_locked(
+            &mut state,
+            target_participant,
+            loss_type,
+            recovery_required,
+        )
     }
 
     /// Validate message history for a participant across recovery
@@ -2785,9 +2796,13 @@ impl TestingEffects for SimulationScenarioHandler {
                 } else if path == "active" {
                     Ok(Box::new(state.active_injections.len()))
                 } else if let Some(key) = path.strip_prefix("parameter:") {
-                    Ok(Box::new(state.parameters.get(key).cloned().unwrap_or_default()))
+                    Ok(Box::new(
+                        state.parameters.get(key).cloned().unwrap_or_default(),
+                    ))
                 } else if let Some(key) = path.strip_prefix("behavior:") {
-                    Ok(Box::new(state.behaviors.get(key).cloned().unwrap_or_default()))
+                    Ok(Box::new(
+                        state.behaviors.get(key).cloned().unwrap_or_default(),
+                    ))
                 } else {
                     Err(TestingError::StateInspectionError {
                         component: component.to_string(),
@@ -2883,7 +2898,9 @@ impl TestingEffects for SimulationScenarioHandler {
                 } else if path == "cover_events" {
                     Ok(Box::new(state.adaptive_privacy.cover_events.len()))
                 } else if path == "accountability_replies" {
-                    Ok(Box::new(state.adaptive_privacy.accountability_replies.len()))
+                    Ok(Box::new(
+                        state.adaptive_privacy.accountability_replies.len(),
+                    ))
                 } else if path == "late_accountability_replies" {
                     Ok(Box::new(
                         state
@@ -2897,10 +2914,7 @@ impl TestingEffects for SimulationScenarioHandler {
                     Ok(Box::new(state.adaptive_privacy.route_diversity.len()))
                 } else if path == "honest_hop_compromise_patterns" {
                     Ok(Box::new(
-                        state
-                            .adaptive_privacy
-                            .honest_hop_compromise_patterns
-                            .len(),
+                        state.adaptive_privacy.honest_hop_compromise_patterns.len(),
                     ))
                 } else if path == "partition_heal_cycles" {
                     Ok(Box::new(state.adaptive_privacy.partition_heal_cycles.len()))
@@ -2943,13 +2957,15 @@ impl TestingEffects for SimulationScenarioHandler {
                             reason: "Expected path:<id>:<field>".to_string(),
                         });
                     }
-                    let path_state = state.adaptive_privacy.anonymous_paths.get(parts[0]).ok_or_else(
-                        || TestingError::StateInspectionError {
+                    let path_state = state
+                        .adaptive_privacy
+                        .anonymous_paths
+                        .get(parts[0])
+                        .ok_or_else(|| TestingError::StateInspectionError {
                             component: component.to_string(),
                             path: path.to_string(),
                             reason: "Anonymous path not found".to_string(),
-                        },
-                    )?;
+                        })?;
                     match parts[1] {
                         "reuse_count" => Ok(Box::new(path_state.reuse_count)),
                         "expired" => Ok(Box::new(path_state.expired)),
@@ -2969,13 +2985,15 @@ impl TestingEffects for SimulationScenarioHandler {
                             reason: "Expected held:<id>:<field>".to_string(),
                         });
                     }
-                    let held_object = state.adaptive_privacy.held_objects.get(parts[0]).ok_or_else(
-                        || TestingError::StateInspectionError {
+                    let held_object = state
+                        .adaptive_privacy
+                        .held_objects
+                        .get(parts[0])
+                        .ok_or_else(|| TestingError::StateInspectionError {
                             component: component.to_string(),
                             path: path.to_string(),
                             reason: "Held object not found".to_string(),
-                        },
-                    )?;
+                        })?;
                     match parts[1] {
                         "expired" => Ok(Box::new(held_object.expired)),
                         "seeded_from_move" => Ok(Box::new(held_object.seeded_from_move)),

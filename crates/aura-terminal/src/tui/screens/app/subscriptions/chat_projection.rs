@@ -215,7 +215,7 @@ impl ChannelProjectionCoordinator {
     }
 
     fn update_chat_state(&self, chat_state: ChatState) {
-        let mut stabilized = {
+        let stabilized = {
             let previous = self.latest_chat_state.read();
             let selected_channel = self.selected_channel_id.read().clone();
             merge_transient_channels(

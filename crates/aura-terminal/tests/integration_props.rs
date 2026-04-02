@@ -110,12 +110,8 @@ mod neighborhood_screen {
         harness.send(events::enter());
         harness.send_char('i');
 
-        // Neighborhood remains non-insert and keeps list focus.
+        // Neighborhood keeps list focus (no insert mode on neighborhood screen).
         let props = extract_neighborhood_view_props(&harness.state);
-        assert!(
-            !props.insert_mode,
-            "Neighborhood should not enter insert mode"
-        );
         assert_eq!(
             props.detail_focus,
             DetailFocus::Channels,
