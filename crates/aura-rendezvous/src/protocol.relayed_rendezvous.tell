@@ -3,23 +3,19 @@ module rendezvous_relay exposing (RelayedRendezvous)
 protocol RelayedRendezvous =
   roles Initiator, Relay, Responder
 
-  -- Phase 1: Initiator sends to relay
   Initiator { guard_capability = "rendezvous:relay"
             , flow_cost = 2 }
     -> Relay : RelayRequest of crate.RelayRequest
 
-  -- Phase 2: Relay forwards to responder
   Relay { guard_capability = "relay:forward"
         , flow_cost = 1
         , leak = "neighbor:1" }
     -> Responder : RelayForward of crate.RelayForward
 
-  -- Phase 3: Responder replies through relay
   Responder { guard_capability = "rendezvous:relay"
             , flow_cost = 2 }
     -> Relay : RelayResponse of crate.RelayResponse
 
-  -- Phase 4: Relay completes to initiator
   Relay { guard_capability = "relay:forward"
         , flow_cost = 1
         , leak = "neighbor:1" }
