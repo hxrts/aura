@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::RuntimeServiceLifecycleEvent;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,7 +38,7 @@ impl RuntimeSystem {
             .await
         {
             tracing::warn!(
-                event = "runtime.service.lifecycle.reconcile_failed",
+                event = RuntimeServiceLifecycleEvent::ReconcileFailed.as_event_name(),
                 service = self.maintenance_service.name(),
                 error = %error,
                 "Runtime startup reconciliation failed to republish the initial LAN descriptor"
@@ -127,7 +128,7 @@ impl RuntimeSystem {
         context: &RuntimeServiceContext,
     ) -> Result<(), ServiceError> {
         tracing::info!(
-            event = "runtime.service.lifecycle.transition",
+            event = RuntimeServiceLifecycleEvent::Transition.as_event_name(),
             service = service.name(),
             phase = "start_requested",
             "Starting runtime service"
@@ -137,7 +138,7 @@ impl RuntimeSystem {
         match health {
             ServiceHealth::Healthy | ServiceHealth::Degraded { .. } => {
                 tracing::info!(
-                    event = "runtime.service.lifecycle.transition",
+                    event = RuntimeServiceLifecycleEvent::Transition.as_event_name(),
                     service = service.name(),
                     phase = "running",
                     health = %health,
@@ -156,7 +157,7 @@ impl RuntimeSystem {
         const SERVICE_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
         tracing::info!(
-            event = "runtime.service.lifecycle.transition",
+            event = RuntimeServiceLifecycleEvent::Transition.as_event_name(),
             service = service.name(),
             phase = "stop_requested",
             "Stopping runtime service"
@@ -182,7 +183,7 @@ impl RuntimeSystem {
             .map_err(|error| match error {
                 TimeoutRunError::Timeout(_) => {
                     tracing::warn!(
-                        event = "runtime.shutdown.service_timeout",
+                        event = RuntimeShutdownEvent::ServiceTimeout.as_event_name(),
                         service = service.name(),
                         timeout_ms = SERVICE_STOP_TIMEOUT.as_millis() as u64,
                         "Runtime service stop timed out"
@@ -206,7 +207,7 @@ impl RuntimeSystem {
         match health {
             ServiceHealth::Stopped | ServiceHealth::NotStarted => {
                 tracing::info!(
-                    event = "runtime.service.lifecycle.transition",
+                    event = RuntimeServiceLifecycleEvent::Transition.as_event_name(),
                     service = service.name(),
                     phase = "stopped",
                     health = %health,

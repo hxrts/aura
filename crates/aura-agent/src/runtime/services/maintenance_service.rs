@@ -11,8 +11,7 @@ use crate::handlers::{
 use crate::runtime::system::{
     publish_lan_descriptor_with, register_bootstrap_candidate_with, sync_peer_reconcile_interval,
 };
-use crate::runtime::AuraEffectSystem;
-use crate::runtime::TaskGroup;
+use crate::runtime::{AuraEffectSystem, RuntimeServiceLifecycleEvent, TaskGroup};
 use async_trait::async_trait;
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
@@ -444,7 +443,7 @@ impl RuntimeMaintenanceService {
                 self.record_degraded_reason(format!("initial_lan_descriptor: {error}"))
                     .await;
                 tracing::warn!(
-                    event = "runtime.service.lifecycle.post_start_failed",
+                    event = RuntimeServiceLifecycleEvent::PostStartFailed.as_event_name(),
                     service = self.name(),
                     error = %error,
                     "Maintenance service failed to publish the initial LAN descriptor"

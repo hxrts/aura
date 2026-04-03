@@ -105,7 +105,8 @@ pub use effect_trace_capture::{
 pub use effects::AuraEffectSystem;
 pub use errors::RuntimeBoundaryError;
 pub use instrumentation::{
-    RuntimeReconfigurationEvent, RuntimeSessionEvent, RuntimeShutdownEvent, RuntimeVmEvent,
+    RuntimeReconfigurationEvent, RuntimeServiceLifecycleEvent, RuntimeSessionEvent,
+    RuntimeShutdownEvent, RuntimeVmEvent,
 };
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-machine")]

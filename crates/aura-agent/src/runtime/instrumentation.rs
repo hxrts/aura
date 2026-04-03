@@ -51,6 +51,7 @@ pub enum RuntimeShutdownEvent {
     TaskTreeEscalated,
     ServicesFailed,
     LifecycleFailed,
+    ServiceTimeout,
 }
 
 impl RuntimeShutdownEvent {
@@ -64,6 +65,24 @@ impl RuntimeShutdownEvent {
             Self::TaskTreeEscalated => "runtime.shutdown.task_tree_escalated",
             Self::ServicesFailed => "runtime.shutdown.services_failed",
             Self::LifecycleFailed => "runtime.shutdown.lifecycle_failed",
+            Self::ServiceTimeout => "runtime.shutdown.service_timeout",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeServiceLifecycleEvent {
+    ReconcileFailed,
+    Transition,
+    PostStartFailed,
+}
+
+impl RuntimeServiceLifecycleEvent {
+    pub const fn as_event_name(self) -> &'static str {
+        match self {
+            Self::ReconcileFailed => "runtime.service.lifecycle.reconcile_failed",
+            Self::Transition => "runtime.service.lifecycle.transition",
+            Self::PostStartFailed => "runtime.service.lifecycle.post_start_failed",
         }
     }
 }
@@ -98,6 +117,14 @@ mod tests {
         assert_eq!(
             RuntimeShutdownEvent::TaskTreeEscalated.as_event_name(),
             "runtime.shutdown.task_tree_escalated"
+        );
+        assert_eq!(
+            RuntimeShutdownEvent::ServiceTimeout.as_event_name(),
+            "runtime.shutdown.service_timeout"
+        );
+        assert_eq!(
+            RuntimeServiceLifecycleEvent::Transition.as_event_name(),
+            "runtime.service.lifecycle.transition"
         );
         assert_eq!(
             RuntimeReconfigurationEvent::DelegationPersisted.as_event_name(),
