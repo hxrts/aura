@@ -19,7 +19,7 @@
 //!
 //! ```ignore
 //! // Protocol with journal coupling
-//! choreography! {
+//! tell! {
 //!     Alice[▷ facts: new_device_fact] -> Bob: DeviceAdded;
 //!     Bob[▷ caps: revoke_access] -> Alice: AccessRevoked;
 //! }

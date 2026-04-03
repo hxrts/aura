@@ -10,7 +10,7 @@
 
 use aura_core::service::{AccountabilityReplyBlock, EstablishedPath, Route, ServiceFamily};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_macros::choreography;
+use aura_macros::tell;
 use aura_mpst::CompositionManifest;
 use serde::{Deserialize, Serialize};
 
@@ -226,7 +226,7 @@ pub mod anonymous_path_establish {
     #![allow(unused_imports)]
     use super::*;
 
-    choreography!(include_str!(
+    tell!(include_str!(
         "src/adaptive_privacy_control/anonymous_path_establish.tell"
     ));
 }
@@ -236,7 +236,7 @@ pub mod move_receipt_reply_block {
     #![allow(unused_imports)]
     use super::*;
 
-    choreography!(include_str!(
+    tell!(include_str!(
         "src/adaptive_privacy_control/move_receipt_reply_block.tell"
     ));
 }
@@ -246,7 +246,7 @@ pub mod hold_deposit_reply_block {
     #![allow(unused_imports)]
     use super::*;
 
-    choreography!(include_str!(
+    tell!(include_str!(
         "src/adaptive_privacy_control/hold_deposit_reply_block.tell"
     ));
 }
@@ -256,7 +256,7 @@ pub mod hold_retrieval_reply_block {
     #![allow(unused_imports)]
     use super::*;
 
-    choreography!(include_str!(
+    tell!(include_str!(
         "src/adaptive_privacy_control/hold_retrieval_reply_block.tell"
     ));
 }
@@ -266,7 +266,7 @@ pub mod hold_audit_reply_block {
     #![allow(unused_imports)]
     use super::*;
 
-    choreography!(include_str!(
+    tell!(include_str!(
         "src/adaptive_privacy_control/hold_audit_reply_block.tell"
     ));
 }

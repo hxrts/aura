@@ -54,7 +54,7 @@ Must not cross `src/upstream.rs`:
 - Depends only on aura-core.
 - No handler implementations or composition.
 - Extensions handled externally via aura-macros.
-- Provides the same `choreography!` macro interface over Telltale's public surface.
+- Provides the same `tell!` macro interface over Telltale's public surface.
 - `src/upstream.rs` is the sanctioned boundary for naming upstream Telltale crates from Aura-owned code.
 - `src/upstream.rs` remains intentionally narrow: language/types/theory plus the
   minimal runtime trait and identifier surface Aura-owned protocol abstractions

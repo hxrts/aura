@@ -2,12 +2,12 @@
 //!
 //! Demonstrates converting manual session handling to choreography macros.
 
-use aura_macros::choreography;
+use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // Simple session coordination choreography.
-choreography!(include_str!("src/session_patterns.tell"));
+tell!(include_str!("src/session_patterns.tell"));
 
 // Message types
 

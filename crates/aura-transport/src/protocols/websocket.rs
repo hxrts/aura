@@ -1,6 +1,6 @@
 //! WebSocket Protocol Message Types
 //!
-//! Core WebSocket protocol messages for aura-macros choreography! macro.
+//! Core WebSocket protocol messages for aura-macros tell! macro.
 //! Target: <100 lines (simple implementation).
 
 use aura_core::hash::{hash as core_hash, hasher};

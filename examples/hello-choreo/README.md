@@ -4,7 +4,7 @@ Minimal two-role choreography example that illustrates choreographic protocol pr
 
 ## What it shows
 
-- Two-role choreography defined with the `choreography!` macro DSL
+- Two-role choreography defined with the `tell!` macro DSL
 - Alice → Bob message send with Ping type
 - Bob → Alice message send with Pong type
 - Automatic session type projection from global choreography
@@ -17,7 +17,7 @@ Minimal two-role choreography example that illustrates choreographic protocol pr
 The example defines a simple ping-pong protocol:
 
 ```rust
-choreography! {
+tell! {
     protocol PingPong {
         roles: Alice, Bob;
         
@@ -54,7 +54,7 @@ The example documents how the guard chain would protect each message send:
 
 ## Type Safety Guarantees
 
-The choreography! macro provides:
+The tell! macro provides:
 
 - **Deadlock-free**: Session types prevent communication deadlocks
 - **Message order**: Types enforce exact sequence of sends/receives

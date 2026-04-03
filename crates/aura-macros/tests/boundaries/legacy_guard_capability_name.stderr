@@ -1,7 +1,7 @@
 error: Invalid annotation value: invalid guard_capability `send_message`: choreography guard capabilities must be canonical namespaced values, got `send_message`
  --> tests/boundaries/legacy_guard_capability_name.rs:3:1
   |
-3 | / choreography!(r#"
+3 | / tell!(r#"
 4 | | module legacy_guard_capability_name exposing (LegacyGuardCapabilityName)
 5 | |
 6 | | protocol LegacyGuardCapabilityName =

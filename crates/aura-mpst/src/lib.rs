@@ -22,18 +22,18 @@
 //!
 //! This crate is a **regular crate** (not proc-macro) which allows it to:
 //! 1. Re-export Telltale choreography/runtime functionality
-//! 2. Provide the exact same `choreography!` macro interface
+//! 2. Provide the exact same `tell!` macro interface
 //! 3. Lower compiled Telltale annotations into Aura-owned effects
 //! 4. Integrate with the guard chain for protocol-level guards
 //!
 //! # Usage
 //!
 //! ```ignore
-//! use aura_mpst::choreography;
+//! use aura_mpst::tell;
 //!
-//! // This works EXACTLY like telltale's choreography! macro
+//! // This works EXACTLY like telltale's tell! macro
 //! // but with Aura-specific extensions
-//! choreography!(r#"
+//! tell!(r#"
 //! module example exposing (Example)
 //!
 //! protocol Example =
@@ -163,7 +163,7 @@ pub use annotation_lowering::{
     generate_aura_choreography_code, lower_aura_effects, lower_aura_effects_from_records,
     parse_choreography_capability, AuraEffect, AuraExtractionError, ChoreographyCapabilityError,
 };
-/// Full-featured choreography! macro with Telltale features + Aura extensions
+/// Full-featured tell! macro with Telltale features + Aura extensions
 ///
 /// This macro provides access to Telltale choreography features plus Aura-specific extensions:
 /// - Module namespaces: `module my_protocol exposing (ProtocolName)`
@@ -178,9 +178,9 @@ pub use annotation_lowering::{
 /// # Example
 ///
 /// ```ignore
-/// use aura_mpst::choreography;
+/// use aura_mpst::tell;
 ///
-/// choreography!(r#"
+/// tell!(r#"
 /// module threshold_ceremony exposing (ThresholdExample)
 ///
 /// protocol ThresholdExample =
@@ -199,7 +199,7 @@ pub use annotation_lowering::{
 /// "#);
 /// ```
 ///
-/// Note: The choreography! macro is available in the aura-macros crate.
+/// Note: The tell! macro is available in the aura-macros crate.
 /// Generated code uses types from this crate.
 pub use aura_core::{
     types::identifiers::DeviceId, AuraError, AuraResult, Cap, Journal, JournalEffects,

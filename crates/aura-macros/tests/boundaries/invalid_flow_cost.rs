@@ -1,6 +1,6 @@
-use aura_macros::choreography;
+use aura_macros::tell;
 
-choreography!(r#"
+tell!(r#"
 module invalid_flow_cost exposing (InvalidFlowCost)
 
 protocol InvalidFlowCost =

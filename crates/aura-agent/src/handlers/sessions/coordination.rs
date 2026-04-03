@@ -20,7 +20,7 @@ use aura_core::hash;
 use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
 use aura_core::util::serialization::to_vec;
 use aura_core::FlowCost;
-use aura_macros::choreography;
+use aura_macros::tell;
 use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, RoleIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -34,7 +34,7 @@ use telltale_machine::StepResult;
 // 2. Coordinator validates request and seeks participant agreement
 // 3. Participants approve or reject session participation
 // 4. Coordinator creates session and distributes session handles
-choreography!(include_str!("src/handlers/sessions/coordination.tell"));
+tell!(include_str!("src/handlers/sessions/coordination.tell"));
 
 // Re-export role type for external use (tests, etc.)
 pub use self::telltale_session_types_session_coordination::session_coordination::SessionCoordinationChoreographyRole as SessionCoordinationRole;

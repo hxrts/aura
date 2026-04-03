@@ -59,7 +59,7 @@ Also declare which capability gates parity-critical mutation and publication, wh
 Create a simple ping-pong choreography. This protocol demonstrates basic message exchange between two devices.
 
 ```rust
-use aura_macros::choreography;
+use aura_macros::tell;
 use aura_core::effects::{ConsoleEffects, NetworkEffects, TimeEffects};
 use aura_core::time::PhysicalTime;
 use serde::{Serialize, Deserialize};
@@ -80,7 +80,7 @@ pub struct Pong {
     pub timestamp: PhysicalTime,
 }
 
-choreography! {
+tell! {
     #[namespace = "hello_world"]
     protocol HelloWorld {
         roles: Alice, Bob;

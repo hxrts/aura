@@ -1479,12 +1479,12 @@ fn read_choreography_source(expr: Expr) -> Result<(String, proc_macro2::Span), s
         }
         other => Err(syn::Error::new(
             other.span(),
-            "choreography! expects a string literal or include_str!(\"path.tell\")",
+            "tell! expects a string literal or include_str!(\"path.tell\")",
         )),
     }
 }
 
-/// Implementation of the Aura choreography! macro
+/// Implementation of the Aura tell! macro
 ///
 /// Uses namespace-aware Telltale generation to avoid module conflicts
 pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> {
@@ -1534,7 +1534,7 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
             compile_error!(
                 "Choreography is missing a namespace. \
                  Add `module <name> exposing (...)` to your .tell file \
-                 or use #[namespace = \"unique_name\"] inside the choreography! macro. \
+                 or use #[namespace = \"unique_name\"] inside the tell! macro. \
                  Each choreography in the same file must have a unique namespace."
             );
         }

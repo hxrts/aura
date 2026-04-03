@@ -1,6 +1,6 @@
-use aura_macros::choreography;
+use aura_macros::tell;
 
-choreography!(
+tell!(
     #[namespace = "macro_namespace"]
     r#"
 module source_namespace exposing (NamespaceMismatch)

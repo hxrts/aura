@@ -32,7 +32,7 @@ use aura_core::{
     effects::{CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects},
     hash, AuraError, AuraResult, DeviceId, Hash32,
 };
-use aura_macros::choreography;
+use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
 use thiserror::Error;
@@ -910,7 +910,7 @@ pub struct DkdMessage {
     pub timestamp: u64,
 }
 
-choreography!(include_str!("src/dkd.tell"));
+tell!(include_str!("src/dkd.tell"));
 
 // =============================================================================
 // Convenience Functions

@@ -4,7 +4,7 @@ error: Coherence validation failed: Coherence validation failed for choreography
        Hint: ensure choice branches are mergeable for non-participants and avoid self-sends.
  --> tests/boundaries/incoherent_self_send.rs:3:15
   |
-3 |   choreography!(r#"
+3 |   tell!(r#"
   |  _______________^
 4 | | module incoherent_self_send exposing (IncoherentSelfSend)
 5 | |

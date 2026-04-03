@@ -59,9 +59,9 @@ The macro provides canonical `ceremony_id()` and `ceremony_timestamp_ms()` acces
 Write the choreography in a `.tell` file:
 
 ```rust
-use aura_macros::choreography;
+use aura_macros::tell;
 
-choreography! {
+tell! {
     #[namespace = "secure_request"]
     protocol SecureRequest {
         roles: Client, Server;
@@ -80,7 +80,7 @@ Annotation syntax: `Role[guard_capability = "namespace:capability", flow_cost = 
 `guard_capability` is the one sanctioned raw-string boundary for first-party
 capability names in choreography source. The macro parses these values into
 validated `CapabilityName`s and fails closed on invalid or legacy names. In
-Rust code outside `.tell` or `choreography!` inputs, prefer typed capability
+Rust code outside `.tell` or `tell!` inputs, prefer typed capability
 families from the owning crate.
 
 ### Canonical Telltale 10 Shape

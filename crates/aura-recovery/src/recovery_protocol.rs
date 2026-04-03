@@ -21,7 +21,7 @@ use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_effects::random::RealRandomHandler;
 use aura_effects::time::PhysicalTimeHandler;
 use aura_journal::DomainFact;
-use aura_macros::choreography;
+use aura_macros::tell;
 use aura_relational::RelationalContext;
 use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
@@ -312,7 +312,7 @@ mod theorem_pack_tests {
 }
 
 // Recovery Protocol Choreography
-choreography!(include_str!("src/recovery_protocol.tell"));
+tell!(include_str!("src/recovery_protocol.tell"));
 
 /// Recovery protocol handler
 pub struct RecoveryProtocolHandler {

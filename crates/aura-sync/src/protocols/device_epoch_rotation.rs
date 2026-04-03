@@ -6,7 +6,7 @@
 
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::{AttestedOp, AuthorityId, DeviceId};
-use aura_macros::choreography;
+use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 
 /// The initiating ceremony type for one device-scoped epoch rotation.
@@ -46,7 +46,7 @@ pub struct DeviceEpochCommit {
     pub attested_leaf_op: Option<AttestedOp>,
 }
 
-choreography!(include_str!("src/protocols/device_epoch_rotation.tell"));
+tell!(include_str!("src/protocols/device_epoch_rotation.tell"));
 
 #[cfg(test)]
 mod tests {

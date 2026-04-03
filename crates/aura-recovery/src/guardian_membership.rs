@@ -17,7 +17,7 @@ use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{hash, AuraError, Hash32};
 use aura_journal::DomainFact;
-use aura_macros::choreography;
+use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -94,7 +94,7 @@ pub struct ChangeCompletion {
 
 // Runtime reconfiguration still consumes the guardian_handoff bundle contract
 // exposed by this choreography surface.
-choreography!(include_str!("src/guardian_membership.tell"));
+tell!(include_str!("src/guardian_membership.tell"));
 
 /// Guardian membership coordinator.
 ///

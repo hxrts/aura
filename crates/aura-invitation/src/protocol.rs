@@ -257,7 +257,7 @@ pub mod guards {
 pub mod exchange {
     #![allow(unused_imports)]
     use super::*;
-    use aura_macros::choreography;
+    use aura_macros::tell;
 
     // Invitation exchange choreography for basic invitation flow
     //
@@ -265,14 +265,14 @@ pub mod exchange {
     // 1. Sender creates and sends invitation offer
     // 2. Receiver accepts or declines the invitation
     // 3. Sender acknowledges the response
-    choreography!(include_str!("src/protocol.invitation_exchange.tell"));
+    tell!(include_str!("src/protocol.invitation_exchange.tell"));
 }
 
 /// Guardian invitation protocol module
 pub mod guardian {
     #![allow(unused_imports)]
     use super::*;
-    use aura_macros::choreography;
+    use aura_macros::tell;
 
     // Guardian invitation choreography for establishing guardian relationships
     //
@@ -280,14 +280,14 @@ pub mod guardian {
     // 1. Principal requests guardian relationship
     // 2. Guardian accepts or declines with appropriate response
     // 3. Principal confirms the relationship establishment
-    choreography!(include_str!("src/protocol.guardian_invitation.tell"));
+    tell!(include_str!("src/protocol.guardian_invitation.tell"));
 }
 
 /// Device enrollment protocol module
 pub mod device_enrollment {
     #![allow(unused_imports)]
     use super::*;
-    use aura_macros::choreography;
+    use aura_macros::tell;
 
     // Device enrollment choreography for adding devices to an authority
     //
@@ -301,7 +301,7 @@ pub mod device_enrollment {
     // The generated manifest carries device-migration link metadata for reconfiguration.
     // Runtime reconfiguration still consumes the device_migration bundle
     // contract exposed by this choreography surface.
-    choreography!(include_str!("src/protocol.device_enrollment.tell"));
+    tell!(include_str!("src/protocol.device_enrollment.tell"));
 }
 
 // =============================================================================

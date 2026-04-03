@@ -1,6 +1,6 @@
-use aura_macros::choreography;
+use aura_macros::tell;
 
-choreography!(r#"
+tell!(r#"
 module legacy_guard_capability_name exposing (LegacyGuardCapabilityName)
 
 protocol LegacyGuardCapabilityName =

@@ -8,7 +8,7 @@ Compile-time DSL parser for choreographies with Aura-specific annotations. Gener
 
 | Belongs here | Does not belong here |
 |-------------|---------------------|
-| `choreography!` macro: Full Telltale feature inheritance with Aura extensions | Runtime code or effect implementations |
+| `tell!` macro: Full Telltale feature inheritance with Aura extensions | Runtime code or effect implementations |
 | `DomainFact` derive macro: Canonical encoding with schema versioning | Multi-party coordination (only generates code) |
 | `aura_effect_handlers` macro: Mock/real handler variant boilerplate | |
 | `aura_handler_adapters` macro: AuraHandler trait adapters | |

@@ -74,7 +74,7 @@ use aura_core::hash;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
-use aura_macros::choreography;
+use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -141,7 +141,7 @@ pub struct SetupCompletion {
 }
 
 // Guardian Setup Choreography - 3 phase protocol
-choreography!(include_str!("src/guardian_setup.tell"));
+tell!(include_str!("src/guardian_setup.tell"));
 
 /// Guardian setup coordinator.
 ///

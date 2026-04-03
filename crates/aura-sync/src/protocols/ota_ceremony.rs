@@ -43,7 +43,7 @@ use aura_core::effects::{JournalEffects, PhysicalTimeEffects};
 use aura_core::threshold::{AgreementMode, ThresholdSignature};
 use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Hash32, SemanticVersion};
-use aura_macros::choreography;
+use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -485,7 +485,7 @@ mod ota_activation_protocol_surface {
 
     use super::*;
 
-    choreography!(include_str!("src/protocols/ota_activation.tell"));
+    tell!(include_str!("src/protocols/ota_activation.tell"));
 }
 
 pub use ota_activation_protocol_surface::telltale_session_types_ota_activation;

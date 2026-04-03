@@ -41,7 +41,7 @@ mod error_types;
 mod handler_adapters;
 mod test_macros;
 
-/// Full-featured choreography! macro with complete Telltale feature inheritance
+/// Full-featured tell! macro with complete Telltale feature inheritance
 ///
 /// This macro inherits ALL standard Telltale features including:
 /// - Module namespaces: `module my_protocol exposing (ProtocolName)`
@@ -57,9 +57,9 @@ mod test_macros;
 /// # Example
 ///
 /// ```ignore
-/// use aura_macros::choreography;
+/// use aura_macros::tell;
 ///
-/// choreography!(r#"
+/// tell!(r#"
 /// module threshold_ceremony exposing (ThresholdExample)
 ///
 /// protocol ThresholdExample =
@@ -69,7 +69,7 @@ mod test_macros;
 /// "#);
 /// ```
 #[proc_macro]
-pub fn choreography(input: TokenStream) -> TokenStream {
+pub fn tell(input: TokenStream) -> TokenStream {
     match choreography::choreography_impl(input.into()) {
         Ok(output) => output.into(),
         Err(err) => err.to_compile_error().into(),

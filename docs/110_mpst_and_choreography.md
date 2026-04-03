@@ -4,12 +4,12 @@ This document describes the architecture of choreographic protocols in Aura. It 
 
 ## 1. DSL and Projection
 
-Aura defines global protocols using the `choreography!` macro. The macro parses a global specification into an abstract syntax tree. The macro produces code that represents the protocol as a choreographic structure. The source of truth for protocols is a `.tell` file stored next to the Rust module that loads it.
+Aura defines global protocols using the `tell!` macro. The macro parses a global specification into an abstract syntax tree. The macro produces code that represents the protocol as a choreographic structure. The source of truth for protocols is a `.tell` file stored next to the Rust module that loads it.
 
 Projection converts the global protocol into per-role local session types. Each local session type defines the exact sequence of sends and receives for a single role. Projection eliminates deadlocks and ensures that communication structure is correct.
 
 ```rust
-choreography!(include_str!("example.tell"));
+tell!(include_str!("example.tell"));
 ```
 
 Example file: `example.tell`
@@ -38,7 +38,7 @@ This example shows the projected type for role `A`. The type describes that `A` 
 
 ## 3. Runtime Integration
 
-Aura executes production choreographies through the Telltale protocol machine. The `choreography!` macro emits the global type, projected local types, role metadata, and composition metadata that the runtime uses to build protocol-machine code images. `AuraChoreoEngine` in `crates/aura-agent/src/runtime/choreo_engine.rs` is the production runtime surface.
+Aura executes production choreographies through the Telltale protocol machine. The `tell!` macro emits the global type, projected local types, role metadata, and composition metadata that the runtime uses to build protocol-machine code images. `AuraChoreoEngine` in `crates/aura-agent/src/runtime/choreo_engine.rs` is the production runtime surface.
 
 Aura targets the current public Telltale language/runtime surface directly. Generated code is sourced from `.tell` files, projected through the public session-type model, and admitted into the protocol machine without an Aura-local runner compatibility layer. For the upstream capability, finalization, semantic-handoff, and runtime-upgrade contract that this runtime model assumes, see Telltale `docs/38_capability_model.md`.
 
@@ -89,7 +89,7 @@ Host-side async code must preserve that ownership model. External network, timer
 
 ## 4. Choreography Annotations and Effect Commands
 
-Choreographies support annotations that modify runtime behavior. The `choreography!` macro extracts these annotations and generates `EffectCommand` sequences. This follows the choreography-first architecture where choreographic annotations are the canonical source of truth for guard requirements.
+Choreographies support annotations that modify runtime behavior. The `tell!` macro extracts these annotations and generates `EffectCommand` sequences. This follows the choreography-first architecture where choreographic annotations are the canonical source of truth for guard requirements.
 
 ### Supported Annotations
 
@@ -130,7 +130,7 @@ FROST ceremonies use choreographies to coordinate threshold signing. These cerem
 Aura Consensus uses choreographic notation for fast path and fallback flows. Consensus choreographies define execute, witness, and commit messages. Session types ensure evidence propagation and correctness.
 
 ```rust
-choreography! {
+tell! {
     #[namespace = "sync"]
     protocol AntiEntropy {
         roles: A, B;
@@ -176,7 +176,7 @@ The runtime provides production choreographic execution through manifest-driven 
 
 ### 10.2 Wiring a Choreography
 
-Wiring a choreography involves storing the protocol in a `.tell` file, generating artifacts via `choreography!`, opening an admitted protocol-machine session, and providing decision sources through the host bridge.
+Wiring a choreography involves storing the protocol in a `.tell` file, generating artifacts via `tell!`, opening an admitted protocol-machine session, and providing decision sources through the host bridge.
 
 See [Choreography Development Guide](803_choreography_guide.md) for the wiring procedure.
 

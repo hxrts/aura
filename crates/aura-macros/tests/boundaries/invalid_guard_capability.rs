@@ -1,6 +1,6 @@
-use aura_macros::choreography;
+use aura_macros::tell;
 
-choreography!(r#"
+tell!(r#"
 module invalid_guard_capability exposing (InvalidGuardCapability)
 
 protocol InvalidGuardCapability =

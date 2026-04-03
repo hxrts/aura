@@ -24,9 +24,9 @@
 //!
 //! Guard effects can originate from two sources that use the same `EffectCommand` system:
 //!
-//! 1. **Choreographic Annotations** (compile-time): The `choreography!` macro generates
+//! 1. **Choreographic Annotations** (compile-time): The `tell!` macro generates
 //!    `EffectCommand` sequences from annotations like `guard_capability`, `flow_cost`,
-//!    `journal_facts`, and `leak`. These are produced by `aura_macros::choreography`
+//!    `journal_facts`, and `leak`. These are produced by `aura_macros::tell`
 //!    via the generated `effect_bridge::annotation_to_commands()` function.
 //!
 //! 2. **Runtime Guard Chain** (send-site): The `GuardChain::standard()` evaluates

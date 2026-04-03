@@ -594,7 +594,7 @@ pub fn convert_send_guard_to_request(
 ///
 /// This is the primary integration point for choreography-generated commands.
 /// Use this function to execute `EffectCommand` sequences produced by the
-/// `aura_macros::choreography` macro's `effect_bridge::annotation_to_commands()`.
+/// `aura_macros::tell` macro's `effect_bridge::annotation_to_commands()`.
 ///
 /// # Example
 ///
@@ -602,7 +602,7 @@ pub fn convert_send_guard_to_request(
 /// use aura_guards::executor::{execute_effect_commands, BorrowedEffectInterpreter};
 /// use aura_core::effects::guard::EffectCommand;
 ///
-/// // Commands from choreography! macro
+/// // Commands from tell! macro
 /// let commands: Vec<EffectCommand> = effect_bridge::annotations_to_commands(&ctx, annotations);
 ///
 /// // Execute through interpreter

@@ -4,7 +4,7 @@
 //! These define the message flow and guard annotations for peer discovery
 //! and channel establishment.
 
-// The choreography! macro generates unit returns which trigger this lint
+// The tell! macro generates unit returns which trigger this lint
 #![allow(clippy::unused_unit)]
 
 use aura_core::types::identifiers::AuthorityId;
@@ -145,7 +145,7 @@ pub mod guards {
 pub mod exchange {
     #![allow(unused_imports)]
     use super::*;
-    use aura_macros::choreography;
+    use aura_macros::tell;
 
     // Rendezvous exchange choreography for direct peer discovery and channel establishment
     //
@@ -154,14 +154,14 @@ pub mod exchange {
     // 2. Responder publishes response descriptor
     // 3. Initiator initiates Noise IKpsk2 handshake
     // 4. Responder completes handshake, establishing secure channel
-    choreography!(include_str!("src/protocol.rendezvous_exchange.tell"));
+    tell!(include_str!("src/protocol.rendezvous_exchange.tell"));
 }
 
 /// Relayed rendezvous protocol module
 pub mod relayed {
     #![allow(unused_imports)]
     use super::*;
-    use aura_macros::choreography;
+    use aura_macros::tell;
 
     // Relayed rendezvous choreography for relay-assisted connection
     //
@@ -170,7 +170,7 @@ pub mod relayed {
     // 2. Relay forwards to responder (with metadata leakage tracking)
     // 3. Responder sends response back through relay
     // 4. Relay completes by forwarding response to initiator
-    choreography!(include_str!("src/protocol.relayed_rendezvous.tell"));
+    tell!(include_str!("src/protocol.relayed_rendezvous.tell"));
 }
 
 // =============================================================================

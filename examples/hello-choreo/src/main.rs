@@ -19,8 +19,8 @@ pub struct Pong;
 
 // Use the choreography macro - generates both Telltale session types and Aura modules.
 // Note: Each choreography must have a unique module namespace.
-use aura_macros::choreography;
-choreography!(include_str!("src/main.tell"));
+use aura_macros::tell;
+tell!(include_str!("src/main.tell"));
 
 // The macro generates the aura_choreography_pingpong module (namespace-prefixed).
 

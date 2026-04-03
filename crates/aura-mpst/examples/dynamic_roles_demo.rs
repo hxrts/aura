@@ -33,14 +33,14 @@ struct FinalSignature {
 }
 
 // Basic threshold ceremony demonstrating multi-party protocol
-// NOTE: The choreography! macro is commented out because it generates code that
+// NOTE: The tell! macro is commented out because it generates code that
 // references module-level types, which doesn't work in the example file context.
 // In a library module, this macro would generate:
 // - Session type definitions for each role (Coordinator, Signer1, Signer2, Observer)
 // - Automatic projection of the global protocol to local session types
 // - Type-safe message passing with deadlock freedom guarantees
 //
-// choreography! {
+// tell! {
 //     #[namespace = "threshold_signing"]
 //     choreography ThresholdCeremony {
 //         roles: Coordinator, Signer1, Signer2, Observer;

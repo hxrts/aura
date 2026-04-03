@@ -1,6 +1,6 @@
-use aura_macros::choreography;
+use aura_macros::tell;
 
-choreography!(r#"
+tell!(r#"
 module incoherent_self_send exposing (IncoherentSelfSend)
 
 protocol IncoherentSelfSend =

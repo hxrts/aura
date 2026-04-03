@@ -196,7 +196,7 @@ Rendezvous protocols are defined as MPST choreographies with guard annotations.
 ### 5.1 Direct Exchange Protocol
 
 ```rust
-choreography! {
+tell! {
     #[namespace = "rendezvous_exchange"]
     protocol RendezvousExchange {
         roles: Initiator, Responder;
@@ -225,7 +225,7 @@ choreography! {
 ### 5.2 Relayed Protocol
 
 ```rust
-choreography! {
+tell! {
     #[namespace = "relayed_rendezvous"]
     protocol RelayedRendezvous {
         roles: Initiator, Relay, Responder;

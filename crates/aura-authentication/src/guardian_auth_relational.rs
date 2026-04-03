@@ -6,7 +6,7 @@
 use aura_core::crypto::ed25519::{Ed25519Signature, Ed25519VerifyingKey};
 use aura_core::relational::GuardianBinding;
 use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
-use aura_macros::choreography;
+use aura_macros::tell;
 use aura_relational::RelationalContext;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -240,7 +240,7 @@ fn verify_consensus_proof(
 }
 
 // Guardian Authentication Choreography via Relational Context
-choreography!(include_str!("src/guardian_auth_relational.tell"));
+tell!(include_str!("src/guardian_auth_relational.tell"));
 
 /// Guardian authentication handler for relational contexts
 pub struct GuardianAuthHandler {

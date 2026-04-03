@@ -1,9 +1,9 @@
 //! Choreography definition for the Aura consensus protocol.
 
-use aura_macros::choreography;
+use aura_macros::tell;
 
 // Define the consensus choreography protocol
-choreography!(include_str!("src/protocol/choreography.tell"));
+tell!(include_str!("src/protocol/choreography.tell"));
 
 #[cfg(test)]
 mod tests {

@@ -8,7 +8,7 @@ use crate::core::sync_protocol_error;
 use aura_core::time::PhysicalTime;
 use aura_core::types::Epoch;
 use aura_core::{AuraError, ContextId, DeviceId};
-use aura_macros::choreography;
+use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -307,7 +307,7 @@ impl EpochRotationCoordinator {
 // The generated manifest carries epoch-rotation transfer link metadata for reconfiguration.
 // Runtime reconfiguration still consumes the epoch_rotation_transfer bundle
 // contract exposed by this choreography surface.
-choreography!(include_str!("src/protocols/epochs.tell"));
+tell!(include_str!("src/protocols/epochs.tell"));
 
 #[cfg(test)]
 mod tests {

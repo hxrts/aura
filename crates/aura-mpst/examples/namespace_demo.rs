@@ -27,11 +27,11 @@ struct AuthResponse {
 }
 
 // Authentication Protocol with auth_service namespace
-// Note: The choreography! macro requires a proper module context to work correctly.
+// Note: The tell! macro requires a proper module context to work correctly.
 // In a library, this would generate role types. For this example, we demonstrate
 // the protocol structure conceptually without macro expansion.
 //
-// choreography!(r#"
+// tell!(r#"
 // module auth_service exposing (AuthenticationProtocol)
 //
 // protocol AuthenticationProtocol =

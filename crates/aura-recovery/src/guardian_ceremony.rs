@@ -38,7 +38,7 @@ use aura_core::{
     types::AuthorityId,
     Hash32,
 };
-use aura_macros::choreography;
+use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -387,7 +387,7 @@ impl CeremonyFact {
 // ============================================================================
 
 // Guardian Ceremony Choreography - uses session types for linear protocol flow
-choreography!(include_str!("src/guardian_ceremony.tell"));
+tell!(include_str!("src/guardian_ceremony.tell"));
 
 /// Ceremony proposal sent to guardians
 #[derive(Debug, Clone, Serialize, Deserialize)]
