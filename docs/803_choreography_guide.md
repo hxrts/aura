@@ -232,7 +232,7 @@ decision. They are not importance labels.
 
 The first production protocols now using this boundary are
 `aura.sync.ota_activation` and `aura.sync.device_epoch_rotation`. Both declare
-`AuraTransitionSafety`, and Aura rejects launch before protocol start when the
+the "AuraTransitionSafety" proof bundle, and Aura rejects launch before protocol start when the
 runtime lacks the theorem-pack capability surface needed for transition
 receipts, bridge admission, and reconfiguration safety.
 
@@ -309,19 +309,19 @@ allowed to target.
 
 Aura should keep the first taxonomy small:
 
-- `AuraTransitionSafety`
+- "AuraTransitionSafety"
   used for OTA/runtime-upgrade/device-epoch flows that depend on transition
   safety, reconfiguration continuity, and bridge/admission correctness
-- `AuraAuthorityEvidence`
+- "AuraAuthorityEvidence"
   used for recovery/finalization flows that depend on authoritative read,
   canonical materialization, and receipt/evidence-backed transitions
-- `AuraConsensusDeployment`
+- "AuraConsensusDeployment"
   reserved for a later explicit consensus decision; do not use until Aura has a
   concrete runtime consumer beyond the existing envelope capability checks
 
 ### Pack-to-Capability Mapping
 
-`AuraTransitionSafety`:
+"AuraTransitionSafety":
 
 - reuse Telltale inventory keys:
   `protocol_machine_envelope_adherence`,
@@ -338,7 +338,7 @@ Aura should keep the first taxonomy small:
   `aura-agent::runtime::choreography_adapter`,
   `aura-agent::runtime::services::reconfiguration_manager`
 
-`AuraAuthorityEvidence`:
+"AuraAuthorityEvidence":
 
 - reuse Telltale inventory keys:
   `protocol_machine_envelope_adherence`,
@@ -361,7 +361,7 @@ Aura should keep the first taxonomy small:
   `aura.invitation.guardian`,
   `aura.invitation.device_enrollment`
 
-`AuraConsensusDeployment`:
+"AuraConsensusDeployment":
 
 - candidate Telltale inventory keys:
   `consensus_envelope`,
@@ -402,11 +402,11 @@ or ordinary transport forwarding.
 
 The current adaptive-privacy Telltale control-plane inventory is:
 
-- `AnonymousPathEstablishProtocol`
-- `MoveReceiptReplyBlockProtocol`
-- `HoldDepositReplyBlockProtocol`
-- `HoldRetrievalReplyBlockProtocol`
-- `HoldAuditReplyBlockProtocol`
+- "AnonymousPathEstablishProtocol"
+- "MoveReceiptReplyBlockProtocol"
+- "HoldDepositReplyBlockProtocol"
+- "HoldRetrievalReplyBlockProtocol"
+- "HoldAuditReplyBlockProtocol"
 
 Bootstrap and stale-node re-entry remain runtime-local for now. They are still
 hint lookup and cache-refresh logic, not canonical multi-party

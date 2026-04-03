@@ -2949,6 +2949,8 @@ pub const SHARED_FLOW_SUPPORT: &[SharedFlowSupport] = &[
 // - startup smoke owns shared neighborhood navigation and onboarding coverage
 // - scenario13 owns chat/contacts plus invitation, home-create, join, and send coverage
 // - scenario12 owns add/remove-device coverage
+// - observation smokes provide secondary semantic coverage for contact-navigation
+//   and invitation lifecycle entry points without replacing the canonical scenario
 pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::NavigateNeighborhood,
@@ -2963,6 +2965,14 @@ pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
         scenario_id: "scenario13-mixed-contact-channel-message-e2e",
     },
     SharedFlowScenarioCoverage {
+        flow: SharedFlowId::NavigateContacts,
+        scenario_id: "semantic-observation-browser-smoke",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::NavigateContacts,
+        scenario_id: "semantic-observation-tui-smoke",
+    },
+    SharedFlowScenarioCoverage {
         flow: SharedFlowId::NavigateNotifications,
         scenario_id: "shared-notifications-and-authority",
     },
@@ -2975,8 +2985,24 @@ pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
         scenario_id: "scenario13-mixed-contact-channel-message-e2e",
     },
     SharedFlowScenarioCoverage {
+        flow: SharedFlowId::CreateInvitation,
+        scenario_id: "semantic-observation-browser-smoke",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::CreateInvitation,
+        scenario_id: "semantic-observation-tui-smoke",
+    },
+    SharedFlowScenarioCoverage {
         flow: SharedFlowId::AcceptInvitation,
         scenario_id: "scenario13-mixed-contact-channel-message-e2e",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::AcceptInvitation,
+        scenario_id: "semantic-observation-browser-smoke",
+    },
+    SharedFlowScenarioCoverage {
+        flow: SharedFlowId::AcceptInvitation,
+        scenario_id: "semantic-observation-tui-smoke",
     },
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::CreateHome,

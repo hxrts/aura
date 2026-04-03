@@ -17,7 +17,7 @@ This document does not define application payload encryption. Application and co
 
 ## 2. Direct-Channel Baseline
 
-Aura already uses adjacent-peer secure channels for direct transport. The current baseline is `Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s` through `NoiseEffects` with the `snow` implementation.
+Aura already uses adjacent-peer secure channels for direct transport. The current baseline is the Noise IKpsk2 25519 ChaChaPoly BLAKE2s pattern through `NoiseEffects` with the `snow` implementation.
 
 The direct-channel baseline remains authoritative for adjacent-peer secure channels. Anonymous path routing does not replace that layer. Each adjacent hop on an anonymous route still runs over the existing link-protected channel model from [Transport and Information Flow](111_transport_and_information_flow.md).
 
@@ -39,7 +39,7 @@ Aura's route layer has the following non-goals:
 
 ## 4. Route-Layer Construction
 
-Aura adopts a route-layer construction based on `Curve25519`, `HKDF-SHA256`, and `ChaCha20-Poly1305`.
+Aura adopts a route-layer construction based on Curve25519, `HKDF-SHA256`, and `ChaCha20-Poly1305`.
 
 The route-layer construction uses the following rules:
 
@@ -48,7 +48,7 @@ The route-layer construction uses the following rules:
 3. Each hop encrypts or decrypts only its own layer with `ChaCha20-Poly1305`.
 4. Each hop receives enough authenticated metadata to identify the next processing action, but not enough to reconstruct deeper route state.
 
-Aura uses `SURB`-like reply blocks as Aura-native typed objects with explicit expiry, scope, and accountability semantics.
+Aura uses SURB-like reply blocks as Aura-native typed objects with explicit expiry, scope, and accountability semantics.
 
 ## 5. Link Encryption Versus Path Encryption
 
@@ -158,7 +158,7 @@ Aura uses typed reply blocks for backward anonymous delivery. A reply block is a
 - backward hop material
 - accountability linkage
 
-Reply blocks are not borrowed Tor `SURB` packets. They are typed Aura objects that integrate with Aura movement, accountability, and retrieval-capability rotation rules.
+Reply blocks are not borrowed Tor SURB packets. They are typed Aura objects that integrate with Aura movement, accountability, and retrieval-capability rotation rules.
 
 Reply blocks must remain distinct from:
 
@@ -194,7 +194,7 @@ Aura does not assume a global passive adversary can be defeated. Aura does not a
 
 Aura keeps adjacent-peer Noise channels because they already fit the transport boundary and context model. Aura adds a route-layer construction because adjacent-peer channels alone do not hide deeper route structure from intermediate forwarding hops.
 
-Aura chooses `Curve25519`, `HKDF-SHA256`, and `ChaCha20-Poly1305` because the construction is simple, widely implemented, and fits Aura's typed route-layer needs. The route layer needs explicit forward and backward hop streams, typed replay bounds, and typed reply blocks. A compact Aura-native construction is easier to align with these requirements than importing a foreign packet format.
+Aura chooses Curve25519, `HKDF-SHA256`, and `ChaCha20-Poly1305` because the construction is simple, widely implemented, and fits Aura's typed route-layer needs. The route layer needs explicit forward and backward hop streams, typed replay bounds, and typed reply blocks. A compact Aura-native construction is easier to align with these requirements than importing a foreign packet format.
 
 ## 15. Required Implementation Boundaries
 

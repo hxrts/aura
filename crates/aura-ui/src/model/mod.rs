@@ -1030,17 +1030,15 @@ impl UiController {
 
     pub fn open_create_invitation_modal(
         &self,
-        receiver_id: Option<&AuthorityId>,
-        receiver_label: Option<&str>,
+        _receiver_id: Option<&AuthorityId>,
+        _receiver_label: Option<&str>,
     ) {
         let mut model = write_model(&self.model);
         model.clear_operation(&OperationId::invitation_create());
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
-            receiver_id: receiver_id.map(ToString::to_string).unwrap_or_default(),
-            receiver_label: receiver_label.map(str::to_string),
             message: String::new(),
             ttl_hours: 24,
-            active_field: FieldId::InvitationReceiver,
+            active_field: FieldId::InvitationMessage,
         }));
         drop(model);
         self.request_rerender();
@@ -1072,17 +1070,32 @@ impl UiController {
 
     pub fn toggle_selectable_item(&self, index: usize) {
         let mut model = write_model(&self.model);
-        if let Some(ActiveModal::CreateChannel(state)) = model.active_modal.as_mut() {
-            if let Some(position) = state
-                .selected_members
-                .iter()
-                .position(|selected| *selected == index)
-            {
-                state.selected_members.remove(position);
-            } else {
-                state.selected_members.push(index);
-                state.selected_members.sort_unstable();
+        match model.active_modal.as_mut() {
+            Some(ActiveModal::CreateChannel(state)) => {
+                if let Some(position) = state
+                    .selected_members
+                    .iter()
+                    .position(|selected| *selected == index)
+                {
+                    state.selected_members.remove(position);
+                } else {
+                    state.selected_members.push(index);
+                    state.selected_members.sort_unstable();
+                }
             }
+            Some(ActiveModal::GuardianSetup(state) | ActiveModal::MfaSetup(state)) => {
+                if let Some(position) = state
+                    .selected_indices
+                    .iter()
+                    .position(|selected| *selected == index)
+                {
+                    state.selected_indices.remove(position);
+                } else {
+                    state.selected_indices.push(index);
+                    state.selected_indices.sort_unstable();
+                }
+            }
+            _ => {}
         }
         drop(model);
         self.request_rerender();

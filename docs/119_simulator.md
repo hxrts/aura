@@ -334,11 +334,11 @@ lifecycle in Aura-local simulator scenario state. Use
 Those simulator lanes correspond to the current adaptive-privacy control-plane
 protocol inventory in `aura-agent`:
 
-- `AnonymousPathEstablishProtocol`
-- `MoveReceiptReplyBlockProtocol`
-- `HoldDepositReplyBlockProtocol`
-- `HoldRetrievalReplyBlockProtocol`
-- `HoldAuditReplyBlockProtocol`
+- "AnonymousPathEstablishProtocol"
+- "MoveReceiptReplyBlockProtocol"
+- "HoldDepositReplyBlockProtocol"
+- "HoldRetrievalReplyBlockProtocol"
+- "HoldAuditReplyBlockProtocol"
 
 Bootstrap and stale-node re-entry are not part of these lanes because they
 remain runtime-local bootstrap/hint logic rather than canonical multi-party

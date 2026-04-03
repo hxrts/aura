@@ -30,12 +30,12 @@ Adaptive privacy policy is runtime-owned local state, not shared truth.
 - the `Neighborhood Plane` and `Web of Trust Plane` provide permit and
   candidate inputs
 - rendezvous descriptor views provide service-surface advertisement inputs
-- `SelectionManager` fuses those inputs with local health and budget signals
+- `SelectionManagerService` fuses those inputs with local health and budget signals
   into runtime-local `LocalSelectionProfile` and `SelectionState`
-- `LocalHealthObserver` owns smoothing, hysteresis, and local health snapshots
+- `LocalHealthObserverService` owns smoothing, hysteresis, and local health snapshots
 - `AnonymousPathManager` owns reusable anonymous established-path lifecycle and
   protected encrypted establish-session state
-- `CoverTrafficGenerator` owns cover-floor planning and reserved cover budget
+- `CoverTrafficGeneratorService` owns cover-floor planning and reserved cover budget
 
 This split is strict:
 

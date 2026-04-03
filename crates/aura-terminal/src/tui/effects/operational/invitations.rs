@@ -46,6 +46,7 @@ use super::EffectCommand;
 // Re-export workflows for convenience
 pub use aura_app::ui::workflows::invitation::{
     create_channel_invitation, create_contact_invitation_with_instance,
+    create_generic_contact_invitation_code_terminal_status,
     create_guardian_invitation_with_instance, export_invitation, export_invitation_by_str,
     import_invitation_details,
 };
@@ -86,8 +87,6 @@ pub async fn handle_invitations(
             ttl_secs,
             operation_instance_id,
         } => {
-            let receiver = *receiver_id;
-
             let ttl_ms = ttl_secs.map(|s| s.saturating_mul(1000));
             let invitation_type_lc = invitation_type.to_lowercase();
             let (kind, extra) = invitation_type_lc
@@ -116,26 +115,55 @@ pub async fn handle_invitations(
                             .filter(|name| !name.is_empty())
                     };
 
-                    match create_contact_invitation_with_instance(
-                        app_core,
-                        receiver,
-                        contact_nickname,
-                        message.clone(),
-                        ttl_ms,
-                        operation_instance_id.clone(),
-                    )
-                    .await
-                    {
-                        Ok(info) => info,
-                        Err(e) => {
-                            return Some(Err(OpError::typed(
-                                OpFailureCode::CreateContactInvitation,
-                                format!("Failed to create contact invitation: {e}"),
-                            )));
+                    if let Some(receiver) = receiver_id.as_ref().copied() {
+                        match create_contact_invitation_with_instance(
+                            app_core,
+                            receiver,
+                            contact_nickname,
+                            message.clone(),
+                            ttl_ms,
+                            operation_instance_id.clone(),
+                        )
+                        .await
+                        {
+                            Ok(info) => info,
+                            Err(e) => {
+                                return Some(Err(OpError::typed(
+                                    OpFailureCode::CreateContactInvitation,
+                                    format!("Failed to create contact invitation: {e}"),
+                                )));
+                            }
                         }
+                    } else {
+                        return Some(
+                            create_generic_contact_invitation_code_terminal_status(
+                                app_core,
+                                contact_nickname,
+                                message.clone(),
+                                ttl_ms,
+                                operation_instance_id.clone(),
+                            )
+                            .await
+                            .result
+                            .map(|code| OpResponse::InvitationCode {
+                                id: String::new(),
+                                code,
+                            })
+                            .map_err(|error| {
+                                OpError::typed(
+                                    OpFailureCode::CreateContactInvitation,
+                                    format!("Failed to create generic contact invitation: {error}"),
+                                )
+                            }),
+                        );
                     }
                 }
                 "guardian" => {
+                    let Some(receiver) = receiver_id.as_ref().copied() else {
+                        return Some(Err(OpError::InvalidArgument(
+                            "Guardian invitations require a receiver authority id".to_string(),
+                        )));
+                    };
                     let subject = {
                         let core = app_core.read().await;
                         match core.authority() {
@@ -169,6 +197,11 @@ pub async fn handle_invitations(
                     }
                 }
                 "channel" | "chat" | "group" => {
+                    let Some(receiver) = receiver_id.as_ref().copied() else {
+                        return Some(Err(OpError::InvalidArgument(
+                            "Channel invitations require a receiver authority id".to_string(),
+                        )));
+                    };
                     let home_id = if let Some(id) = extra {
                         id
                     } else {

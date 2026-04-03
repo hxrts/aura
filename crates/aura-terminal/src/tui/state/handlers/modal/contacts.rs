@@ -10,13 +10,12 @@ use crate::tui::screens::Screen;
 
 use super::super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::super::modal_queue::{ContactSelectModalState, QueuedModal};
-use super::super::super::toast::ToastLevel;
 use super::super::super::views::{
     CreateInvitationField, CreateInvitationModalState, ImportInvitationModalState,
     NicknameModalState,
 };
 use super::super::super::TuiState;
-use super::{dismiss_on_escape, list_nav_from_key, modal_text_char_from_key, parse_authority_id};
+use super::{dismiss_on_escape, list_nav_from_key, modal_text_char_from_key};
 
 /// Handle guardian select modal keys (queue-based)
 pub(super) fn handle_guardian_select_key_queue(
@@ -239,26 +238,11 @@ pub(super) fn handle_create_invitation_key_queue(
         }
         KeyCode::Enter => {
             // Submit from any field
-            if modal_state.receiver_id.trim().is_empty() {
-                commands.push(TuiCommand::ShowToast {
-                    message: "No receiver selected for invitation".to_string(),
-                    level: ToastLevel::Error,
-                });
-                return;
-            }
-
             // Contacts page always creates contact invitations
             let invitation_type = super::super::super::commands::InvitationKind::Contact;
 
             commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
-                receiver_id: match parse_authority_id(
-                    state,
-                    &modal_state.receiver_id,
-                    "invitation creation",
-                ) {
-                    Some(id) => id,
-                    None => return,
-                },
+                receiver_id: None,
                 invitation_type,
                 message: (!modal_state.message.trim().is_empty())
                     .then(|| modal_state.message.clone()),
@@ -292,7 +276,7 @@ pub(super) fn handle_create_invitation_key_queue(
                         }
                     });
                 }
-                CreateInvitationField::Receiver | CreateInvitationField::Message => {}
+                CreateInvitationField::Message => {}
             }
         }
         KeyCode::Right => {
@@ -305,17 +289,10 @@ pub(super) fn handle_create_invitation_key_queue(
                         }
                     });
                 }
-                CreateInvitationField::Receiver | CreateInvitationField::Message => {}
+                CreateInvitationField::Message => {}
             }
         }
         KeyCode::Char(c) => match modal_state.focused_field {
-            CreateInvitationField::Receiver => {
-                state.modal_queue.update_active(|modal| {
-                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
-                        s.receiver_id.push(c);
-                    }
-                });
-            }
             CreateInvitationField::Message => {
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::ContactsCreate(ref mut s) = modal {
@@ -326,13 +303,6 @@ pub(super) fn handle_create_invitation_key_queue(
             CreateInvitationField::Ttl => {}
         },
         KeyCode::Backspace => match modal_state.focused_field {
-            CreateInvitationField::Receiver => {
-                state.modal_queue.update_active(|modal| {
-                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
-                        s.receiver_id.pop();
-                    }
-                });
-            }
             CreateInvitationField::Message => {
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::ContactsCreate(ref mut s) = modal {

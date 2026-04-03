@@ -50,22 +50,9 @@ pub(in crate::app) fn modal_view(
             keybind_rows = help_keybind_rows;
         }
         ModalState::CreateInvitation => {
-            if model
-                .create_invitation_modal()
-                .and_then(|state| state.receiver_label.as_ref())
-                .is_some()
-            {
-                details.push("Review the authority id, optional message, and TTL before generating the code.".to_string());
-            } else {
-                details.push("Create a typed contact invitation.".to_string());
-                details.push("Channel invites stay on the explicit channel-invite path so the selected channel binding remains authoritative.".to_string());
-            }
+            details.push("Create a shareable contact invite code.".to_string());
+            details.push("Share it out of band. The recipient authority is learned when they import and accept it.".to_string());
             let modal_state = model.create_invitation_modal().cloned().unwrap_or_default();
-            inputs.push(ModalInputView {
-                label: "Receiver Authority ID".to_string(),
-                field_id: FieldId::InvitationReceiver,
-                value: modal_state.receiver_id,
-            });
             inputs.push(ModalInputView {
                 label: "Message (optional)".to_string(),
                 field_id: FieldId::InvitationMessage,
@@ -204,20 +191,8 @@ pub(in crate::app) fn modal_view(
                         details.push("Step 1 of 3: Select guardians.".to_string());
                         if model.contacts.is_empty() {
                             details.push("No contacts available.".to_string());
-                        } else {
-                            for (idx, contact) in model.contacts.iter().enumerate() {
-                                let focused = if idx == state.focus_index { ">" } else { " " };
-                                let selected = if state.selected_indices.contains(&idx) {
-                                    "[x]"
-                                } else {
-                                    "[ ]"
-                                };
-                                details.push(format!("{focused} {selected} {}", contact.name));
-                            }
                         }
-                        details.push(
-                            "Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string(),
-                        );
+                        // Selection list is rendered via selectable_items (checkbox component)
                     }
                     ThresholdWizardStep::Threshold => {
                         details.push("Step 2 of 3: Choose threshold.".to_string());
@@ -337,29 +312,7 @@ pub(in crate::app) fn modal_view(
                 match state.step {
                     ThresholdWizardStep::Selection => {
                         details.push("Step 1 of 3: Select devices for MFA signing.".to_string());
-                        let devices = if model.has_secondary_device {
-                            vec![
-                                "This Device".to_string(),
-                                model
-                                    .secondary_device_name()
-                                    .unwrap_or("Secondary Device")
-                                    .to_string(),
-                            ]
-                        } else {
-                            vec!["This Device".to_string()]
-                        };
-                        for (idx, device) in devices.iter().enumerate() {
-                            let focused = if idx == state.focus_index { ">" } else { " " };
-                            let selected = if state.selected_indices.contains(&idx) {
-                                "[x]"
-                            } else {
-                                "[ ]"
-                            };
-                            details.push(format!("{focused} {selected} {device}"));
-                        }
-                        details.push(
-                            "Use ↑/↓ to move, Space to toggle, Enter to continue.".to_string(),
-                        );
+                        // Selection list is rendered via selectable_items (checkbox component)
                     }
                     ThresholdWizardStep::Threshold => {
                         details.push("Step 2 of 3: Configure signing threshold.".to_string());
@@ -539,6 +492,48 @@ pub(in crate::app) fn modal_view(
                         index: idx,
                         label: contact.name.clone(),
                         selected: state.selected_members.contains(&idx),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        ModalState::GuardianSetup => model
+            .guardian_setup_modal()
+            .filter(|state| matches!(state.step, ThresholdWizardStep::Selection))
+            .map(|state| {
+                model
+                    .contacts
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, contact)| SelectableItem {
+                        index: idx,
+                        label: contact.name.clone(),
+                        selected: state.selected_indices.contains(&idx),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        ModalState::MfaSetup => model
+            .mfa_setup_modal()
+            .filter(|state| matches!(state.step, ThresholdWizardStep::Selection))
+            .map(|state| {
+                let devices: Vec<String> = if model.has_secondary_device {
+                    vec![
+                        "This Device".to_string(),
+                        model
+                            .secondary_device_name()
+                            .unwrap_or("Secondary Device")
+                            .to_string(),
+                    ]
+                } else {
+                    vec!["This Device".to_string()]
+                };
+                devices
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, name)| SelectableItem {
+                        index: idx,
+                        label: name,
+                        selected: state.selected_indices.contains(&idx),
                     })
                     .collect()
             })

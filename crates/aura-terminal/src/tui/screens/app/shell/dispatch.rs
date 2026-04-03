@@ -978,16 +978,8 @@ fn open_observed_convenience_modal(
     ));
     match dispatch_cmd {
         DispatchCommand::OpenCreateInvitationModal => {
-            let idx = new_state.contacts.selected_index;
-            let guard = shared_contacts_for_dispatch.read();
-            let modal_state = if let Some(contact) = guard.get(idx) {
-                crate::tui::state::CreateInvitationModalState::for_receiver(
-                    contact.id.clone(),
-                    contact.nickname.clone(),
-                )
-            } else {
-                crate::tui::state::CreateInvitationModalState::new()
-            };
+            let _ = shared_contacts_for_dispatch;
+            let modal_state = crate::tui::state::CreateInvitationModalState::new();
             new_state
                 .modal_queue
                 .enqueue(crate::tui::state::QueuedModal::ContactsCreate(modal_state));

@@ -64,6 +64,8 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Aura Messaging Protocol (AMP)](112_amp.md) documents reliable async messaging with acknowledgment and ordering patterns.
 
+[Network Anonymity](123_network_anonymity.md) documents anonymous path routing, bootstrap re-entry records, and reply-block semantics.
+
 [Rendezvous Architecture](113_rendezvous.md) covers context-scoped peer discovery and encrypted envelope exchange.
 
 [Relational Contexts](114_relational_contexts.md) specifies guardian bindings, recovery grants, and cross-authority journals.

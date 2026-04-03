@@ -99,6 +99,11 @@ and continue to map to the same canonical coverage anchors:
 - Chat/contact navigation, the contact-to-friend lifecycle, invitation, home
   creation, channel join, and message-send flows stay anchored by
   `scenario13-mixed-contact-channel-message-e2e.toml`
+- Contacts navigation, invitation creation, and invitation acceptance remain
+  mapped to Scenario 13 plus the semantic observation smoke scenarios. The
+  current terminal-side change only removes stale modal-local ownership
+  assumptions and keeps those flows on the same typed dispatch and shared
+  workflow path.
 
 Scenario 13 remains the canonical anchor for the shared contacts lifecycle
 because it exercises the parity-critical semantic controls for `send friend

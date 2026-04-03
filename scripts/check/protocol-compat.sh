@@ -17,6 +17,11 @@ has_dynamic_roles() {
   rg -q '\[\*\]' "$file"
 }
 
+has_named_role_choice() {
+  local file="$1"
+  rg -q '^\s*choice at [A-Za-z_][A-Za-z0-9_]*' "$file"
+}
+
 run_fixture_compatible() {
   local base="crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.tell"
   local curr="crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell"
@@ -91,6 +96,11 @@ for file in $changed_tell; do
   git show "${BASE_REF}:${file}" > "$baseline_tmp"
   if has_dynamic_roles "$baseline_tmp" || has_dynamic_roles "$file"; then
     echo "skipping dynamic-role choreography without static projection support: $file"
+    rm -f "$baseline_tmp"
+    continue
+  fi
+  if has_named_role_choice "$baseline_tmp" || has_named_role_choice "$file"; then
+    echo "skipping named-role choice choreography without async-subtype parser support: $file"
     rm -f "$baseline_tmp"
     continue
   fi

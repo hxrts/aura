@@ -57,6 +57,8 @@ Parity-critical shared semantic flows must use one explicit ownership category. 
 
 `aura-app` owns authoritative semantic operation coordination and typed lifecycle and error publication. `aura-agent` owns long-lived runtime and service actors and other actor-owned async state. `aura-terminal` and `aura-web` submit commands and observe lifecycle but do not own terminal semantic truth. `aura-harness` consumes typed handles, readiness, and projections but does not mutate semantic lifecycle directly.
 
+Terminal convenience modals stay in that observed-only category. Opening or editing a local TUI modal such as the contact invitation sheet may prefill or reshape local display state, but it must not become an alternate semantic ingress path or carry authoritative receiver ownership. Tests should prove the real semantic boundary remains the typed dispatch command and upstream `aura-app` workflow submission path rather than modal-local state.
+
 If a migrated parity-critical flow needs both actor and move semantics, the split must stay explicit. The actor owns mutable lifecycle state. Move-owned handles and tokens define which caller may advance or transfer it. If that split is not explicit, the flow is not considered correct by construction.
 
 ### Parity-Critical Observation

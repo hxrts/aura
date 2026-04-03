@@ -1686,6 +1686,19 @@ pub mod handoff {
         pub operation_instance_id: Option<OperationInstanceId>,
     }
 
+    /// Inputs for the generic out-of-band create-contact-invitation workflow.
+    #[derive(Debug, Clone)]
+    pub struct CreateGenericContactInvitationRequest {
+        /// Optional nickname carried in the invitation payload.
+        pub nickname: Option<String>,
+        /// Optional invitation message.
+        pub message: Option<String>,
+        /// Optional invitation TTL in milliseconds.
+        pub ttl_ms: Option<u64>,
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
     /// Inputs for the create-guardian-invitation handoff workflow.
     #[derive(Debug, Clone)]
     pub struct CreateGuardianInvitationRequest {
@@ -1734,6 +1747,21 @@ pub mod handoff {
         super::create_contact_invitation_code_with_terminal_status(
             app_core,
             request.receiver,
+            request.nickname,
+            request.message,
+            request.ttl_ms,
+            request.operation_instance_id,
+        )
+        .await
+    }
+
+    /// Create and export a generic contact invitation as one typed handoff workflow.
+    pub async fn create_generic_contact_invitation(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: CreateGenericContactInvitationRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+        super::create_generic_contact_invitation_code_terminal_status(
+            app_core,
             request.nickname,
             request.message,
             request.ttl_ms,
@@ -1877,6 +1905,76 @@ pub async fn create_contact_invitation_code_with_terminal_status(
         result,
         terminal: owner.terminal_status().await,
     }
+}
+
+/// Create and export a generic out-of-band contact invitation code as one
+/// typed terminal operation.
+pub async fn create_generic_contact_invitation_code_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname: Option<String>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_create(),
+        instance_id,
+        SemanticOperationKind::CreateContactInvitation,
+    );
+    let result: Result<String, AuraError> = async {
+        create_generic_contact_invitation_code_owned(
+            app_core, nickname, message, ttl_ms, &owner, None,
+        )
+        .await
+    }
+    .await;
+
+    if let Err(error) = &result {
+        let _ = owner
+            .publish_failure(command_terminal_error(error.to_string()))
+            .await;
+    }
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
+#[aura_macros::semantic_owner(
+    owner = "create_generic_contact_invitation_code_owned",
+    wrapper = "create_generic_contact_invitation_code_terminal_status",
+    terminal = "publish_success_with",
+    postcondition = "invitation_created",
+    proof = crate::workflows::semantic_facts::InvitationCreatedProof,
+    authoritative_inputs = "runtime,authoritative_source",
+    depends_on = "",
+    child_ops = "",
+    category = "move_owned"
+)]
+async fn create_generic_contact_invitation_code_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname: Option<String>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<String, AuraError> {
+    publish_invitation_owner_status(owner, None, SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+    let receiver = require_runtime(app_core).await?.authority_id();
+    let invitation =
+        create_contact_invitation_runtime(app_core, receiver, nickname, message, ttl_ms).await?;
+    let code = export_invitation_runtime(app_core, &invitation.invitation_id).await?;
+    owner
+        .publish_success_with(issue_invitation_created_proof(
+            invitation.invitation_id.clone(),
+        ))
+        .await?;
+    Ok(code)
 }
 
 /// Create a guardian invitation

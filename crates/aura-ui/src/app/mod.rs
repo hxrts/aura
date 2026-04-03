@@ -222,7 +222,7 @@ mod tests {
 
         assert!(create_branch.contains("UiWorkflowHandoffOwner::submit("));
         assert!(create_branch.contains(".run_workflow("));
-        assert!(create_branch.contains("handoff::create_contact_invitation("));
+        assert!(create_branch.contains("handoff::create_generic_contact_invitation("));
         assert!(!create_branch.contains("complete_runtime_modal_operation_success("));
     }
 

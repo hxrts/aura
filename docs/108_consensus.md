@@ -150,7 +150,8 @@ Consensus-backed ceremonies (including BFT-DKG finalization) are admitted only a
 
 Today this admission lives in the runtime bridge and threshold-signing
 services, not in the consensus choreography source. The current
-`AuraConsensus` `.tell` file remains theorem-pack-free because it still models
+consensus choreography source file (`crates/aura-consensus/src/protocol/choreography.tell`)
+remains theorem-pack-free because it still models
 the message skeleton rather than the authoritative admission/evidence profile.
 Adding a theorem pack there now would be decorative.
 
