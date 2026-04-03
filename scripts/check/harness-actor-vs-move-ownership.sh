@@ -71,6 +71,7 @@ rg -q 'move semantics solve session and endpoint ownership transfer' "$agent_arc
 cargo run -q -p aura-macros --bin ownership_lints -- \
   harness-readiness-ownership \
   crates/aura-agent/src/reactive/app_signal_views.rs \
+  crates/aura-agent/src/reactive/app_signal_projection.rs \
   crates/aura-terminal/src \
   crates/aura-web/src \
   crates/aura-harness/src

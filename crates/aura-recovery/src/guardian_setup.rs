@@ -1,64 +1,15 @@
 //! Guardian Setup Choreography
 //!
-//! Initial establishment of guardian relationships for a threshold account.
-//! Uses the authority model - guardians are identified by AuthorityId.
+//! Establishes guardian relationships for a threshold account. Guardians are
+//! identified by `AuthorityId` and hold encrypted FROST key shares for recovery.
 //!
-//! # FROST Key Share Distribution (Task 8.6)
+//! The setup is a three-phase choreography (defined via `tell!` macro):
+//! invitation, acceptance, and completion. `GuardianSetupCoordinator` drives
+//! the ceremony through the `RecoveryCoordinator` trait.
 //!
-//! Guardian recovery requires each guardian to hold a FROST key share. During
-//! setup, these shares must be generated and distributed securely.
-//!
-//! ## Current State (Placeholder)
-//!
-//! The current implementation creates placeholder shares from hashed public keys.
-//! This allows the protocol structure to work but doesn't provide real threshold
-//! cryptographic security.
-//!
-//! ## Target Implementation
-//!
-//! To implement proper guardian key distribution:
-//!
-//! ### Option A: Trusted Dealer Model (Simpler)
-//!
-//! 1. **During `execute_setup()`**, after guardians accept:
-//!    - Generate a fresh FROST key package for the recovery authority using
-//!      `CryptoEffects::frost_keygen()` with `threshold` and `total_guardians`
-//!    - This creates a `PublicKeyPackage` and one `SigningShare` per guardian
-//!
-//! 2. **Encrypt shares for each guardian**:
-//!    - Use `CryptoEffects::asymmetric_encrypt()` with each guardian's public key
-//!    - The guardian's public key comes from `GuardianAcceptance.public_key`
-//!
-//! 3. **Store the recovery authority's public key** in the commitment tree root
-//!
-//! 4. **Distribute encrypted shares** via the completion message:
-//!    - Extend `SetupCompletion` to include `encrypted_shares: Vec<EncryptedShare>`
-//!    - Each guardian receives their encrypted share
-//!
-//! 5. **Guardians store their shares** via `SecureStorageEffects`:
-//!    - Location: `SecureStorageLocation::guardian_share(account_id, guardian_id)`
-//!    - Decrypt with guardian's private key before storing
-//!
-//! ### Option B: Full DKG (More Secure)
-//!
-//! Run a proper Distributed Key Generation ceremony where no single party
-//! knows all shares. This requires additional choreography rounds and is
-//! more complex to implement.
-//!
-//! ## Required Changes
-//!
-//! 1. **types.rs**: Update `RecoveryShare.share` to hold encrypted FROST share bytes
-//! 2. **SetupCompletion**: Add `encrypted_shares` field
-//! 3. **GuardianAcceptance**: Ensure `public_key` is a real encryption public key
-//! 4. **execute_setup()**: Implement key generation and encryption
-//! 5. **accept_as_guardian()**: Handle share reception and secure storage
-//!
-//! ## Security Considerations
-//!
-//! - The trusted dealer model means the setup initiator temporarily knows all shares
-//! - For high-security scenarios, prefer full DKG
-//! - Shares MUST be encrypted before network transmission
-//! - Shares MUST be stored in `SecureStorageEffects`, never in regular storage
+//! Key types: `GuardianInvitation`, `GuardianAcceptance`, `SetupCompletion`,
+//! `EncryptedKeyShare`. Capability-gated helpers `validate_setup_inputs` and
+//! `build_setup_completion` enforce parameter shape at the feature boundary.
 
 use crate::{
     coordinator::{BaseCoordinator, BaseCoordinatorAccess, RecoveryCoordinator},
@@ -140,8 +91,17 @@ pub struct SetupCompletion {
     pub public_key_package: Vec<u8>,
 }
 
+const GUARDIAN_SETUP_INPUT_VALIDATION_CAPABILITY: &str = "guardian_setup_input_validation";
+const GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY: &str = "guardian_setup_completion_build";
+
 /// Validate the feature-level guardian setup parameter shape.
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "guardian_setup_input_validation",
+    family = "runtime_helper"
+)]
 pub fn validate_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> Result<(), String> {
+    let _ = GUARDIAN_SETUP_INPUT_VALIDATION_CAPABILITY;
     if guardians.len() != 3 {
         return Err("Guardian setup requires exactly three guardians".to_string());
     }
@@ -163,11 +123,17 @@ pub fn validate_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> Resul
 
 /// Build the final setup completion payload from guardian responses.
 #[must_use]
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "guardian_setup_completion_build",
+    family = "runtime_helper"
+)]
 pub fn build_setup_completion(
     setup_id: &str,
     threshold: u16,
     acceptances: Vec<GuardianAcceptance>,
 ) -> SetupCompletion {
+    let _ = GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY;
     let accepted_guardians: Vec<AuthorityId> = acceptances
         .iter()
         .filter(|acceptance| acceptance.accepted)

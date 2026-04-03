@@ -10,9 +10,25 @@ use aura_core::effects::{PhysicalTimeEffects, TransportEffects};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{DeviceId, EffectContext};
 
+const RUNTIME_BRIDGE_SYNC_STATUS_QUERY_CAPABILITY: &str = "runtime_bridge_sync_status_query";
+const RUNTIME_BRIDGE_SYNC_PEER_ONLINE_QUERY_CAPABILITY: &str =
+    "runtime_bridge_sync_peer_online_query";
+const RUNTIME_BRIDGE_SYNC_PEER_QUERY_CAPABILITY: &str = "runtime_bridge_sync_peer_query";
+const RUNTIME_BRIDGE_SYNC_TRIGGER_CAPABILITY: &str = "runtime_bridge_sync_trigger";
+const RUNTIME_BRIDGE_SYNC_CEREMONY_PROCESSING_CAPABILITY: &str =
+    "runtime_bridge_sync_ceremony_processing";
+const RUNTIME_BRIDGE_SYNC_WITH_PEER_CAPABILITY: &str = "runtime_bridge_sync_with_peer";
+const RUNTIME_BRIDGE_SYNC_PEER_CHANNEL_CAPABILITY: &str = "runtime_bridge_sync_peer_channel";
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "runtime_bridge_sync_status_query",
+    family = "runtime_helper"
+)]
 pub(super) async fn get_sync_status(
     bridge: &AgentRuntimeBridge,
 ) -> Result<SyncStatus, IntentError> {
+    let _ = RUNTIME_BRIDGE_SYNC_STATUS_QUERY_CAPABILITY;
     let Some(sync) = bridge.agent.runtime().sync() else {
         return Err(service_unavailable("sync_service"));
     };
@@ -34,7 +50,13 @@ pub(super) async fn get_sync_status(
     })
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "runtime_bridge_sync_peer_online_query",
+    family = "runtime_helper"
+)]
 pub(super) async fn is_peer_online(bridge: &AgentRuntimeBridge, peer: AuthorityId) -> bool {
+    let _ = RUNTIME_BRIDGE_SYNC_PEER_ONLINE_QUERY_CAPABILITY;
     let effects = bridge.agent.runtime().effects();
     let context = EffectContext::with_authority(bridge.agent.authority_id()).context_id();
 
@@ -51,16 +73,28 @@ pub(super) async fn is_peer_online(bridge: &AgentRuntimeBridge, peer: AuthorityI
     false
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "runtime_bridge_sync_peer_query",
+    family = "runtime_helper"
+)]
 pub(super) async fn get_sync_peers(
     bridge: &AgentRuntimeBridge,
 ) -> Result<Vec<DeviceId>, IntentError> {
+    let _ = RUNTIME_BRIDGE_SYNC_PEER_QUERY_CAPABILITY;
     let Some(sync) = bridge.agent.runtime().sync() else {
         return Err(service_unavailable("sync_service"));
     };
     Ok(sync.peers().await)
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "runtime_bridge_sync_trigger",
+    family = "runtime_helper"
+)]
 pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
+    let _ = RUNTIME_BRIDGE_SYNC_TRIGGER_CAPABILITY;
     let Some(sync) = bridge.agent.runtime().sync() else {
         return Err(service_unavailable("sync_service"));
     };
@@ -158,9 +192,15 @@ pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), Inte
     }
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "runtime_bridge_sync_ceremony_processing",
+    family = "runtime_helper"
+)]
 pub(super) async fn process_ceremony_messages(
     bridge: &AgentRuntimeBridge,
 ) -> Result<CeremonyProcessingOutcome, IntentError> {
+    let _ = RUNTIME_BRIDGE_SYNC_CEREMONY_PROCESSING_CAPABILITY;
     let invitation_handler = crate::handlers::invitation::InvitationHandler::new(
         crate::core::AuthorityContext::new_with_device(
             bridge.agent.authority_id(),
@@ -225,10 +265,16 @@ pub(super) async fn process_ceremony_messages(
     })
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "runtime_bridge_sync_with_peer",
+    family = "runtime_helper"
+)]
 pub(super) async fn sync_with_peer(
     bridge: &AgentRuntimeBridge,
     peer_id: &str,
 ) -> Result<(), IntentError> {
+    let _ = RUNTIME_BRIDGE_SYNC_WITH_PEER_CAPABILITY;
     let Some(sync) = bridge.agent.runtime().sync() else {
         return Err(service_unavailable("sync_service"));
     };
@@ -242,11 +288,17 @@ pub(super) async fn sync_with_peer(
         .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "runtime_bridge_sync_peer_channel",
+    family = "runtime_helper"
+)]
 pub(super) async fn ensure_peer_channel(
     bridge: &AgentRuntimeBridge,
     context: ContextId,
     peer: AuthorityId,
 ) -> Result<(), IntentError> {
+    let _ = RUNTIME_BRIDGE_SYNC_PEER_CHANNEL_CAPABILITY;
     let effects = bridge.agent.runtime().effects();
     let Some(rendezvous_manager) = bridge.agent.runtime().rendezvous() else {
         return Err(service_unavailable("rendezvous_manager"));

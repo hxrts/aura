@@ -43,6 +43,10 @@ case "$mode" in
     scope_paths=(
       crates/aura-app/src/workflows
       crates/aura-agent/src/runtime_bridge
+      crates/aura-agent/src/reactive
+      crates/aura-chat/src
+      crates/aura-invitation/src
+      crates/aura-recovery/src
     )
     required_attr='#[aura_macros::capability_boundary'
     completeness_exclusions=()
@@ -158,6 +162,29 @@ check_capability_boundary_completeness() {
     "crates/aura-app/src/workflows/semantic_facts.rs:issue_device_enrollment_imported_proof"
     "crates/aura-agent/src/runtime_bridge/mod.rs:secure_storage_bootstrap_boundary"
     "crates/aura-agent/src/runtime_bridge/mod.rs:secure_storage_bootstrap_store_capabilities"
+    "crates/aura-agent/src/runtime_bridge/identity.rs:get_settings"
+    "crates/aura-agent/src/runtime_bridge/identity.rs:list_devices"
+    "crates/aura-agent/src/runtime_bridge/identity.rs:list_authorities"
+    "crates/aura-agent/src/runtime_bridge/identity.rs:set_nickname_suggestion"
+    "crates/aura-agent/src/runtime_bridge/identity.rs:set_mfa_policy"
+    "crates/aura-agent/src/runtime_bridge/identity.rs:current_time_ms"
+    "crates/aura-agent/src/runtime_bridge/identity.rs:sleep_ms"
+    "crates/aura-agent/src/runtime_bridge/identity.rs:authentication_status"
+    "crates/aura-agent/src/runtime_bridge/sync.rs:get_sync_status"
+    "crates/aura-agent/src/runtime_bridge/sync.rs:is_peer_online"
+    "crates/aura-agent/src/runtime_bridge/sync.rs:get_sync_peers"
+    "crates/aura-agent/src/runtime_bridge/sync.rs:trigger_sync"
+    "crates/aura-agent/src/runtime_bridge/sync.rs:process_ceremony_messages"
+    "crates/aura-agent/src/runtime_bridge/sync.rs:sync_with_peer"
+    "crates/aura-agent/src/runtime_bridge/sync.rs:ensure_peer_channel"
+    "crates/aura-agent/src/reactive/app_signal_projection.rs:map_invitation_type"
+    "crates/aura-agent/src/reactive/app_signal_projection.rs:map_channel_metadata"
+    "crates/aura-agent/src/reactive/app_signal_projection.rs:collect_moderation_homes"
+    "crates/aura-chat/src/guards.rs:plan_local_commit_execution"
+    "crates/aura-invitation/src/guards.rs:plan_accept_execution"
+    "crates/aura-invitation/src/guards.rs:plan_send_execution"
+    "crates/aura-recovery/src/guardian_setup.rs:validate_setup_inputs"
+    "crates/aura-recovery/src/guardian_setup.rs:build_setup_completion"
   )
   local entry file function_name
   for entry in "${required_entries[@]}"; do
@@ -232,9 +259,13 @@ is_actor_owned_candidate() {
 
 is_capability_boundary_candidate() {
   local line="$1"
-  local pattern='^\+.*fn[[:space:]]+(issue_[A-Za-z0-9_]+_(proof|context)|[A-Za-z0-9_]*capability|authorize_[A-Za-z0-9_]+|secure_storage_[A-Za-z0-9_]+)\('
+  local pattern='^\+.*fn[[:space:]]+(issue_[A-Za-z0-9_]+_(proof|context)|[A-Za-z0-9_]*capability|authorize_[A-Za-z0-9_]+|secure_storage_[A-Za-z0-9_]+|plan_[A-Za-z0-9_]+|validate_setup_inputs|build_setup_completion|map_invitation_type|map_channel_metadata|collect_moderation_homes|get_settings|list_devices|list_authorities|set_nickname_suggestion|set_mfa_policy|current_time_ms|sleep_ms|authentication_status|get_sync_status|is_peer_online|get_sync_peers|trigger_sync|process_ceremony_messages|sync_with_peer|ensure_peer_channel)\('
   [[ "$current_file" == crates/aura-app/src/workflows/* \
-      || "$current_file" == crates/aura-agent/src/runtime_bridge/* ]] || return 1
+      || "$current_file" == crates/aura-agent/src/runtime_bridge/* \
+      || "$current_file" == crates/aura-agent/src/reactive/* \
+      || "$current_file" == crates/aura-chat/src/* \
+      || "$current_file" == crates/aura-invitation/src/* \
+      || "$current_file" == crates/aura-recovery/src/* ]] || return 1
   [[ "$line" =~ $pattern ]]
 }
 

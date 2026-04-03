@@ -2753,7 +2753,10 @@ fn scan_browser_shell_mutation_snapshot_boundary(file: &Path, source: &str) -> V
 fn scan_agent_channel_metadata_ownership(file: &Path, source: &str) -> Vec<String> {
     if !file_matches_suffix(
         file,
-        &["crates/aura-agent/src/reactive/app_signal_views.rs"],
+        &[
+            "crates/aura-agent/src/reactive/app_signal_views.rs",
+            "crates/aura-agent/src/reactive/app_signal_projection.rs",
+        ],
     ) {
         return Vec::new();
     }

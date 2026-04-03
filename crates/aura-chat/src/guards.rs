@@ -126,6 +126,9 @@ pub enum EffectCommand {
 /// Outcome type shared across Layer 5 feature crates.
 pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
+const CHAT_GUARD_LOCAL_COMMIT_EXECUTION_PLAN_CAPABILITY: &str =
+    "chat_guard_local_commit_execution_plan";
+
 /// Pure execution plan for local-first chat fact commits.
 ///
 /// Layer 6 runtimes execute the journal append and may treat flow charging as
@@ -163,9 +166,15 @@ pub fn denial_reason(outcome: &GuardOutcome) -> String {
 /// Partition chat guard effects into local journal appends and tracked flow
 /// costs. Chat's authoritative local-first commit path persists facts
 /// immediately; flow charging remains an observed transport-time concern.
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "chat_guard_local_commit_execution_plan",
+    family = "runtime_helper"
+)]
 pub fn plan_local_commit_execution(
     outcome: GuardOutcome,
 ) -> Result<ChatEffectExecutionPlan, String> {
+    let _ = CHAT_GUARD_LOCAL_COMMIT_EXECUTION_PLAN_CAPABILITY;
     if outcome.is_denied() {
         return Err(denial_reason(&outcome));
     }

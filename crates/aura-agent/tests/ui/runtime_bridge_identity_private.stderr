@@ -1,0 +1,13 @@
+error[E0603]: module `runtime_bridge` is private
+ --> tests/ui/runtime_bridge_identity_private.rs:1:17
+  |
+1 | use aura_agent::runtime_bridge::identity::get_settings;
+  |                 ^^^^^^^^^^^^^^  -------- module `identity` is not publicly re-exported
+  |                 |
+  |                 private module
+  |
+note: the module `runtime_bridge` is defined here
+ --> src/lib.rs
+  |
+  | mod runtime_bridge;
+  | ^^^^^^^^^^^^^^^^^^

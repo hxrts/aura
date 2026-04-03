@@ -182,6 +182,11 @@ pub enum EffectCommand {
 /// Outcome type shared across Layer 5 feature crates.
 pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
+const INVITATION_GUARD_ACCEPT_EXECUTION_PLAN_CAPABILITY: &str =
+    "invitation_guard_accept_execution_plan";
+const INVITATION_GUARD_SEND_EXECUTION_PLAN_CAPABILITY: &str =
+    "invitation_guard_send_execution_plan";
+
 /// Pure execution plan derived from an invitation guard outcome.
 ///
 /// Layer 6 runtimes interpret this plan, but the partitioning itself is
@@ -274,9 +279,15 @@ pub fn check_flow_budget(
 /// Accept keeps flow-budget charging and receipt recording local so the
 /// authoritative accept settlement stays atomic even if the peer notification is
 /// deferred or fails later.
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "invitation_guard_accept_execution_plan",
+    family = "runtime_helper"
+)]
 pub fn plan_accept_execution(
     outcome: GuardOutcome,
 ) -> Result<InvitationEffectExecutionPlan, String> {
+    let _ = INVITATION_GUARD_ACCEPT_EXECUTION_PLAN_CAPABILITY;
     if outcome.is_denied() {
         return Err(denial_reason(&outcome));
     }
@@ -301,7 +312,13 @@ pub fn plan_accept_execution(
 /// Send defers every outwardly visible side effect except the journal append so
 /// invitation creation can publish the authoritative pending fact before budget,
 /// receipt, and network effects run on their own timeout policy.
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "invitation_guard_send_execution_plan",
+    family = "runtime_helper"
+)]
 pub fn plan_send_execution(outcome: GuardOutcome) -> Result<InvitationEffectExecutionPlan, String> {
+    let _ = INVITATION_GUARD_SEND_EXECUTION_PLAN_CAPABILITY;
     if outcome.is_denied() {
         return Err(denial_reason(&outcome));
     }
