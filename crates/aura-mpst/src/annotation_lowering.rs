@@ -1,13 +1,11 @@
-//! Aura Annotation Extraction
+//! Aura annotation lowering.
 //!
-//! Simple annotation extraction utilities for Aura choreographic effects.
-//! Uses a minimal parser-oriented pattern for clean annotation processing.
+//! This module lowers compiled Telltale annotation metadata into Aura-owned
+//! effects. Parsing and projection stay upstream; Aura only owns the semantic
+//! interpretation layer.
 
 use crate::ids::RoleId;
-use crate::upstream::language::{
-    collect_choreography_annotation_records, parse_choreography_str, AnnotationScope, Choreography,
-    CompiledChoreography, ProtocolAnnotationRecord,
-};
+use crate::upstream::language::{AnnotationScope, CompiledChoreography, ProtocolAnnotationRecord};
 use aura_core::{CapabilityName, CapabilityNameError};
 
 const DEFAULT_FLOW_COST: u64 = 100;
@@ -78,11 +76,11 @@ pub struct LinkDirective {
     pub imports: Vec<String>,
 }
 
-/// Errors that can occur during annotation extraction
+/// Errors that can occur during annotation lowering.
 #[derive(Debug, thiserror::Error)]
 pub enum AuraExtractionError {
-    /// Failed to parse an annotation
-    #[error("Annotation parse error: {0}")]
+    /// Encountered malformed annotation metadata.
+    #[error("annotation lowering error: {0}")]
     AnnotationParseError(String),
 
     /// Invalid annotation value
@@ -134,35 +132,15 @@ pub fn parse_choreography_capability(
     Ok(parsed)
 }
 
-/// Extract Aura annotations from a choreography string
-///
-/// Parse once through Telltale and then derive Aura effects from the
-/// authoritative ordered annotation records.
-pub fn extract_aura_annotations(
-    choreography_str: &str,
-) -> Result<Vec<AuraEffect>, AuraExtractionError> {
-    let choreography = parse_choreography_str(choreography_str)
-        .map_err(|err| AuraExtractionError::AnnotationParseError(err.to_string()))?;
-    extract_aura_annotations_from_choreography(&choreography)
-}
-
-/// Extract Aura annotations from an already parsed choreography AST.
-pub fn extract_aura_annotations_from_choreography(
-    choreography: &Choreography,
-) -> Result<Vec<AuraEffect>, AuraExtractionError> {
-    let records = collect_choreography_annotation_records(choreography);
-    extract_aura_annotations_from_records(&records)
-}
-
-/// Extract Aura annotations from a compiled Telltale choreography.
-pub fn extract_aura_annotations_from_compiled(
+/// Lower Aura effects from a compiled Telltale choreography.
+pub fn lower_aura_effects(
     compiled: &CompiledChoreography,
 ) -> Result<Vec<AuraEffect>, AuraExtractionError> {
-    extract_aura_annotations_from_records(&compiled.annotation_records())
+    lower_aura_effects_from_records(&compiled.annotation_records())
 }
 
-/// Extract Aura annotations from ordered Telltale annotation records.
-pub fn extract_aura_annotations_from_records(
+/// Lower Aura effects from ordered Telltale annotation records.
+pub fn lower_aura_effects_from_records(
     records: &[ProtocolAnnotationRecord],
 ) -> Result<Vec<AuraEffect>, AuraExtractionError> {
     let mut effects = Vec::new();
@@ -548,11 +526,18 @@ fn parse_leakage_budget_string(raw: &str) -> Result<Vec<u64>, AuraExtractionErro
 mod tests {
     use super::*;
 
-    fn test_choreography(body: &str) -> String {
-        format!(
-            "protocol Extracted =\n  roles Alice, Bob, Coordinator, Worker\n  {}\n",
-            body.trim()
-        )
+    fn test_compiled_choreography(body: &str) -> CompiledChoreography {
+        let declared_roles = ["Alice", "Bob", "Coordinator", "Worker"]
+            .into_iter()
+            .filter(|role| body.contains(role))
+            .collect::<Vec<_>>()
+            .join(", ");
+        crate::upstream::language::compile_choreography(&format!(
+            "protocol Extracted =\n  roles {}\n  {}\n",
+            declared_roles,
+            body.trim(),
+        ))
+        .expect("test choreography should compile")
     }
 
     #[test]
@@ -590,10 +575,10 @@ mod tests {
 
     #[test]
     fn test_guard_capability_annotation() {
-        let choreography = test_choreography(
+        let compiled = test_compiled_choreography(
             r#"Alice { guard_capability : "chat:message:send" } -> Bob: Message"#,
         );
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let effects = lower_aura_effects(&compiled).unwrap();
         let has_guard = effects.iter().any(|e| {
             matches!(e, AuraEffect::GuardCapability { capability, role }
                 if capability.as_str() == "chat:message:send" && role.as_str() == "Alice")
@@ -603,9 +588,10 @@ mod tests {
 
     #[test]
     fn test_journal_facts_annotation() {
-        let choreography =
-            test_choreography(r#"Alice { journal_facts : "message_sent" } -> Bob: Message"#);
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let compiled = test_compiled_choreography(
+            r#"Alice { journal_facts : "message_sent" } -> Bob: Message"#,
+        );
+        let effects = lower_aura_effects(&compiled).unwrap();
         let has_facts = effects.iter().any(|e| {
             matches!(e, AuraEffect::JournalFacts { facts, role }
                 if facts == "message_sent" && role.as_str() == "Alice")
@@ -616,10 +602,10 @@ mod tests {
     #[test]
     fn test_default_flow_cost() {
         // Line with annotation but no flow_cost should get default of 100
-        let choreography = test_choreography(
+        let compiled = test_compiled_choreography(
             r#"Alice { guard_capability : "chat:message:send" } -> Bob: Message"#,
         );
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let effects = lower_aura_effects(&compiled).unwrap();
 
         // Should have both guard capability and default flow cost
         let has_guard = effects
@@ -636,10 +622,10 @@ mod tests {
     #[test]
     fn test_explicit_flow_cost_overrides_default() {
         // Explicit flow_cost should override the default
-        let choreography = test_choreography(
+        let compiled = test_compiled_choreography(
             r#"Alice { guard_capability : "chat:message:send", flow_cost : 250 } -> Bob: Message"#,
         );
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let effects = lower_aura_effects(&compiled).unwrap();
 
         // Should have explicit flow cost of 250, not default 100
         let has_explicit_cost = effects
@@ -659,8 +645,8 @@ mod tests {
     #[test]
     fn test_no_annotation_no_flow_cost() {
         // Line without annotation should not get flow cost
-        let choreography = test_choreography(r#"Alice -> Bob: SimpleMessage"#);
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let compiled = test_compiled_choreography(r#"Alice -> Bob: SimpleMessage"#);
+        let effects = lower_aura_effects(&compiled).unwrap();
 
         // Should not have any flow cost effects
         let has_flow_cost = effects
@@ -675,9 +661,9 @@ mod tests {
 
     #[test]
     fn test_journal_merge_annotation() {
-        let choreography =
-            test_choreography(r#"Alice { journal_merge : true } -> Bob: MergeRequest"#);
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let compiled =
+            test_compiled_choreography(r#"Alice { journal_merge : true } -> Bob: MergeRequest"#);
+        let effects = lower_aura_effects(&compiled).unwrap();
 
         let has_journal_merge = effects
             .iter()
@@ -688,9 +674,9 @@ mod tests {
 
     #[test]
     fn test_audit_log_annotation() {
-        let choreography =
-            test_choreography(r#"Alice { audit_log : "message_sent" } -> Bob: Message"#);
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let compiled =
+            test_compiled_choreography(r#"Alice { audit_log : "message_sent" } -> Bob: Message"#);
+        let effects = lower_aura_effects(&compiled).unwrap();
 
         let has_audit_log = effects
             .iter()
@@ -701,9 +687,9 @@ mod tests {
 
     #[test]
     fn test_leak_annotation_parentheses() {
-        let choreography =
-            test_choreography(r#"Alice { leak: (External, Neighbor) } -> Bob: Message"#);
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let compiled =
+            test_compiled_choreography(r#"Alice { leak: (External, Neighbor) } -> Bob: Message"#);
+        let effects = lower_aura_effects(&compiled).unwrap();
 
         let has_leakage = effects.iter().any(|e| {
             matches!(e, AuraEffect::Leakage { observers, role }
@@ -720,8 +706,8 @@ mod tests {
 
     #[test]
     fn test_leak_annotation_quoted() {
-        let choreography = test_choreography(r#"Alice { leak : "External" } -> Bob: Message"#);
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let compiled = test_compiled_choreography(r#"Alice { leak : "External" } -> Bob: Message"#);
+        let effects = lower_aura_effects(&compiled).unwrap();
 
         let has_leakage = effects.iter().any(|e| {
             matches!(e, AuraEffect::Leakage { observers, role }
@@ -737,10 +723,10 @@ mod tests {
 
     #[test]
     fn test_link_annotation_parsing() {
-        let choreography = test_choreography(
+        let compiled = test_compiled_choreography(
             r#"Coordinator { link : "bundle=sync_chat|exports=chat.send,sync.push|imports=journal.commit" } -> Worker: Step"#,
         );
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let effects = lower_aura_effects(&compiled).unwrap();
         let has_link = effects.iter().any(|effect| {
             matches!(effect, AuraEffect::Link { directive, role }
                 if directive.bundle_id == "sync_chat"
@@ -753,10 +739,10 @@ mod tests {
 
     #[test]
     fn test_link_annotation_requires_bundle_key() {
-        let choreography = test_choreography(
+        let compiled = test_compiled_choreography(
             r#"Coordinator { link : "exports=chat.send|imports=sync.push" } -> Worker: Step"#,
         );
-        let err = extract_aura_annotations(&choreography).expect_err("missing bundle must fail");
+        let err = lower_aura_effects(&compiled).expect_err("missing bundle must fail");
         assert!(
             err.to_string().contains("bundle=<id>"),
             "error should mention required bundle key"
@@ -765,10 +751,10 @@ mod tests {
 
     #[test]
     fn test_link_annotation_record_syntax() {
-        let choreography = test_choreography(
+        let compiled = test_compiled_choreography(
             r#"Coordinator { link : "bundle=sync_chat|exports=chat.send,sync.push|imports=journal.commit" } -> Worker : Step of crate.demo.Payload"#,
         );
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let effects = lower_aura_effects(&compiled).unwrap();
         let has_link = effects.iter().any(|effect| {
             matches!(effect, AuraEffect::Link { directive, role }
                 if directive.bundle_id == "sync_chat"
@@ -784,14 +770,14 @@ mod tests {
 
     #[test]
     fn test_leakage_budget_annotation_quoted() {
-        let choreography =
-            test_choreography(r#"Alice { leakage_budget : "1, 0, 0" } -> Bob: Message"#);
-        let effects = extract_aura_annotations(&choreography).unwrap();
+        let compiled =
+            test_compiled_choreography(r#"Alice { leakage_budget : "1, 0, 0" } -> Bob: Message"#);
+        let effects = lower_aura_effects(&compiled).unwrap();
         assert!(
             effects
                 .iter()
                 .any(|effect| matches!(effect, AuraEffect::FlowCost { cost: 100, .. })),
-            "quoted leakage_budget should parse without breaking annotation extraction"
+            "quoted leakage_budget should parse without breaking annotation lowering"
         );
     }
 
@@ -815,20 +801,17 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_annotations_from_compiled_choreography() {
-        let choreography = parse_choreography_str(
+    fn test_lower_effects_from_compiled_choreography() {
+        let compiled = crate::upstream::language::compile_choreography(
             r#"
 protocol Guarded =
   roles Alice, Bob
   Alice { guard_capability : "chat:message:send", flow_cost : 42 } -> Bob : Message
 "#,
         )
-        .expect("choreography should parse");
-        let compiled = crate::upstream::language::compile_choreography_ast(choreography)
-            .expect("choreography should compile");
+        .expect("choreography should compile");
 
-        let effects = extract_aura_annotations_from_compiled(&compiled)
-            .expect("compiled annotations should parse");
+        let effects = lower_aura_effects(&compiled).expect("compiled annotations should parse");
 
         assert!(effects.iter().any(|effect| {
             matches!(

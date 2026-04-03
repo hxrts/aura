@@ -29,7 +29,7 @@ Aura-owned boundary library for choreographic protocol specifications and multi-
 - `src/types.rs`: Core session type definitions.
 - `src/guards.rs`: Guard chain integration traits.
 - `src/runtime.rs`: Session endpoints and continuation types.
-- `src/ast_extraction.rs`: Annotation parsing, canonical capability parsing, and typed choreography metadata extraction.
+- `src/annotation_lowering.rs`: Lower compiled Telltale annotation records into Aura-owned effects and canonical capability metadata.
 - `src/upstream.rs`: Single Aura-owned boundary for upstream Telltale surfaces.
 
 ## Upstream Boundary Contract
@@ -93,7 +93,7 @@ Contract alignment:
 |---------|----------|-------|
 | `src/projection.rs`, `src/protocol.rs`, `src/types.rs`, `src/guards.rs` | `Pure` | Protocol/specification semantics and projection rules only. |
 | `src/runtime.rs`, endpoint/session descriptors, continuation types | `MoveOwned` | Session endpoints and protocol continuations are value-level handoff surfaces consumed by higher layers. |
-| `src/ast_extraction.rs` | `Pure` | Annotation parsing and typed choreography metadata extraction. |
+| `src/annotation_lowering.rs` | `Pure` | Lower compiled Telltale annotation records into Aura-owned effects. |
 | Actor-owned runtime state | none | Live protocol execution ownership belongs in higher layers using these types. |
 | Observed-only surfaces | none | Tooling can inspect generated artifacts but does not own protocol truth. |
 
@@ -122,7 +122,6 @@ cargo test -p aura-mpst --lib             # inline unit tests
 | Legacy or unnamespaced guard capability admitted | `src/composition.rs` inline | covered |
 | Leak annotation lost | `tests/protocols/annotation_extraction.rs` | covered |
 | Multiple annotations reordered | `tests/protocols/annotation_extraction.rs` | covered |
-| Extension registry creation fails | `tests/protocols/extension_types.rs` | covered |
 | Extension types can't be composed | `tests/protocols/extension_types.rs` | covered |
 | Composite extension ordering wrong | `tests/protocols/extension_types.rs` | covered |
 | Extension field values silently lost | `tests/protocols/extension_types.rs` | covered |

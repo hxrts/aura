@@ -3,17 +3,6 @@
 //! form the runtime side-effect bridge for choreographic guard annotations.
 
 use aura_core::{capability_name, types::identifiers::DeviceId, ContextId};
-use aura_mpst::upstream::language::extensions::ExtensionRegistry;
-
-/// Extension registry can be instantiated — basic smoke test.
-#[test]
-fn test_extension_registry_operations() {
-    // Test that registry can be created
-    let _registry = ExtensionRegistry::new();
-
-    // The actual extension registration happens in AuraHandler::create_extension_registry()
-    // which is private and tested through handler creation
-}
 
 /// Core identity types accessible through aura-mpst re-exports.
 #[test]

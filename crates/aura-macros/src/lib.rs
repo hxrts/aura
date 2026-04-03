@@ -3,14 +3,15 @@
 //! **Purpose**: Compile-time DSL parser for choreographies with Aura-specific annotations.
 //!
 //! This crate provides choreography and effect handler macros for the Aura project,
-//! implementing a compile-time DSL that parses `guard_capability`, `flow_cost`, `journal_facts`
-//! and generates type-safe Rust code for distributed protocols.
+//! implementing a compile-time DSL that compiles choreographies through
+//! Telltale and lowers `guard_capability`, `flow_cost`, and `journal_facts`
+//! into Aura-owned semantics.
 //!
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
 //! - YES Choreography DSL parsing and code generation
-//! - YES Aura-specific annotation extraction
+//! - YES Aura-specific annotation lowering over compiled Telltale metadata
 //! - YES Type-safe macro generation for distributed protocols
 //! - YES Integration with Telltale projection
 //! - NO effect handler implementations (that's aura-effects)
@@ -50,8 +51,8 @@ mod test_macros;
 /// - Session type safety and choreographic projection
 /// - Protocol composition and modular design
 ///
-/// Following the external-demo pattern, we use an empty extension registry
-/// to avoid buggy extensions while maintaining full feature inheritance.
+/// Aura-specific semantics are derived from the shared Telltale frontend rather
+/// than from a custom runtime extension registry.
 ///
 /// # Example
 ///

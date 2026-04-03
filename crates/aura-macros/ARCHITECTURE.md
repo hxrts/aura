@@ -31,7 +31,7 @@ Compile-time DSL parser for choreographies with Aura-specific annotations. Gener
 - Depends only on aura-core (pure compile-time code generation).
 - Is a proc-macro crate (no runtime code).
 - All work happens at compile time.
-- Uses empty extension registry (extensions handled by aura-macros itself).
+- Uses the shared Telltale frontend, then lowers compiled annotation metadata into Aura-owned semantics.
 
 ### InvariantChoreographyAnnotationProjection
 

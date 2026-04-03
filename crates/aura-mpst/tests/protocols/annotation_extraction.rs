@@ -2,7 +2,13 @@
 //! extracted completely and in document order. If annotations are lost
 //! or reordered, guard checks may be skipped or run in the wrong sequence.
 
-use aura_mpst::{extract_aura_annotations, AuraEffect, RoleId};
+use aura_mpst::upstream::language::compile_choreography;
+use aura_mpst::{lower_aura_effects, AuraEffect, RoleId};
+
+fn compile_and_lower(choreography: &str) -> Result<Vec<AuraEffect>, Box<dyn std::error::Error>> {
+    let compiled = compile_choreography(choreography)?;
+    Ok(lower_aura_effects(&compiled)?)
+}
 
 /// guard_capability annotation produces GuardCapability effect with the
 /// correct capability string and role — if lost, the guard chain skips
@@ -18,7 +24,7 @@ protocol Guarded =
   Alice { guard_capability : "chat:message:send" } -> Bob : Message
     "#;
 
-    let effects = extract_aura_annotations(choreography).expect("extract annotations");
+    let effects = compile_and_lower(choreography).expect("lower annotations");
     let has_guard = effects.iter().any(|effect| {
         matches!(
             effect,
@@ -43,7 +49,7 @@ protocol Leaky =
   Alice { leak: (External, Neighbor) } -> Bob : Message
     "#;
 
-    let effects = extract_aura_annotations(choreography).expect("extract annotations");
+    let effects = compile_and_lower(choreography).expect("lower annotations");
     let has_leak = effects.iter().any(|effect| {
         matches!(
             effect,
@@ -71,7 +77,7 @@ protocol MultiAnnotated =
   Alice { guard_capability : "chat:message:send", flow_cost : 10, leak: (External) } -> Bob : Msg
     "#;
 
-    let effects = extract_aura_annotations(choreography).expect("extract annotations");
+    let effects = compile_and_lower(choreography).expect("lower annotations");
 
     // Find the indices of each effect type for Alice
     let guard_idx = effects
@@ -111,7 +117,7 @@ protocol Guarded =
   Alice { guard_capability : "send_message" } -> Bob : Message
     "#;
 
-    let err = extract_aura_annotations(choreography).expect_err("legacy name must fail");
+    let err = compile_and_lower(choreography).expect_err("legacy name must fail");
     assert!(
         err.to_string().contains("canonical namespaced"),
         "error should explain the canonical namespace requirement"

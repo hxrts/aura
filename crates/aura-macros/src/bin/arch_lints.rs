@@ -1311,7 +1311,7 @@ fn capability_name_parse_allowed(path: &str) -> bool {
     path == "crates/aura-core/src/capability_name.rs"
         || path == "crates/aura-authorization/src/biscuit_authorization.rs"
         || path == "crates/aura-guards/src/authorization.rs"
-        || path == "crates/aura-mpst/src/ast_extraction.rs"
+        || path == "crates/aura-mpst/src/annotation_lowering.rs"
         || path == "crates/aura-mpst/src/composition.rs"
         || path == "crates/aura-macros/src/capability_family.rs"
         || path == "crates/aura-macros/src/bin/arch_lints.rs"

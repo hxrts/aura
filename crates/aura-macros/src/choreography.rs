@@ -1,6 +1,6 @@
 //! Aura Choreography Macro Implementation
 //!
-//! This module provides the choreography! macro that generates both the underlying
+//! This module provides the tell! macro that generates both the underlying
 //! Telltale choreography and the Aura-specific wrapper module expected by
 //! the examples and integration code.
 //!
@@ -27,8 +27,8 @@ use telltale_choreography::{
 use telltale_language as telltale_choreography;
 use telltale_theory::coherence::check_coherent;
 
-// Import Biscuit-related types for the updated annotation system
-use aura_mpst::ast_extraction::{extract_aura_annotations_from_compiled, AuraEffect};
+// Import Aura-specific lowering output for compiled choreographies.
+use aura_mpst::annotation_lowering::{lower_aura_effects, AuraEffect};
 
 /// Parsed choreography input (DSL source + derived metadata)
 #[derive(Debug)]
@@ -337,7 +337,7 @@ fn parse_choreography_source(input: TokenStream) -> Result<ChoreographyInput, sy
         .iter()
         .map(|role| role.name().clone())
         .collect::<Vec<_>>();
-    let aura_annotations = extract_aura_annotations_from_compiled(&compiled)
+    let aura_annotations = lower_aura_effects(&compiled)
         .map_err(|err| syn::Error::new(proc_macro2::Span::call_site(), err.to_string()))?;
     validate_link_annotations(&aura_annotations).map_err(|err| {
         syn::Error::new(span, format!("Link annotation validation failed: {err}"))
@@ -1744,7 +1744,7 @@ fn generate_aura_wrapper(
             // - biscuit_auth::Biscuit
             // - aura_core::FlowBudget
             // - aura_core::types::scope::ResourceScope
-            // - aura_mpst::ast_extraction::AuraEffect (for annotation processing)
+            // - aura_mpst::annotation_lowering::AuraEffect (for annotation processing)
             // Users should provide their own BiscuitGuardEvaluator implementation
 
             /// Role enumeration for this choreography
@@ -2459,7 +2459,8 @@ mod tests {
     use super::{
         build_coherence_validation_input, validate_link_annotations, validate_protocol_coherence,
     };
-    use aura_mpst::ast_extraction::extract_aura_annotations;
+    use aura_mpst::annotation_lowering::lower_aura_effects;
+    use telltale_language::compile_choreography;
     use telltale_language::parse_choreography_str;
 
     fn parse_test_choreography(dsl: &str) -> telltale_language::ast::Choreography {
@@ -2476,7 +2477,8 @@ protocol LinkValidation =
   A { link : "bundle=alpha|exports=sync.push|imports=chat.send" } -> B : Msg
   B { link : "bundle=beta|exports=chat.send|imports=sync.push" } -> A : Ack
         "#;
-        let annotations = extract_aura_annotations(dsl).expect("annotations should parse");
+        let compiled = compile_choreography(dsl).expect("choreography should compile");
+        let annotations = lower_aura_effects(&compiled).expect("annotations should lower");
         validate_link_annotations(&annotations).expect("exports should satisfy imports");
     }
 
@@ -2489,7 +2491,8 @@ protocol LinkValidationMissingExport =
   roles A, B
   A { link : "bundle=alpha|exports=sync.push|imports=chat.send" } -> B : Msg
         "#;
-        let annotations = extract_aura_annotations(dsl).expect("annotations should parse");
+        let compiled = compile_choreography(dsl).expect("choreography should compile");
+        let annotations = lower_aura_effects(&compiled).expect("annotations should lower");
         let err = validate_link_annotations(&annotations).expect_err("missing export must fail");
         assert!(
             err.contains("chat.send"),

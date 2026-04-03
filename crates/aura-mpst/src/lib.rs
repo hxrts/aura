@@ -23,7 +23,7 @@
 //! This crate is a **regular crate** (not proc-macro) which allows it to:
 //! 1. Re-export Telltale choreography/runtime functionality
 //! 2. Provide the exact same `choreography!` macro interface
-//! 3. Add Aura-specific extensions via the extension system
+//! 3. Lower compiled Telltale annotations into Aura-owned effects
 //! 4. Integrate with the guard chain for protocol-level guards
 //!
 //! # Usage
@@ -47,10 +47,10 @@
 //! "#);
 //! ```
 //!
-//! # Extension System Integration
+//! # Annotation Lowering
 //!
-//! Extensions are registered automatically when using the choreography macro.
-//! The extension system provides Aura-specific annotations like:
+//! Aura-specific choreography semantics are derived from compiled Telltale
+//! annotations. The lowering surface understands annotations like:
 //!
 //! - `{ guard_capability : "..." }` - Capability requirements
 //! - `{ flow_cost : 100 }` - Resource costs
@@ -61,7 +61,7 @@
 //! # Architecture
 //!
 //! ```text
-//! aura-mpst/              ← Regular crate (re-exports telltale + Aura extensions)
+//! aura-mpst/              ← Regular crate (re-exports telltale + Aura lowering)
 //! aura-macros/            ← Proc-macro crate (custom macros)
 //! ```
 
@@ -73,7 +73,7 @@ pub use serde_json;
 /// Generated choreography composition metadata types.
 pub mod composition;
 
-use crate::upstream::{language as telltale_language, runtime as telltale_runtime};
+use crate::upstream::runtime as telltale_runtime;
 use async_trait::async_trait;
 pub use composition::{
     startup_defaults_for_qualified_name, AdmittedModuleGuardCapabilities,
@@ -142,8 +142,8 @@ pub trait GeneratedChoreographyRuntime: telltale_runtime::ChoreoHandlerExt + Sen
     }
 }
 
-/// AST extraction and annotation parsing for Aura choreographies
-pub mod ast_extraction;
+/// Lower compiled Telltale annotation metadata into Aura effects.
+pub mod annotation_lowering;
 
 /// Identifier newtypes for roles and sessions
 pub mod ids;
@@ -156,42 +156,12 @@ pub mod session;
 /// Termination budgeting helpers
 pub mod termination;
 
-/// Extension system integration
+/// Aura-owned effect/runtime extension types
 pub mod extensions;
 
-/// Initialize the Aura extension system (external-demo pattern)
-///
-/// Returns an empty extension registry following the "external-demo" pattern.
-/// Aura-specific choreography extensions (guard_capability, flow_cost, journal_facts,
-/// leak annotations) are now implemented in the [`aura-macros`](../aura_macros/index.html)
-/// crate via procedural macros that parse and extract annotations at compile-time.
-///
-/// This function exists for:
-/// 1. Compatibility with existing extension registry wiring
-/// 2. Testing that the registry initialization works
-/// 3. Future extensibility if runtime extensions become needed
-///
-/// For actual Aura extensions, see:
-/// - [`aura_macros::choreography`](../aura_macros/attr.choreography.html) - Parse choreography annotations
-/// - [`aura_macros`](../aura_macros/index.html) - All Aura procedural macros
-///
-/// # External-Demo Pattern
-///
-/// The "external-demo" pattern means extensions are handled outside the core library
-/// (in aura-macros) rather than being registered at runtime. This provides:
-/// - Compile-time validation of annotations
-/// - Zero runtime overhead for extension processing
-/// - Better error messages via proc macros
-pub fn init_aura_extensions() -> telltale_language::extensions::ExtensionRegistry {
-    // Create empty registry - extensions are now handled in aura-macros
-    telltale_language::extensions::ExtensionRegistry::new()
-}
-
-pub use ast_extraction::{
-    extract_aura_annotations, extract_aura_annotations_from_choreography,
-    extract_aura_annotations_from_compiled, extract_aura_annotations_from_records,
-    generate_aura_choreography_code, parse_choreography_capability, AuraEffect,
-    AuraExtractionError, ChoreographyCapabilityError,
+pub use annotation_lowering::{
+    generate_aura_choreography_code, lower_aura_effects, lower_aura_effects_from_records,
+    parse_choreography_capability, AuraEffect, AuraExtractionError, ChoreographyCapabilityError,
 };
 /// Full-featured choreography! macro with Telltale features + Aura extensions
 ///
@@ -316,26 +286,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extension_registry_initialization() {
-        let registry = init_aura_extensions();
-        // Verify registry is initialized (empty registry for external-demo pattern)
-        // Extensions are now handled by aura-macros following external-demo pattern
-        assert_eq!(registry.grammar_extensions().count(), 0);
-    }
-
-    #[test]
     fn test_choreography_macro_available() {
         // This test verifies the choreography macro is properly re-exported
         // Actual functionality is tested in integration tests
     }
 
     #[test]
-    fn test_all_choreography_features_available() {
-        // Verify we have access to the re-exported choreography types and functions.
-        let _registry = telltale_language::extensions::ExtensionRegistry::new();
-        let _composer = telltale_language::compiler::grammar::GrammarComposer::new();
-        let _parser = crate::upstream::runtime::ExtensionParser::new();
-
-        // If this compiles, we successfully re-exported everything
+    fn test_compiled_lowering_surface_available() {
+        let _compile = crate::upstream::language::compile_choreography;
+        let _lower = lower_aura_effects;
     }
 }

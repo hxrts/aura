@@ -6,7 +6,8 @@
 // Example code defines types for demonstration that aren't directly called
 #![allow(dead_code)]
 
-use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
+use aura_mpst::annotation_lowering::{lower_aura_effects, AuraEffect};
+use aura_mpst::upstream::language::compile_choreography;
 use serde::{Deserialize, Serialize};
 
 // Message types for the threshold ceremony
@@ -73,9 +74,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   4. Response:       Signers -> Coordinator");
     println!("   5. Finalization:   Coordinator -> Observer");
 
-    // Demonstrate annotation extraction for Aura extensions
+    // Demonstrate annotation lowering for Aura semantics
     println!("\n[OK] Aura Extension Support");
-    println!("   Testing annotation extraction for future Aura features:");
+    println!("   Testing compiled annotation lowering for future Aura features:");
 
     let annotated_choreography = r#"
 module annotated_demo exposing (AnnotatedProtocol)
@@ -88,7 +89,11 @@ protocol AnnotatedProtocol =
   Leader { journal_facts : "round_complete" } -> Follower : Completion
     "#;
 
-    match extract_aura_annotations(annotated_choreography) {
+    let lowered_effects = compile_choreography(annotated_choreography)
+        .map_err(|err| err.to_string())
+        .and_then(|compiled| lower_aura_effects(&compiled).map_err(|err| err.to_string()));
+
+    match lowered_effects {
         Ok(effects) => {
             for effect in &effects {
                 match effect {
@@ -105,7 +110,7 @@ protocol AnnotatedProtocol =
                 }
             }
         }
-        Err(e) => println!("   [ERROR] Annotation extraction error: {e}"),
+        Err(e) => println!("   [ERROR] Annotation lowering error: {e}"),
     }
 
     println!("\n[DONE] Choreography demonstration complete!");
@@ -113,7 +118,7 @@ protocol AnnotatedProtocol =
     println!("   [OK] Multi-party choreographic protocols");
     println!("   [OK] Namespace isolation");
     println!("   [OK] Session type generation");
-    println!("   [OK] Aura annotation extraction");
+    println!("   [OK] Aura annotation lowering");
     println!("   [OK] Integration with Telltale framework");
 
     println!("\n[INFO] Future Dynamic Role Support:");
