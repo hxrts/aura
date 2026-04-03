@@ -319,8 +319,10 @@ fn log_device_enrollment_accept_progress(message: impl Into<String>) {
     let message = message.into();
     #[cfg(feature = "wasm")]
     crate::platform::wasm::console_log(&format!("[device-enrollment-accept] {message}"));
-    #[cfg(not(feature = "wasm"))]
-    eprintln!("[device-enrollment-accept] {message}");
+    #[cfg(all(not(feature = "wasm"), feature = "instrumented"))]
+    tracing::info!(target: "device-enrollment-accept", "{message}");
+    #[cfg(all(not(feature = "wasm"), not(feature = "instrumented")))]
+    let _ = message;
 }
 
 fn emit_contact_accept_probe(stage: &str) {

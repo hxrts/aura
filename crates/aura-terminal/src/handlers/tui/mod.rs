@@ -899,7 +899,12 @@ async fn handle_tui_launch(
         AssertUnwindSafe(run_app_with_context(ctx)).catch_unwind(),
     )
     .await;
-    stdio = returned_stdio.into();
+    #[cfg(feature = "development")]
+    {
+        stdio = returned_stdio.into();
+    }
+    #[cfg(not(feature = "development"))]
+    let _ = returned_stdio;
     let shell_exit_intent = match result {
         Ok(Ok(intent)) => intent,
         Ok(Err(error)) => return Err(AuraError::internal(format!("TUI failed: {error}")).into()),
@@ -951,9 +956,9 @@ async fn handle_tui_launch(
                         .into());
                 }
             }
-            stdio.println(format_args!(
-                "Reloading TUI with newly created bootstrap identity"
-            ));
+            // Suppress visible output — the re-exec enters fullscreen immediately
+            // and any stdout here would flash on the normal terminal buffer.
+            tracing::info!("Reloading TUI with newly created bootstrap identity");
             return reexec_current_tui_process("bootstrap reload").map_err(Into::into);
         }
         ShellExitIntent::AuthoritySwitch {
@@ -963,7 +968,7 @@ async fn handle_tui_launch(
             let _ =
                 persist_selected_authority(&launch.base_path, authority_id, nickname_suggestion)
                     .await?;
-            stdio.println(format_args!("Reloading TUI for authority: {authority_id}"));
+            tracing::info!("Reloading TUI for authority: {authority_id}");
             return reexec_current_tui_process("authority switch").map_err(Into::into);
         }
     }

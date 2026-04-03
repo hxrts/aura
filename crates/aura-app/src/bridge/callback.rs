@@ -142,7 +142,9 @@ impl ObserverRegistry {
             "state observer panicked during notification"
         );
         #[cfg(not(feature = "instrumented"))]
-        eprintln!("state observer {id} panicked during {callback} notification");
+        {
+            let _ = (id, callback);
+        }
     }
 
     fn notify_with<T, F>(&self, callback: &str, value: &T, mut notify: F)
