@@ -10,10 +10,12 @@ use aura_mpst::{extract_aura_annotations, AuraEffect, RoleId};
 #[test]
 fn guard_capability_annotation_emits_effect() {
     let choreography = r#"
-        choreography Guarded {
-            roles: Alice, Bob;
-            Alice[guard_capability = "chat:message:send"] -> Bob: Message;
-        }
+module guarded exposing (Guarded)
+
+protocol Guarded =
+  roles Alice, Bob
+
+  Alice { guard_capability : "chat:message:send" } -> Bob : Message
     "#;
 
     let effects = extract_aura_annotations(choreography).expect("extract annotations");
@@ -33,10 +35,12 @@ fn guard_capability_annotation_emits_effect() {
 #[test]
 fn leak_annotation_emits_effect() {
     let choreography = r#"
-        choreography Leaky {
-            roles: Alice, Bob;
-            Alice[leak: (External, Neighbor)] -> Bob: Message;
-        }
+module leaky exposing (Leaky)
+
+protocol Leaky =
+  roles Alice, Bob
+
+  Alice { leak: (External, Neighbor) } -> Bob : Message
     "#;
 
     let effects = extract_aura_annotations(choreography).expect("extract annotations");
@@ -59,10 +63,12 @@ fn leak_annotation_emits_effect() {
 #[test]
 fn multiple_annotations_preserve_document_order() {
     let choreography = r#"
-        choreography MultiAnnotated {
-            roles: Alice, Bob;
-            Alice[guard_capability = "chat:message:send", flow_cost = 10, leak: (External)] -> Bob: Msg;
-        }
+module multi_annotated exposing (MultiAnnotated)
+
+protocol MultiAnnotated =
+  roles Alice, Bob
+
+  Alice { guard_capability : "chat:message:send", flow_cost : 10, leak: (External) } -> Bob : Msg
     "#;
 
     let effects = extract_aura_annotations(choreography).expect("extract annotations");
@@ -97,10 +103,12 @@ fn multiple_annotations_preserve_document_order() {
 #[test]
 fn legacy_guard_capability_annotation_fails() {
     let choreography = r#"
-        choreography Guarded {
-            roles: Alice, Bob;
-            Alice[guard_capability = "send_message"] -> Bob: Message;
-        }
+module guarded exposing (Guarded)
+
+protocol Guarded =
+  roles Alice, Bob
+
+  Alice { guard_capability : "send_message" } -> Bob : Message
     "#;
 
     let err = extract_aura_annotations(choreography).expect_err("legacy name must fail");

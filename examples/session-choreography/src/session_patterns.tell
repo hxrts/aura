@@ -4,58 +4,60 @@ protocol SimpleSessionChoreography =
   roles Coordinator, Participant
 
   -- Phase 1: Coordinator invites participant
-  Coordinator { parallel = true
-              , guard_capability = "example:create_session"
-              , flow_cost = 100
-              , journal_facts = "session_created" }
+  Coordinator { parallel : true
+              , guard_capability : "example:create_session"
+              , flow_cost : 100
+              , journal_facts : "session_created" }
     -> Participant : SessionInvitation of crate.SessionInvitation
 
   -- Phase 2: Participant decides to accept or decline
-  choice at Participant
-    | accept ->
-        Participant { parallel = true
-                    , guard_capability = "example:join_session"
-                    , flow_cost = 50
-                    , journal_facts = "session_joined" }
+  choice Participant at
+    | accept =>
+        Participant { parallel : true
+                    , guard_capability : "example:join_session"
+                    , flow_cost : 50
+                    , journal_facts : "session_joined" }
           -> Coordinator : SessionAccepted of crate.SessionAccepted
 
-    | decline ->
-        Participant { parallel = true
-                    , guard_capability = "example:decline_session"
-                    , flow_cost = 25
-                    , journal_facts = "session_declined" }
+    | decline =>
+        Participant { parallel : true
+                    , guard_capability : "example:decline_session"
+                    , flow_cost : 25
+                    , journal_facts : "session_declined" }
           -> Coordinator : SessionDeclined of crate.SessionDeclined
 
   -- Phase 3: Activate session
-  Coordinator { parallel = true
-              , guard_capability = "example:activate_session"
-              , flow_cost = 75
-              , journal_facts = "session_activated" }
+  Coordinator { parallel : true
+              , guard_capability : "example:activate_session"
+              , flow_cost : 75
+              , journal_facts : "session_activated" }
     -> Participant : SessionActivated of crate.SessionActivated
 
   -- Phase 4: Session loop
-  loop decide by Coordinator
-    choice at Coordinator
-      | broadcast ->
-          Coordinator { parallel = true
-                       , guard_capability = "example:broadcast_message"
-                       , flow_cost = 25 }
+  rec SessionLoop
+    choice Coordinator at
+      | broadcast =>
+          Coordinator { parallel : true
+                       , guard_capability : "example:broadcast_message"
+                       , flow_cost : 25 }
             -> Participant : BroadcastMessage of crate.BroadcastMessage
+          continue SessionLoop
 
-      | status_check ->
-          Coordinator { parallel = true
-                       , guard_capability = "example:check_status"
-                       , flow_cost = 10 }
+      | status_check =>
+          Coordinator { parallel : true
+                       , guard_capability : "example:check_status"
+                       , flow_cost : 10 }
             -> Participant : StatusCheck of crate.StatusCheck
 
-          Participant { parallel = true
-                      , guard_capability = "example:report_status"
-                      , flow_cost = 15 }
+          Participant { parallel : true
+                      , guard_capability : "example:report_status"
+                      , flow_cost : 15 }
             -> Coordinator : StatusReport of crate.StatusReport
+          continue SessionLoop
 
-      | end_session ->
-          Coordinator { parallel = true
-                       , guard_capability = "example:end_session"
-                       , flow_cost = 100
-                       , journal_facts = "session_ended" }
+      | end_session =>
+          Coordinator { parallel : true
+                       , guard_capability : "example:end_session"
+                       , flow_cost : 100
+                       , journal_facts : "session_ended" }
             -> Participant : SessionEnded of crate.SessionEnded

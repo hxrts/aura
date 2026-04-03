@@ -6,6 +6,6 @@ error: Namespace mismatch: macro namespace "macro_namespace" does not match modu
  7 | |
  8 | | protocol NamespaceMismatch =
  9 | |   roles Alice, Bob
-10 | |   Alice[guard_capability = "chat:message:send"] -> Bob : Message
+10 | |   Alice { guard_capability : "chat:message:send" } -> Bob : Message
 11 | | "#
    | |__^

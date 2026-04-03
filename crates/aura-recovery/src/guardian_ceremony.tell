@@ -11,10 +11,10 @@ protocol GuardianCeremony requires AuraAuthorityEvidence =
   Guardian1 -> Initiator : RespondCeremony of crate.guardian_ceremony.CeremonyResponseMsg
   Guardian2 -> Initiator : RespondCeremony of crate.guardian_ceremony.CeremonyResponseMsg
 
-  choice at Initiator
-    | finalize ->
+  choice Initiator at
+    | finalize =>
         Initiator -> Guardian1 : CommitCeremony of crate.guardian_ceremony.CeremonyCommit
         Initiator -> Guardian2 : CommitCeremony of crate.guardian_ceremony.CeremonyCommit
-    | cancel ->
+    | cancel =>
         Initiator -> Guardian1 : AbortCeremony of crate.guardian_ceremony.CeremonyAbort
         Initiator -> Guardian2 : AbortCeremony of crate.guardian_ceremony.CeremonyAbort

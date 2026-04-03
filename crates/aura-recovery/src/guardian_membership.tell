@@ -3,49 +3,49 @@ module guardian_membership_change exposing (GuardianMembershipChange)
 protocol GuardianMembershipChange =
   roles ChangeInitiator, Guardian1, Guardian2, Guardian3
 
-  ChangeInitiator { guard_capability = "recovery:membership_change:initiate"
-                  , flow_cost = 350
-                  , journal_facts = "membership_change_proposed"
-                  , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
+  ChangeInitiator { guard_capability : "recovery:membership_change:initiate"
+                  , flow_cost : 350
+                  , journal_facts : "membership_change_proposed"
+                  , link : "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
     -> Guardian1 : ProposeChange of crate.guardian_membership.MembershipProposal
 
-  ChangeInitiator { guard_capability = "recovery:membership_change:initiate"
-                  , flow_cost = 350
-                  , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
+  ChangeInitiator { guard_capability : "recovery:membership_change:initiate"
+                  , flow_cost : 350
+                  , link : "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
     -> Guardian2 : ProposeChange of crate.guardian_membership.MembershipProposal
 
-  ChangeInitiator { guard_capability = "recovery:membership_change:initiate"
-                  , flow_cost = 350
-                  , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
+  ChangeInitiator { guard_capability : "recovery:membership_change:initiate"
+                  , flow_cost : 350
+                  , link : "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.vote" }
     -> Guardian3 : ProposeChange of crate.guardian_membership.MembershipProposal
 
-  Guardian1 { guard_capability = "recovery:membership_change:vote"
-            , flow_cost = 220
-            , journal_facts = "membership_vote_cast"
-            , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
+  Guardian1 { guard_capability : "recovery:membership_change:vote"
+            , flow_cost : 220
+            , journal_facts : "membership_vote_cast"
+            , link : "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
-  Guardian2 { guard_capability = "recovery:membership_change:vote"
-            , flow_cost = 220
-            , journal_facts = "membership_vote_cast"
-            , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
+  Guardian2 { guard_capability : "recovery:membership_change:vote"
+            , flow_cost : 220
+            , journal_facts : "membership_vote_cast"
+            , link : "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
-  Guardian3 { guard_capability = "recovery:membership_change:vote"
-            , flow_cost = 220
-            , journal_facts = "membership_vote_cast"
-            , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
+  Guardian3 { guard_capability : "recovery:membership_change:vote"
+            , flow_cost : 220
+            , journal_facts : "membership_vote_cast"
+            , link : "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
-  ChangeInitiator { guard_capability = "recovery:membership_change:complete"
-                  , flow_cost = 180
-                  , journal_facts = "membership_change_completed" }
+  ChangeInitiator { guard_capability : "recovery:membership_change:complete"
+                  , flow_cost : 180
+                  , journal_facts : "membership_change_completed" }
     -> Guardian1 : CompleteChange of crate.guardian_membership.ChangeCompletion
 
-  ChangeInitiator { guard_capability = "recovery:membership_change:complete"
-                  , flow_cost = 180 }
+  ChangeInitiator { guard_capability : "recovery:membership_change:complete"
+                  , flow_cost : 180 }
     -> Guardian2 : CompleteChange of crate.guardian_membership.ChangeCompletion
 
-  ChangeInitiator { guard_capability = "recovery:membership_change:complete"
-                  , flow_cost = 180 }
+  ChangeInitiator { guard_capability : "recovery:membership_change:complete"
+                  , flow_cost : 180 }
     -> Guardian3 : CompleteChange of crate.guardian_membership.ChangeCompletion

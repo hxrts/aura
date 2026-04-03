@@ -92,24 +92,31 @@ where
 From `choreography.tell`:
 
 ```purescript
-@parallel
-Coordinator[guard_capability = "consensus:initiate", flow_cost = 100]
+Coordinator { parallel : true
+            , guard_capability : "consensus:initiate"
+            , flow_cost : 100 }
   -> Witness[*] : Execute(crate::ConsensusMessage)
 
-@parallel
-Witness[*][guard_capability = "consensus:witness_nonce", flow_cost = 50]
+Witness[*] { parallel : true
+           , guard_capability : "consensus:witness_nonce"
+           , flow_cost : 50 }
   -> Coordinator : NonceCommit(crate::ConsensusMessage)
 
-@parallel
-Coordinator[guard_capability = "consensus:aggregate_nonces", flow_cost = 75]
+Coordinator { parallel : true
+            , guard_capability : "consensus:aggregate_nonces"
+            , flow_cost : 75 }
   -> Witness[*] : SignRequest(crate::ConsensusMessage)
 
-@parallel
-Witness[*][guard_capability = "consensus:witness_sign", flow_cost = 50, leak = "pipelined_commitment"]
+Witness[*] { parallel : true
+           , guard_capability : "consensus:witness_sign"
+           , flow_cost : 50
+           , leak : "pipelined_commitment" }
   -> Coordinator : SignShare(crate::ConsensusMessage)
 
-@parallel
-Coordinator[guard_capability = "consensus:finalize", flow_cost = 100, journal_facts = "consensus_complete"]
+Coordinator { parallel : true
+            , guard_capability : "consensus:finalize"
+            , flow_cost : 100
+            , journal_facts : "consensus_complete" }
   -> Witness[*] : ConsensusResult(crate::ConsensusMessage)
 ```
 

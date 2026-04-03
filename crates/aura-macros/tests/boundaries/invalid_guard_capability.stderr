@@ -6,7 +6,7 @@ error: Invalid annotation value: guard_capability expects a string literal
 5 | |
 6 | | protocol InvalidGuardCapability =
 7 | |   roles Alice, Bob
-8 | |   Alice[guard_capability = 42] -> Bob : Message
+8 | |   Alice { guard_capability : 42 } -> Bob : Message
 9 | | "#);
   | |___^
   |

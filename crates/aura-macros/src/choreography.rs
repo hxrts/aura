@@ -195,7 +195,7 @@ fn protocol_to_global_for_coherence(
                 }
                 _ => {
                     return Err(CoherenceModelError::InvalidChoice(format!(
-                        "invalid choice at role `{}`: branch `{}` does not start with send from decider",
+                        "invalid choice role at `{}`: branch `{}` does not start with send from decider",
                         role.name(),
                         branches[0].label
                     )));
@@ -214,7 +214,7 @@ fn protocol_to_global_for_coherence(
                     } => {
                         if from.name() != role.name() {
                             return Err(CoherenceModelError::InvalidChoice(format!(
-                                "invalid choice at role `{}`: branch `{label}` starts from `{}`",
+                                "invalid choice role at `{}`: branch `{label}` starts from `{}`",
                                 role.name(),
                                 from.name(),
                                 label = branch.label
@@ -222,7 +222,7 @@ fn protocol_to_global_for_coherence(
                         }
                         if to.name() != first_receiver.as_str() {
                             return Err(CoherenceModelError::InvalidChoice(format!(
-                                "invalid choice at role `{}`: branch `{label}` sends to `{}` but expected `{}`",
+                                "invalid choice role at `{}`: branch `{label}` sends to `{}` but expected `{}`",
                                 role.name(),
                                 to.name(),
                                 first_receiver,
@@ -236,7 +236,7 @@ fn protocol_to_global_for_coherence(
                     }
                     _ => {
                         return Err(CoherenceModelError::InvalidChoice(format!(
-                            "invalid choice at role `{}`: branch `{label}` must start with send",
+                            "invalid choice role at `{}`: branch `{label}` must start with send",
                             role.name(),
                             label = branch.label
                         )));
@@ -306,8 +306,7 @@ fn parse_choreography_source(input: TokenStream) -> Result<ChoreographyInput, sy
     let namespace_attr = extract_namespace_from_attrs(&parsed.attrs)?;
     let (dsl, span) = read_choreography_source(parsed.expr)?;
 
-    let parser_dsl = normalize_choreography_for_parser(&dsl);
-    let mut choreography = parse_choreography_str(&parser_dsl)
+    let mut choreography = parse_choreography_str(&dsl)
         .map_err(|err| syn::Error::new(span, format!("Choreography parse error: {err}")))?;
     let namespace = match (namespace_attr, choreography.namespace.clone()) {
         (Some(attr), Some(parsed_ns)) => {
@@ -390,75 +389,6 @@ fn validate_link_annotations(annotations: &[AuraEffect]) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-fn strip_aura_annotations_for_parser(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    #[allow(clippy::while_let_on_iterator)]
-    while let Some(ch) = chars.next() {
-        let (open, close) = match ch {
-            '[' => ('[', ']'),
-            '{' => ('{', '}'),
-            _ => {
-                out.push(ch);
-                continue;
-            }
-        };
-
-        let mut depth = 1usize;
-        let mut buf = String::new();
-        let mut has_equals = false;
-
-        while let Some(next) = chars.next() {
-            if next == open {
-                depth += 1;
-            } else if next == close {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    break;
-                }
-            }
-            if next == '=' {
-                has_equals = true;
-            }
-            buf.push(next);
-        }
-
-        if !has_equals {
-            out.push(open);
-            out.push_str(&buf);
-            out.push(close);
-        }
-    }
-
-    out
-}
-
-fn normalize_choreography_for_parser(input: &str) -> String {
-    let stripped = strip_aura_annotations_for_parser(input);
-    let mut normalized = String::with_capacity(stripped.len());
-
-    for line in stripped.lines() {
-        let indent_len = line.chars().take_while(|ch| ch.is_whitespace()).count();
-        let (indent, body) = line.split_at(indent_len);
-        if let Some(rest) = body.strip_prefix("choice at ") {
-            normalized.push_str(indent);
-            normalized.push_str("choice ");
-            normalized.push_str(rest);
-            normalized.push_str(" at");
-        } else if body.starts_with('|') && body.contains("->") {
-            let rewritten = body.replacen("->", "=>", 1);
-            normalized.push_str(indent);
-            normalized.push_str(&rewritten);
-        } else {
-            normalized.push_str(line);
-        }
-        normalized.push('\n');
-    }
-
-    normalized
 }
 
 fn insert_message(out: &mut BTreeMap<String, MessageType>, message: MessageType) {
@@ -2563,22 +2493,20 @@ fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        build_coherence_validation_input, normalize_choreography_for_parser,
-        validate_link_annotations, validate_protocol_coherence,
+        build_coherence_validation_input, validate_link_annotations, validate_protocol_coherence,
     };
     use aura_mpst::ast_extraction::extract_aura_annotations;
     use telltale_language::parse_choreography_str;
 
     fn parse_test_choreography(dsl: &str) -> telltale_language::ast::Choreography {
-        let normalized = normalize_choreography_for_parser(dsl);
-        parse_choreography_str(&normalized).expect("choreography should parse")
+        parse_choreography_str(dsl).expect("choreography should parse")
     }
 
     #[test]
     fn link_validation_accepts_exported_imports() {
         let dsl = r#"
-            A[link = "bundle=alpha|exports=sync.push|imports=chat.send"] -> B: Msg;
-            B[link = "bundle=beta|exports=chat.send|imports=sync.push"] -> A: Ack;
+            A { link : "bundle=alpha|exports=sync.push|imports=chat.send" } -> B: Msg;
+            B { link : "bundle=beta|exports=chat.send|imports=sync.push" } -> A: Ack;
         "#;
         let annotations = extract_aura_annotations(dsl).expect("annotations should parse");
         validate_link_annotations(&annotations).expect("exports should satisfy imports");
@@ -2587,7 +2515,7 @@ mod tests {
     #[test]
     fn link_validation_rejects_missing_export() {
         let dsl = r#"
-            A[link = "bundle=alpha|exports=sync.push|imports=chat.send"] -> B: Msg;
+            A { link : "bundle=alpha|exports=sync.push|imports=chat.send" } -> B: Msg;
         "#;
         let annotations = extract_aura_annotations(dsl).expect("annotations should parse");
         let err = validate_link_annotations(&annotations).expect_err("missing export must fail");
@@ -2632,10 +2560,10 @@ module simple_choice exposing (SimpleChoice)
 
 protocol SimpleChoice =
   roles A, B
-  choice at A
-    | Accept ->
+  choice A at
+    | Accept =>
       A -> B : AcceptMsg
-    | Reject ->
+    | Reject =>
       A -> B : RejectMsg
 "#;
         let choreography = parse_test_choreography(dsl);
@@ -2660,10 +2588,10 @@ module loop_proto exposing (LoopProto)
 protocol LoopProto =
   roles Coordinator, Peer
   loop decide by Coordinator
-    choice at Coordinator
-      | Continue ->
+    choice Coordinator at
+      | Continue =>
         Coordinator -> Peer : Tick
-      | Stop ->
+      | Stop =>
         Coordinator -> Peer : Stop
 "#;
         let choreography = parse_test_choreography(dsl);
@@ -2722,10 +2650,10 @@ module subset_proto exposing (SubsetProto)
 
 protocol SubsetProto =
   roles A, B
-  choice at A
-    | Accept ->
+  choice A at
+    | Accept =>
       A -> B : AcceptMsg
-    | Reject ->
+    | Reject =>
       A -> B : RejectMsg
 "#;
         let choreography = parse_test_choreography(dsl);

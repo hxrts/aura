@@ -33,17 +33,18 @@
 //!
 //! // This works EXACTLY like telltale's choreography! macro
 //! // but with Aura-specific extensions
-//! choreography! {
-//!     choreography Example {
-//!         roles: Alice, Bob;
+//! choreography!(r#"
+//! module example exposing (Example)
 //!
-//!         Alice[guard_capability = "chat:message:send", flow_cost = 100]
-//!         -> Bob: Message;
+//! protocol Example =
+//!   roles Alice, Bob
 //!
-//!         Bob[journal_facts = "message_received"]
-//!         -> Alice: Response;
-//!     }
-//! }
+//!   Alice { guard_capability : "chat:message:send", flow_cost : 100 }
+//!     -> Bob : Message
+//!
+//!   Bob { journal_facts : "message_received" }
+//!     -> Alice : Response
+//! "#);
 //! ```
 //!
 //! # Extension System Integration
@@ -51,11 +52,11 @@
 //! Extensions are registered automatically when using the choreography macro.
 //! The extension system provides Aura-specific annotations like:
 //!
-//! - `[guard_capability="..."]` - Capability requirements
-//! - `[flow_cost=100]` - Resource costs
-//! - `[journal_facts="..."]` - Audit logging
-//! - `[journal_merge=true]` - Journal merge operations
-//! - `[audit_log="..."]` - Audit trail entries
+//! - `{ guard_capability : "..." }` - Capability requirements
+//! - `{ flow_cost : 100 }` - Resource costs
+//! - `{ journal_facts : "..." }` - Audit logging
+//! - `{ journal_merge : true }` - Journal merge operations
+//! - `{ audit_log : "..." }` - Audit trail entries
 //!
 //! # Architecture
 //!
@@ -195,12 +196,12 @@ pub use ast_extraction::{
 /// This macro provides access to Telltale choreography features plus Aura-specific extensions:
 /// - Module namespaces: `module my_protocol exposing (ProtocolName)`
 /// - Parameterized roles: `Worker[N]`, `Signer[*]`
-/// - Choice constructs: `choice at Role { ... }`
+/// - Choice constructs: `choice Role at ...`
 /// - Loop constructs: `loop { ... }`
-/// - Aura capability guards: `[guard_capability = "namespace:capability"]`
-/// - Aura flow costs: `[flow_cost = 100]`
-/// - Aura journal facts: `[journal_facts = "description"]`
-/// - Aura audit logging: `[audit_log = "action:metadata"]`
+/// - Aura capability guards: `{ guard_capability : "namespace:capability" }`
+/// - Aura flow costs: `{ flow_cost : 100 }`
+/// - Aura journal facts: `{ journal_facts : "description" }`
+/// - Aura audit logging: `{ audit_log : "action:metadata" }`
 ///
 /// # Example
 ///
@@ -212,16 +213,16 @@ pub use ast_extraction::{
 ///
 /// protocol ThresholdExample =
 ///   roles Coordinator, Signer[3]
-///   case choose Coordinator of
-///     start_ceremony ->
-///       Coordinator[guard_capability = "consensus:initiate",
-///                  flow_cost = 200,
-///                  journal_facts = "ceremony_started"]
+///   choice Coordinator at
+///     | start_ceremony =>
+///       Coordinator { guard_capability : "consensus:initiate",
+///                     flow_cost : 200,
+///                     journal_facts : "ceremony_started" }
 ///         -> Signer[*] : StartRequest
-///       Signer[*][guard_capability = "consensus:witness_sign",
-///                flow_cost = 150]
+///       Signer[*] { guard_capability : "consensus:witness_sign",
+///                   flow_cost : 150 }
 ///         -> Coordinator : Commitment
-///     abort ->
+///     | abort =>
 ///       Coordinator -> Signer[*] : Abort
 /// "#);
 /// ```

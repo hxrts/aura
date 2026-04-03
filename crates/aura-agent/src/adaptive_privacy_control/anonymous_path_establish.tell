@@ -3,38 +3,38 @@ module anonymous_path_establish exposing (AnonymousPathEstablishProtocol)
 protocol AnonymousPathEstablishProtocol =
   roles Owner, PathManager
 
-  Owner { guard_capability = "adaptive_privacy:anonymous_path:request"
-        , flow_cost = 30
-        , journal_facts = "anonymous_path_establish_requested" }
+  Owner { guard_capability : "adaptive_privacy:anonymous_path:request"
+        , flow_cost : 30
+        , journal_facts : "anonymous_path_establish_requested" }
     -> PathManager : AnonymousPathEstablishRequest of crate.adaptive_privacy_control.AnonymousPathEstablishRequest
 
-  choice at PathManager
-    | Ready ->
-        PathManager { guard_capability = "adaptive_privacy:anonymous_path:ready"
-                    , flow_cost = 30
-                    , journal_facts = "anonymous_path_establish_ready" }
+  choice PathManager at
+    | Ready =>
+        PathManager { guard_capability : "adaptive_privacy:anonymous_path:ready"
+                    , flow_cost : 30
+                    , journal_facts : "anonymous_path_establish_ready" }
           -> Owner : AnonymousPathEstablishSucceeded of crate.adaptive_privacy_control.AnonymousPathEstablishSucceeded
 
-    | Timeout ->
-        PathManager { guard_capability = "adaptive_privacy:anonymous_path:timeout"
-                    , flow_cost = 10
-                    , journal_facts = "anonymous_path_establish_timed_out" }
+    | Timeout =>
+        PathManager { guard_capability : "adaptive_privacy:anonymous_path:timeout"
+                    , flow_cost : 10
+                    , journal_facts : "anonymous_path_establish_timed_out" }
           -> Owner : AnonymousPathEstablishFailed of crate.adaptive_privacy_control.AnonymousPathEstablishFailed
 
-    | Cancelled ->
-        PathManager { guard_capability = "adaptive_privacy:anonymous_path:cancelled"
-                    , flow_cost = 10
-                    , journal_facts = "anonymous_path_establish_cancelled" }
+    | Cancelled =>
+        PathManager { guard_capability : "adaptive_privacy:anonymous_path:cancelled"
+                    , flow_cost : 10
+                    , journal_facts : "anonymous_path_establish_cancelled" }
           -> Owner : AnonymousPathEstablishFailed of crate.adaptive_privacy_control.AnonymousPathEstablishFailed
 
-    | ReplayRejected ->
-        PathManager { guard_capability = "adaptive_privacy:anonymous_path:reject_replay"
-                    , flow_cost = 15
-                    , journal_facts = "anonymous_path_establish_replay_rejected" }
+    | ReplayRejected =>
+        PathManager { guard_capability : "adaptive_privacy:anonymous_path:reject_replay"
+                    , flow_cost : 15
+                    , journal_facts : "anonymous_path_establish_replay_rejected" }
           -> Owner : AnonymousPathEstablishFailed of crate.adaptive_privacy_control.AnonymousPathEstablishFailed
 
-    | StaleOwner ->
-        PathManager { guard_capability = "adaptive_privacy:anonymous_path:reject_stale_owner"
-                    , flow_cost = 15
-                    , journal_facts = "anonymous_path_establish_stale_owner_rejected" }
+    | StaleOwner =>
+        PathManager { guard_capability : "adaptive_privacy:anonymous_path:reject_stale_owner"
+                    , flow_cost : 15
+                    , journal_facts : "anonymous_path_establish_stale_owner_rejected" }
           -> Owner : AnonymousPathEstablishFailed of crate.adaptive_privacy_control.AnonymousPathEstablishFailed

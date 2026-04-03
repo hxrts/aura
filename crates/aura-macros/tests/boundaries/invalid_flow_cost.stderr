@@ -6,7 +6,7 @@ error: Invalid annotation value: flow_cost expects an integer literal
 5 | |
 6 | | protocol InvalidFlowCost =
 7 | |   roles Alice, Bob
-8 | |   Alice[flow_cost = "not_a_number"] -> Bob : Message
+8 | |   Alice { flow_cost : "not_a_number" } -> Bob : Message
 9 | | "#);
   | |___^
   |

@@ -5,17 +5,17 @@ proof_bundle AuraTransitionSafety version "1.0.0" issuer "did:aura:runtime-admis
 protocol DeviceEpochRotationProtocol requires AuraTransitionSafety =
   roles Initiator, Participant
 
-  Initiator { guard_capability = "sync:device_epoch:propose"
-            , flow_cost = 80
-            , journal_facts = "device_epoch_rotation_proposed" }
+  Initiator { guard_capability : "sync:device_epoch:propose"
+            , flow_cost : 80
+            , journal_facts : "device_epoch_rotation_proposed" }
     -> Participant : DeviceEpochProposal of crate.protocols.device_epoch_rotation.DeviceEpochProposal
 
-  Participant { guard_capability = "sync:device_epoch:accept"
-              , flow_cost = 40
-              , journal_facts = "device_epoch_rotation_accepted" }
+  Participant { guard_capability : "sync:device_epoch:accept"
+              , flow_cost : 40
+              , journal_facts : "device_epoch_rotation_accepted" }
     -> Initiator : DeviceEpochAcceptance of crate.protocols.device_epoch_rotation.DeviceEpochAcceptance
 
-  Initiator { guard_capability = "sync:device_epoch:commit"
-            , flow_cost = 60
-            , journal_facts = "device_epoch_rotation_committed" }
+  Initiator { guard_capability : "sync:device_epoch:commit"
+            , flow_cost : 60
+            , journal_facts : "device_epoch_rotation_committed" }
     -> Participant : DeviceEpochCommit of crate.protocols.device_epoch_rotation.DeviceEpochCommit

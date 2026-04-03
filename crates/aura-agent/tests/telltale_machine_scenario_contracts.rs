@@ -119,56 +119,11 @@ fn project_locals(global: &GlobalType) -> std::collections::BTreeMap<String, Loc
         .collect()
 }
 
-fn strip_aura_annotations_for_parser(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    #[allow(clippy::while_let_on_iterator)]
-    while let Some(ch) = chars.next() {
-        let (open, close) = match ch {
-            '[' => ('[', ']'),
-            '{' => ('{', '}'),
-            _ => {
-                out.push(ch);
-                continue;
-            }
-        };
-
-        let mut depth = 1usize;
-        let mut buf = String::new();
-        let mut has_equals = false;
-
-        while let Some(next) = chars.next() {
-            if next == open {
-                depth += 1;
-            } else if next == close {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    break;
-                }
-            }
-            if next == '=' {
-                has_equals = true;
-            }
-            buf.push(next);
-        }
-
-        if !has_equals {
-            out.push(open);
-            out.push_str(&buf);
-            out.push(close);
-        }
-    }
-
-    out
-}
-
 fn invitation_exchange_global_from_source() -> GlobalType {
-    let source = strip_aura_annotations_for_parser(include_str!(
+    let choreography = aura_mpst::upstream::language::parse_choreography_str(include_str!(
         "../../aura-invitation/src/protocol.invitation_exchange.tell"
-    ));
-    let choreography = aura_mpst::upstream::language::parse_choreography_str(&source)
-        .expect("parse invitation choreography source");
+    ))
+    .expect("parse invitation choreography source");
     let current_global = aura_mpst::upstream::language::ast::choreography_to_global(&choreography)
         .expect("convert invitation choreography to global type");
     serde_json::from_value(

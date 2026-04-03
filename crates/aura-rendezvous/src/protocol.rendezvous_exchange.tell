@@ -3,21 +3,21 @@ module rendezvous exposing (RendezvousExchange)
 protocol RendezvousExchange =
   roles Initiator, Responder
 
-  Initiator { guard_capability = "rendezvous:publish"
-            , flow_cost = 1
-            , journal_facts = "RendezvousFact::Descriptor" }
+  Initiator { guard_capability : "rendezvous:publish"
+            , flow_cost : 1
+            , journal_facts : "RendezvousFact::Descriptor" }
     -> Responder : DescriptorOffer of crate.DescriptorOffer
 
-  Responder { guard_capability = "rendezvous:publish"
-            , flow_cost = 1
-            , journal_facts = "RendezvousFact::Descriptor" }
+  Responder { guard_capability : "rendezvous:publish"
+            , flow_cost : 1
+            , journal_facts : "RendezvousFact::Descriptor" }
     -> Initiator : DescriptorAnswer of crate.DescriptorAnswer
 
-  Initiator { guard_capability = "rendezvous:connect"
-            , flow_cost = 2 }
+  Initiator { guard_capability : "rendezvous:connect"
+            , flow_cost : 2 }
     -> Responder : HandshakeInit of crate.HandshakeInit
 
-  Responder { guard_capability = "rendezvous:connect"
-            , flow_cost = 2
-            , journal_facts = "RendezvousFact::ChannelEstablished" }
+  Responder { guard_capability : "rendezvous:connect"
+            , flow_cost : 2
+            , journal_facts : "RendezvousFact::ChannelEstablished" }
     -> Initiator : HandshakeComplete of crate.HandshakeComplete

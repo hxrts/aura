@@ -45,7 +45,7 @@ mod test_macros;
 /// This macro inherits ALL standard Telltale features including:
 /// - Module namespaces: `module my_protocol exposing (ProtocolName)`
 /// - Parameterized roles: `Worker[N]`, `Signer[*]`
-/// - Choice constructs: `choice at Role { ... }`
+/// - Choice constructs: `choice Role at ...`
 /// - Loop constructs: `loop { ... }`
 /// - Session type safety and choreographic projection
 /// - Protocol composition and modular design

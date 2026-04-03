@@ -4,53 +4,8 @@ use aura_mpst::upstream::language::{ast::local_to_local_r, parse_choreography_st
 use std::collections::BTreeMap;
 use telltale_theory::subtyping::orphan_free;
 
-fn strip_aura_annotations_for_parser(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    #[allow(clippy::while_let_on_iterator)]
-    while let Some(ch) = chars.next() {
-        let Some((closing, preserve_if_no_equals)) = (match ch {
-            '[' => Some((']', true)),
-            '{' => Some(('}', true)),
-            _ => None,
-        }) else {
-            out.push(ch);
-            continue;
-        };
-
-        let mut depth = 1usize;
-        let mut buf = String::new();
-        let mut has_equals = false;
-
-        while let Some(next) = chars.next() {
-            if next == ch {
-                depth += 1;
-            } else if next == closing {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    break;
-                }
-            }
-            if next == '=' {
-                has_equals = true;
-            }
-            buf.push(next);
-        }
-
-        if preserve_if_no_equals && !has_equals {
-            out.push(ch);
-            out.push_str(&buf);
-            out.push(closing);
-        }
-    }
-
-    out
-}
-
 fn orphan_free_status_for_all_roles(source: &str) -> BTreeMap<String, bool> {
-    let parser_source = strip_aura_annotations_for_parser(source);
-    let choreography = parse_choreography_str(&parser_source)
+    let choreography = parse_choreography_str(source)
         .unwrap_or_else(|err| panic!("failed to parse consensus choreography: {err}"));
 
     let mut status = BTreeMap::new();

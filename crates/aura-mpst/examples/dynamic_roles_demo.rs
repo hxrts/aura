@@ -78,14 +78,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   Testing annotation extraction for future Aura features:");
 
     let annotated_choreography = r#"
-        choreography AnnotatedProtocol {
-            namespace: "annotated_demo";
-            roles: Leader, Follower;
+module annotated_demo exposing (AnnotatedProtocol)
 
-            Leader[guard_capability = "consensus:initiate"] -> Follower: Instruction;
-            Follower[flow_cost = 10] -> Leader: Status;
-            Leader[journal_facts = "round_complete"] -> Follower: Completion;
-        }
+protocol AnnotatedProtocol =
+  roles Leader, Follower
+
+  Leader { guard_capability : "consensus:initiate" } -> Follower : Instruction
+  Follower { flow_cost : 10 } -> Leader : Status
+  Leader { journal_facts : "round_complete" } -> Follower : Completion
     "#;
 
     match extract_aura_annotations(annotated_choreography) {

@@ -5,29 +5,29 @@ proof_bundle AuraTransitionSafety version "1.0.0" issuer "did:aura:runtime-admis
 protocol OTAActivationProtocol requires AuraTransitionSafety =
   roles Coordinator, Devices[N]
 
-  Coordinator { parallel = true
-              , guard_capability = "ota:propose"
-              , flow_cost = 100
-              , journal_facts = "ota_ceremony_initiated" }
+  Coordinator { parallel : true
+              , guard_capability : "ota:propose"
+              , flow_cost : 100
+              , journal_facts : "ota_ceremony_initiated" }
     -> Devices[*] : UpgradeProposal of crate.protocols.ota_ceremony.UpgradeProposal
 
-  Devices[*] { parallel = true
-             , guard_capability = "ota:commit_readiness"
-             , flow_cost = 80
-             , journal_facts = "ota_ceremony_commitment_received" }
+  Devices[*] { parallel : true
+             , guard_capability : "ota:commit_readiness"
+             , flow_cost : 80
+             , journal_facts : "ota_ceremony_commitment_received" }
     -> Coordinator : ReadinessCommitment of crate.protocols.ota_ceremony.ReadinessCommitment
 
-  choice at Coordinator
-    | Commit ->
-        Coordinator { parallel = true
-                    , guard_capability = "ota:activate"
-                    , flow_cost = 120
-                    , journal_facts = "ota_ceremony_committed" }
+  choice Coordinator at
+    | Commit =>
+        Coordinator { parallel : true
+                    , guard_capability : "ota:activate"
+                    , flow_cost : 120
+                    , journal_facts : "ota_ceremony_committed" }
           -> Devices[*] : OTACeremonyCommit of crate.protocols.ota_ceremony.OTACeremonyCommit
 
-    | Abort ->
-        Coordinator { parallel = true
-                    , guard_capability = "ota:abort"
-                    , flow_cost = 60
-                    , journal_facts = "ota_ceremony_aborted" }
+    | Abort =>
+        Coordinator { parallel : true
+                    , guard_capability : "ota:abort"
+                    , flow_cost : 60
+                    , journal_facts : "ota_ceremony_aborted" }
           -> Devices[*] : OTACeremonyAbort of crate.protocols.ota_ceremony.OTACeremonyAbort

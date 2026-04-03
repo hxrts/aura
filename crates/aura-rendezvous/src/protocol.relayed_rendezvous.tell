@@ -3,20 +3,20 @@ module rendezvous_relay exposing (RelayedRendezvous)
 protocol RelayedRendezvous =
   roles Initiator, Relay, Responder
 
-  Initiator { guard_capability = "rendezvous:relay"
-            , flow_cost = 2 }
+  Initiator { guard_capability : "rendezvous:relay"
+            , flow_cost : 2 }
     -> Relay : RelayRequest of crate.RelayRequest
 
-  Relay { guard_capability = "relay:forward"
-        , flow_cost = 1
-        , leak = "neighbor:1" }
+  Relay { guard_capability : "relay:forward"
+        , flow_cost : 1
+        , leak : "neighbor:1" }
     -> Responder : RelayForward of crate.RelayForward
 
-  Responder { guard_capability = "rendezvous:relay"
-            , flow_cost = 2 }
+  Responder { guard_capability : "rendezvous:relay"
+            , flow_cost : 2 }
     -> Relay : RelayResponse of crate.RelayResponse
 
-  Relay { guard_capability = "relay:forward"
-        , flow_cost = 1
-        , leak = "neighbor:1" }
+  Relay { guard_capability : "relay:forward"
+        , flow_cost : 1
+        , leak : "neighbor:1" }
     -> Initiator : RelayComplete of crate.RelayComplete

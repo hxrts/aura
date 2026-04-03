@@ -6,7 +6,7 @@ error: Invalid annotation value: invalid guard_capability `send_message`: choreo
 5 | |
 6 | | protocol LegacyGuardCapabilityName =
 7 | |   roles Alice, Bob
-8 | |   Alice[guard_capability = "send_message"] -> Bob : Message
+8 | |   Alice { guard_capability : "send_message" } -> Bob : Message
 9 | | "#);
   | |___^
   |

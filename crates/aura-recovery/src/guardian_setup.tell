@@ -5,43 +5,43 @@ proof_bundle AuraAuthorityEvidence version "1.0.0" issuer "did:aura:runtime-admi
 protocol GuardianSetup requires AuraAuthorityEvidence =
   roles SetupInitiator, Guardian1, Guardian2, Guardian3
 
-  SetupInitiator { guard_capability = "recovery:guardian_setup:initiate"
-                 , flow_cost = 300
-                 , journal_facts = "guardian_setup_initiated" }
+  SetupInitiator { guard_capability : "recovery:guardian_setup:initiate"
+                 , flow_cost : 300
+                 , journal_facts : "guardian_setup_initiated" }
     -> Guardian1 : SendInvitation of crate.guardian_setup.GuardianInvitation
 
-  SetupInitiator { guard_capability = "recovery:guardian_setup:initiate"
-                 , flow_cost = 300 }
+  SetupInitiator { guard_capability : "recovery:guardian_setup:initiate"
+                 , flow_cost : 300 }
     -> Guardian2 : SendInvitation of crate.guardian_setup.GuardianInvitation
 
-  SetupInitiator { guard_capability = "recovery:guardian_setup:initiate"
-                 , flow_cost = 300 }
+  SetupInitiator { guard_capability : "recovery:guardian_setup:initiate"
+                 , flow_cost : 300 }
     -> Guardian3 : SendInvitation of crate.guardian_setup.GuardianInvitation
 
-  Guardian1 { guard_capability = "recovery:guardian_setup:accept_invitation"
-            , flow_cost = 200
-            , journal_facts = "guardian_setup_accepted" }
+  Guardian1 { guard_capability : "recovery:guardian_setup:accept_invitation"
+            , flow_cost : 200
+            , journal_facts : "guardian_setup_accepted" }
     -> SetupInitiator : AcceptInvitation of crate.guardian_setup.GuardianAcceptance
 
-  Guardian2 { guard_capability = "recovery:guardian_setup:accept_invitation"
-            , flow_cost = 200
-            , journal_facts = "guardian_setup_accepted" }
+  Guardian2 { guard_capability : "recovery:guardian_setup:accept_invitation"
+            , flow_cost : 200
+            , journal_facts : "guardian_setup_accepted" }
     -> SetupInitiator : AcceptInvitation of crate.guardian_setup.GuardianAcceptance
 
-  Guardian3 { guard_capability = "recovery:guardian_setup:accept_invitation"
-            , flow_cost = 200
-            , journal_facts = "guardian_setup_accepted" }
+  Guardian3 { guard_capability : "recovery:guardian_setup:accept_invitation"
+            , flow_cost : 200
+            , journal_facts : "guardian_setup_accepted" }
     -> SetupInitiator : AcceptInvitation of crate.guardian_setup.GuardianAcceptance
 
-  SetupInitiator { guard_capability = "recovery:guardian_setup:complete"
-                 , flow_cost = 150
-                 , journal_facts = "guardian_setup_completed" }
+  SetupInitiator { guard_capability : "recovery:guardian_setup:complete"
+                 , flow_cost : 150
+                 , journal_facts : "guardian_setup_completed" }
     -> Guardian1 : CompleteSetup of crate.guardian_setup.SetupCompletion
 
-  SetupInitiator { guard_capability = "recovery:guardian_setup:complete"
-                 , flow_cost = 150 }
+  SetupInitiator { guard_capability : "recovery:guardian_setup:complete"
+                 , flow_cost : 150 }
     -> Guardian2 : CompleteSetup of crate.guardian_setup.SetupCompletion
 
-  SetupInitiator { guard_capability = "recovery:guardian_setup:complete"
-                 , flow_cost = 150 }
+  SetupInitiator { guard_capability : "recovery:guardian_setup:complete"
+                 , flow_cost : 150 }
     -> Guardian3 : CompleteSetup of crate.guardian_setup.SetupCompletion

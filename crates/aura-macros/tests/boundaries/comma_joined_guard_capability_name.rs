@@ -5,8 +5,7 @@ choreography! {
     protocol ExampleProtocol {
         roles: Alice, Bob;
 
-        Alice[guard_capability = "recovery:guardian_setup:accept_invitation,recovery:guardian_setup:verify_invitation"]
-        -> Bob: Message;
+        Alice { guard_capability : "recovery:guardian_setup:accept_invitation,recovery:guardian_setup:verify_invitation" } -> Bob: Message;
     }
 }
 

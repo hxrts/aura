@@ -3,18 +3,18 @@ module guardian_auth_relational exposing (GuardianAuthRelational)
 protocol GuardianAuthRelational =
   roles Account, Guardian, Coordinator
 
-  Account { guard_capability = "auth:guardian:request_approval"
-          , flow_cost = 50 }
+  Account { guard_capability : "auth:guardian:request_approval"
+          , flow_cost : 50 }
     -> Coordinator : RequestGuardianAuth of crate.guardian_auth_relational.GuardianAuthRequest
 
-  Coordinator { guard_capability = "auth:guardian:coordinate"
-              , flow_cost = 30 }
+  Coordinator { guard_capability : "auth:guardian:coordinate"
+              , flow_cost : 30 }
     -> Guardian : ForwardAuthRequest of crate.guardian_auth_relational.GuardianAuthRequest
 
-  Guardian { guard_capability = "auth:guardian:submit_proof"
-           , flow_cost = 50 }
+  Guardian { guard_capability : "auth:guardian:submit_proof"
+           , flow_cost : 50 }
     -> Coordinator : SubmitGuardianProof of crate.guardian_auth_relational.GuardianAuthProof
 
-  Coordinator { guard_capability = "auth:guardian:verify"
-              , flow_cost = 30 }
+  Coordinator { guard_capability : "auth:guardian:verify"
+              , flow_cost : 30 }
     -> Account : GuardianAuthResult of crate.guardian_auth_relational.GuardianAuthResponse

@@ -7,7 +7,7 @@ module source_namespace exposing (NamespaceMismatch)
 
 protocol NamespaceMismatch =
   roles Alice, Bob
-  Alice[guard_capability = "chat:message:send"] -> Bob : Message
+  Alice { guard_capability : "chat:message:send" } -> Bob : Message
 "#
 );
 
