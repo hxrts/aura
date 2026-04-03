@@ -4,10 +4,13 @@
 //! Uses a minimal parser-oriented pattern for clean annotation processing.
 
 use crate::ids::RoleId;
+use crate::upstream::language::{
+    collect_choreography_annotation_records, parse_choreography_str, AnnotationScope, Choreography,
+    CompiledChoreography, ProtocolAnnotationRecord,
+};
 use aura_core::{CapabilityName, CapabilityNameError};
-use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
-use syn::{bracketed, parenthesized, Ident, LitBool, LitInt, LitStr, Token};
+
+const DEFAULT_FLOW_COST: u64 = 100;
 
 /// Aura-specific effect that can be generated from annotations
 #[derive(Debug, Clone, PartialEq)]
@@ -131,118 +134,72 @@ pub fn parse_choreography_capability(
     Ok(parsed)
 }
 
-#[derive(Debug)]
-struct AnnotationList {
-    items: Vec<AnnotationItem>,
-}
-
-#[derive(Debug)]
-struct AnnotationItem {
-    name: String,
-    value: Option<AnnotationValue>,
-}
-
-#[derive(Debug)]
-enum AnnotationValue {
-    Str(String),
-    Int(u64),
-    Bool(bool),
-    IdentList(Vec<String>),
-    IntList(Vec<u64>),
-}
-
-impl Parse for AnnotationList {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut items = Vec::new();
-        while !input.is_empty() {
-            items.push(input.parse()?);
-            if input.peek(Token![,]) {
-                input.parse::<Token![,]>()?;
-            } else {
-                break;
-            }
-        }
-        Ok(Self { items })
-    }
-}
-
-impl Parse for AnnotationItem {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let name: Ident = input.parse()?;
-        let value = if input.peek(Token![:]) {
-            input.parse::<Token![:]>()?;
-            Some(parse_annotation_value(input)?)
-        } else {
-            None
-        };
-        Ok(Self {
-            name: name.to_string(),
-            value,
-        })
-    }
-}
-
-fn parse_annotation_value(input: ParseStream) -> syn::Result<AnnotationValue> {
-    if input.peek(LitStr) {
-        let lit: LitStr = input.parse()?;
-        Ok(AnnotationValue::Str(lit.value()))
-    } else if input.peek(LitInt) {
-        let lit: LitInt = input.parse()?;
-        let value = lit.base10_parse::<u64>()?;
-        Ok(AnnotationValue::Int(value))
-    } else if input.peek(LitBool) {
-        let lit: LitBool = input.parse()?;
-        Ok(AnnotationValue::Bool(lit.value))
-    } else if input.peek(syn::token::Paren) {
-        let content;
-        parenthesized!(content in input);
-        let idents: Punctuated<Ident, Token![,]> =
-            content.parse_terminated(Ident::parse, Token![,])?;
-        if idents.is_empty() {
-            return Err(syn::Error::new(
-                content.span(),
-                "leak list must contain at least one identifier",
-            ));
-        }
-        Ok(AnnotationValue::IdentList(
-            idents.into_iter().map(|ident| ident.to_string()).collect(),
-        ))
-    } else if input.peek(syn::token::Bracket) {
-        let content;
-        bracketed!(content in input);
-        let values: Punctuated<LitInt, Token![,]> =
-            content.parse_terminated(LitInt::parse, Token![,])?;
-        if values.is_empty() {
-            return Err(syn::Error::new(
-                content.span(),
-                "leakage_budget must contain at least one integer",
-            ));
-        }
-        let parsed = values
-            .into_iter()
-            .map(|lit| lit.base10_parse::<u64>())
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(AnnotationValue::IntList(parsed))
-    } else {
-        Err(syn::Error::new(
-            input.span(),
-            "Expected string, integer, boolean, or identifier list",
-        ))
-    }
-}
-
 /// Extract Aura annotations from a choreography string
 ///
-/// Simple pattern-based extraction for choreography annotations.
-/// This works with the extension system rather than trying to reparse the AST.
+/// Parse once through Telltale and then derive Aura effects from the
+/// authoritative ordered annotation records.
 pub fn extract_aura_annotations(
     choreography_str: &str,
 ) -> Result<Vec<AuraEffect>, AuraExtractionError> {
+    let choreography = parse_choreography_str(choreography_str)
+        .map_err(|err| AuraExtractionError::AnnotationParseError(err.to_string()))?;
+    extract_aura_annotations_from_choreography(&choreography)
+}
+
+/// Extract Aura annotations from an already parsed choreography AST.
+pub fn extract_aura_annotations_from_choreography(
+    choreography: &Choreography,
+) -> Result<Vec<AuraEffect>, AuraExtractionError> {
+    let records = collect_choreography_annotation_records(choreography);
+    extract_aura_annotations_from_records(&records)
+}
+
+/// Extract Aura annotations from a compiled Telltale choreography.
+pub fn extract_aura_annotations_from_compiled(
+    compiled: &CompiledChoreography,
+) -> Result<Vec<AuraEffect>, AuraExtractionError> {
+    extract_aura_annotations_from_records(&compiled.annotation_records())
+}
+
+/// Extract Aura annotations from ordered Telltale annotation records.
+pub fn extract_aura_annotations_from_records(
+    records: &[ProtocolAnnotationRecord],
+) -> Result<Vec<AuraEffect>, AuraExtractionError> {
     let mut effects = Vec::new();
+    let mut current_block: Option<SenderAnnotationBlock> = None;
 
-    // Simple annotation detection for demonstration
-    detect_annotations_in_text(choreography_str, &mut effects)?;
+    for record in records
+        .iter()
+        .filter(|record| is_sender_annotation_record(record))
+    {
+        let role = record.role.as_deref().map(RoleId::new).ok_or_else(|| {
+            AuraExtractionError::AnnotationParseError(format!(
+                "sender annotation record at {} is missing a role",
+                record.path
+            ))
+        })?;
 
+        let block_changed = current_block.as_ref().is_some_and(|block| {
+            block.path != record.path || block.node_kind != record.node_kind || block.role != role
+        });
+        if block_changed {
+            flush_sender_annotation_block(&mut current_block, &mut effects);
+        }
+
+        if current_block.is_none() {
+            current_block = Some(SenderAnnotationBlock::new(
+                record.path.clone(),
+                record.node_kind.clone(),
+                role.clone(),
+            ));
+        }
+
+        if let Some(block) = current_block.as_mut() {
+            parse_sender_annotation_record(block, record)?;
+        }
+    }
+
+    flush_sender_annotation_block(&mut current_block, &mut effects);
     Ok(effects)
 }
 
@@ -306,326 +263,183 @@ pub fn generate_aura_choreography_code(
     code
 }
 
-/// Detect annotations in choreography text
-fn detect_annotations_in_text(
-    choreography_str: &str,
+#[derive(Debug)]
+struct SenderAnnotationBlock {
+    path: String,
+    node_kind: String,
+    role: RoleId,
+    has_explicit_flow_cost: bool,
+    effects: Vec<AuraEffect>,
+}
+
+impl SenderAnnotationBlock {
+    fn new(path: String, node_kind: String, role: RoleId) -> Self {
+        Self {
+            path,
+            node_kind,
+            role,
+            has_explicit_flow_cost: false,
+            effects: Vec::new(),
+        }
+    }
+}
+
+fn is_sender_annotation_record(record: &ProtocolAnnotationRecord) -> bool {
+    matches!(record.scope, AnnotationScope::Sender)
+        && matches!(record.node_kind.as_str(), "send" | "broadcast")
+}
+
+fn flush_sender_annotation_block(
+    block: &mut Option<SenderAnnotationBlock>,
     effects: &mut Vec<AuraEffect>,
+) {
+    if let Some(mut block) = block.take() {
+        if !block.has_explicit_flow_cost {
+            block.effects.push(AuraEffect::FlowCost {
+                cost: DEFAULT_FLOW_COST,
+                role: block.role.clone(),
+            });
+        }
+        effects.extend(block.effects);
+    }
+}
+
+fn parse_sender_annotation_record(
+    block: &mut SenderAnnotationBlock,
+    record: &ProtocolAnnotationRecord,
 ) -> Result<(), AuraExtractionError> {
-    fn process_statement(
-        statement: &str,
-        effects: &mut Vec<AuraEffect>,
-    ) -> Result<(), AuraExtractionError> {
-        let line = statement.trim();
-        if line.is_empty() {
-            return Ok(());
+    match record.key.as_str() {
+        "guard_capability" => {
+            let capability = parse_choreography_capability(&record.value).map_err(|error| {
+                AuraExtractionError::InvalidAnnotationValue(format!(
+                    "invalid guard_capability `{}`: {error}",
+                    record.value
+                ))
+            })?;
+            block.effects.push(AuraEffect::GuardCapability {
+                capability,
+                role: block.role.clone(),
+            });
         }
-
-        let annotation_content = match extract_annotation_content(line) {
-            Some(content) => content,
-            None => return Ok(()),
-        };
-
-        let role = extract_role_from_line(line).unwrap_or_else(|| RoleId::new("UnknownRole"));
-        let has_role_annotation = line.contains("->");
-        let items = parse_annotation_list(&annotation_content)?;
-        let mut has_flow_cost = false;
-
-        for item in items {
-            match item.name.as_str() {
-                "guard_capability" => {
-                    let capability = match item.value {
-                        Some(AnnotationValue::Str(value)) => value,
-                        Some(_) => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "guard_capability expects a string literal".to_string(),
-                            ))
-                        }
-                        None => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "guard_capability requires a string literal".to_string(),
-                            ))
-                        }
-                    };
-                    let capability =
-                        parse_choreography_capability(&capability).map_err(|error| {
-                            AuraExtractionError::InvalidAnnotationValue(format!(
-                                "invalid guard_capability `{capability}`: {error}"
-                            ))
-                        })?;
-                    effects.push(AuraEffect::GuardCapability {
-                        capability,
-                        role: role.clone(),
-                    });
-                }
-                "flow_cost" => {
-                    if has_flow_cost {
-                        return Err(AuraExtractionError::InvalidAnnotationValue(
-                            "flow_cost specified multiple times".to_string(),
-                        ));
-                    }
-                    let cost = match item.value {
-                        Some(AnnotationValue::Int(value)) => value,
-                        Some(_) => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "flow_cost expects an integer literal".to_string(),
-                            ))
-                        }
-                        None => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "flow_cost requires an integer literal".to_string(),
-                            ))
-                        }
-                    };
-                    effects.push(AuraEffect::FlowCost {
-                        cost,
-                        role: role.clone(),
-                    });
-                    has_flow_cost = true;
-                }
-                "parallel" => match item.value {
-                    None | Some(AnnotationValue::Bool(_)) => {}
-                    Some(_) => {
-                        return Err(AuraExtractionError::InvalidAnnotationValue(
-                            "parallel expects a boolean literal".to_string(),
-                        ))
-                    }
-                },
-                "journal_facts" => {
-                    let facts = match item.value {
-                        Some(AnnotationValue::Str(value)) => value,
-                        Some(_) => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "journal_facts expects a string literal".to_string(),
-                            ))
-                        }
-                        None => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "journal_facts requires a string literal".to_string(),
-                            ))
-                        }
-                    };
-                    effects.push(AuraEffect::JournalFacts {
-                        facts,
-                        role: role.clone(),
-                    });
-                }
-                "journal_merge" => match item.value {
-                    None => {
-                        effects.push(AuraEffect::JournalMerge { role: role.clone() });
-                    }
-                    Some(AnnotationValue::Bool(true)) => {
-                        effects.push(AuraEffect::JournalMerge { role: role.clone() });
-                    }
-                    Some(AnnotationValue::Bool(false)) => {}
-                    Some(_) => {
-                        return Err(AuraExtractionError::InvalidAnnotationValue(
-                            "journal_merge expects a boolean literal".to_string(),
-                        ))
-                    }
-                },
-                "audit_log" => {
-                    let action = match item.value {
-                        Some(AnnotationValue::Str(value)) => value,
-                        Some(_) => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "audit_log expects a string literal".to_string(),
-                            ))
-                        }
-                        None => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "audit_log requires a string literal".to_string(),
-                            ))
-                        }
-                    };
-                    effects.push(AuraEffect::AuditLog {
-                        action,
-                        role: role.clone(),
-                    });
-                }
-                "leak" => {
-                    let observers =
-                        match item.value {
-                            Some(AnnotationValue::IdentList(values)) => values,
-                            Some(AnnotationValue::Str(value)) => vec![value],
-                            Some(_) => return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "leak expects a parenthesized identifier list or string literal"
-                                    .to_string(),
-                            )),
-                            None => {
-                                return Err(AuraExtractionError::InvalidAnnotationValue(
-                                    "leak requires observers".to_string(),
-                                ))
-                            }
-                        };
-                    effects.push(AuraEffect::Leakage {
-                        observers,
-                        role: role.clone(),
-                    });
-                }
-                "leakage_budget" => match item.value {
-                    Some(AnnotationValue::IntList(_values)) => {}
-                    Some(AnnotationValue::Str(value)) => {
-                        parse_leakage_budget_string(&value)?;
-                    }
-                    Some(_) => return Err(AuraExtractionError::InvalidAnnotationValue(
-                        "leakage_budget expects a list of integers or a quoted integer sequence"
-                            .to_string(),
-                    )),
-                    None => return Err(AuraExtractionError::InvalidAnnotationValue(
-                        "leakage_budget requires a list of integers or a quoted integer sequence"
-                            .to_string(),
-                    )),
-                },
-                "link" => {
-                    let raw = match item.value {
-                        Some(AnnotationValue::Str(value)) => value,
-                        Some(_) => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "link expects a string literal".to_string(),
-                            ))
-                        }
-                        None => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "link requires a string literal".to_string(),
-                            ))
-                        }
-                    };
-                    let directive = parse_link_directive(&raw)?;
-                    effects.push(AuraEffect::Link {
-                        directive,
-                        role: role.clone(),
-                    });
-                }
-                other => {
-                    return Err(AuraExtractionError::UnsupportedFeature(format!(
-                        "Unknown annotation: {other}"
-                    )))
-                }
+        "flow_cost" => {
+            if block.has_explicit_flow_cost {
+                return Err(AuraExtractionError::InvalidAnnotationValue(
+                    "flow_cost specified multiple times".to_string(),
+                ));
+            }
+            let cost = parse_u64_annotation_value("flow_cost", &record.value)?;
+            block.effects.push(AuraEffect::FlowCost {
+                cost,
+                role: block.role.clone(),
+            });
+            block.has_explicit_flow_cost = true;
+        }
+        "journal_facts" => {
+            block.effects.push(AuraEffect::JournalFacts {
+                facts: record.value.clone(),
+                role: block.role.clone(),
+            });
+        }
+        "journal_merge" => {
+            if parse_bool_annotation_value("journal_merge", &record.value)? {
+                block.effects.push(AuraEffect::JournalMerge {
+                    role: block.role.clone(),
+                });
             }
         }
-
-        if has_role_annotation && !has_flow_cost {
-            effects.push(AuraEffect::FlowCost { cost: 100, role });
+        "audit_log" => {
+            block.effects.push(AuraEffect::AuditLog {
+                action: record.value.clone(),
+                role: block.role.clone(),
+            });
         }
-
-        Ok(())
-    }
-
-    let mut current = String::new();
-    let mut nesting_depth = 0i32;
-
-    for raw_line in choreography_str.lines() {
-        let trimmed = raw_line.trim();
-
-        if trimmed.is_empty() {
-            process_statement(&current, effects)?;
-            current.clear();
-            nesting_depth = 0;
-            continue;
+        "leak" => {
+            block.effects.push(AuraEffect::Leakage {
+                observers: parse_leak_observers(&record.value)?,
+                role: block.role.clone(),
+            });
         }
-
-        if !current.is_empty() {
-            current.push('\n');
+        "leakage_budget" => {
+            parse_leakage_budget_string(&record.value)?;
         }
-        current.push_str(raw_line);
-
-        for ch in raw_line.chars() {
-            match ch {
-                '{' | '[' => nesting_depth += 1,
-                '}' | ']' => nesting_depth -= 1,
-                _ => {}
-            }
+        "link" => {
+            block.effects.push(AuraEffect::Link {
+                directive: parse_link_directive(&record.value)?,
+                role: block.role.clone(),
+            });
         }
-
-        if trimmed.ends_with(';')
-            || ((raw_line.contains("->") || raw_line.contains("->*")) && nesting_depth <= 0)
-        {
-            process_statement(&current, effects)?;
-            current.clear();
-            nesting_depth = 0;
+        key if is_ignored_upstream_annotation_key(key) => {}
+        other => {
+            return Err(AuraExtractionError::UnsupportedFeature(format!(
+                "Unknown annotation: {other}"
+            )))
         }
     }
 
-    process_statement(&current, effects)?;
     Ok(())
 }
 
-fn parse_annotation_list(content: &str) -> Result<Vec<AnnotationItem>, AuraExtractionError> {
-    let list: AnnotationList = syn::parse_str(content)
-        .map_err(|err| AuraExtractionError::AnnotationParseError(err.to_string()))?;
-    Ok(list.items)
+fn parse_u64_annotation_value(key: &str, value: &str) -> Result<u64, AuraExtractionError> {
+    value.parse::<u64>().map_err(|_| {
+        AuraExtractionError::InvalidAnnotationValue(format!("{key} expects an integer literal"))
+    })
 }
 
-fn extract_annotation_content(line: &str) -> Option<String> {
-    if line.trim_start().starts_with("#[") {
-        return None;
+fn parse_bool_annotation_value(key: &str, value: &str) -> Result<bool, AuraExtractionError> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(AuraExtractionError::InvalidAnnotationValue(format!(
+            "{key} expects a boolean literal"
+        ))),
+    }
+}
+
+fn parse_leak_observers(value: &str) -> Result<Vec<String>, AuraExtractionError> {
+    let trimmed = value.trim();
+    if let Some(inner) = trimmed
+        .strip_prefix('(')
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let observers = inner
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if observers.is_empty() {
+            return Err(AuraExtractionError::InvalidAnnotationValue(
+                "leak requires observers".to_string(),
+            ));
+        }
+        return Ok(observers);
     }
 
-    let bytes = line.as_bytes();
-    let mut index = 0usize;
-    while index < bytes.len() {
-        let (open, close) = match bytes[index] {
-            b'[' => (b'[', b']'),
-            b'{' => (b'{', b'}'),
-            _ => {
-                index += 1;
-                continue;
-            }
-        };
-
-        let start = index + 1;
-        let mut depth = 1usize;
-        index += 1;
-        while index < bytes.len() && depth > 0 {
-            match bytes[index] {
-                byte if byte == open => depth += 1,
-                byte if byte == close => depth = depth.saturating_sub(1),
-                _ => {}
-            }
-            index += 1;
-        }
-
-        if depth != 0 {
-            break;
-        }
-
-        let end = index - 1;
-        let content = line[start..end].trim();
-        if is_annotation_content(content) {
-            return Some(content.to_string());
-        }
+    if trimmed.is_empty() {
+        return Err(AuraExtractionError::InvalidAnnotationValue(
+            "leak requires observers".to_string(),
+        ));
     }
-    None
+
+    Ok(vec![trimmed.to_string()])
 }
 
-fn is_annotation_content(content: &str) -> bool {
-    [
-        "guard_capability",
-        "flow_cost",
-        "journal_facts",
-        "journal_merge",
-        "audit_log",
-        "leak",
-        "leakage_budget",
-        "link",
-    ]
-    .iter()
-    .any(|key| content.contains(key))
-}
-
-fn extract_role_before_delimiter(line: &str, delimiter: char) -> Option<RoleId> {
-    if let Some(position) = line.find(delimiter) {
-        let before_delimiter = line[..position].trim();
-        if !before_delimiter.is_empty() {
-            return Some(RoleId::new(before_delimiter));
-        }
-    }
-    None
-}
-
-/// Extract role from a line - simple implementation
-fn extract_role_from_line(line: &str) -> Option<RoleId> {
-    extract_role_before_delimiter(line, '[').or_else(|| extract_role_before_delimiter(line, '{'))
+fn is_ignored_upstream_annotation_key(key: &str) -> bool {
+    matches!(
+        key,
+        "timed_choice"
+            | "timeout_ms"
+            | "priority"
+            | "retry"
+            | "idempotent"
+            | "trace"
+            | "runtime_timeout"
+            | "heartbeat"
+            | "parallel"
+            | "ordered"
+            | "min_responses"
+            | "required_capability"
+    )
 }
 
 fn parse_link_directive(raw: &str) -> Result<LinkDirective, AuraExtractionError> {
@@ -734,6 +548,13 @@ fn parse_leakage_budget_string(raw: &str) -> Result<Vec<u64>, AuraExtractionErro
 mod tests {
     use super::*;
 
+    fn test_choreography(body: &str) -> String {
+        format!(
+            "protocol Extracted =\n  roles Alice, Bob, Coordinator, Worker\n  {}\n",
+            body.trim()
+        )
+    }
+
     #[test]
     fn test_aura_effect_types() {
         let guard_effect = AuraEffect::GuardCapability {
@@ -768,31 +589,11 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_role_from_line() {
-        let line = r#"Alice { guard_capability : "chat:message:send" } -> Bob: Message;"#;
-        let role = extract_role_from_line(line);
-        assert_eq!(
-            role.map(|role| role.as_str().to_string()),
-            Some("Alice".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_role_from_record_line() {
-        let line = r#"Alice { guard_capability : "chat:message:send" } -> Bob : Message of crate.demo.Payload"#;
-        let role = extract_role_from_line(line);
-        assert_eq!(
-            role.map(|role| role.as_str().to_string()),
-            Some("Alice".to_string())
-        );
-    }
-
-    #[test]
     fn test_guard_capability_annotation() {
-        let choreography = r#"
-            Alice { guard_capability : "chat:message:send" } -> Bob: Message;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography = test_choreography(
+            r#"Alice { guard_capability : "chat:message:send" } -> Bob: Message"#,
+        );
+        let effects = extract_aura_annotations(&choreography).unwrap();
         let has_guard = effects.iter().any(|e| {
             matches!(e, AuraEffect::GuardCapability { capability, role }
                 if capability.as_str() == "chat:message:send" && role.as_str() == "Alice")
@@ -802,10 +603,9 @@ mod tests {
 
     #[test]
     fn test_journal_facts_annotation() {
-        let choreography = r#"
-            Alice { journal_facts : "message_sent" } -> Bob: Message;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography =
+            test_choreography(r#"Alice { journal_facts : "message_sent" } -> Bob: Message"#);
+        let effects = extract_aura_annotations(&choreography).unwrap();
         let has_facts = effects.iter().any(|e| {
             matches!(e, AuraEffect::JournalFacts { facts, role }
                 if facts == "message_sent" && role.as_str() == "Alice")
@@ -816,10 +616,10 @@ mod tests {
     #[test]
     fn test_default_flow_cost() {
         // Line with annotation but no flow_cost should get default of 100
-        let choreography = r#"
-            Alice { guard_capability : "chat:message:send" } -> Bob: Message;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography = test_choreography(
+            r#"Alice { guard_capability : "chat:message:send" } -> Bob: Message"#,
+        );
+        let effects = extract_aura_annotations(&choreography).unwrap();
 
         // Should have both guard capability and default flow cost
         let has_guard = effects
@@ -836,10 +636,10 @@ mod tests {
     #[test]
     fn test_explicit_flow_cost_overrides_default() {
         // Explicit flow_cost should override the default
-        let choreography = r#"
-            Alice { guard_capability : "chat:message:send", flow_cost : 250 } -> Bob: Message;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography = test_choreography(
+            r#"Alice { guard_capability : "chat:message:send", flow_cost : 250 } -> Bob: Message"#,
+        );
+        let effects = extract_aura_annotations(&choreography).unwrap();
 
         // Should have explicit flow cost of 250, not default 100
         let has_explicit_cost = effects
@@ -859,10 +659,8 @@ mod tests {
     #[test]
     fn test_no_annotation_no_flow_cost() {
         // Line without annotation should not get flow cost
-        let choreography = r#"
-            Alice -> Bob: SimpleMessage;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography = test_choreography(r#"Alice -> Bob: SimpleMessage"#);
+        let effects = extract_aura_annotations(&choreography).unwrap();
 
         // Should not have any flow cost effects
         let has_flow_cost = effects
@@ -877,10 +675,9 @@ mod tests {
 
     #[test]
     fn test_journal_merge_annotation() {
-        let choreography = r#"
-            Alice { journal_merge : true } -> Bob: MergeRequest;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography =
+            test_choreography(r#"Alice { journal_merge : true } -> Bob: MergeRequest"#);
+        let effects = extract_aura_annotations(&choreography).unwrap();
 
         let has_journal_merge = effects
             .iter()
@@ -891,10 +688,9 @@ mod tests {
 
     #[test]
     fn test_audit_log_annotation() {
-        let choreography = r#"
-            Alice { audit_log : "message_sent" } -> Bob: Message;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography =
+            test_choreography(r#"Alice { audit_log : "message_sent" } -> Bob: Message"#);
+        let effects = extract_aura_annotations(&choreography).unwrap();
 
         let has_audit_log = effects
             .iter()
@@ -905,10 +701,9 @@ mod tests {
 
     #[test]
     fn test_leak_annotation_parentheses() {
-        let choreography = r#"
-            Alice { leak: (External, Neighbor) } -> Bob: Message;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography =
+            test_choreography(r#"Alice { leak: (External, Neighbor) } -> Bob: Message"#);
+        let effects = extract_aura_annotations(&choreography).unwrap();
 
         let has_leakage = effects.iter().any(|e| {
             matches!(e, AuraEffect::Leakage { observers, role }
@@ -925,10 +720,8 @@ mod tests {
 
     #[test]
     fn test_leak_annotation_quoted() {
-        let choreography = r#"
-            Alice { leak : "External" } -> Bob: Message;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography = test_choreography(r#"Alice { leak : "External" } -> Bob: Message"#);
+        let effects = extract_aura_annotations(&choreography).unwrap();
 
         let has_leakage = effects.iter().any(|e| {
             matches!(e, AuraEffect::Leakage { observers, role }
@@ -944,10 +737,10 @@ mod tests {
 
     #[test]
     fn test_link_annotation_parsing() {
-        let choreography = r#"
-            Coordinator { link : "bundle=sync_chat|exports=chat.send,sync.push|imports=journal.commit" } -> Worker: Step;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography = test_choreography(
+            r#"Coordinator { link : "bundle=sync_chat|exports=chat.send,sync.push|imports=journal.commit" } -> Worker: Step"#,
+        );
+        let effects = extract_aura_annotations(&choreography).unwrap();
         let has_link = effects.iter().any(|effect| {
             matches!(effect, AuraEffect::Link { directive, role }
                 if directive.bundle_id == "sync_chat"
@@ -960,10 +753,10 @@ mod tests {
 
     #[test]
     fn test_link_annotation_requires_bundle_key() {
-        let choreography = r#"
-            Coordinator { link : "exports=chat.send|imports=sync.push" } -> Worker: Step;
-        "#;
-        let err = extract_aura_annotations(choreography).expect_err("missing bundle must fail");
+        let choreography = test_choreography(
+            r#"Coordinator { link : "exports=chat.send|imports=sync.push" } -> Worker: Step"#,
+        );
+        let err = extract_aura_annotations(&choreography).expect_err("missing bundle must fail");
         assert!(
             err.to_string().contains("bundle=<id>"),
             "error should mention required bundle key"
@@ -972,10 +765,10 @@ mod tests {
 
     #[test]
     fn test_link_annotation_record_syntax() {
-        let choreography = r#"
-            Coordinator { link : "bundle=sync_chat|exports=chat.send,sync.push|imports=journal.commit" } -> Worker : Step of crate.demo.Payload
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography = test_choreography(
+            r#"Coordinator { link : "bundle=sync_chat|exports=chat.send,sync.push|imports=journal.commit" } -> Worker : Step of crate.demo.Payload"#,
+        );
+        let effects = extract_aura_annotations(&choreography).unwrap();
         let has_link = effects.iter().any(|effect| {
             matches!(effect, AuraEffect::Link { directive, role }
                 if directive.bundle_id == "sync_chat"
@@ -991,10 +784,9 @@ mod tests {
 
     #[test]
     fn test_leakage_budget_annotation_quoted() {
-        let choreography = r#"
-            Alice { leakage_budget : "1, 0, 0" } -> Bob: Message;
-        "#;
-        let effects = extract_aura_annotations(choreography).unwrap();
+        let choreography =
+            test_choreography(r#"Alice { leakage_budget : "1, 0, 0" } -> Bob: Message"#);
+        let effects = extract_aura_annotations(&choreography).unwrap();
         assert!(
             effects
                 .iter()
@@ -1019,6 +811,34 @@ mod tests {
         assert!(matches!(
             err,
             ChoreographyCapabilityError::LegacyNamespace { .. }
+        ));
+    }
+
+    #[test]
+    fn test_extract_annotations_from_compiled_choreography() {
+        let choreography = parse_choreography_str(
+            r#"
+protocol Guarded =
+  roles Alice, Bob
+  Alice { guard_capability : "chat:message:send", flow_cost : 42 } -> Bob : Message
+"#,
+        )
+        .expect("choreography should parse");
+        let compiled = crate::upstream::language::compile_choreography_ast(choreography)
+            .expect("choreography should compile");
+
+        let effects = extract_aura_annotations_from_compiled(&compiled)
+            .expect("compiled annotations should parse");
+
+        assert!(effects.iter().any(|effect| {
+            matches!(
+                effect,
+                AuraEffect::GuardCapability { capability, role }
+                    if capability.as_str() == "chat:message:send" && role.as_str() == "Alice"
+            )
+        }));
+        assert!(effects.iter().any(
+            |effect| matches!(effect, AuraEffect::FlowCost { cost: 42, role } if role.as_str() == "Alice")
         ));
     }
 }

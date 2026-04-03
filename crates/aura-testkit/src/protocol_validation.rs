@@ -11,9 +11,71 @@ use std::collections::BTreeMap;
 use telltale_theory::coherence::check_coherent;
 use telltale_theory::subtyping::{async_subtype, orphan_free};
 
+fn normalize_legacy_sender_record_annotations(source: &str) -> String {
+    let mut normalized = String::with_capacity(source.len());
+    let mut in_annotation_record = false;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for ch in source.chars() {
+        if escape_next {
+            normalized.push(ch);
+            escape_next = false;
+            continue;
+        }
+
+        if in_string {
+            normalized.push(ch);
+            if ch == '\\' {
+                escape_next = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => {
+                in_string = true;
+                normalized.push(ch);
+            }
+            '{' => {
+                in_annotation_record = true;
+                normalized.push(ch);
+            }
+            '}' => {
+                in_annotation_record = false;
+                normalized.push(ch);
+            }
+            '=' if in_annotation_record => normalized.push(':'),
+            _ => normalized.push(ch),
+        }
+    }
+
+    normalized
+}
+
+fn parse_choreography_str_compat(
+    source: &str,
+    label: &str,
+) -> aura_mpst::upstream::language::ast::Choreography {
+    match parse_choreography_str(source) {
+        Ok(choreography) => choreography,
+        Err(original_error) => {
+            let normalized = normalize_legacy_sender_record_annotations(source);
+            if normalized == source {
+                panic!("{label}: failed to parse choreography source: {original_error}");
+            }
+
+            parse_choreography_str(&normalized).unwrap_or_else(|_| {
+                panic!("{label}: failed to parse choreography source: {original_error}")
+            })
+        }
+    }
+}
+
 fn project_locals_by_role(source: &str, label: &str) -> BTreeMap<String, LocalTypeR> {
-    let choreography = parse_choreography_str(source)
-        .unwrap_or_else(|err| panic!("{label}: failed to parse choreography source: {err}"));
+    let choreography = parse_choreography_str_compat(source, label);
 
     let mut locals = BTreeMap::new();
     for role in &choreography.roles {
@@ -33,8 +95,7 @@ fn project_locals_by_role(source: &str, label: &str) -> BTreeMap<String, LocalTy
 
 /// Assert that a choreography source is coherent under telltale-theory checks.
 pub fn assert_protocol_coherent(source: &str) {
-    let choreography = parse_choreography_str(source)
-        .unwrap_or_else(|err| panic!("coherence: failed to parse choreography source: {err}"));
+    let choreography = parse_choreography_str_compat(source, "coherence");
     let global = choreography_to_global(&choreography).unwrap_or_else(|err| {
         panic!("coherence: failed to convert choreography to theory global: {err}")
     });
@@ -98,6 +159,7 @@ pub fn check_async_subtype_for_shared_roles(
 
 #[cfg(test)]
 mod tests {
+    use super::normalize_legacy_sender_record_annotations;
     use aura_mpst::upstream::language::parse_choreography_str;
 
     #[test]
@@ -124,5 +186,22 @@ protocol Demo =
 "#;
 
         parse_choreography_str(source).expect("choice surface should parse directly");
+    }
+
+    #[test]
+    fn normalizes_legacy_sender_record_annotations_without_touching_strings() {
+        let legacy = r#"
+protocol Demo =
+  roles A, B
+
+  A { guard_capability = "demo:start=still-string", flow_cost = 42 } -> B : Msg of crate.demo.Payload
+"#;
+
+        let normalized = normalize_legacy_sender_record_annotations(legacy);
+
+        assert!(normalized.contains(r#"guard_capability : "demo:start=still-string""#));
+        assert!(normalized.contains("flow_cost : 42"));
+        assert!(normalized.contains("protocol Demo ="));
+        parse_choreography_str(&normalized).expect("normalized legacy annotations should parse");
     }
 }

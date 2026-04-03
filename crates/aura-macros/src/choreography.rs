@@ -19,18 +19,16 @@ use syn::{
     visit_mut::{self, VisitMut},
     Attribute, Expr, ExprLit, ExprMacro, Ident, Lit, LitStr, Stmt, Type,
 };
-use telltale_choreography::ast::{
-    choreography_to_global, local_to_local_r, GlobalTypeCore, PayloadSort,
-};
+use telltale_choreography::ast::{choreography_to_global, GlobalTypeCore, PayloadSort};
 use telltale_choreography::{
-    generate_choreography_code, parse_choreography_str, project, Choreography, MessageType,
-    Protocol,
+    compile_choreography_ast, generate_choreography_code, parse_choreography_str, Choreography,
+    CompiledChoreography, MessageType, Protocol,
 };
 use telltale_language as telltale_choreography;
 use telltale_theory::coherence::check_coherent;
 
 // Import Biscuit-related types for the updated annotation system
-use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
+use aura_mpst::ast_extraction::{extract_aura_annotations_from_compiled, AuraEffect};
 
 /// Parsed choreography input (DSL source + derived metadata)
 #[derive(Debug)]
@@ -38,7 +36,7 @@ struct ChoreographyInput {
     roles: Vec<Ident>,
     aura_annotations: Vec<AuraEffect>,
     namespace: Option<String>,
-    choreography: Choreography,
+    compiled: CompiledChoreography,
 }
 
 #[derive(Debug)]
@@ -331,24 +329,27 @@ fn parse_choreography_source(input: TokenStream) -> Result<ChoreographyInput, sy
         (None, None) => None,
     };
 
-    let roles = choreography
+    let compiled = compile_choreography_ast(choreography)
+        .map_err(|err| syn::Error::new(span, format!("Choreography compile error: {err}")))?;
+    let roles = compiled
+        .choreography
         .roles
         .iter()
         .map(|role| role.name().clone())
         .collect::<Vec<_>>();
-    let aura_annotations = extract_aura_annotations(&dsl)
+    let aura_annotations = extract_aura_annotations_from_compiled(&compiled)
         .map_err(|err| syn::Error::new(proc_macro2::Span::call_site(), err.to_string()))?;
     validate_link_annotations(&aura_annotations).map_err(|err| {
         syn::Error::new(span, format!("Link annotation validation failed: {err}"))
     })?;
-    validate_protocol_coherence(&choreography)
+    validate_protocol_coherence(&compiled.choreography)
         .map_err(|err| syn::Error::new(span, format!("Coherence validation failed: {err}")))?;
 
     Ok(ChoreographyInput {
         roles,
         aura_annotations,
         namespace,
-        choreography,
+        compiled,
     })
 }
 
@@ -517,47 +518,23 @@ fn generate_helpers(messages: &[MessageType]) -> TokenStream {
 }
 
 fn generate_vm_projection_artifacts(
-    choreography: &Choreography,
+    compiled: &CompiledChoreography,
     namespace: Option<&str>,
     annotations: &[AuraEffect],
-    local_types: &[(
-        telltale_choreography::ast::Role,
-        telltale_choreography::ast::LocalType,
-    )],
 ) -> Result<TokenStream, syn::Error> {
-    let global_type = choreography_to_global(choreography).map_err(|error| {
+    let global_json = compiled.global_type_json().map_err(|error| {
         syn::Error::new(
             proc_macro2::Span::call_site(),
-            format!("failed to derive VM global type: {error}"),
+            format!("failed to derive VM global type artifact: {error}"),
         )
     })?;
-
-    let mut local_type_map = BTreeMap::new();
-    for (role, local_type) in local_types {
-        let local_type_r = local_to_local_r(local_type).map_err(|error| {
-            syn::Error::new(
-                proc_macro2::Span::call_site(),
-                format!(
-                    "failed to derive VM local type for role {}: {error}",
-                    role.name()
-                ),
-            )
-        })?;
-        local_type_map.insert(role.name().to_string(), local_type_r);
-    }
-
-    let global_json = serde_json::to_string(&global_type).map_err(|error| {
+    let local_types_json = compiled.local_type_r_json().map_err(|error| {
         syn::Error::new(
             proc_macro2::Span::call_site(),
-            format!("failed to encode VM global type artifact: {error}"),
+            format!("failed to derive VM local-type artifacts: {error}"),
         )
     })?;
-    let local_types_json = serde_json::to_string(&local_type_map).map_err(|error| {
-        syn::Error::new(
-            proc_macro2::Span::call_site(),
-            format!("failed to encode VM local-type artifacts: {error}"),
-        )
-    })?;
+    let choreography = &compiled.choreography;
     let protocol_name = choreography.name.to_string();
     let qualified_name = aura_mpst::CompositionManifest::qualified_name(namespace, &protocol_name);
     let startup_defaults = aura_mpst::startup_defaults_for_qualified_name(&qualified_name);
@@ -1515,9 +1492,9 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     let parsed_input = parse_choreography_source(input.clone())?;
 
     // Generate the Telltale choreography using namespace-aware functions
-    let message_type_names = extract_message_type_names(&parsed_input.choreography);
+    let message_type_names = extract_message_type_names(&parsed_input.compiled.choreography);
     let telltale_output = choreography_impl_namespace_aware(
-        &parsed_input.choreography,
+        &parsed_input.compiled,
         parsed_input.namespace.as_deref(),
         &parsed_input.aura_annotations,
         &message_type_names,
@@ -2243,39 +2220,26 @@ fn generate_aura_wrapper(
 ///
 /// Uses namespace-aware generation to avoid module conflicts.
 fn choreography_impl_namespace_aware(
-    choreography: &Choreography,
+    compiled: &CompiledChoreography,
     namespace: Option<&str>,
     annotations: &[AuraEffect],
     message_type_names: &[String],
 ) -> Result<TokenStream, syn::Error> {
-    // Project to local types
-    let mut local_types = Vec::new();
-    for role in &choreography.roles {
-        match project(choreography, role) {
-            Ok(local_type) => {
-                local_types.push((role.clone(), local_type));
-            }
-            Err(err) => {
-                return Err(syn::Error::new(
-                    proc_macro2::Span::call_site(),
-                    format!("Projection failed for role {}: {}", role.name(), err),
-                ));
-            }
-        }
-    }
+    let choreography = &compiled.choreography;
+    let local_types = &compiled.local_types;
 
     let mut message_map = BTreeMap::new();
     collect_messages(&choreography.protocol, &mut message_map);
     let messages: Vec<_> = message_map.into_values().collect();
     let helpers = generate_helpers(&messages);
     let vm_projection_artifacts =
-        generate_vm_projection_artifacts(choreography, namespace, annotations, &local_types)?;
+        generate_vm_projection_artifacts(compiled, namespace, annotations)?;
 
     // Generate code and hoist inline choice enums (choices need item-level definitions)
     let generated_code = generate_choreography_code(
         &choreography.name.to_string(),
         &choreography.roles,
-        &local_types,
+        local_types,
     );
     let generated_code = hoist_choice_blocks(generated_code);
     let role_ident = quote::format_ident!("{}Role", choreography.name);
@@ -2283,7 +2247,7 @@ fn choreography_impl_namespace_aware(
     let compat_runners = generate_compat_runners(
         &choreography.name.to_string(),
         &choreography.roles,
-        &local_types,
+        local_types,
     );
 
     let generated_code = if let Some(ns) = &choreography.namespace {
@@ -2505,8 +2469,12 @@ mod tests {
     #[test]
     fn link_validation_accepts_exported_imports() {
         let dsl = r#"
-            A { link : "bundle=alpha|exports=sync.push|imports=chat.send" } -> B: Msg;
-            B { link : "bundle=beta|exports=chat.send|imports=sync.push" } -> A: Ack;
+module link_validation exposing (LinkValidation)
+
+protocol LinkValidation =
+  roles A, B
+  A { link : "bundle=alpha|exports=sync.push|imports=chat.send" } -> B : Msg
+  B { link : "bundle=beta|exports=chat.send|imports=sync.push" } -> A : Ack
         "#;
         let annotations = extract_aura_annotations(dsl).expect("annotations should parse");
         validate_link_annotations(&annotations).expect("exports should satisfy imports");
@@ -2515,7 +2483,11 @@ mod tests {
     #[test]
     fn link_validation_rejects_missing_export() {
         let dsl = r#"
-            A { link : "bundle=alpha|exports=sync.push|imports=chat.send" } -> B: Msg;
+module link_validation_missing_export exposing (LinkValidationMissingExport)
+
+protocol LinkValidationMissingExport =
+  roles A, B
+  A { link : "bundle=alpha|exports=sync.push|imports=chat.send" } -> B : Msg
         "#;
         let annotations = extract_aura_annotations(dsl).expect("annotations should parse");
         let err = validate_link_annotations(&annotations).expect_err("missing export must fail");

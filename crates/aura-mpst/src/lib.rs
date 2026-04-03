@@ -188,8 +188,10 @@ pub fn init_aura_extensions() -> telltale_language::extensions::ExtensionRegistr
 }
 
 pub use ast_extraction::{
-    extract_aura_annotations, generate_aura_choreography_code, parse_choreography_capability,
-    AuraEffect, AuraExtractionError, ChoreographyCapabilityError,
+    extract_aura_annotations, extract_aura_annotations_from_choreography,
+    extract_aura_annotations_from_compiled, extract_aura_annotations_from_records,
+    generate_aura_choreography_code, parse_choreography_capability, AuraEffect,
+    AuraExtractionError, ChoreographyCapabilityError,
 };
 /// Full-featured choreography! macro with Telltale features + Aura extensions
 ///

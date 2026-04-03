@@ -1,13 +1,12 @@
-error: Telltale generation failed: Projection failed for role Auditors: dynamic role Auditors requires runtime context for projection
-  --> tests/boundaries/parameterized_roles_and_parallel.rs:3:1
+error: Choreography compile error: projection failed for role Auditors: dynamic role Auditors requires runtime context for projection
+  --> tests/boundaries/parameterized_roles_and_parallel.rs:3:15
    |
- 3 | / choreography!(r#"
+ 3 |   choreography!(r#"
+   |  _______________^
  4 | | module parameterized_roles_and_parallel exposing (ParameterizedRolesAndParallel)
  5 | |
  6 | | protocol ParameterizedRolesAndParallel =
 ...  |
 17 | |       Coordinator -> Auditors[*] : AbortNotice
 18 | | "#);
-   | |___^
-   |
-   = note: this error originates in the macro `choreography` (in Nightly builds, run with -Z macro-backtrace for more info)
+   | |__^

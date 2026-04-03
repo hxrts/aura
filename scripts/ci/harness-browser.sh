@@ -13,7 +13,7 @@ web_tools_cache_root="$repo_root/target/aura-web-tools-ci"
 prepare_browser_web_assets() {
   (
     cd crates/aura-web
-    if [ ! -d node_modules ] || [ ! -d node_modules/ws ]; then
+    if [ ! -d node_modules ] || [ ! -d node_modules/ws ] || [ ! -x node_modules/.bin/esbuild ] || [ ! -x node_modules/.bin/tailwindcss ]; then
       npm ci
     fi
     npm run tailwind:build >/dev/null
