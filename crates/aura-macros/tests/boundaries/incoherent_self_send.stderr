@@ -2,10 +2,10 @@ error: Coherence validation failed: Coherence validation failed for choreography
        Failed predicates: action (sender and receiver must differ).
        Deterministic initial_delivery_env channels: [Alice->Alice:Loopback=0].
        Hint: ensure choice branches are mergeable for non-participants and avoid self-sends.
- --> tests/boundaries/incoherent_self_send.rs:3:15
+ --> tests/boundaries/incoherent_self_send.rs:3:7
   |
 3 |   tell!(r#"
-  |  _______________^
+  |  _______^
 4 | | module incoherent_self_send exposing (IncoherentSelfSend)
 5 | |
 6 | | protocol IncoherentSelfSend =

@@ -1,8 +1,8 @@
 error: Choreography compile error: projection failed for role Auditors: dynamic role Auditors requires runtime context for projection
-  --> tests/boundaries/parameterized_roles_and_parallel.rs:3:15
+  --> tests/boundaries/parameterized_roles_and_parallel.rs:3:7
    |
  3 |   tell!(r#"
-   |  _______________^
+   |  _______^
  4 | | module parameterized_roles_and_parallel exposing (ParameterizedRolesAndParallel)
  5 | |
  6 | | protocol ParameterizedRolesAndParallel =

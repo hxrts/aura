@@ -10,4 +10,4 @@ error: Invalid annotation value: invalid guard_capability `42`: choreography gua
 9 | | "#);
   | |___^
   |
-  = note: this error originates in the macro `choreography` (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the macro `tell` (in Nightly builds, run with -Z macro-backtrace for more info)
