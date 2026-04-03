@@ -58,6 +58,7 @@ pub fn transition(state: &TuiState, event: TerminalEvent) -> (TuiState, Vec<TuiC
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::tui::screens::Screen;
