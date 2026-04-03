@@ -639,6 +639,10 @@ ci-verification-coverage:
 ci-user-flow-coverage:
     scripts/check/user-flow-coverage.sh
 
+# Fast environment sanity checks before the expensive matrix.
+ci-preflight:
+    bash scripts/check/ci-preflight.sh
+
 # Verify shared user-flow policy guardrails and required docs/guidance sync
 ci-user-flow-policy:
     scripts/check/user-flow-policy-guardrails.sh
@@ -1012,24 +1016,68 @@ ci-dry-run profile="push":
     export TMPDIR="${PWD}/.tmp"
     GREEN='\033[0;32m' RED='\033[0;31m' YELLOW='\033[0;33m' BLUE='\033[0;34m' NC='\033[0m'
     exit_code=0
+    infra_abort=0
     current=0
     STEPS=()
+    FAILURES=()
     profile="{{ profile }}"
+    failure_tail_lines="${AURA_CI_DRY_RUN_FAILURE_TAIL_LINES:-60}"
+    run_id="$(date +%Y%m%d-%H%M%S)"
+    log_root="${PWD}/artifacts/ci-dry-run/${profile}/${run_id}"
+    mkdir -p "$log_root"
 
     add_step() {
         local name="$1" cmd="$2"
         STEPS+=("${name}:::${cmd}")
     }
 
-    run_step() {
-        local name="$1" cmd="$2"
-        current=$((current + 1))
-        printf "[%d/%d] %s... " "$current" "$total" "$name"
-        if bash -lc "$cmd" >/dev/null 2>&1; then
-            echo -e "${GREEN}OK${NC}"
+    slugify() {
+        printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-'
+    }
+
+    diagnose_failure() {
+        local log_path="$1"
+        if rg -q 'No space left on device|errno=28|failed to create a temp dir|couldn'\''t create a temp dir|IO failure on output stream: No space left on device|need at least [0-9]+ GiB free' "$log_path"; then
+            printf 'disk-space:::free disk space or prune target/, .tmp/, and generated artifacts'
+        elif rg -q 'not found on PATH|command not found|required command missing from PATH|failed to locate workspace root' "$log_path"; then
+            printf 'missing-tool:::install the missing tool or expose it from nix develop'
+        elif rg -q 'fetcher-cache.*sqlite|eval-cache.*sqlite|SQLite database .* is busy|disk I/O error' "$log_path"; then
+            printf 'nix-cache:::close competing nix jobs or clear stale nix cache state'
+        elif rg -q 'failed to write temp probe|failed to create file via template|IO error while trying to create a temporary directory' "$log_path"; then
+            printf 'tempdir:::check TMPDIR and workspace temp directory permissions'
         else
-            echo -e "${RED}FAIL${NC}"
+            printf 'step-failure:::inspect the step log for the primary assertion or compiler error'
+        fi
+    }
+
+    run_step() {
+        local name="$1" cmd="$2" slug log_path start_ts end_ts duration status diagnosis failure_kind hint
+        current=$((current + 1))
+        slug="$(slugify "$name")"
+        log_path="$(printf '%s/%02d-%s.log' "$log_root" "$current" "$slug")"
+        printf "[%d/%d] %s... " "$current" "$total" "$name"
+        start_ts="$(date +%s)"
+        if bash -lc "$cmd" >"$log_path" 2>&1; then
+            end_ts="$(date +%s)"
+            duration=$((end_ts - start_ts))
+            echo -e "${GREEN}OK${NC} (${duration}s)"
+        else
+            status=$?
+            end_ts="$(date +%s)"
+            duration=$((end_ts - start_ts))
+            diagnosis="$(diagnose_failure "$log_path")"
+            failure_kind="${diagnosis%%:::*}"
+            hint="${diagnosis#*:::}"
+            echo -e "${RED}FAIL${NC} (${duration}s)"
+            echo "  log: $log_path"
+            echo "  tail (-${failure_tail_lines}):"
+            tail -n "$failure_tail_lines" "$log_path" | sed 's/^/    /'
+            FAILURES+=("${name}:::${status}:::${failure_kind}:::${hint}:::${log_path}")
             exit_code=1
+            if [[ "$failure_kind" != "step-failure" ]]; then
+                echo "  aborting remaining steps due to infrastructure failure: $failure_kind"
+                infra_abort=1
+            fi
         fi
     }
 
@@ -1044,22 +1092,21 @@ ci-dry-run profile="push":
     esac
 
     # CI / Fast (push + pull_request)
+    add_step "Preflight"                  "nix develop --command just ci-preflight"
     add_step "Format Check"               "nix develop --command just ci-format"
-    add_step "Clippy Check"               "nix develop --command just ci-clippy"
-    add_step "Build Check"                "nix develop --command just ci-build"
-    add_step "Architecture Check"         "nix develop --command scripts/check/arch.sh --quick"
-    add_step "Ownership Policy"           "nix develop --command just ci-ownership-policy"
-    add_step "User Flow Coverage"         "nix develop --command just ci-user-flow-coverage"
-    add_step "User Flow Policy"           "nix develop --command just ci-user-flow-policy"
-    add_step "Shared Flow Policy"         "nix develop --command just ci-shared-flow-policy"
-    add_step "Tests + Protocol Compat"    "nix develop --command bash -lc 'just ci-test && just ci-protocol-compat'"
-
-    # Docs / Site (push + pull_request)
     add_step "Docs Links"                 "nix develop --command just ci-docs-links"
     add_step "Crate Doc Links"            "nix develop --command just ci-crates-doc-links"
     add_step "Text Formatting Check"      "nix develop --command just ci-text-formatting"
     add_step "Semantic Drift Check"       "nix develop --command just ci-docs-semantic-drift"
     add_step "Docs Build"                 "nix develop --command just ci-book"
+    add_step "Architecture Check"         "nix develop --command scripts/check/arch.sh --quick"
+    add_step "User Flow Coverage"         "nix develop --command just ci-user-flow-coverage"
+    add_step "User Flow Policy"           "nix develop --command just ci-user-flow-policy"
+    add_step "Shared Flow Policy"         "nix develop --command just ci-shared-flow-policy"
+    add_step "Build Check"                "nix develop --command just ci-build"
+    add_step "Clippy Check"               "nix develop --command just ci-clippy"
+    add_step "Ownership Policy"           "nix develop --command just ci-ownership-policy"
+    add_step "Tests + Protocol Compat"    "nix develop --command bash -lc 'just ci-test && just ci-protocol-compat'"
 
     # CI / Deep Conformance (push + pull_request)
     add_step "Conformance Suite"          "nix develop --command bash -lc 'just ci-conformance-policy && CARGO_BUILD_JOBS=4 AURA_CONFORMANCE_WRITE_ARTIFACTS=1 AURA_CONFORMANCE_ARTIFACT_DIR=artifacts/conformance AURA_CONFORMANCE_ROTATING_WINDOW=8 AURA_CONFORMANCE_ITF_SEED_WINDOW=8 just ci-conformance'"
@@ -1077,7 +1124,6 @@ ci-dry-run profile="push":
         add_step "Harness UI Evented"        "nix develop --command just ci-harness-ui-state-evented"
         add_step "Harness Matrix Inventory"  "nix develop --command just ci-harness-matrix-inventory"
         add_step "Harness Shared Intent"     "nix develop --command just ci-harness-shared-intent-contract"
-        add_step "Harness Browser"           "nix develop --command just ci-harness-browser"
 
         # CI / Deep LAN (push)
         add_step "LAN Smoke"                 "nix develop --command just ci-lan-smoke"
@@ -1087,6 +1133,7 @@ ci-dry-run profile="push":
         add_step "Lean Proofs"               "nix develop --command bash -lc 'just ci-lean-build && just ci-lean-check-sorry'"
         add_step "Telltale Bridge"           "nix develop --command just ci-telltale-bridge"
         add_step "Kani Proofs"               "nix develop .#nightly --command just ci-kani"
+        add_step "Harness Browser"           "nix develop --command just ci-harness-browser"
     fi
 
     if [[ "$profile" == "all" ]]; then
@@ -1114,6 +1161,7 @@ ci-dry-run profile="push":
 
     echo "CI Dry Run (profile: $profile)"
     echo "==============================="
+    echo "Logs: $log_root"
     echo ""
 
     # Environment check
@@ -1132,6 +1180,9 @@ ci-dry-run profile="push":
         name="${step%%:::*}"
         cmd="${step#*:::}"
         run_step "$name" "$cmd"
+        if [[ "$infra_abort" -eq 1 ]]; then
+            break
+        fi
     done
 
     # Summary
@@ -1139,6 +1190,27 @@ ci-dry-run profile="push":
     if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}All CI checks passed${NC}"
     else
+        echo "Failure Summary:"
+        for failure in "${FAILURES[@]}"; do
+            name="${failure%%:::*}"
+            rest="${failure#*:::}"
+            status="${rest%%:::*}"
+            rest="${rest#*:::}"
+            failure_kind="${rest%%:::*}"
+            rest="${rest#*:::}"
+            hint="${rest%%:::*}"
+            log_path="${rest#*:::}"
+            echo "  - ${name} (exit ${status}, ${failure_kind})"
+            echo "    hint: ${hint}"
+            echo "    log: ${log_path}"
+        done
+        if [[ "$infra_abort" -eq 1 ]]; then
+            echo ""
+            echo "Stopped after the first infrastructure-class failure to avoid cascading noise."
+        else
+            echo ""
+            echo "Completed all scheduled steps; see the per-step logs above for details."
+        fi
         echo -e "${RED}Some CI checks failed${NC}"
         exit 1
     fi
@@ -1158,7 +1230,7 @@ clean:
     echo "Cleaning documentation builds..."
     rm -rf docs/book/ mermaid.min.js mermaid-init.js
     echo "Cleaning logs..."
-    rm -rf logs/ *.log
+    rm -rf logs/ *.log artifacts/ci-dry-run/
     echo "Cleaning demo/test data..."
     rm -rf .aura-demo/ .aura-test/ outcomes/ *.sealed *.dat *.tmp *.temp
     rm -rf traces/ .qemu-vm/ .patchbay-work/ .patchbay-target/ target-codex/
