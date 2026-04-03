@@ -61,6 +61,7 @@ logs/
 work/
 ext/
 outcomes/
+.target-tmp
 
 # Tooling
 .claude
