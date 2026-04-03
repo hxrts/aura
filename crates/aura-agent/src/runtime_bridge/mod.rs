@@ -9,7 +9,7 @@ use crate::core::AuraAgent;
 use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
-use crate::runtime::services::ServiceError;
+use crate::runtime::services::{RendezvousManager, ServiceError, SyncServiceManager};
 use async_trait::async_trait;
 #[cfg(test)]
 use aura_app::runtime_bridge::ReachabilityRefreshOutcome;
@@ -319,6 +319,24 @@ fn service_unavailable_with_detail(
     detail: impl std::fmt::Display,
 ) -> IntentError {
     service_error_to_intent(ServiceError::unavailable(service, format!("{detail}")))
+}
+
+fn require_sync_service(bridge: &AgentRuntimeBridge) -> Result<&SyncServiceManager, IntentError> {
+    bridge
+        .agent
+        .runtime()
+        .sync()
+        .ok_or_else(|| service_unavailable("sync_service"))
+}
+
+fn require_rendezvous_service(
+    bridge: &AgentRuntimeBridge,
+) -> Result<&RendezvousManager, IntentError> {
+    bridge
+        .agent
+        .runtime()
+        .rendezvous()
+        .ok_or_else(|| service_unavailable("rendezvous_service"))
 }
 
 fn harness_mode_enabled() -> bool {

@@ -1,4 +1,4 @@
-use super::service_actor::{validate_actor_transition, ActorLifecyclePhase};
+use super::service_actor::{validate_actor_transition, ActorLifecyclePhase, ActorOwnedServiceRoot};
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use super::{
     ceremony_runner::CeremonyRunner, CeremonyTracker, LanTransportService, ReconfigurationManager,
@@ -19,7 +19,7 @@ use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaintenanceServiceState {
@@ -43,10 +43,8 @@ impl MaintenanceServiceState {
 }
 
 struct RuntimeMaintenanceShared {
-    tasks: RwLock<Option<TaskGroup>>,
-    state: RwLock<MaintenanceServiceState>,
+    owner: ActorOwnedServiceRoot<RuntimeMaintenanceService, (), MaintenanceServiceState>,
     degraded_reasons: RwLock<Vec<String>>,
-    lifecycle: Mutex<()>,
 }
 
 #[derive(Clone)]
@@ -98,16 +96,14 @@ impl RuntimeMaintenanceService {
             rendezvous_handler,
             lan_transport,
             shared: Arc::new(RuntimeMaintenanceShared {
-                tasks: RwLock::new(None),
-                state: RwLock::new(MaintenanceServiceState::Stopped),
+                owner: ActorOwnedServiceRoot::new(MaintenanceServiceState::Stopped),
                 degraded_reasons: RwLock::new(Vec::new()),
-                lifecycle: Mutex::new(()),
             }),
         }
     }
 
     async fn mark_state(&self, next: MaintenanceServiceState) {
-        *self.shared.state.write().await = next;
+        self.shared.owner.set_state(next).await;
     }
 
     async fn record_degraded_reason(&self, reason: impl Into<String>) {
@@ -127,8 +123,8 @@ impl RuntimeMaintenanceService {
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
-        let _guard = self.shared.lifecycle.lock().await;
-        let current = *self.shared.state.read().await;
+        let _guard = self.shared.owner.lifecycle().lock().await;
+        let current = self.shared.owner.state().await;
         if current == MaintenanceServiceState::Running {
             return Ok(());
         }
@@ -139,21 +135,21 @@ impl RuntimeMaintenanceService {
         let tasks = context.tasks().group(self.name());
         self.spawn_loops(tasks.clone(), context.time_effects())
             .await?;
-        *self.shared.tasks.write().await = Some(tasks);
+        self.shared.owner.install_tasks(tasks).await;
         self.mark_state(MaintenanceServiceState::Running).await;
         Ok(())
     }
 
     async fn stop_managed(&self) -> Result<(), ServiceError> {
-        let _guard = self.shared.lifecycle.lock().await;
-        let current = *self.shared.state.read().await;
+        let _guard = self.shared.owner.lifecycle().lock().await;
+        let current = self.shared.owner.state().await;
         if current == MaintenanceServiceState::Stopped {
             return Ok(());
         }
         validate_actor_transition(self.name(), current.phase(), ActorLifecyclePhase::Stopping)?;
         self.mark_state(MaintenanceServiceState::Stopping).await;
 
-        let shutdown_error = if let Some(tasks) = self.shared.tasks.write().await.take() {
+        let shutdown_error = if let Some(tasks) = self.shared.owner.take_tasks().await {
             tasks
                 .shutdown_with_timeout(Duration::from_secs(2))
                 .await
@@ -699,7 +695,7 @@ impl RuntimeService for RuntimeMaintenanceService {
     }
 
     async fn health(&self) -> ServiceHealth {
-        match *self.shared.state.read().await {
+        match self.shared.owner.state().await {
             MaintenanceServiceState::Stopped => ServiceHealth::Stopped,
             MaintenanceServiceState::Starting => ServiceHealth::Starting,
             MaintenanceServiceState::Stopping => ServiceHealth::Stopping,
@@ -707,7 +703,7 @@ impl RuntimeService for RuntimeMaintenanceService {
                 reason: "maintenance service entered failed lifecycle state".to_string(),
             },
             MaintenanceServiceState::Running => {
-                if self.shared.tasks.read().await.is_some() {
+                if self.shared.owner.has_tasks().await {
                     let degraded = self.shared.degraded_reasons.read().await;
                     if degraded.is_empty() {
                         ServiceHealth::Healthy
@@ -761,9 +757,17 @@ mod tests {
             None,
             None,
         );
-        *service.shared.state.write().await = MaintenanceServiceState::Running;
+        service
+            .shared
+            .owner
+            .set_state(MaintenanceServiceState::Running)
+            .await;
         let tasks = TaskSupervisor::new();
-        *service.shared.tasks.write().await = Some(tasks.group("maintenance_test"));
+        service
+            .shared
+            .owner
+            .install_tasks(tasks.group("maintenance_test"))
+            .await;
         service
             .record_degraded_reason("initial_lan_descriptor: publish failed")
             .await;

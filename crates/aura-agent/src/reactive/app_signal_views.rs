@@ -25,7 +25,7 @@ use aura_app::views::{
     recovery::{Guardian, GuardianStatus, RecoveryState},
 };
 use aura_app::ReactiveHandler;
-use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::effects::reactive::{ReactiveEffects, Signal};
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
@@ -68,18 +68,55 @@ async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
         .await;
 }
 
-async fn read_registered_homes_state(reactive: &ReactiveHandler) -> Result<HomesState, String> {
-    reactive.read(&*HOMES_SIGNAL).await.map_err(|error| {
-        format!("home signal materialization requires registered homes signal: {error}")
+async fn read_registered_signal<T>(
+    reactive: &ReactiveHandler,
+    signal: &Signal<T>,
+    signal_label: &str,
+) -> Result<T, String>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    reactive.read(signal).await.map_err(|error| {
+        format!("{signal_label} materialization requires registered {signal_label}: {error}")
     })
+}
+
+async fn emit_registered_signal<T>(
+    reactive: &ReactiveHandler,
+    signal: &Signal<T>,
+    value: T,
+    signal_label: &str,
+) -> Result<(), String>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    reactive
+        .emit(signal, value)
+        .await
+        .map_err(|error| format!("emit {signal_label}: {error}"))
+}
+
+async fn emit_signal_or_internal_error<T>(
+    reactive: &ReactiveHandler,
+    signal: &Signal<T>,
+    value: T,
+    signal_label: &str,
+) where
+    T: Clone + Send + Sync + 'static,
+{
+    if let Err(error) = reactive.emit(signal, value).await {
+        emit_internal_error(reactive, format!("Failed to emit {signal_label}: {error}")).await;
+    }
+}
+
+async fn read_registered_homes_state(reactive: &ReactiveHandler) -> Result<HomesState, String> {
+    read_registered_signal(reactive, &*HOMES_SIGNAL, "homes signal").await
 }
 
 async fn read_registered_invitations_state(
     reactive: &ReactiveHandler,
 ) -> Result<InvitationsState, String> {
-    reactive.read(&*INVITATIONS_SIGNAL).await.map_err(|error| {
-        format!("invitation signal materialization requires registered invitations signal: {error}")
-    })
+    read_registered_signal(reactive, &*INVITATIONS_SIGNAL, "invitations signal").await
 }
 
 pub(crate) async fn materialize_home_signal_for_channel_invitation(
@@ -162,10 +199,7 @@ pub(crate) async fn materialize_home_signal_for_channel_invitation(
         homes.select_home(Some(channel_id));
     }
 
-    reactive
-        .emit(&*HOMES_SIGNAL, homes)
-        .await
-        .map_err(|error| format!("emit homes signal: {error}"))?;
+    emit_registered_signal(reactive, &*HOMES_SIGNAL, homes, "homes signal").await?;
 
     Ok(())
 }
@@ -226,10 +260,7 @@ pub(crate) async fn materialize_home_signal_for_channel_acceptance(
         return Ok(());
     }
 
-    reactive
-        .emit(&*HOMES_SIGNAL, homes)
-        .await
-        .map_err(|error| format!("emit homes signal: {error}"))?;
+    emit_registered_signal(reactive, &*HOMES_SIGNAL, homes, "homes signal").await?;
 
     Ok(())
 }
@@ -281,10 +312,13 @@ pub(crate) async fn materialize_pending_invitation_signal(
         home_name,
     });
 
-    reactive
-        .emit(&*INVITATIONS_SIGNAL, invitations)
-        .await
-        .map_err(|error| format!("emit invitations signal: {error}"))?;
+    emit_registered_signal(
+        reactive,
+        &*INVITATIONS_SIGNAL,
+        invitations,
+        "invitations signal",
+    )
+    .await?;
 
     Ok(())
 }
@@ -482,13 +516,13 @@ impl ReactiveView for InvitationsSignalView {
 
             let snapshot = state.clone();
 
-            if let Err(e) = self.reactive.emit(&*INVITATIONS_SIGNAL, snapshot).await {
-                emit_internal_error(
-                    &self.reactive,
-                    format!("Failed to emit INVITATIONS_SIGNAL: {e}"),
-                )
-                .await;
-            }
+            emit_signal_or_internal_error(
+                &self.reactive,
+                &*INVITATIONS_SIGNAL,
+                snapshot,
+                "INVITATIONS_SIGNAL",
+            )
+            .await;
         })
     }
 
@@ -703,13 +737,13 @@ impl ReactiveView for ContactsSignalView {
             );
             drop(state);
 
-            if let Err(e) = self.reactive.emit(&*CONTACTS_SIGNAL, snapshot).await {
-                emit_internal_error(
-                    &self.reactive,
-                    format!("Failed to emit CONTACTS_SIGNAL: {e}"),
-                )
-                .await;
-            }
+            emit_signal_or_internal_error(
+                &self.reactive,
+                &*CONTACTS_SIGNAL,
+                snapshot,
+                "CONTACTS_SIGNAL",
+            )
+            .await;
         })
     }
 
@@ -832,13 +866,13 @@ impl ReactiveView for RecoverySignalView {
             let snapshot = state.clone();
             drop(state);
 
-            if let Err(e) = self.reactive.emit(&*RECOVERY_SIGNAL, snapshot).await {
-                emit_internal_error(
-                    &self.reactive,
-                    format!("Failed to emit RECOVERY_SIGNAL: {e}"),
-                )
-                .await;
-            }
+            emit_signal_or_internal_error(
+                &self.reactive,
+                &*RECOVERY_SIGNAL,
+                snapshot,
+                "RECOVERY_SIGNAL",
+            )
+            .await;
         })
     }
 
@@ -1051,10 +1085,13 @@ impl ReactiveView for HomeSignalView {
             let snapshot = homes.clone();
             drop(homes);
 
-            if let Err(e) = self.reactive.emit(&*HOMES_SIGNAL, snapshot.clone()).await {
-                emit_internal_error(&self.reactive, format!("Failed to emit HOMES_SIGNAL: {e}"))
-                    .await;
-            }
+            emit_signal_or_internal_error(
+                &self.reactive,
+                &*HOMES_SIGNAL,
+                snapshot.clone(),
+                "HOMES_SIGNAL",
+            )
+            .await;
         })
     }
 
@@ -1657,10 +1694,8 @@ impl ReactiveView for ChatSignalView {
             let snapshot = state.clone();
             drop(state);
 
-            if let Err(e) = self.reactive.emit(&*CHAT_SIGNAL, snapshot).await {
-                emit_internal_error(&self.reactive, format!("Failed to emit CHAT_SIGNAL: {e}"))
-                    .await;
-            }
+            emit_signal_or_internal_error(&self.reactive, &*CHAT_SIGNAL, snapshot, "CHAT_SIGNAL")
+                .await;
         })
     }
 

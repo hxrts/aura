@@ -13,6 +13,11 @@ use super::shared::{
 use cache::InvitationCacheHandler;
 use channel::InvitationChannelHandler;
 use contact::InvitationContactHandler;
+use execution::{
+    attempt_network_send_envelope, emit_browser_harness_debug_event, invitation_timeout_budget,
+    invitation_timeout_profile, timeout_deferred_network_stage, timeout_invitation_stage_with_budget,
+    timeout_prepare_invitation_stage,
+};
 use crate::core::{default_context_id_for_authority, AgentError, AgentResult, AuthorityContext};
 use crate::reactive::app_signal_views;
 use crate::runtime::services::InvitationManager;
@@ -89,8 +94,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::str::FromStr;
 use uuid::Uuid;
 use validation::InvitationValidationHandler;
-#[cfg(target_arch = "wasm32")]
-use web_sys::js_sys;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 #[cfg(feature = "choreo-backend-telltale-machine")]
@@ -100,11 +103,17 @@ mod cache;
 mod channel;
 mod contact;
 mod device_enrollment;
+mod exchange;
+mod execution;
 mod guardian;
+mod shareable;
 mod validation;
+mod vm_loop;
 
 // Re-export types from aura_invitation for public API
 pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
+use shareable::StoredImportedInvitation;
+pub use shareable::{ShareableInvitation, ShareableInvitationError};
 
 const CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE: &str =
     "application/aura-contact-invitation-acceptance";
@@ -124,172 +133,6 @@ const INVITATION_ACCEPT_MATERIALIZE_STAGE_TIMEOUT_MS: u64 = 15_000;
 const INVITATION_ACCEPT_CHOREOGRAPHY_STAGE_TIMEOUT_MS: u64 = 30_000;
 const INVITATION_VM_LOOP_TIMEOUT_MS: u64 = 30_000;
 const DESCRIPTOR_VALIDITY_WINDOW_MS: u64 = 86_400_000; // 24h
-
-fn invitation_timeout_profile(effects: &AuraEffectSystem) -> TimeoutExecutionProfile {
-    if effects.is_testing() {
-        TimeoutExecutionProfile::simulation_test()
-    } else if effects.harness_mode_enabled() {
-        TimeoutExecutionProfile::harness()
-    } else {
-        TimeoutExecutionProfile::production()
-    }
-}
-
-async fn invitation_timeout_budget(
-    effects: &AuraEffectSystem,
-    stage: &'static str,
-    timeout_ms: u64,
-) -> AgentResult<TimeoutBudget> {
-    let started_at = effects.physical_time().await.map_err(|error| {
-        AgentError::runtime(format!(
-            "invitation stage `{stage}` could not read physical time: {error}"
-        ))
-    })?;
-    let scaled_timeout = invitation_timeout_profile(effects)
-        .scale_duration(Duration::from_millis(timeout_ms))
-        .map_err(|error| {
-            AgentError::runtime(format!(
-                "invitation stage `{stage}` could not scale timeout budget: {error}"
-            ))
-        })?;
-    TimeoutBudget::from_start_and_timeout(&started_at, scaled_timeout)
-        .map_err(|error| AgentError::runtime(error.to_string()))
-}
-
-async fn timeout_invitation_stage_with_budget<T>(
-    effects: &AuraEffectSystem,
-    budget: &TimeoutBudget,
-    stage: &'static str,
-    timeout_ms: u64,
-    future: impl Future<Output = AgentResult<T>>,
-) -> AgentResult<T> {
-    let now = effects.physical_time().await.map_err(|error| {
-        AgentError::runtime(format!(
-            "invitation stage `{stage}` could not read physical time: {error}"
-        ))
-    })?;
-    let scaled_timeout = invitation_timeout_profile(effects)
-        .scale_duration(Duration::from_millis(timeout_ms))
-        .map_err(|error| {
-            AgentError::runtime(format!(
-                "invitation stage `{stage}` could not scale timeout budget: {error}"
-            ))
-        })?;
-    let child_budget = budget.child_budget(&now, scaled_timeout).map_err(|error| {
-        AgentError::timeout(format!(
-            "invitation stage `{stage}` could not allocate remaining timeout budget: {error}"
-        ))
-    })?;
-    execute_with_timeout_budget(effects, &child_budget, || future)
-        .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
-                "invitation stage `{stage}` timed out after {}ms",
-                child_budget.timeout_ms()
-            )),
-            TimeoutRunError::Operation(error) => error,
-        })
-}
-
-async fn timeout_prepare_invitation_stage<T>(
-    effects: &AuraEffectSystem,
-    stage: &'static str,
-    future: impl Future<Output = AgentResult<T>>,
-) -> AgentResult<T> {
-    let started_at = effects.physical_time().await.map_err(|error| {
-        AgentError::runtime(format!(
-            "invitation.prepare stage `{stage}` could not read physical time: {error}"
-        ))
-    })?;
-    let budget = TimeoutBudget::from_start_and_timeout(
-        &started_at,
-        Duration::from_millis(INVITATION_PREPARE_STAGE_TIMEOUT_MS),
-    )
-    .map_err(|error| AgentError::runtime(error.to_string()))?;
-    execute_with_timeout_budget(effects, &budget, || future)
-        .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => AgentError::runtime(format!(
-                "invitation.prepare stage `{stage}` timed out after {INVITATION_PREPARE_STAGE_TIMEOUT_MS}ms"
-            )),
-            TimeoutRunError::Operation(error) => error,
-        })
-}
-
-async fn timeout_deferred_network_stage<T>(
-    effects: &AuraEffectSystem,
-    stage: &'static str,
-    future: impl Future<Output = AgentResult<T>>,
-) -> AgentResult<T> {
-    let started_at = effects.physical_time().await.map_err(|error| {
-        AgentError::runtime(format!(
-            "invitation best-effort network stage `{stage}` could not read physical time: {error}"
-        ))
-    })?;
-    let budget = TimeoutBudget::from_start_and_timeout(
-        &started_at,
-        Duration::from_millis(INVITATION_BEST_EFFORT_NETWORK_TIMEOUT_MS),
-    )
-    .map_err(|error| AgentError::runtime(error.to_string()))?;
-    execute_with_timeout_budget(effects, &budget, || future)
-        .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => AgentError::runtime(format!(
-                "invitation best-effort network stage `{stage}` timed out after {INVITATION_BEST_EFFORT_NETWORK_TIMEOUT_MS}ms"
-            )),
-            TimeoutRunError::Operation(error) => error,
-        })
-}
-
-async fn attempt_network_send_envelope(
-    effects: &AuraEffectSystem,
-    stage: &'static str,
-    envelope: TransportEnvelope,
-) -> AgentResult<()> {
-    timeout_deferred_network_stage(effects, stage, async {
-        let mut last_error = None;
-        for attempt in 0..INVITATION_BEST_EFFORT_NETWORK_SEND_ATTEMPTS {
-            match effects.send_envelope(envelope.clone()).await {
-                Ok(()) => return Ok(()),
-                Err(error) => {
-                    last_error = Some(error.to_string());
-                    if attempt + 1 < INVITATION_BEST_EFFORT_NETWORK_SEND_ATTEMPTS {
-                        let _ = effects
-                            .sleep_ms(INVITATION_BEST_EFFORT_NETWORK_SEND_BACKOFF_MS)
-                            .await;
-                    }
-                }
-            }
-        }
-
-        Err(AgentError::effects(format!(
-            "{stage}: {}",
-            last_error.unwrap_or_else(|| "transport send failed without detail".to_string())
-        )))
-    })
-    .await
-}
-
-#[cfg(target_arch = "wasm32")]
-fn emit_browser_harness_debug_event(event: &str, detail: &str) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Ok(origin) = window.location().origin() else {
-        return;
-    };
-    let event = js_sys::encode_uri_component(event)
-        .as_string()
-        .unwrap_or_else(|| event.to_string());
-    let detail = js_sys::encode_uri_component(detail)
-        .as_string()
-        .unwrap_or_else(|| detail.to_string());
-    let url = format!("{origin}/__aura_harness_debug__/event?event={event}&detail={detail}");
-    let _ = window.fetch_with_str(&url);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn emit_browser_harness_debug_event(_event: &str, _detail: &str) {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ContactInvitationAcceptance {
@@ -366,6 +209,13 @@ struct ChannelInviteDetails {
     home_name: String,
     sender_id: AuthorityId,
     bootstrap: Option<ChannelBootstrapPackage>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CachedInvitationActionValidation {
+    Accept { now_ms: u64 },
+    Decline,
+    Cancel,
 }
 
 fn is_generic_contact_invitation(
@@ -833,6 +683,29 @@ impl InvitationHandler {
             .await
     }
 
+    async fn validate_cached_invitation_for_action(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+        action: CachedInvitationActionValidation,
+    ) -> AgentResult<()> {
+        HandlerUtilities::validate_authority_context(&self.context.authority)?;
+        match action {
+            CachedInvitationActionValidation::Accept { now_ms } => {
+                self.validate_cached_invitation_accept(effects, invitation_id, now_ms)
+                    .await
+            }
+            CachedInvitationActionValidation::Decline => {
+                self.validate_cached_invitation_decline(effects, invitation_id)
+                    .await
+            }
+            CachedInvitationActionValidation::Cancel => {
+                self.validate_cached_invitation_cancel(effects, invitation_id)
+                    .await
+            }
+        }
+    }
+
     /// Create an invitation
     pub async fn create_invitation(
         &self,
@@ -1116,8 +989,6 @@ impl InvitationHandler {
             "Accepting invitation"
         );
 
-        HandlerUtilities::validate_authority_context(&self.context.authority)?;
-
         self.accept_invitation_owned(effects, invitation_id).await
     }
 
@@ -1139,8 +1010,12 @@ impl InvitationHandler {
             INVITATION_ACCEPT_VALIDATE_STAGE_TIMEOUT_MS,
             async {
                 let now_ms = Self::best_effort_current_timestamp_ms(&effects).await;
-                self.validate_cached_invitation_accept(effects.as_ref(), invitation_id, now_ms)
-                    .await?;
+                self.validate_cached_invitation_for_action(
+                    effects.as_ref(),
+                    invitation_id,
+                    CachedInvitationActionValidation::Accept { now_ms },
+                )
+                .await?;
                 Ok(now_ms)
             },
         )
@@ -1930,10 +1805,12 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
-        HandlerUtilities::validate_authority_context(&self.context.authority)?;
-
-        self.validate_cached_invitation_decline(effects.as_ref(), invitation_id)
-            .await?;
+        self.validate_cached_invitation_for_action(
+            effects.as_ref(),
+            invitation_id,
+            CachedInvitationActionValidation::Decline,
+        )
+        .await?;
 
         // Build snapshot and prepare through service
         let snapshot = self.build_snapshot(effects.as_ref()).await;
@@ -1996,11 +1873,14 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
-        HandlerUtilities::validate_authority_context(&self.context.authority)?;
         let own_id = self.context.authority.authority_id();
 
-        self.validate_cached_invitation_cancel(effects.as_ref(), invitation_id)
-            .await?;
+        self.validate_cached_invitation_for_action(
+            effects.as_ref(),
+            invitation_id,
+            CachedInvitationActionValidation::Cancel,
+        )
+        .await?;
 
         // Build snapshot and prepare through service
         let snapshot = self.build_snapshot(effects.as_ref()).await;
@@ -2153,462 +2033,6 @@ impl InvitationHandler {
             .collect()
     }
 
-    async fn load_invitation_for_choreography(
-        &self,
-        effects: &AuraEffectSystem,
-        invitation_id: &InvitationId,
-    ) -> Option<Invitation> {
-        if let Some(inv) = self.invitation_cache.get_invitation(invitation_id).await {
-            return Some(inv);
-        }
-
-        let own_id = self.context.authority.authority_id();
-        if let Some(inv) = Self::load_created_invitation(effects, own_id, invitation_id).await {
-            return Some(inv);
-        }
-
-        if let Some(stored) =
-            Self::load_imported_invitation(effects, own_id, invitation_id, None).await
-        {
-            let status = stored.status.clone();
-            let created_at = stored.created_at;
-            let shareable = stored.shareable;
-            let context_id = match &shareable.invitation_type {
-                InvitationType::Channel { .. } => {
-                    match require_channel_invitation_context(
-                        &shareable.invitation_id,
-                        shareable.sender_id,
-                        shareable.context_id,
-                    ) {
-                        Ok(context_id) => context_id,
-                        Err(error) => {
-                            tracing::warn!(
-                                invitation_id = %shareable.invitation_id,
-                                sender = %shareable.sender_id,
-                                error = %error,
-                                "Skipping imported channel invitation choreography without authoritative context"
-                            );
-                            return None;
-                        }
-                    }
-                }
-                _ => self.context.effect_context.context_id(),
-            };
-            let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
-            return Some(Invitation {
-                invitation_id: shareable.invitation_id,
-                context_id,
-                sender_id: shareable.sender_id,
-                receiver_id: own_id,
-                invitation_type: shareable.invitation_type,
-                status,
-                created_at: if created_at == 0 { now_ms } else { created_at },
-                expires_at: shareable.expires_at,
-                message: shareable.message,
-            });
-        }
-
-        None
-    }
-
-    fn invitation_session_id(invitation_id: &InvitationId) -> Uuid {
-        let digest = hash(invitation_id.as_str().as_bytes());
-        let mut bytes = [0u8; 16];
-        bytes.copy_from_slice(&digest[..16]);
-        Uuid::from_bytes(bytes)
-    }
-
-    fn build_invitation_offer(invitation: &Invitation) -> InvitationOffer {
-        let mut material = Vec::new();
-        material.extend_from_slice(invitation.invitation_id.as_str().as_bytes());
-        material.extend_from_slice(&invitation.sender_id.to_bytes());
-        material.extend_from_slice(&invitation.receiver_id.to_bytes());
-        if let Some(expires_at) = invitation.expires_at {
-            material.extend_from_slice(&expires_at.to_le_bytes());
-        }
-        let commitment_hash = hash(&material);
-
-        InvitationOffer {
-            invitation_id: invitation.invitation_id.clone(),
-            invitation_type: invitation.invitation_type.clone(),
-            sender: invitation.sender_id,
-            message: invitation.message.clone(),
-            expires_at_ms: invitation.expires_at,
-            commitment: commitment_hash,
-        }
-    }
-
-    #[cfg(feature = "choreo-backend-telltale-machine")]
-    fn invitation_exchange_peer_roles(
-        authority_id: AuthorityId,
-        peer_id: AuthorityId,
-    ) -> (ChoreographicRole, ChoreographicRole, Vec<ChoreographicRole>) {
-        // Invitation exchanges use one protocol role per authority. The VM
-        // session resolves concrete participants by authority id and protocol
-        // role name ("Sender"/"Receiver"), so both authorities legitimately use
-        // their local role slot 0 here.
-        let sender_index = RoleIndex::new(0).expect("sender role index");
-        let receiver_index = RoleIndex::new(0).expect("receiver role index");
-        let local_role = ChoreographicRole::for_authority(authority_id, sender_index);
-        let peer_role = ChoreographicRole::for_authority(peer_id, receiver_index);
-        (local_role, peer_role, vec![local_role, peer_role])
-    }
-
-    #[cfg(feature = "choreo-backend-telltale-machine")]
-    async fn execute_invitation_exchange_sender_vm(
-        &self,
-        effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-    ) -> AgentResult<()> {
-        let authority_id = self.context.authority.authority_id();
-        let (_local_role, peer_role, roles) =
-            Self::invitation_exchange_peer_roles(authority_id, invitation.receiver_id);
-        let session_id = Self::invitation_session_id(&invitation.invitation_id);
-        let offer = ExchangeInvitationOffer(Self::build_invitation_offer(invitation));
-        let peer_roles = BTreeMap::from([("Receiver".to_string(), peer_role)]);
-        let budget = invitation_timeout_budget(
-            effects.as_ref(),
-            "invitation_exchange_sender_vm",
-            INVITATION_VM_LOOP_TIMEOUT_MS,
-        )
-        .await?;
-
-        let manifest =
-            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::composition_manifest();
-        let global_type =
-            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::global_type();
-        let local_types =
-            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
-        let mut session = open_owned_manifest_vm_session_admitted(
-            effects.clone(),
-            session_id,
-            roles,
-            &manifest,
-            "Sender",
-            &global_type,
-            &local_types,
-            crate::runtime::AuraVmSchedulerSignals::default(),
-        )
-        .await
-        .map_err(|error| AgentError::internal(error.to_string()))?;
-        session.queue_send_bytes(
-            to_vec(&offer)
-                .map_err(|error| AgentError::internal(format!("offer encode failed: {error}")))?,
-        );
-
-        let loop_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
-            loop {
-                let round = session
-                    .advance_round_until_receive(
-                        "Sender",
-                        &peer_roles,
-                        Self::is_transport_no_message,
-                    )
-                    .await
-                    .map_err(|error| AgentError::internal(error.to_string()))?;
-
-                if let Some(blocked) = round.blocked_receive {
-                    let response: ExchangeInvitationResponse = from_slice(&blocked.payload)
-                        .map_err(|error| {
-                            AgentError::internal(format!(
-                                "invitation response decode failed: {error}"
-                            ))
-                        })?;
-                    if response.0.accepted {
-                        if let InvitationType::Channel {
-                            home_id,
-                            nickname_suggestion,
-                            ..
-                        } = &invitation.invitation_type
-                        {
-                            let reactive = effects.reactive_handler();
-                            let now_ms =
-                                Self::best_effort_current_timestamp_ms(effects.as_ref()).await;
-                            let home_name = require_channel_invitation_name(
-                                *home_id,
-                                nickname_suggestion.clone(),
-                            )?;
-                            app_signal_views::materialize_home_signal_for_channel_acceptance(
-                                &reactive,
-                                *home_id,
-                                &home_name,
-                                invitation.sender_id,
-                                invitation.receiver_id,
-                                invitation.context_id,
-                                now_ms,
-                            )
-                            .await
-                            .map_err(AgentError::runtime)?;
-                        }
-                    }
-                    let status = if response.0.accepted {
-                        aura_invitation::InvitationAckStatus::Accepted
-                    } else {
-                        aura_invitation::InvitationAckStatus::Declined
-                    };
-                    let ack = ExchangeInvitationAck(InvitationAck {
-                        invitation_id: invitation.invitation_id.clone(),
-                        success: true,
-                        status,
-                    });
-                    session.queue_send_bytes(to_vec(&ack).map_err(|error| {
-                        AgentError::internal(format!("invitation ack encode failed: {error}"))
-                    })?);
-                    session
-                        .inject_blocked_receive(&blocked)
-                        .map_err(|error| AgentError::internal(error.to_string()))?;
-                    continue;
-                }
-
-                match round.host_wait_status {
-                    AuraVmHostWaitStatus::Deferred => break Ok(()),
-                    AuraVmHostWaitStatus::Idle => {}
-                    AuraVmHostWaitStatus::TimedOut => {
-                        break Err(AgentError::internal(
-                            "invitation sender VM timed out while waiting for receive".to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Cancelled => {
-                        break Err(AgentError::internal(
-                            "invitation sender VM cancelled while waiting for receive".to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Delivered => {}
-                }
-
-                match round.step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(
-                            "invitation sender VM became stuck without a pending receive"
-                                .to_string(),
-                        ));
-                    }
-                }
-            }
-        })
-        .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
-                "invitation sender VM exceeded {}ms overall timeout",
-                budget.timeout_ms()
-            )),
-            TimeoutRunError::Operation(error) => error,
-        });
-
-        let _ = session.close().await;
-        loop_result
-    }
-
-    #[cfg(feature = "choreo-backend-telltale-machine")]
-    async fn execute_invitation_exchange_receiver_vm(
-        &self,
-        effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-        accepted: bool,
-    ) -> AgentResult<()> {
-        let authority_id = self.context.authority.authority_id();
-        let (_local_role, peer_role, roles) =
-            Self::invitation_exchange_peer_roles(authority_id, invitation.sender_id);
-        let session_id = Self::invitation_session_id(&invitation.invitation_id);
-        let response = ExchangeInvitationResponse(InvitationResponse {
-            invitation_id: invitation.invitation_id.clone(),
-            accepted,
-            message: None,
-            signature: Vec::new(),
-        });
-        let mut response_queued = false;
-        let peer_roles = BTreeMap::from([("Sender".to_string(), peer_role)]);
-        let budget = invitation_timeout_budget(
-            effects.as_ref(),
-            "invitation_exchange_receiver_vm",
-            INVITATION_VM_LOOP_TIMEOUT_MS,
-        )
-        .await?;
-
-        let manifest =
-            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::composition_manifest();
-        let global_type =
-            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::global_type();
-        let local_types =
-            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
-        let mut session = open_owned_manifest_vm_session_admitted(
-            effects.clone(),
-            session_id,
-            roles,
-            &manifest,
-            "Receiver",
-            &global_type,
-            &local_types,
-            crate::runtime::AuraVmSchedulerSignals::default(),
-        )
-        .await
-        .map_err(|error| AgentError::internal(error.to_string()))?;
-
-        let loop_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
-            loop {
-                let round = session
-                    .advance_round("Receiver", &peer_roles)
-                    .await
-                    .map_err(|error| AgentError::internal(error.to_string()))?;
-
-                if let Some(blocked) = round.blocked_receive {
-                    if !response_queued {
-                        session.queue_send_bytes(to_vec(&response).map_err(|error| {
-                            AgentError::internal(format!(
-                                "invitation response encode failed: {error}"
-                            ))
-                        })?);
-                        response_queued = true;
-                    }
-                    session
-                        .inject_blocked_receive(&blocked)
-                        .map_err(|error| AgentError::internal(error.to_string()))?;
-                    continue;
-                }
-
-                match round.host_wait_status {
-                    AuraVmHostWaitStatus::Idle => {}
-                    AuraVmHostWaitStatus::TimedOut => {
-                        break Err(AgentError::internal(
-                            "invitation receiver VM timed out while waiting for receive"
-                                .to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Cancelled => {
-                        break Err(AgentError::internal(
-                            "invitation receiver VM cancelled while waiting for receive"
-                                .to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
-                }
-
-                match round.step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(
-                            "invitation receiver VM became stuck without a pending receive"
-                                .to_string(),
-                        ));
-                    }
-                }
-            }
-        })
-        .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
-                "invitation receiver VM exceeded {}ms overall timeout",
-                budget.timeout_ms()
-            )),
-            TimeoutRunError::Operation(error) => error,
-        });
-
-        let _ = session.close().await;
-        loop_result
-    }
-
-    async fn execute_invitation_exchange_sender(
-        &self,
-        effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-    ) -> AgentResult<()> {
-        self.execute_invitation_exchange_sender_vm(effects, invitation)
-            .await
-    }
-
-    pub(crate) async fn execute_channel_invitation_exchange_sender(
-        &self,
-        effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-    ) -> AgentResult<()> {
-        self.execute_invitation_exchange_sender(effects, invitation)
-            .await
-    }
-
-    async fn execute_invitation_exchange_receiver(
-        &self,
-        effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-        accepted: bool,
-    ) -> AgentResult<()> {
-        self.execute_invitation_exchange_receiver_vm(effects, invitation, accepted)
-            .await
-    }
-
-    async fn execute_guardian_invitation_principal(
-        &self,
-        effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-    ) -> AgentResult<()> {
-        InvitationGuardianHandler::new(self)
-            .execute_guardian_invitation_principal(effects, invitation)
-            .await
-    }
-
-    /// Check if a choreography error is a recoverable transport condition.
-    ///
-    /// `NoMessage` (no pending inbound envelope) and `DestinationUnreachable`
-    /// (peer not routable) are both expected when the remote party hasn't
-    /// joined the choreography yet or when transport is unavailable.
-    fn is_transport_no_message(err: &ChoreographyError) -> bool {
-        match err {
-            ChoreographyError::Transport { source } => source
-                .downcast_ref::<TransportError>()
-                .is_some_and(|inner| {
-                    matches!(
-                        inner,
-                        TransportError::NoMessage | TransportError::DestinationUnreachable { .. }
-                    )
-                }),
-            _ => false,
-        }
-    }
-
-    async fn execute_guardian_invitation_guardian(
-        &self,
-        effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-    ) -> AgentResult<()> {
-        InvitationGuardianHandler::new(self)
-            .execute_guardian_invitation_guardian(effects, invitation)
-            .await
-    }
-
-    /// Execute the DeviceEnrollment choreography as initiator (existing device).
-    ///
-    /// This method runs the 3-message choreography:
-    /// 1. Initiator sends DeviceEnrollmentRequest to Invitee
-    /// 2. Invitee responds with DeviceEnrollmentAccept
-    /// 3. Initiator sends DeviceEnrollmentConfirm
-    pub(crate) async fn execute_device_enrollment_initiator(
-        &self,
-        effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-    ) -> AgentResult<()> {
-        InvitationDeviceEnrollmentHandler::new(self)
-            .execute_device_enrollment_initiator(effects, invitation)
-            .await
-    }
-
-    /// Execute the DeviceEnrollment choreography as invitee (new device).
-    ///
-    /// This method runs the invitee side of the 3-message choreography:
-    /// 1. Receive DeviceEnrollmentRequest from Initiator
-    /// 2. Send DeviceEnrollmentAccept to Initiator
-    /// 3. Receive DeviceEnrollmentConfirm from Initiator
-    pub(crate) async fn execute_device_enrollment_invitee(
-        &self,
-        effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
-    ) -> AgentResult<()> {
-        InvitationDeviceEnrollmentHandler::new(self)
-            .execute_device_enrollment_invitee(effects, invitation)
-            .await
-    }
-
     /// Get an invitation by ID (from in-memory cache only)
     pub async fn get_invitation(&self, invitation_id: &InvitationId) -> Option<Invitation> {
         InvitationCacheHandler::new(self)
@@ -2637,231 +2061,6 @@ struct DeviceEnrollmentInvitation {
     threshold_config: Vec<u8>,
     public_key_package: Vec<u8>,
     baseline_tree_ops: Vec<Vec<u8>>,
-}
-
-// =============================================================================
-// Shareable Invitation (Out-of-Band Sharing)
-// =============================================================================
-
-/// Error type for shareable invitation operations
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ShareableInvitationError {
-    /// Invalid invite code format
-    InvalidFormat,
-    /// Unsupported version
-    UnsupportedVersion(u8),
-    /// Base64 decoding failed
-    DecodingFailed,
-    /// JSON parsing failed
-    ParsingFailed,
-    /// JSON serialization failed
-    SerializationFailed,
-}
-
-impl std::fmt::Display for ShareableInvitationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidFormat => write!(f, "invalid invite code format"),
-            Self::UnsupportedVersion(v) => write!(f, "unsupported version: {}", v),
-            Self::DecodingFailed => write!(f, "base64 decoding failed"),
-            Self::ParsingFailed => write!(f, "JSON parsing failed"),
-            Self::SerializationFailed => write!(f, "JSON serialization failed"),
-        }
-    }
-}
-
-impl std::error::Error for ShareableInvitationError {}
-
-/// Shareable invitation for out-of-band transfer
-///
-/// This struct contains the minimal information needed to redeem an invitation.
-/// It can be encoded as a string (format: `aura:v1:<base64>`) for sharing via
-/// copy/paste, QR codes, etc.
-///
-/// # Example
-///
-/// ```ignore
-/// // Export an invitation
-/// let shareable = ShareableInvitation::from(&invitation);
-/// let code = shareable.to_code()?;
-/// println!("Share this code: {}", code);
-///
-/// // Import an invitation
-/// let decoded = ShareableInvitation::from_code(&code)?;
-/// println!("Invitation from: {}", decoded.sender_id);
-/// ```
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ShareableInvitation {
-    /// Version number for forward compatibility
-    pub version: u8,
-    /// Unique invitation identifier
-    pub invitation_id: InvitationId,
-    /// Sender authority
-    pub sender_id: AuthorityId,
-    /// Context for invitation-scoped facts, when known.
-    ///
-    /// Older invite codes may omit this and rely on channel defaults.
-    #[serde(default)]
-    pub context_id: Option<ContextId>,
-    /// Type of invitation
-    pub invitation_type: InvitationType,
-    /// Expiration timestamp (ms), if any
-    pub expires_at: Option<u64>,
-    /// Optional message from sender
-    pub message: Option<String>,
-}
-
-fn default_imported_invitation_status() -> InvitationStatus {
-    InvitationStatus::Pending
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct StoredImportedInvitation {
-    #[serde(flatten)]
-    shareable: ShareableInvitation,
-    // Legacy bare `ShareableInvitation` payloads decode through these defaults,
-    // so cache reads no longer need a separate migration branch.
-    #[serde(default = "default_imported_invitation_status")]
-    status: InvitationStatus,
-    #[serde(default)]
-    created_at: u64,
-}
-
-impl StoredImportedInvitation {
-    fn pending(shareable: ShareableInvitation, created_at: u64) -> Self {
-        Self {
-            shareable,
-            status: InvitationStatus::Pending,
-            created_at,
-        }
-    }
-}
-
-impl std::ops::Deref for StoredImportedInvitation {
-    type Target = ShareableInvitation;
-
-    fn deref(&self) -> &Self::Target {
-        &self.shareable
-    }
-}
-
-impl ShareableInvitation {
-    /// Current version of the shareable invitation format
-    pub const CURRENT_VERSION: u8 = 1;
-
-    /// Protocol prefix for invite codes
-    pub const PREFIX: &'static str = "aura";
-
-    /// Encode the invitation as a shareable code string
-    ///
-    /// Format: `aura:v1:<base64-encoded-json>`
-    pub fn to_code(&self) -> Result<String, ShareableInvitationError> {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-
-        let json =
-            serde_json::to_vec(self).map_err(|_| ShareableInvitationError::SerializationFailed)?;
-        let b64 = URL_SAFE_NO_PAD.encode(&json);
-        Ok(format!("{}:v{}:{}", Self::PREFIX, self.version, b64))
-    }
-
-    /// Decode an invitation from a code string
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The format is invalid (wrong prefix, missing parts)
-    /// - The version is unsupported
-    /// - Base64 decoding fails
-    /// - JSON parsing fails
-    pub fn from_code(code: &str) -> Result<Self, ShareableInvitationError> {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-
-        let parts: Vec<&str> = code.split(':').collect();
-        if !(3..=5).contains(&parts.len()) {
-            return Err(ShareableInvitationError::InvalidFormat);
-        }
-
-        if parts[0] != Self::PREFIX {
-            return Err(ShareableInvitationError::InvalidFormat);
-        }
-
-        // Parse version (format: "v1", "v2", etc.)
-        let version_str = parts[1];
-        if !version_str.starts_with('v') {
-            return Err(ShareableInvitationError::InvalidFormat);
-        }
-        let version: u8 = version_str[1..]
-            .parse()
-            .map_err(|_| ShareableInvitationError::InvalidFormat)?;
-
-        if version != Self::CURRENT_VERSION {
-            return Err(ShareableInvitationError::UnsupportedVersion(version));
-        }
-
-        let json = URL_SAFE_NO_PAD
-            .decode(parts[2])
-            .map_err(|_| ShareableInvitationError::DecodingFailed)?;
-
-        serde_json::from_slice(&json).map_err(|_| ShareableInvitationError::ParsingFailed)
-    }
-
-    /// Extract optional sender transport address from a code.
-    ///
-    /// Codes may include an optional 4th segment:
-    /// `aura:v1:<payload-b64>:<sender-addr-b64>`.
-    pub fn sender_addr_from_code(code: &str) -> Option<String> {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-
-        let parts: Vec<&str> = code.split(':').collect();
-        if parts.len() != 4 && parts.len() != 5 {
-            return None;
-        }
-        if parts[0] != Self::PREFIX {
-            return None;
-        }
-
-        let decoded = URL_SAFE_NO_PAD.decode(parts[3]).ok()?;
-        let addr = String::from_utf8(decoded).ok()?;
-        let trimmed = addr.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        Some(trimmed.to_string())
-    }
-
-    /// Extract optional sender device identity from a code.
-    ///
-    /// Codes may include an optional 5th segment:
-    /// `aura:v1:<payload-b64>:<sender-addr-b64>:<sender-device-id-b64>`.
-    pub fn sender_device_id_from_code(code: &str) -> Option<DeviceId> {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-
-        let parts: Vec<&str> = code.split(':').collect();
-        if parts.len() != 5 {
-            return None;
-        }
-        if parts[0] != Self::PREFIX {
-            return None;
-        }
-
-        let decoded = URL_SAFE_NO_PAD.decode(parts[4]).ok()?;
-        let device_id = String::from_utf8(decoded).ok()?;
-        device_id.trim().parse().ok()
-    }
-}
-
-impl From<&Invitation> for ShareableInvitation {
-    fn from(inv: &Invitation) -> Self {
-        Self {
-            version: ShareableInvitation::CURRENT_VERSION,
-            invitation_id: inv.invitation_id.clone(),
-            sender_id: inv.sender_id,
-            context_id: Some(inv.context_id),
-            invitation_type: inv.invitation_type.clone(),
-            expires_at: inv.expires_at,
-            message: inv.message.clone(),
-        }
-    }
 }
 
 // =============================================================================
@@ -3326,6 +2525,16 @@ mod tests {
         AuthorityContext::new(authority_id)
     }
 
+    #[track_caller]
+    fn handler_for(authority: AuthorityContext) -> InvitationHandler {
+        InvitationHandler::new(authority).unwrap()
+    }
+
+    #[track_caller]
+    fn handler_for_id(authority_id: AuthorityId) -> InvitationHandler {
+        handler_for(AuthorityContext::new(authority_id))
+    }
+
     fn install_full_invitation_biscuit_cache(
         effects: &Arc<AuraEffectSystem>,
         authority: AuthorityId,
@@ -3568,7 +2777,7 @@ mod tests {
                 peer,
                 shared_transport,
             );
-        let handler = InvitationHandler::new(authority.clone()).unwrap();
+        let handler = handler_for(authority.clone());
 
         let invitation = handler
             .create_invitation(
@@ -3623,7 +2832,7 @@ mod tests {
                 peer,
                 shared_transport,
             );
-        let handler = InvitationHandler::new(authority.clone()).unwrap();
+        let handler = handler_for(authority.clone());
 
         let invitation = handler
             .create_invitation(
@@ -3657,7 +2866,7 @@ mod tests {
     async fn invitation_can_be_created() {
         let authority_context = create_test_authority(91);
         let effects = effects_for(&authority_context);
-        let handler = InvitationHandler::new(authority_context.clone()).unwrap();
+        let handler = handler_for(authority_context.clone());
 
         let receiver_id = AuthorityId::new_from_entropy([92u8; 32]);
 
@@ -3689,8 +2898,8 @@ mod tests {
 
         let sender_effects = effects_for(&sender_context);
         let receiver_effects = effects_for(&receiver_context);
-        let sender_handler = InvitationHandler::new(sender_context).unwrap();
-        let receiver_handler = InvitationHandler::new(receiver_context).unwrap();
+        let sender_handler = handler_for(sender_context);
+        let receiver_handler = handler_for(receiver_context);
 
         let invitation = sender_handler
             .create_invitation(
@@ -3767,7 +2976,7 @@ mod tests {
     async fn importing_channel_invitation_without_context_rejects_before_persist() {
         let authority_context = create_test_authority(101);
         let effects = effects_for(&authority_context);
-        let handler = InvitationHandler::new(authority_context.clone()).unwrap();
+        let handler = handler_for(authority_context.clone());
 
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
@@ -3883,7 +3092,7 @@ mod tests {
     async fn old_format_imported_invitation_preserves_cached_terminal_status() {
         let authority_context = create_test_authority(111);
         let effects = effects_for(&authority_context);
-        let handler = InvitationHandler::new(authority_context.clone()).unwrap();
+        let handler = handler_for(authority_context.clone());
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: InvitationId::new("legacy-imported-status-preserved"),
@@ -4236,8 +3445,8 @@ mod tests {
                 shared_transport.clone(),
             );
 
-        let sender_handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
-        let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        let sender_handler = handler_for_id(sender_id);
+        let receiver_handler = handler_for_id(receiver_id);
 
         let invitation = sender_handler
             .create_invitation(
@@ -4324,7 +3533,7 @@ mod tests {
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap(),
         );
-        let handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
+        let handler = handler_for_id(sender_id);
 
         handler
             .create_invitation(
@@ -4375,7 +3584,7 @@ mod tests {
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap(),
         );
-        let handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
+        let handler = handler_for_id(sender_id);
 
         let context_id = default_context_id_for_authority(sender_id);
         let existing_contact = ContactFact::Added {
@@ -4490,8 +3699,8 @@ mod tests {
             .unwrap(),
         );
 
-        let sender_handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
-        let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        let sender_handler = handler_for_id(sender_id);
+        let receiver_handler = handler_for_id(receiver_id);
 
         let invitation = sender_handler
             .create_invitation(
@@ -4708,8 +3917,8 @@ mod tests {
             .unwrap(),
         );
         let sender_context = AuthorityContext::new(sender_id);
-        let sender_handler = InvitationHandler::new(sender_context.clone()).unwrap();
-        let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        let sender_handler = handler_for(sender_context.clone());
+        let receiver_handler = handler_for_id(receiver_id);
         let sender_service = invitation_service_for(sender_context, sender_effects.clone());
 
         let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
@@ -4878,8 +4087,8 @@ mod tests {
             .unwrap(),
         );
         let sender_context = AuthorityContext::new(sender_id);
-        let sender_handler = InvitationHandler::new(sender_context.clone()).unwrap();
-        let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        let sender_handler = handler_for(sender_context.clone());
+        let receiver_handler = handler_for_id(receiver_id);
         let sender_service = invitation_service_for(sender_context, sender_effects.clone());
 
         let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
@@ -5700,8 +4909,8 @@ mod tests {
 
         let authority_context = AuthorityContext::new(own_authority);
 
-        let handler_import = InvitationHandler::new(authority_context.clone()).unwrap();
-        let handler_accept = InvitationHandler::new(authority_context).unwrap();
+        let handler_import = handler_for(authority_context.clone());
+        let handler_accept = handler_for(authority_context);
 
         let sender_id = AuthorityId::new_from_entropy([123u8; 32]);
         let shareable = ShareableInvitation {
@@ -5817,7 +5026,7 @@ mod tests {
         let authority_context = AuthorityContext::new(own_authority);
 
         // Handler 1: Create an invitation
-        let handler_create = InvitationHandler::new(authority_context.clone()).unwrap();
+        let handler_create = handler_for(authority_context.clone());
         let receiver_id = AuthorityId::new_from_entropy([125u8; 32]);
         let invitation = handler_create
             .create_invitation(
@@ -5833,7 +5042,7 @@ mod tests {
             .unwrap();
 
         // Handler 2: Retrieve the invitation (simulates new service instance)
-        let handler_retrieve = InvitationHandler::new(authority_context).unwrap();
+        let handler_retrieve = handler_for(authority_context);
         let retrieved = handler_retrieve
             .get_invitation_with_storage(&effects, &invitation.invitation_id)
             .await;

@@ -1,6 +1,6 @@
 use super::{
-    harness_mode_enabled, harness_sync_backoff_ms, harness_sync_rounds, service_unavailable,
-    AgentRuntimeBridge,
+    harness_mode_enabled, harness_sync_backoff_ms, harness_sync_rounds, require_rendezvous_service,
+    require_sync_service, service_unavailable, AgentRuntimeBridge,
 };
 use aura_app::runtime_bridge::{
     CeremonyProcessingCounts, CeremonyProcessingOutcome, ReachabilityRefreshOutcome, SyncStatus,
@@ -29,9 +29,7 @@ pub(super) async fn get_sync_status(
     bridge: &AgentRuntimeBridge,
 ) -> Result<SyncStatus, IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_STATUS_QUERY_CAPABILITY;
-    let Some(sync) = bridge.agent.runtime().sync() else {
-        return Err(service_unavailable("sync_service"));
-    };
+    let sync = require_sync_service(bridge)?;
 
     let effects = bridge.agent.runtime().effects();
     let transport_stats = effects.get_transport_stats().await;
@@ -82,9 +80,7 @@ pub(super) async fn get_sync_peers(
     bridge: &AgentRuntimeBridge,
 ) -> Result<Vec<DeviceId>, IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_PEER_QUERY_CAPABILITY;
-    let Some(sync) = bridge.agent.runtime().sync() else {
-        return Err(service_unavailable("sync_service"));
-    };
+    let sync = require_sync_service(bridge)?;
     Ok(sync.peers().await)
 }
 
@@ -95,9 +91,7 @@ pub(super) async fn get_sync_peers(
 )]
 pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_TRIGGER_CAPABILITY;
-    let Some(sync) = bridge.agent.runtime().sync() else {
-        return Err(service_unavailable("sync_service"));
-    };
+    let sync = require_sync_service(bridge)?;
 
     let effects = bridge.agent.runtime().effects();
     let rounds = if harness_mode_enabled() {
@@ -275,9 +269,7 @@ pub(super) async fn sync_with_peer(
     peer_id: &str,
 ) -> Result<(), IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_WITH_PEER_CAPABILITY;
-    let Some(sync) = bridge.agent.runtime().sync() else {
-        return Err(service_unavailable("sync_service"));
-    };
+    let sync = require_sync_service(bridge)?;
 
     let device_id: DeviceId = peer_id
         .parse()
@@ -300,9 +292,8 @@ pub(super) async fn ensure_peer_channel(
 ) -> Result<(), IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_PEER_CHANNEL_CAPABILITY;
     let effects = bridge.agent.runtime().effects();
-    let Some(rendezvous_manager) = bridge.agent.runtime().rendezvous() else {
-        return Err(service_unavailable("rendezvous_manager"));
-    };
+    let rendezvous_manager = require_rendezvous_service(bridge)
+        .map_err(|_| service_unavailable("rendezvous_manager"))?;
 
     let authority = bridge.agent.context().clone();
     let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)

@@ -1,4 +1,4 @@
-use super::{service_unavailable, AgentRuntimeBridge};
+use super::{require_rendezvous_service, service_unavailable, AgentRuntimeBridge};
 use crate::runtime::services::bootstrap_broker::endpoint_is_loopback;
 use crate::runtime::system::register_bootstrap_candidate_with;
 use aura_app::runtime_bridge::{
@@ -26,76 +26,64 @@ fn broker_origin(bridge: &AgentRuntimeBridge) -> BootstrapCandidateOrigin {
 pub(super) async fn get_discovered_peers(
     bridge: &AgentRuntimeBridge,
 ) -> Result<Vec<AuthorityId>, IntentError> {
-    if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        Ok(rendezvous.list_cached_peers().await)
-    } else {
-        Err(service_unavailable("rendezvous_service"))
-    }
+    let rendezvous = require_rendezvous_service(bridge)?;
+    Ok(rendezvous.list_cached_peers().await)
 }
 
 pub(super) async fn get_rendezvous_status(
     bridge: &AgentRuntimeBridge,
 ) -> Result<RendezvousStatus, IntentError> {
-    if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        Ok(RendezvousStatus {
-            is_running: rendezvous.is_running().await,
-            cached_peers: rendezvous.list_cached_peers().await.len(),
-        })
-    } else {
-        Err(service_unavailable("rendezvous_service"))
-    }
+    let rendezvous = require_rendezvous_service(bridge)?;
+    Ok(RendezvousStatus {
+        is_running: rendezvous.is_running().await,
+        cached_peers: rendezvous.list_cached_peers().await.len(),
+    })
 }
 
 pub(super) async fn trigger_discovery(
     bridge: &AgentRuntimeBridge,
 ) -> Result<DiscoveryTriggerOutcome, IntentError> {
-    if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        rendezvous
-            .trigger_discovery()
-            .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to trigger discovery: {}", e)))
-    } else {
-        Err(service_unavailable("rendezvous_service"))
-    }
+    let rendezvous = require_rendezvous_service(bridge)?;
+    rendezvous
+        .trigger_discovery()
+        .await
+        .map_err(|e| IntentError::internal_error(format!("Failed to trigger discovery: {}", e)))
 }
 
 pub(super) async fn get_bootstrap_candidates(
     bridge: &AgentRuntimeBridge,
 ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
-    if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        let mut candidates: Vec<BootstrapCandidateInfo> = rendezvous
-            .list_lan_discovered_peers()
-            .await
-            .into_iter()
-            .map(|peer| BootstrapCandidateInfo {
-                authority_id: peer.authority_id,
-                origin: BootstrapCandidateOrigin::Lan,
-                address: peer.source_addr.clone(),
-                discovered_at_ms: peer.discovered_at_ms,
-                nickname_suggestion: peer.descriptor.nickname_suggestion.clone(),
-            })
-            .collect();
-        let broker_candidates = rendezvous
-            .list_bootstrap_broker_candidates()
-            .await
-            .map_err(|error| {
-                IntentError::internal_error(format!(
-                    "Failed to list bootstrap broker candidates: {error}"
-                ))
-            })?;
-        candidates.extend(broker_candidates.into_iter().filter_map(|candidate| {
-            Some(BootstrapCandidateInfo {
-                authority_id: candidate.authority_id()?,
-                origin: broker_origin(bridge),
-                address: candidate.address,
-                discovered_at_ms: candidate.discovered_at_ms,
-                nickname_suggestion: candidate.nickname_suggestion,
-            })
-        }));
-        Ok(candidates)
-    } else {
-        Err(service_unavailable("rendezvous_service"))
-    }
+    let rendezvous = require_rendezvous_service(bridge)?;
+    let mut candidates: Vec<BootstrapCandidateInfo> = rendezvous
+        .list_lan_discovered_peers()
+        .await
+        .into_iter()
+        .map(|peer| BootstrapCandidateInfo {
+            authority_id: peer.authority_id,
+            origin: BootstrapCandidateOrigin::Lan,
+            address: peer.source_addr.clone(),
+            discovered_at_ms: peer.discovered_at_ms,
+            nickname_suggestion: peer.descriptor.nickname_suggestion.clone(),
+        })
+        .collect();
+    let broker_candidates = rendezvous
+        .list_bootstrap_broker_candidates()
+        .await
+        .map_err(|error| {
+            IntentError::internal_error(format!(
+                "Failed to list bootstrap broker candidates: {error}"
+            ))
+        })?;
+    candidates.extend(broker_candidates.into_iter().filter_map(|candidate| {
+        Some(BootstrapCandidateInfo {
+            authority_id: candidate.authority_id()?,
+            origin: broker_origin(bridge),
+            address: candidate.address,
+            discovered_at_ms: candidate.discovered_at_ms,
+            nickname_suggestion: candidate.nickname_suggestion,
+        })
+    }));
+    Ok(candidates)
 }
 
 pub(super) async fn send_bootstrap_invitation(
@@ -103,28 +91,23 @@ pub(super) async fn send_bootstrap_invitation(
     peer: &BootstrapCandidateInfo,
     invitation_code: &str,
 ) -> Result<(), IntentError> {
-    if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        match peer.origin {
-            BootstrapCandidateOrigin::Lan => rendezvous
-                .send_lan_invitation(&peer.authority_id, &peer.address, invitation_code)
-                .await
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Failed to send LAN invitation: {}", e))
-                }),
-            BootstrapCandidateOrigin::LocalBroker | BootstrapCandidateOrigin::LanBroker => {
-                rendezvous
-                    .send_bootstrap_broker_invitation(peer.authority_id, invitation_code)
-                    .await
-                    .map_err(|e| {
-                        IntentError::internal_error(format!(
-                            "Failed to send bootstrap broker invitation: {}",
-                            e
-                        ))
-                    })
-            }
-        }
-    } else {
-        Err(service_unavailable("rendezvous_service"))
+    let rendezvous = require_rendezvous_service(bridge)?;
+    match peer.origin {
+        BootstrapCandidateOrigin::Lan => rendezvous
+            .send_lan_invitation(&peer.authority_id, &peer.address, invitation_code)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to send LAN invitation: {}", e))
+            }),
+        BootstrapCandidateOrigin::LocalBroker | BootstrapCandidateOrigin::LanBroker => rendezvous
+            .send_bootstrap_broker_invitation(peer.authority_id, invitation_code)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to send bootstrap broker invitation: {}",
+                    e
+                ))
+            }),
     }
 }
 
