@@ -88,7 +88,7 @@ impl RandomCoreEffects for MockCryptoHandler {
 // CryptoCoreEffects implementation for MockCryptoHandler
 #[async_trait]
 impl CryptoCoreEffects for MockCryptoHandler {
-    async fn hkdf_derive(
+    async fn kdf_derive(
         &self,
         ikm: &[u8],
         salt: &[u8],
@@ -163,7 +163,7 @@ impl CryptoCoreEffects for MockCryptoHandler {
             "frost".to_string(),
             "aes-gcm".to_string(),
             "chacha20".to_string(),
-            "hkdf".to_string(),
+            "kdf".to_string(),
         ]
     }
 

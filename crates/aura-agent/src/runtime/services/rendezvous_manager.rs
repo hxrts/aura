@@ -1828,7 +1828,7 @@ mod tests {
     }
     #[async_trait]
     impl CryptoCoreEffects for MockEffects {
-        async fn hkdf_derive(
+        async fn kdf_derive(
             &self,
             _: &[u8],
             _: &[u8],

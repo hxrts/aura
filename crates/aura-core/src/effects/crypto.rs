@@ -126,8 +126,8 @@ pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
 
     // ====== Key Derivation ======
 
-    /// HKDF key derivation
-    async fn hkdf_derive(
+    /// Deterministic key derivation with explicit salt and info inputs.
+    async fn kdf_derive(
         &self,
         ikm: &[u8],
         salt: &[u8],
@@ -382,14 +382,14 @@ impl<T: CryptoCoreEffects + CryptoExtendedEffects + ?Sized> CryptoEffects for T 
 /// Note: CryptoCoreEffects inherits RandomCoreEffects, and Arc<T> gets RandomCoreEffects from the blanket impl in random.rs
 #[async_trait]
 impl<T: CryptoCoreEffects + ?Sized> CryptoCoreEffects for std::sync::Arc<T> {
-    async fn hkdf_derive(
+    async fn kdf_derive(
         &self,
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
         output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
-        (**self).hkdf_derive(ikm, salt, info, output_len).await
+        (**self).kdf_derive(ikm, salt, info, output_len).await
     }
 
     async fn derive_key(

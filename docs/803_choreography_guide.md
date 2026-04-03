@@ -107,9 +107,9 @@ The canonical shape is:
   live in Telltale runtime admission, runtime transition artifacts, or Aura's
   Rust-side protocol/runtime glue
 
-Use [crates/aura-sync/src/protocols/ota_activation.tell](/Users/hxrts/projects/aura/crates/aura-sync/src/protocols/ota_activation.tell)
+Use [crates/aura-sync/src/protocols/ota_activation.tell](../crates/aura-sync/src/protocols/ota_activation.tell)
 and
-[crates/aura-sync/src/protocols/device_epoch_rotation.tell](/Users/hxrts/projects/aura/crates/aura-sync/src/protocols/device_epoch_rotation.tell)
+[crates/aura-sync/src/protocols/device_epoch_rotation.tell](../crates/aura-sync/src/protocols/device_epoch_rotation.tell)
 as the current style references.
 
 #### Legacy-Only Source Surfaces To Remove
@@ -164,65 +164,65 @@ converges on the canonical Telltale 10 shape.
 
 ### First-Party Protocols
 
-- [crates/aura-agent/src/handlers/sessions/coordination.tell](/Users/hxrts/projects/aura/crates/aura-agent/src/handlers/sessions/coordination.tell):
+- [crates/aura-agent/src/handlers/sessions/coordination.tell](../crates/aura-agent/src/handlers/sessions/coordination.tell):
   already structurally close; remove phase-restating comments and the
   legacy `journal_merge = true` source hint.
-- [crates/aura-amp/src/choreography.tell](/Users/hxrts/projects/aura/crates/aura-amp/src/choreography.tell):
+- [crates/aura-amp/src/choreography.tell](../crates/aura-amp/src/choreography.tell):
   already structurally close; normalize onto the same compact source style and
   remove redundant “data transmission / acknowledgment” comments.
-- [crates/aura-authentication/src/dkd.tell](/Users/hxrts/projects/aura/crates/aura-authentication/src/dkd.tell):
+- [crates/aura-authentication/src/dkd.tell](../crates/aura-authentication/src/dkd.tell):
   structurally close; remove phase-only comments and keep only sanctioned edge
   metadata.
-- [crates/aura-authentication/src/guardian_auth_relational.tell](/Users/hxrts/projects/aura/crates/aura-authentication/src/guardian_auth_relational.tell):
+- [crates/aura-authentication/src/guardian_auth_relational.tell](../crates/aura-authentication/src/guardian_auth_relational.tell):
   structurally close; remove phase-only comments and keep the protocol free of
   source-local coordination lore.
-- [crates/aura-consensus/src/protocol/choreography.tell](/Users/hxrts/projects/aura/crates/aura-consensus/src/protocol/choreography.tell):
+- [crates/aura-consensus/src/protocol/choreography.tell](../crates/aura-consensus/src/protocol/choreography.tell):
   close to canonical shape; preserve `parallel` and `leak`, but remove
   phase-restating comments and keep it theorem-pack-free until a later explicit
   decision.
-- [crates/aura-invitation/src/protocol.device_enrollment.tell](/Users/hxrts/projects/aura/crates/aura-invitation/src/protocol.device_enrollment.tell):
+- [crates/aura-invitation/src/protocol.device_enrollment.tell](../crates/aura-invitation/src/protocol.device_enrollment.tell):
   keep the live `device_migration` bundle contract, but remove surrounding
   migration comments and any pseudo-annotations that no longer have a runtime
   consumer.
-- [crates/aura-invitation/src/protocol.guardian_invitation.tell](/Users/hxrts/projects/aura/crates/aura-invitation/src/protocol.guardian_invitation.tell):
+- [crates/aura-invitation/src/protocol.guardian_invitation.tell](../crates/aura-invitation/src/protocol.guardian_invitation.tell):
   structurally close; remove phase-only comments and keep only sanctioned edge
   metadata.
-- [crates/aura-invitation/src/protocol.invitation_exchange.tell](/Users/hxrts/projects/aura/crates/aura-invitation/src/protocol.invitation_exchange.tell):
+- [crates/aura-invitation/src/protocol.invitation_exchange.tell](../crates/aura-invitation/src/protocol.invitation_exchange.tell):
   structurally close; remove phase-only comments and keep the source minimal.
-- [crates/aura-recovery/src/guardian_ceremony.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/guardian_ceremony.tell):
+- [crates/aura-recovery/src/guardian_ceremony.tell](../crates/aura-recovery/src/guardian_ceremony.tell):
   add sanctioned Aura metadata where this protocol still requires it, normalize
   branch names and comments, and remove the bare legacy look.
-- [crates/aura-recovery/src/guardian_membership.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/guardian_membership.tell):
+- [crates/aura-recovery/src/guardian_membership.tell](../crates/aura-recovery/src/guardian_membership.tell):
   keep the live `guardian_handoff` bundle contract, but remove
   `leakage_budget = ...`, `journal_merge = true`, and the surrounding
   migration comments.
-- [crates/aura-recovery/src/guardian_setup.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/guardian_setup.tell):
+- [crates/aura-recovery/src/guardian_setup.tell](../crates/aura-recovery/src/guardian_setup.tell):
   remove `leakage_budget = ...` and `journal_merge = true`, and strip
   phase-restating comments.
-- [crates/aura-recovery/src/recovery_protocol.tell](/Users/hxrts/projects/aura/crates/aura-recovery/src/recovery_protocol.tell):
+- [crates/aura-recovery/src/recovery_protocol.tell](../crates/aura-recovery/src/recovery_protocol.tell):
   structurally close; remove phase-only comments and keep the source ready for
   later theorem-pack adoption only if the recovery semantics justify it.
-- [crates/aura-rendezvous/src/protocol.relayed_rendezvous.tell](/Users/hxrts/projects/aura/crates/aura-rendezvous/src/protocol.relayed_rendezvous.tell):
+- [crates/aura-rendezvous/src/protocol.relayed_rendezvous.tell](../crates/aura-rendezvous/src/protocol.relayed_rendezvous.tell):
   keep theorem-pack-free; normalize comments and preserve only real route-flow
   metadata like `guard_capability`, `flow_cost`, and `leak`.
-- [crates/aura-rendezvous/src/protocol.rendezvous_exchange.tell](/Users/hxrts/projects/aura/crates/aura-rendezvous/src/protocol.rendezvous_exchange.tell):
+- [crates/aura-rendezvous/src/protocol.rendezvous_exchange.tell](../crates/aura-rendezvous/src/protocol.rendezvous_exchange.tell):
   keep theorem-pack-free; normalize comments and preserve only real publication
   and connect metadata.
-- [crates/aura-sync/src/protocols/epochs.tell](/Users/hxrts/projects/aura/crates/aura-sync/src/protocols/epochs.tell):
+- [crates/aura-sync/src/protocols/epochs.tell](../crates/aura-sync/src/protocols/epochs.tell):
   keep the live `epoch_rotation_transfer` bundle contract, but remove the
   surrounding migration comments and keep the rest of the protocol in the same
   compact shape as the OTA and device-epoch references.
 
 ### Protocol-Compat Fixtures
 
-- [crates/aura-testkit/fixtures/protocol_compat/breaking_baseline.tell](/Users/hxrts/projects/aura/crates/aura-testkit/fixtures/protocol_compat/breaking_baseline.tell):
+- [crates/aura-testkit/fixtures/protocol_compat/breaking_baseline.tell](../crates/aura-testkit/fixtures/protocol_compat/breaking_baseline.tell):
   already canonical; no migration needed beyond keeping fixture style minimal.
-- [crates/aura-testkit/fixtures/protocol_compat/breaking_current.tell](/Users/hxrts/projects/aura/crates/aura-testkit/fixtures/protocol_compat/breaking_current.tell):
+- [crates/aura-testkit/fixtures/protocol_compat/breaking_current.tell](../crates/aura-testkit/fixtures/protocol_compat/breaking_current.tell):
   remove the explanatory inline comment so the compatibility edge is expressed
   only by the message-shape difference.
-- [crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.tell](/Users/hxrts/projects/aura/crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.tell):
+- [crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.tell](../crates/aura-testkit/fixtures/protocol_compat/compatible_baseline.tell):
   already canonical; keep unchanged except for style parity if needed.
-- [crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell](/Users/hxrts/projects/aura/crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell):
+- [crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell](../crates/aura-testkit/fixtures/protocol_compat/compatible_current.tell):
   already canonical; keep unchanged except for style parity if needed.
 
 ## 2.2 Theorem-Pack Taxonomy and Admission Policy

@@ -21,9 +21,9 @@ See [Formal Verification Reference](120_verification.md#assurance-summary) for t
 | Lean Theorems | 118 |
 | Conformance Fixtures | 4 |
 | ITF Trace Harnesses | 9 |
-| Testkit Tests | 113 |
+| Testkit Tests | 118 |
 | Bridge Modules | 4 |
-| CI Verification Gates | 11 |
+| CI Verification Gates | 10 |
 | Telltale Parity Modules | 1 |
 | Bridge Pipeline Fixtures | 3 |
 
@@ -335,7 +335,6 @@ Automated verification lanes wired into CI pipelines.
 |------|---------|---------|
 | Conformance Policy | `just ci-conformance-policy` | Policy rule validation |
 | Conformance Contracts | `just ci-conformance-contracts` | Contract satisfaction checks |
-| Golden Fixtures | `conformance_golden_fixtures` | Deterministic replay against known-good traces |
 
 ### Formal Methods
 

@@ -332,7 +332,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                     crate::RecoveryError::internal(format!("Ephemeral key generation failed: {e}"))
                 })?;
 
-            // Derive symmetric key using HKDF from shared secret
+            // Derive a symmetric key from the shared secret.
             // (ephemeral_private XOR guardian_public as a simple shared secret)
             let shared_secret_input = [
                 ephemeral_private.as_slice(),
@@ -341,7 +341,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             .concat();
             let encryption_key = self
                 .effect_system()
-                .hkdf_derive(
+                .kdf_derive(
                     &shared_secret_input,
                     b"aura-guardian-share-v1",
                     format!("guardian:{}", acceptance.guardian_id).as_bytes(),
@@ -589,7 +589,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         .concat();
         let decryption_key = self
             .effect_system()
-            .hkdf_derive(
+            .kdf_derive(
                 &shared_secret_input,
                 b"aura-guardian-share-v1",
                 format!("guardian:{guardian_id}").as_bytes(),

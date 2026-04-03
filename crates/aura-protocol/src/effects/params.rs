@@ -33,16 +33,9 @@ pub struct RandomRangeParams {
     pub end: u64,
 }
 
-/// Parameters for BLAKE3 hashing
+/// Parameters for hashing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Blake3HashParams {
-    /// Data to hash
-    pub data: Vec<u8>,
-}
-
-/// Parameters for SHA-256 hashing
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Sha256HashParams {
+pub struct HashParams {
     /// Data to hash
     pub data: Vec<u8>,
 }

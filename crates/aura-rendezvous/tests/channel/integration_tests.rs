@@ -130,7 +130,7 @@ impl RandomCoreEffects for MockNoise {
 }
 #[async_trait]
 impl CryptoCoreEffects for MockNoise {
-    async fn hkdf_derive(
+    async fn kdf_derive(
         &self,
         _: &[u8],
         _: &[u8],

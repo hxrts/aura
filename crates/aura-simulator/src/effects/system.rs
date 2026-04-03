@@ -172,7 +172,7 @@ impl SimulationEffectSystem {
 
 #[async_trait]
 impl CryptoCoreEffects for SimulationEffectSystem {
-    async fn hkdf_derive(
+    async fn kdf_derive(
         &self,
         ikm: &[u8],
         salt: &[u8],
@@ -180,13 +180,13 @@ impl CryptoCoreEffects for SimulationEffectSystem {
         output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
         if self
-            .should_trigger_fault("hkdf_derive")
+            .should_trigger_fault("kdf_derive")
             .as_ref()
             .is_some_and(Self::is_crypto_failure)
         {
             return Err(AuraError::crypto("Simulated crypto failure".to_string()));
         }
-        self.crypto.hkdf_derive(ikm, salt, info, output_len).await
+        self.crypto.kdf_derive(ikm, salt, info, output_len).await
     }
 
     async fn derive_key(

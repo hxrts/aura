@@ -14,7 +14,7 @@
 //!
 //! - Nonces are derived deterministically from (ratchet_gen, chan_epoch)
 //! - Each nonce is unique per ratchet generation to prevent reuse
-//! - Message keys are derived using HKDF with domain separation
+//! - Message keys are derived using Aura's centralized KDF with domain separation
 //!
 //! ## Usage
 //!
@@ -51,16 +51,18 @@ pub fn derive_nonce_from_ratchet(ratchet_gen: u64, chan_epoch: u64) -> [u8; 12] 
     nonce
 }
 
-/// Derive an AMP message key using HKDF from a master ratchet key.
+/// Derive an AMP message key from a master ratchet key.
 ///
-/// This implements the single KDF path for AMP message keys using HKDF-SHA256
+/// This implements the single KDF path for AMP message keys using Aura's
+/// centralized key-derivation helper
 /// with domain separation to prevent key reuse across different contexts.
 ///
 /// # KDF Chain
 ///
 /// ```text
-/// message_key = HKDF-Expand(
-///     HKDF-Extract(salt=ratchet_gen, ikm=master_key),
+/// message_key = KDF(
+///     ikm=master_key,
+///     salt=ratchet_gen,
 ///     info="AMP_MESSAGE_v1" || context || channel || chan_epoch || ratchet_gen,
 ///     L=32
 /// )
@@ -82,12 +84,7 @@ pub fn derive_nonce_from_ratchet(ratchet_gen: u64, chan_epoch: u64) -> [u8; 12] 
 ///
 /// - Domain separation via info string prevents key reuse
 /// - Ratchet generation as salt ensures forward secrecy
-/// - HKDF provides cryptographic strength key derivation
-///
-/// **Note**: Uses `sha2::Sha256` directly for HKDF key derivation, which is a
-/// cryptographic primitive operation and exempted from the general hash centralization
-/// policy. Key derivation requires algorithm-specific properties.
-#[allow(clippy::disallowed_types)] // HKDF-SHA256 is a cryptographic primitive for key derivation
+/// - The centralized KDF provides cryptographic-strength key derivation
 pub fn derive_message_key(
     master_key: &Hash32,
     context: &[u8],
@@ -95,14 +92,10 @@ pub fn derive_message_key(
     chan_epoch: u64,
     ratchet_gen: u64,
 ) -> AuraResult<Hash32> {
-    use hkdf::Hkdf;
-    use sha2::Sha256;
+    use crate::crypto::kdf;
 
-    // Use ratchet_gen as salt for forward secrecy
     let salt = ratchet_gen.to_le_bytes();
-    let hkdf = Hkdf::<Sha256>::new(Some(&salt), master_key.as_bytes());
 
-    // Build info string with domain separation
     let mut info = Vec::with_capacity(128);
     info.extend_from_slice(b"AMP_MESSAGE_v1");
     info.extend_from_slice(context);
@@ -110,10 +103,8 @@ pub fn derive_message_key(
     info.extend_from_slice(&chan_epoch.to_le_bytes());
     info.extend_from_slice(&ratchet_gen.to_le_bytes());
 
-    // Expand to 32-byte message key
-    let mut output = [0u8; 32];
-    hkdf.expand(&info, &mut output)
-        .map_err(|e| AuraError::crypto(format!("HKDF expansion failed: {e}")))?;
+    let output = kdf::derive_key::<32>(master_key.as_bytes(), &salt, &info)
+        .map_err(|e| AuraError::crypto(format!("message key derivation failed: {e}")))?;
 
     Ok(Hash32::from(output))
 }

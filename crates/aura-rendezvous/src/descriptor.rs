@@ -5,19 +5,14 @@
 //! `aura-agent`.
 
 use crate::facts::{RendezvousDescriptor, TransportAddress, TransportHint};
+use aura_core::hash;
 use aura_core::service::{LinkEndpoint, LinkProtocol};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
-use sha2::{Digest, Sha256};
 
 /// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
 fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(authority.to_bytes());
-    let result = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&result);
-    out
+    hash::hash(&authority.to_bytes())
 }
 
 // =============================================================================
@@ -233,14 +228,11 @@ impl TransportProber {
 
 /// Generate a nonce for descriptor uniqueness
 fn generate_nonce(authority_id: &AuthorityId, context_id: ContextId, now_ms: u64) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(authority_hash_bytes(authority_id));
+    let mut hasher = hash::hasher();
+    hasher.update(&authority_hash_bytes(authority_id));
     hasher.update(context_id.as_bytes());
-    hasher.update(now_ms.to_le_bytes());
-    let result = hasher.finalize();
-    let mut nonce = [0u8; 32];
-    nonce.copy_from_slice(&result);
-    nonce
+    hasher.update(&now_ms.to_le_bytes());
+    hasher.finalize()
 }
 
 /// Compute PSK commitment from context and authority
@@ -248,14 +240,11 @@ fn generate_nonce(authority_id: &AuthorityId, context_id: ContextId, now_ms: u64
 /// Uses a deterministic hash of context + authority. Full implementation
 /// will derive the PSK from the context's shared secret.
 fn compute_psk_commitment(context_id: ContextId, authority_id: &AuthorityId) -> [u8; 32] {
-    let mut hasher = Sha256::new();
+    let mut hasher = hash::hasher();
     hasher.update(b"PSK_COMMITMENT_V1");
     hasher.update(context_id.as_bytes());
-    hasher.update(authority_hash_bytes(authority_id));
-    let result = hasher.finalize();
-    let mut commitment = [0u8; 32];
-    commitment.copy_from_slice(&result);
-    commitment
+    hasher.update(&authority_hash_bytes(authority_id));
+    hasher.finalize()
 }
 
 // =============================================================================

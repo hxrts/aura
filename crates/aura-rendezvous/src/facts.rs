@@ -3,6 +3,7 @@
 //! Fact types for peer discovery and channel establishment.
 //! These facts are stored in context journals and propagated via `aura-sync`.
 
+use aura_core::hash;
 use aura_core::service::{
     BootstrapContactHint, BootstrapIntroductionHint, EstablishDescriptor, EstablishPath,
     HoldDescriptor, LinkEndpoint, LinkProtocol, MoveDescriptor, MovePath, NeighborhoodReentryHint,
@@ -15,7 +16,6 @@ use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
 use aura_journal::DomainFact;
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
@@ -25,12 +25,7 @@ const CHANNEL_CONTEXT_DOMAIN: &[u8] = b"AURA_RENDEZVOUS_CHANNEL_CONTEXT";
 /// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
 /// AuthorityId is 16 bytes (UUID), so we hash it to get a canonical 32-byte representation.
 fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(authority.to_bytes());
-    let result = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&result);
-    out
+    hash::hash(&authority.to_bytes())
 }
 
 /// Derive a deterministic context id for a rendezvous channel between two authorities.
@@ -43,14 +38,11 @@ fn channel_context_id(initiator: &AuthorityId, responder: &AuthorityId) -> Conte
         std::mem::swap(&mut a, &mut b);
     }
 
-    let mut hasher = Sha256::new();
+    let mut hasher = hash::hasher();
     hasher.update(CHANNEL_CONTEXT_DOMAIN);
-    hasher.update(a);
-    hasher.update(b);
-    let result = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&result);
-    ContextId::new_from_entropy(out)
+    hasher.update(&a);
+    hasher.update(&b);
+    ContextId::new_from_entropy(hasher.finalize())
 }
 
 /// Type identifier for rendezvous facts

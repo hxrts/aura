@@ -38,7 +38,7 @@ Effect trait definitions live in `crates/aura-core/src/effects/`. The `CryptoCor
 #[async_trait]
 pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
     // Key derivation
-    async fn hkdf_derive(&self, ikm: &[u8], salt: &[u8], info: &[u8], output_len: u32) -> Result<Vec<u8>, CryptoError>;
+    async fn kdf_derive(&self, ikm: &[u8], salt: &[u8], info: &[u8], output_len: u32) -> Result<Vec<u8>, CryptoError>;
     async fn derive_key(&self, master_key: &[u8], context: &KeyDerivationContext) -> Result<Vec<u8>, CryptoError>;
 
     // Ed25519 signatures
@@ -127,7 +127,7 @@ The following direct imports are allowed in Layer 3:
 - `getrandom`
 - `rand_core::OsRng`
 - `rand_chacha`
-- `hkdf`
+- `blake3`
 
 ### 2.3 Threshold Lifecycle (K1/K2/K3) and Transcript Binding
 

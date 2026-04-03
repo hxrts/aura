@@ -572,13 +572,7 @@ impl RendezvousService {
 
 /// Compute PSK commitment (hash of PSK)
 fn compute_psk_commitment(psk: &[u8; 32]) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(psk);
-    let result = hasher.finalize();
-    let mut commitment = [0u8; 32];
-    commitment.copy_from_slice(&result);
-    commitment
+    aura_core::hash::hash(psk)
 }
 
 // =============================================================================
@@ -678,7 +672,7 @@ mod tests {
     }
     #[async_trait]
     impl CryptoCoreEffects for MockNoise {
-        async fn hkdf_derive(
+        async fn kdf_derive(
             &self,
             _: &[u8],
             _: &[u8],

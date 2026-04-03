@@ -215,14 +215,14 @@ impl PhysicalTimeEffects for CompositeTestHandler {
 #[async_trait]
 impl CryptoCoreEffects for CompositeTestHandler {
     // Delegate to underlying crypto handler
-    async fn hkdf_derive(
+    async fn kdf_derive(
         &self,
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
         output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.hkdf_derive(ikm, salt, info, output_len).await
+        self.crypto.kdf_derive(ikm, salt, info, output_len).await
     }
 
     async fn derive_key(

@@ -2,9 +2,8 @@
 //!
 //! Provides context-free implementations of cryptographic operations.
 //!
-//! Note: This module legitimately uses cryptographic types like `sha2::Sha256`
-//! and `rand::rngs::OsRng` as it implements the CryptoEffects trait - this is
-//! the effect handler layer where actual cryptographic operations are provided.
+//! Note: This module legitimately uses low-level cryptographic implementation
+//! types and `rand::rngs::OsRng` as it implements the CryptoEffects trait.
 
 // Allow disallowed types/methods in cryptographic effect handler implementations
 #![allow(clippy::disallowed_types)]
@@ -39,7 +38,6 @@ pub fn derive_encryption_key(
 /// Derive key material of arbitrary length
 ///
 /// This is the core key derivation function that can produce keys of any length.
-/// It uses HKDF-like expansion with hash for consistency across different lengths.
 pub fn derive_key_material(
     root_key: &[u8],
     spec: &KeyDerivationSpec,
@@ -47,12 +45,6 @@ pub fn derive_key_material(
 ) -> Result<Vec<u8>, CryptoError> {
     if output_length == 0 {
         return Err(CryptoError::invalid("Output length must be greater than 0"));
-    }
-
-    if output_length > 255u32 * 32 {
-        return Err(CryptoError::invalid(
-            "Output length too large for HKDF expansion",
-        ));
     }
 
     // Build context string for domain separation
@@ -106,31 +98,13 @@ pub fn derive_key_material(
     context_bytes.extend_from_slice(b":version:");
     context_bytes.extend_from_slice(&spec.key_version.to_le_bytes());
 
-    // Extract: Combine root key with context
-    let mut extract_input = Vec::new();
-    extract_input.extend_from_slice(root_key);
-    extract_input.extend_from_slice(&context_bytes);
-
-    let prk = hash::hash(&extract_input);
-
-    // Expand: Generate output material using HKDF-like expansion
-    let output_length_usize = output_length as usize;
-    let mut output = Vec::with_capacity(output_length_usize);
-    let num_blocks = output_length_usize.div_ceil(32);
-
-    for i in 0..num_blocks {
-        let mut expand_input = Vec::new();
-        expand_input.extend_from_slice(&prk);
-        expand_input.extend_from_slice(&context_bytes);
-        expand_input.push(i as u8 + 1); // HKDF counter (1-indexed)
-
-        let block = hash::hash(&expand_input);
-        output.extend_from_slice(&block);
-    }
-
-    // Truncate to requested length
-    output.truncate(output_length_usize);
-    Ok(output)
+    aura_core::crypto::kdf::derive_key_material(
+        root_key,
+        b"aura.key_derivation.v1",
+        &context_bytes,
+        output_length,
+    )
+    .map_err(|e| CryptoError::invalid(format!("key derivation failed: {e}")))
 }
 
 /// Compute a deterministic transcript hash for dealer-based key generation (K2).
@@ -240,26 +214,15 @@ impl RandomCoreEffects for RealCryptoHandler {
 // Crypto core implementation for RealCryptoHandler
 #[async_trait]
 impl CryptoCoreEffects for RealCryptoHandler {
-    async fn hkdf_derive(
+    async fn kdf_derive(
         &self,
         ikm: &[u8],
         salt: &[u8],
         info: &[u8],
         output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
-        use hkdf::Hkdf;
-        use sha2::Sha256;
-
-        if output_len == 0 || output_len > 8160 {
-            return Err(CryptoError::invalid("Invalid output length for HKDF"));
-        }
-
-        let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
-        let mut okm = vec![0u8; output_len as usize];
-        hk.expand(info, &mut okm)
-            .map_err(|e| CryptoError::invalid(format!("HKDF expand failed: {e}")))?;
-
-        Ok(okm)
+        aura_core::crypto::kdf::derive_key_material(ikm, salt, info, output_len)
+            .map_err(|e| CryptoError::invalid(format!("KDF derivation failed: {e}")))
     }
 
     async fn derive_key(
@@ -274,8 +237,7 @@ impl CryptoCoreEffects for RealCryptoHandler {
         let salt = hash(context_str.as_bytes());
         let info = b"aura_key_derivation";
 
-        // Use HKDF to derive 32-byte key
-        self.hkdf_derive(master_key, &salt, info, 32).await
+        self.kdf_derive(master_key, &salt, info, 32).await
     }
 
     async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {

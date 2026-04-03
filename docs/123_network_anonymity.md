@@ -39,12 +39,12 @@ Aura's route layer has the following non-goals:
 
 ## 4. Route-Layer Construction
 
-Aura adopts a route-layer construction based on Curve25519, `HKDF-SHA256`, and `ChaCha20-Poly1305`.
+Aura adopts a route-layer construction based on Curve25519, Aura's centralized KDF, and `ChaCha20-Poly1305`.
 
 The route-layer construction uses the following rules:
 
 1. Each anonymous path setup flow creates a fresh route identifier and fresh ephemeral route secret material.
-2. Each hop derives a forward hop key stream and a backward hop key stream from the route secret material through `HKDF-SHA256`.
+2. Each hop derives a forward hop key stream and a backward hop key stream from the route secret material through Aura's centralized KDF.
 3. Each hop encrypts or decrypts only its own layer with `ChaCha20-Poly1305`.
 4. Each hop receives enough authenticated metadata to identify the next processing action, but not enough to reconstruct deeper route state.
 
@@ -194,7 +194,7 @@ Aura does not assume a global passive adversary can be defeated. Aura does not a
 
 Aura keeps adjacent-peer Noise channels because they already fit the transport boundary and context model. Aura adds a route-layer construction because adjacent-peer channels alone do not hide deeper route structure from intermediate forwarding hops.
 
-Aura chooses Curve25519, `HKDF-SHA256`, and `ChaCha20-Poly1305` because the construction is simple, widely implemented, and fits Aura's typed route-layer needs. The route layer needs explicit forward and backward hop streams, typed replay bounds, and typed reply blocks. A compact Aura-native construction is easier to align with these requirements than importing a foreign packet format.
+Aura chooses Curve25519, a centralized KDF surface, and `ChaCha20-Poly1305` because the construction is simple, auditable, and fits Aura's typed route-layer needs. The route layer needs explicit forward and backward hop streams, typed replay bounds, and typed reply blocks. A compact Aura-native construction is easier to align with these requirements than importing a foreign packet format.
 
 ## 15. Required Implementation Boundaries
 

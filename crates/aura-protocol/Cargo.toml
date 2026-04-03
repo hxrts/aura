@@ -37,9 +37,7 @@ aura-store = { path = "../aura-store", version = "0.1.0" }
 frost-ed25519 = { workspace = true }
 curve25519-dalek = { workspace = true }
 ed25519-dalek = { workspace = true }
-sha2 = { workspace = true }
 hmac = { workspace = true }
-hkdf = { workspace = true }
 aes-gcm = { workspace = true }
 getrandom = { workspace = true }
 rand_chacha = { workspace = true }

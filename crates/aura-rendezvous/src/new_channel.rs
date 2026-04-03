@@ -8,22 +8,17 @@ use aura_core::effects::noise::{
     HandshakeState as NoiseHandshakeState, NoiseEffects, NoiseParams, TransportState,
 };
 use aura_core::effects::CryptoEffects;
+use aura_core::hash;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;
 
 /// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
 fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(authority.to_bytes());
-    let result = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&result);
-    out
+    hash::hash(&authority.to_bytes())
 }
 
 // =============================================================================
@@ -722,8 +717,6 @@ fn generate_channel_id(
     authority_b: &AuthorityId,
     epoch: u64,
 ) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-
     // Sort authorities for determinism
     let hash_a = authority_hash_bytes(authority_a);
     let hash_b = authority_hash_bytes(authority_b);
@@ -733,15 +726,12 @@ fn generate_channel_id(
         (hash_b, hash_a)
     };
 
+    let mut hasher = hash::hasher();
     hasher.update(b"CHANNEL_ID_V1");
-    hasher.update(first);
-    hasher.update(second);
-    hasher.update(epoch.to_le_bytes());
-
-    let result = hasher.finalize();
-    let mut channel_id = [0u8; 32];
-    channel_id.copy_from_slice(&result);
-    channel_id
+    hasher.update(&first);
+    hasher.update(&second);
+    hasher.update(&epoch.to_le_bytes());
+    hasher.finalize()
 }
 
 #[cfg(test)]

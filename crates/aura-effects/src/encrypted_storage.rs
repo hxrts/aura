@@ -65,7 +65,7 @@ impl EncryptedStorageConfig {
         Self::default()
     }
 
-    /// Enable opaque file names (HKDF-derived from master key + semantic name)
+    /// Enable opaque file names derived from the master key and semantic name.
     pub fn with_opaque_names(mut self) -> Self {
         self.opaque_names = true;
         self
@@ -242,14 +242,13 @@ where
 
     /// Derive an opaque storage key from the semantic key.
     ///
-    /// Uses HKDF to derive a deterministic but unpredictable key name
+    /// Uses the crypto KDF to derive a deterministic but unpredictable key name
     /// from the master key and semantic key.
     async fn derive_opaque_key(&self, semantic_key: &str) -> Result<String, StorageError> {
         let master_key = self.get_or_init_master_key().await?;
-        // Use HKDF to derive a 16-byte key name
         let derived = self
             .crypto
-            .hkdf_derive(
+            .kdf_derive(
                 &**master_key,
                 semantic_key.as_bytes(),
                 b"aura-opaque-key-v1",
@@ -276,7 +275,7 @@ where
         }
     }
 
-    /// Derive a per-key encryption key using HKDF.
+    /// Derive a per-key encryption key using the crypto KDF.
     ///
     /// This binds the encryption to the storage key, providing key separation
     /// and preventing cross-key ciphertext attacks without needing AAD.
@@ -284,7 +283,7 @@ where
         let master_key = self.get_or_init_master_key().await?;
         let derived = self
             .crypto
-            .hkdf_derive(
+            .kdf_derive(
                 &**master_key,
                 storage_key.as_bytes(),
                 b"aura-storage-encryption-v1",
@@ -651,7 +650,7 @@ mod tests {
 
     #[async_trait]
     impl CryptoCoreEffects for MockCrypto {
-        async fn hkdf_derive(
+        async fn kdf_derive(
             &self,
             ikm: &[u8],
             salt: &[u8],
@@ -671,7 +670,7 @@ mod tests {
             master_key: &[u8],
             context: &aura_core::effects::crypto::KeyDerivationContext,
         ) -> Result<Vec<u8>, aura_core::AuraError> {
-            self.hkdf_derive(master_key, context.context.as_bytes(), b"derive", 32)
+            self.kdf_derive(master_key, context.context.as_bytes(), b"derive", 32)
                 .await
         }
 

@@ -2,12 +2,11 @@
 #![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
+use aura_core::crypto::kdf;
 use aura_core::effects::{RouteCryptoEffects, RouteCryptoError, RouteHopKeyMaterial};
 use aura_core::AuraError;
 use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
-use hkdf::Hkdf;
-use sha2::Sha256;
 
 /// Stateless production route-layer crypto handler.
 #[derive(Debug, Default, Clone)]
@@ -27,25 +26,22 @@ impl RouteCryptoEffects for RealRouteCryptoHandler {
         route_secret_seed: [u8; 32],
         hop_index: u16,
     ) -> Result<RouteHopKeyMaterial, RouteCryptoError> {
-        let hkdf = Hkdf::<Sha256>::new(None, &route_secret_seed);
-
-        let mut forward_key = [0u8; 32];
-        let mut backward_key = [0u8; 32];
-        let mut replay_window_id = [0u8; 32];
-
-        hkdf.expand(
+        let forward_key = kdf::derive_key::<32>(
+            &route_secret_seed,
+            b"aura.route.v1",
             format!("aura.route.forward.{hop_index}").as_bytes(),
-            &mut forward_key,
         )
         .map_err(|_| AuraError::crypto("derive forward hop key material"))?;
-        hkdf.expand(
+        let backward_key = kdf::derive_key::<32>(
+            &route_secret_seed,
+            b"aura.route.v1",
             format!("aura.route.backward.{hop_index}").as_bytes(),
-            &mut backward_key,
         )
         .map_err(|_| AuraError::crypto("derive backward hop key material"))?;
-        hkdf.expand(
+        let replay_window_id = kdf::derive_key::<32>(
+            &route_secret_seed,
+            b"aura.route.v1",
             format!("aura.route.replay.{hop_index}").as_bytes(),
-            &mut replay_window_id,
         )
         .map_err(|_| AuraError::crypto("derive replay-window binding"))?;
 

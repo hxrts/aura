@@ -3,6 +3,7 @@ pub mod ed25519;
 pub mod frost;
 pub mod hash;
 pub mod hpke;
+pub mod kdf;
 pub mod key_derivation;
 pub mod merkle;
 pub mod single_signer;

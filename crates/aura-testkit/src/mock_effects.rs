@@ -245,7 +245,7 @@ impl RandomCoreEffects for MockEffects {
 
 #[async_trait]
 impl CryptoCoreEffects for MockEffects {
-    async fn hkdf_derive(
+    async fn kdf_derive(
         &self,
         _ikm: &[u8],
         _salt: &[u8],

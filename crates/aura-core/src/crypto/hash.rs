@@ -1,4 +1,4 @@
-//! Pure synchronous hash trait for content addressing
+//! Pure synchronous hash trait for content addressing.
 //!
 //! This module provides a synchronous trait-based hashing system. Unlike algebraic
 //! effects (which are for operations with side effects), hashing is a pure,
@@ -21,7 +21,7 @@
 //! `hash()` or `hasher()` functions will automatically use the new algorithm without
 //! any call-site changes.
 //!
-//! Current algorithm: **SHA-256** (256-bit / 32-byte output)
+//! Current algorithm: **BLAKE3** (256-bit / 32-byte output)
 //!
 //! # Usage
 //!
@@ -29,7 +29,7 @@
 //! use aura_core::hash::hash;
 //!
 //! let digest = hash(b"hello world");
-//! assert_eq!(digest.len(), 32); // 32-byte SHA-256 hash
+//! assert_eq!(digest.len(), 32); // 32-byte BLAKE3 digest
 //! ```
 //!
 //! For incremental hashing:
@@ -45,85 +45,54 @@
 //! ```
 
 // This module is the implementation of the centralized hash trait strategy.
-// It is explicitly allowed to use sha2::Sha256 and related types/methods
-// since this is where the hash algorithm is implemented.
+// It is explicitly allowed to use blake3 types and methods since this is where
+// the hash algorithm is implemented.
 #![allow(clippy::disallowed_types, clippy::disallowed_methods)]
 
-use sha2::{Digest, Sha256};
 use std::fmt;
 
-/// Synchronous trait for cryptographic hashing
-///
-/// This trait defines the interface for content-addressing hashing.
-///
-/// Implementations should provide consistent, reliable hashing suitable
-/// for content addressing, deduplication, and commitment schemes.
-///
-/// The algorithm used is determined by the `ALGORITHM` constant.
+/// Synchronous trait for cryptographic hashing.
 pub trait HashAlgorithm: Send + Sync + fmt::Debug {
-    /// Hash arbitrary bytes to a 32-byte digest
-    ///
-    /// The output should be suitable for use as a cryptographic commitment.
-    /// Different bytes should (with very high probability) produce different hashes.
+    /// Hash arbitrary bytes to a 32-byte digest.
     fn hash(&self, data: &[u8]) -> [u8; 32];
 
-    /// Create an incremental hasher for multi-part hashing
-    ///
-    /// Useful when hashing large amounts of data or data provided in chunks.
+    /// Create an incremental hasher for multi-part hashing.
     fn hasher(&self) -> Box<dyn Hasher>;
 }
 
-/// Trait for incremental hashing of multi-part data
-///
-/// Allows updating a hash computation with data provided in multiple chunks.
+/// Trait for incremental hashing of multi-part data.
 pub trait Hasher: Send {
-    /// Update the hasher with more data
+    /// Update the hasher with more data.
     fn update(&mut self, data: &[u8]);
 
-    /// Finalize the hasher and return the 32-byte digest
-    ///
-    /// Consumes the hasher. The hasher cannot be used after finalization.
+    /// Finalize the hasher and return the 32-byte digest.
     fn finalize(self: Box<Self>) -> [u8; 32];
 }
 
-/// SHA-256 hash implementation
-///
-/// SHA-256 is a widely-used cryptographic hash function with the following properties:
-/// - 256-bit (32-byte) output
-/// - NIST FIPS 180-4 standard
-/// - Suitable for content addressing and cryptographic commitments
-/// - Part of the SHA-2 family
+/// BLAKE3 hash implementation.
 #[derive(Debug, Clone, Copy)]
-pub struct Sha256Algorithm;
+pub struct Blake3Algorithm;
 
-impl HashAlgorithm for Sha256Algorithm {
+impl HashAlgorithm for Blake3Algorithm {
     fn hash(&self, data: &[u8]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        let result = hasher.finalize();
-        let mut output = [0u8; 32];
-        output.copy_from_slice(&result);
-        output
+        *blake3::hash(data).as_bytes()
     }
 
     fn hasher(&self) -> Box<dyn Hasher> {
-        Box::new(Sha256Hasher(Sha256::new()))
+        Box::new(Blake3Hasher(blake3::Hasher::new()))
     }
 }
 
-/// SHA-256 incremental hasher
-struct Sha256Hasher(Sha256);
+/// BLAKE3 incremental hasher.
+struct Blake3Hasher(blake3::Hasher);
 
-impl Hasher for Sha256Hasher {
+impl Hasher for Blake3Hasher {
     fn update(&mut self, data: &[u8]) {
         self.0.update(data);
     }
 
     fn finalize(self: Box<Self>) -> [u8; 32] {
-        let result = self.0.finalize();
-        let mut output = [0u8; 32];
-        output.copy_from_slice(&result);
-        output
+        *self.0.finalize().as_bytes()
     }
 }
 
@@ -139,58 +108,21 @@ impl Hasher for Sha256Hasher {
 ///
 /// Example:
 /// ```ignore
-/// // To switch to Blake3:
 /// pub const ALGORITHM: Blake3Algorithm = Blake3Algorithm;
 /// ```
 /// The global hash algorithm used throughout the system.
 ///
 /// This is the single source of truth for which algorithm is used.
 /// Modify this constant to change the algorithm system-wide.
-///
-/// Current: SHA-256 (NIST FIPS 180-4 standard)
-pub const ALGORITHM: Sha256Algorithm = Sha256Algorithm;
+pub const ALGORITHM: Blake3Algorithm = Blake3Algorithm;
 
-// ============================================================================
-// Public API - These functions use the algorithm selected above
-// ============================================================================
-
-/// Convenience function for hashing using the global algorithm
-///
-/// This is the primary way to hash data in the system.
-/// Equivalent to calling `ALGORITHM.hash(data)`.
-///
-/// The algorithm used is determined by the `ALGORITHM` constant.
-///
-/// # Example
-///
-/// ```ignore
-/// use aura_core::hash::hash;
-///
-/// let digest = hash(b"content");
-/// assert_eq!(digest.len(), 32);
-/// ```
+/// Convenience function for hashing using the global algorithm.
 #[inline]
 pub fn hash(data: &[u8]) -> [u8; 32] {
     ALGORITHM.hash(data)
 }
 
-/// Convenience function for creating an incremental hasher
-///
-/// This creates a hasher using the global hash algorithm.
-/// Equivalent to calling `ALGORITHM.hasher()`.
-///
-/// The algorithm used is determined by the `ALGORITHM` constant.
-///
-/// # Example
-///
-/// ```ignore
-/// use aura_core::hash::hasher;
-///
-/// let mut h = hasher();
-/// h.update(b"part1");
-/// h.update(b"part2");
-/// let digest = h.finalize();
-/// ```
+/// Convenience function for creating an incremental hasher.
 #[inline]
 pub fn hasher() -> Box<dyn Hasher> {
     ALGORITHM.hasher()
@@ -217,11 +149,8 @@ mod tests {
     #[test]
     fn test_incremental_hasher_equivalence() {
         let data = b"hello world";
-
-        // All at once
         let hash1 = hash(data);
 
-        // Incremental
         let mut h = hasher();
         h.update(b"hello");
         h.update(b" ");
@@ -255,24 +184,21 @@ mod tests {
     }
 
     #[test]
-    fn test_sha256_implementation() {
-        // Verify SHA-256 implementation is consistent
-        let algo = Sha256Algorithm;
+    fn test_blake3_implementation() {
+        let algo = Blake3Algorithm;
         let hash1 = algo.hash(b"test");
         let hash2 = algo.hash(b"test");
         assert_eq!(hash1, hash2);
     }
 
     #[test]
-    fn test_sha256_known_vector() {
-        // Test against known SHA-256 vector
-        // SHA256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    fn test_blake3_known_vector() {
         let empty_hash = hash(b"");
         let expected = [
-            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
-            0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
-            0x78, 0x52, 0xb8, 0x55,
+            0xaf, 0x13, 0x49, 0xb9, 0xf5, 0xf9, 0xa1, 0xa6, 0xa0, 0x40, 0x4d, 0xea, 0x36, 0xdc,
+            0xc9, 0x49, 0x9b, 0xcb, 0x25, 0xc9, 0xad, 0xc1, 0x12, 0xb7, 0xcc, 0x9a, 0x93, 0xca,
+            0xe4, 0x1f, 0x32, 0x62,
         ];
-        assert_eq!(empty_hash, expected, "SHA-256 of empty string mismatch");
+        assert_eq!(empty_hash, expected, "BLAKE3 of empty string mismatch");
     }
 }

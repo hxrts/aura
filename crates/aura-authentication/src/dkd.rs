@@ -22,7 +22,7 @@
 //! # Integration
 //!
 //! Uses Aura's effect system for:
-//! - `CryptoEffects` for cryptographic operations (FROST, HKDF, signatures)
+//! - `CryptoEffects` for cryptographic operations (FROST, KDF, signatures)
 //! - `NetworkEffects` for secure peer communication
 //! - `JournalEffects` for persistent state and audit logs
 //! - `PhysicalTimeEffects` for replay protection and timeouts
@@ -639,12 +639,12 @@ impl DkdProtocol {
             combined_input.extend_from_slice(contribution.device_id.0.as_bytes());
         }
 
-        // Use HKDF for key derivation
+        // Use the crypto KDF for key derivation.
         let salt = hash::hash(session_id.0.as_bytes());
         let info = format!("aura-dkd-{}_{}", context.app_id, context.context);
 
         let derived_bytes = effects
-            .hkdf_derive(&combined_input, &salt, info.as_bytes(), 32)
+            .kdf_derive(&combined_input, &salt, info.as_bytes(), 32)
             .await
             .map_err(|e| DkdError::CryptographicFailure {
                 reason: e.to_string(),
@@ -701,10 +701,10 @@ impl DkdProtocol {
             verification_message.extend_from_slice(&contribution.commitment.0);
         }
 
-        // Create keyed hash verification proof using HKDF
+        // Create a keyed verification proof using the crypto KDF.
         // This proves knowledge of the derived key and correct contribution binding
         let verification_proof = effects
-            .hkdf_derive(
+            .kdf_derive(
                 derived_key,
                 &verification_message,
                 b"dkd_verification_proof",
@@ -712,7 +712,7 @@ impl DkdProtocol {
             )
             .await
             .map_err(|e| DkdError::CryptographicFailure {
-                reason: format!("HKDF verification failed: {e}"),
+                reason: format!("KDF verification failed: {e}"),
             })?;
 
         tracing::debug!(

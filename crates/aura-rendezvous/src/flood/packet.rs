@@ -16,6 +16,7 @@
 //! and authenticity, preventing tampering with packets.
 
 use aura_core::{
+    crypto::kdf,
     effects::{
         flood::{DecryptedRendezvous, FloodError, RendezvousPacket, RENDEZVOUS_PACKET_SIZE_BYTES},
         CryptoEffects,
@@ -23,8 +24,6 @@ use aura_core::{
     types::AuthorityId,
 };
 use curve25519_dalek::{montgomery::MontgomeryPoint, scalar::Scalar};
-use hkdf::Hkdf;
-use sha2::Sha256;
 
 /// Domain separator for rendezvous encryption key derivation.
 const RENDEZVOUS_ENCRYPT_DOMAIN: &[u8] = b"AURA_RENDEZVOUS_ENCRYPT_v1";
@@ -193,7 +192,7 @@ impl PacketCrypto {
         let recipient_point = MontgomeryPoint(*recipient_public_key);
         let shared_secret = ephemeral_scalar * recipient_point;
 
-        // Derive symmetric key using HKDF
+        // Derive symmetric key from the shared secret.
         let symmetric_key = Self::derive_key(
             shared_secret.as_bytes(),
             ephemeral_public.as_bytes(),
@@ -323,12 +322,8 @@ impl PacketCrypto {
         info.extend_from_slice(ephemeral_public);
         info.extend_from_slice(recipient_public);
 
-        let hkdf = Hkdf::<Sha256>::new(Some(RENDEZVOUS_ENCRYPT_DOMAIN), shared_secret);
-        let mut output = [0u8; 32];
-        hkdf.expand(&info, &mut output)
-            .map_err(|_| FloodError::EncryptionError("HKDF expansion failed".to_string()))?;
-
-        Ok(output)
+        kdf::derive_key(shared_secret, RENDEZVOUS_ENCRYPT_DOMAIN, &info)
+            .map_err(|_| FloodError::EncryptionError("key derivation failed".to_string()))
     }
 }
 
@@ -382,18 +377,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl CryptoCoreEffects for MockCrypto {
-        async fn hkdf_derive(
+        async fn kdf_derive(
             &self,
             ikm: &[u8],
             salt: &[u8],
             info: &[u8],
             output_len: u32,
         ) -> Result<Vec<u8>, aura_core::AuraError> {
-            let hkdf = Hkdf::<Sha256>::new(Some(salt), ikm);
-            let mut output = vec![0u8; output_len as usize];
-            hkdf.expand(info, &mut output)
-                .map_err(|_| aura_core::AuraError::crypto("HKDF failed"))?;
-            Ok(output)
+            aura_core::crypto::kdf::derive_key_material(ikm, salt, info, output_len)
         }
 
         async fn derive_key(

@@ -60,14 +60,14 @@ impl RegistrableHandler for CryptoHandlerAdapter {
         }
 
         match operation {
-            "hkdf_derive" => {
+            "kdf_derive" => {
                 // Parameters would be (ikm, salt, info, length)
                 let params: (Vec<u8>, Option<Vec<u8>>, Vec<u8>, u32) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
                 let salt = params.1.unwrap_or_default();
                 let result = self
                     .core
-                    .hkdf_derive(&params.0, &salt, &params.2, params.3)
+                    .kdf_derive(&params.0, &salt, &params.2, params.3)
                     .await
                     .map_err(|e| HandlerError::ExecutionFailed {
                         source: Box::new(e),

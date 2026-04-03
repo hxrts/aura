@@ -28,12 +28,10 @@ curve25519-dalek = { workspace = true }
 ed25519-dalek = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
-hkdf = { workspace = true }
 indexmap = { workspace = true }
 rand_core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 telltale = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

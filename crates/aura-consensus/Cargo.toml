@@ -28,7 +28,6 @@ telltale = { workspace = true }
 frost-ed25519 = { workspace = true }
 curve25519-dalek = { workspace = true }
 ed25519-dalek = { workspace = true }
-sha2 = { workspace = true }
 getrandom = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }

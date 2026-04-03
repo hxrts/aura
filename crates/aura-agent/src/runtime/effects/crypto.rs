@@ -33,7 +33,7 @@ impl RandomCoreEffects for AuraEffectSystem {
 // Implementation of CryptoCoreEffects
 #[async_trait]
 impl CryptoCoreEffects for AuraEffectSystem {
-    async fn hkdf_derive(
+    async fn kdf_derive(
         &self,
         ikm: &[u8],
         salt: &[u8],
@@ -42,7 +42,7 @@ impl CryptoCoreEffects for AuraEffectSystem {
     ) -> Result<Vec<u8>, CryptoError> {
         self.crypto
             .handler()
-            .hkdf_derive(ikm, salt, info, output_len)
+            .kdf_derive(ikm, salt, info, output_len)
             .await
     }
 

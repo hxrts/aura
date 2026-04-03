@@ -65,7 +65,7 @@ pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
         public_key: &[u8],
     ) -> Result<bool, CryptoError>;
 
-    async fn hkdf_derive(
+    async fn kdf_derive(
         &self,
         ikm: &[u8],
         salt: &[u8],

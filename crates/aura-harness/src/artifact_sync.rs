@@ -21,7 +21,7 @@ pub struct RemoteArtifactRecord {
     pub source_host: String,
     pub source_path: String,
     pub destination_path: String,
-    pub checksum_sha256: String,
+    pub checksum_hex: String,
     pub status: String,
 }
 
@@ -89,14 +89,14 @@ pub fn sync_remote_artifacts(
             "incomplete".to_string()
         };
 
-        let checksum_sha256 = checksum_file(&destination_file)?;
+        let checksum_hex = checksum_file(&destination_file)?;
 
         records.push(RemoteArtifactRecord {
             instance_id: instance.id.clone(),
             source_host: host,
             source_path: source_path.display().to_string(),
             destination_path: destination_file.display().to_string(),
-            checksum_sha256,
+            checksum_hex,
             status,
         });
     }
@@ -158,7 +158,7 @@ mod tests {
 
         assert_eq!(report.records.len(), 1);
         assert_eq!(report.records[0].status, "simulated");
-        assert!(!report.records[0].checksum_sha256.is_empty());
+        assert!(!report.records[0].checksum_hex.is_empty());
         Ok(())
     }
 

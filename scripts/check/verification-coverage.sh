@@ -388,7 +388,7 @@ check_schema_reference \
   "Telltale parity report schema documented and implemented"
 
 check_schema_reference \
-  "aura.lean-quint-bridge.discrepancy.v1" \
+  "aura.telltale-bridge.discrepancy.v1" \
   "crates/aura-quint/tests/bridge_pipeline.rs" \
   "Bridge discrepancy schema documented and implemented"
 

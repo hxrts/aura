@@ -16,7 +16,7 @@ pub fn operations_for(effect_type: EffectType) -> &'static [&'static str] {
             "random_uuid",
         ],
         EffectType::Crypto => &[
-            "hkdf_derive",
+            "kdf_derive",
             "derive_key",
             "ed25519_generate_keypair",
             "ed25519_sign",
@@ -90,7 +90,7 @@ pub fn core_operations_for(effect_type: EffectType) -> &'static [&'static str] {
     match effect_type {
         EffectType::Random => &["random_bytes", "random_bytes_32", "random_u64"],
         EffectType::Crypto => &[
-            "hkdf_derive",
+            "kdf_derive",
             "derive_key",
             "ed25519_generate_keypair",
             "ed25519_sign",

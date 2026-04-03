@@ -410,3 +410,23 @@ if [[ "$work_links" -gt 0 ]]; then
 fi
 
 echo "no links to work/ directory found"
+
+# Check for absolute filesystem paths in markdown links.
+# These resolve locally but break in CI where the repo is checked out
+# to a different path (e.g., /home/runner/work/aura/aura/).
+abs_path_links=0
+
+while IFS= read -r match; do
+  [[ -z "$match" ]] && continue
+  abs_path_links=$((abs_path_links + 1))
+  echo "absolute path in link: $match"
+done < <(rg --no-heading -n '\[[^\]]+\]\(/(?:Users|home|tmp|var|opt|root)/' docs/ 2>/dev/null || true)
+
+if [[ "$abs_path_links" -gt 0 ]]; then
+  echo ""
+  echo "found $abs_path_links link(s) with absolute filesystem paths in docs/"
+  echo "these resolve locally but break in CI — use relative paths instead"
+  exit 1
+fi
+
+echo "no absolute filesystem paths in docs links"
