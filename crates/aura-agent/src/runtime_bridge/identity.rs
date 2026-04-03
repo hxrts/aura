@@ -21,8 +21,7 @@ const RUNTIME_BRIDGE_IDENTITY_NICKNAME_MUTATION_CAPABILITY: &str =
     "runtime_bridge_identity_nickname_mutation";
 const RUNTIME_BRIDGE_IDENTITY_MFA_POLICY_MUTATION_CAPABILITY: &str =
     "runtime_bridge_identity_mfa_policy_mutation";
-const RUNTIME_BRIDGE_IDENTITY_TIME_QUERY_CAPABILITY: &str =
-    "runtime_bridge_identity_time_query";
+const RUNTIME_BRIDGE_IDENTITY_TIME_QUERY_CAPABILITY: &str = "runtime_bridge_identity_time_query";
 const RUNTIME_BRIDGE_IDENTITY_SLEEP_CAPABILITY: &str = "runtime_bridge_identity_sleep";
 const RUNTIME_BRIDGE_IDENTITY_AUTHENTICATION_QUERY_CAPABILITY: &str =
     "runtime_bridge_identity_authentication_query";
