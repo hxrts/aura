@@ -16,7 +16,7 @@ use crate::runtime::services::ceremony_runner::{
 use crate::runtime::services::{
     CeremonyTracker, ReconfigurationManager, SessionDelegationTransfer,
 };
-use crate::runtime::vm_host_bridge::AuraVmHostWaitStatus;
+use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId, TaskSupervisor};
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
@@ -40,7 +40,10 @@ use aura_recovery::guardian_ceremony::{
 use aura_recovery::guardian_membership::{
     ChangeCompletion, GuardianVote, MembershipChange, MembershipProposal,
 };
-use aura_recovery::guardian_setup::{GuardianAcceptance, GuardianInvitation, SetupCompletion};
+use aura_recovery::guardian_setup::{
+    build_setup_completion, validate_setup_inputs, GuardianAcceptance, GuardianInvitation,
+    SetupCompletion,
+};
 use aura_recovery::membership_runners::GuardianMembershipChangeRole;
 use aura_recovery::recovery_protocol::{
     GuardianApproval as ProtocolGuardianApproval, RecoveryOperation as ProtocolRecoveryOperation,
@@ -56,9 +59,6 @@ use uuid::Uuid;
 
 const CHOREO_START_RETRY_DELAY_MS: u64 = 50;
 const CHOREO_START_RETRY_LIMIT: usize = 40;
-
-mod ceremony_types;
-mod state_machine;
 
 /// Recovery service API
 ///
@@ -1978,14 +1978,69 @@ impl RecoveryServiceApi {
     }
 }
 
+fn recovery_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
+    ChoreographicRole::for_authority(
+        authority_id,
+        RoleIndex::new(role_index.into()).expect("role index"),
+    )
+}
+
 async fn execute_recovery_protocol_account(
     effects: Arc<AuraEffectSystem>,
     authority_id: AuthorityId,
     guardian_id: AuthorityId,
     request: ProtocolRecoveryRequest,
 ) -> AgentResult<()> {
-    state_machine::execute_recovery_protocol_account(effects, authority_id, guardian_id, request)
+    let session_id = recovery_session_id(&request.recovery_id, &guardian_id);
+    let roles = vec![
+        recovery_role(authority_id, 0),
+        recovery_role(authority_id, 1),
+        recovery_role(guardian_id, 0),
+    ];
+    let peer_roles = BTreeMap::from([("Coordinator".to_string(), recovery_role(authority_id, 1))]);
+    let manifest =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::composition_manifest();
+    let global_type =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::global_type();
+    let local_types =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::local_types();
+
+    let result = async {
+        let mut session = open_owned_manifest_vm_session_admitted(
+            effects.clone(),
+            session_id,
+            roles,
+            &manifest,
+            "Account",
+            &global_type,
+            &local_types,
+            crate::runtime::AuraVmSchedulerSignals::default(),
+        )
         .await
+        .map_err(|error| AgentError::internal(error.to_string()))?;
+        session.queue_send_bytes(to_vec(&request).map_err(|error| {
+            AgentError::internal(format!("recovery request encode failed: {error}"))
+        })?);
+
+        let loop_result = loop {
+            let round = session
+                .advance_round("Account", &peer_roles)
+                .await
+                .map_err(|error| AgentError::internal(error.to_string()))?;
+
+            match crate::runtime::handle_owned_vm_round(&mut session, round, "recovery account VM")
+                .map_err(|error| AgentError::internal(error.to_string()))?
+            {
+                AuraVmRoundDisposition::Continue => {}
+                AuraVmRoundDisposition::Complete => break Ok(()),
+            }
+        };
+
+        let _ = session.close().await;
+        loop_result
+    }
+    .await;
+    result
 }
 
 async fn execute_recovery_protocol_coordinator(
@@ -1994,29 +2049,130 @@ async fn execute_recovery_protocol_coordinator(
     guardian_id: AuthorityId,
     request: ProtocolRecoveryRequest,
 ) -> AgentResult<()> {
-    state_machine::execute_recovery_protocol_coordinator(
-        effects,
-        authority_id,
-        guardian_id,
-        request,
-    )
-    .await
+    let session_id = recovery_session_id(&request.recovery_id, &guardian_id);
+    let roles = vec![
+        recovery_role(authority_id, 0),
+        recovery_role(authority_id, 1),
+        recovery_role(guardian_id, 0),
+    ];
+    let peer_roles = BTreeMap::from([
+        ("Account".to_string(), recovery_role(authority_id, 0)),
+        ("Guardian".to_string(), recovery_role(guardian_id, 0)),
+    ]);
+    let manifest =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::composition_manifest();
+    let global_type =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::global_type();
+    let local_types =
+        aura_recovery::recovery_protocol::telltale_session_types_recovery_protocol::vm_artifacts::local_types();
+
+    let result = async {
+        let mut session = open_owned_manifest_vm_session_admitted(
+            effects.clone(),
+            session_id,
+            roles,
+            &manifest,
+            "Coordinator",
+            &global_type,
+            &local_types,
+            crate::runtime::AuraVmSchedulerSignals::default(),
+        )
+        .await
+        .map_err(|error| AgentError::internal(error.to_string()))?;
+        session.queue_send_bytes(to_vec(&request).map_err(|error| {
+            AgentError::internal(format!("recovery request encode failed: {error}"))
+        })?);
+        let mut approvals = Vec::new();
+
+        let loop_result = loop {
+            let round = session
+                .advance_round("Coordinator", &peer_roles)
+                .await
+                .map_err(|error| AgentError::internal(error.to_string()))?;
+
+            if let Some(blocked) = round.blocked_receive {
+                let approval: ProtocolGuardianApproval =
+                    from_slice(&blocked.payload).map_err(|error| {
+                        AgentError::internal(format!("guardian approval decode failed: {error}"))
+                    })?;
+                approvals.push(approval.clone());
+                session.queue_send_bytes(
+                    to_vec(&RecoveryOutcome {
+                        success: true,
+                        recovery_grant: None,
+                        error: None,
+                        approvals: approvals.clone(),
+                    })
+                    .map_err(|error| {
+                        AgentError::internal(format!("recovery outcome encode failed: {error}"))
+                    })?,
+                );
+                session
+                    .inject_blocked_receive(&blocked)
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
+                continue;
+            }
+
+            match round.host_wait_status {
+                AuraVmHostWaitStatus::Idle => {}
+                AuraVmHostWaitStatus::TimedOut => {
+                    break Err(AgentError::internal(
+                        "recovery coordinator VM timed out while waiting for receive".to_string(),
+                    ));
+                }
+                AuraVmHostWaitStatus::Cancelled => {
+                    break Err(AgentError::internal(
+                        "recovery coordinator VM cancelled while waiting for receive".to_string(),
+                    ));
+                }
+                AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+            }
+
+            match round.step {
+                StepResult::AllDone => break Ok(()),
+                StepResult::Continue => {}
+                StepResult::Stuck => {
+                    break Err(AgentError::internal(
+                        "recovery coordinator VM became stuck without a pending receive"
+                            .to_string(),
+                    ));
+                }
+            }
+        };
+
+        let _ = session.close().await;
+        loop_result
+    }
+    .await;
+    result
 }
 
 fn recovery_session_id(recovery_id: &RecoveryId, guardian_id: &AuthorityId) -> Uuid {
-    state_machine::recovery_session_id(recovery_id, guardian_id)
+    let mut material = Vec::new();
+    material.extend_from_slice(recovery_id.as_str().as_bytes());
+    material.extend_from_slice(&guardian_id.to_bytes());
+    let digest = hash(&material);
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
 }
 
 fn guardian_setup_session_id(setup_id: &str) -> Uuid {
-    state_machine::guardian_setup_session_id(setup_id)
+    let digest = hash(setup_id.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
 }
 
 fn membership_session_id(change_id: &str) -> Uuid {
-    state_machine::membership_session_id(change_id)
+    let digest = hash(change_id.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
 }
 
 fn validate_guardian_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> AgentResult<()> {
-    ceremony_types::validate_guardian_setup_inputs(guardians, threshold)
+    validate_setup_inputs(guardians, threshold).map_err(AgentError::invalid)
 }
 
 fn build_guardian_setup_completion(
@@ -2024,7 +2180,7 @@ fn build_guardian_setup_completion(
     threshold: u16,
     acceptances: Vec<GuardianAcceptance>,
 ) -> SetupCompletion {
-    ceremony_types::build_guardian_setup_completion(setup_id, threshold, acceptances)
+    build_setup_completion(setup_id, threshold, acceptances)
 }
 
 #[cfg(test)]

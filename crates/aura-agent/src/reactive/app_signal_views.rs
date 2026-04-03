@@ -21,9 +21,7 @@ use aura_app::views::{
         BanRecord, HomeMember, HomeRole, HomeState, HomesState, KickRecord, MuteRecord,
         PinnedMessageMeta,
     },
-    invitations::{
-        Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
-    },
+    invitations::{Invitation, InvitationDirection, InvitationStatus, InvitationsState},
     recovery::{Guardian, GuardianStatus, RecoveryState},
 };
 use aura_app::ReactiveHandler;
@@ -40,6 +38,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use super::scheduler::{ReactiveUpdateFuture, ReactiveView};
+use crate::reactive::app_signal_projection;
 
 use crate::runtime::AuraEffectSystem;
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
@@ -263,10 +262,10 @@ pub(crate) async fn materialize_pending_invitation_signal(
     let is_generic_sent_contact_invitation = direction == InvitationDirection::Sent
         && matches!(invitation_type, DomainInvitationType::Contact { .. })
         && sender_id == receiver_id;
-    let (home_id, home_name) = InvitationsSignalView::map_channel_metadata(invitation_type);
+    let (home_id, home_name) = app_signal_projection::map_channel_metadata(invitation_type);
     invitations.add_invitation(Invitation {
         id: invitation_id.to_string(),
-        invitation_type: InvitationsSignalView::map_invitation_type(invitation_type),
+        invitation_type: app_signal_projection::map_invitation_type(invitation_type),
         status: InvitationStatus::Pending,
         direction,
         from_id: sender_id,
@@ -306,35 +305,6 @@ impl InvitationsSignalView {
             own_authority,
             reactive,
             update_gate: Mutex::new(()),
-        }
-    }
-
-    fn map_invitation_type(inv_type: &DomainInvitationType) -> InvitationType {
-        match inv_type {
-            // Legacy mapping: the TUI maps aura-app Home → "Contact".
-            DomainInvitationType::Contact { .. } => InvitationType::Home,
-            DomainInvitationType::Guardian { .. } => InvitationType::Guardian,
-            DomainInvitationType::Channel { .. } => InvitationType::Chat,
-            DomainInvitationType::DeviceEnrollment { .. } => InvitationType::Home,
-        }
-    }
-
-    fn map_channel_metadata(
-        inv_type: &DomainInvitationType,
-    ) -> (Option<ChannelId>, Option<String>) {
-        match inv_type {
-            DomainInvitationType::Channel {
-                home_id,
-                nickname_suggestion,
-                ..
-            } => (
-                Some(*home_id),
-                nickname_suggestion
-                    .clone()
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty()),
-            ),
-            _ => (None, None),
         }
     }
 }
@@ -395,11 +365,14 @@ impl ReactiveView for InvitationsSignalView {
                             == InvitationDirection::Sent
                             && matches!(invitation_type, DomainInvitationType::Contact { .. })
                             && sender_id == receiver_id;
-                        let (home_id, home_name) = Self::map_channel_metadata(&invitation_type);
+                        let (home_id, home_name) =
+                            app_signal_projection::map_channel_metadata(&invitation_type);
 
                         let invitation = Invitation {
                             id: invitation_id.to_string(),
-                            invitation_type: Self::map_invitation_type(&invitation_type),
+                            invitation_type: app_signal_projection::map_invitation_type(
+                                &invitation_type,
+                            ),
                             status: InvitationStatus::Pending,
                             direction,
                             from_id: sender_id,
@@ -1187,52 +1160,6 @@ impl ChatSignalView {
         }
     }
 
-    fn collect_moderation_homes(
-        homes: &HomesState,
-        context_id: ContextId,
-        channel_id: ChannelId,
-    ) -> Vec<HomeState> {
-        let mut candidates = Vec::new();
-
-        if let Some(home) = homes.home_state(&channel_id) {
-            if home.context_id == Some(context_id) {
-                candidates.push(home.clone());
-            }
-        }
-
-        for (_, home) in homes.iter() {
-            if home.context_id == Some(context_id)
-                && !candidates
-                    .iter()
-                    .any(|candidate: &HomeState| candidate.id == home.id)
-            {
-                candidates.push(home.clone());
-            }
-        }
-
-        candidates
-    }
-
-    #[cfg(test)]
-    fn select_moderation_home(
-        homes: &HomesState,
-        context_id: ContextId,
-        channel_id: ChannelId,
-    ) -> Option<HomeState> {
-        if let Some(home) = homes.home_state(&channel_id) {
-            if home.context_id == Some(context_id) {
-                return Some(home.clone());
-            }
-        }
-
-        let candidates = Self::collect_moderation_homes(homes, context_id, channel_id);
-        if candidates.len() == 1 {
-            return candidates.first().cloned();
-        }
-
-        None
-    }
-
     async fn sender_allowed_for_context(
         &self,
         context_id: ContextId,
@@ -1248,7 +1175,8 @@ impl ChatSignalView {
             Ok(homes) => homes,
             Err(_) => return false,
         };
-        let candidates = Self::collect_moderation_homes(&homes, context_id, channel_id);
+        let candidates =
+            app_signal_projection::collect_moderation_homes(&homes, context_id, channel_id);
         if candidates.is_empty() {
             return false;
         }
@@ -1818,8 +1746,9 @@ mod tests {
         homes.add_home(channel_home);
         homes.add_home(synthetic_home);
 
-        let selected = ChatSignalView::select_moderation_home(&homes, context_id, channel_home_id)
-            .expect("channel-authoritative home should be selected");
+        let selected =
+            app_signal_projection::select_moderation_home(&homes, context_id, channel_home_id)
+                .expect("channel-authoritative home should be selected");
         assert_eq!(selected.id, channel_home_id);
     }
 
@@ -1827,7 +1756,7 @@ mod tests {
     fn invitation_signal_view_preserves_channel_metadata() {
         let channel_id = ChannelId::from_bytes([41u8; 32]);
         let (home_id, home_name) =
-            InvitationsSignalView::map_channel_metadata(&DomainInvitationType::Channel {
+            app_signal_projection::map_channel_metadata(&DomainInvitationType::Channel {
                 home_id: channel_id,
                 nickname_suggestion: Some("shared-parity-lab".to_string()),
                 bootstrap: None,
@@ -1901,7 +1830,7 @@ mod tests {
         ));
 
         let selected =
-            ChatSignalView::select_moderation_home(&homes, context_id, unknown_channel_id);
+            app_signal_projection::select_moderation_home(&homes, context_id, unknown_channel_id);
         assert!(
             selected.is_none(),
             "ambiguous context without channel-authoritative home should be rejected"

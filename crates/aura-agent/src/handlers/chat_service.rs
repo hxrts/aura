@@ -14,7 +14,9 @@ use crate::runtime::{
     handle_owned_vm_round, open_owned_manifest_vm_session_admitted, AuraEffectSystem,
 };
 use aura_chat::capabilities::evaluation_candidates_for_chat_guard;
-use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
+use aura_chat::guards::{
+    plan_local_commit_execution, ChatEffectExecutionPlan, GuardOutcome, GuardSnapshot,
+};
 use aura_chat::types::{ChatMember, ChatRole};
 use aura_chat::{
     ChatFactService, ChatGroup, ChatGroupId, ChatMessage, ChatMessageId, CHAT_FACT_TYPE_ID,
@@ -375,35 +377,27 @@ impl ChatServiceApi {
     }
 
     async fn execute_outcome(&self, outcome: GuardOutcome) -> AgentResult<()> {
-        if outcome.is_denied() {
-            let reason = outcome
-                .decision
-                .denial_reason()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| "Operation denied".to_string());
-            return Err(AgentError::effects(format!(
-                "Guard denied operation: {reason}"
-            )));
+        let ChatEffectExecutionPlan {
+            journal_appends,
+            tracked_flow_costs,
+        } = plan_local_commit_execution(outcome)
+            .map_err(|reason| AgentError::effects(format!("Guard denied operation: {reason}")))?;
+
+        for cost in tracked_flow_costs {
+            // Chat is local-first: flow budget charging happens at transport-layer
+            // send-time via the guard-chain (CapGuard → FlowGuard → JournalCoupler).
+            // Local fact commits don't require flow charging since there's no peer
+            // recipient at commit time. The cost is tracked here for observability
+            // but actual budget deduction occurs when facts sync to peers.
+            tracing::trace!(
+                cost = cost.value(),
+                "Chat fact commit - flow cost tracked for sync-time charging"
+            );
         }
 
-        for effect in outcome.effects {
-            match effect {
-                EffectCommand::ChargeFlowBudget { cost } => {
-                    // Chat is local-first: flow budget charging happens at transport-layer
-                    // send-time via the guard-chain (CapGuard → FlowGuard → JournalCoupler).
-                    // Local fact commits don't require flow charging since there's no peer
-                    // recipient at commit time. The cost is tracked here for observability
-                    // but actual budget deduction occurs when facts sync to peers.
-                    tracing::trace!(
-                        cost = cost.value(),
-                        "Chat fact commit - flow cost tracked for sync-time charging"
-                    );
-                }
-                EffectCommand::JournalAppend { fact } => {
-                    self.commit_chat_fact_and_wait(fact.context_id(), &fact)
-                        .await?;
-                }
-            }
+        for fact in journal_appends {
+            self.commit_chat_fact_and_wait(fact.context_id(), &fact)
+                .await?;
         }
 
         Ok(())

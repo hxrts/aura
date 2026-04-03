@@ -64,7 +64,7 @@ use crate::{
     coordinator::{BaseCoordinator, BaseCoordinatorAccess, RecoveryCoordinator},
     effects::RecoveryEffects,
     facts::{RecoveryFact, RecoveryFactEmitter},
-    types::{GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
+    types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
     utils::EvidenceBuilder,
     RecoveryResult,
 };
@@ -138,6 +138,58 @@ pub struct SetupCompletion {
     pub encrypted_shares: Vec<EncryptedKeyShare>,
     /// Public key package for the recovery authority
     pub public_key_package: Vec<u8>,
+}
+
+/// Validate the feature-level guardian setup parameter shape.
+pub fn validate_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> Result<(), String> {
+    if guardians.len() != 3 {
+        return Err("Guardian setup requires exactly three guardians".to_string());
+    }
+
+    if threshold == 0 {
+        return Err("Guardian setup threshold must be at least 1".to_string());
+    }
+
+    if threshold as usize > guardians.len() {
+        return Err(format!(
+            "Guardian setup threshold {} exceeds guardian count {}",
+            threshold,
+            guardians.len()
+        ));
+    }
+
+    Ok(())
+}
+
+/// Build the final setup completion payload from guardian responses.
+#[must_use]
+pub fn build_setup_completion(
+    setup_id: &str,
+    threshold: u16,
+    acceptances: Vec<GuardianAcceptance>,
+) -> SetupCompletion {
+    let accepted_guardians: Vec<AuthorityId> = acceptances
+        .iter()
+        .filter(|acceptance| acceptance.accepted)
+        .map(|acceptance| acceptance.guardian_id)
+        .collect();
+
+    let guardian_set = GuardianSet::new(
+        accepted_guardians
+            .iter()
+            .copied()
+            .map(GuardianProfile::new)
+            .collect(),
+    );
+
+    SetupCompletion {
+        setup_id: setup_id.to_string(),
+        success: accepted_guardians.len() >= threshold as usize,
+        guardian_set,
+        threshold,
+        encrypted_shares: Vec::new(),
+        public_key_package: Vec::new(),
+    }
 }
 
 // Guardian Setup Choreography - 3 phase protocol
@@ -742,6 +794,49 @@ mod tests {
         assert!(acc.accepted);
         assert_eq!(acc.guardian_id, guardian_id);
         assert!(!acc.public_key.is_empty());
+    }
+
+    #[test]
+    fn validate_setup_inputs_requires_exactly_three_guardians() {
+        let err = match validate_setup_inputs(&[test_authority_id(1), test_authority_id(2)], 2) {
+            Ok(()) => panic!("two guardians should be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(err, "Guardian setup requires exactly three guardians");
+    }
+
+    #[test]
+    fn build_setup_completion_derives_guardian_set_from_acceptances() {
+        let accepted = GuardianAcceptance {
+            guardian_id: test_authority_id(1),
+            setup_id: "setup-1".to_string(),
+            accepted: true,
+            public_key: vec![1, 2, 3],
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1,
+                uncertainty: None,
+            }),
+        };
+        let declined = GuardianAcceptance {
+            guardian_id: test_authority_id(2),
+            setup_id: "setup-1".to_string(),
+            accepted: false,
+            public_key: vec![4, 5, 6],
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 2,
+                uncertainty: None,
+            }),
+        };
+
+        let completion = build_setup_completion("setup-1", 1, vec![accepted.clone(), declined]);
+        let accepted_guardians: Vec<AuthorityId> = completion
+            .guardian_set
+            .iter()
+            .map(|guardian| guardian.authority_id)
+            .collect();
+
+        assert!(completion.success);
+        assert_eq!(accepted_guardians, vec![accepted.guardian_id]);
     }
 }
 

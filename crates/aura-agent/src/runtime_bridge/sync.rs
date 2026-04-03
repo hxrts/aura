@@ -1,0 +1,324 @@
+use super::{
+    harness_mode_enabled, harness_sync_backoff_ms, harness_sync_rounds, service_unavailable,
+    AgentRuntimeBridge,
+};
+use aura_app::runtime_bridge::{
+    CeremonyProcessingCounts, CeremonyProcessingOutcome, ReachabilityRefreshOutcome, SyncStatus,
+};
+use aura_app::IntentError;
+use aura_core::effects::{PhysicalTimeEffects, TransportEffects};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::{DeviceId, EffectContext};
+
+pub(super) async fn get_sync_status(
+    bridge: &AgentRuntimeBridge,
+) -> Result<SyncStatus, IntentError> {
+    let Some(sync) = bridge.agent.runtime().sync() else {
+        return Err(service_unavailable("sync_service"));
+    };
+
+    let effects = bridge.agent.runtime().effects();
+    let transport_stats = effects.get_transport_stats().await;
+
+    let health = sync.sync_service_health().await;
+    let is_running = sync.is_running().await;
+    let active_sessions = health.as_ref().map(|h| h.active_sessions).unwrap_or(0);
+    let last_sync_ms = health.and_then(|h| h.last_sync);
+
+    Ok(SyncStatus {
+        is_running,
+        connected_peers: (transport_stats.active_channels as usize).max(active_sessions as usize),
+        last_sync_ms,
+        pending_facts: 0,
+        active_sessions: active_sessions as usize,
+    })
+}
+
+pub(super) async fn is_peer_online(bridge: &AgentRuntimeBridge, peer: AuthorityId) -> bool {
+    let effects = bridge.agent.runtime().effects();
+    let context = EffectContext::with_authority(bridge.agent.authority_id()).context_id();
+
+    if effects.is_channel_established(context, peer).await {
+        return true;
+    }
+
+    if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
+        if rendezvous.get_descriptor(context, peer).await.is_some() {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub(super) async fn get_sync_peers(
+    bridge: &AgentRuntimeBridge,
+) -> Result<Vec<DeviceId>, IntentError> {
+    let Some(sync) = bridge.agent.runtime().sync() else {
+        return Err(service_unavailable("sync_service"));
+    };
+    Ok(sync.peers().await)
+}
+
+pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
+    let Some(sync) = bridge.agent.runtime().sync() else {
+        return Err(service_unavailable("sync_service"));
+    };
+
+    let effects = bridge.agent.runtime().effects();
+    let rounds = if harness_mode_enabled() {
+        harness_sync_rounds()
+    } else {
+        1
+    };
+    let backoff_ms = harness_sync_backoff_ms();
+    let mut last_sync_error: Option<IntentError> = None;
+
+    for round in 0..rounds {
+        if harness_mode_enabled() {
+            let _ = super::rendezvous::trigger_discovery(bridge).await;
+        }
+
+        bridge.seed_sync_peers_from_rendezvous().await;
+
+        let authority_peers: Vec<AuthorityId> =
+            if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
+                let mut peers = rendezvous.list_cached_peers().await;
+                if peers.is_empty() {
+                    peers = rendezvous
+                        .list_lan_discovered_peers()
+                        .await
+                        .into_iter()
+                        .map(|peer| peer.authority_id)
+                        .collect();
+                }
+                peers.sort();
+                peers.dedup();
+                peers
+            } else {
+                Vec::new()
+            };
+        let peers = sync.peers().await;
+
+        if peers.is_empty() && authority_peers.is_empty() {
+            tracing::debug!(
+                "trigger_sync skipped because no sync or authority peers are available"
+            );
+            return Ok(());
+        }
+
+        let sync_result = if peers.is_empty() {
+            Ok(())
+        } else {
+            sync.sync_with_peers(&effects, peers)
+                .await
+                .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
+        };
+
+        let mut pull_error: Option<IntentError> = None;
+        #[cfg(target_arch = "wasm32")]
+        let skip_harness_browser_fact_pull = super::browser_harness_page_enabled();
+        #[cfg(not(target_arch = "wasm32"))]
+        let skip_harness_browser_fact_pull = false;
+        for peer in authority_peers {
+            if skip_harness_browser_fact_pull {
+                tracing::debug!(peer = %peer, "skipping harness browser relational fact sync pull");
+                continue;
+            }
+            if let Err(error) = bridge.pull_remote_relational_facts(peer).await {
+                tracing::warn!(peer = %peer, error = %error, "fact sync pull failed");
+                if pull_error.is_none() {
+                    pull_error = Some(error);
+                }
+            }
+        }
+
+        if let Some(error) = pull_error {
+            last_sync_error = Some(error);
+        }
+
+        match sync_result {
+            Ok(()) => {
+                if last_sync_error.is_none() {
+                    return Ok(());
+                }
+            }
+            Err(error) => last_sync_error = Some(error),
+        }
+
+        if round + 1 < rounds {
+            let effects = bridge.agent.runtime().effects();
+            let _ = effects.sleep_ms(backoff_ms).await;
+        }
+    }
+
+    match last_sync_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+pub(super) async fn process_ceremony_messages(
+    bridge: &AgentRuntimeBridge,
+) -> Result<CeremonyProcessingOutcome, IntentError> {
+    let invitation_handler = crate::handlers::invitation::InvitationHandler::new(
+        crate::core::AuthorityContext::new_with_device(
+            bridge.agent.authority_id(),
+            bridge.agent.runtime().device_id(),
+        ),
+    )
+    .map_err(|e| {
+        IntentError::internal_error(format!(
+            "Failed to create invitation handler for inbox processing: {e}"
+        ))
+    })?;
+    let processed_contact_messages = invitation_handler
+        .process_contact_invitation_acceptances(bridge.agent.runtime().effects())
+        .await
+        .map_err(|e| {
+            IntentError::internal_error(format!("Failed to process contact/chat envelopes: {e}"))
+        })?;
+    let processed_handshakes = if let Some(rendezvous_manager) = bridge.agent.runtime().rendezvous()
+    {
+        let authority = bridge.agent.context().clone();
+        let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to create rendezvous handler for handshake processing: {e}"
+                ))
+            })?
+            .with_rendezvous_manager((*rendezvous_manager).clone());
+        handler
+            .process_handshake_envelopes(bridge.agent.runtime().effects())
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to process rendezvous handshakes: {e}"))
+            })?
+    } else {
+        0
+    };
+
+    let counts = CeremonyProcessingCounts {
+        acceptances: 0,
+        completions: 0,
+        contact_messages: processed_contact_messages,
+        handshakes: processed_handshakes,
+    };
+
+    if counts.total() == 0 {
+        return Ok(CeremonyProcessingOutcome::NoProgress);
+    }
+
+    let reachability_refresh = match bridge
+        .refresh_reachability_after_ceremony_processing()
+        .await
+    {
+        Ok(()) => ReachabilityRefreshOutcome::Refreshed,
+        Err(error) => ReachabilityRefreshOutcome::Degraded {
+            reason: error.to_string(),
+        },
+    };
+
+    Ok(CeremonyProcessingOutcome::Processed {
+        counts,
+        reachability_refresh,
+    })
+}
+
+pub(super) async fn sync_with_peer(
+    bridge: &AgentRuntimeBridge,
+    peer_id: &str,
+) -> Result<(), IntentError> {
+    let Some(sync) = bridge.agent.runtime().sync() else {
+        return Err(service_unavailable("sync_service"));
+    };
+
+    let device_id: DeviceId = peer_id
+        .parse()
+        .map_err(|e| IntentError::validation_failed(format!("Invalid peer ID: {e}")))?;
+    let effects = bridge.agent.runtime().effects();
+    sync.sync_with_peers(&effects, vec![device_id])
+        .await
+        .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
+}
+
+pub(super) async fn ensure_peer_channel(
+    bridge: &AgentRuntimeBridge,
+    context: ContextId,
+    peer: AuthorityId,
+) -> Result<(), IntentError> {
+    let effects = bridge.agent.runtime().effects();
+    let Some(rendezvous_manager) = bridge.agent.runtime().rendezvous() else {
+        return Err(service_unavailable("rendezvous_manager"));
+    };
+
+    let authority = bridge.agent.context().clone();
+    let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
+        .map_err(|e| {
+            IntentError::internal_error(format!(
+                "Failed to create rendezvous handler for peer channel setup: {e}"
+            ))
+        })?
+        .with_rendezvous_manager((*rendezvous_manager).clone());
+
+    let rounds = if harness_mode_enabled() {
+        harness_sync_rounds()
+    } else {
+        1
+    };
+    let backoff_ms = if harness_mode_enabled() {
+        harness_sync_backoff_ms()
+    } else {
+        0
+    };
+
+    if effects.is_channel_established(context, peer).await {
+        bridge.seed_sync_peers_from_rendezvous().await;
+        bridge.sync_seeded_peers().await?;
+        return Ok(());
+    }
+
+    let _ = super::rendezvous::trigger_discovery(bridge).await;
+    bridge.seed_sync_peers_from_rendezvous().await;
+    let _ = bridge.sync_seeded_peers().await;
+    let _ = process_ceremony_messages(bridge).await;
+
+    let result = handler
+        .initiate_channel(&effects, context, peer)
+        .await
+        .map_err(|e| {
+            IntentError::network_error(format!(
+                "Failed to initiate peer channel for {peer} in {context}: {e}"
+            ))
+        })?;
+
+    if !result.success {
+        return Err(IntentError::network_error(result.error.unwrap_or_else(
+            || "peer channel initiation was denied".to_string(),
+        )));
+    }
+
+    for round in 0..rounds {
+        if effects.is_channel_established(context, peer).await {
+            bridge.seed_sync_peers_from_rendezvous().await;
+            bridge.sync_seeded_peers().await?;
+            return Ok(());
+        }
+
+        if harness_mode_enabled() {
+            let _ = super::rendezvous::trigger_discovery(bridge).await;
+        }
+        bridge.seed_sync_peers_from_rendezvous().await;
+        bridge.sync_seeded_peers().await?;
+        process_ceremony_messages(bridge).await?;
+
+        if round + 1 < rounds && backoff_ms > 0 {
+            let effects = bridge.agent.runtime().effects();
+            let _ = effects.sleep_ms(backoff_ms).await;
+        }
+    }
+
+    Err(IntentError::network_error(format!(
+        "peer channel for {peer} in {context} did not establish after bounded convergence"
+    )))
+}

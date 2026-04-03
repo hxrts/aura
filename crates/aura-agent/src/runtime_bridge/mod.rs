@@ -11,15 +11,15 @@ use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
 use crate::runtime::services::ServiceError;
 use async_trait::async_trait;
+#[cfg(test)]
+use aura_app::runtime_bridge::ReachabilityRefreshOutcome;
 use aura_app::runtime_bridge::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
-    BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingCounts,
-    CeremonyProcessingOutcome, DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo,
-    InvitationMutationOutcome, ReachabilityRefreshOutcome, RendezvousStatus, RuntimeBridge,
-    SettingsBridgeState, SyncStatus,
+    BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome,
+    DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo, InvitationMutationOutcome,
+    RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
-use aura_app::ui::workflows::authority::{authority_key_prefix, deserialize_authority};
 use aura_app::views::home::{HomeState, HomesState};
 use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
@@ -34,16 +34,15 @@ use aura_core::effects::{
     random::RandomCoreEffects,
     reactive::ReactiveEffects,
     time::PhysicalTimeEffects,
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
-    ThresholdSigningEffects, TransportEffects, TransportEnvelope,
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
+    TransportEffects, TransportEnvelope,
 };
 use aura_core::hash::hash;
 use aura_core::threshold::{AgreementMode, SigningContext, ThresholdConfig, ThresholdSignature};
-use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
+use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
-use aura_core::EffectContext;
 use aura_core::Hash32;
 use aura_core::OwnedTaskSpawner;
 use aura_core::Prestate;
@@ -78,10 +77,12 @@ use tokio_tungstenite::tungstenite::Message;
 
 mod amp;
 mod consensus;
+mod identity;
 mod invitation;
 mod recovery;
 mod rendezvous;
 mod settings;
+mod sync;
 
 use amp::map_amp_error;
 use consensus::{map_consensus_error, persist_consensus_dkg_transcript};
@@ -391,7 +392,7 @@ impl AgentRuntimeBridge {
         Self { agent }
     }
 
-    async fn seed_sync_peers_from_rendezvous(&self) {
+    pub(super) async fn seed_sync_peers_from_rendezvous(&self) {
         if let (Some(sync), Some(rendezvous)) = (
             self.agent.runtime().sync(),
             self.agent.runtime().rendezvous(),
@@ -402,7 +403,7 @@ impl AgentRuntimeBridge {
         }
     }
 
-    async fn sync_seeded_peers(&self) -> Result<(), IntentError> {
+    pub(super) async fn sync_seeded_peers(&self) -> Result<(), IntentError> {
         let Some(sync) = self.agent.runtime().sync() else {
             return Err(service_unavailable("sync_service"));
         };
@@ -418,7 +419,9 @@ impl AgentRuntimeBridge {
             .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
     }
 
-    async fn refresh_reachability_after_ceremony_processing(&self) -> Result<(), IntentError> {
+    pub(super) async fn refresh_reachability_after_ceremony_processing(
+        &self,
+    ) -> Result<(), IntentError> {
         let rounds = if harness_mode_enabled() {
             harness_sync_rounds()
         } else {
@@ -447,7 +450,10 @@ impl AgentRuntimeBridge {
         }
     }
 
-    async fn pull_remote_relational_facts(&self, peer: AuthorityId) -> Result<usize, IntentError> {
+    pub(super) async fn pull_remote_relational_facts(
+        &self,
+        peer: AuthorityId,
+    ) -> Result<usize, IntentError> {
         tracing::info!(peer = %peer, "pull_remote_relational_facts start");
         let Some(rendezvous) = self.agent.runtime().rendezvous() else {
             return Err(service_unavailable("rendezvous_service"));
@@ -1658,245 +1664,26 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn try_get_sync_status(&self) -> Result<SyncStatus, IntentError> {
-        let Some(sync) = self.agent.runtime().sync() else {
-            return Err(service_unavailable("sync_service"));
-        };
-
-        // "Connected peers" is a UI-facing availability signal. It should reflect
-        // currently reachable peers (e.g., contacts/devices online), not merely the
-        // configured peer list.
-        //
-        // For now, we approximate this via TransportEffects active channel count, which
-        // is supported in shared-transport simulation/demos and can be implemented by
-        // production transports as they mature.
-        let effects = self.agent.runtime().effects();
-        let transport_stats = effects.get_transport_stats().await;
-
-        let health = sync.sync_service_health().await;
-        let is_running = sync.is_running().await;
-        let active_sessions = health.as_ref().map(|h| h.active_sessions).unwrap_or(0);
-        let last_sync_ms = health.and_then(|h| h.last_sync);
-
-        Ok(SyncStatus {
-            is_running,
-            connected_peers: (transport_stats.active_channels as usize)
-                .max(active_sessions as usize),
-            last_sync_ms,
-            pending_facts: 0, // Would need to track this in SyncServiceManager
-            active_sessions: active_sessions as usize,
-        })
+        sync::get_sync_status(self).await
     }
 
     async fn is_peer_online(&self, peer: AuthorityId) -> bool {
-        let effects = self.agent.runtime().effects();
-        let context = EffectContext::with_authority(self.agent.authority_id()).context_id();
-
-        if effects.is_channel_established(context, peer).await {
-            return true;
-        }
-
-        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
-            if rendezvous.get_descriptor(context, peer).await.is_some() {
-                return true;
-            }
-        }
-
-        false
+        sync::is_peer_online(self, peer).await
     }
     async fn try_get_sync_peers(&self) -> Result<Vec<DeviceId>, IntentError> {
-        let Some(sync) = self.agent.runtime().sync() else {
-            return Err(service_unavailable("sync_service"));
-        };
-        Ok(sync.peers().await)
+        sync::get_sync_peers(self).await
     }
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
-        if let Some(sync) = self.agent.runtime().sync() {
-            let effects = self.agent.runtime().effects();
-            let rounds = if harness_mode_enabled() {
-                harness_sync_rounds()
-            } else {
-                1
-            };
-            let backoff_ms = harness_sync_backoff_ms();
-            let mut last_sync_error: Option<IntentError> = None;
-
-            for round in 0..rounds {
-                if harness_mode_enabled() {
-                    let _ = rendezvous::trigger_discovery(self).await;
-                }
-
-                self.seed_sync_peers_from_rendezvous().await;
-
-                let authority_peers: Vec<AuthorityId> =
-                    if let Some(rendezvous) = self.agent.runtime().rendezvous() {
-                        let mut peers = rendezvous.list_cached_peers().await;
-                        if peers.is_empty() {
-                            peers = rendezvous
-                                .list_lan_discovered_peers()
-                                .await
-                                .into_iter()
-                                .map(|peer| peer.authority_id)
-                                .collect();
-                        }
-                        peers.sort();
-                        peers.dedup();
-                        peers
-                    } else {
-                        Vec::new()
-                    };
-                let peers = sync.peers().await;
-
-                if peers.is_empty() && authority_peers.is_empty() {
-                    tracing::debug!(
-                        "trigger_sync skipped because no sync or authority peers are available"
-                    );
-                    return Ok(());
-                }
-
-                let sync_result = if peers.is_empty() {
-                    Ok(())
-                } else {
-                    sync.sync_with_peers(&effects, peers)
-                        .await
-                        .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
-                };
-
-                let mut pull_error: Option<IntentError> = None;
-                #[cfg(target_arch = "wasm32")]
-                let skip_harness_browser_fact_pull = browser_harness_page_enabled();
-                #[cfg(not(target_arch = "wasm32"))]
-                let skip_harness_browser_fact_pull = false;
-                for peer in authority_peers {
-                    if skip_harness_browser_fact_pull {
-                        tracing::debug!(
-                            peer = %peer,
-                            "skipping harness browser relational fact sync pull"
-                        );
-                        continue;
-                    }
-                    if let Err(error) = self.pull_remote_relational_facts(peer).await {
-                        tracing::warn!(peer = %peer, error = %error, "fact sync pull failed");
-                        if pull_error.is_none() {
-                            pull_error = Some(error);
-                        }
-                    }
-                }
-
-                if let Some(error) = pull_error {
-                    last_sync_error = Some(error);
-                }
-
-                match sync_result {
-                    Ok(()) => {
-                        if last_sync_error.is_none() {
-                            return Ok(());
-                        }
-                    }
-                    Err(error) => last_sync_error = Some(error),
-                }
-
-                if round + 1 < rounds {
-                    self.sleep_ms(backoff_ms).await;
-                }
-            }
-
-            match last_sync_error {
-                Some(error) => Err(error),
-                None => Ok(()),
-            }
-        } else {
-            Err(service_unavailable("sync_service"))
-        }
+        sync::trigger_sync(self).await
     }
 
     async fn process_ceremony_messages(&self) -> Result<CeremonyProcessingOutcome, IntentError> {
-        let invitation_handler = crate::handlers::invitation::InvitationHandler::new(
-            crate::core::AuthorityContext::new_with_device(
-                self.agent.authority_id(),
-                self.agent.runtime().device_id(),
-            ),
-        )
-        .map_err(|e| {
-            IntentError::internal_error(format!(
-                "Failed to create invitation handler for inbox processing: {e}"
-            ))
-        })?;
-        let processed_contact_messages = invitation_handler
-            .process_contact_invitation_acceptances(self.agent.runtime().effects())
-            .await
-            .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to process contact/chat envelopes: {e}"
-                ))
-            })?;
-        let processed_handshakes =
-            if let Some(rendezvous_manager) = self.agent.runtime().rendezvous() {
-                let authority = self.agent.context().clone();
-                let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
-                    .map_err(|e| {
-                        IntentError::internal_error(format!(
-                            "Failed to create rendezvous handler for handshake processing: {e}"
-                        ))
-                    })?
-                    .with_rendezvous_manager((*rendezvous_manager).clone());
-                handler
-                    .process_handshake_envelopes(self.agent.runtime().effects())
-                    .await
-                    .map_err(|e| {
-                        IntentError::internal_error(format!(
-                            "Failed to process rendezvous handshakes: {e}"
-                        ))
-                    })?
-            } else {
-                0
-            };
-
-        let counts = CeremonyProcessingCounts {
-            acceptances: 0,
-            completions: 0,
-            contact_messages: processed_contact_messages,
-            handshakes: processed_handshakes,
-        };
-
-        if counts.total() == 0 {
-            return Ok(CeremonyProcessingOutcome::NoProgress);
-        }
-
-        let reachability_refresh = match self.refresh_reachability_after_ceremony_processing().await
-        {
-            Ok(()) => ReachabilityRefreshOutcome::Refreshed,
-            Err(error) => ReachabilityRefreshOutcome::Degraded {
-                reason: error.to_string(),
-            },
-        };
-
-        Ok(CeremonyProcessingOutcome::Processed {
-            counts,
-            reachability_refresh,
-        })
+        sync::process_ceremony_messages(self).await
     }
 
     async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
-        if let Some(sync) = self.agent.runtime().sync() {
-            // Parse peer_id into DeviceId
-            let device_id: DeviceId = peer_id
-                .parse()
-                .map_err(|e| IntentError::validation_failed(format!("Invalid peer ID: {e}")))?;
-
-            // Create a single-element vector for the target peer
-            let peers = vec![device_id];
-
-            // Get the effects from agent runtime
-            let effects = self.agent.runtime().effects();
-
-            // Sync with the specific peer
-            sync.sync_with_peers(&effects, peers)
-                .await
-                .map_err(|e| IntentError::internal_error(format!("Sync failed: {}", e)))
-        } else {
-            Err(service_unavailable("sync_service"))
-        }
+        sync::sync_with_peer(self, peer_id).await
     }
 
     async fn ensure_peer_channel(
@@ -1904,84 +1691,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         context: ContextId,
         peer: AuthorityId,
     ) -> Result<(), IntentError> {
-        let effects = self.agent.runtime().effects();
-        let Some(rendezvous_manager) = self.agent.runtime().rendezvous() else {
-            return Err(service_unavailable("rendezvous_manager"));
-        };
-
-        let authority = self.agent.context().clone();
-        let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
-            .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to create rendezvous handler for peer channel setup: {e}"
-                ))
-            })?
-            .with_rendezvous_manager((*rendezvous_manager).clone());
-
-        let rounds = if harness_mode_enabled() {
-            harness_sync_rounds()
-        } else {
-            1
-        };
-        let backoff_ms = if harness_mode_enabled() {
-            harness_sync_backoff_ms()
-        } else {
-            0
-        };
-
-        if effects.is_channel_established(context, peer).await {
-            self.seed_sync_peers_from_rendezvous().await;
-            self.sync_seeded_peers().await?;
-            return Ok(());
-        }
-
-        let _ = rendezvous::trigger_discovery(self).await;
-        self.seed_sync_peers_from_rendezvous().await;
-        let _ = self.sync_seeded_peers().await;
-        let _ = self.process_ceremony_messages().await;
-
-        let result = handler
-            .initiate_channel(&effects, context, peer)
-            .await
-            .map_err(|e| {
-                IntentError::network_error(format!(
-                    "Failed to initiate peer channel for {peer} in {context}: {e}"
-                ))
-            });
-
-        let result = match result {
-            Ok(value) => value,
-            Err(error) => return Err(IntentError::network_error(error.to_string())),
-        };
-
-        if !result.success {
-            return Err(IntentError::network_error(result.error.unwrap_or_else(
-                || "peer channel initiation was denied".to_string(),
-            )));
-        }
-
-        for round in 0..rounds {
-            if effects.is_channel_established(context, peer).await {
-                self.seed_sync_peers_from_rendezvous().await;
-                self.sync_seeded_peers().await?;
-                return Ok(());
-            }
-
-            if harness_mode_enabled() {
-                let _ = rendezvous::trigger_discovery(self).await;
-            }
-            self.seed_sync_peers_from_rendezvous().await;
-            self.sync_seeded_peers().await?;
-            self.process_ceremony_messages().await?;
-
-            if round + 1 < rounds && backoff_ms > 0 {
-                self.sleep_ms(backoff_ms).await;
-            }
-        }
-
-        Err(IntentError::network_error(format!(
-            "peer channel for {peer} in {context} did not establish after bounded convergence"
-        )))
+        sync::ensure_peer_channel(self, context, peer).await
     }
 
     // =========================================================================
@@ -3816,191 +3526,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError> {
-        let device_count = self.try_list_devices().await?.len();
-
-        // Get threshold config if available
-        let (threshold_k, threshold_n) = if let Some(config) = self.get_threshold_config().await {
-            (config.threshold, config.total_participants)
-        } else {
-            (0, 0)
-        };
-
-        // Get contact count from invitations (accepted contact invitations)
-        let contact_count = self
-            .agent
-            .invitations()
-            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?
-            .list_with_storage()
-            .await
-            .iter()
-            .filter(|inv| {
-                matches!(
-                    inv.invitation_type,
-                    crate::handlers::invitation::InvitationType::Contact { .. }
-                ) && inv.status == crate::handlers::invitation::InvitationStatus::Accepted
-            })
-            .count();
-
-        // Settings service not yet implemented - return available data
-        // When implemented, would provide: nickname_suggestion, mfa_policy from profile facts
-        let (nickname_suggestion, mfa_policy) = match self.try_load_account_config().await {
-            Ok(Some((_key, config))) => (
-                config.nickname_suggestion.unwrap_or_default(),
-                config.mfa_policy.unwrap_or_else(|| "disabled".to_string()),
-            ),
-            Ok(None) => (String::new(), "disabled".to_string()),
-            Err(e) => return Err(e),
-        };
-
-        Ok(SettingsBridgeState {
-            nickname_suggestion,
-            mfa_policy,
-            threshold_k,
-            threshold_n,
-            device_count,
-            contact_count,
-        })
+        identity::get_settings(self).await
     }
 
     async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError> {
-        use aura_app::views::naming::EffectiveName;
-        use aura_core::tree::metadata::DeviceLeafMetadata;
-
-        let effects = self.agent.runtime().effects();
-        let current_device = self.agent.context().device_id();
-
-        let state = match effects.get_current_state().await {
-            Ok(state) => state,
-            Err(e) => {
-                return Err(IntentError::internal_error(format!(
-                    "Failed to read current device list: {e}"
-                )));
-            }
-        };
-
-        let mut devices: Vec<BridgeDeviceInfo> = state
-            .leaves
-            .values()
-            .filter(|leaf| leaf.role == LeafRole::Device)
-            .map(|leaf| {
-                let id = leaf.device_id;
-
-                // Try to decode nickname_suggestion from leaf metadata
-                let nickname_suggestion = DeviceLeafMetadata::decode(&leaf.meta)
-                    .ok()
-                    .and_then(|meta| meta.nickname_suggestion);
-
-                // Local nickname override (not yet wired to persistent storage)
-                let nickname: Option<String> = None;
-
-                let device = BridgeDeviceInfo {
-                    id,
-                    name: String::new(), // Will be computed from effective_name()
-                    nickname,
-                    nickname_suggestion,
-                    is_current: leaf.device_id == current_device,
-                    last_seen: None,
-                };
-
-                // Compute name using EffectiveName trait
-                BridgeDeviceInfo {
-                    name: device.effective_name(),
-                    ..device
-                }
-            })
-            .collect();
-
-        // Ensure the current device is always included, even if not yet in the commitment tree.
-        // This handles fresh accounts where no device enrollment ceremony has occurred yet.
-        let current_in_tree = devices.iter().any(|d| d.is_current);
-        if !current_in_tree {
-            let id = current_device;
-            let device = BridgeDeviceInfo {
-                id,
-                name: String::new(),
-                nickname: None,
-                nickname_suggestion: None,
-                is_current: true,
-                last_seen: None,
-            };
-            devices.insert(
-                0,
-                BridgeDeviceInfo {
-                    name: device.effective_name(),
-                    ..device
-                },
-            );
-        }
-
-        Ok(devices)
+        identity::list_devices(self).await
     }
 
     async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError> {
-        let current_id = self.agent.authority_id();
-        let current_nickname = match self.try_load_account_config().await {
-            Ok(Some((_key, config))) => config
-                .nickname_suggestion
-                .filter(|value| !value.trim().is_empty()),
-            Ok(None) => None,
-            Err(error) => return Err(error),
-        };
-
-        let mut authorities = vec![BridgeAuthorityInfo {
-            id: current_id,
-            nickname_suggestion: current_nickname,
-            is_current: true,
-        }];
-        let mut seen = HashSet::from([current_id]);
-
-        let effects = self.agent.runtime().effects();
-        let keys = match effects.list_keys(Some(authority_key_prefix())).await {
-            Ok(keys) => keys,
-            Err(error) => {
-                return Err(IntentError::internal_error(format!(
-                    "Failed to list stored authorities: {error}"
-                )));
-            }
-        };
-
-        for key in keys {
-            let Some(bytes) = (match effects.retrieve(&key).await {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    return Err(IntentError::internal_error(format!(
-                        "Failed to read authority record {key}: {error}"
-                    )));
-                }
-            }) else {
-                continue;
-            };
-
-            let record = match deserialize_authority(&bytes) {
-                Ok(record) => record,
-                Err(error) => {
-                    return Err(IntentError::internal_error(format!(
-                        "Failed to decode authority record {key}: {error}"
-                    )));
-                }
-            };
-
-            if !seen.insert(record.authority_id) {
-                continue;
-            }
-
-            authorities.push(BridgeAuthorityInfo {
-                id: record.authority_id,
-                nickname_suggestion: None,
-                is_current: record.authority_id == current_id,
-            });
-        }
-
-        authorities.sort_by(|left, right| {
-            right
-                .is_current
-                .cmp(&left.is_current)
-                .then_with(|| left.id.to_string().cmp(&right.id.to_string()))
-        });
-        Ok(authorities)
+        identity::list_authorities(self).await
     }
 
     async fn has_account_config(&self) -> Result<bool, IntentError> {
@@ -4012,15 +3546,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError> {
-        let (key, mut config) = self.load_account_config().await?;
-        config.nickname_suggestion = Some(name.to_string());
-        self.store_account_config(&key, &config).await
+        identity::set_nickname_suggestion(self, name).await
     }
 
     async fn set_mfa_policy(&self, policy: &str) -> Result<(), IntentError> {
-        let (key, mut config) = self.load_account_config().await?;
-        config.mfa_policy = Some(policy.to_string());
-        self.store_account_config(&key, &config).await
+        identity::set_mfa_policy(self, policy).await
     }
 
     // =========================================================================
@@ -4041,17 +3571,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn current_time_ms(&self) -> Result<u64, IntentError> {
-        let effects = self.agent.runtime().effects();
-        let time = effects
-            .physical_time()
-            .await
-            .map_err(|e| service_unavailable_with_detail("physical_time", e))?;
-        Ok(time.ts_ms)
+        identity::current_time_ms(self).await
     }
 
     async fn sleep_ms(&self, ms: u64) {
-        let effects = self.agent.runtime().effects();
-        let _ = effects.sleep_ms(ms).await;
+        identity::sleep_ms(self, ms).await;
     }
 
     // =========================================================================
@@ -4059,18 +3583,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError> {
-        let auth_service = self
-            .agent
-            .auth()
-            .map_err(|error| IntentError::internal_error(error.to_string()))?;
-        let status = auth_service
-            .authentication_status()
-            .await
-            .map_err(|error| IntentError::internal_error(error.to_string()))?;
-        Ok(AuthenticationStatus::Authenticated {
-            authority_id: status.authority_id,
-            device_id: status.device_id,
-        })
+        identity::authentication_status(self).await
     }
 }
 

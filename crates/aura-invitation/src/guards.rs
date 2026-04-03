@@ -182,6 +182,31 @@ pub enum EffectCommand {
 /// Outcome type shared across Layer 5 feature crates.
 pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
+/// Pure execution plan derived from an invitation guard outcome.
+///
+/// Layer 6 runtimes interpret this plan, but the partitioning itself is
+/// invitation-domain logic and belongs with the invitation guard surface.
+#[derive(Debug, Clone)]
+pub struct InvitationEffectExecutionPlan {
+    /// Effects the runtime executes on the authoritative local path immediately.
+    pub local_effects: Vec<EffectCommand>,
+    /// Effects intentionally deferred to later network/timeout handling.
+    pub deferred_network_effects: Vec<EffectCommand>,
+}
+
+impl InvitationEffectExecutionPlan {
+    #[must_use]
+    pub fn new(
+        local_effects: Vec<EffectCommand>,
+        deferred_network_effects: Vec<EffectCommand>,
+    ) -> Self {
+        Self {
+            local_effects,
+            deferred_network_effects,
+        }
+    }
+}
+
 /// Typed guard rejection for consistent error reporting.
 #[derive(Debug, Clone, Copy)]
 pub struct GuardReject {
@@ -198,6 +223,16 @@ impl std::fmt::Display for GuardReject {
 
 fn deny(reject: GuardReject) -> GuardOutcome {
     GuardOutcome::denied(types::GuardViolation::other(reject.to_string()))
+}
+
+/// Human-readable denial reason extracted from a guard outcome.
+#[must_use]
+pub fn denial_reason(outcome: &GuardOutcome) -> String {
+    outcome
+        .decision
+        .denial_reason()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "Operation denied".to_string())
 }
 
 // =============================================================================
@@ -234,6 +269,58 @@ pub fn check_flow_budget(
             message: "Flow budget insufficient",
         }))
     }
+}
+
+/// Accept keeps flow-budget charging and receipt recording local so the
+/// authoritative accept settlement stays atomic even if the peer notification is
+/// deferred or fails later.
+pub fn plan_accept_execution(
+    outcome: GuardOutcome,
+) -> Result<InvitationEffectExecutionPlan, String> {
+    if outcome.is_denied() {
+        return Err(denial_reason(&outcome));
+    }
+
+    let mut local_effects = Vec::new();
+    let mut deferred_network_effects = Vec::new();
+    for command in outcome.effects {
+        match command {
+            EffectCommand::NotifyPeer { .. } => deferred_network_effects.push(command),
+            EffectCommand::ChargeFlowBudget { .. }
+            | EffectCommand::JournalAppend { .. }
+            | EffectCommand::RecordReceipt { .. } => local_effects.push(command),
+        }
+    }
+
+    Ok(InvitationEffectExecutionPlan::new(
+        local_effects,
+        deferred_network_effects,
+    ))
+}
+
+/// Send defers every outwardly visible side effect except the journal append so
+/// invitation creation can publish the authoritative pending fact before budget,
+/// receipt, and network effects run on their own timeout policy.
+pub fn plan_send_execution(outcome: GuardOutcome) -> Result<InvitationEffectExecutionPlan, String> {
+    if outcome.is_denied() {
+        return Err(denial_reason(&outcome));
+    }
+
+    let mut local_effects = Vec::new();
+    let mut deferred_network_effects = Vec::new();
+    for command in outcome.effects {
+        match command {
+            EffectCommand::ChargeFlowBudget { .. }
+            | EffectCommand::NotifyPeer { .. }
+            | EffectCommand::RecordReceipt { .. } => deferred_network_effects.push(command),
+            EffectCommand::JournalAppend { .. } => local_effects.push(command),
+        }
+    }
+
+    Ok(InvitationEffectExecutionPlan::new(
+        local_effects,
+        deferred_network_effects,
+    ))
 }
 
 impl types::CapabilitySnapshot for GuardSnapshot {
@@ -369,5 +456,61 @@ mod tests {
             InvitationCapability::Send.as_name().as_str(),
             "invitation:send"
         );
+    }
+
+    #[test]
+    fn test_plan_accept_execution_defers_only_peer_notification() {
+        let outcome = GuardOutcome::allowed(vec![
+            EffectCommand::ChargeFlowBudget {
+                cost: FlowCost::new(1),
+            },
+            EffectCommand::NotifyPeer {
+                peer: AuthorityId::new_from_entropy([9; 32]),
+                invitation_id: InvitationId::new("invitation-accept-plan"),
+            },
+        ]);
+
+        let plan = match plan_accept_execution(outcome) {
+            Ok(plan) => plan,
+            Err(error) => panic!("accept execution plan: {error}"),
+        };
+        assert_eq!(plan.local_effects.len(), 1);
+        assert_eq!(plan.deferred_network_effects.len(), 1);
+        assert!(matches!(
+            plan.deferred_network_effects[0],
+            EffectCommand::NotifyPeer { .. }
+        ));
+    }
+
+    #[test]
+    fn test_plan_send_execution_keeps_only_journal_append_local() {
+        let outcome = GuardOutcome::allowed(vec![
+            EffectCommand::JournalAppend {
+                fact: InvitationFact::Declined {
+                    context_id: Some(ContextId::new_from_entropy([2; 32])),
+                    invitation_id: InvitationId::new("invitation-send-plan"),
+                    decliner_id: AuthorityId::new_from_entropy([4; 32]),
+                    declined_at: aura_core::time::PhysicalTime {
+                        ts_ms: 1,
+                        uncertainty: None,
+                    },
+                },
+            },
+            EffectCommand::RecordReceipt {
+                operation: InvitationOperation::DeclineInvitation,
+                peer: Some(AuthorityId::new_from_entropy([5; 32])),
+            },
+        ]);
+
+        let plan = match plan_send_execution(outcome) {
+            Ok(plan) => plan,
+            Err(error) => panic!("send execution plan: {error}"),
+        };
+        assert_eq!(plan.local_effects.len(), 1);
+        assert_eq!(plan.deferred_network_effects.len(), 1);
+        assert!(matches!(
+            plan.local_effects[0],
+            EffectCommand::JournalAppend { .. }
+        ));
     }
 }

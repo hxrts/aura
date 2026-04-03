@@ -126,6 +126,65 @@ pub enum EffectCommand {
 /// Outcome type shared across Layer 5 feature crates.
 pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
+/// Pure execution plan for local-first chat fact commits.
+///
+/// Layer 6 runtimes execute the journal append and may treat flow charging as
+/// an observed transport-time concern, but the classification of chat guard
+/// effects belongs with the chat guard domain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatEffectExecutionPlan {
+    /// Chat facts to append immediately on the authoritative local commit path.
+    pub journal_appends: Vec<ChatFact>,
+    /// Flow costs observed locally and charged later by the transport guard chain.
+    pub tracked_flow_costs: Vec<FlowCost>,
+}
+
+impl ChatEffectExecutionPlan {
+    /// Construct a local chat execution plan from guard-produced effects.
+    #[must_use]
+    pub fn new(journal_appends: Vec<ChatFact>, tracked_flow_costs: Vec<FlowCost>) -> Self {
+        Self {
+            journal_appends,
+            tracked_flow_costs,
+        }
+    }
+}
+
+/// Human-readable denial reason extracted from a guard outcome.
+#[must_use]
+pub fn denial_reason(outcome: &GuardOutcome) -> String {
+    outcome
+        .decision
+        .denial_reason()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "Operation denied".to_string())
+}
+
+/// Partition chat guard effects into local journal appends and tracked flow
+/// costs. Chat's authoritative local-first commit path persists facts
+/// immediately; flow charging remains an observed transport-time concern.
+pub fn plan_local_commit_execution(
+    outcome: GuardOutcome,
+) -> Result<ChatEffectExecutionPlan, String> {
+    if outcome.is_denied() {
+        return Err(denial_reason(&outcome));
+    }
+
+    let mut journal_appends = Vec::new();
+    let mut tracked_flow_costs = Vec::new();
+    for effect in outcome.effects {
+        match effect {
+            EffectCommand::JournalAppend { fact } => journal_appends.push(fact),
+            EffectCommand::ChargeFlowBudget { cost } => tracked_flow_costs.push(cost),
+        }
+    }
+
+    Ok(ChatEffectExecutionPlan::new(
+        journal_appends,
+        tracked_flow_costs,
+    ))
+}
+
 // =============================================================================
 // Guard Helpers
 // =============================================================================
@@ -160,4 +219,36 @@ pub fn check_moderation(snapshot: &GuardSnapshot) -> Option<GuardOutcome> {
         )));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_local_commit_execution_splits_guard_effects() {
+        let outcome = GuardOutcome::allowed(vec![
+            EffectCommand::ChargeFlowBudget {
+                cost: FlowCost::new(2),
+            },
+            EffectCommand::JournalAppend {
+                fact: ChatFact::ChannelClosed {
+                    context_id: ContextId::new_from_entropy([7; 32]),
+                    channel_id: aura_core::types::identifiers::ChannelId::from_bytes([8; 32]),
+                    closed_at: aura_core::time::PhysicalTime {
+                        ts_ms: 1,
+                        uncertainty: None,
+                    },
+                    actor_id: AuthorityId::new_from_entropy([9; 32]),
+                },
+            },
+        ]);
+
+        let plan = match plan_local_commit_execution(outcome) {
+            Ok(plan) => plan,
+            Err(error) => panic!("chat execution plan: {error}"),
+        };
+        assert_eq!(plan.journal_appends.len(), 1);
+        assert_eq!(plan.tracked_flow_costs, vec![FlowCost::new(2)]);
+    }
 }

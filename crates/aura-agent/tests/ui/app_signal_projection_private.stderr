@@ -1,0 +1,11 @@
+error[E0603]: module `app_signal_projection` is private
+ --> tests/ui/app_signal_projection_private.rs:1:27
+  |
+1 | use aura_agent::reactive::app_signal_projection::map_channel_metadata;
+  |                           ^^^^^^^^^^^^^^^^^^^^^ private module
+  |
+note: the module `app_signal_projection` is defined here
+ --> src/reactive/mod.rs
+  |
+  | pub(crate) mod app_signal_projection;
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

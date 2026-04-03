@@ -986,20 +986,28 @@ impl InvitationHandler {
                 invitation.invitation_id.clone(),
             );
 
-            let (local_effects, deferred_network_effects) =
-                split_invitation_send_guard_outcome(outcome, &self.context.authority)?;
+            let execution_plan =
+                aura_invitation::guards::plan_send_execution(outcome).map_err(|reason| {
+                    AgentError::effects(format!("Guard denied operation: {reason}"))
+                })?;
+            tracing::debug!(
+                authority = %self.context.authority.authority_id(),
+                local_effect_count = execution_plan.local_effects.len(),
+                deferred_network_effect_count = execution_plan.deferred_network_effects.len(),
+                "Prepared invitation guard outcome with deferred network side effects"
+            );
             timeout_prepare_invitation_stage(
                 effects.as_ref(),
                 "execute_local_effects",
                 execute_invitation_effect_commands(
-                    local_effects,
+                    execution_plan.local_effects,
                     &self.context.authority,
                     effects.as_ref(),
                     false,
                 ),
             )
             .await?;
-            deferred_network_effects
+            DeferredInvitationNetworkEffects::new(execution_plan.deferred_network_effects)
         };
 
         if matches!(invitation.invitation_type, InvitationType::Contact { .. })
@@ -2870,11 +2878,7 @@ pub async fn execute_guard_outcome(
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
     if outcome.is_denied() {
-        let reason = outcome
-            .decision
-            .denial_reason()
-            .map(ToString::to_string)
-            .unwrap_or_else(|| "Operation denied".to_string());
+        let reason = aura_invitation::guards::denial_reason(&outcome);
         return Err(AgentError::effects(format!(
             "Guard denied operation: {}",
             reason
@@ -2915,11 +2919,18 @@ pub async fn execute_guard_outcome_for_accept(
     authority: &AuthorityContext,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
-    let (local_effects, deferred_network_effects) =
-        split_invitation_accept_guard_outcome(outcome, authority)?;
-    execute_invitation_effect_commands(local_effects, authority, effects, false).await?;
+    let execution_plan = aura_invitation::guards::plan_accept_execution(outcome)
+        .map_err(|reason| AgentError::effects(format!("Guard denied operation: {reason}")))?;
+    tracing::debug!(
+        authority = %authority.authority_id(),
+        local_effect_count = execution_plan.local_effects.len(),
+        deferred_network_effect_count = execution_plan.deferred_network_effects.len(),
+        "Prepared invitation accept guard outcome with deferred peer notification side effects"
+    );
+    execute_invitation_effect_commands(execution_plan.local_effects, authority, effects, false)
+        .await?;
     if let Err(error) = execute_invitation_effect_commands(
-        deferred_network_effects.commands,
+        execution_plan.deferred_network_effects,
         authority,
         effects,
         true,
@@ -2933,106 +2944,6 @@ pub async fn execute_guard_outcome_for_accept(
         );
     }
     Ok(())
-}
-
-/// Accept keeps flow-budget charging and receipt recording local so the
-/// authoritative accept settlement stays atomic even if the peer notification is
-/// deferred or fails later.
-fn split_invitation_accept_guard_outcome(
-    outcome: aura_invitation::guards::GuardOutcome,
-    authority: &AuthorityContext,
-) -> AgentResult<(
-    Vec<aura_invitation::guards::EffectCommand>,
-    DeferredInvitationNetworkEffects,
-)> {
-    if outcome.is_denied() {
-        let reason = outcome
-            .decision
-            .denial_reason()
-            .map(ToString::to_string)
-            .unwrap_or_else(|| "Operation denied".to_string());
-        return Err(AgentError::effects(format!(
-            "Guard denied operation: {}",
-            reason
-        )));
-    }
-
-    let mut local_effects = Vec::new();
-    let mut deferred_network_effects = Vec::new();
-    for command in outcome.effects {
-        match command {
-            aura_invitation::guards::EffectCommand::NotifyPeer { .. } => {
-                deferred_network_effects.push(command);
-            }
-            aura_invitation::guards::EffectCommand::ChargeFlowBudget { .. }
-            | aura_invitation::guards::EffectCommand::JournalAppend { .. }
-            | aura_invitation::guards::EffectCommand::RecordReceipt { .. } => {
-                local_effects.push(command);
-            }
-        }
-    }
-
-    tracing::debug!(
-        authority = %authority.authority_id(),
-        local_effect_count = local_effects.len(),
-        deferred_network_effect_count = deferred_network_effects.len(),
-        "Prepared invitation accept guard outcome with deferred peer notification side effects"
-    );
-
-    Ok((
-        local_effects,
-        DeferredInvitationNetworkEffects::new(deferred_network_effects),
-    ))
-}
-
-/// Send defers every outwardly visible side effect except the journal append so
-/// invitation creation can publish the authoritative pending fact before budget,
-/// receipt, and network effects run on their own timeout policy.
-fn split_invitation_send_guard_outcome(
-    outcome: aura_invitation::guards::GuardOutcome,
-    authority: &AuthorityContext,
-) -> AgentResult<(
-    Vec<aura_invitation::guards::EffectCommand>,
-    DeferredInvitationNetworkEffects,
-)> {
-    if outcome.is_denied() {
-        let reason = outcome
-            .decision
-            .denial_reason()
-            .map(ToString::to_string)
-            .unwrap_or_else(|| "Operation denied".to_string());
-        return Err(AgentError::effects(format!(
-            "Guard denied operation: {}",
-            reason
-        )));
-    }
-
-    let mut local_effects = Vec::new();
-    let mut deferred_network_effects = Vec::new();
-    for command in outcome.effects {
-        match command {
-            aura_invitation::guards::EffectCommand::ChargeFlowBudget { .. }
-            | aura_invitation::guards::EffectCommand::NotifyPeer { .. }
-            | aura_invitation::guards::EffectCommand::RecordReceipt { .. } => {
-                deferred_network_effects.push(command);
-            }
-            aura_invitation::guards::EffectCommand::JournalAppend { .. } => {
-                local_effects.push(command);
-            }
-        }
-    }
-
-    tracing::debug!(
-        authority = %authority.authority_id(),
-        local_effect_count = local_effects.len(),
-        deferred_network_effect_count = deferred_network_effects.len(),
-        "Prepared invitation guard outcome with deferred network side effects"
-    );
-
-    Ok((
-        local_effects,
-        DeferredInvitationNetworkEffects::new(deferred_network_effects),
-    ))
 }
 
 pub(crate) async fn execute_invitation_effect_commands(
@@ -4211,14 +4122,13 @@ mod tests {
             },
         ]);
 
-        let (local_effects, deferred_network_effects) =
-            split_invitation_accept_guard_outcome(outcome, &authority)
-                .expect("accept split should succeed");
+        let execution_plan = aura_invitation::guards::plan_accept_execution(outcome)
+            .expect("accept split should succeed");
 
-        assert_eq!(local_effects.len(), 3);
-        assert_eq!(deferred_network_effects.commands().len(), 1);
+        assert_eq!(execution_plan.local_effects.len(), 3);
+        assert_eq!(execution_plan.deferred_network_effects.len(), 1);
         assert!(matches!(
-            deferred_network_effects.commands().first(),
+            execution_plan.deferred_network_effects.first(),
             Some(aura_invitation::guards::EffectCommand::NotifyPeer { .. })
         ));
     }

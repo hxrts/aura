@@ -32,6 +32,7 @@
 //! - Type-safe: leverages Rust's type system for correctness guarantees
 //! - Deterministic: reproducible behavior for testing and simulation
 
+pub(crate) mod app_signal_projection;
 pub(crate) mod app_signal_views;
 pub(crate) mod frp;
 pub(crate) mod pipeline;
