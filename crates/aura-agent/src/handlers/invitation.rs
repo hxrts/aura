@@ -368,6 +368,14 @@ struct ChannelInviteDetails {
     bootstrap: Option<ChannelBootstrapPackage>,
 }
 
+fn is_generic_contact_invitation(
+    sender_id: AuthorityId,
+    receiver_id: AuthorityId,
+    invitation_type: &InvitationType,
+) -> bool {
+    matches!(invitation_type, InvitationType::Contact { .. }) && sender_id == receiver_id
+}
+
 fn require_channel_invitation_name(
     home_id: ChannelId,
     nickname_suggestion: Option<String>,
@@ -887,6 +895,7 @@ impl InvitationHandler {
         expires_in_ms: Option<u64>,
     ) -> AgentResult<PreparedInvitation> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
+        let sender_id = self.context.authority.authority_id();
 
         // Generate unique invitation ID
         let invitation_id =
@@ -914,40 +923,11 @@ impl InvitationHandler {
             context_override,
             invitation_context
         );
-        // Build snapshot and prepare through service.
-        // For channel invitations this must use the channel context so the
-        // generated invitation facts and transport metadata are scoped correctly.
-        let snapshot = self
-            .build_snapshot_for_context(effects.as_ref(), invitation_context)
-            .await;
-
-        let outcome = self.service.prepare_send_invitation(
-            &snapshot,
-            receiver_id,
-            invitation_type.clone(),
-            message.clone(),
-            expires_in_ms,
-            invitation_id.clone(),
-        );
-
-        let (local_effects, deferred_network_effects) =
-            split_invitation_send_guard_outcome(outcome, &self.context.authority)?;
-        timeout_prepare_invitation_stage(
-            effects.as_ref(),
-            "execute_local_effects",
-            execute_invitation_effect_commands(
-                local_effects,
-                &self.context.authority,
-                effects.as_ref(),
-                false,
-            ),
-        )
-        .await?;
 
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
             context_id: invitation_context,
-            sender_id: self.context.authority.authority_id(),
+            sender_id,
             receiver_id,
             invitation_type,
             status: InvitationStatus::Pending,
@@ -956,7 +936,79 @@ impl InvitationHandler {
             message,
         };
 
-        if let InvitationType::Contact { .. } = invitation.invitation_type {
+        let deferred_network_effects = if is_generic_contact_invitation(
+            invitation.sender_id,
+            invitation.receiver_id,
+            &invitation.invitation_type,
+        ) {
+            let fact = InvitationFact::Sent {
+                context_id: invitation.context_id,
+                invitation_id: invitation.invitation_id.clone(),
+                sender_id: invitation.sender_id,
+                receiver_id: invitation.receiver_id,
+                invitation_type: invitation.invitation_type.clone(),
+                sent_at: PhysicalTime {
+                    ts_ms: current_time,
+                    uncertainty: None,
+                },
+                expires_at: invitation.expires_at.map(|ts_ms| PhysicalTime {
+                    ts_ms,
+                    uncertainty: None,
+                }),
+                message: invitation.message.clone(),
+            };
+            timeout_prepare_invitation_stage(
+                effects.as_ref(),
+                "commit_generic_contact_invitation_fact",
+                execute_journal_append(
+                    fact,
+                    &self.context.authority,
+                    invitation.context_id,
+                    effects.as_ref(),
+                ),
+            )
+            .await?;
+            DeferredInvitationNetworkEffects::new(Vec::new())
+        } else {
+            // Build snapshot and prepare through service.
+            // For channel invitations this must use the channel context so the
+            // generated invitation facts and transport metadata are scoped correctly.
+            let snapshot = self
+                .build_snapshot_for_context(effects.as_ref(), invitation_context)
+                .await;
+
+            let outcome = self.service.prepare_send_invitation(
+                &snapshot,
+                invitation.receiver_id,
+                invitation.invitation_type.clone(),
+                invitation.message.clone(),
+                expires_in_ms,
+                invitation.invitation_id.clone(),
+            );
+
+            let (local_effects, deferred_network_effects) =
+                split_invitation_send_guard_outcome(outcome, &self.context.authority)?;
+            timeout_prepare_invitation_stage(
+                effects.as_ref(),
+                "execute_local_effects",
+                execute_invitation_effect_commands(
+                    local_effects,
+                    &self.context.authority,
+                    effects.as_ref(),
+                    false,
+                ),
+            )
+            .await?;
+            deferred_network_effects
+        };
+
+        if matches!(invitation.invitation_type, InvitationType::Contact { .. })
+            && !is_generic_contact_invitation(
+                invitation.sender_id,
+                invitation.receiver_id,
+                &invitation.invitation_type,
+            )
+        {
             let sender_contact_exists = self
                 .sender_contact_exists(
                     effects.as_ref(),

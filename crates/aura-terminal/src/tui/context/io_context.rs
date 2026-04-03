@@ -563,7 +563,7 @@ impl IoContext {
 
     pub async fn create_invitation_code(
         &self,
-        receiver_id: AuthorityId,
+        receiver_id: Option<AuthorityId>,
         invitation_type: &str,
         message: Option<String>,
         ttl_secs: Option<u64>,

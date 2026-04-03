@@ -865,28 +865,12 @@ fn submit_simple_modal_action(
                 rerender();
                 return true;
             };
-            let receiver = create_state.receiver_id.trim().to_string();
-            if receiver.is_empty() {
-                controller.runtime_error_toast("Receiver authority id is required");
-                rerender();
-                return true;
-            }
             let message = (!create_state.message.trim().is_empty()).then_some(create_state.message);
             let ttl_ms = Some(create_state.ttl_hours.max(1).saturating_mul(60 * 60 * 1000));
 
             let app_core = controller.app_core().clone();
             spawn_ui(async move {
                 tracing::info!("create_invitation submit start");
-                let receiver_id = match receiver.parse::<AuthorityId>() {
-                    Ok(value) => value,
-                    Err(error) => {
-                        tracing::warn!(error = %error, "create_invitation invalid receiver");
-                        controller.runtime_error_toast(format!("Invalid authority id: {error}"));
-                        rerender();
-                        return;
-                    }
-                };
-
                 let operation = UiWorkflowHandoffOwner::submit(
                     controller.clone(),
                     OperationId::invitation_create(),
@@ -898,11 +882,10 @@ fn submit_simple_modal_action(
                 match transfer
                     .run_workflow(
                         controller.clone(),
-                        "create_contact_invitation",
-                        invitation_workflows::handoff::create_contact_invitation(
+                        "create_generic_contact_invitation",
+                        invitation_workflows::handoff::create_generic_contact_invitation(
                             &app_core,
-                            invitation_workflows::handoff::CreateContactInvitationRequest {
-                                receiver: receiver_id,
+                            invitation_workflows::handoff::CreateGenericContactInvitationRequest {
                                 nickname: None,
                                 message,
                                 ttl_ms,
@@ -918,7 +901,7 @@ fn submit_simple_modal_action(
                         controller.remember_invitation_code(&code);
                         tracing::info!("create_invitation write_clipboard ok");
                         controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
-                            receiver_authority_id: Some(receiver_id.to_string()),
+                            receiver_authority_id: None,
                             source_operation: OperationId::invitation_create(),
                             code: Some(code),
                         });

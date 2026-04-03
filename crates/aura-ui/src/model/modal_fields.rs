@@ -168,7 +168,7 @@ impl CreateInvitationModalState {
         match self.active_field {
             FieldId::InvitationMessage => self.message.clone(),
             FieldId::InvitationTtl => self.ttl_hours.to_string(),
-            _ => self.receiver_id.clone(),
+            _ => self.message.clone(),
         }
     }
 
@@ -178,7 +178,7 @@ impl CreateInvitationModalState {
             FieldId::InvitationTtl => {
                 self.ttl_hours = value.trim().parse::<u64>().unwrap_or(self.ttl_hours.max(1));
             }
-            _ => self.receiver_id = value,
+            _ => self.message = value,
         }
     }
 
@@ -186,7 +186,7 @@ impl CreateInvitationModalState {
         self.active_field = match field_id {
             FieldId::InvitationMessage => FieldId::InvitationMessage,
             FieldId::InvitationTtl => FieldId::InvitationTtl,
-            _ => FieldId::InvitationReceiver,
+            _ => FieldId::InvitationMessage,
         };
         self.set_text_value(value);
     }
@@ -195,7 +195,7 @@ impl CreateInvitationModalState {
         self.active_field = match field_id {
             FieldId::InvitationMessage => FieldId::InvitationMessage,
             FieldId::InvitationTtl => FieldId::InvitationTtl,
-            _ => FieldId::InvitationReceiver,
+            _ => FieldId::InvitationMessage,
         };
     }
 }

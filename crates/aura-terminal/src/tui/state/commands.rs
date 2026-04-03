@@ -254,7 +254,7 @@ pub enum DispatchCommand {
     AcceptInvitation,
     DeclineInvitation,
     CreateInvitation {
-        receiver_id: AuthorityId,
+        receiver_id: Option<AuthorityId>,
         invitation_type: InvitationKind,
         message: Option<String>,
         ttl_secs: Option<u64>,

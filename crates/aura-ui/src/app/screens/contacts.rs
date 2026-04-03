@@ -121,13 +121,63 @@ pub(super) fn ContactsScreen(
                                             width_class: Some("w-[6.5rem]".to_string()),
                                             onclick: {
                                                 let controller = controller.clone();
+                                                let app_core = controller.app_core().clone();
                                                 let authority_id = peer.authority_id;
-                                                let label = peer.authority_id.to_string();
                                                 move |_| {
-                                                    controller.open_create_invitation_modal(
-                                                        Some(&authority_id),
-                                                        Some(&label),
-                                                    );
+                                                    let controller = controller.clone();
+                                                    let app_core = app_core.clone();
+                                                    spawn_ui(async move {
+                                                        let operation = UiWorkflowHandoffOwner::submit(
+                                                            controller.clone(),
+                                                            OperationId::invitation_create(),
+                                                            SemanticOperationKind::CreateContactInvitation,
+                                                        );
+                                                        let workflow_instance_id = operation.workflow_instance_id();
+                                                        let transfer = operation.handoff_to_app_workflow(
+                                                            UiOperationTransferScope::CreateInvitation,
+                                                        );
+                                                        match transfer
+                                                            .run_workflow(
+                                                                controller.clone(),
+                                                                "create_contact_invitation_code",
+                                                                invitation_workflows::handoff::create_contact_invitation(
+                                                                    &app_core,
+                                                                    invitation_workflows::handoff::CreateContactInvitationRequest {
+                                                                        receiver: authority_id,
+                                                                        nickname: None,
+                                                                        message: None,
+                                                                        ttl_ms: None,
+                                                                        operation_instance_id: workflow_instance_id,
+                                                                    },
+                                                                ),
+                                                            )
+                                                            .await
+                                                        {
+                                                            Ok(code) => {
+                                                                controller.write_clipboard(&code);
+                                                                controller.remember_invitation_code(&code);
+                                                                controller.push_runtime_fact(
+                                                                    RuntimeFact::InvitationCodeReady {
+                                                                        receiver_authority_id: Some(authority_id.to_string()),
+                                                                        source_operation: OperationId::invitation_create(),
+                                                                        code: Some(code),
+                                                                    },
+                                                                );
+                                                                controller.info_toast(
+                                                                    "Invitation code copied to clipboard",
+                                                                );
+                                                            }
+                                                            Err(SubmittedOperationWorkflowError::Workflow(error)) => {
+                                                                controller.runtime_error_toast(error.to_string());
+                                                            }
+                                                            Err(
+                                                                SubmittedOperationWorkflowError::Protocol(detail)
+                                                                | SubmittedOperationWorkflowError::Panicked(detail),
+                                                            ) => {
+                                                                controller.runtime_error_toast(detail);
+                                                            }
+                                                        }
+                                                    });
                                                     render_tick.set(render_tick() + 1);
                                                 }
                                             }

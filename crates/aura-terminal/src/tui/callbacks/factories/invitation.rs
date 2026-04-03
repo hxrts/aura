@@ -182,7 +182,7 @@ impl InvitationsCallbacks {
 
     fn make_create(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateInvitationCallback {
         Arc::new(
-            move |receiver_id: AuthorityId,
+            move |receiver_id: Option<AuthorityId>,
                   invitation_type: String,
                   message: Option<String>,
                   ttl_secs: Option<u64>,

@@ -260,6 +260,9 @@ pub(crate) async fn materialize_pending_invitation_signal(
     } else {
         InvitationDirection::Received
     };
+    let is_generic_sent_contact_invitation = direction == InvitationDirection::Sent
+        && matches!(invitation_type, DomainInvitationType::Contact { .. })
+        && sender_id == receiver_id;
     let (home_id, home_name) = InvitationsSignalView::map_channel_metadata(invitation_type);
     invitations.add_invitation(Invitation {
         id: invitation_id.to_string(),
@@ -268,8 +271,10 @@ pub(crate) async fn materialize_pending_invitation_signal(
         direction,
         from_id: sender_id,
         from_name: "Unknown".to_string(),
-        to_id: (direction == InvitationDirection::Sent).then_some(receiver_id),
-        to_name: (direction == InvitationDirection::Sent).then_some("Unknown".to_string()),
+        to_id: (direction == InvitationDirection::Sent && !is_generic_sent_contact_invitation)
+            .then_some(receiver_id),
+        to_name: (direction == InvitationDirection::Sent && !is_generic_sent_contact_invitation)
+            .then_some("Unknown".to_string()),
         created_at,
         expires_at,
         message,
@@ -386,6 +391,10 @@ impl ReactiveView for InvitationsSignalView {
                         } else {
                             InvitationDirection::Received
                         };
+                        let is_generic_sent_contact_invitation = direction
+                            == InvitationDirection::Sent
+                            && matches!(invitation_type, DomainInvitationType::Contact { .. })
+                            && sender_id == receiver_id;
                         let (home_id, home_name) = Self::map_channel_metadata(&invitation_type);
 
                         let invitation = Invitation {
@@ -395,8 +404,11 @@ impl ReactiveView for InvitationsSignalView {
                             direction,
                             from_id: sender_id,
                             from_name: "Unknown".to_string(),
-                            to_id: (direction == InvitationDirection::Sent).then_some(receiver_id),
-                            to_name: (direction == InvitationDirection::Sent)
+                            to_id: (direction == InvitationDirection::Sent
+                                && !is_generic_sent_contact_invitation)
+                                .then_some(receiver_id),
+                            to_name: (direction == InvitationDirection::Sent
+                                && !is_generic_sent_contact_invitation)
                                 .then_some("Unknown".to_string()),
                             created_at: sent_at.ts_ms,
                             expires_at: expires_at.map(|t| t.ts_ms),
@@ -1734,7 +1746,9 @@ mod tests {
     use super::*;
     use crate::runtime::effects::AuraEffectSystem;
     use crate::AgentConfig;
-    use aura_app::signal_defs::{register_app_signals, CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL};
+    use aura_app::signal_defs::{
+        register_app_signals, CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL,
+    };
     use aura_app::views::chat::ChatState;
     use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
@@ -1821,6 +1835,44 @@ mod tests {
 
         assert_eq!(home_id, Some(channel_id));
         assert_eq!(home_name.as_deref(), Some("shared-parity-lab"));
+    }
+
+    #[tokio::test]
+    async fn generic_sent_contact_invitation_hides_receiver_identity() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+
+        let own_authority = AuthorityId::new_from_entropy([81u8; 32]);
+        materialize_pending_invitation_signal(
+            &reactive,
+            own_authority,
+            "generic-contact-invite",
+            own_authority,
+            own_authority,
+            &DomainInvitationType::Contact {
+                nickname: Some("friend".to_string()),
+            },
+            1234,
+            Some(5678),
+            Some("share this code".to_string()),
+        )
+        .await
+        .expect("materialize generic sent contact invitation");
+
+        let invitations = reactive
+            .read(&*INVITATIONS_SIGNAL)
+            .await
+            .expect("invitation signal should be registered");
+        let invitation = invitations
+            .invitation("generic-contact-invite")
+            .expect("generic invitation should be present");
+
+        assert_eq!(
+            invitation.direction,
+            aura_app::views::invitations::InvitationDirection::Sent
+        );
+        assert_eq!(invitation.to_id, None);
+        assert_eq!(invitation.to_name, None);
     }
 
     #[test]

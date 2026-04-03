@@ -151,6 +151,14 @@ fn map_amp_finalize_error(error: impl Display) -> IntentError {
     internal_bridge_error("AMP finalize failed", error)
 }
 
+fn is_generic_contact_invitation(invitation: &crate::handlers::invitation::Invitation) -> bool {
+    invitation.sender_id == invitation.receiver_id
+        && matches!(
+            invitation.invitation_type,
+            aura_invitation::InvitationType::Contact { .. }
+        )
+}
+
 fn collect_authoritative_moderation_homes(
     homes: &HomesState,
     context_id: ContextId,
@@ -3797,6 +3805,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .filter(|inv| {
                 inv.status == crate::handlers::InvitationStatus::Pending
                     && inv.sender_id == our_authority
+                    && !is_generic_contact_invitation(inv)
             })
             .map(|inv| inv.receiver_id)
             .collect())
@@ -5235,6 +5244,41 @@ mod tests {
             error.to_string().contains("invitation_service"),
             "expected invitation service error, got: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn try_get_invited_peer_ids_skips_generic_contact_invites() {
+        let authority = AuthorityId::new_from_entropy([52u8; 32]);
+        let receiver = AuthorityId::new_from_entropy([53u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([54u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        bridge
+            .create_contact_invitation(authority, None, Some("generic".to_string()), None)
+            .await
+            .expect("generic contact invitation should succeed");
+        bridge
+            .create_contact_invitation(receiver, None, Some("direct".to_string()), None)
+            .await
+            .expect("direct contact invitation should succeed");
+
+        let invited = bridge
+            .try_get_invited_peer_ids()
+            .await
+            .expect("read invited peer ids");
+
+        assert_eq!(invited, vec![receiver]);
     }
 
     #[tokio::test]

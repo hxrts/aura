@@ -397,7 +397,7 @@ pub(crate) fn apply_harness_command(
                 })?;
             Ok(vec![TuiCommand::Dispatch(
                 DispatchCommand::CreateInvitation {
-                    receiver_id,
+                    receiver_id: Some(receiver_id),
                     invitation_type: InvitationKind::Contact,
                     message: None,
                     ttl_secs: None,

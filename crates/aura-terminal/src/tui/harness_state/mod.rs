@@ -517,7 +517,7 @@ mod tests {
                 invitation_type: InvitationKind::Contact,
                 message: None,
                 ttl_secs: None,
-            })] if receiver_id.to_string() == authority_id
+            })] if receiver_id.as_ref().is_some_and(|receiver_id| receiver_id.to_string() == authority_id)
         ));
     }
 

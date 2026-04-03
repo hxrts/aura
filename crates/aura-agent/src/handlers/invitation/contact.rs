@@ -365,6 +365,7 @@ impl<'a> InvitationContactHandler<'a> {
 
                     let mut updated = invitation.clone();
                     updated.status = InvitationStatus::Accepted;
+                    updated.receiver_id = acceptance.acceptor_id;
                     InvitationHandler::persist_created_invitation(
                         effects.as_ref(),
                         self.handler.context.authority.authority_id(),
@@ -507,6 +508,7 @@ impl<'a> InvitationContactHandler<'a> {
 
                     let mut updated = invitation.clone();
                     updated.status = InvitationStatus::Accepted;
+                    updated.receiver_id = acceptance.acceptor_id;
                     tracing::debug!(
                         invitation_id = %updated.invitation_id,
                         sender_id = %updated.sender_id,

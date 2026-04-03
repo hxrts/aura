@@ -66,8 +66,6 @@ pub struct TextModalState {
 
 #[derive(Debug, Clone)]
 pub struct CreateInvitationModalState {
-    pub receiver_id: String,
-    pub receiver_label: Option<String>,
     pub message: String,
     pub ttl_hours: u64,
     pub active_field: FieldId,
@@ -76,11 +74,9 @@ pub struct CreateInvitationModalState {
 impl Default for CreateInvitationModalState {
     fn default() -> Self {
         Self {
-            receiver_id: String::new(),
-            receiver_label: None,
             message: String::new(),
             ttl_hours: 24,
-            active_field: FieldId::InvitationReceiver,
+            active_field: FieldId::InvitationMessage,
         }
     }
 }

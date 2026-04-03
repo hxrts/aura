@@ -6,14 +6,9 @@ pub(super) fn handle_contacts_char(model: &mut UiModel, ch: char) {
         'n' => {
             model.modal_hint = "Invite Contacts".to_string();
             model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
-                receiver_id: model
-                    .selected_contact_authority_id()
-                    .map(|authority_id| authority_id.to_string())
-                    .unwrap_or_default(),
-                receiver_label: model.selected_contact_name().map(str::to_string),
                 message: String::new(),
                 ttl_hours: 24,
-                active_field: aura_app::ui::contract::FieldId::InvitationReceiver,
+                active_field: aura_app::ui::contract::FieldId::InvitationMessage,
             }));
         }
         'a' => {

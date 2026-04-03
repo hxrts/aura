@@ -319,8 +319,8 @@ pub enum EffectCommand {
     // === Invitation Commands ===
     /// Create a new invitation
     CreateInvitation {
-        /// Receiver authority ID
-        receiver_id: AuthorityId,
+        /// Receiver authority ID when the invitation is addressed.
+        receiver_id: Option<AuthorityId>,
         /// Type of invitation (Contact, Guardian, Channel)
         invitation_type: String,
         /// Optional message to include

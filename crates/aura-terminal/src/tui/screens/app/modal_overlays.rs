@@ -277,8 +277,6 @@ pub fn render_contacts_create_modal(contacts: &ContactsViewProps) -> Option<AnyE
                 focused_field: modal.focused_field,
                 creating: false,
                 error: String::new(),
-                receiver_id: modal.receiver_id.clone(),
-                receiver_name: modal.receiver_name.clone(),
                 message: modal.message.clone(),
                 ttl_hours: modal.ttl_hours as u32,
             )

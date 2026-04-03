@@ -18,7 +18,6 @@ pub use aura_app::ui::types::{
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CreateInvitationField {
     #[default]
-    Receiver,
     Message,
     Ttl,
 }
@@ -28,10 +27,6 @@ pub enum CreateInvitationField {
 /// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
 pub struct CreateInvitationModalState {
-    /// Receiver authority ID (required for creating an invitation)
-    pub receiver_id: String,
-    /// Best-effort receiver display name (for UI hints)
-    pub receiver_name: String,
     /// Optional message
     pub message: String,
     /// TTL in hours
@@ -47,48 +42,33 @@ impl CreateInvitationModalState {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            receiver_id: String::new(),
-            receiver_name: String::new(),
             message: String::new(),
             ttl_hours: DEFAULT_INVITATION_TTL_HOURS,
-            focused_field: CreateInvitationField::Receiver,
+            focused_field: CreateInvitationField::Message,
             error: None,
-        }
-    }
-
-    /// Create initialized state for a specific receiver.
-    pub fn for_receiver(receiver_id: impl Into<String>, receiver_name: impl Into<String>) -> Self {
-        Self {
-            receiver_id: receiver_id.into(),
-            receiver_name: receiver_name.into(),
-            ..Self::new()
         }
     }
 
     /// Reset state (called when dismissed)
     pub fn reset(&mut self) {
-        self.receiver_id.clear();
-        self.receiver_name.clear();
         self.message.clear();
         self.ttl_hours = DEFAULT_INVITATION_TTL_HOURS;
-        self.focused_field = CreateInvitationField::Receiver;
+        self.focused_field = CreateInvitationField::Message;
         self.error = None;
     }
 
     /// Move focus to next field
     pub fn focus_next(&mut self) {
         self.focused_field = match self.focused_field {
-            CreateInvitationField::Receiver => CreateInvitationField::Message,
             CreateInvitationField::Message => CreateInvitationField::Ttl,
-            CreateInvitationField::Ttl => CreateInvitationField::Receiver,
+            CreateInvitationField::Ttl => CreateInvitationField::Message,
         };
     }
 
     /// Move focus to previous field
     pub fn focus_prev(&mut self) {
         self.focused_field = match self.focused_field {
-            CreateInvitationField::Receiver => CreateInvitationField::Ttl,
-            CreateInvitationField::Message => CreateInvitationField::Receiver,
+            CreateInvitationField::Message => CreateInvitationField::Ttl,
             CreateInvitationField::Ttl => CreateInvitationField::Message,
         };
     }
@@ -247,8 +227,6 @@ impl Validatable for ImportInvitationFormData {
 /// Form data for invitation creation (portable, validatable)
 #[derive(Clone, Debug, Default)]
 pub struct CreateInvitationFormData {
-    /// Receiver authority ID (required)
-    pub receiver_id: String,
     /// Optional message
     pub message: String,
     /// TTL in hours
@@ -258,9 +236,6 @@ pub struct CreateInvitationFormData {
 impl Validatable for CreateInvitationFormData {
     fn validate(&self) -> Vec<ValidationError> {
         let mut errors = vec![];
-        if self.receiver_id.trim().is_empty() {
-            errors.push(ValidationError::required("receiver"));
-        }
         if self.message.len() > 500 {
             errors.push(ValidationError::too_long("message", 500));
         }
