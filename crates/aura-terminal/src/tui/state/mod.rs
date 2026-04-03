@@ -357,6 +357,16 @@ impl TuiState {
             .enqueue(QueuedToast::success(self.next_toast_id, message));
     }
 
+    /// Signal that bootstrap account creation succeeded while the shell is about to hand off.
+    ///
+    /// Keep the account-setup modal visible in its success state so the first-run shell
+    /// does not briefly expose the underlying neighborhood screen before exiting.
+    pub fn account_created_bootstrap_handoff_queued(&mut self) {
+        if let Some(QueuedModal::AccountSetup(ref mut state)) = self.modal_queue.current_mut() {
+            state.set_success();
+        }
+    }
+
     /// Signal that account creation failed (queue-based)
     pub fn account_creation_failed_queued(&mut self, error: String) {
         if let Some(QueuedModal::AccountSetup(ref mut state)) = self.modal_queue.current_mut() {

@@ -1119,9 +1119,11 @@ pub(super) async fn process_ui_update_match(
                         OperationState::Succeeded,
                     );
                 }
-                state.account_created_queued();
                 if show_setup {
+                    state.account_created_bootstrap_handoff_queued();
                     state.should_exit = true;
+                } else {
+                    state.account_created_queued();
                 }
                 state.clone()
             });

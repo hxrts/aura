@@ -368,6 +368,22 @@ mod tests {
     }
 
     #[test]
+    fn test_account_setup_bootstrap_handoff_feedback_keeps_modal_visible() {
+        let mut state = TuiState::with_account_setup();
+        state.account_setup_state_mut().unwrap().nickname_suggestion = "Alice".to_string();
+        state.account_setup_state_mut().unwrap().creating = true;
+
+        state.account_created_bootstrap_handoff_queued();
+
+        let modal = state
+            .account_setup_state()
+            .expect("account setup modal remains active");
+        assert!(modal.success);
+        assert!(!modal.creating);
+        assert!(!state.toast_queue.is_active());
+    }
+
+    #[test]
     fn test_account_setup_error_recovery() {
         let mut state = TuiState::with_account_setup();
         state.account_setup_state_mut().unwrap().nickname_suggestion = "Alice".to_string();
