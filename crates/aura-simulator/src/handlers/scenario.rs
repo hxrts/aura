@@ -4,6 +4,10 @@
 //! capabilities. Replaces the former ScenarioInjectionMiddleware with proper
 //! effect system integration.
 
+use crate::environment_bridge::{
+    AuraEnvironmentBridge, AuraEnvironmentSnapshot, AuraEnvironmentTrace,
+    AuraLinkAdmissionObservation, AuraMobilityProfile, AuraNodeCapabilityObservation,
+};
 use async_trait::async_trait;
 use aura_core::effects::{TestingEffects, TestingError};
 use aura_core::frost::ThresholdSignature;
@@ -477,6 +481,7 @@ struct ScenarioState {
     current_tick: u64,
     network_conditions: Vec<NetworkCondition>,
     adaptive_privacy: AdaptivePrivacyState,
+    environment_bridge: AuraEnvironmentBridge,
 }
 
 #[derive(Debug, Clone)]
@@ -796,6 +801,7 @@ impl SimulationScenarioHandler {
                     current_tick: 0,
                     network_conditions: Vec::new(),
                     adaptive_privacy: AdaptivePrivacyState::new(),
+                    environment_bridge: AuraEnvironmentBridge::new(),
                 }),
             }),
         }
@@ -2066,6 +2072,17 @@ impl SimulationScenarioHandler {
                 home_locality_bias,
                 neighborhood_locality_bias,
             } => {
+                state
+                    .environment_bridge
+                    .record_mobility_profile(AuraMobilityProfile {
+                        profile_id: profile_id.clone(),
+                        clusters: clusters.clone(),
+                        home_locality_bias_millis: bias_to_per_mille(home_locality_bias),
+                        neighborhood_locality_bias_millis: bias_to_per_mille(
+                            neighborhood_locality_bias,
+                        ),
+                        recorded_at_tick: state.current_tick,
+                    });
                 state.adaptive_privacy.movement_profiles.insert(
                     profile_id.clone(),
                     MovementProfile {
@@ -2283,6 +2300,14 @@ impl SimulationScenarioHandler {
                 queue_depth,
                 utilization,
             } => {
+                state
+                    .environment_bridge
+                    .record_node_capability(AuraNodeCapabilityObservation {
+                        provider: provider.clone(),
+                        queue_depth,
+                        utilization_per_mille: bias_to_per_mille(utilization),
+                        recorded_at_tick: state.current_tick,
+                    });
                 state.adaptive_privacy.provider_saturation.insert(
                     provider.clone(),
                     ProviderSaturationState {
@@ -2338,6 +2363,14 @@ impl SimulationScenarioHandler {
                 density,
                 peers,
             } => {
+                state
+                    .environment_bridge
+                    .record_link_admission(AuraLinkAdmissionObservation {
+                        profile_id: profile_id.clone(),
+                        density: sync_density_label(density).to_string(),
+                        peers: peers.clone(),
+                        recorded_at_tick: state.current_tick,
+                    });
                 state.adaptive_privacy.sync_opportunities.insert(
                     profile_id.clone(),
                     SyncOpportunityState {
@@ -2706,6 +2739,18 @@ impl Default for SimulationScenarioHandler {
     }
 }
 
+fn bias_to_per_mille(value: f64) -> u64 {
+    (value.clamp(0.0, 1.0) * 1000.0).round() as u64
+}
+
+fn sync_density_label(density: SyncOpportunityDensity) -> &'static str {
+    match density {
+        SyncOpportunityDensity::Sparse => "sparse",
+        SyncOpportunityDensity::Balanced => "balanced",
+        SyncOpportunityDensity::Heavy => "heavy",
+    }
+}
+
 #[async_trait]
 impl TestingEffects for SimulationScenarioHandler {
     async fn create_checkpoint(
@@ -2864,6 +2909,23 @@ impl TestingEffects for SimulationScenarioHandler {
                     component: component.to_string(),
                     path: path.to_string(),
                     reason: "Unknown simulation path".to_string(),
+                }),
+            },
+            "environment" => match path {
+                "mobility_profiles" => Ok(Box::new(
+                    state.environment_bridge.snapshot().mobility_profiles.len(),
+                )),
+                "link_admissions" => Ok(Box::new(
+                    state.environment_bridge.snapshot().link_admissions.len(),
+                )),
+                "node_capabilities" => Ok(Box::new(
+                    state.environment_bridge.snapshot().node_capabilities.len(),
+                )),
+                "trace_entries" => Ok(Box::new(state.environment_bridge.trace().entries.len())),
+                _ => Err(TestingError::StateInspectionError {
+                    component: component.to_string(),
+                    path: path.to_string(),
+                    reason: "Unknown environment path".to_string(),
                 }),
             },
             "adaptive_privacy" => {
@@ -3090,6 +3152,28 @@ impl TestingEffects for SimulationScenarioHandler {
 }
 
 impl SimulationScenarioHandler {
+    /// Export the Aura environment bridge snapshot for migrated simulation state.
+    #[must_use]
+    pub fn environment_snapshot(&self) -> AuraEnvironmentSnapshot {
+        let state = self
+            .shared
+            .state
+            .lock()
+            .expect("scenario state mutex should not be poisoned");
+        state.environment_bridge.snapshot()
+    }
+
+    /// Export the Aura environment bridge trace for migrated simulation state.
+    #[must_use]
+    pub fn environment_trace(&self) -> AuraEnvironmentTrace {
+        let state = self
+            .shared
+            .state
+            .lock()
+            .expect("scenario state mutex should not be poisoned");
+        state.environment_bridge.trace().clone()
+    }
+
     fn record_simple_event(
         &self,
         event_type: &str,
@@ -3733,6 +3817,49 @@ mod tests {
             .downcast::<usize>()
             .expect("move to hold seed type");
         assert_eq!(*move_to_hold_seeds, 1);
+
+        let environment_mobility = handler
+            .inspect_state("environment", "mobility_profiles")
+            .await
+            .expect("environment mobility")
+            .downcast::<usize>()
+            .expect("environment mobility type");
+        assert_eq!(*environment_mobility, 1);
+
+        let environment_admission = handler
+            .inspect_state("environment", "link_admissions")
+            .await
+            .expect("environment admission")
+            .downcast::<usize>()
+            .expect("environment admission type");
+        assert_eq!(*environment_admission, 1);
+
+        let environment_capabilities = handler
+            .inspect_state("environment", "node_capabilities")
+            .await
+            .expect("environment capabilities")
+            .downcast::<usize>()
+            .expect("environment capability type");
+        assert_eq!(*environment_capabilities, 1);
+
+        let environment_trace_entries = handler
+            .inspect_state("environment", "trace_entries")
+            .await
+            .expect("environment trace entries")
+            .downcast::<usize>()
+            .expect("environment trace type");
+        assert_eq!(*environment_trace_entries, 3);
+
+        let snapshot = handler.environment_snapshot();
+        assert_eq!(snapshot.mobility_profiles.len(), 1);
+        assert_eq!(snapshot.link_admissions.len(), 1);
+        assert_eq!(snapshot.node_capabilities.len(), 1);
+        assert_eq!(snapshot.mobility_profiles[0].profile_id, "clustered_social");
+        assert_eq!(snapshot.link_admissions[0].density, "sparse");
+        assert_eq!(snapshot.node_capabilities[0].provider, "provider-a");
+
+        let trace = handler.environment_trace();
+        assert_eq!(trace.entries.len(), 3);
     }
 
     #[tokio::test]

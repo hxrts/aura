@@ -136,6 +136,7 @@ pub mod utils;
 
 // Simulation context
 pub mod context;
+pub mod environment_bridge;
 
 // Scenario definitions
 /// Async simulator host bridge for request/resume execution.
@@ -178,6 +179,11 @@ pub use choreography_transport::{SimulatedMessageBus, SimulatedTransport, TestEf
 
 // Re-export choreography observer
 pub use choreography_observer::{ObserverStatistics, ProtocolEvent, SimulatorObserver};
+pub use environment_bridge::{
+    AuraEnvironmentBridge, AuraEnvironmentSnapshot, AuraEnvironmentTrace,
+    AuraEnvironmentTraceEntry, AuraLinkAdmissionObservation, AuraMobilityProfile,
+    AuraNodeCapabilityObservation,
+};
 
 // Re-export protocol state machine
 pub use protocol_state_machine::{

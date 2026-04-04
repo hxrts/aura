@@ -380,6 +380,19 @@ The report includes:
 - optional semantic summary derived from upstream Telltale 11 context
 - optional upstream Telltale 11 run context when the Aura runner path is used
 
+### Environment Bridge
+
+Aura now exposes a small environment bridge for simulator-local state that is
+being migrated toward Telltale 11 terminology. The current migrated slice is:
+
+- adaptive-privacy movement profiles -> mobility profiles
+- sync opportunities -> link-admission observations
+- provider saturation -> node-capability observations
+
+Use `SimulationScenarioHandler::environment_snapshot()` and
+`SimulationScenarioHandler::environment_trace()` to inspect the migrated bridge
+surface.
+
 ### ITF Trace Format
 
 ITF (Informal Trace Format) traces come from Quint model checking. Each trace captures a sequence of states and transitions.
