@@ -74,17 +74,18 @@ Contract alignment:
 
 ### InvariantTelltaleArtifactMappingCanonical
 
-Artifact requirements for telltale parity must stay canonical, and optional
-upstream Telltale 11 sidecars must remain additive rather than redefining the
-Aura comparison boundary.
+Artifact requirements for telltale parity must stay canonical. Supported
+file/control-plane report lanes must carry upstream Telltale 11 run sidecars as
+their default semantic surface, while Aura differential comparison remains the
+low-level surface diff rather than a second theorem authority.
 
 Enforcement locus:
 - `src/telltale_parity.rs` validates required Aura conformance surfaces before comparison.
-- `src/telltale_parity.rs` loads optional upstream simulator sidecars into the emitted report.
+- `src/telltale_parity.rs` requires upstream run sidecars for supported report lanes and loads them into the emitted report.
 
 Failure mode:
 - Different lanes compare non-equivalent Aura surfaces and produce false mismatches.
-- Upstream sidecars become a second source of truth for Aura parity outcomes.
+- Supported parity lanes silently fall back to Aura-local summaries and lose theorem-facing context.
 - Parity reports cannot be replayed or audited consistently.
 
 Verification hooks:

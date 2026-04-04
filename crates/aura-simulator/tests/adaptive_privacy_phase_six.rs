@@ -29,9 +29,21 @@ use aura_simulator::scenario::types::{
 };
 use aura_simulator::{
     run_telltale_control_plane_file_lane, run_telltale_parity_file_lane, DifferentialProfile,
-    TelltaleControlPlaneFileRun, TelltaleParityFileRun,
+    TelltaleControlPlaneFileRun, TelltaleParityFileRun, TelltaleUpstreamPathsV1,
 };
 use serde::{Deserialize, Serialize};
+use telltale_simulator::analysis::NormalizedObservability;
+use telltale_simulator::environment::EnvironmentTrace;
+use telltale_simulator::fault::{AssumptionDiagnostic, AssumptionFailureClass};
+use telltale_simulator::reconfiguration::ReconfigurationSummary;
+use telltale_simulator::runner::{
+    CriticalCapacityPhase, CriticalCapacitySummary, SchedulerBoundMode, SchedulerEnvelopeStatus,
+    SchedulerFairnessRequirement, SchedulerProfileSummary, TheoremProgressSummary,
+};
+use telltale_simulator::scenario::{
+    ExecutionRegime, ResolvedExecutionBackend, ResolvedSchedulerPolicy, ResolvedTheoremProfile,
+    TheoremAssumptionBundle, TheoremEligibility, TheoremEnvelopeProfile, TheoremSchedulerProfile,
+};
 
 const REPORT_SCHEMA_V1: &str = "aura.adaptive-privacy.phase6.report.v1";
 
@@ -605,6 +617,107 @@ fn write_json<T: Serialize>(path: &PathBuf, value: &T) {
     .expect("write json artifact");
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct PhaseSixRunOutputFixture {
+    stats: PhaseSixRunStatsFixture,
+    analysis: PhaseSixRunAnalysisFixture,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PhaseSixRunStatsFixture {
+    execution_regime: ExecutionRegime,
+    theorem_profile: ResolvedTheoremProfile,
+    theorem_progress: TheoremProgressSummary,
+    scheduler_profile: SchedulerProfileSummary,
+    reconfiguration_summary: ReconfigurationSummary,
+    environment_trace: EnvironmentTrace,
+    assumption_diagnostics: Vec<AssumptionDiagnostic>,
+    backend: ResolvedExecutionBackend,
+    scheduler_concurrency: u64,
+    worker_threads: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PhaseSixRunAnalysisFixture {
+    normalized_observability: NormalizedObservability,
+}
+
+fn phase_six_run_output_fixture() -> PhaseSixRunOutputFixture {
+    PhaseSixRunOutputFixture {
+        stats: PhaseSixRunStatsFixture {
+            execution_regime: ExecutionRegime::CanonicalExact,
+            theorem_profile: ResolvedTheoremProfile {
+                scheduler_profile: TheoremSchedulerProfile::CanonicalExact,
+                envelope_profile: TheoremEnvelopeProfile::Exact,
+                assumption_bundle: TheoremAssumptionBundle::FaultFreeTransport,
+                eligibility: TheoremEligibility::Exact,
+                eligibility_reason: None,
+            },
+            theorem_progress: TheoremProgressSummary {
+                initial_weighted_measure: 8,
+                initial_depth_budget: 4,
+                productive_step_count: 3,
+                remaining_weighted_measure: 2,
+                weighted_measure_consumed: 6,
+                critical_capacity: CriticalCapacitySummary {
+                    threshold: Some(4),
+                    phase: CriticalCapacityPhase::BelowThreshold,
+                },
+            },
+            scheduler_profile: SchedulerProfileSummary {
+                implementation_policy: ResolvedSchedulerPolicy::Cooperative,
+                theorem_profile: TheoremSchedulerProfile::CanonicalExact,
+                productive_exactness: true,
+                total_step_mode: SchedulerBoundMode::ProductiveExactOnly,
+                total_step_upper_bound: None,
+                fairness_requirement: SchedulerFairnessRequirement::ExplicitYieldFairness,
+                envelope_status: SchedulerEnvelopeStatus::Exact,
+            },
+            reconfiguration_summary: ReconfigurationSummary {
+                applied_operations: 1,
+                pure_operations: 1,
+                transition_operations: 0,
+                transition_budget_consumed: 0,
+            },
+            environment_trace: EnvironmentTrace::default(),
+            assumption_diagnostics: vec![AssumptionDiagnostic {
+                tick: 0,
+                class: AssumptionFailureClass::FairnessFailure,
+                adversary_id: None,
+                detail: "none".to_string(),
+            }],
+            backend: ResolvedExecutionBackend::Canonical,
+            scheduler_concurrency: 1,
+            worker_threads: 1,
+        },
+        analysis: PhaseSixRunAnalysisFixture {
+            normalized_observability: NormalizedObservability {
+                schema_version: 1,
+                raw_observable_event_count: 1,
+                raw_reconfiguration_count: 0,
+                normalized_event_class: vec!["sent:x".to_string()],
+                normalized_reconfiguration_class: Vec::new(),
+            },
+        },
+    }
+}
+
+fn phase_six_upstream_paths(root: &PathBuf, prefix: &str) -> TelltaleUpstreamPathsV1 {
+    let baseline_run_path = root.join(format!("{prefix}-baseline-run.json"));
+    let candidate_run_path = root.join(format!("{prefix}-candidate-run.json"));
+    let run_output = phase_six_run_output_fixture();
+    write_json(&baseline_run_path, &run_output);
+    write_json(&candidate_run_path, &run_output);
+    TelltaleUpstreamPathsV1 {
+        baseline_run_output_path: Some(baseline_run_path),
+        telltale_run_output_path: Some(candidate_run_path),
+        baseline_decision_report_path: None,
+        telltale_decision_report_path: None,
+        baseline_sweep_manifest_path: None,
+        telltale_sweep_manifest_path: None,
+    }
+}
+
 fn artifact(target: &str, effect_suffixes: &[&str]) -> AuraConformanceArtifactV1 {
     let mut artifact = AuraConformanceArtifactV1::new(AuraConformanceRunMetadataV1 {
         target: target.to_string(),
@@ -732,7 +845,7 @@ fn phase_six_control_plane_reports_are_archived() {
             telltale_candidate_path: candidate_path,
             output_report_path: report_path,
             profile: DifferentialProfile::EnvelopeBounded,
-            upstream: None,
+            upstream: phase_six_upstream_paths(&root, &scenario.id),
         })
         .expect("run control-plane telltale lane");
         archived.insert(scenario.id, report.lane);
@@ -809,8 +922,12 @@ fn phase_six_generic_telltale_lane_archive_remains_available() {
         telltale_candidate_path: candidate_path,
         output_report_path: report_path,
         profile: DifferentialProfile::EnvelopeBounded,
-        upstream: None,
+        upstream: phase_six_upstream_paths(&root, "generic"),
     })
     .expect("run telltale parity lane");
     assert!(report.differential.equivalent);
+    assert_eq!(
+        report.semantic_summary.relation,
+        aura_simulator::TelltaleParitySemanticRelationV1::EquivalentUnderNormalization
+    );
 }

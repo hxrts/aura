@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 pub const AURA_ENVIRONMENT_SNAPSHOT_ARTIFACT_SCHEMA_V1: &str = "aura.environment.snapshot.v1";
 /// Schema identifier for environment trace artifacts.
 pub const AURA_ENVIRONMENT_TRACE_ARTIFACT_SCHEMA_V1: &str = "aura.environment.trace.v1";
+/// Schema identifier for Aura-specific environment overlay artifacts.
+pub const AURA_ENVIRONMENT_OVERLAY_ARTIFACT_SCHEMA_V1: &str = "aura.environment.overlay.v1";
 
 /// Environment-facing mobility profile derived from adaptive-privacy movement state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,11 +86,68 @@ pub struct AuraEnvironmentTraceArtifactV1 {
     pub trace: AuraEnvironmentTrace,
 }
 
+/// Aura-specific provider heterogeneity overlay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuraProviderOverlayV1 {
+    pub provider: String,
+    pub queue_depth: usize,
+    pub utilization_per_mille: u64,
+    pub health_score_per_mille: Option<u64>,
+    pub latency_ms: Option<u64>,
+}
+
+/// Aura-specific admission-pressure overlay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuraAdmissionPressureOverlayV1 {
+    pub profile_id: String,
+    pub density: String,
+    pub peer_count: usize,
+}
+
+/// Aura-specific topology churn overlay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuraTopologyChurnOverlayV1 {
+    pub burst_id: String,
+    pub affected_participants: Vec<String>,
+    pub entering: usize,
+    pub leaving: usize,
+    pub recorded_at_tick: u64,
+}
+
+/// Aura-specific adversary/interference overlay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuraInterferenceOverlayV1 {
+    pub path_id: String,
+    pub compromised_hops: Vec<String>,
+    pub honest_hops_remaining: usize,
+    pub recorded_at_tick: u64,
+}
+
+/// Aura-specific environment supplement that must not leak into the core bridge vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AuraEnvironmentOverlayV1 {
+    pub mobility_profiles: Vec<String>,
+    pub partition_heal_cycle_count: usize,
+    pub provider_heterogeneity: Vec<AuraProviderOverlayV1>,
+    pub admission_pressure: Vec<AuraAdmissionPressureOverlayV1>,
+    pub topology_churn: Vec<AuraTopologyChurnOverlayV1>,
+    pub adversary_interference: Vec<AuraInterferenceOverlayV1>,
+}
+
+/// Stable on-disk Aura environment overlay artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuraEnvironmentOverlayArtifactV1 {
+    pub schema_version: String,
+    pub metadata: AuraEnvironmentArtifactMetadataV1,
+    pub overlay: AuraEnvironmentOverlayV1,
+}
+
 /// Snapshot plus trace captured from the environment bridge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuraEnvironmentArtifacts {
     pub snapshot: AuraEnvironmentSnapshot,
     pub trace: AuraEnvironmentTrace,
+    pub overlay: Option<AuraEnvironmentOverlayV1>,
 }
 
 /// On-disk paths for one scenario run's environment artifacts.
@@ -96,6 +155,7 @@ pub struct AuraEnvironmentArtifacts {
 pub struct AuraEnvironmentArtifactPaths {
     pub snapshot_path: PathBuf,
     pub trace_path: PathBuf,
+    pub overlay_path: Option<PathBuf>,
 }
 
 /// Errors emitted while materializing environment artifacts.
@@ -105,6 +165,14 @@ pub enum AuraEnvironmentArtifactError {
     Serialize { message: String },
     #[error("failed writing environment artifact to {path}: {message}")]
     WriteArtifact { path: String, message: String },
+}
+
+/// Loaded environment artifacts with optional Aura overlay supplement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedAuraEnvironmentArtifacts {
+    pub snapshot: AuraEnvironmentSnapshotArtifactV1,
+    pub trace: AuraEnvironmentTraceArtifactV1,
+    pub overlay: Option<AuraEnvironmentOverlayArtifactV1>,
 }
 
 /// Aura-owned environment bridge state.
@@ -221,6 +289,7 @@ impl AuraEnvironmentBridge {
         AuraEnvironmentArtifacts {
             snapshot: self.snapshot(),
             trace: self.trace.clone(),
+            overlay: None,
         }
     }
 }
@@ -241,6 +310,7 @@ pub fn write_environment_artifacts(
     };
     let snapshot_path = scenario_dir.join("environment_snapshot.json");
     let trace_path = scenario_dir.join("environment_trace.json");
+    let overlay_path = scenario_dir.join("environment_overlay.json");
 
     write_json_artifact(
         &snapshot_path,
@@ -259,9 +329,61 @@ pub fn write_environment_artifacts(
         },
     )?;
 
+    let overlay_path = artifacts
+        .overlay
+        .as_ref()
+        .map(|overlay| {
+            write_json_artifact(
+                &overlay_path,
+                &AuraEnvironmentOverlayArtifactV1 {
+                    schema_version: AURA_ENVIRONMENT_OVERLAY_ARTIFACT_SCHEMA_V1.to_string(),
+                    metadata: AuraEnvironmentArtifactMetadataV1 {
+                        scenario_name: scenario_name.to_string(),
+                        seed,
+                    },
+                    overlay: overlay.clone(),
+                },
+            )
+            .map(|()| overlay_path.clone())
+        })
+        .transpose()?;
+
     Ok(AuraEnvironmentArtifactPaths {
         snapshot_path,
         trace_path,
+        overlay_path,
+    })
+}
+
+/// Load snapshot/trace artifacts and the optional Aura overlay supplement.
+pub fn load_environment_artifacts(
+    paths: &AuraEnvironmentArtifactPaths,
+) -> Result<LoadedAuraEnvironmentArtifacts, AuraEnvironmentArtifactError> {
+    let snapshot = load_json_artifact(&paths.snapshot_path)?;
+    let trace = load_json_artifact(&paths.trace_path)?;
+    let overlay = paths
+        .overlay_path
+        .as_deref()
+        .map(load_json_artifact::<AuraEnvironmentOverlayArtifactV1>)
+        .transpose()?;
+    Ok(LoadedAuraEnvironmentArtifacts {
+        snapshot,
+        trace,
+        overlay,
+    })
+}
+
+fn load_json_artifact<T>(path: &Path) -> Result<T, AuraEnvironmentArtifactError>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let payload =
+        std::fs::read(path).map_err(|error| AuraEnvironmentArtifactError::WriteArtifact {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    serde_json::from_slice(&payload).map_err(|error| AuraEnvironmentArtifactError::Serialize {
+        message: error.to_string(),
     })
 }
 
@@ -364,6 +486,24 @@ mod tests {
                     },
                 )],
             },
+            overlay: Some(AuraEnvironmentOverlayV1 {
+                mobility_profiles: vec!["profile-a".to_string()],
+                partition_heal_cycle_count: 1,
+                provider_heterogeneity: vec![AuraProviderOverlayV1 {
+                    provider: "provider-a".to_string(),
+                    queue_depth: 4,
+                    utilization_per_mille: 900,
+                    health_score_per_mille: Some(850),
+                    latency_ms: Some(45),
+                }],
+                admission_pressure: vec![AuraAdmissionPressureOverlayV1 {
+                    profile_id: "profile-a".to_string(),
+                    density: "sparse".to_string(),
+                    peer_count: 2,
+                }],
+                topology_churn: Vec::new(),
+                adversary_interference: Vec::new(),
+            }),
         };
 
         let paths = write_environment_artifacts(dir.path(), "Parity Example", 42, &artifacts)
@@ -375,6 +515,7 @@ mod tests {
         let trace: AuraEnvironmentTraceArtifactV1 =
             serde_json::from_slice(&std::fs::read(&paths.trace_path).expect("read trace"))
                 .expect("decode trace");
+        let loaded = load_environment_artifacts(&paths).expect("load artifacts");
 
         assert_eq!(
             snapshot.schema_version,
@@ -388,5 +529,7 @@ mod tests {
         assert_eq!(trace.metadata.scenario_name, "Parity Example");
         assert_eq!(snapshot.snapshot.mobility_profiles.len(), 1);
         assert_eq!(trace.trace.entries.len(), 1);
+        assert!(paths.overlay_path.is_some());
+        assert!(loaded.overlay.is_some());
     }
 }

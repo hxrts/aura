@@ -321,7 +321,7 @@ The simulator exposes telltale parity as an artifact-level boundary. The boundar
 
 Use `TelltaleParityInput` and `TelltaleParityRunner` when both baseline and candidate artifacts are already in memory. Use `run_telltale_parity_file_lane` with `TelltaleParityFileRun` for file-driven CI workflows.
 
-The file lane accepts baseline and candidate artifact paths, a comparison profile, and an output report path. It emits one stable JSON report artifact.
+The supported file lanes accept baseline and candidate artifact paths, a comparison profile, an output report path, and upstream Telltale run sidecars. They emit one stable JSON report artifact whose semantic surface is rooted in the upstream run context rather than Aura-local fallback summaries.
 
 Protocol-critical control-plane lifecycles should use the dedicated telltale
 control-plane lanes instead of reimplementing the same ownership/timeout/replay
@@ -357,11 +357,13 @@ Telltale parity lanes use one canonical mapping:
 Reports use schema `aura.telltale-parity.report.v1`.
 
 For Telltale 11-backed lanes, Aura can also invoke an upstream simulator runner
-first and attach the resulting sidecar automatically. Use
+first and attach the candidate run sidecar automatically. Use
 `run_telltale_parity_with_runner(...)` or
 `run_telltale_control_plane_with_runner(...)` and configure the runner command
 with `AURA_TELLTALE_SIMULATOR_RUNNER` when the executable is not on the shell
-search path.
+search path. The supported report lanes still expect a baseline upstream run
+sidecar so the report can compare theorem, scheduler, environment, and
+reconfiguration context across both sides.
 
 ### Expected Outputs
 
@@ -377,8 +379,9 @@ The report includes:
 - first mismatch surface
 - first mismatch step index
 - full differential comparison payload
-- optional semantic summary derived from upstream Telltale 11 context
-- optional upstream Telltale 11 run context when the Aura runner path is used
+- semantic summary derived from authoritative upstream Telltale 11 run context
+- upstream Telltale 11 run context for both sides, with optional decision and
+  sweep attachments when those sidecars are provided
 
 ### Environment Bridge
 
@@ -395,12 +398,38 @@ simulator artifact root:
 ```text
 <artifacts_dir>/scenario-runs/<scenario_slug>-seed-<seed>/environment_snapshot.json
 <artifacts_dir>/scenario-runs/<scenario_slug>-seed-<seed>/environment_trace.json
+<artifacts_dir>/scenario-runs/<scenario_slug>-seed-<seed>/environment_overlay.json
 ```
 
 Read the written paths from `SimulationResults::environment_artifacts`. The
 bridge remains the single Aura-owned place where migrated mobility,
 link-admission, and node-capability decisions are materialized before handler
-state keeps its richer Aura-local bookkeeping.
+state keeps its richer Aura-local bookkeeping. The optional
+`environment_overlay.json` supplement carries Aura-only dimensions such as
+provider heterogeneity, admission pressure, topology churn, and interference
+patterns without expanding the core bridge vocabulary.
+
+## Experiment Surfaces
+
+Aura now layers its comparative experiment lanes on top of the published
+Telltale simulator harness and sweep machinery instead of adding a second local
+manifest format.
+
+Use `aura_simulator::run_adaptive_privacy_policy_sweep(...)` to produce shared
+`SweepManifest` outputs for adaptive-privacy comparisons. Use
+`aura_simulator::compare_policy_sweeps(...)` to emit the Aura policy-diff
+artifact that compares two sweep runs with the shared Telltale diff logic.
+
+For theorem-aware failure evidence, use
+`aura_simulator::counterexample_from_parity_report(...)` or
+`aura_simulator::counterexample_from_control_plane_report(...)`. These wrappers
+preserve the shared Telltale `DecisionCounterexample` witness and annotate
+whether the mismatch is schedule noise or safety-visible divergence.
+
+For reusable study bundles, use `aura_simulator::run_suite_catalog(...)` and
+`aura_simulator::compare_suite_catalogs(...)`. Aura owns the suite catalog
+choices, while the shared Telltale harness remains the execution engine and the
+shared `SweepManifest` remains the archived manifest shape.
 
 ### ITF Trace Format
 

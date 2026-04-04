@@ -114,6 +114,7 @@ pub mod handlers;
 // Bounded liveness checking infrastructure
 /// Differential replay/conformance tester for envelope-bounded comparisons.
 pub mod differential_tester;
+pub mod experiments;
 pub mod liveness;
 /// Online property definitions for simulator monitoring.
 pub mod properties;
@@ -180,11 +181,14 @@ pub use choreography_transport::{SimulatedMessageBus, SimulatedTransport, TestEf
 // Re-export choreography observer
 pub use choreography_observer::{ObserverStatistics, ProtocolEvent, SimulatorObserver};
 pub use environment_bridge::{
-    write_environment_artifacts, AuraEnvironmentArtifactError, AuraEnvironmentArtifactMetadataV1,
-    AuraEnvironmentArtifactPaths, AuraEnvironmentArtifacts, AuraEnvironmentBridge,
-    AuraEnvironmentSnapshot, AuraEnvironmentSnapshotArtifactV1, AuraEnvironmentTrace,
-    AuraEnvironmentTraceArtifactV1, AuraEnvironmentTraceEntry, AuraLinkAdmissionObservation,
-    AuraMobilityProfile, AuraNodeCapabilityObservation,
+    load_environment_artifacts, write_environment_artifacts, AuraAdmissionPressureOverlayV1,
+    AuraEnvironmentArtifactError, AuraEnvironmentArtifactMetadataV1, AuraEnvironmentArtifactPaths,
+    AuraEnvironmentArtifacts, AuraEnvironmentBridge, AuraEnvironmentOverlayArtifactV1,
+    AuraEnvironmentOverlayV1, AuraEnvironmentSnapshot, AuraEnvironmentSnapshotArtifactV1,
+    AuraEnvironmentTrace, AuraEnvironmentTraceArtifactV1, AuraEnvironmentTraceEntry,
+    AuraInterferenceOverlayV1, AuraLinkAdmissionObservation, AuraMobilityProfile,
+    AuraNodeCapabilityObservation, AuraProviderOverlayV1, AuraTopologyChurnOverlayV1,
+    LoadedAuraEnvironmentArtifacts, AURA_ENVIRONMENT_OVERLAY_ARTIFACT_SCHEMA_V1,
     AURA_ENVIRONMENT_SNAPSHOT_ARTIFACT_SCHEMA_V1, AURA_ENVIRONMENT_TRACE_ARTIFACT_SCHEMA_V1,
 };
 
@@ -204,6 +208,16 @@ pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};
 pub use differential_tester::{
     DifferentialMismatch, DifferentialProfile, DifferentialReport, DifferentialTester,
     DifferentialTesterError,
+};
+pub use experiments::{
+    archive_from_sweep, compare_policy_sweeps, compare_suite_catalogs,
+    counterexample_from_control_plane_report, counterexample_from_parity_report,
+    run_adaptive_privacy_policy_sweep, run_suite_catalog, write_experiment_artifact,
+    AuraAdaptivePrivacySweepRequest, AuraCounterexampleReportV1, AuraExperimentError,
+    AuraExperimentSuiteCatalog, AuraPolicyDiffReportV1, AuraPolicyPreset, AuraSemanticRegressionV1,
+    AuraSuiteTournamentReportV1, AuraSweepArchiveV1, AURA_COUNTEREXAMPLE_REPORT_SCHEMA_V1,
+    AURA_POLICY_DIFF_REPORT_SCHEMA_V1, AURA_SUITE_TOURNAMENT_REPORT_SCHEMA_V1,
+    AURA_SWEEP_ARCHIVE_SCHEMA_V1,
 };
 pub use liveness::{
     check_consensus_terminates_within, consensus_liveness_checker, BoundedLivenessChecker,

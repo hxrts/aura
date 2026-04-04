@@ -396,14 +396,16 @@ For fault-aware replays, persist `entries + faults` bundles and re-inject faults
 
 ### Differential Replay Workflow
 
-Use `aura_simulator::DifferentialTester` to compare baseline and candidate conformance artifacts. Two profiles are available. The `strict` profile requires byte-identical surfaces. The `envelope_bounded` profile uses Aura law-aware comparison with commutative and algebraic envelopes. In Telltale 11-backed lanes, this is the artifact comparator, not the only semantic authority: prefer the parity report's upstream semantic summary when it is present.
+Use `aura_simulator::DifferentialTester` to compare baseline and candidate conformance artifacts. Two profiles are available. The `strict` profile requires byte-identical surfaces. The `envelope_bounded` profile uses Aura law-aware comparison with commutative and algebraic envelopes. In supported Telltale 11-backed report lanes, this is the low-level surface comparator, not the theorem-facing semantic authority: use the parity report's upstream semantic summary and run context.
 
 For Telltale 11-backed parity lanes, prefer
 `aura_simulator::run_telltale_parity_with_runner(...)` or
 `aura_simulator::run_telltale_control_plane_with_runner(...)` over manually
-assembling upstream sidecar paths. These helpers invoke the configured
-Telltale runner command, attach the generated run-output sidecar, and then emit
-the normal Aura parity report. Override the command with
+assembling candidate upstream sidecar paths. These helpers invoke the
+configured Telltale runner command, attach the generated candidate run-output
+sidecar, and then emit the normal Aura parity report. Supported file lanes
+still require a baseline upstream run sidecar, and they attach optional
+decision/sweep sidecars when available. Override the command with
 `AURA_TELLTALE_SIMULATOR_RUNNER` when needed.
 
 For environment-oriented simulation state, Aura now exposes a bridge layer that
@@ -411,7 +413,26 @@ uses Telltale 11-aligned names for migrated slices. Prefer the scenario-run
 artifact lane over ad hoc handler inspection: after `run_scenario(...)`,
 inspect `SimulationResults::environment_artifacts` and the persisted
 `environment_snapshot.json` / `environment_trace.json` files under the
-configured simulator artifact root.
+configured simulator artifact root. When richer Aura-only environment detail is
+needed, read the optional `environment_overlay.json` supplement instead of
+expanding the core bridge schema.
+
+For comparative experiment work, use
+`aura_simulator::run_adaptive_privacy_policy_sweep(...)` plus
+`aura_simulator::compare_policy_sweeps(...)` instead of ad hoc local sweep
+scripts. Those APIs keep Aura-specific bindings on top of the shared Telltale
+`SweepManifest` and `SweepDiffReport` surfaces.
+
+For reusable regression bundles, use `aura_simulator::run_suite_catalog(...)`
+and `aura_simulator::compare_suite_catalogs(...)`. The suite catalogs are
+Aura-owned, but execution still goes through the shared Telltale harness and
+the archived manifest remains the shared sweep format.
+
+For theorem-aware failure evidence, convert parity reports with
+`aura_simulator::counterexample_from_parity_report(...)` or
+`aura_simulator::counterexample_from_control_plane_report(...)`. These helpers
+preserve the shared Telltale counterexample witness and record whether the
+observed mismatch is schedule noise only.
 
 For parity debugging, run:
 

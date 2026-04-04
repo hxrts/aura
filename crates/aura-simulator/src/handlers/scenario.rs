@@ -4,7 +4,11 @@
 //! capabilities. Replaces the former ScenarioInjectionMiddleware with proper
 //! effect system integration.
 
-use crate::environment_bridge::{AuraEnvironmentArtifacts, AuraEnvironmentBridge};
+use crate::environment_bridge::{
+    AuraAdmissionPressureOverlayV1, AuraEnvironmentArtifacts, AuraEnvironmentBridge,
+    AuraEnvironmentOverlayV1, AuraInterferenceOverlayV1, AuraProviderOverlayV1,
+    AuraTopologyChurnOverlayV1,
+};
 use async_trait::async_trait;
 use aura_core::effects::{TestingEffects, TestingError};
 use aura_core::frost::ThresholdSignature;
@@ -3149,7 +3153,9 @@ impl SimulationScenarioHandler {
             .state
             .lock()
             .expect("scenario state mutex should not be poisoned");
-        state.environment_bridge.capture_artifacts()
+        let mut artifacts = state.environment_bridge.capture_artifacts();
+        artifacts.overlay = Some(capture_adaptive_privacy_overlay(&state.adaptive_privacy));
+        artifacts
     }
 
     fn record_simple_event(
@@ -3172,6 +3178,81 @@ impl SimulationScenarioHandler {
         Self::evaluate_scenario_triggers_locked(&mut state, Some(event_type))?;
 
         Ok(())
+    }
+}
+
+fn capture_adaptive_privacy_overlay(
+    adaptive_privacy: &AdaptivePrivacyState,
+) -> AuraEnvironmentOverlayV1 {
+    let mut mobility_profiles = adaptive_privacy
+        .movement_profiles
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    mobility_profiles.sort();
+
+    let mut provider_heterogeneity = adaptive_privacy
+        .provider_saturation
+        .values()
+        .map(|state| AuraProviderOverlayV1 {
+            provider: state.provider.clone(),
+            queue_depth: state.queue_depth,
+            utilization_per_mille: bias_to_per_mille(state.utilization),
+            health_score_per_mille: adaptive_privacy
+                .local_health
+                .get(&state.provider)
+                .map(|health| bias_to_per_mille(health.score)),
+            latency_ms: adaptive_privacy
+                .local_health
+                .get(&state.provider)
+                .map(|health| health.latency_ms),
+        })
+        .collect::<Vec<_>>();
+    provider_heterogeneity.sort_by(|left, right| left.provider.cmp(&right.provider));
+
+    let mut admission_pressure = adaptive_privacy
+        .sync_opportunities
+        .values()
+        .map(|state| AuraAdmissionPressureOverlayV1 {
+            profile_id: state.profile_id.clone(),
+            density: sync_density_label(state.density).to_string(),
+            peer_count: state.peers.len(),
+        })
+        .collect::<Vec<_>>();
+    admission_pressure.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+
+    let mut topology_churn = adaptive_privacy
+        .churn_bursts
+        .values()
+        .map(|burst| AuraTopologyChurnOverlayV1 {
+            burst_id: burst.id.clone(),
+            affected_participants: burst.affected_participants.clone(),
+            entering: burst.entering,
+            leaving: burst.leaving,
+            recorded_at_tick: burst.recorded_at,
+        })
+        .collect::<Vec<_>>();
+    topology_churn.sort_by(|left, right| left.burst_id.cmp(&right.burst_id));
+
+    let mut adversary_interference = adaptive_privacy
+        .honest_hop_compromise_patterns
+        .iter()
+        .map(|pattern| AuraInterferenceOverlayV1 {
+            path_id: pattern.path_id.clone(),
+            compromised_hops: pattern.compromised_hops.clone(),
+            honest_hops_remaining: pattern.honest_hops_remaining,
+            recorded_at_tick: pattern.recorded_at,
+        })
+        .collect::<Vec<_>>();
+    adversary_interference.sort_by(|left, right| left.path_id.cmp(&right.path_id));
+
+    AuraEnvironmentOverlayV1 {
+        mobility_profiles,
+        partition_heal_cycle_count: adaptive_privacy.partition_heal_cycles.len(),
+        provider_heterogeneity,
+        admission_pressure,
+        topology_churn,
+        adversary_interference,
     }
 }
 

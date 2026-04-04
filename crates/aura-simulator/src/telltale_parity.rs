@@ -2,8 +2,8 @@
 //!
 //! This module defines a crate-local integration boundary.
 //! It avoids direct protocol-machine execution coupling in the default simulator path.
-//! Callers provide conformance artifacts and can optionally attach upstream
-//! Telltale 11 simulator sidecars for theorem-facing context.
+//! Callers provide conformance artifacts, while supported file/control-plane
+//! lanes require upstream Telltale 11 run sidecars for theorem-facing context.
 
 use crate::differential_tester::{DifferentialProfile, DifferentialReport, DifferentialTester};
 use aura_core::{AuraConformanceArtifactV1, ConformanceSurfaceName};
@@ -125,8 +125,8 @@ pub struct TelltaleParityFileRun {
     pub output_report_path: PathBuf,
     /// Comparison profile.
     pub profile: DifferentialProfile,
-    /// Optional upstream Telltale 11 sidecar paths to enrich the Aura parity report.
-    pub upstream: Option<TelltaleUpstreamPathsV1>,
+    /// Upstream Telltale 11 sidecar paths that define the default semantic report surface.
+    pub upstream: TelltaleUpstreamPathsV1,
 }
 
 /// Protocol-critical control-plane lane kinds that should use telltale parity
@@ -159,8 +159,8 @@ pub struct TelltaleControlPlaneFileRun {
     pub output_report_path: PathBuf,
     /// Comparison profile.
     pub profile: DifferentialProfile,
-    /// Optional upstream Telltale 11 sidecar paths to enrich the Aura parity report.
-    pub upstream: Option<TelltaleUpstreamPathsV1>,
+    /// Upstream Telltale 11 sidecar paths that define the default semantic report surface.
+    pub upstream: TelltaleUpstreamPathsV1,
 }
 
 /// Stable simulator parity artifact payload.
@@ -178,12 +178,10 @@ pub struct TelltaleParityReportV1 {
     pub first_mismatch_step_index: Option<usize>,
     /// Differential comparison report.
     pub differential: DifferentialReport,
-    /// High-level semantic summary when upstream Telltale 11 context is present.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub semantic_summary: Option<TelltaleParitySemanticSummaryV1>,
-    /// Optional upstream Telltale 11 simulator context attached to this lane.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upstream: Option<TelltaleUpstreamReportV1>,
+    /// High-level Aura overlay derived from the authoritative upstream context.
+    pub semantic_summary: TelltaleParitySemanticSummaryV1,
+    /// Authoritative upstream Telltale 11 simulator context attached to this lane.
+    pub upstream: TelltaleUpstreamReportV1,
 }
 
 /// Optional file paths for upstream Telltale 11 sidecar artifacts.
@@ -206,12 +204,10 @@ pub struct TelltaleUpstreamPathsV1 {
 /// Upstream Telltale 11 simulator context carried inside Aura parity reports.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TelltaleUpstreamReportV1 {
-    /// Baseline-side Telltale 11 run summary, when provided.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub baseline_run: Option<TelltaleRunSummaryV1>,
-    /// Candidate-side Telltale 11 run summary, when provided.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub telltale_run: Option<TelltaleRunSummaryV1>,
+    /// Baseline-side Telltale 11 run summary.
+    pub baseline_run: TelltaleRunSummaryV1,
+    /// Candidate-side Telltale 11 run summary.
+    pub telltale_run: TelltaleRunSummaryV1,
     /// Baseline-side theorem/decision report, when provided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_decision_report: Option<TelltaleDecisionReport>,
@@ -225,8 +221,7 @@ pub struct TelltaleUpstreamReportV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telltale_sweep_manifest: Option<SweepManifest>,
     /// Compact cross-run comparison for the supplied upstream sidecars.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub comparison: Option<TelltaleUpstreamComparisonV1>,
+    pub comparison: TelltaleUpstreamComparisonV1,
 }
 
 /// Compact summary of a Telltale 11 simulator run sidecar.
@@ -340,6 +335,9 @@ pub enum TelltaleParityError {
     /// Failed writing parity report.
     #[error("failed writing parity report to {path}: {message}")]
     WriteReport { path: String, message: String },
+    /// Supported parity lane omitted required upstream sidecars.
+    #[error("supported lane {lane} is missing required upstream sidecars: {missing:?}")]
+    MissingRequiredUpstreamSidecars { lane: String, missing: Vec<String> },
     /// Failed invoking the upstream simulator runner.
     #[error("failed invoking telltale simulator runner {program}: {message}")]
     RunSimulator { program: String, message: String },
@@ -394,6 +392,7 @@ pub fn run_telltale_parity_file_lane(
         telltale_candidate: candidate,
         profile: input.profile,
     });
+    let upstream = load_upstream_context("aura-simulator:telltale-parity", &input.upstream)?;
 
     let report = TelltaleParityReportV1 {
         schema_version: AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1.to_string(),
@@ -404,11 +403,10 @@ pub fn run_telltale_parity_file_lane(
         },
         first_mismatch_surface: differential.mismatch.as_ref().and_then(|m| m.surface),
         first_mismatch_step_index: differential.mismatch.as_ref().and_then(|m| m.step_index),
-        semantic_summary: None,
+        semantic_summary: semantic_summary_from_report(&differential, &upstream),
         differential,
-        upstream: load_upstream_context(input.upstream.as_ref())?,
+        upstream,
     };
-    let report = with_semantic_summary(report);
 
     write_parity_report(&input.output_report_path, &report)?;
     Ok(report)
@@ -426,9 +424,9 @@ pub fn run_telltale_parity_with_runner(
 ) -> Result<TelltaleParityReportV1, TelltaleParityError> {
     execute_telltale_simulator_run(input.runner.as_ref(), &input.telltale_run)?;
     let mut parity = input.parity.clone();
-    let mut upstream = parity.upstream.clone().unwrap_or_default();
+    let mut upstream = parity.upstream.clone();
     upstream.telltale_run_output_path = Some(input.telltale_run.output_path.clone());
-    parity.upstream = Some(upstream);
+    parity.upstream = upstream;
     run_telltale_parity_file_lane(&parity)
 }
 
@@ -448,7 +446,6 @@ pub fn run_telltale_control_plane_file_lane(
         "aura-simulator:telltale-control-plane:{}",
         input.control_plane_lane.lane_suffix()
     );
-    report = with_semantic_summary(report);
     write_parity_report(&input.output_report_path, &report)?;
     Ok(report)
 }
@@ -465,9 +462,9 @@ pub fn run_telltale_control_plane_with_runner(
 ) -> Result<TelltaleParityReportV1, TelltaleParityError> {
     execute_telltale_simulator_run(input.runner.as_ref(), &input.telltale_run)?;
     let mut parity = input.parity.clone();
-    let mut upstream = parity.upstream.clone().unwrap_or_default();
+    let mut upstream = parity.upstream.clone();
     upstream.telltale_run_output_path = Some(input.telltale_run.output_path.clone());
-    parity.upstream = Some(upstream);
+    parity.upstream = upstream;
     run_telltale_control_plane_file_lane(&parity)
 }
 
@@ -551,22 +548,29 @@ fn load_run_summary(path: &Path) -> Result<TelltaleRunSummaryV1, TelltaleParityE
 }
 
 fn load_upstream_context(
-    upstream: Option<&TelltaleUpstreamPathsV1>,
-) -> Result<Option<TelltaleUpstreamReportV1>, TelltaleParityError> {
-    let Some(upstream) = upstream else {
-        return Ok(None);
-    };
+    lane: &str,
+    upstream: &TelltaleUpstreamPathsV1,
+) -> Result<TelltaleUpstreamReportV1, TelltaleParityError> {
+    let missing = required_upstream_sidecars(upstream);
+    if !missing.is_empty() {
+        return Err(TelltaleParityError::MissingRequiredUpstreamSidecars {
+            lane: lane.to_string(),
+            missing,
+        });
+    }
 
-    let baseline_run = upstream
-        .baseline_run_output_path
-        .as_deref()
-        .map(load_run_summary)
-        .transpose()?;
-    let telltale_run = upstream
-        .telltale_run_output_path
-        .as_deref()
-        .map(load_run_summary)
-        .transpose()?;
+    let baseline_run = load_run_summary(
+        upstream
+            .baseline_run_output_path
+            .as_deref()
+            .expect("required upstream baseline run path"),
+    )?;
+    let telltale_run = load_run_summary(
+        upstream
+            .telltale_run_output_path
+            .as_deref()
+            .expect("required upstream candidate run path"),
+    )?;
     let baseline_decision_report = upstream
         .baseline_decision_report_path
         .as_deref()
@@ -588,26 +592,23 @@ fn load_upstream_context(
         .map(load_json_file::<SweepManifest>)
         .transpose()?;
 
-    let comparison = match (&baseline_run, &telltale_run) {
-        (Some(baseline), Some(candidate)) => Some(TelltaleUpstreamComparisonV1 {
-            execution_regime_match: baseline.execution_regime == candidate.execution_regime,
-            theorem_profile_match: baseline.theorem_profile == candidate.theorem_profile,
-            scheduler_profile_match: baseline.scheduler_profile == candidate.scheduler_profile,
-            normalized_observability_match: baseline.normalized_observability
-                == candidate.normalized_observability,
-            decision_report_match: match (&baseline_decision_report, &telltale_decision_report) {
-                (Some(lhs), Some(rhs)) => Some(lhs == rhs),
-                _ => None,
-            },
-            sweep_run_count_match: match (&baseline_sweep_manifest, &telltale_sweep_manifest) {
-                (Some(lhs), Some(rhs)) => Some(lhs.runs.len() == rhs.runs.len()),
-                _ => None,
-            },
-        }),
-        _ => None,
+    let comparison = TelltaleUpstreamComparisonV1 {
+        execution_regime_match: baseline_run.execution_regime == telltale_run.execution_regime,
+        theorem_profile_match: baseline_run.theorem_profile == telltale_run.theorem_profile,
+        scheduler_profile_match: baseline_run.scheduler_profile == telltale_run.scheduler_profile,
+        normalized_observability_match: baseline_run.normalized_observability
+            == telltale_run.normalized_observability,
+        decision_report_match: match (&baseline_decision_report, &telltale_decision_report) {
+            (Some(lhs), Some(rhs)) => Some(lhs == rhs),
+            _ => None,
+        },
+        sweep_run_count_match: match (&baseline_sweep_manifest, &telltale_sweep_manifest) {
+            (Some(lhs), Some(rhs)) => Some(lhs.runs.len() == rhs.runs.len()),
+            _ => None,
+        },
     };
 
-    Ok(Some(TelltaleUpstreamReportV1 {
+    Ok(TelltaleUpstreamReportV1 {
         baseline_run,
         telltale_run,
         baseline_decision_report,
@@ -615,20 +616,25 @@ fn load_upstream_context(
         baseline_sweep_manifest,
         telltale_sweep_manifest,
         comparison,
-    }))
+    })
 }
 
-fn with_semantic_summary(mut report: TelltaleParityReportV1) -> TelltaleParityReportV1 {
-    report.semantic_summary =
-        semantic_summary_from_report(&report.differential, report.upstream.as_ref());
-    report
+fn required_upstream_sidecars(upstream: &TelltaleUpstreamPathsV1) -> Vec<String> {
+    let mut missing = Vec::new();
+    if upstream.baseline_run_output_path.is_none() {
+        missing.push("baseline_run_output_path".to_string());
+    }
+    if upstream.telltale_run_output_path.is_none() {
+        missing.push("telltale_run_output_path".to_string());
+    }
+    missing
 }
 
 fn semantic_summary_from_report(
     differential: &DifferentialReport,
-    upstream: Option<&TelltaleUpstreamReportV1>,
-) -> Option<TelltaleParitySemanticSummaryV1> {
-    let comparison = upstream?.comparison.as_ref()?;
+    upstream: &TelltaleUpstreamReportV1,
+) -> TelltaleParitySemanticSummaryV1 {
+    let comparison = &upstream.comparison;
     let theorem_aligned = comparison.execution_regime_match
         && comparison.theorem_profile_match
         && comparison.scheduler_profile_match;
@@ -641,13 +647,13 @@ fn semantic_summary_from_report(
     } else {
         TelltaleParitySemanticRelationV1::SafetyVisibleDivergence
     };
-    Some(TelltaleParitySemanticSummaryV1 {
+    TelltaleParitySemanticSummaryV1 {
         relation,
         execution_regime_match: comparison.execution_regime_match,
         theorem_profile_match: comparison.theorem_profile_match,
         scheduler_profile_match: comparison.scheduler_profile_match,
         normalized_observability_match: comparison.normalized_observability_match,
-    })
+    }
 }
 
 fn write_parity_report(
@@ -677,6 +683,7 @@ mod tests {
     use aura_core::{
         AuraConformanceRunMetadataV1, AuraConformanceSurfaceV1, ConformanceSurfaceName,
     };
+    use serde::Serialize;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
@@ -723,6 +730,17 @@ mod tests {
             ),
         );
         artifact
+    }
+
+    fn write_json_fixture<T>(path: &Path, value: &T)
+    where
+        T: Serialize,
+    {
+        fs::write(
+            path,
+            serde_json::to_vec_pretty(value).expect("serialize fixture"),
+        )
+        .expect("write fixture");
     }
 
     #[test]
@@ -779,11 +797,15 @@ mod tests {
             telltale_candidate_path: candidate_path,
             output_report_path: report_path.clone(),
             profile: DifferentialProfile::EnvelopeBounded,
-            upstream: None,
+            upstream: write_required_upstream_paths(dir.path()),
         })
         .expect("run lane");
         assert_eq!(report.schema_version, AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1);
         assert!(report.differential.equivalent);
+        assert_eq!(
+            report.semantic_summary.relation,
+            TelltaleParitySemanticRelationV1::EquivalentUnderNormalization
+        );
 
         let written: TelltaleParityReportV1 =
             serde_json::from_slice(&std::fs::read(report_path).expect("read report"))
@@ -828,7 +850,7 @@ mod tests {
             telltale_candidate_path: candidate_path,
             output_report_path: artifact_path.clone(),
             profile: DifferentialProfile::EnvelopeBounded,
-            upstream: None,
+            upstream: write_required_upstream_paths(&work_dir),
         })
         .expect("run lane");
         assert!(report.differential.equivalent);
@@ -861,7 +883,7 @@ mod tests {
             telltale_candidate_path: candidate_path,
             output_report_path: report_path,
             profile: DifferentialProfile::Strict,
-            upstream: None,
+            upstream: write_required_upstream_paths(dir.path()),
         })
         .expect("run lane");
         assert!(!report.differential.equivalent);
@@ -896,7 +918,7 @@ mod tests {
             telltale_candidate_path: candidate_path,
             output_report_path: report_path.clone(),
             profile: DifferentialProfile::EnvelopeBounded,
-            upstream: None,
+            upstream: write_required_upstream_paths(dir.path()),
         })
         .expect("run control-plane lane");
         assert_eq!(
@@ -974,6 +996,31 @@ mod tests {
         }
     }
 
+    fn sample_decision_report() -> TelltaleDecisionReport {
+        TelltaleDecisionReport {
+            kind: DecisionKind::TheoremEligibility,
+            outcome: DecisionOutcome::Certified(DecisionCertificate::TheoremEligibility {
+                eligibility: TheoremEligibility::Exact,
+            }),
+        }
+    }
+
+    fn write_required_upstream_paths(dir: &Path) -> TelltaleUpstreamPathsV1 {
+        let baseline_run_path = dir.join("baseline-run.json");
+        let candidate_run_path = dir.join("candidate-run.json");
+        let run_output = sample_run_summary();
+        write_json_fixture(&baseline_run_path, &run_output);
+        write_json_fixture(&candidate_run_path, &run_output);
+        TelltaleUpstreamPathsV1 {
+            baseline_run_output_path: Some(baseline_run_path),
+            telltale_run_output_path: Some(candidate_run_path),
+            baseline_decision_report_path: None,
+            telltale_decision_report_path: None,
+            baseline_sweep_manifest_path: None,
+            telltale_sweep_manifest_path: None,
+        }
+    }
+
     fn write_runner_script(path: &Path, body: &str) {
         fs::write(path, body).expect("write script");
         let mut perms = fs::metadata(path).expect("metadata").permissions();
@@ -1019,12 +1066,7 @@ mod tests {
         )
         .expect("write candidate run");
 
-        let decision = TelltaleDecisionReport {
-            kind: DecisionKind::TheoremEligibility,
-            outcome: DecisionOutcome::Certified(DecisionCertificate::TheoremEligibility {
-                eligibility: TheoremEligibility::Exact,
-            }),
-        };
+        let decision = sample_decision_report();
         std::fs::write(
             &baseline_decision_path,
             serde_json::to_vec_pretty(&decision).expect("serialize baseline decision"),
@@ -1065,32 +1107,30 @@ mod tests {
             telltale_candidate_path: candidate_path,
             output_report_path: report_path,
             profile: DifferentialProfile::EnvelopeBounded,
-            upstream: Some(TelltaleUpstreamPathsV1 {
+            upstream: TelltaleUpstreamPathsV1 {
                 baseline_run_output_path: Some(baseline_run_path),
                 telltale_run_output_path: Some(candidate_run_path),
                 baseline_decision_report_path: Some(baseline_decision_path),
                 telltale_decision_report_path: Some(candidate_decision_path),
                 baseline_sweep_manifest_path: Some(baseline_sweep_path),
                 telltale_sweep_manifest_path: Some(candidate_sweep_path),
-            }),
+            },
         })
         .expect("run lane");
 
-        let upstream = report.upstream.expect("upstream context");
-        assert!(upstream.baseline_run.is_some());
-        assert!(upstream.telltale_run.is_some());
+        let upstream = report.upstream;
         assert!(upstream.baseline_decision_report.is_some());
         assert!(upstream.telltale_decision_report.is_some());
         assert!(upstream.baseline_sweep_manifest.is_some());
         assert!(upstream.telltale_sweep_manifest.is_some());
-        let comparison = upstream.comparison.expect("comparison");
+        let comparison = upstream.comparison;
         assert!(comparison.execution_regime_match);
         assert!(comparison.theorem_profile_match);
         assert!(comparison.scheduler_profile_match);
         assert!(comparison.normalized_observability_match);
         assert_eq!(comparison.decision_report_match, Some(true));
         assert_eq!(comparison.sweep_run_count_match, Some(true));
-        let semantic = report.semantic_summary.expect("semantic summary");
+        let semantic = report.semantic_summary;
         assert_eq!(
             semantic.relation,
             TelltaleParitySemanticRelationV1::EquivalentUnderNormalization
@@ -1193,7 +1233,14 @@ mod tests {
                 telltale_candidate_path: candidate_path,
                 output_report_path: report_path,
                 profile: DifferentialProfile::EnvelopeBounded,
-                upstream: None,
+                upstream: TelltaleUpstreamPathsV1 {
+                    baseline_run_output_path: Some(fixture_path.clone()),
+                    telltale_run_output_path: None,
+                    baseline_decision_report_path: None,
+                    telltale_decision_report_path: None,
+                    baseline_sweep_manifest_path: None,
+                    telltale_sweep_manifest_path: None,
+                },
             },
             telltale_run: TelltaleSimulatorRunRequest {
                 config_path: dir.path().join("scenario.toml"),
@@ -1207,9 +1254,15 @@ mod tests {
         })
         .expect("run parity with runner");
 
-        let upstream = report.upstream.expect("upstream");
-        assert!(upstream.telltale_run.is_some());
-        assert!(report.semantic_summary.is_none());
+        let upstream = report.upstream;
+        assert_eq!(
+            upstream.baseline_run.normalized_observability,
+            upstream.telltale_run.normalized_observability
+        );
+        assert_eq!(
+            report.semantic_summary.relation,
+            TelltaleParitySemanticRelationV1::EquivalentUnderNormalization
+        );
         assert!(run_output_path.exists());
         let logged = fs::read_to_string(arg_log_path).expect("read args");
         assert!(logged.contains("--pretty"));
@@ -1254,18 +1307,18 @@ mod tests {
             telltale_candidate_path: candidate_path,
             output_report_path: report_path,
             profile: DifferentialProfile::Strict,
-            upstream: Some(TelltaleUpstreamPathsV1 {
+            upstream: TelltaleUpstreamPathsV1 {
                 baseline_run_output_path: Some(baseline_run_path),
                 telltale_run_output_path: Some(candidate_run_path),
                 baseline_decision_report_path: None,
                 telltale_decision_report_path: None,
                 baseline_sweep_manifest_path: None,
                 telltale_sweep_manifest_path: None,
-            }),
+            },
         })
         .expect("run lane");
 
-        let semantic = report.semantic_summary.expect("semantic summary");
+        let semantic = report.semantic_summary;
         assert_eq!(
             semantic.relation,
             TelltaleParitySemanticRelationV1::ExactMatch
@@ -1315,22 +1368,54 @@ mod tests {
             telltale_candidate_path: candidate_path,
             output_report_path: report_path,
             profile: DifferentialProfile::EnvelopeBounded,
-            upstream: Some(TelltaleUpstreamPathsV1 {
+            upstream: TelltaleUpstreamPathsV1 {
                 baseline_run_output_path: Some(baseline_run_path),
                 telltale_run_output_path: Some(candidate_run_path),
                 baseline_decision_report_path: None,
                 telltale_decision_report_path: None,
                 baseline_sweep_manifest_path: None,
                 telltale_sweep_manifest_path: None,
-            }),
+            },
         })
         .expect("run lane");
 
-        let semantic = report.semantic_summary.expect("semantic summary");
+        let semantic = report.semantic_summary;
         assert_eq!(
             semantic.relation,
             TelltaleParitySemanticRelationV1::SafetyVisibleDivergence
         );
         assert!(!semantic.theorem_profile_match);
+    }
+
+    #[test]
+    fn supported_file_lane_rejects_missing_required_upstream_run_sidecars() {
+        let dir = tempdir().expect("tempdir");
+        let baseline_path = dir.path().join("baseline.json");
+        let candidate_path = dir.path().join("candidate.json");
+        let report_path = dir.path().join("report.json");
+
+        write_json_fixture(&baseline_path, &artifact("aura", &["a", "b"]));
+        write_json_fixture(&candidate_path, &artifact("telltale_machine", &["b", "a"]));
+
+        let error = run_telltale_parity_file_lane(&TelltaleParityFileRun {
+            baseline_path,
+            telltale_candidate_path: candidate_path,
+            output_report_path: report_path,
+            profile: DifferentialProfile::EnvelopeBounded,
+            upstream: TelltaleUpstreamPathsV1::default(),
+        })
+        .expect_err("missing run sidecars should fail");
+
+        match error {
+            TelltaleParityError::MissingRequiredUpstreamSidecars { missing, .. } => {
+                assert!(missing
+                    .iter()
+                    .any(|field| field == "baseline_run_output_path"));
+                assert!(missing
+                    .iter()
+                    .any(|field| field == "telltale_run_output_path"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }
