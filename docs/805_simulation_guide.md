@@ -407,10 +407,11 @@ the normal Aura parity report. Override the command with
 `AURA_TELLTALE_SIMULATOR_RUNNER` when needed.
 
 For environment-oriented simulation state, Aura now exposes a bridge layer that
-uses Telltale 11-aligned names for migrated slices. Use
-`SimulationScenarioHandler::environment_snapshot()` and
-`SimulationScenarioHandler::environment_trace()` when you need environment-style
-inspection instead of Aura-local adaptive-privacy internals.
+uses Telltale 11-aligned names for migrated slices. Prefer the scenario-run
+artifact lane over ad hoc handler inspection: after `run_scenario(...)`,
+inspect `SimulationResults::environment_artifacts` and the persisted
+`environment_snapshot.json` / `environment_trace.json` files under the
+configured simulator artifact root.
 
 For parity debugging, run:
 

@@ -389,9 +389,18 @@ being migrated toward Telltale 11 terminology. The current migrated slice is:
 - sync opportunities -> link-admission observations
 - provider saturation -> node-capability observations
 
-Use `SimulationScenarioHandler::environment_snapshot()` and
-`SimulationScenarioHandler::environment_trace()` to inspect the migrated bridge
-surface.
+Scenario runs now persist that bridge surface as first-class artifacts under the
+simulator artifact root:
+
+```text
+<artifacts_dir>/scenario-runs/<scenario_slug>-seed-<seed>/environment_snapshot.json
+<artifacts_dir>/scenario-runs/<scenario_slug>-seed-<seed>/environment_trace.json
+```
+
+Read the written paths from `SimulationResults::environment_artifacts`. The
+bridge remains the single Aura-owned place where migrated mobility,
+link-admission, and node-capability decisions are materialized before handler
+state keeps its richer Aura-local bookkeeping.
 
 ### ITF Trace Format
 

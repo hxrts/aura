@@ -20,11 +20,13 @@ use super::{
     stateless_simulator::SimulationTickResult, SimulationFaultHandler, SimulationScenarioHandler,
     SimulationTimeHandler,
 };
+use crate::environment_bridge::{write_environment_artifacts, AuraEnvironmentArtifactPaths};
 use crate::properties::{
     default_property_suite, PropertyStateSnapshot, ProtocolPropertyClass, ProtocolPropertySuiteIds,
 };
 use crate::property_monitor::{AuraPropertyMonitor, PropertyRunReport, PropertyViolation};
 use crate::quint::itf_fuzzer::{ITFBasedFuzzer, ITFFuzzConfig, ITFTrace};
+use crate::types::SimulatorConfig;
 use aura_agent::{AuraEffectSystem, EffectSystemFactory};
 use aura_core::effects::{
     ChaosEffects, SimulationEnvironmentConfig, SimulationEnvironmentFactory, TestingEffects,
@@ -33,7 +35,7 @@ use aura_core::effects::{
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use parking_lot::RwLock;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
 
@@ -51,6 +53,7 @@ pub struct SimulationEffectComposer {
     scenario_handler: Option<Arc<SimulationScenarioHandler>>,
     itf_fuzzer: Option<ITFBasedFuzzer>,
     seed: u64,
+    artifacts_dir: PathBuf,
     /// Optional shared transport inbox for multi-agent simulations
     shared_transport_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
 }
@@ -67,6 +70,7 @@ impl SimulationEffectComposer {
             scenario_handler: None,
             itf_fuzzer: None,
             seed: 42, // Default deterministic seed
+            artifacts_dir: SimulatorConfig::default().artifacts_dir,
             shared_transport_inbox: None,
         }
     }
@@ -74,6 +78,12 @@ impl SimulationEffectComposer {
     /// Set the seed for deterministic simulation
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = seed;
+        self
+    }
+
+    /// Override the artifact root used for scenario-run outputs.
+    pub fn with_artifacts_dir(mut self, artifacts_dir: impl Into<PathBuf>) -> Self {
+        self.artifacts_dir = artifacts_dir.into();
         self
     }
 
@@ -175,6 +185,7 @@ impl SimulationEffectComposer {
             scenario_handler: self.scenario_handler,
             itf_fuzzer: self.itf_fuzzer,
             seed: self.seed,
+            artifacts_dir: self.artifacts_dir,
         })
     }
 
@@ -243,6 +254,7 @@ pub struct ComposedSimulationEnvironment {
     scenario_handler: Option<Arc<SimulationScenarioHandler>>,
     itf_fuzzer: Option<ITFBasedFuzzer>,
     seed: u64,
+    artifacts_dir: PathBuf,
 }
 
 impl ComposedSimulationEnvironment {
@@ -279,6 +291,11 @@ impl ComposedSimulationEnvironment {
     /// Check if this environment is deterministic
     pub fn is_deterministic(&self) -> bool {
         true // All simulation environments are deterministic
+    }
+
+    /// Get the artifact root for scenario-run outputs.
+    pub fn artifacts_dir(&self) -> &Path {
+        &self.artifacts_dir
     }
 
     /// Access time effects through trait
@@ -436,6 +453,7 @@ impl ComposedSimulationEnvironment {
             results.properties_checked = monitor.property_count();
             results.property_violations = monitor.violations().to_vec();
         }
+        self.persist_environment_artifacts(&scenario_name, &mut results)?;
 
         info!(
             scenario_name = %scenario_name,
@@ -559,6 +577,8 @@ impl ComposedSimulationEnvironment {
             .await
             .map_err(|e| SimulationComposerError::EffectOperationFailed(e.to_string()))?;
 
+        self.persist_environment_artifacts(&scenario_name, &mut results)?;
+
         info!(
             scenario_name = %scenario_name,
             ticks_executed = results.tick_results.len(),
@@ -585,6 +605,23 @@ impl ComposedSimulationEnvironment {
                 "Property verification failed: {e}"
             ))
         })
+    }
+
+    fn persist_environment_artifacts(
+        &self,
+        scenario_name: &str,
+        results: &mut SimulationResults,
+    ) -> Result<(), SimulationComposerError> {
+        let Some(scenario_handler) = self.scenario_handler.as_ref() else {
+            return Ok(());
+        };
+
+        let artifacts = scenario_handler.capture_environment_artifacts();
+        let paths =
+            write_environment_artifacts(self.artifacts_dir(), scenario_name, self.seed, &artifacts)
+                .map_err(|error| SimulationComposerError::ArtifactWriteFailed(error.to_string()))?;
+        results.environment_artifacts = Some(paths);
+        Ok(())
     }
 }
 
@@ -728,6 +765,7 @@ pub struct SimulationResults {
     pub tick_results: Vec<SimulationTickResult>,
     pub property_violations: Vec<PropertyViolation>,
     pub properties_checked: usize,
+    pub environment_artifacts: Option<AuraEnvironmentArtifactPaths>,
 }
 
 impl SimulationResults {
@@ -737,6 +775,7 @@ impl SimulationResults {
             tick_results: Vec::new(),
             property_violations: Vec::new(),
             properties_checked: 0,
+            environment_artifacts: None,
         }
     }
 
@@ -780,6 +819,10 @@ pub enum SimulationComposerError {
     /// Effect operation failed
     #[error("Effect operation failed: {0}")]
     EffectOperationFailed(String),
+
+    /// Scenario-run environment artifacts could not be written.
+    #[error("Artifact write failed: {0}")]
+    ArtifactWriteFailed(String),
 }
 
 /// Factory functions for creating common simulation environments
@@ -872,6 +915,7 @@ mod tests {
         assert_eq!(results.tick_results.len(), 0);
         assert_eq!(results.total_execution_time(), std::time::Duration::ZERO);
         assert_eq!(results.average_tick_time(), std::time::Duration::ZERO);
+        assert!(results.environment_artifacts.is_none());
 
         // Add a tick result
         let tick_result = SimulationTickResult {
@@ -917,6 +961,9 @@ mod tests {
 
         let err = SimulationComposerError::EffectOperationFailed("operation failed".to_string());
         assert!(format!("{err}").contains("Effect operation failed"));
+
+        let err = SimulationComposerError::ArtifactWriteFailed("artifact failed".to_string());
+        assert!(format!("{err}").contains("Artifact write failed"));
     }
 
     #[tokio::test]
@@ -1013,5 +1060,85 @@ mod tests {
             "expected no property violations, got: {:?}",
             results.property_violations
         );
+    }
+
+    #[tokio::test]
+    async fn test_environment_bridge_run_scenario_writes_environment_artifacts() {
+        use crate::handlers::scenario::{AdaptivePrivacyTransition, SyncOpportunityDensity};
+        use crate::{InjectionAction, ScenarioDefinition, TriggerCondition};
+        use aura_testkit::DeviceTestFixture;
+        use tempfile::tempdir;
+
+        let fixture = DeviceTestFixture::new(5);
+        let device_id = fixture.device_id();
+        let authority_id = AuthorityId::new_from_entropy([6u8; 32]);
+        let dir = tempdir().expect("tempdir");
+        let env = SimulationEffectComposer::new(device_id, authority_id)
+            .with_seed(9)
+            .with_artifacts_dir(dir.path())
+            .with_effect_system_async()
+            .await
+            .expect("effect system")
+            .with_time_control()
+            .with_fault_injection()
+            .with_scenario_management()
+            .build()
+            .expect("build environment");
+
+        let handler = env.testing_effects().expect("scenario handler");
+        handler
+            .register_scenario(ScenarioDefinition {
+                id: "environment_bridge_artifacts".to_string(),
+                name: "Environment Bridge Artifacts".to_string(),
+                actions: vec![
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::ConfigureMovement {
+                            profile_id: "profile-a".to_string(),
+                            clusters: vec!["cluster-1".to_string()],
+                            home_locality_bias: 0.8,
+                            neighborhood_locality_bias: 0.2,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordProviderSaturation {
+                            provider: "provider-a".to_string(),
+                            queue_depth: 3,
+                            utilization: 0.9,
+                        },
+                    ),
+                    InjectionAction::AdaptivePrivacyTransition(
+                        AdaptivePrivacyTransition::RecordSyncOpportunity {
+                            profile_id: "profile-a".to_string(),
+                            density: SyncOpportunityDensity::Sparse,
+                            peers: vec!["alice".to_string(), "bob".to_string()],
+                        },
+                    ),
+                ],
+                trigger: TriggerCondition::Immediate,
+                duration: None,
+                priority: 1,
+            })
+            .expect("register scenario");
+        handler
+            .trigger_scenario("environment_bridge_artifacts")
+            .expect("trigger scenario");
+
+        let results = env
+            .run_scenario(
+                "environment_bridge_artifacts".to_string(),
+                "writes environment artifacts".to_string(),
+                SimulationScenarioConfig {
+                    max_ticks: 1,
+                    ..SimulationScenarioConfig::default()
+                },
+            )
+            .await
+            .expect("run scenario");
+
+        let paths = results
+            .environment_artifacts
+            .expect("environment artifacts should be written");
+        assert!(paths.snapshot_path.exists());
+        assert!(paths.trace_path.exists());
     }
 }

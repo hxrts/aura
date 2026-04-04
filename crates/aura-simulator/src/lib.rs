@@ -180,9 +180,12 @@ pub use choreography_transport::{SimulatedMessageBus, SimulatedTransport, TestEf
 // Re-export choreography observer
 pub use choreography_observer::{ObserverStatistics, ProtocolEvent, SimulatorObserver};
 pub use environment_bridge::{
-    AuraEnvironmentBridge, AuraEnvironmentSnapshot, AuraEnvironmentTrace,
-    AuraEnvironmentTraceEntry, AuraLinkAdmissionObservation, AuraMobilityProfile,
-    AuraNodeCapabilityObservation,
+    write_environment_artifacts, AuraEnvironmentArtifactError, AuraEnvironmentArtifactMetadataV1,
+    AuraEnvironmentArtifactPaths, AuraEnvironmentArtifacts, AuraEnvironmentBridge,
+    AuraEnvironmentSnapshot, AuraEnvironmentSnapshotArtifactV1, AuraEnvironmentTrace,
+    AuraEnvironmentTraceArtifactV1, AuraEnvironmentTraceEntry, AuraLinkAdmissionObservation,
+    AuraMobilityProfile, AuraNodeCapabilityObservation,
+    AURA_ENVIRONMENT_SNAPSHOT_ARTIFACT_SCHEMA_V1, AURA_ENVIRONMENT_TRACE_ARTIFACT_SCHEMA_V1,
 };
 
 // Re-export protocol state machine

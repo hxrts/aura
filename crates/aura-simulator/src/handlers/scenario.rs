@@ -4,10 +4,7 @@
 //! capabilities. Replaces the former ScenarioInjectionMiddleware with proper
 //! effect system integration.
 
-use crate::environment_bridge::{
-    AuraEnvironmentBridge, AuraEnvironmentSnapshot, AuraEnvironmentTrace,
-    AuraLinkAdmissionObservation, AuraMobilityProfile, AuraNodeCapabilityObservation,
-};
+use crate::environment_bridge::{AuraEnvironmentArtifacts, AuraEnvironmentBridge};
 use async_trait::async_trait;
 use aura_core::effects::{TestingEffects, TestingError};
 use aura_core::frost::ThresholdSignature;
@@ -2072,17 +2069,13 @@ impl SimulationScenarioHandler {
                 home_locality_bias,
                 neighborhood_locality_bias,
             } => {
-                state
-                    .environment_bridge
-                    .record_mobility_profile(AuraMobilityProfile {
-                        profile_id: profile_id.clone(),
-                        clusters: clusters.clone(),
-                        home_locality_bias_millis: bias_to_per_mille(home_locality_bias),
-                        neighborhood_locality_bias_millis: bias_to_per_mille(
-                            neighborhood_locality_bias,
-                        ),
-                        recorded_at_tick: state.current_tick,
-                    });
+                state.environment_bridge.configure_mobility_profile(
+                    profile_id.clone(),
+                    clusters.clone(),
+                    bias_to_per_mille(home_locality_bias),
+                    bias_to_per_mille(neighborhood_locality_bias),
+                    state.current_tick,
+                );
                 state.adaptive_privacy.movement_profiles.insert(
                     profile_id.clone(),
                     MovementProfile {
@@ -2300,14 +2293,12 @@ impl SimulationScenarioHandler {
                 queue_depth,
                 utilization,
             } => {
-                state
-                    .environment_bridge
-                    .record_node_capability(AuraNodeCapabilityObservation {
-                        provider: provider.clone(),
-                        queue_depth,
-                        utilization_per_mille: bias_to_per_mille(utilization),
-                        recorded_at_tick: state.current_tick,
-                    });
+                state.environment_bridge.observe_node_capability(
+                    provider.clone(),
+                    queue_depth,
+                    bias_to_per_mille(utilization),
+                    state.current_tick,
+                );
                 state.adaptive_privacy.provider_saturation.insert(
                     provider.clone(),
                     ProviderSaturationState {
@@ -2363,14 +2354,12 @@ impl SimulationScenarioHandler {
                 density,
                 peers,
             } => {
-                state
-                    .environment_bridge
-                    .record_link_admission(AuraLinkAdmissionObservation {
-                        profile_id: profile_id.clone(),
-                        density: sync_density_label(density).to_string(),
-                        peers: peers.clone(),
-                        recorded_at_tick: state.current_tick,
-                    });
+                state.environment_bridge.observe_link_admission(
+                    profile_id.clone(),
+                    sync_density_label(density).to_string(),
+                    peers.clone(),
+                    state.current_tick,
+                );
                 state.adaptive_privacy.sync_opportunities.insert(
                     profile_id.clone(),
                     SyncOpportunityState {
@@ -3152,26 +3141,15 @@ impl TestingEffects for SimulationScenarioHandler {
 }
 
 impl SimulationScenarioHandler {
-    /// Export the Aura environment bridge snapshot for migrated simulation state.
+    /// Capture the Aura environment bridge artifacts for migrated simulation state.
     #[must_use]
-    pub fn environment_snapshot(&self) -> AuraEnvironmentSnapshot {
+    pub(crate) fn capture_environment_artifacts(&self) -> AuraEnvironmentArtifacts {
         let state = self
             .shared
             .state
             .lock()
             .expect("scenario state mutex should not be poisoned");
-        state.environment_bridge.snapshot()
-    }
-
-    /// Export the Aura environment bridge trace for migrated simulation state.
-    #[must_use]
-    pub fn environment_trace(&self) -> AuraEnvironmentTrace {
-        let state = self
-            .shared
-            .state
-            .lock()
-            .expect("scenario state mutex should not be poisoned");
-        state.environment_bridge.trace().clone()
+        state.environment_bridge.capture_artifacts()
     }
 
     fn record_simple_event(
@@ -3850,7 +3828,8 @@ mod tests {
             .expect("environment trace type");
         assert_eq!(*environment_trace_entries, 3);
 
-        let snapshot = handler.environment_snapshot();
+        let artifacts = handler.capture_environment_artifacts();
+        let snapshot = artifacts.snapshot;
         assert_eq!(snapshot.mobility_profiles.len(), 1);
         assert_eq!(snapshot.link_admissions.len(), 1);
         assert_eq!(snapshot.node_capabilities.len(), 1);
@@ -3858,7 +3837,7 @@ mod tests {
         assert_eq!(snapshot.link_admissions[0].density, "sparse");
         assert_eq!(snapshot.node_capabilities[0].provider, "provider-a");
 
-        let trace = handler.environment_trace();
+        let trace = artifacts.trace;
         assert_eq!(trace.entries.len(), 3);
     }
 
