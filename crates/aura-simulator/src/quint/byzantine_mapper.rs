@@ -156,7 +156,7 @@ pub struct SynchronizationRequirements {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectivenessConditions {
     /// Network conditions that enhance effectiveness
-    pub network_conditions: NetworkConditions,
+    pub network_conditions: AttackNetworkConditions,
     /// Protocol states where strategy is most effective
     pub optimal_protocol_states: Vec<String>,
     /// Participant configurations that enhance attacks
@@ -165,7 +165,7 @@ pub struct EffectivenessConditions {
 
 /// Network conditions for enhanced attack effectiveness
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetworkConditions {
+pub struct AttackNetworkConditions {
     /// Preferred latency range (min, max milliseconds)
     pub latency_range: Option<(u64, u64)>,
     /// Preferred packet loss rate
@@ -807,7 +807,7 @@ impl ByzantineMapper {
                 },
             },
             effectiveness_conditions: EffectivenessConditions {
-                network_conditions: NetworkConditions {
+                network_conditions: AttackNetworkConditions {
                     latency_range: Some((10, 500)),
                     packet_loss_rate: Some(0.1),
                     benefits_from_partitions: false,

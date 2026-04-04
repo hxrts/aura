@@ -26,24 +26,27 @@ pub mod types {
         RecoveryDemoSuccess,
     }
 
-    /// Legacy Byzantine strategy kept for backward compatibility with older scenarios
+    /// Transport conditions for scenarios.
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct LegacyByzantineStrategy {
-        pub name: String,
-        pub parameters: HashMap<String, String>,
-    }
-
-    /// Byzantine conditions for scenarios
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct ByzantineConditions {
-        pub strategies: Vec<LegacyByzantineStrategy>,
-    }
-
-    /// Network conditions for scenarios
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct NetworkConditions {
+    pub struct TransportConditions {
         pub latency_ms: Option<u64>,
         pub packet_loss: Option<f64>,
+    }
+
+    /// Fault declarations for scenarios.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct FaultConditions {
+        pub models: Vec<FaultModel>,
+    }
+
+    /// Explicit fault model declarations used by Aura scenario generation.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case")]
+    pub enum FaultModel {
+        ByzantineStrategy {
+            name: String,
+            parameters: HashMap<String, String>,
+        },
     }
 
     /// Scenario assertion
@@ -131,8 +134,8 @@ pub mod types {
         pub id: String,
         pub name: String,
         pub setup: ScenarioSetup,
-        pub network_conditions: Option<NetworkConditions>,
-        pub byzantine_conditions: Option<ByzantineConditions>,
+        pub transport_conditions: Option<TransportConditions>,
+        pub fault_conditions: Option<FaultConditions>,
         pub assertions: Vec<ScenarioAssertion>,
         pub expected_outcome: ExpectedOutcome,
     }
@@ -514,12 +517,14 @@ mod tests {
     use super::types::{
         AdaptivePrivacyMetric, AdaptivePrivacyValidationProfile, AdaptiveTopologyKind,
         BootstrapObserverInferenceTarget, BootstrapObserverScenario, BoundaryScenario,
-        BoundaryScenarioFocus, ControlPlaneFailureMode, HoldValidationProfile,
+        BoundaryScenarioFocus, ChatGroupConfig, ControlPlaneFailureMode, DemoConfig, DemoType,
+        ExpectedOutcome, FaultConditions, FaultModel, HoldValidationProfile,
         MetadataMinimizationFocus, MetadataMinimizationScenario, ObserverInferenceTarget,
-        ObserverModelScenario, OrganicTrafficProfile, ReachableSetSize,
-        SecurityControlTrafficClass, StarvationScenario, SyncOpportunityProfile,
-        TelltaleControlPlaneScenario,
+        ObserverModelScenario, OrganicTrafficProfile, ReachableSetSize, Scenario,
+        ScenarioAssertion, ScenarioSetup, SecurityControlTrafficClass, StarvationScenario,
+        SyncOpportunityProfile, TelltaleControlPlaneScenario, TransportConditions,
     };
+    use std::collections::HashMap;
 
     #[test]
     fn phase_six_validation_matrix_covers_required_dimensions() {
@@ -661,5 +666,54 @@ mod tests {
             metrics.contains(&AdaptivePrivacyMetric::PartialPathCompromiseLinkagePrecisionRecall)
         );
         assert_eq!(metrics.len(), 17);
+    }
+
+    #[test]
+    fn scenario_round_trips_through_transport_and_fault_conditions() {
+        let mut fault_params = HashMap::new();
+        fault_params.insert("delay_ms".to_string(), "1000".to_string());
+        let scenario = Scenario {
+            id: "transport-fault".to_string(),
+            name: "Transport Fault".to_string(),
+            setup: ScenarioSetup {
+                participants: 5,
+                threshold: 3,
+                chat_config: Some(ChatGroupConfig {
+                    enabled: true,
+                    multi_actor_support: false,
+                    message_history_validation: true,
+                    group_name: Some("test".to_string()),
+                    initial_messages: Vec::new(),
+                }),
+                data_loss_config: None,
+                demo_config: Some(DemoConfig {
+                    protagonist: None,
+                    guardians: vec!["g1".to_string()],
+                    demo_type: DemoType::ChatGroupDemo,
+                    validation_steps: vec!["step".to_string()],
+                }),
+            },
+            transport_conditions: Some(TransportConditions {
+                latency_ms: Some(120),
+                packet_loss: Some(0.05),
+            }),
+            fault_conditions: Some(FaultConditions {
+                models: vec![FaultModel::ByzantineStrategy {
+                    name: "delay".to_string(),
+                    parameters: fault_params,
+                }],
+            }),
+            assertions: vec![ScenarioAssertion {
+                property: "safe".to_string(),
+                expected: true,
+            }],
+            expected_outcome: ExpectedOutcome::Success,
+        };
+
+        let json = serde_json::to_vec(&scenario).expect("serialize");
+        let decoded: Scenario = serde_json::from_slice(&json).expect("deserialize");
+        assert!(decoded.transport_conditions.is_some());
+        let fault_conditions = decoded.fault_conditions.expect("fault conditions");
+        assert_eq!(fault_conditions.models.len(), 1);
     }
 }

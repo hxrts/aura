@@ -360,7 +360,8 @@ For Telltale 11-backed lanes, Aura can also invoke an upstream simulator runner
 first and attach the resulting sidecar automatically. Use
 `run_telltale_parity_with_runner(...)` or
 `run_telltale_control_plane_with_runner(...)` and configure the runner command
-with `AURA_TELLTALE_SIMULATOR_RUNNER` when the executable is not on `PATH`.
+with `AURA_TELLTALE_SIMULATOR_RUNNER` when the executable is not on the shell
+search path.
 
 ### Expected Outputs
 

@@ -6,8 +6,8 @@
 
 use crate::quint::properties::{PropertyPriority, PropertyType, VerifiableProperty};
 use crate::scenario::types::{
-    ByzantineConditions, ExpectedOutcome as ScenarioExpectedOutcome, NetworkConditions, Scenario,
-    ScenarioAssertion, ScenarioSetup,
+    ExpectedOutcome as ScenarioExpectedOutcome, FaultConditions, FaultModel, Scenario,
+    ScenarioAssertion, ScenarioSetup, TransportConditions,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -370,8 +370,8 @@ impl ChaosGenerator {
 
         // Configure byzantine behavior
         if byzantine_count > 0 {
-            scenario.byzantine_conditions = Some(ByzantineConditions {
-                strategies: vec![crate::scenario::types::LegacyByzantineStrategy {
+            scenario.fault_conditions = Some(FaultConditions {
+                models: vec![FaultModel::ByzantineStrategy {
                     name: format!("Chaos testing strategy for {chaos_type:?}"),
                     parameters: std::collections::HashMap::new(),
                 }],
@@ -379,7 +379,7 @@ impl ChaosGenerator {
         }
 
         // Configure network based on chaos type
-        scenario.network_conditions = Some(self.create_network_config(&chaos_type));
+        scenario.transport_conditions = Some(self.create_transport_config(&chaos_type));
 
         // Add property-specific assertions
         scenario.assertions = self.create_assertions(property, &chaos_type);
@@ -463,17 +463,17 @@ impl ChaosGenerator {
     }
 
     /// Create network configuration for chaos type
-    fn create_network_config(&self, chaos_type: &ChaosType) -> NetworkConditions {
+    fn create_transport_config(&self, chaos_type: &ChaosType) -> TransportConditions {
         match chaos_type {
-            ChaosType::NetworkPartition => NetworkConditions {
+            ChaosType::NetworkPartition => TransportConditions {
                 latency_ms: Some(300),
                 packet_loss: Some(0.1),
             },
-            ChaosType::TimingAttack => NetworkConditions {
+            ChaosType::TimingAttack => TransportConditions {
                 latency_ms: Some(1000),
                 packet_loss: Some(0.05),
             },
-            _ => NetworkConditions {
+            _ => TransportConditions {
                 latency_ms: Some(50),
                 packet_loss: Some(0.01),
             },
@@ -671,8 +671,8 @@ impl ChaosGenerator {
                 data_loss_config: None,
                 demo_config: None,
             },
-            network_conditions: None,
-            byzantine_conditions: None,
+            transport_conditions: None,
+            fault_conditions: None,
             assertions: Vec::new(),
             expected_outcome: ScenarioExpectedOutcome::Success,
         }
@@ -690,11 +690,11 @@ impl ChaosGenerator {
                 data_loss_config: None,
                 demo_config: None,
             },
-            network_conditions: Some(NetworkConditions {
+            transport_conditions: Some(TransportConditions {
                 latency_ms: Some(500),
                 packet_loss: Some(0.1),
             }),
-            byzantine_conditions: None,
+            fault_conditions: None,
             assertions: Vec::new(),
             expected_outcome: ScenarioExpectedOutcome::Success,
         }
@@ -712,11 +712,11 @@ impl ChaosGenerator {
                 data_loss_config: None,
                 demo_config: None,
             },
-            network_conditions: Some(NetworkConditions {
+            transport_conditions: Some(TransportConditions {
                 latency_ms: Some(800),
                 packet_loss: Some(0.05),
             }),
-            byzantine_conditions: None,
+            fault_conditions: None,
             assertions: Vec::new(),
             expected_outcome: ScenarioExpectedOutcome::Timeout,
         }
@@ -733,11 +733,11 @@ impl ChaosGenerator {
                 data_loss_config: None,
                 demo_config: None,
             },
-            network_conditions: Some(NetworkConditions {
+            transport_conditions: Some(TransportConditions {
                 latency_ms: Some(200),
                 packet_loss: Some(0.02),
             }),
-            byzantine_conditions: None,
+            fault_conditions: None,
             assertions: Vec::new(),
             expected_outcome: ScenarioExpectedOutcome::Failure,
         }
@@ -754,8 +754,8 @@ impl ChaosGenerator {
                 data_loss_config: None,
                 demo_config: None,
             },
-            network_conditions: None,
-            byzantine_conditions: None,
+            transport_conditions: None,
+            fault_conditions: None,
             assertions: Vec::new(),
             expected_outcome: ScenarioExpectedOutcome::Failure,
         }
@@ -772,8 +772,8 @@ impl ChaosGenerator {
                 data_loss_config: None,
                 demo_config: None,
             },
-            network_conditions: None,
-            byzantine_conditions: None,
+            transport_conditions: None,
+            fault_conditions: None,
             assertions: Vec::new(),
             expected_outcome: ScenarioExpectedOutcome::Failure,
         }
@@ -790,11 +790,11 @@ impl ChaosGenerator {
                 data_loss_config: None,
                 demo_config: None,
             },
-            network_conditions: Some(NetworkConditions {
+            transport_conditions: Some(TransportConditions {
                 latency_ms: Some(300),
                 packet_loss: Some(0.1),
             }),
-            byzantine_conditions: None,
+            fault_conditions: None,
             assertions: Vec::new(),
             expected_outcome: ScenarioExpectedOutcome::Failure,
         }
@@ -873,6 +873,45 @@ mod tests {
             .filter(|s| s.target_property == "safety_prop")
             .collect();
         assert!(!safety_scenarios.is_empty());
+    }
+
+    #[test]
+    fn test_generated_scenarios_use_transport_and_fault_conditions() {
+        let mut generator = ChaosGenerator::with_config(ChaosGenerationConfig {
+            max_scenarios_per_property: 1,
+            enabled_chaos_types: vec![ChaosType::Byzantine],
+            min_property_priority: PropertyPriority::Low,
+            include_satisfied_properties: true,
+            test_network_sizes: vec![5],
+            byzantine_ratios: vec![0.4],
+        });
+
+        let properties = vec![VerifiableProperty {
+            id: "transport_faults".to_string(),
+            name: "Transport Faults".to_string(),
+            property_type: PropertyType::Safety,
+            expression: "always_safe".to_string(),
+            description: "Generated scenario should use explicit transport/fault surfaces"
+                .to_string(),
+            source_location: "test.qnt:5".to_string(),
+            priority: PropertyPriority::High,
+            tags: vec!["safety".to_string()],
+            continuous_monitoring: true,
+        }];
+
+        let scenarios = generator
+            .generate_chaos_scenarios(&properties)
+            .expect("generate scenarios");
+        let scenario = scenarios
+            .into_iter()
+            .find(|scenario| scenario.chaos_type == ChaosType::Byzantine)
+            .expect("byzantine scenario");
+        assert!(scenario.scenario.transport_conditions.is_some());
+        let fault_conditions = scenario
+            .scenario
+            .fault_conditions
+            .expect("fault conditions");
+        assert!(!fault_conditions.models.is_empty());
     }
 
     #[test]
