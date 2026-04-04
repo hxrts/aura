@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run adaptive-privacy phase-6 tuning tests and archive artifacts.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Validate shared intent and barrier metadata contracts are complete.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Reject legacy and deprecated workflow ownership tags in workflow sources.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure legacy shared semantic UI helper shortcuts have been removed.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

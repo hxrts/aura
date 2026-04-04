@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Initialize, inspect, or smoke-test a threshold account via the CLI.
 set -euo pipefail
 
 action="${1:-init}"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure TUI product action dispatch does not branch on harness mode.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

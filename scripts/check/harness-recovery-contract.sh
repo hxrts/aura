@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify harness recovery methods are registered and cover all recovery paths.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

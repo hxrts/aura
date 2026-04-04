@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Dispatch a subcommand to the aura-harness binary via cargo run.
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then

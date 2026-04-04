@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Aggregate flake metrics from harness scenario report artifacts.
 set -euo pipefail
 
 root="${1:-artifacts/harness}"

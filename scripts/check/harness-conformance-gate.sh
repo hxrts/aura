@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify CI conformance workflow triggers are configured for protected branches.
 set -euo pipefail
 
 legacy_workflow=".github/workflows/ci.yml"

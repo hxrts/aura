@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Validate actor-vs-move ownership inventory alignment across docs and crates.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

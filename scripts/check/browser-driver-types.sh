@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Type-check the Playwright driver and verify typed contract imports.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

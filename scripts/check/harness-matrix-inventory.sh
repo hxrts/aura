@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify harness matrix inventory covers all expected scenario ids per lane.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

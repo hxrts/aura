@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run Quint workflow verification checks or setup validation.
 set -euo pipefail
 
 mode="${1:-check}"

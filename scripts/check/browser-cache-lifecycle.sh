@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify browser cache lifecycle boundaries are declared in the UI contract.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

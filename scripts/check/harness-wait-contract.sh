@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify typed wait contract references and barrier declarations in the executor.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

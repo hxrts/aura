@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Enforce that harness command-plane access stays within allowed files.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

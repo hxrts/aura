@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify TUI channel selection uses committed authoritative identity.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

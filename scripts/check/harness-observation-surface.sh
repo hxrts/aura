@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify ObservationBackend trait does not expose action-like methods.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

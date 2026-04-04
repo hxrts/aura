@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify shared user-flow guidance docs stay in sync with policy changes.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

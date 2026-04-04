@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure parity-critical export helpers do not depend on override caches.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

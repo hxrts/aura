@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Enforce observed-layer authorship boundaries via compile-fail and lint checks.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

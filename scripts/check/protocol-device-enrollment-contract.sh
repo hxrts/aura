@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Reject forbidden optional-authority device enrollment patterns.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Build and serve the aura-web static site on a configurable port.
 set -euo pipefail
 
 port="${1:-4173}"

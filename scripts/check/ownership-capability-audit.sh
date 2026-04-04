@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Audit crate sources for forbidden ownership and capability patterns.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"

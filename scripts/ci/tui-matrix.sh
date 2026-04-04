@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Build TUI binaries and run the harness matrix for a given suite.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

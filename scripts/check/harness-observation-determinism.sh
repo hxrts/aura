@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure observation paths are free of non-deterministic time, random, or UUID calls.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

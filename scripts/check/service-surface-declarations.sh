@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify service surface macro declarations exist in required crate files.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

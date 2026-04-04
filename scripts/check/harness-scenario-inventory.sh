@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify every harness scenario file is listed in the inventory and vice versa.
 set -euo pipefail
 
 fail() {

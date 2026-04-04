@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify canonical shared scenario model exposes typed intent actions.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

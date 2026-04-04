@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify render convergence hooks exist in web and TUI snapshot paths.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

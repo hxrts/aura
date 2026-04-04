@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Enforce typed error boundaries in parity-critical workflow and runtime paths.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

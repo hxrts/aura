@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run the harness scenario matrix for a given lane and suite from inventory.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

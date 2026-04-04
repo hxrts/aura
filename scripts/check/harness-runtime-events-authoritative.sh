@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure TUI snapshot export does not synthesize parity-critical runtime facts.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

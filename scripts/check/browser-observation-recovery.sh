@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure browser observation paths do not perform implicit recovery.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

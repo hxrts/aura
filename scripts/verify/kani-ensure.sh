@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Install and set up the Kani verification toolchain if not present.
 set -euo pipefail
 
 ROOT="${AURA_KANI_ROOT:-$PWD/.tmp/kani-root}"

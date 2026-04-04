@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure node, npm, TypeScript, and Playwright are installed for browser tests.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

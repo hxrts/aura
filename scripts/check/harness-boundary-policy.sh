@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure semantic scenario contracts do not contain frontend-specific mechanics.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

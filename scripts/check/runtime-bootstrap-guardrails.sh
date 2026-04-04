@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Check for forbidden runtime bootstrap and error-boundary patterns.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

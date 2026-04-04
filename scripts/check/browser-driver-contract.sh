@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify Rust and TypeScript browser driver contracts stay in sync.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

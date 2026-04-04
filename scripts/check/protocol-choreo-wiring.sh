@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify spec-only choreography protocols have no runtime wiring.
 set -euo pipefail
 
 DOC_PATH="docs/110_mpst_and_choreography.md"

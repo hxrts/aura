@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure TUI semantic snapshot exporter does not use override caches.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

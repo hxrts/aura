@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Bundle CI failure metadata and artifacts for triage and replay.
 set -euo pipefail
 
 BUNDLE_DIR="${1:?bundle dir required}"

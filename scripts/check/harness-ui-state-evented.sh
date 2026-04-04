@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Validate evented UI state contracts and semantic wait helpers across backends.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

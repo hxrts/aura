@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure semantic harness core uses typed payload structs, not raw serde_json::Value.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

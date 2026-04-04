@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Validate CI runner prerequisites: required commands and resource limits.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

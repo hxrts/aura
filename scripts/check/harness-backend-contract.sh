@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify InstanceBackend trait does not carry forbidden UI-action surfaces.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

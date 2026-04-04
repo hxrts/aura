@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Enforce user-flow policy guardrails on changed files in the diff range.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

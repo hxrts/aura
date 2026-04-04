@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run protocol compatibility pair tests across session-type baselines.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify TUI observation channel uses evented snapshots, not filesystem polling.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure wasm-bindgen-cli version matches the Cargo.lock wasm-bindgen version.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

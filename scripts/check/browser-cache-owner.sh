@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Enforce browser cache ownership boundaries in the Playwright driver.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

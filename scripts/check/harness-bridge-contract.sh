@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify the browser harness bridge implements all declared UI contract methods.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

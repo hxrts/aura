@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure shared intent UI flow uses canonical paths without legacy bypass shortcuts.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

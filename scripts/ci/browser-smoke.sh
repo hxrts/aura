@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run browser smoke tests with web asset preparation and Playwright driver.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

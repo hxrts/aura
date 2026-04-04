@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure onboarding does not use bespoke or stale snapshot publication paths.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

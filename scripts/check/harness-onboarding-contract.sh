@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify onboarding is declared in the shared snapshot model and published canonically.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

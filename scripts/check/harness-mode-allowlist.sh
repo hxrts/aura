@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Validate harness-mode allowlist and change-kind metadata in the UI contract.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

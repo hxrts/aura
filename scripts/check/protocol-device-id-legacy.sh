@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Scan for legacy device-id patterns in crate sources.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify runtime lifecycle bridge signatures use typed returns, not unit.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."

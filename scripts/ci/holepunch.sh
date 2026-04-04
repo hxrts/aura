@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run holepunch/patchbay connectivity tests at various CI tiers.
 set -euo pipefail
 
 mode="${1:-}"

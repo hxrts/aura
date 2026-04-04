@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Launch a dual TUI+web demo environment with optional browser and reset control.
 set -euo pipefail
 
 usage() {

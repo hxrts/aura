@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ensure UiSnapshot carries revision and quiescence metadata in the UI contract.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

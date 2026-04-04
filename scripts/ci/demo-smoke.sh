@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Run dual-demo smoke test for CI validation.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

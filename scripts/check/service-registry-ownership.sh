@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Enforce service registry ownership annotations and legacy removal.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

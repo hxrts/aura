@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify Playwright browser installation and driver script availability.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

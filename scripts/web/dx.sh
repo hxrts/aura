@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Locate the workspace root and configure the Dioxus CLI environment.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

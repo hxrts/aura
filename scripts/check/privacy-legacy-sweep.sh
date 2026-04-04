@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Sweep for legacy adaptive-privacy transport selection patterns.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Verify focus and selection semantics are declared in the scenario contract.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

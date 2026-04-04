@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Reject positional row/index item ids in shared harness scenarios.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

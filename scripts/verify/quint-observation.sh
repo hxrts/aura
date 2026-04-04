@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Generate a Quint semantic observation trace and convert it to a harness scenario.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
