@@ -131,7 +131,7 @@ The default contributor verification path for this class of change is:
 1. `just lint-arch-syntax`
 2. `just ci-ownership-policy`
 3. `just check-arch`
-4. `just ci-adaptive-privacy-phase6` if the change touches adaptive privacy
+4. `just ci-adaptive-privacy-tuning` if the change touches adaptive privacy
    policy constants, simulator evidence, or telltale-backed control-plane parity
 
 When a new `Establish`, `Move`, or `Hold` surface lands, the same change should

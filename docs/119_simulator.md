@@ -265,7 +265,7 @@ Phase 6 adaptive-privacy validation uses one deterministic artifact lane instead
 of ad hoc local sweeps. Run:
 
 ```bash
-just ci-adaptive-privacy-phase6
+just ci-adaptive-privacy-tuning
 ```
 
 That lane writes the canonical archive under

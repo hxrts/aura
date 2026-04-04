@@ -622,7 +622,7 @@ The default contributor path for service-family boundary work is:
 1. `just lint-arch-syntax`
 2. `just ci-ownership-policy`
 3. `just check-arch`
-4. `just ci-adaptive-privacy-phase6` when the change affects adaptive privacy
+4. `just ci-adaptive-privacy-tuning` when the change affects adaptive privacy
    policy, simulator evidence, or control-plane parity artifacts
 
 ### Same-Change Checklist
