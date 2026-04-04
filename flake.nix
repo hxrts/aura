@@ -255,6 +255,7 @@
           ];
 
           shellHook = ''
+            [[ -r "$HOME/.local/state/secrets/cargo-registry-token" ]] && export CARGO_REGISTRY_TOKEN="$(cat "$HOME/.local/state/secrets/cargo-registry-token")"
             export AURA_SUPPRESS_NIX_WELCOME=1
             export CARGO_TARGET_DIR="$PWD/target"
             export AURA_WORKSPACE_ROOT="$PWD"
