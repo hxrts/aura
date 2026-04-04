@@ -138,7 +138,7 @@ impl Default for SimulatorConfig {
             enable_faults: false,
             enable_chaos: false,
             enable_property_checking: true,
-            artifacts_dir: std::path::PathBuf::from("./test_artifacts"),
+            artifacts_dir: std::path::PathBuf::from("./artifacts"),
             checkpoint_interval: 100,
             log_level: LogLevel::Info,
             network_config: NetworkConfig::default(),

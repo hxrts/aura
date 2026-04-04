@@ -1234,7 +1234,7 @@ mod tests {
                 output_report_path: report_path,
                 profile: DifferentialProfile::EnvelopeBounded,
                 upstream: TelltaleUpstreamPathsV1 {
-                    baseline_run_output_path: Some(fixture_path.clone()),
+                    baseline_run_output_path: Some(fixture_path),
                     telltale_run_output_path: None,
                     baseline_decision_report_path: None,
                     telltale_decision_report_path: None,

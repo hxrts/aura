@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -702,7 +702,7 @@ fn phase_six_run_output_fixture() -> PhaseSixRunOutputFixture {
     }
 }
 
-fn phase_six_upstream_paths(root: &PathBuf, prefix: &str) -> TelltaleUpstreamPathsV1 {
+fn phase_six_upstream_paths(root: &Path, prefix: &str) -> TelltaleUpstreamPathsV1 {
     let baseline_run_path = root.join(format!("{prefix}-baseline-run.json"));
     let candidate_run_path = root.join(format!("{prefix}-candidate-run.json"));
     let run_output = phase_six_run_output_fixture();
