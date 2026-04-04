@@ -36,7 +36,6 @@ done <<< "$changed_files"
 canonical_changed_path() {
   case "$1" in
     docs/997_flow_coverage.md) echo "docs/997_flow_coverage.md" ;;
-    scripts/check/ux-flow-coverage.sh) echo "scripts/check/user-flow-coverage.sh" ;;
     scripts/check/ux-guidance-sync.sh) echo "scripts/check/user-flow-guidance-sync.sh" ;;
     scripts/check/ux-policy-guardrails.sh) echo "scripts/check/user-flow-policy-guardrails.sh" ;;
     *) echo "$1" ;;
@@ -64,7 +63,7 @@ matches_any_rule_source() {
       testing_guide_sync:crates/aura-ui/src/*|\
       testing_guide_sync:crates/aura-web/src/*|\
       testing_guide_sync:scripts/check/shared-flow-policy.sh|\
-      testing_guide_sync:scripts/check/ui-parity-contract.sh|\
+      testing_guide_sync:scripts/check/harness-governance.sh|\
       testing_guide_sync:scripts/check/harness-ui-state-evented.sh|\
       testing_guide_sync:scripts/check/user-flow-policy-guardrails.sh)
         return 0
@@ -72,18 +71,18 @@ matches_any_rule_source() {
       coverage_report_sync:crates/aura-app/src/ui_contract.rs|\
       coverage_report_sync:scenarios/harness/*|\
       coverage_report_sync:scenarios/harness_inventory.toml|\
-      coverage_report_sync:scripts/check/user-flow-coverage.sh)
+      coverage_report_sync:scripts/check/harness-governance.sh)
         return 0
         ;;
       agent_guidance_sync:scripts/check/shared-flow-policy.sh|\
-      agent_guidance_sync:scripts/check/ui-parity-contract.sh|\
+      agent_guidance_sync:scripts/check/harness-governance.sh|\
       agent_guidance_sync:scripts/check/harness-ui-state-evented.sh|\
       agent_guidance_sync:scripts/check/user-flow-guidance-sync.sh|\
       agent_guidance_sync:scripts/check/user-flow-policy-guardrails.sh)
         return 0
         ;;
       skills_guidance_sync:scripts/check/shared-flow-policy.sh|\
-      skills_guidance_sync:scripts/check/ui-parity-contract.sh|\
+      skills_guidance_sync:scripts/check/harness-governance.sh|\
       skills_guidance_sync:scripts/check/harness-ui-state-evented.sh|\
       skills_guidance_sync:scripts/check/user-flow-guidance-sync.sh|\
       skills_guidance_sync:scripts/check/user-flow-policy-guardrails.sh)
