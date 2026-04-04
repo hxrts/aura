@@ -10,7 +10,9 @@ fail() {
 }
 
 forbidden_contract_patterns='send_keys|send_key|click_button|click_target|fill_input|selector|dom_snapshot'
-if rg -n "$forbidden_contract_patterns" crates/aura-app/src/scenario_contract.rs \
+if rg -n "$forbidden_contract_patterns" \
+  crates/aura-app/src/scenario_contract.rs \
+  crates/aura-app/src/scenario_contract/*.rs \
   | rg -v ':\s*//!|:\s*//|:\s*\*' >/tmp/harness-contract-forbidden.$$ 2>/dev/null; then
   cat /tmp/harness-contract-forbidden.$$ >&2
   rm -f /tmp/harness-contract-forbidden.$$

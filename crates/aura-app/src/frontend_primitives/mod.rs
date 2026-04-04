@@ -3,6 +3,12 @@
 //! This module provides platform-agnostic types that every frontend
 //! (Dioxus-based or otherwise) consumes. Shell crates may re-export
 //! these types under their own aliases but should not fork them.
+//!
+//! Boundary rules:
+//! - `task_owner` owns shell-facing cancellation and spawn coordination only.
+//! - `submitted_operation` owns terminal handoff and submission publication only.
+//! - Workflow semantics and runtime policy stay in `aura-app::workflows`.
+//! - This module is a narrow frontend task-root exception, not a second async runtime.
 
 mod cancellation_waiters;
 mod clipboard;

@@ -725,7 +725,9 @@ check_workflows() {
   # Direct init_signals calls
   local init_calls
   init_calls=$(rg --no-heading "init_signals\\(" crates/aura-app/src -g "*.rs" \
-    | grep -v "crates/aura-app/src/core/app.rs" | grep -v "init_signals_with_hooks" || true)
+    | grep -v "crates/aura-app/src/core/app.rs" \
+    | grep -v "crates/aura-app/src/core/app/legacy.rs" \
+    | grep -v "init_signals_with_hooks" || true)
   emit_hits "Direct init_signals calls" "$init_calls"
 
   # Strong command pipeline enforcement in TUI slash command path.

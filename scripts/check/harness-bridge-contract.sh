@@ -9,7 +9,10 @@ fail() {
   exit 1
 }
 
-ui_contract="crates/aura-app/src/ui_contract.rs"
+ui_contract_files=(
+  crates/aura-app/src/ui_contract.rs
+  crates/aura-app/src/ui_contract/*.rs
+)
 bridge_impl="crates/aura-web/src/harness/install.rs"
 
 extract_bridge_methods() {
@@ -31,17 +34,17 @@ extract_bridge_methods() {
   ' "$bridge_impl" | sort -u
 }
 
-rg -q 'pub const BROWSER_HARNESS_BRIDGE_API_VERSION' "$ui_contract" \
+rg -q 'pub const BROWSER_HARNESS_BRIDGE_API_VERSION' "${ui_contract_files[@]}" \
   || fail "missing browser harness bridge API version"
-rg -q 'pub const BROWSER_HARNESS_BRIDGE_METHODS' "$ui_contract" \
+rg -q 'pub const BROWSER_HARNESS_BRIDGE_METHODS' "${ui_contract_files[@]}" \
   || fail "missing browser harness bridge method metadata"
-rg -q 'pub const BROWSER_OBSERVATION_SURFACE_API_VERSION' "$ui_contract" \
+rg -q 'pub const BROWSER_OBSERVATION_SURFACE_API_VERSION' "${ui_contract_files[@]}" \
   || fail "missing browser observation surface API version"
-rg -q 'pub const BROWSER_OBSERVATION_SURFACE_METHODS' "$ui_contract" \
+rg -q 'pub const BROWSER_OBSERVATION_SURFACE_METHODS' "${ui_contract_files[@]}" \
   || fail "missing browser observation surface method metadata"
-rg -q 'pub struct HarnessShellStructureSnapshot' "$ui_contract" \
+rg -q 'pub struct HarnessShellStructureSnapshot' "${ui_contract_files[@]}" \
   || fail "missing HarnessShellStructureSnapshot contract"
-rg -q 'pub fn validate_harness_shell_structure' "$ui_contract" \
+rg -q 'pub fn validate_harness_shell_structure' "${ui_contract_files[@]}" \
   || fail "missing harness shell structure validator"
 
 contract_methods=()
@@ -58,7 +61,7 @@ done < <(
       print name
     }
     in_block && /^\];/ { in_block=0 }
-  ' "$ui_contract" | sort -u
+  ' "${ui_contract_files[@]}" | sort -u
 )
 
 exported_action_methods=()
@@ -104,7 +107,7 @@ done < <(
       print name
     }
     in_block && /^\];/ { in_block=0 }
-  ' "$ui_contract" | sort -u
+  ' "${ui_contract_files[@]}" | sort -u
 )
 
 if [[ "${observation_methods[*]}" != "${exported_observation_methods[*]}" ]]; then

@@ -9,9 +9,14 @@ fail() {
   exit 1
 }
 
-rg -q 'ScenarioAction::Intent' crates/aura-app/src/scenario_contract.rs \
+scenario_contract_files=(
+  crates/aura-app/src/scenario_contract.rs
+  crates/aura-app/src/scenario_contract/*.rs
+)
+
+rg -q 'ScenarioAction::Intent' "${scenario_contract_files[@]}" \
   || fail "canonical shared scenario model must expose typed intent actions"
-rg -q 'validate_shared_intent_contract' crates/aura-app/src/scenario_contract.rs \
+rg -q 'validate_shared_intent_contract' "${scenario_contract_files[@]}" \
   || fail "shared scenario validation must enforce typed intent actions"
 
 cargo test -p aura-app shared_intent_contract_accepts_intents --quiet

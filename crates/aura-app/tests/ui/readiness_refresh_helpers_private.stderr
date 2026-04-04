@@ -7,10 +7,8 @@ error[E0603]: function `refresh_authoritative_invitation_readiness` is private
 note: the function `refresh_authoritative_invitation_readiness` is defined here
  --> src/workflows/invitation.rs
   |
-  | / pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
-  | |     app_core: &Arc<RwLock<AppCore>>,
-  | | ) -> Result<(), AuraError> {
-  | |__________________________^
+  |     refresh_authoritative_contact_link_readiness, refresh_authoritative_invitation_readiness,
+  |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[E0603]: function `refresh_authoritative_contact_link_readiness` is private
  --> tests/ui/readiness_refresh_helpers_private.rs:3:50
@@ -21,7 +19,5 @@ error[E0603]: function `refresh_authoritative_contact_link_readiness` is private
 note: the function `refresh_authoritative_contact_link_readiness` is defined here
  --> src/workflows/invitation.rs
   |
-  | / pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
-  | |     app_core: &Arc<RwLock<AppCore>>,
-  | | ) -> Result<(), AuraError> {
-  | |__________________________^
+  |     refresh_authoritative_contact_link_readiness, refresh_authoritative_invitation_readiness,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

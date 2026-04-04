@@ -9,11 +9,16 @@ fail() {
   exit 1
 }
 
-rg -q 'pub enum FocusSemantics' crates/aura-app/src/scenario_contract.rs \
+scenario_contract_files=(
+  crates/aura-app/src/scenario_contract.rs
+  crates/aura-app/src/scenario_contract/*.rs
+)
+
+rg -q 'pub enum FocusSemantics' "${scenario_contract_files[@]}" \
   || fail "missing focus semantics contract"
-rg -q 'pub enum SelectionSemantics' crates/aura-app/src/scenario_contract.rs \
+rg -q 'pub enum SelectionSemantics' "${scenario_contract_files[@]}" \
   || fail "missing selection semantics contract"
-rg -q 'pub struct SharedActionContract' crates/aura-app/src/scenario_contract.rs \
+rg -q 'pub struct SharedActionContract' "${scenario_contract_files[@]}" \
   || fail "missing shared action contract"
 
 cargo test -p aura-app every_intent_kind_declares_focus_and_selection_semantics --quiet

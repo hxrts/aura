@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use super::*;
 
 pub async fn create_contact_invitation(

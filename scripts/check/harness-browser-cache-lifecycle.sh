@@ -9,12 +9,17 @@ fail() {
   exit 1
 }
 
-rg -q 'pub const BROWSER_CACHE_BOUNDARIES' crates/aura-app/src/ui_contract.rs \
+ui_contract_files=(
+  crates/aura-app/src/ui_contract.rs
+  crates/aura-app/src/ui_contract/*.rs
+)
+
+rg -q 'pub const BROWSER_CACHE_BOUNDARIES' "${ui_contract_files[@]}" \
   || fail "missing browser cache lifecycle metadata"
 
 for reason in session_start authority_switch device_import storage_reset navigation_recovery
 do
-  rg -q "$reason" crates/aura-app/src/ui_contract.rs \
+  rg -q "$reason" "${ui_contract_files[@]}" \
     || fail "missing browser cache lifecycle reason: $reason"
 done
 

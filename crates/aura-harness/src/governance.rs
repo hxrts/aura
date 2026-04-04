@@ -24,6 +24,33 @@ const CORE_SHARED_SCENARIO_IDS: &[&str] = &[
     "scenario13-mixed-contact-channel-message-e2e",
 ];
 
+fn read_contract_family(root: &str, module_dir: &str) -> Result<String> {
+    let mut combined =
+        fs::read_to_string(root).with_context(|| format!("failed to read {root}"))?;
+
+    let module_path = Path::new(module_dir);
+    if module_path.exists() {
+        let mut files = fs::read_dir(module_path)
+            .with_context(|| format!("failed to read directory {module_dir}"))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .with_context(|| format!("failed to enumerate directory {module_dir}"))?;
+        files.sort_by_key(|entry| entry.path());
+        for entry in files {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+                continue;
+            }
+            combined.push('\n');
+            combined.push_str(
+                &fs::read_to_string(&path)
+                    .with_context(|| format!("failed to read {}", path.display()))?,
+            );
+        }
+    }
+
+    Ok(combined)
+}
+
 pub enum GovernanceCheck {
     SharedScenarioContract,
     ScenarioLegality,
@@ -359,8 +386,10 @@ pub fn validate_ui_parity_contract() -> Result<()> {
 }
 
 pub fn validate_settings_surface_contract() -> Result<()> {
-    let contract = fs::read_to_string("crates/aura-app/src/ui_contract.rs")
-        .context("failed to read crates/aura-app/src/ui_contract.rs")?;
+    let contract = read_contract_family(
+        "crates/aura-app/src/ui_contract.rs",
+        "crates/aura-app/src/ui_contract",
+    )?;
     let web_model = fs::read_to_string("crates/aura-ui/src/model/settings.rs")
         .context("failed to read crates/aura-ui/src/model/settings.rs")?;
     let tui_types = fs::read_to_string("crates/aura-terminal/src/tui/types/settings.rs")

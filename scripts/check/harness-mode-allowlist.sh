@@ -9,11 +9,14 @@ fail() {
   exit 1
 }
 
-ui_contract="crates/aura-app/src/ui_contract.rs"
+ui_contract_files=(
+  crates/aura-app/src/ui_contract.rs
+  crates/aura-app/src/ui_contract/*.rs
+)
 
-rg -q 'pub const HARNESS_MODE_ALLOWLIST' "$ui_contract" \
+rg -q 'pub const HARNESS_MODE_ALLOWLIST' "${ui_contract_files[@]}" \
   || fail "missing harness-mode allowlist metadata"
-rg -q 'enum HarnessModeChangeKind' "$ui_contract" \
+rg -q 'enum HarnessModeChangeKind' "${ui_contract_files[@]}" \
   || fail "missing harness-mode change kind metadata"
 
 frontend_hits="$(

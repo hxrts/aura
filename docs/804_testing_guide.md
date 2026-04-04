@@ -37,13 +37,13 @@ All shared flows should use typed scenario primitives, typed semantic command su
 
 Shared-semantic preflight is intentionally stricter than generic backend startup. A run config that includes SSH instances does not automatically qualify for the shared semantic lane. Until a backend implements the shared semantic contract, SSH remains diagnostic-only for harness purposes. Shared-semantic scenarios must fail closed before execution.
 
-`aura-app::ui_contract` is the canonical module for shared flow support. It defines `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`, `UiSnapshot`, `compare_ui_snapshots_for_parity`, `OperationInstanceId`, and `RuntimeEventSnapshot`. Use semantic readiness and state assertions before using fallback text matching.
+`aura-app::ui_contract` is the canonical module for shared flow support. It defines `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`, `UiSnapshot`, `compare_ui_snapshots_for_parity`, `OperationInstanceId`, and `RuntimeEventSnapshot`. The root file is a facade; parity metadata, harness/browser bridge metadata, and shared-flow support tables may live in dedicated `ui_contract/*` modules, but the canonical public contract stays `aura-app::ui_contract`. Use semantic readiness and state assertions before using fallback text matching.
 
 Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits.
 
 ### Shared UX Contract and Determinism
 
-The shared UX contract is defined in [CLI and Terminal User Interface](117_user_interface.md). The `aura-app::ui_contract` module is the canonical authority for parity-critical UI identity, readiness semantics, and typed observation payloads.
+The shared UX contract is defined in [CLI and Terminal User Interface](117_user_interface.md). The `aura-app::ui_contract` module is the canonical authority for parity-critical UI identity, readiness semantics, and typed observation payloads. The shared semantic scenario contract remains `aura-app::scenario_contract`; its root may delegate contract families such as submission, actions, expectations, and values into `scenario_contract/*` modules without changing the public harness contract.
 
 Shared scenarios must submit typed semantic commands through the frontend bridge. They must not use raw PTY keys, raw selector clicks, raw label matching, or incidental focus stepping as primary mechanics. Frontend-specific UI I/O belongs in frontend-conformance coverage rather than the main shared semantic lane. Unsupported semantic commands must fail closed and diagnostically.
 

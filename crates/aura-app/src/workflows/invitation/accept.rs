@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use super::*;
 
 pub async fn accept_invitation(
@@ -770,9 +772,9 @@ pub async fn cancel_invitation_by_str_with_terminal_status(
 ) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
-        OperationId::invitation_cancel(),
+        OperationId::invitation_revoke(),
         instance_id,
-        SemanticOperationKind::CancelInvitation,
+        SemanticOperationKind::RevokeInvitation,
     );
     let result: Result<(), AuraError> = async {
         owner

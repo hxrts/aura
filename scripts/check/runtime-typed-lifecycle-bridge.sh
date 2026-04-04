@@ -24,24 +24,27 @@ check_present() {
   fi
 }
 
-app_bridge="crates/aura-app/src/runtime_bridge.rs"
+app_bridge_files=(
+  crates/aura-app/src/runtime_bridge.rs
+  crates/aura-app/src/runtime_bridge/*.rs
+)
 agent_bridge="crates/aura-agent/src/runtime_bridge/mod.rs"
 agent_rendezvous="crates/aura-agent/src/runtime_bridge/rendezvous.rs"
 mock_bridge="crates/aura-testkit/src/mock_runtime_bridge.rs"
 
 check_absent 'async fn process_ceremony_messages\(&self\) -> Result<\(\), IntentError>' \
-  "$app_bridge" "$agent_bridge" "$mock_bridge"
+  "${app_bridge_files[@]}" "$agent_bridge" "$mock_bridge"
 check_absent 'async fn trigger_discovery\(&self\) -> Result<\(\), IntentError>' \
-  "$app_bridge" "$agent_bridge" "$agent_rendezvous" "$mock_bridge"
+  "${app_bridge_files[@]}" "$agent_bridge" "$agent_rendezvous" "$mock_bridge"
 check_absent 'async fn accept_invitation\([^)]*\) -> Result<\(\), IntentError>' \
-  "$app_bridge" "$agent_bridge" "$mock_bridge"
+  "${app_bridge_files[@]}" "$agent_bridge" "$mock_bridge"
 check_absent 'async fn decline_invitation\([^)]*\) -> Result<\(\), IntentError>' \
-  "$app_bridge" "$agent_bridge" "$mock_bridge"
+  "${app_bridge_files[@]}" "$agent_bridge" "$mock_bridge"
 check_absent 'async fn cancel_invitation\([^)]*\) -> Result<\(\), IntentError>' \
-  "$app_bridge" "$agent_bridge" "$mock_bridge"
+  "${app_bridge_files[@]}" "$agent_bridge" "$mock_bridge"
 
-check_present 'enum CeremonyProcessingOutcome' "$app_bridge"
-check_present 'enum DiscoveryTriggerOutcome' "$app_bridge"
-check_present 'struct InvitationMutationOutcome' "$app_bridge"
+check_present 'enum CeremonyProcessingOutcome' "${app_bridge_files[@]}"
+check_present 'enum DiscoveryTriggerOutcome' "${app_bridge_files[@]}"
+check_present 'struct InvitationMutationOutcome' "${app_bridge_files[@]}"
 
 echo "runtime-typed-lifecycle-bridge: clean"

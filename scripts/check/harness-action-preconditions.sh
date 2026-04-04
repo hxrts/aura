@@ -9,10 +9,14 @@ fail() {
   exit 1
 }
 
-scenario_contract="crates/aura-app/src/scenario_contract.rs"
 executor="crates/aura-harness/src/executor.rs"
 
-rg -q 'ActionPrecondition::Quiescence' "$scenario_contract" \
+scenario_contract_files=(
+  crates/aura-app/src/scenario_contract.rs
+  crates/aura-app/src/scenario_contract/*.rs
+)
+
+rg -q 'ActionPrecondition::Quiescence' "${scenario_contract_files[@]}" \
   || fail "shared action contracts must declare quiescence preconditions"
 rg -q 'fn enforce_action_preconditions' "$executor" \
   || fail "executor is missing typed action precondition enforcement"

@@ -86,6 +86,12 @@ The two TUI-only conformance scenarios are retained as frontend-conformance cove
 Current parity-critical source changes touched the following shared-flow areas
 and continue to map to the same canonical coverage anchors:
 
+- Shared flow and scenario contract metadata now live behind facade roots in
+  `aura-app::ui_contract` and `aura-app::scenario_contract`, with dedicated
+  module families for parity metadata, harness metadata, shared-flow support,
+  action contracts, expectations, submission, and value types. The canonical
+  public contract and the coverage anchors below do not change with that
+  internal split.
 - Notifications navigation remains anchored by
   `shared-notifications-and-authority.toml`, with
   `semantic-observation-browser-smoke.toml` and

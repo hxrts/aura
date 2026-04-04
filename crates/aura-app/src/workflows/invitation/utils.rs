@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use crate::views::invitations::InvitationType;
 
 /// 1 hour TTL preset in hours

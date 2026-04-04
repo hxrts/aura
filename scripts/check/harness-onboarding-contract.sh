@@ -9,7 +9,12 @@ fail() {
   exit 1
 }
 
-rg -q 'ScreenId::Onboarding' crates/aura-app/src/ui_contract.rs \
+ui_contract_files=(
+  crates/aura-app/src/ui_contract.rs
+  crates/aura-app/src/ui_contract/*.rs
+)
+
+rg -q 'ScreenId::Onboarding' "${ui_contract_files[@]}" \
   || fail "onboarding must be declared in the shared snapshot model"
 rg -F -q 'controller.set_account_setup_state(' crates/aura-web/src/main.rs \
   || fail "web onboarding must publish through the canonical controller snapshot pipeline"

@@ -2207,7 +2207,9 @@ const ACTOR_SPAWN_APPROVED_SUFFIXES: &[&str] = &[
 ];
 const HARNESS_MOVE_APPROVED_SUFFIXES: &[&str] = &[
     "crates/aura-app/src/ui_contract.rs",
+    "crates/aura-app/src/ui_contract/legacy.rs",
     "crates/aura-app/src/scenario_contract.rs",
+    "crates/aura-app/src/scenario_contract/legacy.rs",
     "crates/aura-app/src/workflows/harness_determinism.rs",
     "crates/aura-app/tests/ui/ui_operation_handle_private_fields.rs",
     "crates/aura-app/tests/ui/harness_ui_operation_handle_private_fields.rs",

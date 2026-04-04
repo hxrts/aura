@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use super::*;
 
 pub async fn list_pending_invitations(

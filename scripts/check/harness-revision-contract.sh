@@ -9,9 +9,14 @@ fail() {
   exit 1
 }
 
-rg -q 'pub revision: ProjectionRevision' crates/aura-app/src/ui_contract.rs \
+ui_contract_files=(
+  crates/aura-app/src/ui_contract.rs
+  crates/aura-app/src/ui_contract/*.rs
+)
+
+rg -q 'pub revision: ProjectionRevision' "${ui_contract_files[@]}" \
   || fail "UiSnapshot must carry revision metadata"
-rg -q 'pub quiescence: QuiescenceSnapshot' crates/aura-app/src/ui_contract.rs \
+rg -q 'pub quiescence: QuiescenceSnapshot' "${ui_contract_files[@]}" \
   || fail "UiSnapshot must carry quiescence metadata"
 
 cargo test -p aura-app projection_revision_detects_stale_snapshots_by_revision --quiet
