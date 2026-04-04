@@ -415,21 +415,25 @@ Aura now layers its comparative experiment lanes on top of the published
 Telltale simulator harness and sweep machinery instead of adding a second local
 manifest format.
 
-Use `aura_simulator::run_adaptive_privacy_policy_sweep(...)` to produce shared
-`SweepManifest` outputs for adaptive-privacy comparisons. Use
-`aura_simulator::compare_policy_sweeps(...)` to emit the Aura policy-diff
-artifact that compares two sweep runs with the shared Telltale diff logic.
+Use `aura_simulator::run_adaptive_privacy_policy_sweep(...)` together with
+`aura_simulator::archive_from_sweep(...)` to produce `AuraSweepArchiveV1`
+artifacts for adaptive-privacy comparisons while preserving the shared
+Telltale sweep manifest shape internally. Use
+`aura_simulator::compare_policy_sweeps(...)` to emit `AuraPolicyDiffReportV1`,
+which compares two sweep runs with the shared Telltale diff logic.
 
 For theorem-aware failure evidence, use
 `aura_simulator::counterexample_from_parity_report(...)` or
 `aura_simulator::counterexample_from_control_plane_report(...)`. These wrappers
-preserve the shared Telltale `DecisionCounterexample` witness and annotate
-whether the mismatch is schedule noise or safety-visible divergence.
+emit `AuraCounterexampleReportV1`, preserving the shared Telltale counterexample
+witness internally and annotating whether the mismatch is schedule noise or
+safety-visible divergence.
 
 For reusable study bundles, use `aura_simulator::run_suite_catalog(...)` and
 `aura_simulator::compare_suite_catalogs(...)`. Aura owns the suite catalog
-choices, while the shared Telltale harness remains the execution engine and the
-shared `SweepManifest` remains the archived manifest shape.
+choices, while the shared Telltale harness remains the execution engine and
+`AuraSuiteTournamentReportV1` preserves the shared sweep-derived comparison
+shape internally.
 
 ### ITF Trace Format
 

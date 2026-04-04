@@ -421,12 +421,13 @@ For comparative experiment work, use
 `aura_simulator::run_adaptive_privacy_policy_sweep(...)` plus
 `aura_simulator::compare_policy_sweeps(...)` instead of ad hoc local sweep
 scripts. Those APIs keep Aura-specific bindings on top of the shared Telltale
-`SweepManifest` and `SweepDiffReport` surfaces.
+execution machinery while emitting Aura-owned `AuraSweepArchiveV1` and
+`AuraPolicyDiffReportV1` artifacts.
 
 For reusable regression bundles, use `aura_simulator::run_suite_catalog(...)`
 and `aura_simulator::compare_suite_catalogs(...)`. The suite catalogs are
 Aura-owned, but execution still goes through the shared Telltale harness and
-the archived manifest remains the shared sweep format.
+the archived comparison surface is `AuraSuiteTournamentReportV1`.
 
 For theorem-aware failure evidence, convert parity reports with
 `aura_simulator::counterexample_from_parity_report(...)` or
