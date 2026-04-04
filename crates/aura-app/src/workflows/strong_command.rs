@@ -66,6 +66,8 @@ mod tests {
     #[cfg(feature = "signals")]
     use crate::core::StateSnapshot;
     #[cfg(feature = "signals")]
+    use crate::signal_defs::{register_app_signals, CHAT_SIGNAL, CHAT_SIGNAL_NAME};
+    #[cfg(feature = "signals")]
     use crate::ui::workflows::strong_command::execute::{home_for_scope, wait_for_consistency};
     use crate::views::{Channel, ChannelType, ChatState, Contact, ContactsState};
     #[cfg(feature = "signals")]
@@ -78,13 +80,27 @@ mod tests {
         ui_contract::{
             AuthoritativeSemanticFact, OperationId, SemanticOperationKind, SemanticOperationPhase,
         },
-        workflows::signals::read_signal_or_default,
+        workflows::signals::{emit_signal, read_signal_or_default},
     };
     #[cfg(feature = "signals")]
     use async_lock::RwLock;
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::AuraError;
     use proptest::prelude::*;
+    #[cfg(feature = "signals")]
+    async fn register_signals(app_core: &Arc<RwLock<AppCore>>) {
+        let core = app_core.read().await;
+        register_app_signals(&*core).await.unwrap();
+    }
+
+    #[cfg(feature = "signals")]
+    async fn install_chat_signal(app_core: &Arc<RwLock<AppCore>>, chat: ChatState) {
+        register_signals(app_core).await;
+        emit_signal(app_core, &*CHAT_SIGNAL, chat, CHAT_SIGNAL_NAME)
+            .await
+            .unwrap();
+    }
+
     #[cfg(feature = "signals")]
     use std::sync::Arc;
 
@@ -643,26 +659,27 @@ mod tests {
     async fn consistency_barrier_reports_replicated_when_join_is_visible() {
         let app_core = crate::testing::default_test_app_core();
         let channel_id = ChannelId::from_bytes([32u8; 32]);
+        let chat = ChatState::from_channels(vec![Channel {
+            id: channel_id,
+            context_id: None,
+            name: "replicated-room".to_string(),
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: Vec::new(),
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        }]);
 
         {
             let mut core = app_core.write().await;
-            core.views_mut()
-                .set_chat(ChatState::from_channels(vec![Channel {
-                    id: channel_id,
-                    context_id: None,
-                    name: "replicated-room".to_string(),
-                    topic: None,
-                    channel_type: ChannelType::Home,
-                    unread_count: 0,
-                    is_dm: false,
-                    member_ids: Vec::new(),
-                    member_count: 1,
-                    last_message: None,
-                    last_message_time: None,
-                    last_activity: 0,
-                    last_finalized_epoch: 0,
-                }]));
+            core.views_mut().set_chat(chat.clone());
         }
+        install_chat_signal(&app_core, chat).await;
 
         let plan = PlannedCommand::Membership(CommandPlan {
             actor: None,
@@ -697,6 +714,7 @@ mod tests {
     async fn consistency_barrier_treats_missing_leave_scope_as_replicated() {
         let app_core = crate::testing::default_test_app_core();
         let missing_channel = ChannelId::from_bytes([44u8; 32]);
+        register_signals(&app_core).await;
 
         let plan = PlannedCommand::Membership(CommandPlan {
             actor: None,

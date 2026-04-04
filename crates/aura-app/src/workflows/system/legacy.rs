@@ -1214,7 +1214,7 @@ mod tests {
     #[cfg(feature = "signals")]
     #[test]
     fn authoritative_readiness_hook_tracks_transport_and_sync_convergence() {
-        let source = include_str!("../system.rs");
+        let source = include_str!("legacy.rs");
         assert!(source.contains("&*TRANSPORT_PEERS_SIGNAL"));
         assert!(source.contains("authoritative_transport_peers_readiness_hook"));
         assert!(source.contains("authoritative_sync_status_readiness_hook"));
