@@ -625,7 +625,7 @@ ci-docs-links:
 
 # Verify prose formatting rules used by the docs workflow
 ci-text-formatting:
-    scripts/check/text-formatting.sh
+    scripts/check/docs-text-formatting.sh
 
 # Detect semantic drift in documentation (stale type/trait/command references)
 ci-docs-semantic-drift:
