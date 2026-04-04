@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 mkdir -p artifacts/harness/browser
-log_file="$repo_root/artifacts/harness/browser/ci-browser.log"
+log_file="$repo_root/artifacts/harness/browser/ci-matrix-web.log"
 exec > >(tee "$log_file") 2>&1
 
 web_tools_cache_root="$repo_root/target/aura-web-tools-ci"
@@ -13,7 +13,7 @@ web_tools_cache_root="$repo_root/target/aura-web-tools-ci"
 prepare_browser_web_assets() {
   (
     cd crates/aura-web
-    if [ ! -d node_modules ] || [ ! -d node_modules/ws ] || [ ! -x node_modules/.bin/esbuild ] || [ ! -x node_modules/.bin/tailwindcss ]; then
+    if [ ! -d node_modules ] || [ ! -d node_modules/ws ]; then
       npm ci
     fi
     npm run tailwind:build >/dev/null
@@ -33,18 +33,17 @@ mkdir -p "$web_tools_cache_root"
 (
   cd crates/aura-harness/playwright-driver
   npm ci
-  npm run build
   npm run install-browsers
 )
 
-bash scripts/check/harness-browser-install.sh
+bash scripts/check/browser-install.sh
+
+cargo build -p aura-harness --bin aura-harness -q
+export AURA_HARNESS_BIN="$repo_root/target/debug/aura-harness"
 export AURA_HARNESS_WEB_BUILD_PROFILE=release
 export AURA_HARNESS_WEB_SERVER_READY_TIMEOUT_SECS=1800
 export AURA_WEB_TOOLS_CACHE_ROOT="$web_tools_cache_root"
 
 prepare_browser_web_assets
 
-cargo run -p aura-harness --bin aura-harness -- run \
-  --config configs/harness/browser-loopback.toml \
-  --scenario scenarios/harness/semantic-observation-browser-smoke.toml \
-  --artifacts-dir artifacts/harness/browser
+bash scripts/harness/run-matrix.sh --lane web "$@"

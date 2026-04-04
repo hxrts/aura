@@ -11,8 +11,8 @@ fail() {
 
 bash scripts/check/harness-governance.sh core-scenario-mechanics
 bash scripts/check/transparent-onion-quarantine.sh
-bash scripts/check/adaptive-privacy-runtime-locality.sh
-bash scripts/check/adaptive-privacy-phase5-legacy-sweep.sh
+bash scripts/check/privacy-runtime-locality.sh
+bash scripts/check/privacy-legacy-sweep.sh
 bash scripts/check/harness-ui-state-evented.sh
 bash scripts/check/harness-governance.sh ui-parity-contract
 # Inventory and converted shared-scenario contract
@@ -21,7 +21,7 @@ bash scripts/check/harness-governance.sh shared-scenario-contract
 bash scripts/check/harness-governance.sh scenario-legality
 bash scripts/check/harness-scenario-config-boundary.sh
 bash scripts/check/harness-governance.sh scenario-shape-contract
-bash scripts/check/harness-shared-flow-metadata.sh
+bash scripts/check/shared-flow-metadata.sh
 bash scripts/check/harness-command-plane-boundary.sh
 bash scripts/check/harness-trace-determinism.sh
 bash scripts/check/harness-observation-determinism.sh
@@ -41,26 +41,26 @@ cargo run -q -p aura-macros --bin ownership_lints -- \
 bash scripts/check/harness-recovery-contract.sh
 bash scripts/check/harness-wait-contract.sh
 bash scripts/check/harness-semantic-primitive-contract.sh
-bash scripts/check/harness-shared-intent-ui-flow.sh
+bash scripts/check/shared-intent-flow.sh
 bash scripts/check/harness-backend-contract.sh
-bash scripts/check/harness-shared-raw-ui-quarantine.sh
+bash scripts/check/shared-raw-quarantine.sh
 bash scripts/check/harness-raw-backend-quarantine.sh
 bash scripts/check/harness-governance.sh settings-surface-contract
-bash scripts/check/harness-tui-semantic-snapshot.sh
-bash scripts/check/harness-tui-selection-contract.sh
-bash scripts/check/harness-tui-product-path.sh
+bash scripts/check/tui-semantic-snapshot.sh
+bash scripts/check/tui-selection-contract.sh
+bash scripts/check/tui-product-path.sh
 bash scripts/check/harness-onboarding-publication.sh
 bash scripts/check/harness-runtime-events-authoritative.sh
-bash scripts/check/harness-browser-observation-recovery.sh
-bash scripts/check/harness-shared-semantic-dedup.sh
-bash scripts/check/harness-tui-observation-channel.sh
+bash scripts/check/browser-observation-recovery.sh
+bash scripts/check/shared-semantic-dedup.sh
+bash scripts/check/tui-observation-channel.sh
 bash scripts/check/harness-export-override-policy.sh
 bash scripts/check/harness-onboarding-contract.sh
 bash scripts/check/harness-bridge-contract.sh
-bash scripts/check/harness-browser-cache-owner.sh
-bash scripts/check/harness-browser-cache-lifecycle.sh
-bash scripts/check/harness-browser-observation-contract.sh
-bash scripts/check/harness-browser-driver-types.sh
+bash scripts/check/browser-cache-owner.sh
+bash scripts/check/browser-cache-lifecycle.sh
+bash scripts/check/browser-observation-contract.sh
+bash scripts/check/browser-driver-types.sh
 
 cargo test -p aura-app shared_flow_support_contract_is_consistent --quiet
 cargo test -p aura-app shared_intent_contract_accepts_intents --quiet

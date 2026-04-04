@@ -15,13 +15,13 @@ lane_files=(
   "justfile"
   "scripts/check/shared-flow-policy.sh"
   "scripts/check/user-flow-policy-guardrails.sh"
-  "scripts/ci/harness-browser.sh"
-  "scripts/ci/harness-matrix-web.sh"
-  "scripts/ci/harness-matrix-tui.sh"
-  "scripts/ci/harness-shared-semantic-web.sh"
-  "scripts/ci/harness-shared-semantic-tui.sh"
-  "scripts/ci/harness-frontend-conformance-web.sh"
-  "scripts/ci/harness-frontend-conformance-tui.sh"
+  "scripts/ci/browser-smoke.sh"
+  "scripts/ci/web-matrix.sh"
+  "scripts/ci/tui-matrix.sh"
+  "scripts/ci/web-semantic.sh"
+  "scripts/ci/tui-semantic.sh"
+  "scripts/ci/web-conformance.sh"
+  "scripts/ci/tui-conformance.sh"
 )
 
 violations="$(

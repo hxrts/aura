@@ -4,4 +4,4 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-bash scripts/ci/harness-matrix-web.sh --suite shared "$@"
+bash scripts/ci/web-matrix.sh --suite shared "$@"

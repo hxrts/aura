@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# quint-semantic-trace.sh - Generate or check deterministic Quint semantic traces
+# quint-trace.sh - Generate or check deterministic Quint semantic traces
 #
 # Usage:
-#   ./scripts/verify/quint-semantic-trace.sh generate [spec] [output]
-#   ./scripts/verify/quint-semantic-trace.sh check [spec] [expected]
+#   ./scripts/verify/quint-trace.sh generate [spec] [output]
+#   ./scripts/verify/quint-trace.sh check [spec] [expected]
 #
 # Environment:
 #   QUINT_TRACE_SEED       - Random seed (default: 424242)

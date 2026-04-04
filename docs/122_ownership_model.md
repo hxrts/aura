@@ -614,8 +614,8 @@ explicit:
   - thin repo-wide integration/governance gates such as
     `scripts/check/service-surface-declarations.sh`,
     `scripts/check/service-registry-ownership.sh`,
-    `scripts/check/adaptive-privacy-phase5-legacy-sweep.sh`, and
-    `scripts/check/adaptive-privacy-phase6.sh`
+    `scripts/check/privacy-legacy-sweep.sh`, and
+    `scripts/check/privacy-phase6-gate.sh`
 
 The default contributor path for service-family boundary work is:
 

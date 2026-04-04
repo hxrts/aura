@@ -4,7 +4,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Detects when documentation references identifiers, types, traits, or commands
-# that no longer exist in the codebase. Complements docs-links.sh (link integrity)
+# that no longer exist in the codebase. Complements docs-link-check.sh (link integrity)
 # with semantic integrity checking.
 #
 # Checks:
@@ -15,7 +15,7 @@
 # 5. File path references in code fences - validates paths exist
 #
 # Usage:
-#   ./scripts/check/docs-semantic-drift.sh [OPTIONS]
+#   ./scripts/check/docs-drift-check.sh [OPTIONS]
 #
 # Options:
 #   --verbose       Show all checked items, not just violations

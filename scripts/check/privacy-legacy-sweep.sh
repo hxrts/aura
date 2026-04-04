@@ -9,7 +9,7 @@ fail() {
   exit 1
 }
 
-bash scripts/check/adaptive-privacy-runtime-locality.sh
+bash scripts/check/privacy-runtime-locality.sh
 bash scripts/check/transparent-onion-quarantine.sh
 
 legacy_selection_hits="$(

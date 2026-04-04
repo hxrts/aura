@@ -163,13 +163,13 @@ browser-driver-smoke:
     cd crates/aura-harness/playwright-driver && npm test
 
 ci-harness-browser-driver-types:
-    bash scripts/check/harness-browser-driver-types.sh
+    bash scripts/check/browser-driver-types.sh
 
 ci-browser-driver-contract-sync:
-    bash scripts/check/browser-driver-contract-sync.sh
+    bash scripts/check/browser-driver-contract.sh
 
 harness-browser-install-check:
-    bash scripts/check/harness-browser-install.sh
+    bash scripts/check/browser-install.sh
 
 # Run harness scenario against browser backend config
 harness-run-browser scenario config="configs/harness/browser-loopback.toml" artifacts_dir="artifacts/harness/browser":
@@ -249,16 +249,16 @@ ci-harness-runtime-events-authoritative:
     bash scripts/check/harness-runtime-events-authoritative.sh
 
 ci-harness-browser-observation-recovery:
-    bash scripts/check/harness-browser-observation-recovery.sh
+    bash scripts/check/browser-observation-recovery.sh
 
 ci-harness-tui-observation-channel:
-    bash scripts/check/harness-tui-observation-channel.sh
+    bash scripts/check/tui-observation-channel.sh
 
 ci-ui-parity-contract:
     bash scripts/check/harness-governance.sh ui-parity-contract
 
 quint-observation-scenario:
-    ./scripts/verify/quint-observation-scenario.sh
+    ./scripts/verify/quint-observation.sh
 
 # Replay latest browser harness bundle
 harness-replay-browser bundle="artifacts/harness/browser/harness/browser-loopback-smoke/replay_bundle.json":
@@ -445,33 +445,33 @@ ci-harness-replay:
 
 # Browser harness lane (WASM build + Playwright smoke + browser scenarios)
 ci-harness-browser:
-    ./scripts/ci/harness-browser.sh
+    ./scripts/ci/browser-smoke.sh
 
 ci-harness-matrix-tui:
-    ./scripts/ci/harness-matrix-tui.sh
+    ./scripts/ci/tui-matrix.sh
 
 ci-harness-matrix-web:
-    ./scripts/ci/harness-matrix-web.sh
+    ./scripts/ci/web-matrix.sh
 
 ci-harness-matrix:
     just ci-harness-matrix-tui
     just ci-harness-matrix-web
 
 ci-harness-shared-semantic-tui:
-    ./scripts/ci/harness-shared-semantic-tui.sh
+    ./scripts/ci/tui-semantic.sh
 
 ci-harness-shared-semantic-web:
-    ./scripts/ci/harness-shared-semantic-web.sh
+    ./scripts/ci/web-semantic.sh
 
 ci-harness-shared-semantic-matrix:
     just ci-harness-shared-semantic-tui
     just ci-harness-shared-semantic-web
 
 ci-harness-frontend-conformance-tui:
-    ./scripts/ci/harness-frontend-conformance-tui.sh
+    ./scripts/ci/tui-conformance.sh
 
 ci-harness-frontend-conformance-web:
-    ./scripts/ci/harness-frontend-conformance-web.sh
+    ./scripts/ci/web-conformance.sh
 
 ci-harness-frontend-conformance-matrix:
     just ci-harness-frontend-conformance-tui
@@ -581,7 +581,7 @@ ci-agent-wasm:
 ci-workspace-wasm-test:
     #!/usr/bin/env bash
     set -euo pipefail
-    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen-runner.sh}"
+    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
       CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo test --workspace --target wasm32-unknown-unknown \
         --exclude aura-terminal \
@@ -613,7 +613,7 @@ ci-effects:
 
 # Verify docs links referenced from crates/ resolve to existing files in docs/
 ci-crates-doc-links:
-    scripts/check/docs-links.sh
+    scripts/check/docs-link-check.sh
 
 # Verify markdown links within docs/ using the same config as GitHub docs workflow
 ci-docs-links:
@@ -629,7 +629,7 @@ ci-text-formatting:
 
 # Detect semantic drift in documentation (stale type/trait/command references)
 ci-docs-semantic-drift:
-    scripts/check/docs-semantic-drift.sh
+    scripts/check/docs-drift-check.sh
 
 # Verify docs/998_verification_coverage.md metrics match actual codebase
 ci-verification-coverage:
@@ -651,8 +651,8 @@ ci-user-flow-policy:
 
 ci-harness-ownership-policy:
     bash scripts/check/ownership-category-declarations.sh
-    bash scripts/check/adaptive-privacy-runtime-locality.sh
-    bash scripts/check/adaptive-privacy-phase5-legacy-sweep.sh
+    bash scripts/check/privacy-runtime-locality.sh
+    bash scripts/check/privacy-legacy-sweep.sh
     bash scripts/check/harness-actor-vs-move-ownership.sh
     just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
     just _ownership-lint terminal-shell-explicit-exit-intent crates/aura-terminal/src
@@ -730,7 +730,7 @@ ci-ratchet-audit:
     cargo test -p aura-macros --test compile_fail -- --nocapture
 
 ci-browser-semantic-restart-boundary:
-    bash scripts/check/browser-semantic-restart-boundary.sh
+    bash scripts/check/browser-restart-boundary.sh
 
 ci-annotation-ratchet:
     bash scripts/check/ownership-annotation-ratchet.sh semantic-owner
@@ -749,7 +749,7 @@ ci-service-registry-ownership:
     bash scripts/check/service-registry-ownership.sh
 
 ci-adaptive-privacy-phase6:
-    bash scripts/check/adaptive-privacy-phase6.sh
+    bash scripts/check/privacy-phase6-gate.sh
 
 ci-actor-lifecycle:
     just _ownership-lint actor-owned-task-spawn crates/aura-agent/src crates/aura-app/src crates/aura-core/src crates/aura-effects/src crates/aura-harness/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src
@@ -815,7 +815,7 @@ ci-workflow-unbounded-runtime-awaits:
     just _ownership-lint workflow-unbounded-runtime-awaits crates/aura-app/src crates/aura-terminal/src/tui crates/aura-web/src crates/aura-ui/src
 
 ci-runtime-typed-lifecycle-bridge:
-    bash scripts/check/runtime-typed-lifecycle-bridge.sh
+    bash scripts/check/runtime-lifecycle-bridge.sh
 
 ci-weak-to-strong-identifier-upgrade:
     just _ownership-lint weak-to-strong-identifier-upgrade crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src
@@ -860,7 +860,7 @@ ci-timeout-time-domains:
 
 # Choreography wiring lint
 ci-choreo:
-    scripts/check/choreo-wiring.sh
+    scripts/check/protocol-choreo-wiring.sh
 
 ci-async-session-ownership:
     just _ownership-lint async-session-ownership crates/aura-agent/src/handlers crates/aura-agent/src/runtime/services crates/aura-agent/src/runtime_bridge
@@ -951,7 +951,7 @@ ci-conformance-strict:
     cargo test -p aura-agent --features choreo-backend-telltale-machine --test telltale_machine_parity -- --nocapture
 
     echo "Running strict native/wasm parity lane..."
-    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen-runner.sh}"
+    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
       cargo test -p aura-agent --target wasm32-unknown-unknown \
       --features web,choreo-backend-telltale-machine \
@@ -1433,11 +1433,11 @@ verification-coverage format="--md":
 
 # Regenerate a deterministic Quint semantic trace for harness / simulator workflows
 quint-semantic-trace spec="verification/quint/harness/flows.qnt" out="verification/quint/traces/harness_flows.itf.json" seed="424242" max_steps="50":
-    QUINT_TRACE_SEED={{ seed }} QUINT_TRACE_MAX_STEPS={{ max_steps }} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh generate {{ spec }} {{ out }}
+    QUINT_TRACE_SEED={{ seed }} QUINT_TRACE_MAX_STEPS={{ max_steps }} just _nix-dev -- ./scripts/verify/quint-trace.sh generate {{ spec }} {{ out }}
 
 # Check that the checked-in Quint semantic trace matches regeneration
 quint-semantic-trace-check spec="verification/quint/harness/flows.qnt" expected="verification/quint/traces/harness_flows.itf.json" seed="424242" max_steps="50":
-    QUINT_TRACE_SEED={{ seed }} QUINT_TRACE_MAX_STEPS={{ max_steps }} just _nix-dev -- ./scripts/verify/quint-semantic-trace.sh check {{ spec }} {{ expected }}
+    QUINT_TRACE_SEED={{ seed }} QUINT_TRACE_MAX_STEPS={{ max_steps }} just _nix-dev -- ./scripts/verify/quint-trace.sh check {{ spec }} {{ expected }}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Lean Formal Verification
@@ -1558,18 +1558,18 @@ kani-setup:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Setting up Kani verifier..."
-    just _nix-nightly -- bash scripts/verify/ensure-kani.sh
+    just _nix-nightly -- bash scripts/verify/kani-ensure.sh
     echo "✓ Kani setup complete at ${AURA_KANI_ROOT:-$PWD/.tmp/kani-root}. Run 'just kani' to verify."
 
 _ensure-kani:
-    bash scripts/verify/ensure-kani.sh
+    bash scripts/verify/kani-ensure.sh
 
 _run-kani *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
     ROOT="${AURA_KANI_ROOT:-$PWD/.tmp/kani-root}"
     export KANI_HOME="${AURA_KANI_HOME:-$ROOT/kani-home}"
-    bash scripts/verify/ensure-kani.sh
+    bash scripts/verify/kani-ensure.sh
     export PATH="$ROOT/bin:$PATH"
     {{ ARGS }}
 
