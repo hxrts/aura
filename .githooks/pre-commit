@@ -16,4 +16,30 @@ if [[ -n "${ignored_staged}" ]]; then
   exit 1
 fi
 
-just fmt-check
+# Scope fmt and check to crates with staged .rs changes.
+staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+if [[ -n "${staged_rs}" ]]; then
+  crates=$(echo "${staged_rs}" \
+    | sed -n 's|^crates/\([^/]*\)/.*|--package \1|p' \
+    | sort -u)
+  examples=$(echo "${staged_rs}" \
+    | sed -n 's|^examples/\([^/]*\)/.*|--package \1|p' \
+    | sort -u)
+  packages="${crates}${crates:+$'\n'}${examples}"
+
+  if [[ -n "${packages}" ]]; then
+    # shellcheck disable=SC2086
+    cargo fmt ${packages} -- --check 2>&1 || {
+      echo "" >&2
+      echo "error: staged Rust files are not formatted. Run: cargo fmt" >&2
+      exit 1
+    }
+
+    # shellcheck disable=SC2086
+    cargo check ${packages} --quiet 2>&1 || {
+      echo "" >&2
+      echo "error: cargo check failed on staged crates" >&2
+      exit 1
+    }
+  fi
+fi
