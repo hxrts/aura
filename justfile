@@ -19,6 +19,14 @@ default:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _nix-dev *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmpdir="${TMPDIR:-$PWD/.tmp}"
+    if [[ ! -d "$tmpdir" ]]; then
+        tmpdir="$PWD/.tmp"
+    fi
+    mkdir -p "$tmpdir"
+    export TMPDIR="$tmpdir"
     nix develop --command {{ ARGS }}
 
 _nix-nightly *ARGS:
