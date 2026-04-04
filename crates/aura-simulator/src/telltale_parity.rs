@@ -1084,6 +1084,7 @@ mod tests {
                 input_index: 0,
                 scenario_name: "lane".to_string(),
                 bindings: Vec::new(),
+                execution_regime: None,
                 theorem_profile: None,
                 scheduler_profile: None,
                 theorem_eligibility: decision,

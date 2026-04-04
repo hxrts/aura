@@ -373,6 +373,18 @@ pub fn run_suite_catalog(
                 input_index: idx,
                 scenario_name: suite.harness_spec.scenario.name.clone(),
                 bindings: suite.bindings.clone(),
+                execution_regime: result
+                    .as_ref()
+                    .ok()
+                    .map(|run| run.stats.execution_regime)
+                    .or_else(|| {
+                        suite
+                            .harness_spec
+                            .scenario
+                            .resolved_execution()
+                            .ok()
+                            .map(|execution| execution.regime())
+                    }),
                 theorem_profile: result
                     .as_ref()
                     .ok()
