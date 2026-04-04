@@ -356,6 +356,12 @@ Telltale parity lanes use one canonical mapping:
 
 Reports use schema `aura.telltale-parity.report.v1`.
 
+For Telltale 11-backed lanes, Aura can also invoke an upstream simulator runner
+first and attach the resulting sidecar automatically. Use
+`run_telltale_parity_with_runner(...)` or
+`run_telltale_control_plane_with_runner(...)` and configure the runner command
+with `AURA_TELLTALE_SIMULATOR_RUNNER` when the executable is not on `PATH`.
+
 ### Expected Outputs
 
 The simulator telltale parity lane writes:
@@ -370,6 +376,7 @@ The report includes:
 - first mismatch surface
 - first mismatch step index
 - full differential comparison payload
+- optional upstream Telltale 11 run context when the Aura runner path is used
 
 ### ITF Trace Format
 

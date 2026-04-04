@@ -398,6 +398,14 @@ For fault-aware replays, persist `entries + faults` bundles and re-inject faults
 
 Use `aura_simulator::DifferentialTester` to compare baseline and candidate conformance artifacts. Two profiles are available. The `strict` profile requires byte-identical surfaces. The `envelope_bounded` profile uses Aura law-aware comparison with commutative and algebraic envelopes.
 
+For Telltale 11-backed parity lanes, prefer
+`aura_simulator::run_telltale_parity_with_runner(...)` or
+`aura_simulator::run_telltale_control_plane_with_runner(...)` over manually
+assembling upstream sidecar paths. These helpers invoke the configured
+Telltale runner command, attach the generated run-output sidecar, and then emit
+the normal Aura parity report. Override the command with
+`AURA_TELLTALE_SIMULATOR_RUNNER` when needed.
+
 For parity debugging, run:
 
 ```bash

@@ -10,6 +10,7 @@ use aura_core::{AuraConformanceArtifactV1, ConformanceSurfaceName};
 use aura_testkit::load_conformance_artifact_file;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use telltale_simulator::analysis::NormalizedObservability;
 use telltale_simulator::decision::DecisionReport as TelltaleDecisionReport;
 use telltale_simulator::environment::EnvironmentTrace;
@@ -23,6 +24,84 @@ use telltale_simulator::sweep::SweepManifest;
 
 /// Schema identifier for simulator parity reports.
 pub const AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1: &str = "aura.telltale-parity.report.v1";
+/// Environment variable that overrides the upstream simulator runner command.
+pub const AURA_TELLTALE_SIMULATOR_RUNNER_ENV: &str = "AURA_TELLTALE_SIMULATOR_RUNNER";
+
+/// Aura-owned command surface for invoking the upstream Telltale simulator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TelltaleSimulatorCommandV1 {
+    /// Executable to invoke.
+    pub program: PathBuf,
+    /// Static extra arguments inserted before the run request arguments.
+    pub extra_args: Vec<String>,
+}
+
+impl TelltaleSimulatorCommandV1 {
+    /// Resolve the default command from Aura configuration.
+    #[must_use]
+    pub fn from_environment() -> Self {
+        let program = std::env::var_os(AURA_TELLTALE_SIMULATOR_RUNNER_ENV)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("telltale-simulator-run"));
+        Self {
+            program,
+            extra_args: Vec::new(),
+        }
+    }
+
+    /// Build argv for one upstream simulator run request.
+    #[must_use]
+    pub fn args_for_run(&self, request: &TelltaleSimulatorRunRequest) -> Vec<String> {
+        let mut args = self.extra_args.clone();
+        args.push("--config".to_string());
+        args.push(request.config_path.display().to_string());
+        args.push("--output".to_string());
+        args.push(request.output_path.display().to_string());
+        if request.pretty {
+            args.push("--pretty".to_string());
+        }
+        args
+    }
+}
+
+impl Default for TelltaleSimulatorCommandV1 {
+    fn default() -> Self {
+        Self::from_environment()
+    }
+}
+
+/// One upstream Telltale simulator run request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TelltaleSimulatorRunRequest {
+    /// Simulator config passed to `telltale-simulator-run`.
+    pub config_path: PathBuf,
+    /// Output JSON written by the upstream simulator runner.
+    pub output_path: PathBuf,
+    /// Whether the upstream runner should emit pretty JSON.
+    pub pretty: bool,
+}
+
+/// Aura-owned parity lane that first invokes an upstream simulator run.
+#[derive(Debug, Clone)]
+pub struct TelltaleParityRunnerFileRun {
+    /// File-based Aura parity comparison inputs.
+    pub parity: TelltaleParityFileRun,
+    /// Upstream Telltale simulator run request for the candidate lane.
+    pub telltale_run: TelltaleSimulatorRunRequest,
+    /// Optional explicit command override.
+    pub runner: Option<TelltaleSimulatorCommandV1>,
+}
+
+/// Aura-owned control-plane parity lane that first invokes an upstream simulator run.
+#[derive(Debug, Clone)]
+pub struct TelltaleControlPlaneRunnerFileRun {
+    /// File-based Aura control-plane parity comparison inputs.
+    pub parity: TelltaleControlPlaneFileRun,
+    /// Upstream Telltale simulator run request for the candidate lane.
+    pub telltale_run: TelltaleSimulatorRunRequest,
+    /// Optional explicit command override.
+    pub runner: Option<TelltaleSimulatorCommandV1>,
+}
 
 /// Stable boundary input for parity checks.
 #[derive(Debug, Clone)]
@@ -230,6 +309,16 @@ pub enum TelltaleParityError {
     /// Failed writing parity report.
     #[error("failed writing parity report to {path}: {message}")]
     WriteReport { path: String, message: String },
+    /// Failed invoking the upstream simulator runner.
+    #[error("failed invoking telltale simulator runner {program}: {message}")]
+    RunSimulator { program: String, message: String },
+    /// Upstream simulator runner exited unsuccessfully.
+    #[error("telltale simulator runner {program} failed with status {status}: {stderr}")]
+    RunnerFailed {
+        program: String,
+        status: String,
+        stderr: String,
+    },
 }
 
 /// Entry-point trait for telltale-backed parity checks.
@@ -292,6 +381,24 @@ pub fn run_telltale_parity_file_lane(
     Ok(report)
 }
 
+/// Run an upstream Telltale simulator invocation and attach its sidecar to the
+/// Aura parity lane automatically.
+///
+/// # Errors
+///
+/// Returns [`TelltaleParityError`] when the upstream runner, artifact loading,
+/// or report writing fails.
+pub fn run_telltale_parity_with_runner(
+    input: &TelltaleParityRunnerFileRun,
+) -> Result<TelltaleParityReportV1, TelltaleParityError> {
+    execute_telltale_simulator_run(input.runner.as_ref(), &input.telltale_run)?;
+    let mut parity = input.parity.clone();
+    let mut upstream = parity.upstream.clone().unwrap_or_default();
+    upstream.telltale_run_output_path = Some(input.telltale_run.output_path.clone());
+    parity.upstream = Some(upstream);
+    run_telltale_parity_file_lane(&parity)
+}
+
 /// Run a protocol-critical telltale parity lane for a named control-plane
 /// lifecycle and emit one stable report artifact.
 pub fn run_telltale_control_plane_file_lane(
@@ -312,6 +419,24 @@ pub fn run_telltale_control_plane_file_lane(
     Ok(report)
 }
 
+/// Run an upstream Telltale simulator invocation and attach its sidecar to the
+/// Aura control-plane parity lane automatically.
+///
+/// # Errors
+///
+/// Returns [`TelltaleParityError`] when the upstream runner, artifact loading,
+/// or report writing fails.
+pub fn run_telltale_control_plane_with_runner(
+    input: &TelltaleControlPlaneRunnerFileRun,
+) -> Result<TelltaleParityReportV1, TelltaleParityError> {
+    execute_telltale_simulator_run(input.runner.as_ref(), &input.telltale_run)?;
+    let mut parity = input.parity.clone();
+    let mut upstream = parity.upstream.clone().unwrap_or_default();
+    upstream.telltale_run_output_path = Some(input.telltale_run.output_path.clone());
+    parity.upstream = Some(upstream);
+    run_telltale_control_plane_file_lane(&parity)
+}
+
 /// Validate that an artifact satisfies required canonical surfaces.
 pub fn validate_telltale_mapping_surfaces(
     artifact: &AuraConformanceArtifactV1,
@@ -327,6 +452,36 @@ fn load_artifact(path: &Path) -> Result<AuraConformanceArtifactV1, TelltaleParit
     load_conformance_artifact_file(path).map_err(|error| TelltaleParityError::LoadArtifact {
         path: path.display().to_string(),
         message: error.to_string(),
+    })
+}
+
+fn execute_telltale_simulator_run(
+    command: Option<&TelltaleSimulatorCommandV1>,
+    request: &TelltaleSimulatorRunRequest,
+) -> Result<(), TelltaleParityError> {
+    let command = command.cloned().unwrap_or_default();
+    let args = command.args_for_run(request);
+    let output = Command::new(&command.program)
+        .args(&args)
+        .output()
+        .map_err(|error| TelltaleParityError::RunSimulator {
+            program: command.program.display().to_string(),
+            message: error.to_string(),
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stderr = if stderr.is_empty() {
+        "no stderr captured".to_string()
+    } else {
+        stderr
+    };
+    Err(TelltaleParityError::RunnerFailed {
+        program: command.program.display().to_string(),
+        status: output.status.to_string(),
+        stderr,
     })
 }
 
@@ -456,7 +611,9 @@ mod tests {
     use aura_core::{
         AuraConformanceRunMetadataV1, AuraConformanceSurfaceV1, ConformanceSurfaceName,
     };
-    use std::path::PathBuf;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
     use telltale_simulator::decision::{DecisionCertificate, DecisionKind, DecisionOutcome};
     use telltale_simulator::fault::AssumptionFailureClass;
     use telltale_simulator::runner::{
@@ -751,6 +908,13 @@ mod tests {
         }
     }
 
+    fn write_runner_script(path: &Path, body: &str) {
+        fs::write(path, body).expect("write script");
+        let mut perms = fs::metadata(path).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms).expect("chmod");
+    }
+
     #[test]
     fn file_lane_embeds_upstream_telltale_sidecars() {
         let dir = tempdir().expect("tempdir");
@@ -860,5 +1024,119 @@ mod tests {
         assert!(comparison.normalized_observability_match);
         assert_eq!(comparison.decision_report_match, Some(true));
         assert_eq!(comparison.sweep_run_count_match, Some(true));
+    }
+
+    #[test]
+    fn runner_command_builds_expected_argv() {
+        let command = TelltaleSimulatorCommandV1 {
+            program: PathBuf::from("/tmp/telltale-simulator-run"),
+            extra_args: vec!["--frozen".to_string()],
+        };
+        let request = TelltaleSimulatorRunRequest {
+            config_path: PathBuf::from("/tmp/scenario.toml"),
+            output_path: PathBuf::from("/tmp/run.json"),
+            pretty: true,
+        };
+        assert_eq!(
+            command.args_for_run(&request),
+            vec![
+                "--frozen".to_string(),
+                "--config".to_string(),
+                "/tmp/scenario.toml".to_string(),
+                "--output".to_string(),
+                "/tmp/run.json".to_string(),
+                "--pretty".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn parity_runner_surfaces_upstream_runner_failures() {
+        let dir = tempdir().expect("tempdir");
+        let script_path = dir.path().join("fail-runner.sh");
+        write_runner_script(&script_path, "#!/bin/sh\necho fail-runner >&2\nexit 17\n");
+        let error = execute_telltale_simulator_run(
+            Some(&TelltaleSimulatorCommandV1 {
+                program: script_path,
+                extra_args: Vec::new(),
+            }),
+            &TelltaleSimulatorRunRequest {
+                config_path: dir.path().join("scenario.toml"),
+                output_path: dir.path().join("run.json"),
+                pretty: true,
+            },
+        )
+        .expect_err("runner should fail");
+        match error {
+            TelltaleParityError::RunnerFailed { status, stderr, .. } => {
+                assert!(status.contains("17"));
+                assert!(stderr.contains("fail-runner"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parity_runner_invokes_upstream_and_attaches_sidecar() {
+        let dir = tempdir().expect("tempdir");
+        let baseline_path = dir.path().join("baseline.json");
+        let candidate_path = dir.path().join("candidate.json");
+        let report_path = dir.path().join("report.json");
+        let run_output_path = dir.path().join("candidate-run.json");
+        let fixture_path = dir.path().join("fixture.json");
+        let arg_log_path = dir.path().join("runner-args.log");
+        let script_path = dir.path().join("ok-runner.sh");
+
+        let baseline = artifact("aura", &["a", "b"]);
+        let candidate = artifact("telltale_machine", &["b", "a"]);
+        fs::write(
+            &baseline_path,
+            serde_json::to_vec_pretty(&baseline).expect("serialize baseline"),
+        )
+        .expect("write baseline");
+        fs::write(
+            &candidate_path,
+            serde_json::to_vec_pretty(&candidate).expect("serialize candidate"),
+        )
+        .expect("write candidate");
+        fs::write(
+            &fixture_path,
+            serde_json::to_vec_pretty(&sample_run_summary()).expect("serialize fixture"),
+        )
+        .expect("write fixture");
+
+        let script = format!(
+            "#!/bin/sh\nset -eu\nlog=\"{}\"\nfixture=\"{}\"\noutput=\"\"\nconfig=\"\"\n: > \"$log\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --config) config=\"$2\"; shift 2 ;;\n    --output) output=\"$2\"; shift 2 ;;\n    --pretty) echo --pretty >> \"$log\"; shift ;;\n    *) echo \"$1\" >> \"$log\"; shift ;;\n  esac\ndone\nprintf '%s\\n' \"$config\" >> \"$log\"\ncat \"$fixture\" > \"$output\"\n",
+            arg_log_path.display(),
+            fixture_path.display()
+        );
+        write_runner_script(&script_path, &script);
+
+        let report = run_telltale_parity_with_runner(&TelltaleParityRunnerFileRun {
+            parity: TelltaleParityFileRun {
+                baseline_path,
+                telltale_candidate_path: candidate_path,
+                output_report_path: report_path,
+                profile: DifferentialProfile::EnvelopeBounded,
+                upstream: None,
+            },
+            telltale_run: TelltaleSimulatorRunRequest {
+                config_path: dir.path().join("scenario.toml"),
+                output_path: run_output_path.clone(),
+                pretty: true,
+            },
+            runner: Some(TelltaleSimulatorCommandV1 {
+                program: script_path,
+                extra_args: Vec::new(),
+            }),
+        })
+        .expect("run parity with runner");
+
+        let upstream = report.upstream.expect("upstream");
+        assert!(upstream.telltale_run.is_some());
+        assert!(run_output_path.exists());
+        let logged = fs::read_to_string(arg_log_path).expect("read args");
+        assert!(logged.contains("--pretty"));
+        assert!(logged.contains("scenario.toml"));
     }
 }

@@ -209,11 +209,14 @@ pub use property_monitor::{
     PropertyViolation,
 };
 pub use telltale_parity::{
-    run_telltale_control_plane_file_lane, run_telltale_parity_file_lane,
+    run_telltale_control_plane_file_lane, run_telltale_control_plane_with_runner,
+    run_telltale_parity_file_lane, run_telltale_parity_with_runner,
     validate_telltale_mapping_surfaces, TelltaleControlPlaneFileRun, TelltaleControlPlaneLane,
-    TelltaleParityError, TelltaleParityFileRun, TelltaleParityInput, TelltaleParityReportV1,
-    TelltaleParityRunner, TelltaleRunSummaryV1, TelltaleUpstreamComparisonV1,
-    TelltaleUpstreamPathsV1, TelltaleUpstreamReportV1, AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1,
+    TelltaleControlPlaneRunnerFileRun, TelltaleParityError, TelltaleParityFileRun,
+    TelltaleParityInput, TelltaleParityReportV1, TelltaleParityRunner, TelltaleParityRunnerFileRun,
+    TelltaleRunSummaryV1, TelltaleSimulatorCommandV1, TelltaleSimulatorRunRequest,
+    TelltaleUpstreamComparisonV1, TelltaleUpstreamPathsV1, TelltaleUpstreamReportV1,
+    AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1, AURA_TELLTALE_SIMULATOR_RUNNER_ENV,
 };
 
 // Re-export Duration for convenience
