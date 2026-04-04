@@ -255,7 +255,7 @@ ci-harness-tui-observation-channel:
     bash scripts/check/harness-tui-observation-channel.sh
 
 ci-ui-parity-contract:
-    bash scripts/check/ui-parity-contract.sh
+    bash scripts/check/harness-governance.sh ui-parity-contract
 
 quint-observation-scenario:
     ./scripts/verify/quint-observation-scenario.sh
@@ -637,7 +637,7 @@ ci-verification-coverage:
 
 # Verify user flow coverage mapping remains aligned with changed flow surfaces
 ci-user-flow-coverage:
-    scripts/check/user-flow-coverage.sh
+    bash scripts/check/harness-governance.sh user-flow-coverage
 
 # Fast environment sanity checks before the expensive matrix.
 ci-preflight:
@@ -866,13 +866,13 @@ ci-async-session-ownership:
     just _ownership-lint async-session-ownership crates/aura-agent/src/handlers crates/aura-agent/src/runtime/services crates/aura-agent/src/runtime_bridge
 
 ci-async-concurrency-envelope:
-    bash scripts/check/async-concurrency-envelope.sh
+    bash scripts/check/runtime-boundary-allowlist.sh concurrency
 
 ci-runtime-shutdown-order:
     bash scripts/check/runtime-shutdown-order.sh
 
 ci-runtime-instrumentation-schema:
-    bash scripts/check/runtime-instrumentation-schema.sh
+    bash scripts/check/runtime-boundary-allowlist.sh instrumentation
 
 ci-harness-readiness-ownership:
     just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src

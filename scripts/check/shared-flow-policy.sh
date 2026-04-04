@@ -13,9 +13,8 @@ bash scripts/check/harness-governance.sh core-scenario-mechanics
 bash scripts/check/transparent-onion-quarantine.sh
 bash scripts/check/adaptive-privacy-runtime-locality.sh
 bash scripts/check/adaptive-privacy-phase5-legacy-sweep.sh
-bash scripts/check/harness-governance-wrappers.sh
 bash scripts/check/harness-ui-state-evented.sh
-bash scripts/check/ui-parity-contract.sh
+bash scripts/check/harness-governance.sh ui-parity-contract
 # Inventory and converted shared-scenario contract
 bash scripts/check/harness-scenario-inventory.sh
 bash scripts/check/harness-governance.sh shared-scenario-contract
@@ -46,7 +45,7 @@ bash scripts/check/harness-shared-intent-ui-flow.sh
 bash scripts/check/harness-backend-contract.sh
 bash scripts/check/harness-shared-raw-ui-quarantine.sh
 bash scripts/check/harness-raw-backend-quarantine.sh
-bash scripts/check/harness-settings-surface-contract.sh
+bash scripts/check/harness-governance.sh settings-surface-contract
 bash scripts/check/harness-tui-semantic-snapshot.sh
 bash scripts/check/harness-tui-selection-contract.sh
 bash scripts/check/harness-tui-product-path.sh

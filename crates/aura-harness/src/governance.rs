@@ -59,7 +59,6 @@ pub enum GovernanceCheck {
     UiParityContract,
     SettingsSurfaceContract,
     ScenarioShapeContract,
-    GovernanceWrappers,
 }
 
 pub fn run(check: GovernanceCheck) -> Result<()> {
@@ -71,7 +70,6 @@ pub fn run(check: GovernanceCheck) -> Result<()> {
         GovernanceCheck::UiParityContract => validate_ui_parity_contract(),
         GovernanceCheck::SettingsSurfaceContract => validate_settings_surface_contract(),
         GovernanceCheck::ScenarioShapeContract => validate_scenario_shape_contract(),
-        GovernanceCheck::GovernanceWrappers => validate_governance_wrappers(),
     }
 }
 
@@ -501,63 +499,6 @@ pub fn validate_scenario_shape_contract() -> Result<()> {
     Ok(())
 }
 
-pub fn validate_governance_wrappers() -> Result<()> {
-    const WRAPPERS: &[(&str, &str)] = &[
-        (
-            "scripts/check/harness-shared-scenario-contract.sh",
-            "shared-scenario-contract",
-        ),
-        (
-            "scripts/check/harness-scenario-legality.sh",
-            "scenario-legality",
-        ),
-        (
-            "scripts/check/harness-core-scenario-mechanics.sh",
-            "core-scenario-mechanics",
-        ),
-        ("scripts/check/user-flow-coverage.sh", "user-flow-coverage"),
-        ("scripts/check/ui-parity-contract.sh", "ui-parity-contract"),
-        (
-            "scripts/check/harness-settings-surface-contract.sh",
-            "settings-surface-contract",
-        ),
-        (
-            "scripts/check/harness-scenario-shape-contract.sh",
-            "scenario-shape-contract",
-        ),
-        (
-            "scripts/check/harness-governance-wrappers.sh",
-            "governance-wrappers",
-        ),
-    ];
-
-    for (path, check) in WRAPPERS {
-        let body =
-            fs::read_to_string(path).with_context(|| format!("failed to read wrapper {path}"))?;
-        let expected =
-            format!("cargo run -p aura-harness --bin aura-harness --quiet -- governance {check}");
-        if !body.contains(&expected) {
-            bail!("wrapper does not call typed governance entry point: {path}");
-        }
-        for forbidden in [
-            "rg ",
-            "awk ",
-            "git diff",
-            "allowed_actions=",
-            "shared_paths=",
-            "entries=",
-            "core_shared_scenarios=",
-            "AURA_ALLOW_FLOW_COVERAGE_SKIP",
-        ] {
-            if body.contains(forbidden) {
-                bail!("wrapper contains standalone governance logic: {path}");
-            }
-        }
-    }
-
-    println!("harness-governance-wrappers: clean");
-    Ok(())
-}
 fn ensure_converted_frontend_mechanics_are_classified(
     entry: &ScenarioInventoryEntry,
     definition: &ScenarioDefinition,

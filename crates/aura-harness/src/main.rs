@@ -102,7 +102,6 @@ enum GovernanceCheckArg {
     UiParityContract,
     SettingsSurfaceContract,
     ScenarioShapeContract,
-    GovernanceWrappers,
 }
 
 fn main() -> Result<()> {
@@ -125,7 +124,6 @@ fn governance_check(args: GovernanceArgs) -> Result<()> {
         GovernanceCheckArg::UiParityContract => GovernanceCheck::UiParityContract,
         GovernanceCheckArg::SettingsSurfaceContract => GovernanceCheck::SettingsSurfaceContract,
         GovernanceCheckArg::ScenarioShapeContract => GovernanceCheck::ScenarioShapeContract,
-        GovernanceCheckArg::GovernanceWrappers => GovernanceCheck::GovernanceWrappers,
     };
     governance::run(check)
 }
