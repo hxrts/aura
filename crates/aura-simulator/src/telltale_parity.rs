@@ -178,6 +178,9 @@ pub struct TelltaleParityReportV1 {
     pub first_mismatch_step_index: Option<usize>,
     /// Differential comparison report.
     pub differential: DifferentialReport,
+    /// High-level semantic summary when upstream Telltale 11 context is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_summary: Option<TelltaleParitySemanticSummaryV1>,
     /// Optional upstream Telltale 11 simulator context attached to this lane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream: Option<TelltaleUpstreamReportV1>,
@@ -270,6 +273,34 @@ pub struct TelltaleUpstreamComparisonV1 {
     /// Whether the supplied sweep manifests have the same run count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sweep_run_count_match: Option<bool>,
+}
+
+/// High-level semantic relation for one Telltale-backed Aura parity report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TelltaleParitySemanticRelationV1 {
+    /// Raw strict comparison and upstream semantic classifications agree.
+    ExactMatch,
+    /// Raw traces differ, but upstream normalization and theorem-facing
+    /// classifications agree.
+    EquivalentUnderNormalization,
+    /// The runs diverge on safety-visible behavior.
+    SafetyVisibleDivergence,
+}
+
+/// Semantic summary for one Telltale-backed Aura parity report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelltaleParitySemanticSummaryV1 {
+    /// High-level semantic relation.
+    pub relation: TelltaleParitySemanticRelationV1,
+    /// Whether execution regimes match across supplied upstream sidecars.
+    pub execution_regime_match: bool,
+    /// Whether theorem profiles match across supplied upstream sidecars.
+    pub theorem_profile_match: bool,
+    /// Whether scheduler profiles match across supplied upstream sidecars.
+    pub scheduler_profile_match: bool,
+    /// Whether normalized observability classes match across supplied upstream sidecars.
+    pub normalized_observability_match: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -373,9 +404,11 @@ pub fn run_telltale_parity_file_lane(
         },
         first_mismatch_surface: differential.mismatch.as_ref().and_then(|m| m.surface),
         first_mismatch_step_index: differential.mismatch.as_ref().and_then(|m| m.step_index),
+        semantic_summary: None,
         differential,
         upstream: load_upstream_context(input.upstream.as_ref())?,
     };
+    let report = with_semantic_summary(report);
 
     write_parity_report(&input.output_report_path, &report)?;
     Ok(report)
@@ -415,6 +448,7 @@ pub fn run_telltale_control_plane_file_lane(
         "aura-simulator:telltale-control-plane:{}",
         input.control_plane_lane.lane_suffix()
     );
+    report = with_semantic_summary(report);
     write_parity_report(&input.output_report_path, &report)?;
     Ok(report)
 }
@@ -582,6 +616,38 @@ fn load_upstream_context(
         telltale_sweep_manifest,
         comparison,
     }))
+}
+
+fn with_semantic_summary(mut report: TelltaleParityReportV1) -> TelltaleParityReportV1 {
+    report.semantic_summary =
+        semantic_summary_from_report(&report.differential, report.upstream.as_ref());
+    report
+}
+
+fn semantic_summary_from_report(
+    differential: &DifferentialReport,
+    upstream: Option<&TelltaleUpstreamReportV1>,
+) -> Option<TelltaleParitySemanticSummaryV1> {
+    let comparison = upstream?.comparison.as_ref()?;
+    let theorem_aligned = comparison.execution_regime_match
+        && comparison.theorem_profile_match
+        && comparison.scheduler_profile_match;
+    let relation = if theorem_aligned && comparison.normalized_observability_match {
+        if differential.profile == DifferentialProfile::Strict && differential.equivalent {
+            TelltaleParitySemanticRelationV1::ExactMatch
+        } else {
+            TelltaleParitySemanticRelationV1::EquivalentUnderNormalization
+        }
+    } else {
+        TelltaleParitySemanticRelationV1::SafetyVisibleDivergence
+    };
+    Some(TelltaleParitySemanticSummaryV1 {
+        relation,
+        execution_regime_match: comparison.execution_regime_match,
+        theorem_profile_match: comparison.theorem_profile_match,
+        scheduler_profile_match: comparison.scheduler_profile_match,
+        normalized_observability_match: comparison.normalized_observability_match,
+    })
 }
 
 fn write_parity_report(
@@ -978,7 +1044,7 @@ mod tests {
                 bindings: Vec::new(),
                 theorem_profile: None,
                 scheduler_profile: None,
-                theorem_eligibility: decision.clone(),
+                theorem_eligibility: decision,
                 capacity_report: None,
                 result_error: None,
             }],
@@ -1024,6 +1090,15 @@ mod tests {
         assert!(comparison.normalized_observability_match);
         assert_eq!(comparison.decision_report_match, Some(true));
         assert_eq!(comparison.sweep_run_count_match, Some(true));
+        let semantic = report.semantic_summary.expect("semantic summary");
+        assert_eq!(
+            semantic.relation,
+            TelltaleParitySemanticRelationV1::EquivalentUnderNormalization
+        );
+        assert!(semantic.execution_regime_match);
+        assert!(semantic.theorem_profile_match);
+        assert!(semantic.scheduler_profile_match);
+        assert!(semantic.normalized_observability_match);
     }
 
     #[test]
@@ -1134,9 +1209,125 @@ mod tests {
 
         let upstream = report.upstream.expect("upstream");
         assert!(upstream.telltale_run.is_some());
+        assert!(report.semantic_summary.is_none());
         assert!(run_output_path.exists());
         let logged = fs::read_to_string(arg_log_path).expect("read args");
         assert!(logged.contains("--pretty"));
         assert!(logged.contains("scenario.toml"));
+    }
+
+    #[test]
+    fn semantic_summary_reports_exact_match_for_strict_aligned_runs() {
+        let dir = tempdir().expect("tempdir");
+        let baseline_path = dir.path().join("baseline.json");
+        let candidate_path = dir.path().join("candidate.json");
+        let report_path = dir.path().join("report.json");
+        let baseline_run_path = dir.path().join("baseline-run.json");
+        let candidate_run_path = dir.path().join("candidate-run.json");
+
+        let baseline = artifact("aura", &["a", "b"]);
+        let candidate = artifact("telltale_machine", &["a", "b"]);
+        fs::write(
+            &baseline_path,
+            serde_json::to_vec_pretty(&baseline).expect("serialize baseline"),
+        )
+        .expect("write baseline");
+        fs::write(
+            &candidate_path,
+            serde_json::to_vec_pretty(&candidate).expect("serialize candidate"),
+        )
+        .expect("write candidate");
+        let run_output = sample_run_summary();
+        fs::write(
+            &baseline_run_path,
+            serde_json::to_vec_pretty(&run_output).expect("serialize baseline run"),
+        )
+        .expect("write baseline run");
+        fs::write(
+            &candidate_run_path,
+            serde_json::to_vec_pretty(&run_output).expect("serialize candidate run"),
+        )
+        .expect("write candidate run");
+
+        let report = run_telltale_parity_file_lane(&TelltaleParityFileRun {
+            baseline_path,
+            telltale_candidate_path: candidate_path,
+            output_report_path: report_path,
+            profile: DifferentialProfile::Strict,
+            upstream: Some(TelltaleUpstreamPathsV1 {
+                baseline_run_output_path: Some(baseline_run_path),
+                telltale_run_output_path: Some(candidate_run_path),
+                baseline_decision_report_path: None,
+                telltale_decision_report_path: None,
+                baseline_sweep_manifest_path: None,
+                telltale_sweep_manifest_path: None,
+            }),
+        })
+        .expect("run lane");
+
+        let semantic = report.semantic_summary.expect("semantic summary");
+        assert_eq!(semantic.relation, TelltaleParitySemanticRelationV1::ExactMatch);
+    }
+
+    #[test]
+    fn semantic_summary_reports_safety_visible_divergence_for_theorem_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let baseline_path = dir.path().join("baseline.json");
+        let candidate_path = dir.path().join("candidate.json");
+        let report_path = dir.path().join("report.json");
+        let baseline_run_path = dir.path().join("baseline-run.json");
+        let candidate_run_path = dir.path().join("candidate-run.json");
+
+        let baseline = artifact("aura", &["a", "b"]);
+        let candidate = artifact("telltale_machine", &["b", "a"]);
+        fs::write(
+            &baseline_path,
+            serde_json::to_vec_pretty(&baseline).expect("serialize baseline"),
+        )
+        .expect("write baseline");
+        fs::write(
+            &candidate_path,
+            serde_json::to_vec_pretty(&candidate).expect("serialize candidate"),
+        )
+        .expect("write candidate");
+
+        let baseline_run = sample_run_summary();
+        let mut candidate_run = sample_run_summary();
+        candidate_run.stats.theorem_profile.scheduler_profile =
+            TheoremSchedulerProfile::ThreadedEnvelope;
+        candidate_run.stats.theorem_profile.eligibility = TheoremEligibility::EnvelopeBounded;
+        fs::write(
+            &baseline_run_path,
+            serde_json::to_vec_pretty(&baseline_run).expect("serialize baseline run"),
+        )
+        .expect("write baseline run");
+        fs::write(
+            &candidate_run_path,
+            serde_json::to_vec_pretty(&candidate_run).expect("serialize candidate run"),
+        )
+        .expect("write candidate run");
+
+        let report = run_telltale_parity_file_lane(&TelltaleParityFileRun {
+            baseline_path,
+            telltale_candidate_path: candidate_path,
+            output_report_path: report_path,
+            profile: DifferentialProfile::EnvelopeBounded,
+            upstream: Some(TelltaleUpstreamPathsV1 {
+                baseline_run_output_path: Some(baseline_run_path),
+                telltale_run_output_path: Some(candidate_run_path),
+                baseline_decision_report_path: None,
+                telltale_decision_report_path: None,
+                baseline_sweep_manifest_path: None,
+                telltale_sweep_manifest_path: None,
+            }),
+        })
+        .expect("run lane");
+
+        let semantic = report.semantic_summary.expect("semantic summary");
+        assert_eq!(
+            semantic.relation,
+            TelltaleParitySemanticRelationV1::SafetyVisibleDivergence
+        );
+        assert!(!semantic.theorem_profile_match);
     }
 }
