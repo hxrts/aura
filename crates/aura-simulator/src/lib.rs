@@ -212,8 +212,8 @@ pub use telltale_parity::{
     run_telltale_control_plane_file_lane, run_telltale_parity_file_lane,
     validate_telltale_mapping_surfaces, TelltaleControlPlaneFileRun, TelltaleControlPlaneLane,
     TelltaleParityError, TelltaleParityFileRun, TelltaleParityInput, TelltaleParityReportV1,
-    TelltaleParityRunner, TelltaleSurfaceMappingV1, AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1,
-    TELLTALE_SURFACE_MAPPINGS_V1,
+    TelltaleParityRunner, TelltaleRunSummaryV1, TelltaleUpstreamComparisonV1,
+    TelltaleUpstreamPathsV1, TelltaleUpstreamReportV1, AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1,
 };
 
 // Re-export Duration for convenience

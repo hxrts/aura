@@ -633,6 +633,9 @@ async fn join_channel_by_name_owned(
     }
 
     if messaging_backend(app_core).await == MessagingBackend::LocalOnly {
+        // OWNERSHIP: observed - the local-only branch seeds a purely local chat
+        // channel from observed projections and contacts; no runtime authority
+        // exists on this path.
         let normalized_channel_name = normalize_channel_name(channel_name);
         let existing_local_channel = {
             let chat = observed_chat_snapshot(app_core).await;

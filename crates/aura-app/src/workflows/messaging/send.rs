@@ -975,6 +975,8 @@ pub async fn start_direct_chat_with_authority(
     contact_authority: AuthorityId,
     timestamp_ms: u64,
 ) -> Result<ChannelId, AuraError> {
+    // OWNERSHIP: observed - contact projection data here is used only to derive
+    // a display label for the DM path; it does not authorize the direct chat.
     let backend = messaging_backend(app_core).await;
     let contacts = observed_contacts_snapshot(app_core).await;
     let contact_id = contact_authority.to_string();

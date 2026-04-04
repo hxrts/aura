@@ -74,14 +74,17 @@ Contract alignment:
 
 ### InvariantTelltaleArtifactMappingCanonical
 
-Artifact mapping for telltale parity must be stable and shared across lanes.
+Artifact requirements for telltale parity must stay canonical, and optional
+upstream Telltale 11 sidecars must remain additive rather than redefining the
+Aura comparison boundary.
 
 Enforcement locus:
-- `src/telltale_parity.rs` publishes `TELLTALE_SURFACE_MAPPINGS_V1`.
 - `src/telltale_parity.rs` validates required Aura conformance surfaces before comparison.
+- `src/telltale_parity.rs` loads optional upstream simulator sidecars into the emitted report.
 
 Failure mode:
-- Different lanes compare non-equivalent surfaces and produce false mismatches.
+- Different lanes compare non-equivalent Aura surfaces and produce false mismatches.
+- Upstream sidecars become a second source of truth for Aura parity outcomes.
 - Parity reports cannot be replayed or audited consistently.
 
 Verification hooks:
@@ -132,7 +135,7 @@ cargo test -p aura-simulator
 | Replay transcript mismatch | DeterministicReplay | `src/async_host.rs` `async_host_replay_matches_recorded_transcript` | Covered |
 | Replay mismatch not detected | DeterministicReplay | `src/async_host.rs` `async_host_replay_detects_mismatch` | Covered |
 | Parity diverges between sync/async hosts | TelltaleParityBoundaryStable | `src/async_host.rs` `async_host_parity_matches_sync_host_on_representative_suite` | Covered |
-| Surface mapping doesn't match required surfaces | TelltaleArtifactMappingCanonical | `src/telltale_parity.rs` `canonical_surface_mapping_matches_required_surfaces` | Covered |
+| Required surfaces not enforced or upstream context omitted | TelltaleArtifactMappingCanonical | `src/telltale_parity.rs` `surface_validation_rejects_missing_required_surface`, `file_lane_embeds_upstream_telltale_sidecars` | Covered |
 | Parity report artifact unstable | TelltaleArtifactMappingCanonical | `src/telltale_parity.rs` `file_lane_writes_stable_report_artifact` | Covered |
 | Consensus protocol simulation wrong | — | `tests/consensus_protocol_test.rs`, `tests/consensus_property_tests.rs` | Covered |
 | Invitation protocol simulation wrong | — | `tests/invitation_protocol_test.rs` | Covered |

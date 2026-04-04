@@ -732,6 +732,7 @@ fn phase_six_control_plane_reports_are_archived() {
             telltale_candidate_path: candidate_path,
             output_report_path: report_path,
             profile: DifferentialProfile::EnvelopeBounded,
+            upstream: None,
         })
         .expect("run control-plane telltale lane");
         archived.insert(scenario.id, report.lane);
@@ -808,6 +809,7 @@ fn phase_six_generic_telltale_lane_archive_remains_available() {
         telltale_candidate_path: candidate_path,
         output_report_path: report_path,
         profile: DifferentialProfile::EnvelopeBounded,
+        upstream: None,
     })
     .expect("run telltale parity lane");
     assert!(report.differential.equivalent);

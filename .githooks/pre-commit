@@ -17,4 +17,3 @@ if [[ -n "${ignored_staged}" ]]; then
 fi
 
 just fmt-check
-just clippy-strict

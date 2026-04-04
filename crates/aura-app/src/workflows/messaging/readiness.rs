@@ -140,6 +140,8 @@ impl ChannelReadinessCoordinator {
         app_core: &Arc<RwLock<AppCore>>,
         resolve_recipients: bool,
     ) -> Result<Self, AuraError> {
+        // OWNERSHIP: fact-backed - authoritative semantic facts drive readiness;
+        // observed chat only enriches already-materialized channel metadata.
         let facts = authoritative_semantic_facts_snapshot(app_core).await?;
         let observed_chat = observed_chat_snapshot(app_core).await;
         let (runtime, self_authority) = {

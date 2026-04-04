@@ -76,6 +76,9 @@ pub(crate) async fn context_id_for_channel(
 pub(crate) async fn next_observed_projection_timestamp_ms(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> u64 {
+    // OWNERSHIP: observed-display-update - this helper inspects observed chat
+    // projections only to synthesize a monotone local timestamp for projection
+    // repair; it does not authorize semantic decisions.
     let chat = observed_chat_snapshot(app_core).await;
     let channel_activity = chat
         .all_channels()
@@ -101,6 +104,9 @@ pub(crate) async fn ensure_channel_visible_after_join(
     context_id: ContextId,
     name_hint: Option<&str>,
 ) -> Result<(), AuraError> {
+    // OWNERSHIP: observed-display-update - this routine repairs the observed
+    // chat projection after an authoritative join succeeds, using observed
+    // names only to preserve display continuity.
     let existing_name = observed_chat_snapshot(app_core)
         .await
         .channel(&channel_id)
@@ -165,6 +171,8 @@ pub(in crate::workflows) async fn apply_authoritative_membership_projection(
     joined: bool,
     name_hint: Option<&str>,
 ) -> Result<(), AuraError> {
+    // OWNERSHIP: observed-display-update - this helper mutates only observed
+    // chat projection state after authoritative membership outcomes are known.
     if joined {
         ensure_channel_visible_after_join(app_core, channel_id, context_id, name_hint).await?;
         let chat = observed_chat_snapshot(app_core).await;
@@ -213,6 +221,8 @@ pub async fn resolve_authoritative_context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
 ) -> Option<ContextId> {
+    // OWNERSHIP: authoritative-source - prefer runtime authority; observed chat
+    // is a bounded fallback for pre-existing canonical context materialization.
     let runtime = {
         let core = app_core.read().await;
         core.runtime().cloned()
@@ -261,6 +271,8 @@ pub(crate) async fn canonical_channel_name_hint_for_invite(
     channel_id: ChannelId,
     channel_name_or_id: &str,
 ) -> Result<String, AuraError> {
+    // OWNERSHIP: observed - canonical naming here is a UI hint derivation path;
+    // it may consult observed chat labels but does not authorize the invite.
     let existing_name = observed_chat_snapshot(app_core)
         .await
         .channel(&channel_id)
@@ -294,6 +306,9 @@ pub(crate) async fn resolve_authoritative_channel_binding_from_input(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
 ) -> Result<crate::runtime_bridge::AuthoritativeChannelBinding, AuraError> {
+    // OWNERSHIP: authoritative-source - observed chat can disambiguate an
+    // already materialized binding, but runtime remains the authoritative
+    // source when the projection is ambiguous or incomplete.
     match routing::parse_channel_ref(channel_input)? {
         crate::workflows::channel_ref::ChannelSelector::Id(channel_id) => {
             let context_id =
