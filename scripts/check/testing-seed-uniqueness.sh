@@ -115,7 +115,7 @@ if [[ -n "$banned_in_tests" ]]; then
     count=$(printf '%s' "$banned_in_tests" | sed '/^$/d' | wc -l | tr -d ' ')
     echo -e "${RED}ERROR: Found ${count} banned AuraEffectSystem constructor call(s) in test context:${NC}"
     if $QUIET_SUCCESS; then
-        echo "  (run scripts/check/test-seeds.sh directly to see full locations)"
+        echo "  (run scripts/check/testing-seed-uniqueness.sh directly to see full locations)"
     else
         echo "$banned_in_tests" | sed '/^$/d' | head -20
         if [[ "$count" -gt 20 ]]; then

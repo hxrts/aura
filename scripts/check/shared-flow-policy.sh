@@ -10,7 +10,7 @@ fail() {
 }
 
 bash scripts/check/harness-governance.sh core-scenario-mechanics
-bash scripts/check/transparent-onion-quarantine.sh
+bash scripts/check/privacy-onion-quarantine.sh
 bash scripts/check/privacy-runtime-locality.sh
 bash scripts/check/privacy-legacy-sweep.sh
 bash scripts/check/harness-ui-state-evented.sh

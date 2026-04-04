@@ -52,7 +52,7 @@ Why it is host-only:
 Enforcement:
 
 - `src/lib.rs` gates `mock_runtime_bridge` and the `MockRuntimeBridge` re-export behind `#[cfg(not(target_arch = "wasm32"))]`
-- `scripts/check/testkit-exception-boundary.sh` keeps the `clippy::disallowed_types` exception set explicit and local to named files
+- `scripts/check/testing-exception-boundary.sh` keeps the `clippy::disallowed_types` exception set explicit and local to named files
 
 ### InvariantMockContractFidelity
 

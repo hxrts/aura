@@ -10,7 +10,7 @@ fail() {
 }
 
 bash scripts/check/privacy-runtime-locality.sh
-bash scripts/check/transparent-onion-quarantine.sh
+bash scripts/check/privacy-onion-quarantine.sh
 
 legacy_selection_hits="$(
   rg -n 'TransportSelector|CandidateKind|ConnectionCandidate|on_candidates_changed\(|select_establish_path(_with_probing)?\(' \

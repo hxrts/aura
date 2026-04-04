@@ -300,16 +300,16 @@ check:
 
 # Detect legacy authority/device UUID coercions
 check-device-id-legacy:
-    bash scripts/check/device-id-legacy.sh
+    bash scripts/check/protocol-device-id-legacy.sh
 
 audit-device-id-separation:
-    bash scripts/check/device-id-legacy.sh audit-live
+    bash scripts/check/protocol-device-id-legacy.sh audit-live
 
 audit-runtime-device-id-separation:
-    bash scripts/check/device-id-legacy.sh audit-runtime
+    bash scripts/check/protocol-device-id-legacy.sh audit-runtime
 
 check-bootstrap-guardrails:
-    bash scripts/check/bootstrap-guardrails.sh
+    bash scripts/check/runtime-bootstrap-guardrails.sh
 
 # Run the exact same check that Zed editor runs (rust-analyzer checkOnSave)
 check-zed:
@@ -340,7 +340,7 @@ lint-arch-syntax:
 
 ci-capability-model-audit:
     cargo run -q -p aura-macros --bin arch_lints -- capability-boundaries crates
-    bash scripts/check/capability-model-audit.sh
+    bash scripts/check/ownership-capability-audit.sh
 
 # Format code
 fmt:
@@ -669,7 +669,7 @@ ci-frontend-portability:
     just web-check
 
 ci-testkit-exception-boundary:
-    bash scripts/check/testkit-exception-boundary.sh
+    bash scripts/check/testing-exception-boundary.sh
 
 ci-ownership-policy:
     just ci-ownership-categories
@@ -764,7 +764,7 @@ ci-capability-boundaries:
     cargo test -p aura-core --test compile_fail -- --nocapture
 
 ci-typed-errors:
-    bash scripts/check/typed-error-boundary.sh
+    bash scripts/check/runtime-error-boundary.sh
 
 ci-browser-promise-bounded-awaits:
     just _ownership-lint browser-promise-bounded-awaits crates
@@ -794,7 +794,7 @@ ci-proof-issuer-authoritative-source:
     just _ownership-lint proof-issuer-authoritative-source crates/aura-app/src/workflows
 
 ci-device-enrollment-authority-contract:
-    bash scripts/check/device-enrollment-authority-contract.sh
+    bash scripts/check/protocol-device-enrollment-contract.sh
 
 ci-workflow-no-view-reads:
     just _ownership-lint workflow-no-view-reads-for-decisions crates/aura-app/src/workflows
@@ -821,7 +821,7 @@ ci-weak-to-strong-identifier-upgrade:
     just _ownership-lint weak-to-strong-identifier-upgrade crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src
 
 ci-workflow-ownership-tag-ratchet:
-    bash scripts/check/workflow-ownership-tag-ratchet.sh
+    bash scripts/check/ownership-workflow-tag-ratchet.sh
 
 ci-parity-critical-ignored-results:
     just _ownership-lint parity-critical-ignored-results crates/aura-app/src/workflows crates/aura-agent/src/handlers
@@ -844,7 +844,7 @@ ci-owner-issued-readiness-boundary:
     just _ownership-lint owner-issued-readiness-boundary crates/aura-harness/src
 
 ci-observed-layer-boundaries:
-    bash scripts/check/observed-layer-authorship.sh
+    bash scripts/check/ownership-observed-layer.sh
 
 ci-frontend-handoff-boundary:
     just _ownership-lint frontend-semantic-handoff-boundary crates/aura-terminal crates/aura-web
@@ -908,7 +908,7 @@ ci-lean-build:
 ci-lean-check-sorry:
     #!/usr/bin/env bash
     set -euo pipefail
-    if bash scripts/check/lean-sorry-check.sh verification/lean/Aura; then
+    if bash scripts/check/verification-lean-sorry.sh verification/lean/Aura; then
         echo "::warning::Found incomplete proofs (sorry)"
     else
         echo "All proofs complete"
@@ -967,7 +967,7 @@ ci-conformance-contracts:
 
 # Policy check: protected-branch CI must keep conformance gate job wired
 ci-conformance-policy:
-    scripts/check/conformance-gate.sh
+    scripts/check/harness-conformance-gate.sh
 
 # Full conformance gate used by CI protected-branch workflows
 ci-conformance: ci-conformance-policy
@@ -1460,7 +1460,7 @@ verify-lean jobs="2": lean-init
     echo "Building Lean verification modules (threads={{ jobs }})..."
     cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{ jobs }}
     cd ../..
-    if bash scripts/check/lean-sorry-check.sh verification/lean/Aura > "$sorry_report"; then
+    if bash scripts/check/verification-lean-sorry.sh verification/lean/Aura > "$sorry_report"; then
         count=$(wc -l < "$sorry_report" | tr -d ' ')
         echo -e "${YELLOW}⚠ Found $count incomplete proofs (sorry)${NC}"
         head -10 "$sorry_report" | sed 's/^/  /'
@@ -1797,7 +1797,7 @@ demo-log log="/tmp/aura-demo.log":
 
 # Smoke-check the developer demo launcher startup, cleanup, and rerun behavior.
 demo-smoke:
-    bash scripts/check/demo-dual-smoke.sh
+    bash scripts/check/dev-demo-smoke.sh
 
 # Execute any aura CLI command
 aura *ARGS='--help':
