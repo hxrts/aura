@@ -36,8 +36,6 @@ done <<< "$changed_files"
 canonical_changed_path() {
   case "$1" in
     docs/997_flow_coverage.md) echo "docs/997_flow_coverage.md" ;;
-    scripts/check/ux-guidance-sync.sh) echo "scripts/check/user-flow-guidance-sync.sh" ;;
-    scripts/check/ux-policy-guardrails.sh) echo "scripts/check/user-flow-policy-guardrails.sh" ;;
     *) echo "$1" ;;
   esac
 }
