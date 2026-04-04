@@ -1797,7 +1797,7 @@ demo-log log="/tmp/aura-demo.log":
 
 # Smoke-check the developer demo launcher startup, cleanup, and rerun behavior.
 demo-smoke:
-    bash scripts/check/dev-demo-smoke.sh
+    bash scripts/ci/demo-smoke.sh
 
 # Execute any aura CLI command
 aura *ARGS='--help':
