@@ -615,7 +615,7 @@ explicit:
     `scripts/check/service-surface-declarations.sh`,
     `scripts/check/service-registry-ownership.sh`,
     `scripts/check/privacy-legacy-sweep.sh`, and
-    `scripts/check/privacy-phase6-gate.sh`
+    `scripts/check/privacy-tuning-gate.sh`
 
 The default contributor path for service-family boundary work is:
 
