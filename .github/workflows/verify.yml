@@ -37,30 +37,30 @@ jobs:
           name: verify-deep
           replay-command: nix develop --command 'just ci-lean-build && just ci-lean-check-sorry'
 
-  lean-quint-bridge:
-    name: Lean-Quint Bridge
+  telltale-bridge:
+    name: Telltale Bridge
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-nix
         with:
-          cache-name: lean-quint-bridge
+          cache-name: telltale-bridge
           enable-store-cache: false
       - name: Bridge cross-validation
-        run: nix develop --command just ci-lean-quint-bridge
+        run: nix develop .#ci --command just ci-telltale-bridge
       - name: Upload bridge artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lean-quint-bridge-${{ github.run_id }}
-          path: artifacts/lean-quint-bridge
+          name: telltale-bridge-${{ github.run_id }}
+          path: artifacts/telltale-bridge
           if-no-files-found: warn
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: verify-deep
-          replay-command: nix develop --command just ci-lean-quint-bridge
+          replay-command: nix develop .#ci --command just ci-telltale-bridge
 
   kani:
     name: Kani Proofs

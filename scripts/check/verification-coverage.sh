@@ -144,7 +144,7 @@ bridge_pipeline_fixtures=$(count_find crates/aura-quint/tests/fixtures/bridge -n
 check_metric "Bridge Pipeline Fixtures" "$(get_documented "Bridge Pipeline Fixtures")" "$bridge_pipeline_fixtures"
 
 # Count CI verification gates from justfile
-ci_gates=$(grep -cE "^ci-(property-monitor|simulator-telltale-parity|choreo-parity|quint-typecheck|conformance-policy|conformance-contracts|lean-build|lean-check-sorry|lean-quint-bridge|kani):" justfile 2>/dev/null || echo "0")
+ci_gates=$(grep -cE "^ci-(property-monitor|simulator-telltale-parity|choreo-parity|quint-typecheck|conformance-policy|conformance-contracts|lean-build|lean-check-sorry|telltale-bridge|kani):" justfile 2>/dev/null || echo "0")
 # Add 1 for conformance_golden_fixtures test
 ci_gates=$((ci_gates + 1))
 check_metric "CI Verification Gates" "$(get_documented "CI Verification Gates")" "$ci_gates"

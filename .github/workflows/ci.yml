@@ -33,13 +33,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: format
-      - run: nix develop --command just ci-format
+      - run: nix develop .#ci --command just ci-format
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: ci-fast
-          replay-command: nix develop --command just ci-format
+          replay-command: nix develop .#ci --command just ci-format
 
   clippy:
     name: Clippy Check
@@ -49,13 +49,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: clippy
-      - run: nix develop --command just ci-clippy
+      - run: nix develop .#ci --command just ci-clippy
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: ci-fast
-          replay-command: nix develop --command just ci-clippy
+          replay-command: nix develop .#ci --command just ci-clippy
 
   build:
     name: Build Check
@@ -65,13 +65,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: build
-      - run: nix develop --command just ci-build
+      - run: nix develop .#ci --command just ci-build
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: ci-fast
-          replay-command: nix develop --command just ci-build
+          replay-command: nix develop .#ci --command just ci-build
 
   arch:
     name: Architecture Check
@@ -81,13 +81,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: arch
-      - run: nix develop --command scripts/check/arch.sh --quick
+      - run: nix develop .#ci --command scripts/check/arch.sh --quick
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: ci-fast
-          replay-command: nix develop --command scripts/check/arch.sh --quick
+          replay-command: nix develop .#ci --command scripts/check/arch.sh --quick
 
   user-flow-coverage:
     name: User Flow Coverage
@@ -97,13 +97,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: user-flow-coverage
-      - run: nix develop --command just ci-user-flow-coverage
+      - run: nix develop .#ci --command just ci-user-flow-coverage
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: ci-fast
-          replay-command: nix develop --command just ci-user-flow-coverage
+          replay-command: nix develop .#ci --command just ci-user-flow-coverage
 
   user-flow-policy:
     name: User Flow Policy
@@ -115,13 +115,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: user-flow-policy
-      - run: nix develop --command just ci-user-flow-policy
+      - run: nix develop .#ci --command just ci-user-flow-policy
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: ci-fast
-          replay-command: nix develop --command just ci-user-flow-policy
+          replay-command: nix develop .#ci --command just ci-user-flow-policy
 
   shared-flow-policy:
     name: Shared Flow Policy
@@ -133,13 +133,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: shared-flow-policy
-      - run: nix develop --command just ci-shared-flow-policy
+      - run: nix develop .#ci --command just ci-shared-flow-policy
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: ci-fast
-          replay-command: nix develop --command just ci-shared-flow-policy
+          replay-command: nix develop .#ci --command just ci-shared-flow-policy
 
   test:
     name: Tests + Protocol Compat
@@ -170,16 +170,16 @@ jobs:
             sudo swapon /swapfile
           fi
       - name: Run tests
-        run: nix develop --command just ci-test
+        run: nix develop .#ci --command just ci-test
         env:
           CARGO_BUILD_JOBS: 4
           CARGO_PROFILE_DEV_DEBUG: 0
           CARGO_INCREMENTAL: 0
       - name: Protocol compatibility
-        run: nix develop --command just ci-protocol-compat
+        run: nix develop .#ci --command just ci-protocol-compat
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: ci-fast
-          replay-command: nix develop --command 'just ci-test && just ci-protocol-compat'
+          replay-command: nix develop .#ci --command 'just ci-test && just ci-protocol-compat'
