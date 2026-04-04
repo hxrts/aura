@@ -22,6 +22,14 @@ _nix-dev *ARGS:
     nix develop --command {{ ARGS }}
 
 _nix-nightly *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmpdir="${TMPDIR:-$PWD/.tmp}"
+    if [[ ! -d "$tmpdir" ]]; then
+        tmpdir="$PWD/.tmp"
+    fi
+    mkdir -p "$tmpdir"
+    export TMPDIR="$tmpdir"
     nix develop .#nightly --command {{ ARGS }}
 
 _harness action *ARGS:
@@ -1132,7 +1140,7 @@ ci-dry-run profile="push":
         # CI / Deep Verify (push)
         add_step "Lean Proofs"               "nix develop --command bash -lc 'just ci-lean-build && just ci-lean-check-sorry'"
         add_step "Telltale Bridge"           "nix develop --command just ci-telltale-bridge"
-        add_step "Kani Proofs"               "nix develop .#nightly --command just ci-kani"
+        add_step "Kani Proofs"               "bash -lc 'tmpdir=\"\${TMPDIR:-\$PWD/.tmp}\"; if [[ ! -d \"\$tmpdir\" ]]; then tmpdir=\"\$PWD/.tmp\"; fi; mkdir -p \"\$tmpdir\"; export TMPDIR=\"\$tmpdir\"; nix develop .#nightly --command just ci-kani'"
         add_step "Harness Browser"           "nix develop --command just ci-harness-browser"
     fi
 
