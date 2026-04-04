@@ -49,6 +49,7 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: clippy
+          enable-store-cache: false
       - run: nix develop .#ci --command just ci-clippy
       - name: Failure bundle
         if: failure()
@@ -151,6 +152,7 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: test
+          enable-store-cache: false
       - name: Create swap space
         run: |
           if [ -f /swapfile ]; then
