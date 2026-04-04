@@ -1266,7 +1266,10 @@ mod tests {
         .expect("run lane");
 
         let semantic = report.semantic_summary.expect("semantic summary");
-        assert_eq!(semantic.relation, TelltaleParitySemanticRelationV1::ExactMatch);
+        assert_eq!(
+            semantic.relation,
+            TelltaleParitySemanticRelationV1::ExactMatch
+        );
     }
 
     #[test]

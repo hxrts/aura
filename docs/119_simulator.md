@@ -376,6 +376,7 @@ The report includes:
 - first mismatch surface
 - first mismatch step index
 - full differential comparison payload
+- optional semantic summary derived from upstream Telltale 11 context
 - optional upstream Telltale 11 run context when the Aura runner path is used
 
 ### ITF Trace Format

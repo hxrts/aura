@@ -214,9 +214,10 @@ pub use telltale_parity::{
     validate_telltale_mapping_surfaces, TelltaleControlPlaneFileRun, TelltaleControlPlaneLane,
     TelltaleControlPlaneRunnerFileRun, TelltaleParityError, TelltaleParityFileRun,
     TelltaleParityInput, TelltaleParityReportV1, TelltaleParityRunner, TelltaleParityRunnerFileRun,
-    TelltaleRunSummaryV1, TelltaleSimulatorCommandV1, TelltaleSimulatorRunRequest,
-    TelltaleUpstreamComparisonV1, TelltaleUpstreamPathsV1, TelltaleUpstreamReportV1,
-    AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1, AURA_TELLTALE_SIMULATOR_RUNNER_ENV,
+    TelltaleParitySemanticRelationV1, TelltaleParitySemanticSummaryV1, TelltaleRunSummaryV1,
+    TelltaleSimulatorCommandV1, TelltaleSimulatorRunRequest, TelltaleUpstreamComparisonV1,
+    TelltaleUpstreamPathsV1, TelltaleUpstreamReportV1, AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1,
+    AURA_TELLTALE_SIMULATOR_RUNNER_ENV,
 };
 
 // Re-export Duration for convenience

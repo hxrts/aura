@@ -1,4 +1,8 @@
 //! Differential trace/artifact comparison utilities for replay conformance.
+//!
+//! This is Aura's artifact-level comparator. For Telltale 11-backed parity
+//! lanes, treat it as the low-level surface diff and use the parity report's
+//! upstream semantic summary for theorem-facing interpretation when available.
 
 use std::path::Path;
 

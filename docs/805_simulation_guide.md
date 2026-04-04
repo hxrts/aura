@@ -396,7 +396,7 @@ For fault-aware replays, persist `entries + faults` bundles and re-inject faults
 
 ### Differential Replay Workflow
 
-Use `aura_simulator::DifferentialTester` to compare baseline and candidate conformance artifacts. Two profiles are available. The `strict` profile requires byte-identical surfaces. The `envelope_bounded` profile uses Aura law-aware comparison with commutative and algebraic envelopes.
+Use `aura_simulator::DifferentialTester` to compare baseline and candidate conformance artifacts. Two profiles are available. The `strict` profile requires byte-identical surfaces. The `envelope_bounded` profile uses Aura law-aware comparison with commutative and algebraic envelopes. In Telltale 11-backed lanes, this is the artifact comparator, not the only semantic authority: prefer the parity report's upstream semantic summary when it is present.
 
 For Telltale 11-backed parity lanes, prefer
 `aura_simulator::run_telltale_parity_with_runner(...)` or
