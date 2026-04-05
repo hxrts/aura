@@ -10,21 +10,43 @@ impl Drop for TrybuildLock {
     }
 }
 
-fn acquire_trybuild_lock() -> TrybuildLock {
+fn trybuild_available() -> bool {
+    std::env::var_os("CARGO").is_some()
+        || std::process::Command::new("cargo")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok()
+}
+
+fn trybuild_root() -> std::path::PathBuf {
     let workspace_root = match std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
     {
-        Some(path) => path,
+        Some(path) => path.to_path_buf(),
         None => panic!("workspace root"),
     };
-    let lock_root = workspace_root.join("target/tests");
-    if let Err(error) = std::fs::create_dir_all(&lock_root) {
-        panic!(
-            "failed to create trybuild lock root {}: {error}",
-            lock_root.display()
-        );
+    let preferred = workspace_root.join("target/tests");
+    if std::fs::create_dir_all(&preferred).is_ok() {
+        return preferred;
     }
+
+    let fallback = std::env::temp_dir()
+        .join("aura-trybuild")
+        .join(env!("CARGO_PKG_NAME"));
+    std::fs::create_dir_all(&fallback).unwrap_or_else(|error| {
+        panic!(
+            "failed to create fallback trybuild root {}: {error}",
+            fallback.display()
+        )
+    });
+    fallback
+}
+
+fn acquire_trybuild_lock() -> TrybuildLock {
+    let lock_root = trybuild_root();
     let lock_path = lock_root.join("trybuild-lock");
     loop {
         match std::fs::create_dir(&lock_path) {
@@ -39,6 +61,10 @@ fn acquire_trybuild_lock() -> TrybuildLock {
 
 #[test]
 fn strong_command_compile_fail_guards() {
+    if !trybuild_available() {
+        eprintln!("skipping trybuild strong-command guards: cargo is unavailable");
+        return;
+    }
     let _lock = acquire_trybuild_lock();
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/*.rs");
