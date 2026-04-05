@@ -1,5 +1,5 @@
 [package]
-name = "aura-anti-entropy"
+name = "hxrts-aura-anti-entropy"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 description = "Journal anti-entropy and fact synchronization for Aura"
 
+[lib]
+name = "aura_anti_entropy"
 [lints]
 workspace = true
 
@@ -17,9 +19,9 @@ default = []
 simulation = ["aura-core/simulation"]
 
 [dependencies]
-aura-core = { path = "../aura-core", version = "0.1.0" }
-aura-guards = { path = "../aura-guards", version = "0.1.0" }
-aura-journal = { path = "../aura-journal", version = "0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
+aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.1.0" }
+aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.1.0" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

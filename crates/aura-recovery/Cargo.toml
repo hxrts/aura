@@ -1,5 +1,5 @@
 [package]
-name = "aura-recovery"
+name = "hxrts-aura-recovery"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,19 +10,21 @@ homepage.workspace = true
 description = "Guardian-based device recovery and key restoration protocols"
 include = ["src/**", "Cargo.toml"]
 
+[lib]
+name = "aura_recovery"
 [dependencies]
-aura-core = { path = "../aura-core", version = "0.1.0" }
-aura-journal = { path = "../aura-journal", version = "0.1.0" }
-aura-composition = { path = "../aura-composition", version = "0.1.0" }
-aura-signature = { path = "../aura-signature", version = "0.1.0" }
-aura-authentication = { path = "../aura-authentication", version = "0.1.0" }
-aura-authorization = { path = "../aura-authorization", version = "0.1.0" }
-aura-effects = { path = "../aura-effects", version = "0.1.0" }
-aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
-aura-protocol = { path = "../aura-protocol", version = "0.1.0" }
-aura-relational = { path = "../aura-relational", version = "0.1.0" }
-aura-macros = { path = "../aura-macros", version = "0.1.0" }
-aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
+aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.1.0" }
+aura-composition = { package = "hxrts-aura-composition", path = "../aura-composition", version = "=0.1.0" }
+aura-signature = { package = "hxrts-aura-signature", path = "../aura-signature", version = "=0.1.0" }
+aura-authentication = { package = "hxrts-aura-authentication", path = "../aura-authentication", version = "=0.1.0" }
+aura-authorization = { package = "hxrts-aura-authorization", path = "../aura-authorization", version = "=0.1.0" }
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.1.0" }
+aura-consensus = { package = "hxrts-aura-consensus", path = "../aura-consensus", version = "=0.1.0" }
+aura-protocol = { package = "hxrts-aura-protocol", path = "../aura-protocol", version = "=0.1.0" }
+aura-relational = { package = "hxrts-aura-relational", path = "../aura-relational", version = "=0.1.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.1.0" }
+aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.1.0" }
 
 async-trait = { workspace = true }
 bincode = { workspace = true }
@@ -35,8 +37,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-aura-agent = { path = "../aura-agent" }
-aura-testkit = { path = "../aura-testkit" }
 assert_matches = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true }

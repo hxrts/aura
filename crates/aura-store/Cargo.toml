@@ -1,5 +1,5 @@
 [package]
-name = "aura-store"
+name = "hxrts-aura-store"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,12 +9,14 @@ repository.workspace = true
 homepage.workspace = true
 description = "Storage domain types, semantics, and pure logic for Aura"
 
+[lib]
+name = "aura_store"
 [lints]
 workspace = true
 
 [dependencies]
-aura-core = { path = "../aura-core", version = "0.1.0" }
-aura-macros = { path = "../aura-macros", version = "0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.1.0" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

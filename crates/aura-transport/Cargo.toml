@@ -1,5 +1,5 @@
 [package]
-name = "aura-transport"
+name = "hxrts-aura-transport"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,8 +19,8 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-aura-core = { path = "../aura-core", version = "0.1.0" }
-aura-macros = { path = "../aura-macros", version = "0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.1.0" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

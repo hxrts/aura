@@ -1,5 +1,5 @@
 [package]
-name = "aura-rendezvous"
+name = "hxrts-aura-rendezvous"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,14 +10,16 @@ homepage.workspace = true
 description = "Secret-Branded Broadcasting (SBB) and rendezvous protocols for Aura"
 include = ["src/**", "Cargo.toml"]
 
+[lib]
+name = "aura_rendezvous"
 [dependencies]
-aura-core = { path = "../aura-core", version = "0.1.0" }
-aura-macros = { path = "../aura-macros", version = "0.1.0" }
-aura-journal = { path = "../aura-journal", version = "0.1.0" }
-aura-guards = { path = "../aura-guards", version = "0.1.0" }
-aura-social = { path = "../aura-social", version = "0.1.0" }
-aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
-aura-transport = { path = "../aura-transport", version = "0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.1.0" }
+aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.1.0" }
+aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.1.0" }
+aura-social = { package = "hxrts-aura-social", path = "../aura-social", version = "=0.1.0" }
+aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.1.0" }
+aura-transport = { package = "hxrts-aura-transport", path = "../aura-transport", version = "=0.1.0" }
 
 async-lock = "3"
 async-trait = { workspace = true }
@@ -38,7 +40,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-aura-effects = { path = "../aura-effects" }
+aura-effects = { package = "hxrts-aura-effects", version = "=0.1.0", path = "../aura-effects" }
 proptest = { workspace = true }
 rand = { workspace = true }
 tokio = { workspace = true }

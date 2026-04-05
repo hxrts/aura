@@ -1,5 +1,5 @@
 [package]
-name = "aura-macros"
+name = "hxrts-aura-macros"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,7 @@ homepage.workspace = true
 description = "Procedural macros for Aura ownership boundaries and choreography"
 
 [lib]
+name = "aura_macros"
 proc-macro = true
 
 [features]
@@ -27,12 +28,12 @@ futures = "0.3"
 thiserror = "1.0"
 serde_json = { workspace = true }
 async-trait = "0.1"
-aura-core = { path = "../aura-core", version = "0.1.0" }
-aura-mpst = { path = "../aura-mpst", version = "0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
+aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.1.0" }
 
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 futures = "0.3"
-aura-core = { path = "../aura-core" }
+aura-core = { package = "hxrts-aura-core", version = "=0.1.0", path = "../aura-core" }
 trybuild = "1.0"

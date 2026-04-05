@@ -1,5 +1,5 @@
 [package]
-name = "aura-core"
+name = "hxrts-aura-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 description = "Foundation types, effect traits, and cryptographic utilities for Aura"
 
+[lib]
+name = "aura_core"
 [lints]
 workspace = true
 

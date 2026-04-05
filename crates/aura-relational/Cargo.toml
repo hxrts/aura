@@ -1,5 +1,5 @@
 [package]
-name = "aura-relational"
+name = "hxrts-aura-relational"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,12 +11,14 @@ description = "RelationalContext implementation for cross-authority coordination
 keywords = ["aura", "relational", "authority", "coordination", "crdt"]
 categories = ["cryptography", "data-structures"]
 
+[lib]
+name = "aura_relational"
 [dependencies]
-aura-core = { path = "../aura-core", version = "0.1.0" }
-aura-journal = { path = "../aura-journal", version = "0.1.0" }
-aura-macros = { path = "../aura-macros", version = "0.1.0" }
-aura-consensus = { path = "../aura-consensus", version = "0.1.0" }
-aura-effects = { path = "../aura-effects", version = "0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
+aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.1.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.1.0" }
+aura-consensus = { package = "hxrts-aura-consensus", path = "../aura-consensus", version = "=0.1.0" }
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.1.0" }
 
 async-trait = { workspace = true }
 bincode = { workspace = true }

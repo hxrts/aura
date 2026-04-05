@@ -9,8 +9,8 @@ description = "Core Quint formal verification integration for Aura - Layer 3: Im
 publish = false
 
 [dependencies]
-aura-core = { path = "../aura-core", version = "0.1.0", features = ["simulation"] }
-aura-effects = { path = "../aura-effects", version = "0.1.0", features = ["simulation"] }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0", features = ["simulation"] }
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.1.0", features = ["simulation"] }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

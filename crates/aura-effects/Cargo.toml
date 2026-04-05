@@ -1,5 +1,5 @@
 [package]
-name = "aura-effects"
+name = "hxrts-aura-effects"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,8 @@ description = "Standard library of context-free effect handler implementations"
 keywords = ["effects", "handlers", "algebraic-effects", "runtime"]
 categories = ["development-tools"]
 
+[lib]
+name = "aura_effects"
 [lints]
 workspace = true
 
@@ -21,7 +23,7 @@ telltale-runtime-capability = ["dep:telltale-machine"]
 transparent_onion = ["aura-core/transparent_onion"]
 
 [dependencies]
-aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
 
 tokio = { workspace = true }
 async-trait = { workspace = true }
