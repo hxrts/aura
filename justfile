@@ -1837,11 +1837,12 @@ metrics:
 
 # Run release validation and publish crates.
 # Usage:
-#   just release <version> [dry_run] [skip_ci] [skip_nix] [no_tag] [push] [allow_dirty] [no_require_main]
+#   just release <version> [dry_run] [skip_ci] [skip_nix] [no_tag] [push] [allow_dirty] [no_require_main] [skip_publish]
 # Example:
 #   just release 0.2.0
 #   just release 0.2.0 true                       # dry-run
 #   just release 0.2.0 false false false false true # publish + push
+#   just release 0.2.0 true true false false true false false true # tag + push without cargo publish
 release \
   version="" \
   dry_run="false" \
@@ -1850,7 +1851,8 @@ release \
   no_tag="false" \
   push="false" \
   allow_dirty="false" \
-  no_require_main="false":
+  no_require_main="false" \
+  skip_publish="false":
     #!/usr/bin/env bash
     set -euo pipefail
     args=()
@@ -1877,6 +1879,9 @@ release \
     fi
     if [ "{{no_require_main}}" = "true" ]; then
       args+=(--no-require-main)
+    fi
+    if [ "{{skip_publish}}" = "true" ]; then
+      args+=(--skip-publish)
     fi
     ./scripts/ops/release.sh "${args[@]}"
 

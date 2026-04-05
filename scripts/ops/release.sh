@@ -16,6 +16,7 @@ PUSH=0
 ALLOW_DIRTY=0
 REQUIRE_MAIN=1
 SKIP_NIX=0
+SKIP_PUBLISH=0
 VERSION=""
 TAG_PREFIX="v"
 TAG_NAME=""
@@ -31,6 +32,7 @@ Options:
   --dry-run             Run all publishing steps with --dry-run
   --skip-ci             Skip just ci-dry-run preflight checks
   --skip-nix            Skip nix build and flake check
+  --skip-publish        Skip cargo publish / cargo publish --dry-run
   --no-tag              Skip git tag creation
   --push                Push current branch and tag after successful publish
   --allow-dirty         Allow a dirty git working tree
@@ -190,6 +192,10 @@ main() {
         SKIP_NIX=1
         shift
         ;;
+      --skip-publish)
+        SKIP_PUBLISH=1
+        shift
+        ;;
       --no-tag)
         CREATE_TAG=0
         shift
@@ -226,7 +232,7 @@ main() {
   assert_version_format "${VERSION}"
 
   echo "== release ${VERSION} =="
-  echo "   dry_run=${DRY_RUN} skip_ci=${SKIP_CI} skip_nix=${SKIP_NIX}"
+  echo "   dry_run=${DRY_RUN} skip_ci=${SKIP_CI} skip_nix=${SKIP_NIX} skip_publish=${SKIP_PUBLISH}"
   echo "   tag=${CREATE_TAG} push=${PUSH} allow_dirty=${ALLOW_DIRTY}"
   echo ""
 
@@ -234,8 +240,8 @@ main() {
   assert_branch
   assert_clean_tree
 
-  # Registry token check (skip for dry-run)
-  if [[ "${DRY_RUN}" -eq 0 && "${CARGO_REGISTRY_TOKEN:-}" == "" ]]; then
+  # Registry token check (skip for dry-run or explicit tag-only releases)
+  if [[ "${SKIP_PUBLISH}" -eq 0 && "${DRY_RUN}" -eq 0 && "${CARGO_REGISTRY_TOKEN:-}" == "" ]]; then
     die "CARGO_REGISTRY_TOKEN is not set; publishing will fail"
   fi
 
@@ -255,7 +261,11 @@ main() {
   fi
 
   # Publish workspace (cargo handles dependency ordering and skips publish=false crates)
-  publish_workspace
+  if [[ "${SKIP_PUBLISH}" -eq 0 ]]; then
+    publish_workspace
+  else
+    echo "== skipping cargo publish =="
+  fi
 
   # Tag and push
   create_release_tag
