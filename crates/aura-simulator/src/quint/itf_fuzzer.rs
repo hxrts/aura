@@ -2381,6 +2381,33 @@ pub struct SimulationConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEST_WORKDIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn create_test_working_dir(test_name: &str) -> PathBuf {
+        let unique_suffix = TEST_WORKDIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let working_dir = std::env::temp_dir().join(format!(
+            "aura-itf-fuzzer-{test_name}-{}-{timestamp}-{unique_suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&working_dir)
+            .unwrap_or_else(|error| panic!("failed to create test working dir: {error}"));
+        working_dir
+    }
+
+    fn test_config(test_name: &str) -> ITFFuzzConfig {
+        ITFFuzzConfig {
+            working_dir: create_test_working_dir(test_name),
+            ..ITFFuzzConfig::default()
+        }
+    }
 
     #[tokio::test]
     async fn test_parse_simple_itf_trace() {
@@ -2407,13 +2434,8 @@ mod tests {
         }"##;
 
         // Create a test config with an ephemeral working directory
-        let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
-            ..ITFFuzzConfig::default()
-        };
-
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let fuzzer = ITFBasedFuzzer::with_config(test_config("parse-simple-itf-trace"))
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
         let trace = fuzzer
             .parse_itf_trace(json)
             .unwrap_or_else(|_| panic!("Failed to parse trace"));
@@ -2438,13 +2460,8 @@ mod tests {
     #[tokio::test]
     async fn test_itf_conversion_integration() {
         // Create a test config with an ephemeral working directory
-        let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
-            ..ITFFuzzConfig::default()
-        };
-
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let fuzzer = ITFBasedFuzzer::with_config(test_config("itf-conversion-integration"))
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         // Create a test ITF trace
         let itf_trace = ITFTrace {
@@ -2514,7 +2531,7 @@ mod tests {
     #[tokio::test]
     async fn test_model_checking_configuration() {
         let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
+            working_dir: create_test_working_dir("model-checking-configuration"),
             iterative_deepening: IterativeDeepening {
                 initial_bound: 2,
                 max_bound: 8,
@@ -2525,7 +2542,7 @@ mod tests {
         };
 
         let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         // Test configuration
         assert_eq!(fuzzer.config.iterative_deepening.initial_bound, 2);
@@ -2536,13 +2553,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_violation_extraction() {
-        let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
-            ..ITFFuzzConfig::default()
-        };
-
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let fuzzer = ITFBasedFuzzer::with_config(test_config("violation-extraction"))
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         // Create a mock model checking result with counterexample
         let counterexample_trace = ITFTrace {
@@ -2609,7 +2621,7 @@ mod tests {
     #[tokio::test]
     async fn test_simulation_configuration() {
         let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
+            working_dir: create_test_working_dir("simulation-configuration"),
             simulation: SimulationConfig {
                 num_runs: 5,
                 max_steps: 25,
@@ -2621,7 +2633,7 @@ mod tests {
         };
 
         let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         // Test simulation configuration
         assert_eq!(fuzzer.config.simulation.num_runs, 5);
@@ -2633,13 +2645,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mbt_metadata_parsing() {
-        let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
-            ..ITFFuzzConfig::default()
-        };
-
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let fuzzer = ITFBasedFuzzer::with_config(test_config("mbt-metadata-parsing"))
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         // Create a state with MBT metadata
         let state = ITFState {
@@ -2683,13 +2690,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_trace_to_test_case_conversion() {
-        let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
-            ..ITFFuzzConfig::default()
-        };
-
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let fuzzer = ITFBasedFuzzer::with_config(test_config("trace-to-test-case-conversion"))
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         // Create a trace with MBT metadata
         let trace = ITFTrace {
@@ -2779,13 +2781,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_coverage_analysis() {
-        let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
-            ..ITFFuzzConfig::default()
-        };
-
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let fuzzer = ITFBasedFuzzer::with_config(test_config("coverage-analysis"))
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         // Create test cases for coverage analysis
         let test_cases = vec![GeneratedTestCase {
@@ -2901,13 +2898,8 @@ mod tests {
             ]
         }"##;
 
-        let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
-            ..ITFFuzzConfig::default()
-        };
-
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let fuzzer = ITFBasedFuzzer::with_config(test_config("e2e-itf-to-effect-execution"))
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         // Step 2: Parse ITF trace
         let itf_trace = fuzzer.parse_itf_trace(itf_json).unwrap();
@@ -2950,13 +2942,8 @@ mod tests {
     async fn test_e2e_explore_and_generate() {
         use super::super::domain_handlers::capability_properties_registry;
 
-        let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
-            ..ITFFuzzConfig::default()
-        };
-
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let fuzzer = ITFBasedFuzzer::with_config(test_config("e2e-explore-and-generate"))
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         // Create ActionRegistry
         let registry = capability_properties_registry();
@@ -3006,13 +2993,8 @@ mod tests {
             ]
         }"##;
 
-        let config = ITFFuzzConfig {
-            working_dir: std::env::temp_dir(),
-            ..ITFFuzzConfig::default()
-        };
-
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let fuzzer = ITFBasedFuzzer::with_config(test_config("e2e-validated-test-case-generation"))
+            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
 
         let itf_trace = fuzzer.parse_itf_trace(itf_json).unwrap();
         let registry = capability_properties_registry();

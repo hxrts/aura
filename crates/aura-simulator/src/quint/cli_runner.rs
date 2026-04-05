@@ -154,8 +154,17 @@ impl QuintCliRunner {
             .map_err(|e| QuintCliError::CliNotFound(format!("Cannot execute quint: {e}")))?;
 
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
             return Err(QuintCliError::CliNotFound(
-                "Quint CLI executable not found or failed version check".to_string(),
+                format!(
+                    "Quint CLI executable not found or failed version check (path: {}, cwd: {}, status: {}, stdout: {}, stderr: {})",
+                    quint_path.display(),
+                    working_dir.display(),
+                    output.status,
+                    stdout.trim(),
+                    stderr.trim()
+                ),
             ));
         }
 
