@@ -144,10 +144,12 @@ impl QuintCliRunner {
     /// Create a new Quint CLI runner
     pub fn new(quint_path: Option<PathBuf>, working_dir: PathBuf) -> QuintCliResult<Self> {
         let quint_path = quint_path.unwrap_or_else(|| PathBuf::from("quint"));
+        std::fs::create_dir_all(&working_dir)?;
 
         // Verify quint is available
         let output = Command::new(&quint_path)
             .arg("--version")
+            .current_dir(&working_dir)
             .output()
             .map_err(|e| QuintCliError::CliNotFound(format!("Cannot execute quint: {e}")))?;
 
@@ -366,6 +368,7 @@ impl QuintCliRunner {
     pub async fn get_version(&self) -> QuintCliResult<String> {
         let output = AsyncCommand::new(&self.quint_path)
             .arg("--version")
+            .current_dir(&self.working_dir)
             .output()
             .await?;
 

@@ -167,16 +167,14 @@ async fn wait_for_lan_peer(agent: &AuraAgent, peer: &AuraAgent) -> TestResult {
                     && cache_peer_descriptor_directly(agent, peer).await?
                 {
                     eprintln!(
-                        "LAN broadcast unavailable; seeded peer descriptor directly for {}",
-                        peer_id
+                        "LAN broadcast unavailable; seeded peer descriptor directly for {peer_id}"
                     );
                     break;
                 }
             }
             if poll_attempts >= 10 && cache_peer_descriptor_directly(agent, peer).await? {
                 eprintln!(
-                    "LAN discovery unavailable; seeded peer descriptor directly for {}",
-                    peer_id
+                    "LAN discovery unavailable; seeded peer descriptor directly for {peer_id}"
                 );
                 break;
             }
