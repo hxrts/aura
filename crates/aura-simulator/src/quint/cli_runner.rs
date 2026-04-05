@@ -175,6 +175,15 @@ impl QuintCliRunner {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn for_tests(quint_path: PathBuf, working_dir: PathBuf) -> Self {
+        Self {
+            quint_path,
+            working_dir,
+            _timeout_ms: 30000,
+        }
+    }
+
     /// Parse a Quint specification file
     pub async fn parse_spec(&self, spec_file: &Path) -> QuintCliResult<QuintParseOutput> {
         let output = AsyncCommand::new(&self.quint_path)

@@ -302,7 +302,7 @@ impl ITFBasedFuzzer {
 
         Ok(Self {
             trace_converter: TraceConverter::new(),
-            itf_converter: super::trace_converter::ItfTraceConverter::new(),
+            itf_converter: crate::quint::trace_converter::ItfTraceConverter::new(),
             property_evaluator: SimulationPropertyEvaluator::new(),
             chaos_generator: ChaosGenerator::new(),
             quint_cli,
@@ -2409,6 +2409,24 @@ mod tests {
         }
     }
 
+    fn test_fuzzer_with_config(config: ITFFuzzConfig) -> ITFBasedFuzzer {
+        let quint_path = config.quint_executable.clone();
+        let working_dir = config.working_dir.clone();
+        ITFBasedFuzzer {
+            trace_converter: TraceConverter::new(),
+            itf_converter: crate::quint::trace_converter::ItfTraceConverter::new(),
+            property_evaluator: SimulationPropertyEvaluator::new(),
+            chaos_generator: ChaosGenerator::new(),
+            quint_cli: QuintCliRunner::for_tests(quint_path, working_dir),
+            config,
+            storage: default_storage_provider(),
+        }
+    }
+
+    fn test_fuzzer(test_name: &str) -> ITFBasedFuzzer {
+        test_fuzzer_with_config(test_config(test_name))
+    }
+
     #[tokio::test]
     async fn test_parse_simple_itf_trace() {
         let json = r##"{
@@ -2434,8 +2452,7 @@ mod tests {
         }"##;
 
         // Create a test config with an ephemeral working directory
-        let fuzzer = ITFBasedFuzzer::with_config(test_config("parse-simple-itf-trace"))
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer("parse-simple-itf-trace");
         let trace = fuzzer
             .parse_itf_trace(json)
             .unwrap_or_else(|_| panic!("Failed to parse trace"));
@@ -2460,8 +2477,7 @@ mod tests {
     #[tokio::test]
     async fn test_itf_conversion_integration() {
         // Create a test config with an ephemeral working directory
-        let fuzzer = ITFBasedFuzzer::with_config(test_config("itf-conversion-integration"))
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer("itf-conversion-integration");
 
         // Create a test ITF trace
         let itf_trace = ITFTrace {
@@ -2541,8 +2557,7 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer_with_config(config);
 
         // Test configuration
         assert_eq!(fuzzer.config.iterative_deepening.initial_bound, 2);
@@ -2553,8 +2568,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_violation_extraction() {
-        let fuzzer = ITFBasedFuzzer::with_config(test_config("violation-extraction"))
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer("violation-extraction");
 
         // Create a mock model checking result with counterexample
         let counterexample_trace = ITFTrace {
@@ -2632,8 +2646,7 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config)
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer_with_config(config);
 
         // Test simulation configuration
         assert_eq!(fuzzer.config.simulation.num_runs, 5);
@@ -2645,8 +2658,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mbt_metadata_parsing() {
-        let fuzzer = ITFBasedFuzzer::with_config(test_config("mbt-metadata-parsing"))
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer("mbt-metadata-parsing");
 
         // Create a state with MBT metadata
         let state = ITFState {
@@ -2690,8 +2702,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_trace_to_test_case_conversion() {
-        let fuzzer = ITFBasedFuzzer::with_config(test_config("trace-to-test-case-conversion"))
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer("trace-to-test-case-conversion");
 
         // Create a trace with MBT metadata
         let trace = ITFTrace {
@@ -2781,8 +2792,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_coverage_analysis() {
-        let fuzzer = ITFBasedFuzzer::with_config(test_config("coverage-analysis"))
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer("coverage-analysis");
 
         // Create test cases for coverage analysis
         let test_cases = vec![GeneratedTestCase {
@@ -2898,8 +2908,7 @@ mod tests {
             ]
         }"##;
 
-        let fuzzer = ITFBasedFuzzer::with_config(test_config("e2e-itf-to-effect-execution"))
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer("e2e-itf-to-effect-execution");
 
         // Step 2: Parse ITF trace
         let itf_trace = fuzzer.parse_itf_trace(itf_json).unwrap();
@@ -2942,8 +2951,7 @@ mod tests {
     async fn test_e2e_explore_and_generate() {
         use super::super::domain_handlers::capability_properties_registry;
 
-        let fuzzer = ITFBasedFuzzer::with_config(test_config("e2e-explore-and-generate"))
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer("e2e-explore-and-generate");
 
         // Create ActionRegistry
         let registry = capability_properties_registry();
@@ -2993,8 +3001,7 @@ mod tests {
             ]
         }"##;
 
-        let fuzzer = ITFBasedFuzzer::with_config(test_config("e2e-validated-test-case-generation"))
-            .unwrap_or_else(|error| panic!("Failed to create fuzzer: {error}"));
+        let fuzzer = test_fuzzer("e2e-validated-test-case-generation");
 
         let itf_trace = fuzzer.parse_itf_trace(itf_json).unwrap();
         let registry = capability_properties_registry();
