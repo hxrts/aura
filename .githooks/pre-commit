@@ -34,14 +34,9 @@ if [[ -n "${staged_rs}" ]]; then
 
   crates=$(echo "${staged_rs}" | while read -r file; do
     manifest=
-    case "$file" in
-      crates/*/*)
-        manifest="$(dirname "$(dirname "$file")")/Cargo.toml"
-        ;;
-      examples/*/*)
-        manifest="$(dirname "$(dirname "$file")")/Cargo.toml"
-        ;;
-    esac
+    if [[ "$file" == crates/*/* || "$file" == examples/*/* ]]; then
+      manifest="$(dirname "$(dirname "$file")")/Cargo.toml"
+    fi
     if [[ -n "${manifest}" && -f "${manifest}" ]]; then
       package_name=$(package_name_for_manifest "${manifest}")
       if [[ -n "${package_name}" ]]; then

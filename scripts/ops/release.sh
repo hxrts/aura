@@ -18,6 +18,7 @@ REQUIRE_MAIN=1
 SKIP_NIX=0
 SKIP_PUBLISH=0
 VERSION=""
+CURRENT_VERSION=""
 TAG_PREFIX="v"
 TAG_NAME=""
 
@@ -67,6 +68,44 @@ extract_workspace_version() {
       exit
     }
   ' "${ROOT_DIR}/Cargo.toml"
+}
+
+workspace_manifest_files() {
+  git ls-files -- 'Cargo.toml' 'crates/*/Cargo.toml' 'examples/*/Cargo.toml'
+}
+
+update_manifest_versions() {
+  local old_version="$1"
+  local new_version="$2"
+  local manifest
+
+  echo "== bumping workspace version ${old_version} -> ${new_version} =="
+
+  perl -0pi -e 's/(\[workspace\.package\][^\[]*?\bversion\s*=\s*")\Q'"${old_version}"'\E(")/${1}'"${new_version}"'${2}/s' \
+    "${ROOT_DIR}/Cargo.toml"
+
+  while IFS= read -r manifest; do
+    perl -0pi -e 's/(\[package\][^\[]*?\bversion\s*=\s*")\Q'"${old_version}"'\E(")/${1}'"${new_version}"'${2}/s' \
+      "${manifest}"
+    perl -0pi -e 's/(version\s*=\s*"=)\Q'"${old_version}"'\E(")/${1}'"${new_version}"'${2}/g' \
+      "${manifest}"
+  done < <(workspace_manifest_files)
+}
+
+refresh_lockfile() {
+  echo "== refreshing Cargo.lock =="
+  cargo generate-lockfile
+}
+
+create_release_commit() {
+  if git diff --quiet && git diff --cached --quiet; then
+    echo "== no release commit needed =="
+    return
+  fi
+
+  git add Cargo.toml Cargo.lock crates/*/Cargo.toml examples/*/Cargo.toml
+  git commit -m "Release v${VERSION}"
+  echo "== created release commit for v${VERSION} =="
 }
 
 # ── Validation ─────────────────────────────────────────────────────────
@@ -229,6 +268,10 @@ main() {
   if [[ -z "${VERSION}" ]]; then
     die "unable to determine workspace version"
   fi
+  CURRENT_VERSION="$(extract_workspace_version)"
+  if [[ -z "${CURRENT_VERSION}" ]]; then
+    die "unable to determine current workspace version"
+  fi
   assert_version_format "${VERSION}"
 
   echo "== release ${VERSION} =="
@@ -245,6 +288,14 @@ main() {
     die "CARGO_REGISTRY_TOKEN is not set; publishing will fail"
   fi
 
+  if [[ "${VERSION}" != "${CURRENT_VERSION}" ]]; then
+    if [[ "${DRY_RUN}" -eq 1 ]]; then
+      die "--dry-run does not support version bumps; bump to ${VERSION} first or run a real release"
+    fi
+    update_manifest_versions "${CURRENT_VERSION}" "${VERSION}"
+    refresh_lockfile
+  fi
+
   # Preflight checks
   if [[ "${SKIP_CI}" -eq 0 ]]; then
     require_command just
@@ -259,6 +310,8 @@ main() {
   else
     echo "== skipping nix checks =="
   fi
+
+  create_release_commit
 
   # Publish workspace (cargo handles dependency ordering and skips publish=false crates)
   if [[ "${SKIP_PUBLISH}" -eq 0 ]]; then
