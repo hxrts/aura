@@ -7,8 +7,6 @@
 
 pub mod actions;
 pub mod expectations;
-#[allow(dead_code)]
-mod legacy;
 pub mod submission;
 pub mod values;
 

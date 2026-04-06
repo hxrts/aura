@@ -22,7 +22,6 @@ use crate::views::ViewState;
 use crate::workflows::runtime::timeout_runtime_call as timeout_runtime_call_bounded;
 
 use crate::ReactiveHandler;
-use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::reactive::{
     ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
@@ -102,26 +101,26 @@ pub struct SubscriptionId {
 /// ```
 pub struct AppCore {
     /// The current authority (user identity)
-    authority: Option<AuthorityId>,
+    pub(super) authority: Option<AuthorityId>,
 
     /// The account ID for this AppCore
-    account_id: AccountId,
+    pub(super) account_id: AccountId,
 
     /// View state manager
-    views: ViewState,
+    pub(super) views: ViewState,
 
     /// Authoritative active-home selection for workflow resolution.
     ///
     /// This is owned by the application core rather than inferred from view
     /// projections so parity-critical workflows do not depend on view-only
     /// selection heuristics.
-    active_home_selection: Option<ChannelId>,
+    pub(super) active_home_selection: Option<ChannelId>,
 
     /// Authoritative semantic facts owned by `aura-app` workflow publication.
     ///
     /// Signals mirror this store for subscribers, but the store is the
     /// semantic source of truth for parity-critical workflow reads and updates.
-    authoritative_semantic_facts: Vec<AuthoritativeSemanticFact>,
+    pub(super) authoritative_semantic_facts: Vec<AuthoritativeSemanticFact>,
 
     /// Optional RuntimeBridge for runtime operations (sync, signing, network)
     ///
@@ -133,26 +132,26 @@ pub struct AppCore {
     /// When absent (demo/offline mode):
     /// - Local-only state management
     /// - No network operations available
-    runtime: Option<Arc<dyn RuntimeBridge>>,
+    pub(super) runtime: Option<Arc<dyn RuntimeBridge>>,
 
     /// Reactive effect handler for FRP-style state management.
     ///
     /// This handler implements ReactiveEffects and manages the signal graph
     /// for reactive state updates. Use `init_signals()` to register application
     /// signals before using reactive operations.
-    reactive: ReactiveHandler,
+    pub(super) reactive: ReactiveHandler,
 
     /// Observer registry for callback-based subscriptions (UniFFI/mobile)
     #[cfg(feature = "callbacks")]
-    observer_registry: crate::bridge::callback::ObserverRegistry,
+    pub(super) observer_registry: crate::bridge::callback::ObserverRegistry,
 
     /// Whether the contacts refresh hook has been installed.
-    contacts_refresh_hook_installed: bool,
+    pub(super) contacts_refresh_hook_installed: bool,
     /// Whether the chat refresh hook has been installed.
-    chat_refresh_hook_installed: bool,
+    pub(super) chat_refresh_hook_installed: bool,
     /// Whether the authoritative readiness hook has been installed.
     #[cfg(feature = "signals")]
-    authoritative_readiness_hook_installed: bool,
+    pub(super) authoritative_readiness_hook_installed: bool,
 }
 
 impl AppCore {
@@ -284,47 +283,6 @@ impl AppCore {
     /// Get the account ID
     pub fn account_id(&self) -> AccountId {
         self.account_id
-    }
-
-    pub(crate) fn contacts_refresh_hook_installed(&self) -> bool {
-        self.contacts_refresh_hook_installed
-    }
-
-    pub(crate) fn mark_contacts_refresh_hook_installed(&mut self) -> bool {
-        if self.contacts_refresh_hook_installed {
-            false
-        } else {
-            self.contacts_refresh_hook_installed = true;
-            true
-        }
-    }
-
-    pub(crate) fn chat_refresh_hook_installed(&self) -> bool {
-        self.chat_refresh_hook_installed
-    }
-
-    pub(crate) fn mark_chat_refresh_hook_installed(&mut self) -> bool {
-        if self.chat_refresh_hook_installed {
-            false
-        } else {
-            self.chat_refresh_hook_installed = true;
-            true
-        }
-    }
-
-    #[cfg(feature = "signals")]
-    pub(crate) fn authoritative_readiness_hook_installed(&self) -> bool {
-        self.authoritative_readiness_hook_installed
-    }
-
-    #[cfg(feature = "signals")]
-    pub(crate) fn mark_authoritative_readiness_hook_installed(&mut self) -> bool {
-        if self.authoritative_readiness_hook_installed {
-            false
-        } else {
-            self.authoritative_readiness_hook_installed = true;
-            true
-        }
     }
 
     /// Set the authority (user identity) for this AppCore
@@ -460,56 +418,6 @@ impl AppCore {
             })?;
 
         Ok(())
-    }
-
-    /// Initialize signals and install runtime-backed hooks.
-    pub async fn init_signals_with_hooks(
-        app_core: &Arc<RwLock<AppCore>>,
-    ) -> Result<(), IntentError> {
-        {
-            let mut core = app_core.write().await;
-            core.init_signals().await?;
-        }
-
-        let has_runtime = {
-            let core = app_core.read().await;
-            core.runtime().is_some()
-        };
-        if !has_runtime {
-            return Ok(());
-        }
-
-        crate::workflows::system::install_contacts_refresh_hook(app_core)
-            .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
-        crate::workflows::system::install_chat_refresh_hook(app_core)
-            .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
-        crate::workflows::system::install_authoritative_readiness_hook(app_core)
-            .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
-
-        Ok(())
-    }
-
-    /// Detach the runtime bridge from one AppCore instance.
-    ///
-    /// This is a teardown-only escape hatch for frontend generation shutdown.
-    /// Long-lived tasks may still hold `Arc<RwLock<AppCore>>`; clearing the
-    /// shared runtime pointer breaks the `AppCore -> RuntimeBridge -> runtime
-    /// task -> AppCore` retention cycle so the owned runtime can be shut down.
-    pub async fn detach_runtime(app_core: &Arc<RwLock<AppCore>>) -> bool {
-        let mut core = app_core.write().await;
-        let had_runtime = core.runtime.take().is_some();
-        if had_runtime {
-            core.contacts_refresh_hook_installed = false;
-            core.chat_refresh_hook_installed = false;
-            #[cfg(feature = "signals")]
-            {
-                core.authoritative_readiness_hook_installed = false;
-            }
-        }
-        had_runtime
     }
 
     // ==================== Threshold Signing Operations ====================

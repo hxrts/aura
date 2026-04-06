@@ -6,10 +6,11 @@
 #![allow(missing_docs)] // Shared contract surface - refined incrementally during migration.
 
 mod harness_metadata;
-#[allow(dead_code)]
-mod legacy;
+mod ids;
+mod operations;
 mod parity;
 mod shared_flow_support;
+mod snapshots;
 
 pub use harness_metadata::{
     BrowserCacheBoundary, BrowserCacheBoundaryMetadata, BrowserHarnessBridgeMethod,
@@ -21,26 +22,24 @@ pub use harness_metadata::{
     BROWSER_OBSERVATION_SURFACE_METHODS, FRONTEND_EXECUTION_BOUNDARIES, HARNESS_MODE_ALLOWLIST,
     TUI_OBSERVATION_SURFACE_API_VERSION, TUI_OBSERVATION_SURFACE_METHODS,
 };
-pub use legacy::{
-    bridged_operation_statuses, classify_screen_item_id,
-    classify_semantic_settings_section_item_id, classify_settings_section_item_id,
-    contacts_friend_action_controls, list_item_dom_id, list_item_selector,
-    nav_control_id_for_screen, next_projection_revision, screen_item_id,
+pub use ids::{
+    classify_screen_item_id, classify_semantic_settings_section_item_id,
+    classify_settings_section_item_id, contacts_friend_action_controls, list_item_dom_id,
+    list_item_selector, nav_control_id_for_screen, screen_item_id,
     semantic_settings_section_item_id, semantic_settings_section_surface_id,
-    settings_section_item_id, validate_harness_shell_structure, validate_render_convergence,
-    AcceptedPendingChannelBinding, AuthoritativeSemanticFact, AuthoritativeSemanticFactKind,
-    AuthoritativeSemanticFactsSnapshot, ChannelBindingWitness, ChannelFactKey, ConfirmationState,
-    ControlId, FieldId, FrontendSpecificSettingsSectionId, HarnessShellMode,
-    HarnessShellStructureSnapshot, HarnessUiCommand, HarnessUiCommandReceipt,
-    HarnessUiOperationHandle, InvitationFactKind, ListId, ListItemSnapshot, ListSnapshot,
-    MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
-    ParityUiIdentity, ProjectionRevision, QuiescenceSnapshot, QuiescenceState, RenderHeartbeat,
-    RuntimeEventId, RuntimeEventKind, RuntimeEventSnapshot, RuntimeFact, ScreenId,
-    SelectionSnapshot, SemanticFailureCode, SemanticFailureDomain, SemanticOperationCausality,
-    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
-    SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId, ToastKind, ToastSnapshot,
-    UiReadiness, UiSnapshot, WorkflowTerminalOutcome, WorkflowTerminalStatus,
-    FRONTEND_SPECIFIC_SETTINGS_SECTIONS, PARITY_CRITICAL_SETTINGS_SECTIONS,
+    settings_section_item_id, AcceptedPendingChannelBinding, ChannelBindingWitness, ControlId,
+    FieldId, FrontendSpecificSettingsSectionId, HarnessUiCommand, HarnessUiCommandReceipt,
+    HarnessUiOperationHandle, ListId, ModalId, ParityUiIdentity, ScreenId,
+    SettingsSectionSurfaceId, SharedSettingsSectionId, FRONTEND_SPECIFIC_SETTINGS_SECTIONS,
+    PARITY_CRITICAL_SETTINGS_SECTIONS,
+};
+pub use operations::{
+    bridged_operation_statuses, AuthoritativeSemanticFact, AuthoritativeSemanticFactKind,
+    ChannelFactKey, ConfirmationState, InvitationFactKind, OperationId, OperationInstanceId,
+    OperationState, RuntimeEventId, SemanticFailureCode, SemanticFailureDomain,
+    SemanticOperationCausality, SemanticOperationError, SemanticOperationKind,
+    SemanticOperationPhase, SemanticOperationStatus, ToastId, ToastKind, UiReadiness,
+    WorkflowTerminalOutcome, WorkflowTerminalStatus,
 };
 pub use parity::{
     compare_ui_snapshots_for_parity, uncovered_ui_parity_mismatches, UiParityMismatch,
@@ -53,4 +52,11 @@ pub use shared_flow_support::{
     SharedScreenModuleMap, SharedScreenSupport, ALL_SHARED_FLOW_IDS, PARITY_EXCEPTION_METADATA,
     SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SOURCE_AREAS, SHARED_FLOW_SUPPORT,
     SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
+};
+pub use snapshots::{
+    next_projection_revision, validate_harness_shell_structure, validate_render_convergence,
+    AuthoritativeSemanticFactsSnapshot, HarnessShellMode, HarnessShellStructureSnapshot,
+    ListItemSnapshot, ListSnapshot, MessageSnapshot, OperationSnapshot, ProjectionRevision,
+    QuiescenceSnapshot, QuiescenceState, RenderHeartbeat, RuntimeEventKind, RuntimeEventSnapshot,
+    RuntimeFact, SelectionSnapshot, ToastSnapshot, UiSnapshot,
 };
