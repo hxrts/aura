@@ -178,7 +178,7 @@ create_release_tag() {
   TAG_NAME="${TAG_PREFIX}${VERSION}"
   if git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
     local existing_commit current_commit
-    existing_commit="$(git rev-parse "${TAG_NAME}")"
+    existing_commit="$(git rev-parse "${TAG_NAME}^{}")"
     current_commit="$(git rev-parse HEAD)"
     if [[ "${existing_commit}" == "${current_commit}" ]]; then
       echo "== tag ${TAG_NAME} already exists and points to HEAD; reusing =="
