@@ -31,7 +31,7 @@ done < <(
   ' "$inventory"
 )
 
-cargo test -p aura-app snapshot_invariants_reject_row_index_ids --quiet
-cargo test -p aura-app shared_intent_contract_rejects_row_index_item_ids --quiet
+cargo test -p hxrts-aura-app snapshot_invariants_reject_row_index_ids --quiet
+cargo test -p hxrts-aura-app shared_intent_contract_rejects_row_index_item_ids --quiet
 
 echo "harness row-index contract: clean"

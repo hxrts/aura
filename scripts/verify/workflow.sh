@@ -322,7 +322,7 @@ cmd_quint_types() {
 # ============================================================================
 
 cmd_kani() {
-    local PACKAGE="aura-protocol"
+    local PACKAGE="hxrts-aura-protocol"
     local UNWIND="10"
     local LOG_DIR="logs/kani"
     local LOG_FILE="${LOG_DIR}/kani-suite-$(date +%Y%m%d-%H%M%S).log"

@@ -20,7 +20,7 @@ if sed -n '/pub trait ObservationBackend/,/^}/p' "$backend_mod" \
   fail "ObservationBackend exports action-like methods"
 fi
 
-cargo test -p aura-app observation_surface_methods_do_not_overlap_action_surface --quiet
+cargo test -p hxrts-aura-app observation_surface_methods_do_not_overlap_action_surface --quiet
 cargo test -p aura-harness observation_endpoints_are_side_effect_free --quiet
 
 echo "harness observation surface: clean"

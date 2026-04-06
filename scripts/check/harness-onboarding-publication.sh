@@ -26,8 +26,8 @@ if rg -q 'synthetic_onboarding_snapshot' crates/aura-harness/src/backend/local_p
   fail "local PTY backend may not fabricate onboarding snapshots"
 fi
 
-cargo test -p aura-app onboarding_is_declared_in_the_shared_snapshot_model --quiet
-cargo test -p aura-app onboarding_uses_canonical_snapshot_publication_path --quiet
-cargo test -p aura-app onboarding_harness_paths_have_no_bespoke_recovery_logic --quiet
+cargo test -p hxrts-aura-app onboarding_is_declared_in_the_shared_snapshot_model --quiet
+cargo test -p hxrts-aura-app onboarding_uses_canonical_snapshot_publication_path --quiet
+cargo test -p hxrts-aura-app onboarding_harness_paths_have_no_bespoke_recovery_logic --quiet
 
 echo "harness onboarding publication: clean"

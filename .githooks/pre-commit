@@ -19,13 +19,37 @@ fi
 # Scope fmt and check to crates with staged .rs changes.
 staged_rs=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
 if [[ -n "${staged_rs}" ]]; then
-  crates=$(echo "${staged_rs}" \
-    | sed -n 's|^crates/\([^/]*\)/.*|--package \1|p' \
-    | sort -u)
-  examples=$(echo "${staged_rs}" \
-    | sed -n 's|^examples/\([^/]*\)/.*|--package \1|p' \
-    | sort -u)
-  packages="${crates}${crates:+$'\n'}${examples}"
+  package_name_for_manifest() {
+    local manifest="$1"
+    awk '
+      $0 == "[package]" { in_package = 1; next }
+      /^\[/ && $0 != "[package]" { in_package = 0 }
+      in_package && $1 == "name" {
+        gsub(/"/, "", $3)
+        print $3
+        exit
+      }
+    ' "$manifest"
+  }
+
+  crates=$(echo "${staged_rs}" | while read -r file; do
+    manifest=
+    case "$file" in
+      crates/*/*)
+        manifest="$(dirname "$(dirname "$file")")/Cargo.toml"
+        ;;
+      examples/*/*)
+        manifest="$(dirname "$(dirname "$file")")/Cargo.toml"
+        ;;
+    esac
+    if [[ -n "${manifest}" && -f "${manifest}" ]]; then
+      package_name=$(package_name_for_manifest "${manifest}")
+      if [[ -n "${package_name}" ]]; then
+        printf -- '--package %s\n' "${package_name}"
+      fi
+    fi
+  done | sort -u)
+  packages="${crates}"
 
   if [[ -n "${packages}" ]]; then
     # shellcheck disable=SC2086

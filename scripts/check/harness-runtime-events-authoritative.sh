@@ -22,8 +22,8 @@ fi
 
 cargo test -p aura-terminal semantic_snapshot_exports_tui_owned_runtime_facts --quiet
 cargo test -p aura-terminal semantic_snapshot_exporter_does_not_infer_parity_runtime_events --quiet
-cargo test -p aura-app ui_snapshot_parity_detects_runtime_event_shape_drift --quiet
-cargo test -p aura-app ui_snapshot_parity_detects_toast_drift --quiet
+cargo test -p hxrts-aura-app ui_snapshot_parity_detects_runtime_event_shape_drift --quiet
+cargo test -p hxrts-aura-app ui_snapshot_parity_detects_toast_drift --quiet
 cargo test -p aura-harness shared_intent_waits_bind_only_to_declared_barriers --quiet
 
 echo "harness runtime events authoritative: clean"

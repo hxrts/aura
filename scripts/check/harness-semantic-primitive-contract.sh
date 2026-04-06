@@ -20,7 +20,7 @@ rg -q 'ScenarioAction::Intent' "${scenario_contract_files[@]}" \
 rg -q 'validate_shared_intent_contract' "${scenario_contract_files[@]}" \
   || fail "shared scenario validation must enforce typed intent actions"
 
-cargo test -p aura-app shared_intent_contract_accepts_intents --quiet
-cargo test -p aura-app shared_intent_contract_rejects_ui_actions --quiet
+cargo test -p hxrts-aura-app shared_intent_contract_accepts_intents --quiet
+cargo test -p hxrts-aura-app shared_intent_contract_rejects_ui_actions --quiet
 
 echo "harness semantic primitive contract: clean"

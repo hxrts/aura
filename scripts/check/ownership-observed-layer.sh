@@ -16,8 +16,8 @@ fail() {
 # Then asserts the UI projection layer does not introduce direct authoritative
 # publication on its own.
 
-cargo test -p aura-app --test compile_fail -- --nocapture
-cargo run -q -p aura-macros --bin ownership_lints -- \
+cargo test -p hxrts-aura-app --test compile_fail -- --nocapture
+cargo run -q -p hxrts-aura-macros --bin ownership_lints -- \
   harness-readiness-ownership \
   crates/aura-agent/src/reactive/app_signal_views.rs \
   crates/aura-agent/src/reactive/app_signal_projection.rs \

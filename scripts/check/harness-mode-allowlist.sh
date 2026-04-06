@@ -34,8 +34,8 @@ if rg -q 'reset_harness_bootstrap_storage_once' crates/aura-web/src/main.rs; the
   fail "web frontend may not carry harness-only bootstrap reset shortcuts"
 fi
 
-cargo test -p aura-app harness_mode_allowlist_is_scoped_to_non_semantic_categories --quiet
-cargo test -p aura-app connectivity_check_is_harness_mode_neutral --quiet
+cargo test -p hxrts-aura-app harness_mode_allowlist_is_scoped_to_non_semantic_categories --quiet
+cargo test -p hxrts-aura-app connectivity_check_is_harness_mode_neutral --quiet
 cargo test -p aura-terminal invitation_dispatch_uses_product_callbacks_without_harness_shortcuts --quiet
 
 echo "harness mode allowlist: clean"

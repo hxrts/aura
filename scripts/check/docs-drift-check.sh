@@ -388,10 +388,17 @@ check_type_references() {
 
     info "Building type index (this may take a moment)..."
 
-    # Extract struct, enum, trait, type alias definitions
-    grep -rh "pub struct \|pub enum \|pub trait \|pub type " crates/ --include="*.rs" 2>/dev/null | \
-        sed -E 's/.*(pub struct |pub enum |pub trait |pub type )([A-Z][a-zA-Z0-9_]*).*/\2/' | \
-        sort -u > "$type_cache"
+    # Extract struct, enum, trait, type alias definitions plus macro-defined public ids.
+    {
+        grep -rh "pub struct \|pub enum \|pub trait \|pub type " crates/ --include="*.rs" 2>/dev/null | \
+            sed -E 's/.*(pub struct |pub enum |pub trait |pub type )([A-Z][a-zA-Z0-9_]*).*/\2/'
+        find crates -name "*.rs" -type f -print0 2>/dev/null | \
+            xargs -0 perl -0ne '
+                while (/(?:string_id|uuid_id|hash_id|typed_id)!\(\s*(?:(?:\/\/\/[^\n]*\n)|\s)*([A-Z][a-zA-Z0-9_]*)\s*,?/sg) {
+                    print "$1\n";
+                }
+            ' 2>/dev/null
+    } | sort -u > "$type_cache"
 
     local type_count
     type_count=$(wc -l < "$type_cache" | tr -d ' ')

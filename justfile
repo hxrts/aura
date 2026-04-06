@@ -47,7 +47,7 @@ _ownership-lint mode *PATHS:
     if [ -x target/debug/ownership_lints ]; then \
         target/debug/ownership_lints {{ mode }} {{ PATHS }}; \
     else \
-        cargo run -q -p aura-macros --bin ownership_lints -- {{ mode }} {{ PATHS }}; \
+        cargo run -q -p hxrts-aura-macros --bin ownership_lints -- {{ mode }} {{ PATHS }}; \
     fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -80,7 +80,7 @@ build-terminal-release:
 
 # Build app-host binary
 build-app-host:
-    cargo build -p aura-app --bin app-host --features host --release
+    cargo build -p hxrts-aura-app --bin app-host --features host --release
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Web App
@@ -304,7 +304,7 @@ test-crate-isolated crate:
 
 # Benchmark Telltale protocol-machine cooperative vs threaded backends for Category C shapes
 bench-choreo-parity:
-    cargo bench -p aura-agent --features choreo-backend-telltale-machine --bench telltale_machine_backends
+    cargo bench -p hxrts-aura-agent --features choreo-backend-telltale-machine --bench telltale_machine_backends
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Linting & Formatting
@@ -344,18 +344,18 @@ clippy-strict:
 
 # Rust-native architecture syntax lints that replaced grep-heavy arch.sh checks
 lint-arch-syntax:
-    cargo run -q -p aura-macros --bin arch_lints -- layer-policy crates
-    cargo run -q -p aura-macros --bin arch_lints -- effect-boundaries crates
-    cargo run -q -p aura-macros --bin arch_lints -- impure-escapes crates
-    cargo run -q -p aura-macros --bin arch_lints -- concurrency crates
-    cargo run -q -p aura-macros --bin arch_lints -- frontend-portability crates
-    cargo run -q -p aura-macros --bin arch_lints -- semantic-bridge-contracts crates
-    cargo run -q -p aura-macros --bin arch_lints -- crypto-boundaries crates
-    cargo run -q -p aura-macros --bin arch_lints -- capability-boundaries crates
-    cargo run -q -p aura-macros --bin arch_lints -- style crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- layer-policy crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- effect-boundaries crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- impure-escapes crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- concurrency crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- frontend-portability crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- semantic-bridge-contracts crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- crypto-boundaries crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- capability-boundaries crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- style crates
 
 ci-capability-model-audit:
-    cargo run -q -p aura-macros --bin arch_lints -- capability-boundaries crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- capability-boundaries crates
     bash scripts/check/ownership-capability-audit.sh
 
 # Format code
@@ -450,8 +450,8 @@ ci-harness-matrix-inventory:
 # Harness shared intent-contract policy
 ci-harness-shared-intent-contract:
     bash scripts/check/harness-governance.sh shared-scenario-contract
-    cargo test -p aura-app shared_intent_contract_accepts_intents --quiet
-    cargo test -p aura-app shared_intent_contract_rejects_ui_actions --quiet
+    cargo test -p hxrts-aura-app shared_intent_contract_accepts_intents --quiet
+    cargo test -p hxrts-aura-app shared_intent_contract_rejects_ui_actions --quiet
 
 # Harness replay regression (nightly mixed-topology lane)
 ci-harness-replay:
@@ -495,17 +495,17 @@ ci-harness-frontend-conformance-matrix:
 
 # LAN smoke lane for workspace-fast coverage
 ci-lan-smoke:
-    cargo test -p aura-agent --test lan_integration -q
+    cargo test -p hxrts-aura-agent --test lan_integration -q
 
 ci-bootstrap-discovery:
-    cargo test -p aura-agent native_client_round_trips_against_local_broker_http --lib -q
-    cargo test -p aura-agent native_client_round_trips_broker_invitations --lib -q
+    cargo test -p hxrts-aura-agent native_client_round_trips_against_local_broker_http --lib -q
+    cargo test -p hxrts-aura-agent native_client_round_trips_broker_invitations --lib -q
     cargo test -p aura-terminal account_setup_modal_mentions_bootstrap_candidates --lib -q
     cargo test -p aura-web web_onboarding_lists_bootstrap_candidates_separately_from_join_flow -q
 
 # LAN deep lane for serialized end-to-end coverage
 ci-lan-deep:
-    cargo test -p aura-agent --test lan_integration -q -- --ignored
+    cargo test -p hxrts-aura-agent --test lan_integration -q -- --ignored
 
 # Test suite (excludes patchbay tests which run in ci-holepunch-tier2)
 ci-test:
@@ -567,22 +567,22 @@ ci-choreo-parity:
     mkdir -p artifacts/choreo-parity
     AURA_CONFORMANCE_WRITE_ARTIFACTS=1 \
     AURA_CONFORMANCE_ARTIFACT_DIR="${PWD}/artifacts/choreo-parity" \
-    cargo test -p aura-agent --features choreo-backend-telltale-machine --test telltale_machine_parity -q
-    cargo test -p aura-agent --features choreo-backend-telltale-machine --lib parity_policy::tests -q
+    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --test telltale_machine_parity -q
+    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --lib parity_policy::tests -q
 
 # Choreography concurrency contract gates (link/delegate coherence + canonical fallback)
 ci-choreo-concurrency-contracts:
     mkdir -p artifacts/choreo-concurrency-contracts
     AURA_CONFORMANCE_WRITE_ARTIFACTS=1 \
     AURA_CONFORMANCE_ARTIFACT_DIR="${PWD}/artifacts/choreo-concurrency-contracts" \
-    cargo test -p aura-agent --features choreo-backend-telltale-machine --test telltale_machine_concurrent_contracts -- --nocapture
+    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --test telltale_machine_concurrent_contracts -- --nocapture
 
 # WASM choreography backend matrix for aura-agent
 
 # Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
 ci-agent-wasm:
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-agent --target wasm32-unknown-unknown --features web
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-machine"
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p hxrts-aura-agent --target wasm32-unknown-unknown --features web
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p hxrts-aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-machine"
 
 # WASM workspace test matrix for crates currently supported on WASM
 # Excludes native-only/runtime-heavy crates:
@@ -680,8 +680,8 @@ ci-harness-ownership-policy:
     just ci-frontend-portability
 
 ci-frontend-portability:
-    cargo run -q -p aura-macros --bin arch_lints -- frontend-portability crates
-    cargo run -q -p aura-macros --bin arch_lints -- semantic-bridge-contracts crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- frontend-portability crates
+    cargo run -q -p hxrts-aura-macros --bin arch_lints -- semantic-bridge-contracts crates
     just web-check
 
 ci-testkit-exception-boundary:
@@ -743,7 +743,7 @@ ci-ratchet-audit:
     just web-check
     just ci-agent-wasm
     env CARGO_TARGET_DIR=target/ratchet just ci-workspace-wasm-test
-    cargo test -p aura-macros --test compile_fail -- --nocapture
+    cargo test -p hxrts-aura-macros --test compile_fail -- --nocapture
 
 ci-browser-semantic-restart-boundary:
     bash scripts/check/browser-restart-boundary.sh
@@ -758,7 +758,7 @@ ci-ownership-categories:
 
 ci-service-surface-policy:
     mkdir -p target/tmp
-    TMPDIR={{invocation_directory()}}/target/tmp cargo test -p aura-macros --test service_surface_compile_fail -- --nocapture
+    TMPDIR={{invocation_directory()}}/target/tmp cargo test -p hxrts-aura-macros --test service_surface_compile_fail -- --nocapture
     bash scripts/check/service-surface-declarations.sh
 
 ci-service-registry-ownership:
@@ -771,13 +771,13 @@ ci-actor-lifecycle:
     just _ownership-lint actor-owned-task-spawn crates/aura-agent/src crates/aura-app/src crates/aura-core/src crates/aura-effects/src crates/aura-harness/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src
 
 ci-move-semantics:
-    cargo test -p aura-core --test compile_fail -- --nocapture
+    cargo test -p hxrts-aura-core --test compile_fail -- --nocapture
 
 ci-authoritative-fact-boundary:
-    cargo test -p aura-app --test compile_fail -- --nocapture
+    cargo test -p hxrts-aura-app --test compile_fail -- --nocapture
 
 ci-capability-boundaries:
-    cargo test -p aura-core --test compile_fail -- --nocapture
+    cargo test -p hxrts-aura-core --test compile_fail -- --nocapture
 
 ci-typed-errors:
     bash scripts/check/runtime-error-boundary.sh
@@ -932,7 +932,7 @@ ci-lean-check-sorry:
 
 # Kani bounded model checking
 ci-kani:
-    just _run-kani cargo kani --package aura-protocol --default-unwind 10 --output-format terse
+    just _run-kani cargo kani --package hxrts-aura-protocol --default-unwind 10 --output-format terse
 
 # ITF conformance tests
 ci-conformance-itf:
@@ -964,12 +964,12 @@ ci-conformance-strict:
     export AURA_CONFORMANCE_ITF_SEED_WINDOW="${AURA_CONFORMANCE_ITF_SEED_WINDOW:-8}"
 
     echo "Running native/threaded parity lane..."
-    cargo test -p aura-agent --features choreo-backend-telltale-machine --test telltale_machine_parity -- --nocapture
+    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --test telltale_machine_parity -- --nocapture
 
     echo "Running strict native/wasm parity lane..."
     : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
-      cargo test -p aura-agent --target wasm32-unknown-unknown \
+      cargo test -p hxrts-aura-agent --target wasm32-unknown-unknown \
       --features web,choreo-backend-telltale-machine \
       --test telltale_machine_parity -- --nocapture
 
@@ -979,7 +979,7 @@ ci-conformance-contracts:
     set -euo pipefail
     export AURA_CONFORMANCE_ARTIFACT_DIR="${AURA_CONFORMANCE_ARTIFACT_DIR:-artifacts/conformance}"
     export AURA_SCENARIO_CONTRACT_ARTIFACT="${AURA_SCENARIO_CONTRACT_ARTIFACT:-$(pwd)/$AURA_CONFORMANCE_ARTIFACT_DIR/scenario_contracts.json}"
-    cargo test -p aura-agent --features choreo-backend-telltale-machine --test telltale_machine_scenario_contracts -- --nocapture
+    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --test telltale_machine_scenario_contracts -- --nocapture
 
 # Policy check: protected-branch CI must keep conformance gate job wired
 ci-conformance-policy:
@@ -1377,7 +1377,7 @@ test-macos-keychain:
     echo "Aura macOS Keychain Integration Tests"
     echo "======================================"
     export RUST_LOG=debug RUST_BACKTRACE=1
-    cargo test -p aura-agent --test macos_keychain_tests -- --nocapture --test-threads=1
+    cargo test -p hxrts-aura-agent --test macos_keychain_tests -- --nocapture --test-threads=1
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Quint Specifications
@@ -1544,7 +1544,7 @@ lean-translate jobs="1" crate="all":
     command -v charon &>/dev/null || { echo -e "${RED}✗ Charon not found${NC}"; exit 1; }
     command -v aeneas &>/dev/null || { echo -e "${RED}✗ Aeneas not found${NC}"; exit 1; }
 
-    CRATES=("aura-core" "aura-journal")
+    CRATES=("hxrts-aura-core" "hxrts-aura-journal")
     [ "$TARGET" != "all" ] && CRATES=("$TARGET")
 
     for crate in "${CRATES[@]}"; do
@@ -1562,11 +1562,11 @@ lean-translate jobs="1" crate="all":
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Run Kani verification on a package
-kani package="aura-protocol" unwind="10":
+kani package="hxrts-aura-protocol" unwind="10":
     just _nix-nightly -- just _run-kani cargo kani --package {{ package }} --default-unwind {{ unwind }}
 
 # Run a specific Kani harness
-kani-harness harness package="aura-protocol" unwind="10":
+kani-harness harness package="hxrts-aura-protocol" unwind="10":
     just _nix-nightly -- just _run-kani cargo kani --package {{ package }} --harness {{ harness }} --default-unwind {{ unwind }}
 
 # Setup Kani (first time only)
@@ -1618,12 +1618,12 @@ verify-conformance:
     AURA_CONSENSUS_ITF_TRACE="$trace_file" \
       AURA_CONSENSUS_ITF_TRACE_DIR="$trace_dir" \
       AURA_CONFORMANCE_ITF_TRACE="$trace_file" \
-      cargo test -p aura-protocol --test consensus_itf_conformance -- --nocapture || \
+      cargo test -p hxrts-aura-protocol --test consensus_itf_conformance -- --nocapture || \
         { echo -e "${RED}[FAIL]${NC}"; exit 1; }
     echo -e "${GREEN}[OK]${NC} Conformance passed"
 
     echo "[3/3] Running differential tests..."
-    cargo test -p aura-protocol --test consensus_differential -- --nocapture || \
+    cargo test -p hxrts-aura-protocol --test consensus_differential -- --nocapture || \
         { echo -e "${RED}[FAIL]${NC}"; exit 1; }
     echo -e "${GREEN}[OK]${NC} Differential passed"
 

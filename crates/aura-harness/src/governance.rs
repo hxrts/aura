@@ -340,42 +340,42 @@ pub fn validate_ui_parity_contract() -> Result<()> {
         }
     }
 
-    run_cargo_test("aura-app", "shared_flow_support_contract_is_consistent")?;
+    run_cargo_test(APP_PACKAGE, "shared_flow_support_contract_is_consistent")?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "shared_flow_scenario_coverage_points_to_existing_scenarios",
     )?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "shared_screen_modal_and_list_support_is_unique_and_addressable",
     )?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "shared_screen_module_map_uses_canonical_screen_names",
     )?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "parity_module_map_points_to_existing_frontend_symbols",
     )?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "parity_exception_metadata_is_complete_and_documented",
     )?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "ui_snapshot_parity_ignores_occurrence_ids_but_catches_state_drift",
     )?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "ui_snapshot_parity_detects_focus_semantic_drift",
     )?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "ui_snapshot_parity_detects_runtime_event_shape_drift",
     )?;
-    run_cargo_test("aura-app", "parity_ui_identity_helpers_match_contract_ids")?;
+    run_cargo_test(APP_PACKAGE, "parity_ui_identity_helpers_match_contract_ids")?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "frontend_sources_reference_shared_identity_helpers",
     )?;
 
@@ -439,9 +439,9 @@ pub fn validate_settings_surface_contract() -> Result<()> {
         bail!("tui settings export may not derive parity ids from section titles");
     }
 
-    run_cargo_test("aura-app", "shared_settings_section_surface_is_explicit")?;
+    run_cargo_test(APP_PACKAGE, "shared_settings_section_surface_is_explicit")?;
     run_cargo_test(
-        "aura-app",
+        APP_PACKAGE,
         "frontend_settings_sources_use_shared_section_ids",
     )?;
 
@@ -673,6 +673,8 @@ fn run_cargo_test(crate_name: &str, test_name: &str) -> Result<()> {
     }
     Ok(())
 }
+
+const APP_PACKAGE: &str = "hxrts-aura-app";
 
 fn normalize_rel_path(path: impl AsRef<Path>) -> String {
     let mut normalized = path.as_ref().to_string_lossy().replace('\\', "/");

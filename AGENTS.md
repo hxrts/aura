@@ -51,6 +51,10 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 | Arch | `just ci-frontend-portability` | Run shared frontend portability and semantic-bridge syntax lints |
 | Arch | `just ci-frontend-handoff-boundary` | Run frontend semantic owner allocation / handoff boundary lints |
 
+### Cargo Package Names
+
+Published workspace crates use `hxrts-aura-*` Cargo package names even though their source directories remain `crates/aura-*`. When writing hooks, CI scripts, or raw Cargo commands, target package ids such as `hxrts-aura-app`, `hxrts-aura-agent`, `hxrts-aura-core`, `hxrts-aura-macros`, and `hxrts-aura-protocol` instead of the legacy `aura-*` package selectors. Non-published shells and test infra such as `aura-terminal`, `aura-ui`, `aura-web`, `aura-harness`, `aura-simulator`, `aura-quint`, and `aura-testkit` keep their existing package names.
+
 ## Architecture Overview
 
 ### 8-Layer Structure

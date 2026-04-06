@@ -22,7 +22,7 @@ rg -q 'pub enum SelectionSemantics' "${scenario_contract_files[@]}" \
 rg -q 'pub struct SharedActionContract' "${scenario_contract_files[@]}" \
   || fail "missing shared action contract"
 
-cargo test -p aura-app every_intent_kind_declares_focus_and_selection_semantics --quiet
-cargo test -p aura-app ui_snapshot_parity_detects_focus_semantic_drift --quiet
+cargo test -p hxrts-aura-app every_intent_kind_declares_focus_and_selection_semantics --quiet
+cargo test -p hxrts-aura-app ui_snapshot_parity_detects_focus_semantic_drift --quiet
 
 echo "harness focus selection contract: clean"

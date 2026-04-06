@@ -124,13 +124,13 @@ if printf '%s\n' "${exported_observation_methods[@]:-}" \
   fail "browser observation surface exports action methods"
 fi
 
-cargo test -p aura-app browser_harness_bridge_contract_is_versioned_and_complete --quiet
-cargo test -p aura-app browser_harness_bridge_read_methods_are_declared_deterministic --quiet
-cargo test -p aura-app browser_observation_surface_contract_is_versioned_and_read_only --quiet
-cargo test -p aura-app tui_observation_surface_contract_is_versioned_and_read_only --quiet
-cargo test -p aura-app harness_shell_structure_accepts_exactly_one_app_shell --quiet
-cargo test -p aura-app harness_shell_structure_accepts_single_onboarding_shell --quiet
-cargo test -p aura-app harness_shell_structure_rejects_duplicate_or_ambiguous_roots --quiet
+cargo test -p hxrts-aura-app browser_harness_bridge_contract_is_versioned_and_complete --quiet
+cargo test -p hxrts-aura-app browser_harness_bridge_read_methods_are_declared_deterministic --quiet
+cargo test -p hxrts-aura-app browser_observation_surface_contract_is_versioned_and_read_only --quiet
+cargo test -p hxrts-aura-app tui_observation_surface_contract_is_versioned_and_read_only --quiet
+cargo test -p hxrts-aura-app harness_shell_structure_accepts_exactly_one_app_shell --quiet
+cargo test -p hxrts-aura-app harness_shell_structure_accepts_single_onboarding_shell --quiet
+cargo test -p hxrts-aura-app harness_shell_structure_rejects_duplicate_or_ambiguous_roots --quiet
 cargo test -p aura-harness playwright_semantic_bridge_failure_and_projection_contracts_are_explicit --quiet
 
 echo "harness bridge contract: clean"

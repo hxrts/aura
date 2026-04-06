@@ -33,7 +33,7 @@ bash scripts/check/harness-mode-allowlist.sh
 bash scripts/check/harness-render-convergence.sh
 bash scripts/check/harness-focus-selection-contract.sh
 bash scripts/check/harness-revision-contract.sh
-cargo run -q -p aura-macros --bin ownership_lints -- \
+cargo run -q -p hxrts-aura-macros --bin ownership_lints -- \
   harness-recovery-ownership \
   crates/aura-harness/src/tool_api.rs \
   crates/aura-terminal/src/tui/harness_state/snapshot.rs \
@@ -63,35 +63,35 @@ bash scripts/check/browser-cache-lifecycle.sh
 bash scripts/check/browser-observation-contract.sh
 bash scripts/check/browser-driver-types.sh
 
-cargo test -p aura-app shared_flow_support_contract_is_consistent --quiet
-cargo test -p aura-app shared_intent_contract_accepts_intents --quiet
-cargo test -p aura-app shared_intent_contract_rejects_ui_actions --quiet
-cargo test -p aura-app shared_intent_contract_rejects_row_index_item_ids --quiet
-cargo test -p aura-app every_intent_kind_has_a_matching_contract --quiet
-cargo test -p aura-app every_intent_kind_declares_barrier_metadata --quiet
-cargo test -p aura-app declared_post_operation_convergence_contracts_are_explicit --quiet
-cargo test -p aura-app snapshot_invariants_reject_placeholder_ids --quiet
-cargo test -p aura-app snapshot_invariants_reject_override_backed_ids --quiet
-cargo test -p aura-app snapshot_invariants_reject_row_index_ids --quiet
-cargo test -p aura-app snapshot_invariants_reject_inferred_runtime_events --quiet
-cargo test -p aura-app snapshot_invariants_reject_contradictory_focus_and_modal_state --quiet
-cargo test -p aura-app projection_revision_detects_stale_snapshots_by_revision --quiet
-cargo test -p aura-app onboarding_is_declared_in_the_shared_snapshot_model --quiet
-cargo test -p aura-app ui_snapshot_parity_detects_focus_semantic_drift --quiet
-cargo test -p aura-app browser_harness_bridge_contract_is_versioned_and_complete --quiet
-cargo test -p aura-app browser_harness_bridge_read_methods_are_declared_deterministic --quiet
-cargo test -p aura-app browser_observation_surface_contract_is_versioned_and_read_only --quiet
-cargo test -p aura-app tui_observation_surface_contract_is_versioned_and_read_only --quiet
-cargo test -p aura-app harness_shell_structure_accepts_exactly_one_app_shell --quiet
-cargo test -p aura-app harness_shell_structure_accepts_single_onboarding_shell --quiet
-cargo test -p aura-app harness_shell_structure_rejects_duplicate_or_ambiguous_roots --quiet
-cargo test -p aura-app observation_surface_methods_do_not_overlap_action_surface --quiet
-cargo test -p aura-app harness_mode_allowlist_is_scoped_to_non_semantic_categories --quiet
-cargo test -p aura-app connectivity_check_is_harness_mode_neutral --quiet
-cargo test -p aura-app frontend_execution_boundaries_are_defined_and_exist --quiet
-cargo test -p aura-app ui_snapshot_parity_reports_undeclared_drift --quiet
-cargo test -p aura-app render_convergence_accepts_matching_snapshot_and_heartbeat --quiet
-cargo test -p aura-app render_convergence_rejects_semantic_state_published_ahead_of_renderer --quiet
+cargo test -p hxrts-aura-app shared_flow_support_contract_is_consistent --quiet
+cargo test -p hxrts-aura-app shared_intent_contract_accepts_intents --quiet
+cargo test -p hxrts-aura-app shared_intent_contract_rejects_ui_actions --quiet
+cargo test -p hxrts-aura-app shared_intent_contract_rejects_row_index_item_ids --quiet
+cargo test -p hxrts-aura-app every_intent_kind_has_a_matching_contract --quiet
+cargo test -p hxrts-aura-app every_intent_kind_declares_barrier_metadata --quiet
+cargo test -p hxrts-aura-app declared_post_operation_convergence_contracts_are_explicit --quiet
+cargo test -p hxrts-aura-app snapshot_invariants_reject_placeholder_ids --quiet
+cargo test -p hxrts-aura-app snapshot_invariants_reject_override_backed_ids --quiet
+cargo test -p hxrts-aura-app snapshot_invariants_reject_row_index_ids --quiet
+cargo test -p hxrts-aura-app snapshot_invariants_reject_inferred_runtime_events --quiet
+cargo test -p hxrts-aura-app snapshot_invariants_reject_contradictory_focus_and_modal_state --quiet
+cargo test -p hxrts-aura-app projection_revision_detects_stale_snapshots_by_revision --quiet
+cargo test -p hxrts-aura-app onboarding_is_declared_in_the_shared_snapshot_model --quiet
+cargo test -p hxrts-aura-app ui_snapshot_parity_detects_focus_semantic_drift --quiet
+cargo test -p hxrts-aura-app browser_harness_bridge_contract_is_versioned_and_complete --quiet
+cargo test -p hxrts-aura-app browser_harness_bridge_read_methods_are_declared_deterministic --quiet
+cargo test -p hxrts-aura-app browser_observation_surface_contract_is_versioned_and_read_only --quiet
+cargo test -p hxrts-aura-app tui_observation_surface_contract_is_versioned_and_read_only --quiet
+cargo test -p hxrts-aura-app harness_shell_structure_accepts_exactly_one_app_shell --quiet
+cargo test -p hxrts-aura-app harness_shell_structure_accepts_single_onboarding_shell --quiet
+cargo test -p hxrts-aura-app harness_shell_structure_rejects_duplicate_or_ambiguous_roots --quiet
+cargo test -p hxrts-aura-app observation_surface_methods_do_not_overlap_action_surface --quiet
+cargo test -p hxrts-aura-app harness_mode_allowlist_is_scoped_to_non_semantic_categories --quiet
+cargo test -p hxrts-aura-app connectivity_check_is_harness_mode_neutral --quiet
+cargo test -p hxrts-aura-app frontend_execution_boundaries_are_defined_and_exist --quiet
+cargo test -p hxrts-aura-app ui_snapshot_parity_reports_undeclared_drift --quiet
+cargo test -p hxrts-aura-app render_convergence_accepts_matching_snapshot_and_heartbeat --quiet
+cargo test -p hxrts-aura-app render_convergence_rejects_semantic_state_published_ahead_of_renderer --quiet
 cargo test -p aura-harness --lib browser_driver_maps_shared_controls_to_selectors --quiet
 cargo test -p aura-harness --lib browser_driver_maps_shared_fields_to_selectors --quiet
 cargo test -p aura-harness --lib browser_driver_maps_navigation_items_to_controls --quiet

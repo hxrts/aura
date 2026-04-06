@@ -39,6 +39,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+aura-testkit = { package = "aura-testkit", path = "../aura-testkit" }
 tokio = { workspace = true }
 
 [lints]

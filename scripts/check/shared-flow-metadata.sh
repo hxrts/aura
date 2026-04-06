@@ -15,11 +15,11 @@ scenario_contract_files=(
   crates/aura-app/src/scenario_contract/*.rs
 )
 
-cargo test -p aura-app every_intent_kind_has_a_matching_contract --quiet \
+cargo test -p hxrts-aura-app every_intent_kind_has_a_matching_contract --quiet \
   || fail "shared intent metadata contract is incomplete"
-cargo test -p aura-app every_intent_kind_declares_barrier_metadata --quiet \
+cargo test -p hxrts-aura-app every_intent_kind_declares_barrier_metadata --quiet \
   || fail "shared intent barrier metadata contract is incomplete"
-cargo test -p aura-app declared_post_operation_convergence_contracts_are_explicit --quiet \
+cargo test -p hxrts-aura-app declared_post_operation_convergence_contracts_are_explicit --quiet \
   || fail "shared intent convergence metadata contract is incomplete"
 
 rg -q 'pub struct SharedActionContract' "${scenario_contract_files[@]}" \

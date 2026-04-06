@@ -970,7 +970,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_agent::{AgentConfig, AuraEffectSystem};
     use aura_core::DeviceId;
     use aura_testkit::TestEffectsBuilder;
 
@@ -1001,7 +1000,9 @@ mod tests {
     async fn test_contribution_generation() {
         let config = create_test_config(2, 3);
         let protocol = DkdProtocol::new(config);
-        let effects = AuraEffectSystem::simulation_for_test(&AgentConfig::default()).unwrap();
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
 
         let session_id = DkdSessionId::deterministic("test");
         let device_id = device(4);

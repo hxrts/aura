@@ -103,6 +103,7 @@ android = []
 web = []
 
 [dev-dependencies]
+aura-testkit = { package = "aura-testkit", path = "../aura-testkit" }
 anyhow = { workspace = true }
 async-lock = { workspace = true }
 tracing-subscriber = { workspace = true }

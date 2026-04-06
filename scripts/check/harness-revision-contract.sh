@@ -20,6 +20,6 @@ rg -q 'pub revision: ProjectionRevision' "${ui_contract_files[@]}" \
 rg -q 'pub quiescence: QuiescenceSnapshot' "${ui_contract_files[@]}" \
   || fail "UiSnapshot must carry quiescence metadata"
 
-cargo test -p aura-app projection_revision_detects_stale_snapshots_by_revision --quiet
+cargo test -p hxrts-aura-app projection_revision_detects_stale_snapshots_by_revision --quiet
 
 echo "harness revision contract: clean"

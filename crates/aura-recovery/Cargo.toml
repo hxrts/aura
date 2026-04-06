@@ -37,6 +37,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+aura-testkit = { package = "aura-testkit", path = "../aura-testkit" }
 assert_matches = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true }

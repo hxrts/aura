@@ -69,14 +69,14 @@ rg -q 'move semantics solve session and endpoint ownership transfer' "$agent_arc
 #   1. ownership_lints harness-readiness-ownership — readiness-specific refresh API enforcement
 #   2. ownership_lints harness-move-ownership-boundary — frontend handle/receipt fabrication boundaries
 # Note: semantic lifecycle authorship is now covered by aura-app compile-fail ownership boundaries.
-cargo run -q -p aura-macros --bin ownership_lints -- \
+cargo run -q -p hxrts-aura-macros --bin ownership_lints -- \
   harness-readiness-ownership \
   crates/aura-agent/src/reactive/app_signal_views.rs \
   crates/aura-agent/src/reactive/app_signal_projection.rs \
   crates/aura-terminal/src \
   crates/aura-web/src \
   crates/aura-harness/src
-cargo run -q -p aura-macros --bin ownership_lints -- \
+cargo run -q -p hxrts-aura-macros --bin ownership_lints -- \
   harness-move-ownership-boundary \
   crates/aura-app \
   crates/aura-terminal \
