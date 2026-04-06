@@ -1,17 +1,17 @@
 [package]
 name = "session-choreography"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 publish = false
 include = ["src/**", "Cargo.toml"]
 
 [dependencies]
-aura-core = { package = "hxrts-aura-core", path = "../../crates/aura-core", version = "=0.1.0" }
-aura-macros = { package = "hxrts-aura-macros", path = "../../crates/aura-macros", version = "=0.1.0" }
-aura-mpst = { package = "hxrts-aura-mpst", path = "../../crates/aura-mpst", version = "=0.1.0" }
-aura-agent = { package = "hxrts-aura-agent", path = "../../crates/aura-agent", version = "=0.1.0" }
-aura-protocol = { package = "hxrts-aura-protocol", path = "../../crates/aura-protocol", version = "=0.1.0" }
-aura-effects = { package = "hxrts-aura-effects", path = "../../crates/aura-effects", version = "=0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../../crates/aura-core", version = "=0.2.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../../crates/aura-macros", version = "=0.2.0" }
+aura-mpst = { package = "hxrts-aura-mpst", path = "../../crates/aura-mpst", version = "=0.2.0" }
+aura-agent = { package = "hxrts-aura-agent", path = "../../crates/aura-agent", version = "=0.2.0" }
+aura-protocol = { package = "hxrts-aura-protocol", path = "../../crates/aura-protocol", version = "=0.2.0" }
+aura-effects = { package = "hxrts-aura-effects", path = "../../crates/aura-effects", version = "=0.2.0" }
 telltale = { workspace = true }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

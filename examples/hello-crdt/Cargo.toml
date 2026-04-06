@@ -1,8 +1,8 @@
 [package]
 name = "hello-crdt"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 publish = false
 
 [dependencies]
-aura-core = { package = "hxrts-aura-core", path = "../../crates/aura-core", version = "=0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../../crates/aura-core", version = "=0.2.0" }

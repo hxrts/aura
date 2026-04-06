@@ -103,7 +103,10 @@ create_release_commit() {
     return
   fi
 
-  git add Cargo.toml Cargo.lock crates/*/Cargo.toml examples/*/Cargo.toml
+  git add Cargo.toml crates/*/Cargo.toml examples/*/Cargo.toml
+  if [[ -f Cargo.lock ]]; then
+    git add -f Cargo.lock
+  fi
   git commit -m "Release v${VERSION}"
   echo "== created release commit for v${VERSION} =="
 }

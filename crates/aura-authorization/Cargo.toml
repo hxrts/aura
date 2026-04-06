@@ -12,8 +12,8 @@ homepage.workspace = true
 [lib]
 name = "aura_authorization"
 [dependencies]
-aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
-aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.2.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.2.0" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -13,15 +13,15 @@ include = ["src/**", "Cargo.toml"]
 [lib]
 name = "aura_invitation"
 [dependencies]
-aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
-aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.1.0" }
-aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.1.0" }
-aura-authorization = { package = "hxrts-aura-authorization", path = "../aura-authorization", version = "=0.1.0" }
-aura-authentication = { package = "hxrts-aura-authentication", path = "../aura-authentication", version = "=0.1.0" }
-aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.1.0" }
-aura-composition = { package = "hxrts-aura-composition", path = "../aura-composition", version = "=0.1.0" }
-aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.1.0" }
-aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.2.0" }
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0" }
+aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.2.0" }
+aura-authorization = { package = "hxrts-aura-authorization", path = "../aura-authorization", version = "=0.2.0" }
+aura-authentication = { package = "hxrts-aura-authentication", path = "../aura-authentication", version = "=0.2.0" }
+aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.2.0" }
+aura-composition = { package = "hxrts-aura-composition", path = "../aura-composition", version = "=0.2.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.2.0" }
+aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.2.0" }
 
 async-trait = { workspace = true }
 bincode = { workspace = true }

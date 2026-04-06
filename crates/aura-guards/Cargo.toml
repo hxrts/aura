@@ -15,10 +15,10 @@ name = "aura_guards"
 workspace = true
 
 [dependencies]
-aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
-aura-authorization = { package = "hxrts-aura-authorization", path = "../aura-authorization", version = "=0.1.0" }
-aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.1.0" }
-aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.2.0" }
+aura-authorization = { package = "hxrts-aura-authorization", path = "../aura-authorization", version = "=0.2.0" }
+aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.2.0" }
+aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.2.0" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

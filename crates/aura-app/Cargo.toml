@@ -1,6 +1,6 @@
 [package]
 name = "hxrts-aura-app"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Portable headless application core for Aura"
 license = "Apache-2.0"
@@ -52,17 +52,17 @@ path = "src/bin/app_host.rs"
 required-features = ["host"]
 
 [dependencies]
-aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
-aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.1.0" }
-aura-composition = { package = "hxrts-aura-composition", path = "../aura-composition", version = "=0.1.0" }
-aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.1.0" }
-aura-relational = { package = "hxrts-aura-relational", path = "../aura-relational", version = "=0.1.0" }
-aura-chat = { package = "hxrts-aura-chat", path = "../aura-chat", version = "=0.1.0" }
-aura-social = { package = "hxrts-aura-social", path = "../aura-social", version = "=0.1.0" }
-aura-maintenance = { package = "hxrts-aura-maintenance", path = "../aura-maintenance", version = "=0.1.0" }
-aura-protocol = { package = "hxrts-aura-protocol", path = "../aura-protocol", version = "=0.1.0" }
-aura-recovery = { package = "hxrts-aura-recovery", path = "../aura-recovery", version = "=0.1.0" }
-aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.2.0" }
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0" }
+aura-composition = { package = "hxrts-aura-composition", path = "../aura-composition", version = "=0.2.0" }
+aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.2.0" }
+aura-relational = { package = "hxrts-aura-relational", path = "../aura-relational", version = "=0.2.0" }
+aura-chat = { package = "hxrts-aura-chat", path = "../aura-chat", version = "=0.2.0" }
+aura-social = { package = "hxrts-aura-social", path = "../aura-social", version = "=0.2.0" }
+aura-maintenance = { package = "hxrts-aura-maintenance", path = "../aura-maintenance", version = "=0.2.0" }
+aura-protocol = { package = "hxrts-aura-protocol", path = "../aura-protocol", version = "=0.2.0" }
+aura-recovery = { package = "hxrts-aura-recovery", path = "../aura-recovery", version = "=0.2.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.2.0" }
 
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"

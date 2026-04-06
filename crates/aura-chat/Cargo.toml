@@ -14,11 +14,11 @@ categories = ["cryptography"]
 [lib]
 name = "aura_chat"
 [dependencies]
-aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.1.0" }
-aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.1.0" }
-aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.1.0" }
-aura-composition = { package = "hxrts-aura-composition", path = "../aura-composition", version = "=0.1.0" }
-aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.1.0" }
+aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.2.0" }
+aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.2.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.2.0" }
+aura-composition = { package = "hxrts-aura-composition", path = "../aura-composition", version = "=0.2.0" }
+aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.2.0" }
 
 serde = { workspace = true }
 thiserror = { workspace = true }
