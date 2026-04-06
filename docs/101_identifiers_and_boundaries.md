@@ -6,10 +6,8 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 
 | Identifier | Type | Purpose |
 |------------|------|---------|
-| `AuthorityId` | `Uuid` | Journal namespace for an authority. Does not leak operator or membership metadata. All public keys, commitment trees, and attested operations reduce under this namespace. |
+| `AuthorityId` | `Uuid` | Journal namespace for an authority. Does not leak operator or membership metadata. All public keys, commitment trees, and attested operations reduce under this namespace. Guardians are identified by their own `AuthorityId`. |
 | `DeviceId` | `Uuid` | Device within a threshold account. Each device holds shares of the root key. Visible only inside the authority namespace. |
-| `LocalDeviceId` | `u32` | Compact internal device identifier for efficiency. Never appears in cross-authority communication. |
-| `GuardianId` | `Uuid` | Social recovery guardian. Does not reveal the guardian's own authority structure. |
 | `AccountId` | `Uuid` | Legacy identifier being replaced by `AuthorityId`. Exists for backward compatibility. |
 
 ## 2. Context Identifiers
@@ -25,6 +23,7 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 | Identifier | Type | Purpose |
 |------------|------|---------|
 | `ChannelId` | `Hash32` | AMP messaging substream scoped under a relational context. Opaque. Does not reveal membership or topology. |
+| `MessageId` | `Uuid` | Individual message within a channel. Scoped under a `ChannelId`. |
 | `RelayId` | `[u8; 32]` | Pairwise communication context derived from X25519 keys. Foundation for RID message contexts. |
 | `GroupId` | `[u8; 32]` | Threshold group communication context derived from group membership. Foundation for GID message contexts. |
 | `MessageContext` | `enum { Relay, Group, DkdContext }` | Unifies the three privacy context types. Enforces mutual exclusivity. Cross-partition routing requires explicit bridge operations. |
@@ -36,14 +35,16 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 |------------|------|---------|
 | `ContentId` | `{ hash: Hash32, size: Option<u64> }` | Hash of canonical content bytes (files, documents, encrypted payloads, CRDT state). Any party can verify integrity by hashing and comparing. |
 | `ChunkId` | `{ hash: Hash32, sequence: Option<u32> }` | Storage-layer chunk identifier. Multiple chunks may comprise a single `ContentId`. Enables content-addressable storage with deduplication. |
-| `Hash32` | `[u8; 32]` | Raw 32-byte Blake3 cryptographic hash. Foundation for all content addressing. Provides collision and preimage resistance. |
+| `Hash32` | `[u8; 32]` | Raw 32-byte BLAKE3 cryptographic hash. Foundation for all content addressing. Provides collision and preimage resistance. |
 | `DataId` | `String` | Stored data chunk identifier with type prefixes (`data:uuid`, `encrypted:uuid`). Enables heterogeneous storage addressing. |
 
 ## 5. Journal Identifiers
 
 | Identifier | Type | Purpose |
 |------------|------|---------|
-| `FactId` | `u64` | Lightweight reference to journal facts. Enables efficient queries without cloning fact content. Internal to journal layer. |
+| `FactId` | `[u8; 32]` | Content-addressed fact identifier derived from fact hash. Enables deduplication and integrity verification. |
+| `FactTypeId` | `String` | Registered fact type discriminator. Each domain crate declares its own type IDs for schema-aware encoding and reduction. |
+| `FactOpId` | `[u8; 32]` | Attested operation identifier within the journal. |
 | `EventId` | `Uuid` | Event identifier within the effect API system. Used in audit logs and debugging. |
 | `OperationId` | `Uuid` | Operation tracking identifier. |
 
@@ -58,17 +59,33 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 
 | Identifier | Type | Purpose |
 |------------|------|---------|
-| `HomeId` | `[u8; 32]` | Home in the urban social topology. Each user resides in exactly one home. See [Social Architecture](115_social_architecture.md). |
-| `NeighborhoodId` | `[u8; 32]` | Neighborhood (collection of homes with 1-hop link relationships). Enables governance and traversal policies. |
+| `HomeId` | `Hash32` | Home in the social topology. Each user resides in exactly one home. See [Social Architecture](115_social_architecture.md). |
+| `NeighborhoodId` | `Hash32` | Neighborhood (collection of homes with 1-hop link relationships). Enables governance and traversal policies. |
 
 ## 8. Tree Identifiers
 
 | Identifier | Type | Purpose |
 |------------|------|---------|
-| `LeafId` | `u32` | Leaf node in the commitment tree. Stable across tree modifications and epoch rotations. See [Authority and Identity](102_authority_and_identity.md). |
+| `LeafId` | `u32` | Authority-internal leaf node in the commitment tree. Stable across tree modifications and epoch rotations. Used for internal topology, proofs, and key-rotation bookkeeping. See [Authority and Identity](102_authority_and_identity.md). |
 | `ProposalId` | `Hash32` | Snapshot proposal identifier. Enables proposal deduplication and verification during tree operations. |
 
-## 9. Accountability Structures
+## 9. Ceremony and Recovery Identifiers
+
+| Identifier | Type | Purpose |
+|------------|------|---------|
+| `CeremonyId` | `String` | Guardian ceremony identifier for key-rotation and enrollment flows. |
+| `RecoveryId` | `String` | Recovery ceremony identifier for guardian-based recovery flows. |
+| `InvitationId` | `String` | Invitation identifier for relationship and enrollment invites. |
+
+## 10. Membership Identifiers
+
+| Identifier | Type | Purpose |
+|------------|------|---------|
+| `MemberId` | `String` | Member identifier within groups or organizational structures. |
+| `IndividualId` | `String` | Individual person or entity within the identity system. Can be derived from a `DeviceId` or DKD context. |
+| `RelationshipId` | `[u8; 32]` | Identifies a specific relationship between two authorities. |
+
+## 11. Accountability Structures
 
 ### Receipt
 
@@ -78,7 +95,7 @@ Fields: `ctx: ContextId`, `src: AuthorityId`, `dst: AuthorityId`, `epoch: Epoch`
 
 See [Transport and Information Flow](111_transport_and_information_flow.md) for receipt propagation.
 
-## 10. Derived Keys
+## 12. Derived Keys
 
 Aura derives per-context cryptographic keys from reduced account state and `ContextId`. Derived keys never surface on the wire. They only exist inside effect handlers to encrypt payloads, generate commitment tree secrets, or run DKD.
 
