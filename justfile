@@ -1137,7 +1137,7 @@ ci-dry-run profile="push":
         # CI / Deep Harness (push)
         add_step "Harness Build"             "nix develop --command just ci-harness-build"
         add_step "Harness Contract"          "nix develop --command just ci-harness-contract"
-        add_step "Harness UI Evented"        "nix develop --command just ci-harness-ui-state-evented"
+        add_step "Harness UI Evented"        "nix develop .#ci --command just ci-harness-ui-state-evented"
         add_step "Harness Matrix Inventory"  "nix develop --command just ci-harness-matrix-inventory"
         add_step "Harness Shared Intent"     "nix develop --command just ci-harness-shared-intent-contract"
 
