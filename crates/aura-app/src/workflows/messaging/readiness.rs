@@ -128,9 +128,11 @@ impl ChannelReadinessSeed {
         {
             self.fact_key.name = Some(channel.name.clone());
         }
-        self.member_count = self
-            .member_count
-            .max(channel.member_count.max(channel.member_ids.len() as u32 + 1));
+        self.member_count = self.member_count.max(
+            channel
+                .member_count
+                .max(channel.member_ids.len() as u32 + 1),
+        );
         self.authoritative_context = self.authoritative_context.or(channel.context_id);
     }
 }
@@ -406,7 +408,9 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
             false
         }
         Err(error) => {
-            return Err(super::super::error::runtime_call("create note-to-self channel", error).into());
+            return Err(
+                super::super::error::runtime_call("create note-to-self channel", error).into(),
+            );
         }
     };
 
@@ -426,7 +430,9 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
     .await
     {
         if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-            return Err(super::super::error::runtime_call("join note-to-self channel", error).into());
+            return Err(
+                super::super::error::runtime_call("join note-to-self channel", error).into(),
+            );
         }
     }
 
@@ -669,8 +675,18 @@ pub(crate) async fn try_join_via_pending_channel_invitation(
         || runtime.try_list_pending_invitations(),
     )
     .await
-    .map_err(|e| AuraError::from(super::super::error::runtime_call("list pending invitations", e)))?
-    .map_err(|e| AuraError::from(super::super::error::runtime_call("list pending invitations", e)))?;
+    .map_err(|e| {
+        AuraError::from(super::super::error::runtime_call(
+            "list pending invitations",
+            e,
+        ))
+    })?
+    .map_err(|e| {
+        AuraError::from(super::super::error::runtime_call(
+            "list pending invitations",
+            e,
+        ))
+    })?;
     let Some(invitation) =
         select_pending_channel_invitation(&pending, runtime.authority_id(), requested_channel_id)
     else {
@@ -689,12 +705,15 @@ pub(crate) async fn try_join_via_pending_channel_invitation(
         || runtime.accept_invitation(invitation.invitation_id.as_str()),
     )
     .await
-    .map_err(|error| super::super::error::runtime_call("accept pending channel invitation", error))?
-    {
+    .map_err(|error| {
+        super::super::error::runtime_call("accept pending channel invitation", error)
+    })? {
         if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
-            return Err(
-                super::super::error::runtime_call("accept pending channel invitation", error).into(),
-            );
+            return Err(super::super::error::runtime_call(
+                "accept pending channel invitation",
+                error,
+            )
+            .into());
         }
     }
 

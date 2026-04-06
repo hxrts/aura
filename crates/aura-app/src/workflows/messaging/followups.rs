@@ -42,9 +42,11 @@ pub(crate) async fn warm_channel_connectivity(
         {
             Ok(())
         } else {
-            Err(AuraError::from(super::super::error::WorkflowError::Precondition(
-                "channel peer connectivity not yet warmed",
-            )))
+            Err(AuraError::from(
+                super::super::error::WorkflowError::Precondition(
+                    "channel peer connectivity not yet warmed",
+                ),
+            ))
         }
     })
     .await;
@@ -216,6 +218,5 @@ pub(in crate::workflows) async fn post_terminal_join_followups(
     });
 
     let _ = warm_channel_connectivity(app_core, &runtime, authoritative_channel).await;
-    stabilize_authoritative_join_readiness(app_core, authoritative_channel, channel_name_hint)
-        .await
+    stabilize_authoritative_join_readiness(app_core, authoritative_channel, channel_name_hint).await
 }

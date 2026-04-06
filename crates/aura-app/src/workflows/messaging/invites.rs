@@ -237,17 +237,7 @@ pub async fn invite_authority_to_channel(
         SemanticOperationKind::InviteActorToChannel,
     );
     super::invite_authority_to_channel_with_context(
-        app_core,
-        receiver,
-        channel_id,
-        None,
-        None,
-        &owner,
-        None,
-        None,
-        None,
-        message,
-        ttl_ms,
+        app_core, receiver, channel_id, None, None, &owner, None, None, None, message, ttl_ms,
     )
     .await
 }

@@ -73,9 +73,7 @@ pub(crate) async fn context_id_for_channel(
     routing::context_id_for_channel(app_core, channel_id, local_authority).await
 }
 
-pub(crate) async fn next_observed_projection_timestamp_ms(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> u64 {
+pub(crate) async fn next_observed_projection_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
     // OWNERSHIP: observed-display-update - this helper inspects observed chat
     // projections only to synthesize a monotone local timestamp for projection
     // repair; it does not authorize semantic decisions.
@@ -384,18 +382,20 @@ pub(crate) async fn require_authoritative_channel_ref(
             return Ok(authoritative_channel_ref(channel_id, context_id));
         }
         converge_runtime(runtime).await;
-        Err(AuraError::from(super::super::error::WorkflowError::Precondition(
-            "authoritative context required for channel",
-        )))
+        Err(AuraError::from(
+            super::super::error::WorkflowError::Precondition(
+                "authoritative context required for channel",
+            ),
+        ))
     })
     .await
     .map_err(|error| match error {
         RetryRunError::Timeout(timeout_error) => timeout_error.into(),
-        RetryRunError::AttemptsExhausted { .. } => AuraError::from(
-            super::super::error::WorkflowError::Precondition(
+        RetryRunError::AttemptsExhausted { .. } => {
+            AuraError::from(super::super::error::WorkflowError::Precondition(
                 "authoritative context required for channel",
-            ),
-        ),
+            ))
+        }
     })
 }
 
@@ -412,10 +412,16 @@ pub(in crate::workflows) async fn runtime_channel_state_exists(
     )
     .await
     .map_err(|error| {
-        AuraError::from(super::super::error::runtime_call("inspect channel state", error))
+        AuraError::from(super::super::error::runtime_call(
+            "inspect channel state",
+            error,
+        ))
     })?
     .map_err(|error| {
-        AuraError::from(super::super::error::runtime_call("inspect channel state", error))
+        AuraError::from(super::super::error::runtime_call(
+            "inspect channel state",
+            error,
+        ))
     })
 }
 
@@ -434,18 +440,20 @@ pub(in crate::workflows) async fn wait_for_runtime_channel_state(
             return Ok(());
         }
         converge_runtime(runtime).await;
-        Err(AuraError::from(super::super::error::WorkflowError::Precondition(
-            "canonical AMP channel state required",
-        )))
+        Err(AuraError::from(
+            super::super::error::WorkflowError::Precondition(
+                "canonical AMP channel state required",
+            ),
+        ))
     })
     .await
     .map_err(|error| match error {
         RetryRunError::Timeout(timeout_error) => timeout_error.into(),
-        RetryRunError::AttemptsExhausted { .. } => AuraError::from(
-            super::super::error::WorkflowError::Precondition(
+        RetryRunError::AttemptsExhausted { .. } => {
+            AuraError::from(super::super::error::WorkflowError::Precondition(
                 "canonical AMP channel state required",
-            ),
-        ),
+            ))
+        }
     })
 }
 
@@ -473,20 +481,20 @@ async fn authoritative_channel_participants(
         || runtime.amp_list_channel_participants(context_id, channel_id),
     )
     .await
-    .map_err(|error| {
-        super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
+    .map_err(
+        |error| super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
             channel: channel_id.to_string(),
             context: context_id.to_string(),
             source: AuraError::agent(error.to_string()),
-        }
-    })?
-    .map_err(|error| {
-        super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
+        },
+    )?
+    .map_err(
+        |error| super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
             channel: channel_id.to_string(),
             context: context_id.to_string(),
             source: AuraError::agent(error.to_string()),
-        }
-    })?;
+        },
+    )?;
 
     for _ in 0..3 {
         let mut participants = last.clone();

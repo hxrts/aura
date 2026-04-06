@@ -387,7 +387,9 @@ pub async fn create_channel_with_authoritative_binding(
     match &result {
         Ok(created) => {
             owner
-                .publish_success_with(prove_channel_membership_ready(app_core, created.channel_id).await?)
+                .publish_success_with(
+                    prove_channel_membership_ready(app_core, created.channel_id).await?,
+                )
                 .await?;
         }
         Err(error) => {
@@ -427,10 +429,17 @@ async fn join_channel_with_name_hint(
     if let Some(member_count) =
         authoritative_join_member_count_if_joined(&runtime, channel, runtime.authority_id()).await?
     {
-        apply_authoritative_membership_projection(app_core, channel_id, context_id, true, name_hint)
-            .await?;
-        publish_authoritative_channel_membership_ready(app_core, channel_id, name_hint, member_count)
-            .await?;
+        apply_authoritative_membership_projection(
+            app_core, channel_id, context_id, true, name_hint,
+        )
+        .await?;
+        publish_authoritative_channel_membership_ready(
+            app_core,
+            channel_id,
+            name_hint,
+            member_count,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -460,7 +469,9 @@ async fn join_channel_with_name_hint(
                 .await
                 .unwrap_or(false);
             if intent_error_is_not_found(&error) && !canonical_state_exists {
-                return Err(JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error());
+                return Err(
+                    JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
+                );
             }
             if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists
                 && !canonical_state_exists
@@ -579,7 +590,8 @@ pub async fn join_channel_by_name_with_binding_terminal_status(
             .publish_phase(SemanticOperationPhase::WorkflowDispatched)
             .await?;
         if messaging_backend(app_core).await == MessagingBackend::LocalOnly {
-            let channel_id = join_channel_by_name_owned(app_core, channel_name, &owner, None).await?;
+            let channel_id =
+                join_channel_by_name_owned(app_core, channel_name, &owner, None).await?;
             return join_channel_binding_witness(app_core, &channel_id).await;
         }
 
@@ -657,7 +669,9 @@ async fn join_channel_by_name_owned(
                 app_core,
                 channel.id,
                 Some(channel.name.as_str()),
-                channel.member_count.max(channel.member_ids.len() as u32 + 1),
+                channel
+                    .member_count
+                    .max(channel.member_ids.len() as u32 + 1),
             )
             .await?;
             channel.id
@@ -678,24 +692,27 @@ async fn join_channel_by_name_owned(
         return Ok(channel_id.to_string());
     }
 
-    let binding = match resolve_authoritative_channel_binding_from_input(app_core, channel_name).await {
-        Ok(binding) => binding,
-        Err(error) => {
-            owner
-                .publish_failure(
-                    SemanticOperationError::new(
-                        SemanticFailureDomain::Command,
-                        SemanticFailureCode::InternalError,
+    let binding =
+        match resolve_authoritative_channel_binding_from_input(app_core, channel_name).await {
+            Ok(binding) => binding,
+            Err(error) => {
+                owner
+                    .publish_failure(
+                        SemanticOperationError::new(
+                            SemanticFailureDomain::Command,
+                            SemanticFailureCode::InternalError,
+                        )
+                        .with_detail(error.to_string()),
                     )
-                    .with_detail(error.to_string()),
-                )
-                .await?;
-            return Err(error);
-        }
-    };
+                    .await?;
+                return Err(error);
+            }
+        };
     let channel_id = binding.channel_id;
     let authoritative_channel = authoritative_channel_ref(binding.channel_id, binding.context_id);
-    let existing_membership_proof = prove_channel_membership_ready(app_core, channel_id).await.ok();
+    let existing_membership_proof = prove_channel_membership_ready(app_core, channel_id)
+        .await
+        .ok();
     if let Some(proof) = existing_membership_proof {
         owner.publish_success_with(proof).await?;
         let mut best_effort = workflow_best_effort();
@@ -802,7 +819,8 @@ pub async fn leave_channel(
     .map_err(|e| super::error::runtime_call("leave channel", e))?
     .map_err(|e| super::error::runtime_call("leave channel", e))?;
 
-    apply_authoritative_membership_projection(app_core, channel_id, context_id, false, None).await?;
+    apply_authoritative_membership_projection(app_core, channel_id, context_id, false, None)
+        .await?;
     clear_authoritative_channel_readiness_facts(app_core, channel_id).await?;
 
     Ok(())
@@ -824,7 +842,8 @@ pub async fn leave_channel_by_name(
 
     let mut candidate_ids = matching_chat_channel_ids(app_core, channel_name).await?;
     if candidate_ids.is_empty() {
-        candidate_ids.push(resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?);
+        candidate_ids
+            .push(resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?);
     }
 
     for channel_id in &candidate_ids {
@@ -862,8 +881,9 @@ pub async fn close_channel(
     .map_err(|e| super::error::runtime_call("close channel", e))?
     .map_err(|e| super::error::runtime_call("close channel", e))?;
 
-    let fact = ChatFact::channel_closed_ms(context_id, channel_id, timestamp_ms, runtime.authority_id())
-        .to_generic();
+    let fact =
+        ChatFact::channel_closed_ms(context_id, channel_id, timestamp_ms, runtime.authority_id())
+            .to_generic();
 
     let facts = vec![fact];
     timeout_runtime_call(

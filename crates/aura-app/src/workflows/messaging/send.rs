@@ -224,12 +224,14 @@ async fn deliver_message_fact_remotely(
             );
         }
         if !failed_fanout.is_empty() {
-            return Err(super::super::error::WorkflowError::DeliveryFanoutUnavailable {
-                peer: channel_id.to_string(),
-                attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                recipients: failed_fanout,
-            }
-            .into());
+            return Err(
+                super::super::error::WorkflowError::DeliveryFanoutUnavailable {
+                    peer: channel_id.to_string(),
+                    attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
+                    recipients: failed_fanout,
+                }
+                .into(),
+            );
         }
     }
 
@@ -1025,7 +1027,9 @@ pub async fn start_direct_chat_with_authority(
         .await;
         if let Err(error) = create_result {
             if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-                return Err(super::super::error::runtime_call("create direct channel", error).into());
+                return Err(
+                    super::super::error::runtime_call("create direct channel", error).into(),
+                );
             }
         }
 
@@ -1061,7 +1065,9 @@ pub async fn start_direct_chat_with_authority(
         )
         .await
         .map_err(|error| super::super::error::runtime_call("add contact to direct channel", error))?
-        .map_err(|error| super::super::error::runtime_call("add contact to direct channel", error))?;
+        .map_err(|error| {
+            super::super::error::runtime_call("add contact to direct channel", error)
+        })?;
 
         let chat_fact = ChatFact::channel_created_ms(
             context_id,
