@@ -1,9 +1,9 @@
 //! Authority-internal tree state
 //!
 //! This module provides the internal TreeState implementation that hides
-//! device structure from external view, using LocalDeviceId internally.
+//! device structure from external view, using LeafId as the internal handle.
 
-use crate::commitment_tree::local_types::{ExternalLeafView, LocalDeviceId, LocalLeafNode};
+use crate::commitment_tree::local_types::{ExternalLeafView, LocalLeafNode};
 use aura_core::{
     tree::{commit_branch, commit_leaf, BranchNode, Epoch, LeafId, NodeIndex, Policy, TreeHash32},
     Hash32,
@@ -30,17 +30,11 @@ pub struct AuthorityTreeState {
     /// Branch nodes.
     pub branches: BTreeMap<NodeIndex, BranchNode>,
 
-    /// Leaf nodes with internal device references.
+    /// Leaf nodes keyed by the stable internal leaf handle.
     leaves: BTreeMap<LeafId, LocalLeafNode>,
 
     /// Leaf commitments.
     leaf_commitments: BTreeMap<LeafId, TreeHash32>,
-
-    /// Device ID mapping (internal only).
-    device_mapping: BTreeMap<LocalDeviceId, LeafId>,
-
-    /// Next local device ID counter.
-    next_device_id: u32,
 
     /// Next leaf ID counter.
     next_leaf_id: u32,
@@ -58,14 +52,14 @@ pub struct AuthorityTreeState {
     #[serde(default)]
     merkle_root: TreeHash32,
 
-    /// Cached FROST key shares per device (cleared on structural changes).
-    frost_key_cache: BTreeMap<LocalDeviceId, Vec<u8>>,
+    /// Cached FROST key shares per leaf (cleared on structural changes).
+    frost_key_cache: BTreeMap<LeafId, Vec<u8>>,
 
-    /// Devices that require a DKG refresh.
-    pending_dkg_devices: BTreeSet<LocalDeviceId>,
+    /// Leaves that require a DKG refresh.
+    pending_dkg_devices: BTreeSet<LeafId>,
 
     /// Scheduled DKG runs keyed by epoch for deterministic replay.
-    scheduled_dkg_epochs: BTreeMap<Epoch, BTreeSet<LocalDeviceId>>,
+    scheduled_dkg_epochs: BTreeMap<Epoch, BTreeSet<LeafId>>,
 
     /// Recorded notifications for devices and relying parties.
     dkg_notifications: Vec<DkgNotification>,
@@ -109,7 +103,7 @@ pub struct AuthorityTreeState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct DkgNotification {
-    device_id: LocalDeviceId,
+    device_id: LeafId,
     epoch: Epoch,
     kind: DkgNotificationKind,
 }
@@ -143,8 +137,6 @@ impl AuthorityTreeState {
             branches: BTreeMap::new(),
             leaves: BTreeMap::new(),
             leaf_commitments: BTreeMap::new(),
-            device_mapping: BTreeMap::new(),
-            next_device_id: 1,
             next_leaf_id: 0,
             threshold: 1,
             active_leaves: BTreeSet::new(),
@@ -168,15 +160,11 @@ impl AuthorityTreeState {
 
     /// Add a device with public key, returns the assigned leaf index.
     pub fn add_device(&mut self, public_key: Vec<u8>) -> LeafId {
-        let local_id = LocalDeviceId::new(self.next_device_id);
-        self.next_device_id = self.next_device_id.saturating_add(1);
-
         let leaf_id = LeafId(self.next_leaf_id);
         self.next_leaf_id = self.next_leaf_id.saturating_add(1);
 
-        let leaf = LocalLeafNode::new(leaf_id, local_id, public_key);
+        let leaf = LocalLeafNode::new(leaf_id, public_key);
         self.leaves.insert(leaf_id, leaf);
-        self.device_mapping.insert(local_id, leaf_id);
         self.active_leaves.insert(leaf_id);
 
         self.refresh_after_structural_change();
@@ -243,18 +231,8 @@ impl AuthorityTreeState {
         self.active_leaves.remove(&leaf_id);
         self.leaf_commitments.remove(&leaf_id);
         self.leaf_parent.remove(&leaf_id);
-
-        let device_to_remove = self
-            .device_mapping
-            .iter()
-            .find(|(_, mapped_leaf)| **mapped_leaf == leaf_id)
-            .map(|(device, _)| *device);
-
-        if let Some(device_id) = device_to_remove {
-            self.device_mapping.remove(&device_id);
-            self.frost_key_cache.remove(&device_id);
-            self.pending_dkg_devices.remove(&device_id);
-        }
+        self.frost_key_cache.remove(&leaf_id);
+        self.pending_dkg_devices.remove(&leaf_id);
 
         self.refresh_after_structural_change();
         debug_assert!(self.assert_topology_invariants().is_ok());
@@ -936,9 +914,9 @@ impl AuthorityTreeState {
     }
 
     fn mark_devices_for_key_regeneration(&mut self) {
-        let device_ids: Vec<_> = self.device_mapping.keys().copied().collect();
-        for device_id in device_ids {
-            self.queue_dkg_for_device(device_id);
+        let leaf_ids: Vec<_> = self.active_leaves.iter().copied().collect();
+        for leaf_id in leaf_ids {
+            self.queue_dkg_for_device(leaf_id);
         }
     }
 
@@ -959,7 +937,7 @@ impl AuthorityTreeState {
         }
     }
 
-    fn queue_dkg_for_device(&mut self, device_id: LocalDeviceId) {
+    fn queue_dkg_for_device(&mut self, device_id: LeafId) {
         self.pending_dkg_devices.insert(device_id);
         self.scheduled_dkg_epochs
             .entry(self.epoch)

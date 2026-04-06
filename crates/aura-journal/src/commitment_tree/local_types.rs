@@ -1,36 +1,10 @@
-//! Local device types for authority-internal use
+//! Authority-internal leaf types
 //!
-//! These types are used internally within an authority's commitment tree
-//! and are never exposed externally. This maintains the authority abstraction
+//! These types are used internally within an authority's commitment tree and
+//! are never exposed externally. This maintains the authority abstraction
 //! where devices are hidden implementation details.
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
-
-/// Internal device identifier local to an authority
-///
-/// These IDs are only meaningful within a single authority context
-/// and are never exposed in the public API or journal facts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct LocalDeviceId(pub u32);
-
-impl LocalDeviceId {
-    /// Create a new local device ID
-    pub fn new(id: u32) -> Self {
-        Self(id)
-    }
-
-    /// Get the raw ID value
-    pub fn as_u32(&self) -> u32 {
-        self.0
-    }
-}
-
-impl fmt::Display for LocalDeviceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LocalDevice#{}", self.0)
-    }
-}
 
 /// Authority-internal leaf node representation
 ///
@@ -41,9 +15,6 @@ pub struct LocalLeafNode {
     /// Unique identifier for this leaf
     pub leaf_id: aura_core::tree::types::LeafId,
 
-    /// Internal device reference (not exposed externally)
-    pub local_device: LocalDeviceId,
-
     /// Serialized public key material
     pub public_key: Vec<u8>,
 
@@ -53,14 +24,9 @@ pub struct LocalLeafNode {
 
 impl LocalLeafNode {
     /// Create a new local leaf node
-    pub fn new(
-        leaf_id: aura_core::tree::types::LeafId,
-        local_device: LocalDeviceId,
-        public_key: Vec<u8>,
-    ) -> Self {
+    pub fn new(leaf_id: aura_core::tree::types::LeafId, public_key: Vec<u8>) -> Self {
         Self {
             leaf_id,
-            local_device,
             public_key,
             metadata: None,
         }
