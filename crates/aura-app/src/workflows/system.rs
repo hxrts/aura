@@ -5,8 +5,6 @@
 #![allow(missing_docs)]
 
 pub mod hooks;
-#[allow(dead_code)]
-mod legacy;
 pub mod refresh;
 pub mod versioning;
 

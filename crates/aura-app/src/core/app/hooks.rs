@@ -1,6 +1,6 @@
 //! Hook-installation and runtime-detach responsibilities for `AppCore`.
 
-use super::legacy::AppCore;
+use super::state::AppCore;
 use crate::core::IntentError;
 use async_lock::RwLock;
 use std::sync::Arc;
