@@ -20,6 +20,7 @@ pub(crate) async fn warm_channel_connectivity(
                 .await?;
         let mut any_peer_ready = recipients.is_empty();
         for peer in recipients {
+            let peer_id = peer.to_string();
             if timeout_runtime_call(
                 runtime,
                 "warm_channel_connectivity",
@@ -32,6 +33,14 @@ pub(crate) async fn warm_channel_connectivity(
             {
                 any_peer_ready = true;
             }
+            let _ = timeout_runtime_call(
+                runtime,
+                "warm_channel_connectivity",
+                "sync_with_peer",
+                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.sync_with_peer(&peer_id),
+            )
+            .await;
         }
         let _ =
             refresh_authoritative_delivery_readiness_for_channel(app_core, runtime, channel).await;
@@ -201,6 +210,8 @@ pub(in crate::workflows) async fn post_terminal_join_followups(
     let channel_id = authoritative_channel.channel_id();
     let context_id = authoritative_channel.context_id();
 
+    let _ = warm_channel_connectivity(app_core, &runtime, authoritative_channel).await;
+
     let _ = timeout_runtime_call(
         &runtime,
         "post_terminal_join_followups",
@@ -221,7 +232,5 @@ pub(in crate::workflows) async fn post_terminal_join_followups(
             error,
         ))
     });
-
-    let _ = warm_channel_connectivity(app_core, &runtime, authoritative_channel).await;
     stabilize_authoritative_join_readiness(app_core, authoritative_channel, channel_name_hint).await
 }

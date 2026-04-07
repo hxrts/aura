@@ -745,10 +745,15 @@ async fn execute_semantic_intent(
             declared_immediate_unit_response(&contract)
         }
         RoutedSemanticIntent::CreateHome { home_name } => {
+            let handle = begin_declared_exact_ui_operation(
+                controller.clone(),
+                &contract,
+                OperationId::create_home(),
+            )?;
             context_workflows::create_home(controller.app_core(), Some(home_name), None)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            declared_immediate_unit_response(&contract)
+            declared_handle_unit_response(&contract, handle)
         }
         RoutedSemanticIntent::CreateChannel { channel_name } => {
             let timestamp_ms = context_workflows::current_time_ms(controller.app_core())

@@ -420,7 +420,8 @@ impl IntentAction {
             },
             Self::CreateHome { .. } => SharedActionContract {
                 intent: IntentKind::CreateHome,
-                submission: SubmissionContract::Immediate {
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::create_home(),
                     value: SubmissionValueContract::None,
                 },
                 preconditions: vec![
@@ -439,23 +440,20 @@ impl IntentAction {
                             operation_id: OperationId::create_home(),
                             state: OperationState::Succeeded,
                         },
-                        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::HomeCreated),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                     ],
                 },
                 post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Control(ControlId::NeighborhoodNewHomeButton),
                 selection_semantics: SelectionSemantics::List(ListId::Homes),
-                transitions: vec![
-                    AuthoritativeTransitionKind::Operation(OperationId::create_home()),
-                    AuthoritativeTransitionKind::RuntimeEvent(RuntimeEventKind::HomeCreated),
-                ],
+                transitions: vec![AuthoritativeTransitionKind::Operation(
+                    OperationId::create_home(),
+                )],
                 terminal_success: vec![
                     TerminalSuccessKind::OperationState {
                         operation_id: OperationId::create_home(),
                         state: OperationState::Succeeded,
                     },
-                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::HomeCreated),
                     TerminalSuccessKind::Readiness(UiReadiness::Ready),
                 ],
                 terminal_failure_codes: vec![
@@ -791,25 +789,15 @@ impl IntentAction {
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
-                    before_next_intent: vec![BarrierDeclaration::OperationState {
-                        operation_id: OperationId::invitation_accept_channel(),
-                        state: OperationState::Succeeded,
-                    }],
+                    before_next_intent: vec![BarrierDeclaration::Readiness(UiReadiness::Ready)],
                 },
                 post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Screen(ScreenId::Chat),
                 selection_semantics: SelectionSemantics::PreservesCurrent,
-                transitions: vec![AuthoritativeTransitionKind::Operation(
-                    OperationId::invitation_accept_channel(),
-                )],
+                transitions: vec![AuthoritativeTransitionKind::Screen(ScreenId::Chat)],
                 terminal_success: vec![
-                    TerminalSuccessKind::OperationState {
-                        operation_id: OperationId::invitation_accept_channel(),
-                        state: OperationState::Succeeded,
-                    },
-                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::InvitationAccepted),
-                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelJoined),
-                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
+                    TerminalSuccessKind::Screen(ScreenId::Chat),
+                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
                 ],
                 terminal_failure_codes: vec![
                     "pending_channel_invitation_issue_failed".to_string(),

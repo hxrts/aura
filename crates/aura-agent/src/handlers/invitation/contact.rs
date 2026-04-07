@@ -21,6 +21,34 @@ impl<'a> InvitationContactHandler<'a> {
         Self { handler }
     }
 
+    async fn publish_channel_acceptance_chat_projection(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        home_id: ChannelId,
+        home_name: &str,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+    ) -> AgentResult<()> {
+        let now_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
+        let fact = aura_chat::ChatFact::channel_updated_ms(
+            context_id,
+            home_id,
+            Some(home_name.to_string()),
+            Some(format!("Home channel {}", home_id)),
+            Some(2),
+            Some(vec![receiver_id]),
+            now_ms,
+            sender_id,
+        );
+        effects
+            .commit_relational_facts(vec![fact.to_generic()])
+            .await
+            .map_err(|error| AgentError::effects(error.to_string()))?;
+        effects.await_next_view_update().await;
+        Ok(())
+    }
+
     async fn seed_sender_descriptor_for_authority_context(
         &self,
         effects: &AuraEffectSystem,
@@ -384,6 +412,15 @@ impl<'a> InvitationContactHandler<'a> {
                                 .await;
                         let home_name =
                             require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
+                        self.publish_channel_acceptance_chat_projection(
+                            effects.as_ref(),
+                            updated.context_id,
+                            *home_id,
+                            &home_name,
+                            updated.sender_id,
+                            updated.receiver_id,
+                        )
+                        .await?;
                         crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
                             &reactive,
                             *home_id,
@@ -451,25 +488,16 @@ impl<'a> InvitationContactHandler<'a> {
                             .await;
                     }
 
-                    let Some(invitation) = InvitationHandler::load_created_invitation(
+                    let invitation = InvitationHandler::load_created_invitation(
                         effects.as_ref(),
                         self.handler.context.authority.authority_id(),
                         &acceptance.invitation_id,
                     )
-                    .await
-                    else {
-                        tracing::warn!(
-                            invitation_id = %acceptance.invitation_id,
-                            acceptor_id = %acceptance.acceptor_id,
-                            context_id = %acceptance.context_id,
-                            channel_id = %acceptance.channel_id,
-                            "Ignoring channel acceptance for unknown invitation"
-                        );
-                        in_flight_envelope = None;
-                        continue;
-                    };
+                    .await;
 
-                    if !matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                    if invitation.as_ref().is_some_and(|invitation| {
+                        !matches!(invitation.invitation_type, InvitationType::Channel { .. })
+                    }) {
                         in_flight_envelope = None;
                         continue;
                     }
@@ -506,52 +534,112 @@ impl<'a> InvitationContactHandler<'a> {
                         .map_err(|e| AgentError::effects(e.to_string()))?;
                     effects.await_next_view_update().await;
 
-                    let mut updated = invitation.clone();
-                    updated.status = InvitationStatus::Accepted;
-                    updated.receiver_id = acceptance.acceptor_id;
-                    tracing::debug!(
-                        invitation_id = %updated.invitation_id,
-                        sender_id = %updated.sender_id,
-                        receiver_id = %updated.receiver_id,
-                        invitation_context = %updated.context_id,
-                        acceptance_context = %acceptance.context_id,
-                        channel_id = %acceptance.channel_id,
-                        "processed channel invitation acceptance for created invitation"
-                    );
-                    InvitationHandler::persist_created_invitation(
-                        effects.as_ref(),
-                        self.handler.context.authority.authority_id(),
-                        &updated,
-                    )
-                    .await?;
-                    if let InvitationType::Channel {
-                        home_id,
-                        nickname_suggestion,
-                        ..
-                    } = &updated.invitation_type
-                    {
-                        let reactive = effects.reactive_handler();
-                        let now_ms =
-                            InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
-                                .await;
-                        let home_name =
-                            require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
+                    let reactive = effects.reactive_handler();
+                    let now_ms =
+                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
+                            .await;
+                    let local_authority = self.handler.context.authority.authority_id();
+                    let home_name = if let Some(invitation) = invitation.as_ref() {
+                        let mut updated = invitation.clone();
+                        updated.status = InvitationStatus::Accepted;
+                        updated.receiver_id = acceptance.acceptor_id;
+                        tracing::debug!(
+                            invitation_id = %updated.invitation_id,
+                            sender_id = %updated.sender_id,
+                            receiver_id = %updated.receiver_id,
+                            invitation_context = %updated.context_id,
+                            acceptance_context = %acceptance.context_id,
+                            channel_id = %acceptance.channel_id,
+                            "processed channel invitation acceptance for created invitation"
+                        );
+                        InvitationHandler::persist_created_invitation(
+                            effects.as_ref(),
+                            local_authority,
+                            &updated,
+                        )
+                        .await?;
+                        self.handler.invitation_cache.cache_invitation(updated.clone()).await;
+                        match &updated.invitation_type {
+                            InvitationType::Channel {
+                                home_id,
+                                nickname_suggestion,
+                                ..
+                            } => {
+                                let home_name = require_channel_invitation_name(
+                                    *home_id,
+                                    nickname_suggestion.clone(),
+                                )?;
+                                self.publish_channel_acceptance_chat_projection(
+                                    effects.as_ref(),
+                                    updated.context_id,
+                                    *home_id,
+                                    &home_name,
+                                    updated.sender_id,
+                                    updated.receiver_id,
+                                )
+                                .await?;
+                                crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                                    &reactive,
+                                    *home_id,
+                                    &home_name,
+                                    updated.sender_id,
+                                    updated.receiver_id,
+                                    updated.context_id,
+                                    now_ms,
+                                )
+                                .await
+                                .map_err(AgentError::runtime)?;
+                                home_name
+                            }
+                            _ => unreachable!("non-channel invitation filtered above"),
+                        }
+                    } else {
+                        let Some(home_name) = acceptance
+                            .channel_name
+                            .as_ref()
+                            .map(|value| value.trim().to_string())
+                            .filter(|value| !value.is_empty())
+                        else {
+                            tracing::warn!(
+                                invitation_id = %acceptance.invitation_id,
+                                acceptor_id = %acceptance.acceptor_id,
+                                context_id = %acceptance.context_id,
+                                channel_id = %acceptance.channel_id,
+                                "Ignoring channel acceptance without created invitation or canonical channel name"
+                            );
+                            in_flight_envelope = None;
+                            continue;
+                        };
+                        tracing::warn!(
+                            invitation_id = %acceptance.invitation_id,
+                            acceptor_id = %acceptance.acceptor_id,
+                            context_id = %acceptance.context_id,
+                            channel_id = %acceptance.channel_id,
+                            "Materializing channel acceptance without created invitation record"
+                        );
+                        self.publish_channel_acceptance_chat_projection(
+                            effects.as_ref(),
+                            acceptance.context_id,
+                            acceptance.channel_id,
+                            &home_name,
+                            local_authority,
+                            acceptance.acceptor_id,
+                        )
+                        .await?;
                         crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
                             &reactive,
-                            *home_id,
+                            acceptance.channel_id,
                             &home_name,
-                            updated.sender_id,
-                            updated.receiver_id,
-                            updated.context_id,
+                            local_authority,
+                            acceptance.acceptor_id,
+                            acceptance.context_id,
                             now_ms,
                         )
                         .await
                         .map_err(AgentError::runtime)?;
-                    }
-                    self.handler
-                        .invitation_cache
-                        .cache_invitation(updated)
-                        .await;
+                        home_name
+                    };
+                    let _ = home_name;
 
                     processed = processed.saturating_add(1);
                     in_flight_envelope = None;

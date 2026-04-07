@@ -10,6 +10,33 @@ fn invitation_internal_error(prefix: &'static str, error: impl std::fmt::Display
     AgentError::internal(detail)
 }
 
+async fn publish_channel_acceptance_chat_projection(
+    effects: &AuraEffectSystem,
+    context_id: ContextId,
+    home_id: ChannelId,
+    home_name: &str,
+    sender_id: AuthorityId,
+    receiver_id: AuthorityId,
+) -> AgentResult<()> {
+    let now_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
+    let fact = aura_chat::ChatFact::channel_updated_ms(
+        context_id,
+        home_id,
+        Some(home_name.to_string()),
+        Some(format!("Home channel {}", home_id)),
+        Some(2),
+        Some(vec![receiver_id]),
+        now_ms,
+        sender_id,
+    );
+    effects
+        .commit_relational_facts(vec![fact.to_generic()])
+        .await
+        .map_err(|error| AgentError::effects(error.to_string()))?;
+    effects.await_next_view_update().await;
+    Ok(())
+}
+
 impl InvitationHandler {
     pub(super) async fn load_invitation_for_choreography(
         &self,
@@ -194,6 +221,15 @@ impl InvitationHandler {
                                 *home_id,
                                 nickname_suggestion.clone(),
                             )?;
+                            publish_channel_acceptance_chat_projection(
+                                effects.as_ref(),
+                                invitation.context_id,
+                                *home_id,
+                                &home_name,
+                                invitation.sender_id,
+                                invitation.receiver_id,
+                            )
+                            .await?;
                             app_signal_views::materialize_home_signal_for_channel_acceptance(
                                 &reactive,
                                 *home_id,

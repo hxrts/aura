@@ -25,7 +25,7 @@ pub async fn accept_invitation(
     child_ops = "",
     category = "move_owned"
 )]
-async fn accept_invitation_id_owned(
+pub(in crate::workflows) async fn accept_invitation_id_owned(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &InvitationId,
     owner: &SemanticWorkflowOwner,
@@ -91,28 +91,27 @@ async fn accept_invitation_id_owned(
         }
     }
 
-    let contact_peer = (owner.kind() == SemanticOperationKind::AcceptContactInvitation)
-        .then(|| {
-            accepted_invitation
-                .as_ref()
-                .map(|invitation| invitation.from_id)
-                .or_else(|| {
-                    pending_runtime_invitation.as_ref().and_then(|invitation| {
-                        if matches!(
-                            invitation.invitation_type,
-                            InvitationBridgeType::Contact { .. }
-                        ) {
-                            Some(invitation.sender_id)
-                        } else {
-                            None
-                        }
-                    })
-                })
+    let accept_peer = accepted_invitation
+        .as_ref()
+        .and_then(|invitation| match invitation.invitation_type {
+            crate::views::invitations::InvitationType::Home
+            | crate::views::invitations::InvitationType::Chat => Some(invitation.from_id),
+            _ => None,
         })
-        .flatten();
+        .or_else(|| {
+            pending_runtime_invitation.as_ref().and_then(|invitation| {
+                if matches!(
+                    invitation.invitation_type,
+                    InvitationBridgeType::Contact { .. } | InvitationBridgeType::Channel { .. }
+                ) {
+                    Some(invitation.sender_id)
+                } else {
+                    None
+                }
+            })
+        });
     trigger_runtime_discovery_with_timeout(&runtime).await;
-    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime, contact_peer).await
-    {
+    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime, accept_peer).await {
         return fail_invitation_accept(owner, error).await;
     }
 
@@ -444,13 +443,13 @@ pub(in crate::workflows) async fn accept_imported_invitation_inner(
     if contact_probe {
         emit_contact_accept_probe("post_accept_convergence");
     }
-    let contact_peer = matches!(
+    let accept_peer = matches!(
         invitation.invitation_type,
         crate::runtime_bridge::InvitationBridgeType::Contact { .. }
+            | crate::runtime_bridge::InvitationBridgeType::Channel { .. }
     )
     .then_some(invitation.sender_id);
-    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime, contact_peer).await
-    {
+    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime, accept_peer).await {
         return fail_invitation_accept(owner, error).await;
     }
 

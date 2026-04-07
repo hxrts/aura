@@ -146,6 +146,7 @@ struct ChannelInvitationAcceptance {
     acceptor_id: AuthorityId,
     context_id: ContextId,
     channel_id: ChannelId,
+    channel_name: Option<String>,
 }
 
 /// Result of an invitation action
@@ -1083,10 +1084,14 @@ impl InvitationHandler {
             .await;
 
         if let Some(invitation) = choreography_invitation.as_ref() {
-            if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+            if matches!(
+                invitation.invitation_type,
+                InvitationType::Contact { .. } | InvitationType::Channel { .. }
+            ) {
                 tracing::debug!(
                     invitation_id = %invitation_id,
-                    "Returning immediately after local contact invitation acceptance"
+                    invitation_type = ?invitation.invitation_type,
+                    "Returning immediately after local invitation acceptance; post-accept notification is best effort"
                 );
                 return Ok(InvitationResult::new(
                     invitation_id.clone(),
@@ -4023,6 +4028,7 @@ mod tests {
             acceptor_id: receiver_id,
             context_id,
             channel_id,
+            channel_name: Some("shared-parity-lab".to_string()),
         };
         let payload = serde_json::to_vec(&acceptance).unwrap();
         let mut metadata = HashMap::new();
@@ -4223,6 +4229,35 @@ mod tests {
         assert!(
             home.member(&receiver_id).is_some(),
             "sender home state should include receiver after transported acceptance"
+        );
+
+        let committed = sender_effects
+            .load_committed_facts(sender_id)
+            .await
+            .unwrap();
+        let updated_channel_projection = committed.iter().any(|fact| {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
+            else {
+                return false;
+            };
+            matches!(
+                ChatFact::from_envelope(envelope),
+                Some(ChatFact::ChannelUpdated {
+                    context_id: seen_context,
+                    channel_id: seen_channel,
+                    name: Some(name),
+                    member_count: Some(2),
+                    member_ids: Some(member_ids),
+                    ..
+                }) if seen_context == context_id
+                    && seen_channel == channel_id
+                    && name == "shared-parity-lab"
+                    && member_ids.as_slice() == [receiver_id]
+            )
+        });
+        assert!(
+            updated_channel_projection,
+            "sender should publish a canonical ChannelUpdated projection after transported acceptance"
         );
     }
 

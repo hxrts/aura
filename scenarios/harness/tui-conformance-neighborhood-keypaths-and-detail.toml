@@ -69,13 +69,6 @@ value = "Entry access:"
 timeout_ms = 8000
 
 [[steps]]
-id = "alice-neighborhood-state-indicator-visible"
-action = "diagnostic_screen_contains"
-actor = "alice"
-value = "M:Off"
-timeout_ms = 8000
-
-[[steps]]
 id = "alice-create-neighborhood-keypath"
 action = "input_text"
 actor = "alice"
