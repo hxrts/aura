@@ -1,7 +1,8 @@
 //! Reactive and callback signal surfaces for `AppCore`.
+#![allow(missing_docs)]
 
 #[cfg(feature = "callbacks")]
-use super::state::SubscriptionId;
+use super::config::SubscriptionId;
 use super::state::{AppCore, APP_RUNTIME_OPERATION_TIMEOUT, APP_RUNTIME_QUERY_TIMEOUT};
 use crate::core::IntentError;
 use async_trait::async_trait;
@@ -12,11 +13,11 @@ use aura_core::query::{FactPredicate, Query};
 
 impl AppCore {
     /// Initialize all application signals with default values.
-    pub async fn init_signals(&mut self) -> Result<(), IntentError> {
+    pub(super) async fn ensure_signals_registered(&mut self) -> Result<(), IntentError> {
         if let Some(runtime) = self.runtime.as_ref() {
             if crate::workflows::runtime::timeout_runtime_call(
                 runtime,
-                "init_signals",
+                "ensure_signals_registered",
                 "get_threshold_config",
                 APP_RUNTIME_QUERY_TIMEOUT,
                 || runtime.get_threshold_config(),
@@ -27,7 +28,7 @@ impl AppCore {
             {
                 let bootstrap = crate::workflows::runtime::timeout_runtime_call(
                     runtime,
-                    "init_signals",
+                    "ensure_signals_registered",
                     "bootstrap_signing_keys",
                     APP_RUNTIME_OPERATION_TIMEOUT,
                     || runtime.bootstrap_signing_keys(),

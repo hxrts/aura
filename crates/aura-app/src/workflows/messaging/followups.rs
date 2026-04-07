@@ -1,5 +1,7 @@
 use super::*;
 
+const CHANNEL_INVITE_POST_CREATE_PROPAGATION_ATTEMPTS: usize = 8;
+
 /// Best-effort channel connectivity warming.
 pub(crate) async fn warm_channel_connectivity(
     app_core: &Arc<RwLock<AppCore>>,
@@ -64,6 +66,7 @@ pub(crate) async fn warm_channel_connectivity(
     warmed
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 async fn propagate_channel_invitation_to_peer(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
@@ -128,6 +131,8 @@ async fn propagate_channel_invitation_to_peer(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+/// Best-effort post-create follow-up work for a newly issued channel invitation.
 pub async fn run_post_channel_invite_followups(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,

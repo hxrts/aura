@@ -7,10 +7,8 @@ error[E0603]: function `refresh_authoritative_channel_membership_readiness` is p
 note: the function `refresh_authoritative_channel_membership_readiness` is defined here
  --> src/workflows/messaging.rs
   |
-  | / pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readiness(
-  | |     app_core: &Arc<RwLock<AppCore>>,
-  | | ) -> Result<(), AuraError> {
-  | |__________________________^
+  |     refresh_authoritative_channel_membership_readiness,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[E0603]: function `refresh_authoritative_recipient_resolution_readiness` is private
  --> tests/ui_signals/readiness_refresh_helpers_private.rs:4:45
@@ -21,7 +19,5 @@ error[E0603]: function `refresh_authoritative_recipient_resolution_readiness` is
 note: the function `refresh_authoritative_recipient_resolution_readiness` is defined here
  --> src/workflows/messaging.rs
   |
-  | / pub(in crate::workflows) async fn refresh_authoritative_recipient_resolution_readiness(
-  | |     app_core: &Arc<RwLock<AppCore>>,
-  | | ) -> Result<(), AuraError> {
-  | |__________________________^
+  |     refresh_authoritative_recipient_resolution_readiness,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

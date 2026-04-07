@@ -1,5 +1,6 @@
 //! Core `AppCore` state, configuration, and constructors.
 
+use super::config::AppConfig;
 use crate::core::IntentError;
 use crate::runtime_bridge::RuntimeBridge;
 use crate::ui_contract::AuthoritativeSemanticFact;
@@ -8,39 +9,11 @@ use crate::ReactiveHandler;
 use aura_core::hash;
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use aura_core::AccountId;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) const APP_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(5_000);
 pub(super) const APP_RUNTIME_OPERATION_TIMEOUT: Duration = Duration::from_millis(30_000);
-
-/// Configuration for creating an AppCore instance.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct AppConfig {
-    pub data_dir: String,
-    pub debug: bool,
-    pub journal_path: Option<String>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            data_dir: "./data".to_string(),
-            debug: false,
-            journal_path: None,
-        }
-    }
-}
-
-/// Unique identifier for a subscription (callbacks feature only).
-#[cfg(feature = "callbacks")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct SubscriptionId {
-    pub id: u64,
-}
 
 /// Portable application core state and injected runtime handles.
 pub struct AppCore {
@@ -127,14 +100,17 @@ impl AppCore {
         })
     }
 
+    /// Return the stable app-owned account identifier for this core instance.
     pub fn account_id(&self) -> AccountId {
         self.account_id
     }
 
+    /// Update the in-memory authority binding for this app core.
     pub fn set_authority(&mut self, authority: AuthorityId) {
         self.authority = Some(authority);
     }
 
+    /// Return the currently bound authority, if one has been staged.
     pub fn authority(&self) -> Option<&AuthorityId> {
         self.authority.as_ref()
     }

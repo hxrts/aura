@@ -110,6 +110,12 @@ and continue to map to the same canonical coverage anchors:
   current terminal-side change only removes stale modal-local ownership
   assumptions and keeps those flows on the same typed dispatch and shared
   workflow path.
+- `aura-app` splits these same flows across more specific
+  owner modules while preserving the coverage anchors above:
+  `workflows/context/neighborhood.rs`,
+  `workflows/invitation/{create,accept,readiness}.rs`, and
+  `workflows/messaging/{channel_refs,channels,send}.rs`. Shared-flow source
+  metadata continues to publish through the `aura-app::ui_contract` facade.
 
 Scenario 13 remains the canonical anchor for the shared contacts lifecycle
 because it exercises the parity-critical semantic controls for `send friend

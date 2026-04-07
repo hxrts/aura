@@ -1,24 +1,24 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct MessageSendReadiness {
-    pub(crate) recipient_resolution_ready: bool,
-    pub(crate) delivery_ready: bool,
+pub(super) struct MessageSendReadiness {
+    pub(super) recipient_resolution_ready: bool,
+    pub(super) delivery_ready: bool,
 }
 
 #[derive(Debug, Clone)]
-struct ChannelReadinessState {
+pub(super) struct ChannelReadinessState {
     channel_id: ChannelId,
     fact_key: ChannelFactKey,
     authoritative_channel: Option<AuthoritativeChannelRef>,
-    member_count: u32,
-    recipients: Vec<AuthorityId>,
-    delivery_supported: bool,
+    pub(super) member_count: u32,
+    pub(super) recipients: Vec<AuthorityId>,
+    pub(super) delivery_supported: bool,
     had_membership_fact: bool,
 }
 
 impl ChannelReadinessState {
-    fn new(
+    pub(super) fn new(
         channel_id: ChannelId,
         fact_key: ChannelFactKey,
         member_count: u32,
@@ -58,7 +58,7 @@ impl ChannelReadinessState {
             })
     }
 
-    fn delivery_facts(
+    pub(super) fn delivery_facts(
         &self,
         context_id: ContextId,
         ready_peers: &[AuthorityId],
@@ -84,7 +84,7 @@ impl ChannelReadinessState {
 }
 
 #[derive(Debug, Clone, Default)]
-struct ChannelReadinessCoordinator {
+pub(super) struct ChannelReadinessCoordinator {
     states: Vec<ChannelReadinessState>,
 }
 
@@ -138,7 +138,7 @@ impl ChannelReadinessSeed {
 }
 
 impl ChannelReadinessCoordinator {
-    async fn load(
+    pub(super) async fn load(
         app_core: &Arc<RwLock<AppCore>>,
         resolve_recipients: bool,
     ) -> Result<Self, AuraError> {
@@ -250,7 +250,10 @@ impl ChannelReadinessCoordinator {
         &self.states
     }
 
-    fn state_for_channel(&self, channel_id: ChannelId) -> Option<&ChannelReadinessState> {
+    pub(super) fn state_for_channel(
+        &self,
+        channel_id: ChannelId,
+    ) -> Option<&ChannelReadinessState> {
         self.states
             .iter()
             .find(|state| state.channel_id == channel_id)
@@ -630,14 +633,16 @@ pub(crate) async fn refresh_authoritative_delivery_readiness_for_channel(
     .await
 }
 
-fn channel_id_from_pending_channel_invitation(invitation: &InvitationInfo) -> Option<ChannelId> {
+pub(super) fn channel_id_from_pending_channel_invitation(
+    invitation: &InvitationInfo,
+) -> Option<ChannelId> {
     match &invitation.invitation_type {
         InvitationBridgeType::Channel { home_id, .. } => home_id.parse().ok(),
         _ => None,
     }
 }
 
-fn select_pending_channel_invitation(
+pub(super) fn select_pending_channel_invitation(
     pending: &[InvitationInfo],
     local_authority: AuthorityId,
     requested_channel_id: ChannelId,

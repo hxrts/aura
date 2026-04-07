@@ -1,329 +1,25 @@
 #![allow(missing_docs)]
 
-use super::execute::PlannedCommand;
+use super::execution_model::PlannedCommand;
 use super::parse::ParsedCommand;
+use super::plan::{
+    CommandPlan, CommandScope, MembershipPlan, ModerationPlan, ModeratorPlan, PlanPrecondition,
+};
+use super::resolved_refs::{
+    ChannelResolveOutcome, ExistingChannelResolution, ResolveTarget, ResolvedAuthorityId,
+    ResolvedChannelId, ResolvedCommand, ResolvedContextId,
+};
+use super::snapshot::{ResolverSnapshot, SnapshotToken};
 use crate::core::StateSnapshot;
 use crate::views::Contact;
 use crate::workflows::chat_commands::normalize_channel_name;
 use crate::workflows::parse::parse_authority_id;
 use crate::AppCore;
 use async_lock::RwLock;
-use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use std::collections::BTreeMap;
-use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-
-/// Canonical authority target resolved by `CommandResolver`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ResolvedAuthorityId(pub AuthorityId);
-
-/// Canonical channel target resolved by `CommandResolver`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ResolvedChannelId(pub ChannelId);
-
-/// Canonical context target resolved by `CommandResolver`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ResolvedContextId(pub ContextId);
-
-/// Canonical existing channel target resolved by `CommandResolver`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ExistingChannelResolution {
-    channel_id: ResolvedChannelId,
-    context_id: Option<ResolvedContextId>,
-}
-
-impl ExistingChannelResolution {
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) const fn new(
-        channel_id: ResolvedChannelId,
-        context_id: Option<ResolvedContextId>,
-    ) -> Self {
-        Self {
-            channel_id,
-            context_id,
-        }
-    }
-
-    #[must_use]
-    pub const fn channel_id(&self) -> ResolvedChannelId {
-        self.channel_id
-    }
-
-    #[must_use]
-    pub const fn context_id(&self) -> Option<ResolvedContextId> {
-        self.context_id
-    }
-}
-
-/// Canonical result of channel resolution for commands that may target an
-/// existing channel or intentionally create one later.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChannelResolveOutcome {
-    Existing(ExistingChannelResolution),
-    WillCreate { channel_name: String },
-}
-
-impl ChannelResolveOutcome {
-    #[must_use]
-    pub const fn context_id(&self) -> Option<ResolvedContextId> {
-        match self {
-            Self::Existing(channel) => channel.context_id(),
-            Self::WillCreate { .. } => None,
-        }
-    }
-
-    #[must_use]
-    pub const fn existing_channel(&self) -> Option<ExistingChannelResolution> {
-        match self {
-            Self::Existing(channel) => Some(*channel),
-            Self::WillCreate { .. } => None,
-        }
-    }
-
-    #[must_use]
-    pub fn is_will_create(&self) -> bool {
-        matches!(self, Self::WillCreate { .. })
-    }
-}
-
-/// Snapshot token used to guarantee single-snapshot command resolution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SnapshotToken(u64);
-
-impl SnapshotToken {
-    #[must_use]
-    pub fn value(self) -> u64 {
-        self.0
-    }
-}
-
-impl fmt::Display for SnapshotToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "snapshot-{}", self.0)
-    }
-}
-
-/// Snapshot captured for command resolution.
-#[derive(Debug, Clone)]
-pub struct ResolverSnapshot {
-    token: SnapshotToken,
-    state: StateSnapshot,
-}
-
-impl ResolverSnapshot {
-    #[must_use]
-    pub fn token(&self) -> SnapshotToken {
-        self.token
-    }
-
-    #[must_use]
-    pub fn state(&self) -> &StateSnapshot {
-        &self.state
-    }
-}
-
-/// Executable command values with canonical IDs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResolvedCommand {
-    Msg {
-        target: ResolvedAuthorityId,
-        text: String,
-    },
-    Me {
-        action: String,
-    },
-    Nick {
-        name: String,
-    },
-    Who,
-    Whois {
-        target: ResolvedAuthorityId,
-    },
-    Leave,
-    Join {
-        channel_name: String,
-        channel: ChannelResolveOutcome,
-    },
-    Help {
-        command: Option<String>,
-    },
-    Neighborhood {
-        name: String,
-    },
-    NhAdd {
-        home_id: String,
-    },
-    NhLink {
-        home_id: String,
-    },
-    HomeInvite {
-        target: ResolvedAuthorityId,
-    },
-    HomeAccept,
-    Kick {
-        target: ResolvedAuthorityId,
-        reason: Option<String>,
-    },
-    Ban {
-        target: ResolvedAuthorityId,
-        reason: Option<String>,
-    },
-    Unban {
-        target: ResolvedAuthorityId,
-    },
-    Mute {
-        target: ResolvedAuthorityId,
-        duration: Option<std::time::Duration>,
-    },
-    Unmute {
-        target: ResolvedAuthorityId,
-    },
-    Invite {
-        target: ResolvedAuthorityId,
-    },
-    Topic {
-        text: String,
-    },
-    Pin {
-        message_id: String,
-    },
-    Unpin {
-        message_id: String,
-    },
-    Op {
-        target: ResolvedAuthorityId,
-    },
-    Deop {
-        target: ResolvedAuthorityId,
-    },
-    Mode {
-        channel_name: String,
-        channel: ExistingChannelResolution,
-        flags: String,
-    },
-}
-
-/// Common execution scope for command plans.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CommandScope {
-    Global,
-    Channel {
-        channel_id: ResolvedChannelId,
-        context_id: Option<ResolvedContextId>,
-    },
-    Context {
-        context_id: ResolvedContextId,
-    },
-}
-
-/// Planning preconditions that must hold before execution.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlanPrecondition {
-    TargetExists(ResolvedAuthorityId),
-    ChannelExists(ResolvedChannelId),
-    ActorInScope,
-}
-
-/// Typed command plan for execution.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandPlan<T> {
-    pub actor: Option<ResolvedAuthorityId>,
-    pub scope: CommandScope,
-    pub preconditions: Vec<PlanPrecondition>,
-    pub operation: T,
-}
-
-/// Membership operation plan family (`/join`, `/leave`, `/part`, `/quit`, `/j`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MembershipPlan {
-    pub command: ResolvedCommand,
-}
-
-/// Moderation operation plan family (`/kick`, `/ban`, `/mute`, etc.).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModerationPlan {
-    pub command: ResolvedCommand,
-}
-
-/// Moderator operation plan family (`/op`, `/deop`, `/mode`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModeratorPlan {
-    pub command: ResolvedCommand,
-}
-
-/// Plan construction errors.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum CommandPlanError {
-    #[error("command is not a membership command")]
-    NotMembershipCommand,
-    #[error("command is not a moderation command")]
-    NotModerationCommand,
-    #[error("command is not a moderator command")]
-    NotModeratorCommand,
-}
-
-impl MembershipPlan {
-    pub fn from_resolved(command: ResolvedCommand) -> Result<Self, CommandPlanError> {
-        if matches!(
-            command,
-            ResolvedCommand::Join { .. } | ResolvedCommand::Leave
-        ) {
-            return Ok(Self { command });
-        }
-        Err(CommandPlanError::NotMembershipCommand)
-    }
-}
-
-impl ModerationPlan {
-    pub fn from_resolved(command: ResolvedCommand) -> Result<Self, CommandPlanError> {
-        if matches!(
-            command,
-            ResolvedCommand::Kick { .. }
-                | ResolvedCommand::Ban { .. }
-                | ResolvedCommand::Unban { .. }
-                | ResolvedCommand::Mute { .. }
-                | ResolvedCommand::Unmute { .. }
-                | ResolvedCommand::Invite { .. }
-        ) {
-            return Ok(Self { command });
-        }
-        Err(CommandPlanError::NotModerationCommand)
-    }
-}
-
-impl ModeratorPlan {
-    pub fn from_resolved(command: ResolvedCommand) -> Result<Self, CommandPlanError> {
-        if matches!(
-            command,
-            ResolvedCommand::Op { .. }
-                | ResolvedCommand::Deop { .. }
-                | ResolvedCommand::Mode { .. }
-        ) {
-            return Ok(Self { command });
-        }
-        Err(CommandPlanError::NotModeratorCommand)
-    }
-}
-
-/// Resolution target namespace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResolveTarget {
-    Authority,
-    Channel,
-    Context,
-}
-
-impl fmt::Display for ResolveTarget {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Authority => write!(f, "authority"),
-            Self::Channel => write!(f, "channel"),
-            Self::Context => write!(f, "context"),
-        }
-    }
-}
 
 /// Command resolver errors.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -879,10 +575,10 @@ impl CommandResolver {
 
         if let Ok(channel_id) = normalized.parse::<ChannelId>() {
             if let Some(ctx) = resolve_channel_context(state, channel_id) {
-                return Ok(ExistingChannelResolution {
-                    channel_id: ResolvedChannelId(channel_id),
-                    context_id: ctx,
-                });
+                return Ok(ExistingChannelResolution::new(
+                    ResolvedChannelId(channel_id),
+                    ctx,
+                ));
             }
             return Err(CommandResolverError::UnknownTarget {
                 target: ResolveTarget::Channel,
@@ -903,10 +599,10 @@ impl CommandResolver {
                 .next()
                 .map(|(id, (name, context))| (*id, (name, *context)))
             {
-                return Ok(ExistingChannelResolution {
-                    channel_id: ResolvedChannelId(channel_id),
+                return Ok(ExistingChannelResolution::new(
+                    ResolvedChannelId(channel_id),
                     context_id,
-                });
+                ));
             }
         }
 

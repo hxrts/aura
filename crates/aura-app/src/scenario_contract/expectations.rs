@@ -105,7 +105,6 @@ impl ScenarioAction {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-
 pub enum Expectation {
     ScreenIs(ScreenId),
     ControlVisible(ControlId),

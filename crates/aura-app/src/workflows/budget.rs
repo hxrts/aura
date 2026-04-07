@@ -38,15 +38,22 @@
 //! }
 //! ```
 
-use crate::signal_defs::{BUDGET_SIGNAL, BUDGET_SIGNAL_NAME};
-use crate::workflows::signals::{emit_signal, read_signal_or_default};
-use crate::AppCore;
-use async_lock::RwLock;
+mod format;
+mod runtime;
+mod validation;
+
+pub use format::{format_budget_compact, format_budget_status};
+pub use runtime::{
+    can_add_member, can_join_neighborhood, can_pin_content, get_budget_breakdown,
+    get_current_budget, update_budget,
+};
+pub use validation::{
+    check_can_add_member, check_can_join_neighborhood, check_can_pin, BudgetValidationError,
+};
+
 use aura_core::types::identifiers::HomeId;
-use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 
 // =============================================================================
 // Constants
@@ -370,276 +377,13 @@ impl fmt::Display for BudgetError {
 impl std::error::Error for BudgetError {}
 
 // =============================================================================
-// Workflow Functions
-// =============================================================================
-
-/// Get the current budget for the active home
-///
-/// **What it does**: Reads budget state from BUDGET_SIGNAL
-/// **Returns**: Domain type (HomeFlowBudget)
-/// **Signal pattern**: Read-only operation (no emission)
-///
-/// This is the primary method for getting budget data across all frontends.
-/// Falls back to default budget if signal is not available.
-pub async fn get_current_budget(app_core: &Arc<RwLock<AppCore>>) -> HomeFlowBudget {
-    let core = app_core.read().await;
-
-    // Try to read from BUDGET_SIGNAL, fallback to default
-    drop(core);
-    read_signal_or_default(app_core, &*BUDGET_SIGNAL).await
-}
-
-/// Get a budget breakdown with computed allocation values
-///
-/// **What it does**: Computes allocation breakdown from current budget
-/// **Returns**: Domain type (BudgetBreakdown)
-/// **Signal pattern**: Read-only operation (no emission)
-///
-/// Use this for detailed budget inspection across all frontends.
-pub async fn get_budget_breakdown(app_core: &Arc<RwLock<AppCore>>) -> BudgetBreakdown {
-    let budget = get_current_budget(app_core).await;
-    budget.breakdown()
-}
-
-/// Check if a new member can be added to the home
-///
-/// **What it does**: Validates budget capacity for new member
-/// **Returns**: Boolean (true if capacity available)
-/// **Signal pattern**: Read-only operation (no emission)
-///
-/// Frontends should call this before attempting to add a member.
-pub async fn can_add_member(app_core: &Arc<RwLock<AppCore>>) -> bool {
-    let budget = get_current_budget(app_core).await;
-    budget.can_add_member()
-}
-
-/// Check if current home can join a neighborhood
-///
-/// **What it does**: Validates budget capacity for neighborhood membership
-/// **Returns**: Boolean (true if capacity available)
-/// **Signal pattern**: Read-only operation (no emission)
-///
-/// Neighborhoods require additional budget allocation.
-pub async fn can_join_neighborhood(app_core: &Arc<RwLock<AppCore>>) -> bool {
-    let budget = get_current_budget(app_core).await;
-    budget.can_join_neighborhood()
-}
-
-/// Check if content can be pinned to the home
-///
-/// **What it does**: Validates budget capacity for pinning content
-/// **Returns**: Result with available capacity or error
-/// **Signal pattern**: Read-only operation (no emission)
-///
-/// Returns the number of bytes available for pinning.
-pub async fn can_pin_content(
-    app_core: &Arc<RwLock<AppCore>>,
-    content_size_bytes: u64,
-) -> Result<u64, AuraError> {
-    let budget = get_current_budget(app_core).await;
-    let available = budget.pinned_storage_remaining();
-
-    if content_size_bytes > available {
-        Err(AuraError::budget_exceeded(format!(
-            "Insufficient budget: need {content_size_bytes} bytes, have {available} available"
-        )))
-    } else {
-        Ok(available)
-    }
-}
-
-/// Update budget state and emit signal
-///
-/// **What it does**: Updates BUDGET_SIGNAL with new budget state
-/// **Returns**: Result indicating success/failure
-/// **Signal pattern**: Write operation (emits BUDGET_SIGNAL)
-///
-/// This is called internally when budget state changes (e.g., after
-/// adding a member, pinning content, or receiving budget updates).
-pub async fn update_budget(
-    app_core: &Arc<RwLock<AppCore>>,
-    budget: HomeFlowBudget,
-) -> Result<(), AuraError> {
-    emit_signal(app_core, &*BUDGET_SIGNAL, budget, BUDGET_SIGNAL_NAME).await
-}
-
-// =============================================================================
-// Formatting Functions (Portable)
-// =============================================================================
-
-/// Format budget status as a human-readable string.
-///
-/// Returns a multi-line summary suitable for CLI output or any frontend.
-/// Includes total usage, per-category breakdowns, and capacity warnings.
-///
-/// # Example Output
-///
-/// ```text
-/// Home Storage Budget: home-123
-/// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-///
-/// Total: 2.4 MB / 10.0 MB (24% used)
-///
-/// Member Storage:
-///   2 members (8 max)
-///   400.0 KB / 1.6 MB used
-///
-/// Neighborhood Allocations:
-///   1 neighborhoods (4 max)
-///   1.0 MB contributed
-///
-/// Pinned Content:
-///   1.0 MB / 8.0 MB used
-///
-/// Remaining: 7.6 MB
-/// ```
-#[must_use]
-pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
-    let breakdown = budget.breakdown();
-    let usage_percent = (budget.usage_fraction() * 100.0) as u8;
-
-    let mut output = String::new();
-    output.push_str(&format!("Home Storage Budget: {}\n", budget.home_id));
-    output.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-    output.push_str(&format!(
-        "\nTotal: {} / {} ({}% used)\n",
-        BudgetBreakdown::format_size(budget.total_used()),
-        BudgetBreakdown::format_size(breakdown.total),
-        usage_percent
-    ));
-
-    output.push_str("\nMember Storage:\n");
-    output.push_str(&format!(
-        "  {} members ({} max)\n",
-        budget.member_count, MAX_MEMBERS
-    ));
-    output.push_str(&format!(
-        "  {} / {} used\n",
-        BudgetBreakdown::format_size(breakdown.member_used),
-        BudgetBreakdown::format_size(breakdown.member_limit)
-    ));
-
-    output.push_str("\nNeighborhood Allocations:\n");
-    output.push_str(&format!(
-        "  {} neighborhoods ({} max)\n",
-        budget.neighborhood_count, MAX_NEIGHBORHOODS
-    ));
-    output.push_str(&format!(
-        "  {} contributed\n",
-        BudgetBreakdown::format_size(breakdown.neighborhood_allocations)
-    ));
-
-    output.push_str("\nPinned Content:\n");
-    output.push_str(&format!(
-        "  {} / {} used\n",
-        BudgetBreakdown::format_size(breakdown.pinned_used),
-        BudgetBreakdown::format_size(breakdown.pinned_limit)
-    ));
-
-    output.push_str(&format!(
-        "\nRemaining: {}\n",
-        BudgetBreakdown::format_size(breakdown.remaining)
-    ));
-
-    // Add warnings if capacity is high
-    if usage_percent > 95 {
-        output.push_str("\n⚠  CRITICAL: Storage is nearly full!\n");
-    } else if usage_percent > 80 {
-        output.push_str("\n⚠  WARNING: Storage is running low\n");
-    }
-
-    output
-}
-
-/// Format budget breakdown as a compact one-line summary.
-///
-/// Returns a short status line suitable for status bars or compact displays.
-///
-/// # Example
-///
-/// ```rust
-/// use aura_app::ui::workflows::budget::{HomeFlowBudget, format_budget_compact};
-/// use aura_core::types::identifiers::HomeId;
-///
-/// let budget = HomeFlowBudget::new(HomeId::default());
-/// let compact = format_budget_compact(&budget);
-/// assert!(compact.contains("Storage:"));
-/// assert!(compact.contains("%"));
-/// ```
-#[must_use]
-pub fn format_budget_compact(budget: &HomeFlowBudget) -> String {
-    let usage_percent = (budget.usage_fraction() * 100.0) as u8;
-    format!(
-        "Storage: {} / {} ({}%)",
-        BudgetBreakdown::format_size(budget.total_used()),
-        BudgetBreakdown::format_size(budget.total_allocation()),
-        usage_percent
-    )
-}
-
-/// Check if budget can accommodate a new member, with error message.
-///
-/// Returns `Ok(())` if capacity is available, `Err` with formatted message otherwise.
-/// Use this before attempting to add members for user-friendly error messages.
-///
-/// # Example
-///
-/// ```rust
-/// use aura_app::ui::workflows::budget::{HomeFlowBudget, check_can_add_member};
-/// use aura_core::types::identifiers::HomeId;
-///
-/// let budget = HomeFlowBudget::new(HomeId::default());
-/// assert!(check_can_add_member(&budget).is_ok());
-/// ```
-pub fn check_can_add_member(budget: &HomeFlowBudget) -> Result<(), String> {
-    if budget.can_add_member() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Cannot add member: home at capacity ({}/{})",
-            budget.member_count, MAX_MEMBERS
-        ))
-    }
-}
-
-/// Check if budget can accommodate joining a neighborhood, with error message.
-///
-/// Returns `Ok(())` if capacity is available, `Err` with formatted message otherwise.
-/// Use this before attempting to join neighborhoods.
-pub fn check_can_join_neighborhood(budget: &HomeFlowBudget) -> Result<(), String> {
-    if budget.can_join_neighborhood() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Cannot join neighborhood: home at capacity ({}/{})",
-            budget.neighborhood_count, MAX_NEIGHBORHOODS
-        ))
-    }
-}
-
-/// Check if budget can accommodate pinning content of given size, with error message.
-///
-/// Returns `Ok(())` if space is available, `Err` with formatted message otherwise.
-/// Use this before attempting to pin content.
-pub fn check_can_pin(budget: &HomeFlowBudget, size_bytes: u64) -> Result<(), String> {
-    if budget.can_pin(size_bytes) {
-        Ok(())
-    } else {
-        Err(format!(
-            "Cannot pin content: need {}, have {} available",
-            BudgetBreakdown::format_size(size_bytes),
-            BudgetBreakdown::format_size(budget.pinned_storage_remaining())
-        ))
-    }
-}
-
-// =============================================================================
 // Tests
 // =============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal_defs::BUDGET_SIGNAL;
     use crate::AppConfig;
     use aura_core::effects::reactive::ReactiveEffects;
 

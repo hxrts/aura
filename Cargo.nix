@@ -45,190 +45,10 @@ rec {
   # You can override the features with
   # workspaceMembers."${crateName}".build.override { features = [ "default" "feature1" ... ]; }.
   workspaceMembers = {
-    "aura-agent" = rec {
-      packageId = "aura-agent";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-agent";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-amp" = rec {
-      packageId = "aura-amp";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-amp";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-anti-entropy" = rec {
-      packageId = "aura-anti-entropy";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-anti-entropy";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-app" = rec {
-      packageId = "aura-app";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-app";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-authentication" = rec {
-      packageId = "aura-authentication";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-authentication";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-authorization" = rec {
-      packageId = "aura-authorization";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-authorization";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-chat" = rec {
-      packageId = "aura-chat";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-chat";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-composition" = rec {
-      packageId = "aura-composition";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-composition";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-consensus" = rec {
-      packageId = "aura-consensus";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-consensus";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-core" = rec {
-      packageId = "aura-core";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-core";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-effects" = rec {
-      packageId = "aura-effects";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-effects";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-guards" = rec {
-      packageId = "aura-guards";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-guards";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "aura-harness" = rec {
       packageId = "aura-harness";
       build = internal.buildRustCrateWithFeatures {
         packageId = "aura-harness";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-invitation" = rec {
-      packageId = "aura-invitation";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-invitation";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-journal" = rec {
-      packageId = "aura-journal";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-journal";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-macros" = rec {
-      packageId = "aura-macros";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-macros";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-maintenance" = rec {
-      packageId = "aura-maintenance";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-maintenance";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-mpst" = rec {
-      packageId = "aura-mpst";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-mpst";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-protocol" = rec {
-      packageId = "aura-protocol";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-protocol";
       };
 
       # Debug support which might change between releases.
@@ -245,80 +65,10 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "aura-recovery" = rec {
-      packageId = "aura-recovery";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-recovery";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-relational" = rec {
-      packageId = "aura-relational";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-relational";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-rendezvous" = rec {
-      packageId = "aura-rendezvous";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-rendezvous";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-signature" = rec {
-      packageId = "aura-signature";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-signature";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
     "aura-simulator" = rec {
       packageId = "aura-simulator";
       build = internal.buildRustCrateWithFeatures {
         packageId = "aura-simulator";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-social" = rec {
-      packageId = "aura-social";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-social";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-store" = rec {
-      packageId = "aura-store";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-store";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-sync" = rec {
-      packageId = "aura-sync";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-sync";
       };
 
       # Debug support which might change between releases.
@@ -339,16 +89,6 @@ rec {
       packageId = "aura-testkit";
       build = internal.buildRustCrateWithFeatures {
         packageId = "aura-testkit";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "aura-transport" = rec {
-      packageId = "aura-transport";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-transport";
       };
 
       # Debug support which might change between releases.
@@ -389,6 +129,266 @@ rec {
       packageId = "hello-crdt";
       build = internal.buildRustCrateWithFeatures {
         packageId = "hello-crdt";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-agent" = rec {
+      packageId = "hxrts-aura-agent";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-agent";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-amp" = rec {
+      packageId = "hxrts-aura-amp";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-amp";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-anti-entropy" = rec {
+      packageId = "hxrts-aura-anti-entropy";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-anti-entropy";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-app" = rec {
+      packageId = "hxrts-aura-app";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-app";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-authentication" = rec {
+      packageId = "hxrts-aura-authentication";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-authentication";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-authorization" = rec {
+      packageId = "hxrts-aura-authorization";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-authorization";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-chat" = rec {
+      packageId = "hxrts-aura-chat";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-chat";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-composition" = rec {
+      packageId = "hxrts-aura-composition";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-composition";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-consensus" = rec {
+      packageId = "hxrts-aura-consensus";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-consensus";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-core" = rec {
+      packageId = "hxrts-aura-core";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-core";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-effects" = rec {
+      packageId = "hxrts-aura-effects";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-effects";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-guards" = rec {
+      packageId = "hxrts-aura-guards";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-guards";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-invitation" = rec {
+      packageId = "hxrts-aura-invitation";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-invitation";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-journal" = rec {
+      packageId = "hxrts-aura-journal";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-journal";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-macros" = rec {
+      packageId = "hxrts-aura-macros";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-macros";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-maintenance" = rec {
+      packageId = "hxrts-aura-maintenance";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-maintenance";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-mpst" = rec {
+      packageId = "hxrts-aura-mpst";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-mpst";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-protocol" = rec {
+      packageId = "hxrts-aura-protocol";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-protocol";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-recovery" = rec {
+      packageId = "hxrts-aura-recovery";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-recovery";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-relational" = rec {
+      packageId = "hxrts-aura-relational";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-relational";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-rendezvous" = rec {
+      packageId = "hxrts-aura-rendezvous";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-rendezvous";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-signature" = rec {
+      packageId = "hxrts-aura-signature";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-signature";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-social" = rec {
+      packageId = "hxrts-aura-social";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-social";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-store" = rec {
+      packageId = "hxrts-aura-store";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-store";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-sync" = rec {
+      packageId = "hxrts-aura-sync";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-sync";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "hxrts-aura-transport" = rec {
+      packageId = "hxrts-aura-transport";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "hxrts-aura-transport";
       };
 
       # Debug support which might change between releases.
@@ -825,7 +825,7 @@ with optional architecture-specific hardware acceleration
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_DataExchange" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI_Shell" ];
           }
@@ -1450,10 +1450,10 @@ with optional architecture-specific hardware acceleration
       };
       "async-signal" = rec {
         crateName = "async-signal";
-        version = "0.2.13";
+        version = "0.2.14";
         edition = "2021";
         description = "Async signal handling";
-        sha256 = "0k66mpb3xp86hj4vxs7w40v7qz2jfbblrm9ddc5mglwwynxp1h23";
+        sha256 = "11dlpb15la279r5cazppy18gbk2xzzl60ahzl19m1kr0l2psmdaj";
         libName = "async_signal";
         authors = [
           "John Nunley <dev@notgull.net>"
@@ -1747,1672 +1747,9 @@ with optional architecture-specific hardware acceleration
           "portable-atomic" = [ "dep:portable-atomic" ];
         };
       };
-      "aura-agent" = rec {
-        crateName = "aura-agent";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Capability-based agents with clean service layer architecture for identity management";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-agent; };
-        libName = "aura_agent";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-amp";
-            packageId = "aura-amp";
-          }
-          {
-            name = "aura-app";
-            packageId = "aura-app";
-            features = [ "signals" ];
-          }
-          {
-            name = "aura-authentication";
-            packageId = "aura-authentication";
-          }
-          {
-            name = "aura-authorization";
-            packageId = "aura-authorization";
-          }
-          {
-            name = "aura-chat";
-            packageId = "aura-chat";
-          }
-          {
-            name = "aura-composition";
-            packageId = "aura-composition";
-          }
-          {
-            name = "aura-consensus";
-            packageId = "aura-consensus";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-invitation";
-            packageId = "aura-invitation";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-maintenance";
-            packageId = "aura-maintenance";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "aura-protocol";
-            packageId = "aura-protocol";
-          }
-          {
-            name = "aura-recovery";
-            packageId = "aura-recovery";
-          }
-          {
-            name = "aura-relational";
-            packageId = "aura-relational";
-          }
-          {
-            name = "aura-rendezvous";
-            packageId = "aura-rendezvous";
-          }
-          {
-            name = "aura-signature";
-            packageId = "aura-signature";
-          }
-          {
-            name = "aura-social";
-            packageId = "aura-social";
-          }
-          {
-            name = "aura-store";
-            packageId = "aura-store";
-          }
-          {
-            name = "aura-sync";
-            packageId = "aura-sync";
-          }
-          {
-            name = "aura-transport";
-            packageId = "aura-transport";
-          }
-          {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "cfg-if";
-            packageId = "cfg-if";
-          }
-          {
-            name = "dirs";
-            packageId = "dirs 5.0.1";
-          }
-          {
-            name = "ed25519-dalek";
-            packageId = "ed25519-dalek";
-            features = [ "rand_core" "serde" ];
-          }
-          {
-            name = "frost-ed25519";
-            packageId = "frost-ed25519";
-            features = [ "serialization" ];
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "futures-signals";
-            packageId = "futures-signals";
-          }
-          {
-            name = "get_if_addrs";
-            packageId = "get_if_addrs";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "gloo-net";
-            packageId = "gloo-net";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "http" "websocket" ];
-          }
-          {
-            name = "gloo-timers";
-            packageId = "gloo-timers 0.3.0";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "futures" ];
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-          }
-          {
-            name = "parking_lot";
-            packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.5";
-          }
-          {
-            name = "rand_core";
-            packageId = "rand_core 0.6.4";
-            features = [ "std" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_cbor";
-            packageId = "serde_cbor";
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "subtle";
-            packageId = "subtle";
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "telltale-machine";
-            packageId = "telltale-machine";
-            optional = true;
-            features = [ "multi-thread" ];
-          }
-          {
-            name = "telltale-types";
-            packageId = "telltale-types";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "time";
-            packageId = "time";
-            features = [ "serde" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "io-util" "macros" "rt" "sync" "time" "net" "rt-multi-thread" ];
-          }
-          {
-            name = "tokio-tungstenite";
-            packageId = "tokio-tungstenite 0.20.1";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-          {
-            name = "wasm-bindgen-futures";
-            packageId = "wasm-bindgen-futures";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Window" "Location" ];
-          }
-          {
-            name = "zeroize";
-            packageId = "zeroize";
-            features = [ "derive" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-          }
-          {
-            name = "async-lock";
-            packageId = "async-lock 3.4.2";
-          }
-          {
-            name = "aura-testkit";
-            packageId = "aura-testkit";
-          }
-          {
-            name = "criterion";
-            packageId = "criterion";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "loom";
-            packageId = "loom";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "telltale-machine";
-            packageId = "telltale-machine";
-            features = [ "multi-thread" ];
-          }
-          {
-            name = "telltale-theory";
-            packageId = "telltale-theory";
-          }
-          {
-            name = "telltale-types";
-            packageId = "telltale-types";
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
-          }
-          {
-            name = "tracing-subscriber";
-            packageId = "tracing-subscriber";
-            usesDefaultFeatures = false;
-            features = [ "fmt" "env-filter" ];
-          }
-          {
-            name = "trybuild";
-            packageId = "trybuild";
-          }
-          {
-            name = "wasm-bindgen-test";
-            packageId = "wasm-bindgen-test";
-          }
-        ];
-        features = {
-          "choreo-backend-telltale-machine" = [ "dep:telltale-machine" "aura-effects/telltale-runtime-capability" ];
-          "default" = [ "choreo-backend-telltale-machine" ];
-          "simulation" = [ "aura-core/simulation" ];
-          "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" "aura-protocol/transparent_onion" "aura-social/transparent_onion" "aura-sync/transparent_onion" ];
-        };
-        resolvedDefaultFeatures = [ "android" "choreo-backend-telltale-machine" "default" "ios" "real-android-keystore" "simulation" "transparent_onion" "web" ];
-      };
-      "aura-amp" = rec {
-        crateName = "aura-amp";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Aura Messaging Protocol: reliable async messaging with acknowledgment and ordering";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-amp; };
-        libName = "aura_amp";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-consensus";
-            packageId = "aura-consensus";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "aura-transport";
-            packageId = "aura-transport";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-        features = {
-          "default" = [ "demo-crypto" ];
-          "simulation" = [ "aura-core/simulation" ];
-        };
-        resolvedDefaultFeatures = [ "default" "demo-crypto" "simulation" ];
-      };
-      "aura-anti-entropy" = rec {
-        crateName = "aura-anti-entropy";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Journal anti-entropy and fact synchronization for Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-anti-entropy; };
-        libName = "aura_anti_entropy";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-lock";
-            packageId = "async-lock 3.4.2";
-          }
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-        features = {
-          "simulation" = [ "aura-core/simulation" ];
-        };
-        resolvedDefaultFeatures = [ "default" "simulation" ];
-      };
-      "aura-app" = rec {
-        crateName = "aura-app";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Portable headless application core for Aura";
-        crateBin = [
-          {
-            name = "app-host";
-            path = "src/bin/app_host.rs";
-            requiredFeatures = [ "host" ];
-          }
-        ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-app; };
-        libName = "aura_app";
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-            optional = true;
-          }
-          {
-            name = "async-lock";
-            packageId = "async-lock 3.4.2";
-          }
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-chat";
-            packageId = "aura-chat";
-          }
-          {
-            name = "aura-composition";
-            packageId = "aura-composition";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-maintenance";
-            packageId = "aura-maintenance";
-          }
-          {
-            name = "aura-protocol";
-            packageId = "aura-protocol";
-          }
-          {
-            name = "aura-recovery";
-            packageId = "aura-recovery";
-          }
-          {
-            name = "aura-relational";
-            packageId = "aura-relational";
-          }
-          {
-            name = "aura-social";
-            packageId = "aura-social";
-          }
-          {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
-            name = "cfg-if";
-            packageId = "cfg-if";
-          }
-          {
-            name = "console_error_panic_hook";
-            packageId = "console_error_panic_hook";
-            optional = true;
-          }
-          {
-            name = "dominator";
-            packageId = "dominator";
-            optional = true;
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "futures-signals";
-            packageId = "futures-signals";
-            optional = true;
-          }
-          {
-            name = "getrandom";
-            packageId = "getrandom 0.2.17";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "js" ];
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "js-sys";
-            packageId = "js-sys";
-            optional = true;
-          }
-          {
-            name = "parking_lot";
-            packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 2.0.18";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-            optional = true;
-          }
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            optional = true;
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" ];
-          }
-          {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-            optional = true;
-          }
-          {
-            name = "wasm-bindgen-futures";
-            packageId = "wasm-bindgen-futures";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            optional = true;
-            features = [ "console" "Location" "Window" "WorkerGlobalScope" ];
-          }
-        ];
-        buildDependencies = [
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            optional = true;
-            features = [ "build" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "trybuild";
-            packageId = "trybuild";
-          }
-        ];
-        features = {
-          "android" = [ "uniffi" "mobile" ];
-          "host" = [ "dep:anyhow" ];
-          "instrumented" = [ "dep:tracing" ];
-          "ios" = [ "uniffi" "mobile" ];
-          "mobile" = [ "uniffi" "callbacks" ];
-          "native" = [ "signals" ];
-          "signals" = [ "dep:futures-signals" ];
-          "uniffi" = [ "dep:uniffi" "callbacks" ];
-          "wasm" = [ "dep:wasm-bindgen" "dep:js-sys" "dep:web-sys" "dep:console_error_panic_hook" ];
-          "web-dominator" = [ "wasm" "signals" "dep:dominator" ];
-          "web-js" = [ "wasm" ];
-        };
-        resolvedDefaultFeatures = [ "android" "app-internals" "callbacks" "debug-serialize" "default" "host" "instrumented" "ios" "mobile" "native" "signals" "uniffi" "wasm" "web-dominator" "web-js" ];
-      };
-      "aura-authentication" = rec {
-        crateName = "aura-authentication";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Authentication protocols and identity verification for Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-authentication; };
-        libName = "aura_authentication";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-authorization";
-            packageId = "aura-authorization";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "aura-protocol";
-            packageId = "aura-protocol";
-          }
-          {
-            name = "aura-relational";
-            packageId = "aura-relational";
-          }
-          {
-            name = "aura-signature";
-            packageId = "aura-signature";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "ed25519-dalek";
-            packageId = "ed25519-dalek";
-            features = [ "rand_core" "serde" ];
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.5";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "aura-agent";
-            packageId = "aura-agent";
-          }
-          {
-            name = "aura-testkit";
-            packageId = "aura-testkit";
-            features = [ "full-effect-system" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-
-      };
-      "aura-authorization" = rec {
-        crateName = "aura-authorization";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Capability-based authorization for Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-authorization; };
-        libName = "aura_authorization";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-        ];
-
-      };
-      "aura-chat" = rec {
-        crateName = "aura-chat";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Secure chat functionality for the Aura threshold identity platform";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-chat; };
-        libName = "aura_chat";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "aura-composition";
-            packageId = "aura-composition";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        features = {
-        };
-        resolvedDefaultFeatures = [ "default" ];
-      };
-      "aura-composition" = rec {
-        crateName = "aura-composition";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Aura Layer 3: Handler composition and effect system assembly";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-composition; };
-        libName = "aura_composition";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "cfg-if";
-            packageId = "cfg-if";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" "serde" "v4" ];
-          }
-        ];
-
-      };
-      "aura-consensus" = rec {
-        crateName = "aura-consensus";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Single-shot consensus protocol for non-monotone operations in Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-consensus; };
-        libName = "aura_consensus";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-lock";
-            packageId = "async-lock 3.4.2";
-          }
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "curve25519-dalek";
-            packageId = "curve25519-dalek";
-          }
-          {
-            name = "ed25519-dalek";
-            packageId = "ed25519-dalek";
-            features = [ "rand_core" "serde" ];
-          }
-          {
-            name = "frost-ed25519";
-            packageId = "frost-ed25519";
-            features = [ "serialization" ];
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "getrandom";
-            packageId = "getrandom 0.2.17";
-            features = [ "js" ];
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.5";
-          }
-          {
-            name = "rand_chacha";
-            packageId = "rand_chacha 0.3.1";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "subtle";
-            packageId = "subtle";
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-          {
-            name = "zeroize";
-            packageId = "zeroize";
-            features = [ "derive" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "telltale-theory";
-            packageId = "telltale-theory";
-          }
-        ];
-        features = {
-          "simulation" = [ "aura-core/simulation" ];
-        };
-        resolvedDefaultFeatures = [ "default" "simulation" ];
-      };
-      "aura-core" = rec {
-        crateName = "aura-core";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Foundation types, effect traits, and cryptographic utilities for Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-core; };
-        libName = "aura_core";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "blake3";
-            packageId = "blake3";
-          }
-          {
-            name = "cfg-if";
-            packageId = "cfg-if";
-          }
-          {
-            name = "ed25519-dalek";
-            packageId = "ed25519-dalek";
-            features = [ "rand_core" "serde" ];
-          }
-          {
-            name = "frost-ed25519";
-            packageId = "frost-ed25519";
-            features = [ "serialization" ];
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "parking_lot";
-            packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
-          }
-          {
-            name = "paste";
-            packageId = "paste";
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            optional = true;
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.5";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_bytes";
-            packageId = "serde_bytes";
-          }
-          {
-            name = "serde_ipld_dagcbor";
-            packageId = "serde_ipld_dagcbor";
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "time";
-            packageId = "time";
-            features = [ "serde" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "toml";
-            packageId = "toml 0.8.23";
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-          {
-            name = "web-time";
-            packageId = "web-time";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "zeroize";
-            packageId = "zeroize";
-            features = [ "derive" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "criterion";
-            packageId = "criterion";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "async_tokio" ];
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "io-util" "macros" "rt" "sync" "time" "rt-multi-thread" ];
-          }
-          {
-            name = "tracing-subscriber";
-            packageId = "tracing-subscriber";
-            usesDefaultFeatures = false;
-            features = [ "fmt" "env-filter" ];
-          }
-          {
-            name = "trybuild";
-            packageId = "trybuild";
-          }
-        ];
-        features = {
-          "proptest" = [ "dep:proptest" ];
-        };
-        resolvedDefaultFeatures = [ "default" "proptest" "simulation" "transparent_onion" ];
-      };
-      "aura-effects" = rec {
-        crateName = "aura-effects";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Standard library of context-free effect handler implementations";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-effects; };
-        libName = "aura_effects";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "aes-gcm";
-            packageId = "aes-gcm";
-          }
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "cfg-if";
-            packageId = "cfg-if";
-          }
-          {
-            name = "chacha20";
-            packageId = "chacha20";
-          }
-          {
-            name = "chacha20poly1305";
-            packageId = "chacha20poly1305";
-          }
-          {
-            name = "curve25519-dalek";
-            packageId = "curve25519-dalek";
-          }
-          {
-            name = "ed25519-dalek";
-            packageId = "ed25519-dalek";
-            features = [ "rand_core" "serde" ];
-          }
-          {
-            name = "fastrand";
-            packageId = "fastrand 2.3.0";
-          }
-          {
-            name = "frost-core";
-            packageId = "frost-core";
-            features = [ "serialization" ];
-          }
-          {
-            name = "frost-ed25519";
-            packageId = "frost-ed25519";
-            features = [ "serialization" ];
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "futures-util";
-            packageId = "futures-util";
-          }
-          {
-            name = "getrandom";
-            packageId = "getrandom 0.2.17";
-            features = [ "js" ];
-          }
-          {
-            name = "gloo-timers";
-            packageId = "gloo-timers 0.3.0";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "futures" ];
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "indexed_db_futures";
-            packageId = "indexed_db_futures";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "serde" ];
-          }
-          {
-            name = "js-sys";
-            packageId = "js-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "postcard";
-            packageId = "postcard";
-            features = [ "use-std" ];
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.5";
-          }
-          {
-            name = "rand_chacha";
-            packageId = "rand_chacha 0.3.1";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "sha2";
-            packageId = "sha2 0.10.9";
-          }
-          {
-            name = "snow";
-            packageId = "snow";
-          }
-          {
-            name = "socket2";
-            packageId = "socket2 0.5.10";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "all" ];
-          }
-          {
-            name = "telltale-machine";
-            packageId = "telltale-machine";
-            optional = true;
-            features = [ "multi-thread" ];
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "io-util" "macros" "rt" "sync" "time" "fs" "net" ];
-          }
-          {
-            name = "tokio-tungstenite";
-            packageId = "tokio-tungstenite 0.23.1";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "url";
-            packageId = "url";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-          {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "wasm-bindgen-futures";
-            packageId = "wasm-bindgen-futures";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Window" "Storage" ];
-          }
-          {
-            name = "web-time";
-            packageId = "web-time";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "zeroize";
-            packageId = "zeroize";
-            features = [ "derive" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
-          }
-        ];
-        features = {
-          "simulation" = [ "aura-core/simulation" ];
-          "telltale-runtime-capability" = [ "dep:telltale-machine" ];
-          "transparent_onion" = [ "aura-core/transparent_onion" ];
-        };
-        resolvedDefaultFeatures = [ "default" "simulation" "telltale-runtime-capability" "transparent_onion" ];
-      };
-      "aura-guards" = rec {
-        crateName = "aura-guards";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Guard chain enforcement for authorization, flow budgets, and leakage tracking";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-guards; };
-        libName = "aura_guards";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-authorization";
-            packageId = "aura-authorization";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "parking_lot";
-            packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-
-      };
       "aura-harness" = rec {
         crateName = "aura-harness";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         description = "Multi-instance runtime harness for Aura";
         crateBin = [
@@ -3442,14 +1779,6 @@ with optional architecture-specific hardware acceleration
             packageId = "async-trait";
           }
           {
-            name = "aura-app";
-            packageId = "aura-app";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
             name = "aura-simulator";
             packageId = "aura-simulator";
           }
@@ -3470,6 +1799,16 @@ with optional architecture-specific hardware acceleration
           {
             name = "hex";
             packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-app";
+            packageId = "hxrts-aura-app";
+            rename = "aura-app";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
           }
           {
             name = "nix";
@@ -3568,611 +1907,9 @@ with optional architecture-specific hardware acceleration
         };
         resolvedDefaultFeatures = [ "default" "patchbay-backend" ];
       };
-      "aura-invitation" = rec {
-        crateName = "aura-invitation";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Invitation lifecycle protocols for contacts, channels, and guardians";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-invitation; };
-        libName = "aura_invitation";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-authentication";
-            packageId = "aura-authentication";
-          }
-          {
-            name = "aura-authorization";
-            packageId = "aura-authorization";
-          }
-          {
-            name = "aura-composition";
-            packageId = "aura-composition";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "assert_matches";
-            packageId = "assert_matches";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-
-      };
-      "aura-journal" = rec {
-        crateName = "aura-journal";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Fact-based journal storage, validation, and deterministic reduction";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-journal; };
-        libName = "aura_journal";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "time";
-            packageId = "time";
-            features = [ "serde" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "criterion";
-            packageId = "criterion";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "rand_chacha";
-            packageId = "rand_chacha 0.3.1";
-          }
-        ];
-
-      };
-      "aura-macros" = rec {
-        crateName = "aura-macros";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Procedural macros for Aura ownership boundaries and choreography";
-        crateBin = [
-          {
-            name = "arch_lints";
-            path = "src/bin/arch_lints.rs";
-            requiredFeatures = [ ];
-          }
-          {
-            name = "ownership_lints";
-            path = "src/bin/ownership_lints.rs";
-            requiredFeatures = [ ];
-          }
-        ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-macros; };
-        procMacro = true;
-        libName = "aura_macros";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "proc-macro2";
-            packageId = "proc-macro2";
-            features = [ "span-locations" ];
-          }
-          {
-            name = "quote";
-            packageId = "quote";
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.117";
-            features = [ "full" "extra-traits" "visit" ];
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "telltale-language";
-            packageId = "telltale-language";
-          }
-          {
-            name = "telltale-theory";
-            packageId = "telltale-theory";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "trybuild";
-            packageId = "trybuild";
-          }
-        ];
-        features = {
-          "default" = [ "proc-macro" ];
-        };
-        resolvedDefaultFeatures = [ "default" "proc-macro" ];
-      };
-      "aura-maintenance" = rec {
-        crateName = "aura-maintenance";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Distributed maintenance: snapshots, garbage collection, and OTA upgrades";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-maintenance; };
-        libName = "aura_maintenance";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-        ];
-
-      };
-      "aura-mpst" = rec {
-        crateName = "aura-mpst";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Multi-party session type extensions for Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-mpst; };
-        libName = "aura_mpst";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "syn";
-            packageId = "syn 2.0.117";
-            features = [ "full" ];
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "telltale-language";
-            packageId = "telltale-language";
-          }
-          {
-            name = "telltale-runtime";
-            packageId = "telltale-runtime";
-          }
-          {
-            name = "telltale-theory";
-            packageId = "telltale-theory";
-          }
-          {
-            name = "telltale-types";
-            packageId = "telltale-types";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-        features = {
-        };
-        resolvedDefaultFeatures = [ "debug" "default" ];
-      };
-      "aura-protocol" = rec {
-        crateName = "aura-protocol";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Multi-party protocol orchestration and choreography execution";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-protocol; };
-        libName = "aura_protocol";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "aes-gcm";
-            packageId = "aes-gcm";
-          }
-          {
-            name = "async-lock";
-            packageId = "async-lock 3.4.2";
-          }
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-amp";
-            packageId = "aura-amp";
-          }
-          {
-            name = "aura-anti-entropy";
-            packageId = "aura-anti-entropy";
-          }
-          {
-            name = "aura-authorization";
-            packageId = "aura-authorization";
-          }
-          {
-            name = "aura-composition";
-            packageId = "aura-composition";
-          }
-          {
-            name = "aura-consensus";
-            packageId = "aura-consensus";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "aura-store";
-            packageId = "aura-store";
-          }
-          {
-            name = "aura-transport";
-            packageId = "aura-transport";
-          }
-          {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "curve25519-dalek";
-            packageId = "curve25519-dalek";
-          }
-          {
-            name = "ed25519-dalek";
-            packageId = "ed25519-dalek";
-            features = [ "rand_core" "serde" ];
-          }
-          {
-            name = "frost-ed25519";
-            packageId = "frost-ed25519";
-            features = [ "serialization" ];
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "getrandom";
-            packageId = "getrandom 0.2.17";
-            features = [ "js" ];
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "hmac";
-            packageId = "hmac";
-          }
-          {
-            name = "once_cell";
-            packageId = "once_cell";
-          }
-          {
-            name = "parking_lot";
-            packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.5";
-          }
-          {
-            name = "rand_chacha";
-            packageId = "rand_chacha 0.3.1";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "subtle";
-            packageId = "subtle";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-          {
-            name = "zeroize";
-            packageId = "zeroize";
-            features = [ "derive" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "criterion";
-            packageId = "criterion";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "async_tokio" "html_reports" ];
-          }
-        ];
-        features = {
-          "simulation" = [ "aura-core/simulation" ];
-          "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" ];
-        };
-        resolvedDefaultFeatures = [ "crdt-sync" "default" "simulation" "transparent_onion" ];
-      };
       "aura-quint" = rec {
         crateName = "aura-quint";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         description = "Core Quint formal verification integration for Aura - Layer 3: Implementation";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-quint; };
@@ -4188,16 +1925,6 @@ with optional architecture-specific hardware acceleration
           {
             name = "async-trait";
             packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-            features = [ "simulation" ];
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-            features = [ "simulation" ];
           }
           {
             name = "chrono";
@@ -4216,6 +1943,18 @@ with optional architecture-specific hardware acceleration
           {
             name = "hex";
             packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+            features = [ "simulation" ];
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+            features = [ "simulation" ];
           }
           {
             name = "quint_evaluator";
@@ -4262,417 +2001,9 @@ with optional architecture-specific hardware acceleration
         ];
 
       };
-      "aura-recovery" = rec {
-        crateName = "aura-recovery";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Guardian-based device recovery and key restoration protocols";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-recovery; };
-        libName = "aura_recovery";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-authentication";
-            packageId = "aura-authentication";
-          }
-          {
-            name = "aura-authorization";
-            packageId = "aura-authorization";
-          }
-          {
-            name = "aura-composition";
-            packageId = "aura-composition";
-          }
-          {
-            name = "aura-consensus";
-            packageId = "aura-consensus";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "aura-protocol";
-            packageId = "aura-protocol";
-          }
-          {
-            name = "aura-relational";
-            packageId = "aura-relational";
-          }
-          {
-            name = "aura-signature";
-            packageId = "aura-signature";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "assert_matches";
-            packageId = "assert_matches";
-          }
-          {
-            name = "aura-agent";
-            packageId = "aura-agent";
-          }
-          {
-            name = "aura-testkit";
-            packageId = "aura-testkit";
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-
-      };
-      "aura-relational" = rec {
-        crateName = "aura-relational";
-        version = "0.1.0";
-        edition = "2021";
-        description = "RelationalContext implementation for cross-authority coordination in Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-relational; };
-        libName = "aura_relational";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-consensus";
-            packageId = "aura-consensus";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" "v4" "serde" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-        features = {
-        };
-        resolvedDefaultFeatures = [ "default" ];
-      };
-      "aura-rendezvous" = rec {
-        crateName = "aura-rendezvous";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Secret-Branded Broadcasting (SBB) and rendezvous protocols for Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-rendezvous; };
-        libName = "aura_rendezvous";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-lock";
-            packageId = "async-lock 3.4.2";
-          }
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "aura-social";
-            packageId = "aura-social";
-          }
-          {
-            name = "aura-transport";
-            packageId = "aura-transport";
-          }
-          {
-            name = "base64";
-            packageId = "base64 0.22.1";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "curve25519-dalek";
-            packageId = "curve25519-dalek";
-          }
-          {
-            name = "ed25519-dalek";
-            packageId = "ed25519-dalek";
-            features = [ "rand_core" "serde" ];
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "indexmap";
-            packageId = "indexmap 2.13.1";
-          }
-          {
-            name = "rand_core";
-            packageId = "rand_core 0.6.4";
-            features = [ "std" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.5";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-        features = {
-        };
-        resolvedDefaultFeatures = [ "default" ];
-      };
-      "aura-signature" = rec {
-        crateName = "aura-signature";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Threshold signature schemes and attestation types for Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-signature; };
-        libName = "aura_signature";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "ed25519-dalek";
-            packageId = "ed25519-dalek";
-            features = [ "rand_core" "serde" ];
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.5";
-          }
-          {
-            name = "signature";
-            packageId = "signature";
-          }
-        ];
-
-      };
       "aura-simulator" = rec {
         crateName = "aura-simulator";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-simulator; };
         libName = "aura_simulator";
@@ -4685,47 +2016,8 @@ with optional architecture-specific hardware acceleration
             packageId = "async-trait";
           }
           {
-            name = "aura-agent";
-            packageId = "aura-agent";
-            features = [ "simulation" ];
-          }
-          {
-            name = "aura-amp";
-            packageId = "aura-amp";
-          }
-          {
-            name = "aura-consensus";
-            packageId = "aura-consensus";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-            features = [ "simulation" ];
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-            features = [ "simulation" ];
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-protocol";
-            packageId = "aura-protocol";
-          }
-          {
             name = "aura-quint";
             packageId = "aura-quint";
-          }
-          {
-            name = "aura-sync";
-            packageId = "aura-sync";
           }
           {
             name = "aura-testkit";
@@ -4766,6 +2058,54 @@ with optional architecture-specific hardware acceleration
           {
             name = "hex";
             packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-agent";
+            packageId = "hxrts-aura-agent";
+            rename = "aura-agent";
+            features = [ "simulation" ];
+          }
+          {
+            name = "hxrts-aura-amp";
+            packageId = "hxrts-aura-amp";
+            rename = "aura-amp";
+          }
+          {
+            name = "hxrts-aura-consensus";
+            packageId = "hxrts-aura-consensus";
+            rename = "aura-consensus";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+            features = [ "simulation" ];
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+            features = [ "simulation" ];
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-protocol";
+            packageId = "hxrts-aura-protocol";
+            rename = "aura-protocol";
+          }
+          {
+            name = "hxrts-aura-sync";
+            packageId = "hxrts-aura-sync";
+            rename = "aura-sync";
           }
           {
             name = "indexmap";
@@ -4835,32 +2175,39 @@ with optional architecture-specific hardware acceleration
         ];
         devDependencies = [
           {
-            name = "aura-anti-entropy";
-            packageId = "aura-anti-entropy";
+            name = "hxrts-aura-anti-entropy";
+            packageId = "hxrts-aura-anti-entropy";
+            rename = "aura-anti-entropy";
           }
           {
-            name = "aura-authentication";
-            packageId = "aura-authentication";
+            name = "hxrts-aura-authentication";
+            packageId = "hxrts-aura-authentication";
+            rename = "aura-authentication";
           }
           {
-            name = "aura-invitation";
-            packageId = "aura-invitation";
+            name = "hxrts-aura-invitation";
+            packageId = "hxrts-aura-invitation";
+            rename = "aura-invitation";
           }
           {
-            name = "aura-macros";
-            packageId = "aura-macros";
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
           }
           {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
           }
           {
-            name = "aura-recovery";
-            packageId = "aura-recovery";
+            name = "hxrts-aura-recovery";
+            packageId = "hxrts-aura-recovery";
+            rename = "aura-recovery";
           }
           {
-            name = "aura-rendezvous";
-            packageId = "aura-rendezvous";
+            name = "hxrts-aura-rendezvous";
+            packageId = "hxrts-aura-rendezvous";
+            rename = "aura-rendezvous";
           }
           {
             name = "proptest";
@@ -4875,266 +2222,9 @@ with optional architecture-specific hardware acceleration
         ];
 
       };
-      "aura-social" = rec {
-        crateName = "aura-social";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Social topology (blocks and neighborhoods) for the Aura threshold identity platform";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-social; };
-        libName = "aura_social";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-        ];
-        features = {
-          "transparent_onion" = [ "aura-core/transparent_onion" ];
-        };
-        resolvedDefaultFeatures = [ "default" "transparent_onion" ];
-      };
-      "aura-store" = rec {
-        crateName = "aura-store";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Storage domain types, semantics, and pure logic for Aura";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-store; };
-        libName = "aura_store";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-        ];
-        devDependencies = [
-          {
-            name = "proptest";
-            packageId = "proptest";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-        ];
-        features = {
-        };
-        resolvedDefaultFeatures = [ "default" ];
-      };
-      "aura-sync" = rec {
-        crateName = "aura-sync";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Journal synchronization and peer-to-peer fact exchange";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-sync; };
-        libName = "aura_sync";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "async-lock";
-            packageId = "async-lock 3.4.2";
-          }
-          {
-            name = "async-trait";
-            packageId = "async-trait";
-          }
-          {
-            name = "aura-anti-entropy";
-            packageId = "aura-anti-entropy";
-          }
-          {
-            name = "aura-authorization";
-            packageId = "aura-authorization";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-guards";
-            packageId = "aura-guards";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-maintenance";
-            packageId = "aura-maintenance";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "aura-protocol";
-            packageId = "aura-protocol";
-          }
-          {
-            name = "aura-rendezvous";
-            packageId = "aura-rendezvous";
-          }
-          {
-            name = "bincode";
-            packageId = "bincode";
-          }
-          {
-            name = "biscuit-auth";
-            packageId = "biscuit-auth";
-            features = [ "wasm" ];
-          }
-          {
-            name = "futures";
-            packageId = "futures";
-          }
-          {
-            name = "hex";
-            packageId = "hex";
-          }
-          {
-            name = "parking_lot";
-            packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
-          }
-          {
-            name = "rand";
-            packageId = "rand 0.8.5";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "telltale";
-            packageId = "telltale";
-          }
-          {
-            name = "thiserror";
-            packageId = "thiserror 1.0.69";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-          {
-            name = "tracing";
-            packageId = "tracing";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-          {
-            name = "web-time";
-            packageId = "web-time";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-        ];
-        devDependencies = [
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-testkit";
-            packageId = "aura-testkit";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
-          }
-        ];
-        features = {
-          "crdt-sync" = [ "aura-protocol/crdt-sync" ];
-          "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" "aura-protocol/transparent_onion" ];
-        };
-        resolvedDefaultFeatures = [ "crdt-sync" "default" "transparent_onion" ];
-      };
       "aura-terminal" = rec {
         crateName = "aura-terminal";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         description = "Terminal interface for Aura";
         crateBin = [
@@ -5167,70 +2257,9 @@ with optional architecture-specific hardware acceleration
             packageId = "async-trait";
           }
           {
-            name = "aura-agent";
-            packageId = "aura-agent";
-          }
-          {
-            name = "aura-app";
-            packageId = "aura-app";
-            features = [ "native" ];
-          }
-          {
-            name = "aura-authentication";
-            packageId = "aura-authentication";
-          }
-          {
-            name = "aura-authorization";
-            packageId = "aura-authorization";
-          }
-          {
-            name = "aura-chat";
-            packageId = "aura-chat";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-invitation";
-            packageId = "aura-invitation";
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-maintenance";
-            packageId = "aura-maintenance";
-          }
-          {
-            name = "aura-protocol";
-            packageId = "aura-protocol";
-          }
-          {
-            name = "aura-recovery";
-            packageId = "aura-recovery";
-          }
-          {
-            name = "aura-relational";
-            packageId = "aura-relational";
-          }
-          {
             name = "aura-simulator";
             packageId = "aura-simulator";
             optional = true;
-          }
-          {
-            name = "aura-sync";
-            packageId = "aura-sync";
           }
           {
             name = "aura-testkit";
@@ -5270,6 +2299,82 @@ with optional architecture-specific hardware acceleration
           {
             name = "hex";
             packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-agent";
+            packageId = "hxrts-aura-agent";
+            rename = "aura-agent";
+          }
+          {
+            name = "hxrts-aura-app";
+            packageId = "hxrts-aura-app";
+            rename = "aura-app";
+            features = [ "native" ];
+          }
+          {
+            name = "hxrts-aura-authentication";
+            packageId = "hxrts-aura-authentication";
+            rename = "aura-authentication";
+          }
+          {
+            name = "hxrts-aura-authorization";
+            packageId = "hxrts-aura-authorization";
+            rename = "aura-authorization";
+          }
+          {
+            name = "hxrts-aura-chat";
+            packageId = "hxrts-aura-chat";
+            rename = "aura-chat";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-invitation";
+            packageId = "hxrts-aura-invitation";
+            rename = "aura-invitation";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-maintenance";
+            packageId = "hxrts-aura-maintenance";
+            rename = "aura-maintenance";
+          }
+          {
+            name = "hxrts-aura-protocol";
+            packageId = "hxrts-aura-protocol";
+            rename = "aura-protocol";
+          }
+          {
+            name = "hxrts-aura-recovery";
+            packageId = "hxrts-aura-recovery";
+            rename = "aura-recovery";
+          }
+          {
+            name = "hxrts-aura-relational";
+            packageId = "hxrts-aura-relational";
+            rename = "aura-relational";
+          }
+          {
+            name = "hxrts-aura-sync";
+            packageId = "hxrts-aura-sync";
+            rename = "aura-sync";
           }
           {
             name = "iocraft";
@@ -5369,7 +2474,7 @@ with optional architecture-specific hardware acceleration
       };
       "aura-testkit" = rec {
         crateName = "aura-testkit";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-testkit; };
         libName = "aura_testkit";
@@ -5392,65 +2497,6 @@ with optional architecture-specific hardware acceleration
           {
             name = "async-trait";
             packageId = "async-trait";
-          }
-          {
-            name = "aura-agent";
-            packageId = "aura-agent";
-            optional = true;
-          }
-          {
-            name = "aura-amp";
-            packageId = "aura-amp";
-          }
-          {
-            name = "aura-anti-entropy";
-            packageId = "aura-anti-entropy";
-          }
-          {
-            name = "aura-app";
-            packageId = "aura-app";
-          }
-          {
-            name = "aura-authorization";
-            packageId = "aura-authorization";
-          }
-          {
-            name = "aura-consensus";
-            packageId = "aura-consensus";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-            features = [ "simulation" ];
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-            features = [ "simulation" ];
-          }
-          {
-            name = "aura-journal";
-            packageId = "aura-journal";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "aura-protocol";
-            packageId = "aura-protocol";
-          }
-          {
-            name = "aura-relational";
-            packageId = "aura-relational";
-          }
-          {
-            name = "aura-social";
-            packageId = "aura-social";
-          }
-          {
-            name = "aura-transport";
-            packageId = "aura-transport";
           }
           {
             name = "base64";
@@ -5487,6 +2533,79 @@ with optional architecture-specific hardware acceleration
           {
             name = "hex";
             packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-agent";
+            packageId = "hxrts-aura-agent";
+            rename = "aura-agent";
+            optional = true;
+          }
+          {
+            name = "hxrts-aura-amp";
+            packageId = "hxrts-aura-amp";
+            rename = "aura-amp";
+          }
+          {
+            name = "hxrts-aura-anti-entropy";
+            packageId = "hxrts-aura-anti-entropy";
+            rename = "aura-anti-entropy";
+          }
+          {
+            name = "hxrts-aura-app";
+            packageId = "hxrts-aura-app";
+            rename = "aura-app";
+          }
+          {
+            name = "hxrts-aura-authorization";
+            packageId = "hxrts-aura-authorization";
+            rename = "aura-authorization";
+          }
+          {
+            name = "hxrts-aura-consensus";
+            packageId = "hxrts-aura-consensus";
+            rename = "aura-consensus";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+            features = [ "simulation" ];
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+            features = [ "simulation" ];
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "hxrts-aura-protocol";
+            packageId = "hxrts-aura-protocol";
+            rename = "aura-protocol";
+          }
+          {
+            name = "hxrts-aura-relational";
+            packageId = "hxrts-aura-relational";
+            rename = "aura-relational";
+          }
+          {
+            name = "hxrts-aura-social";
+            packageId = "hxrts-aura-social";
+            rename = "aura-social";
+          }
+          {
+            name = "hxrts-aura-transport";
+            packageId = "hxrts-aura-transport";
+            rename = "aura-transport";
           }
           {
             name = "once_cell";
@@ -5569,14 +2688,6 @@ with optional architecture-specific hardware acceleration
         ];
         devDependencies = [
           {
-            name = "aura-composition";
-            packageId = "aura-composition";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
             name = "bincode";
             packageId = "bincode";
           }
@@ -5585,6 +2696,16 @@ with optional architecture-specific hardware acceleration
             packageId = "criterion";
             target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "async_tokio" "html_reports" ];
+          }
+          {
+            name = "hxrts-aura-composition";
+            packageId = "hxrts-aura-composition";
+            rename = "aura-composition";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
           }
           {
             name = "tempfile";
@@ -5597,52 +2718,9 @@ with optional architecture-specific hardware acceleration
         };
         resolvedDefaultFeatures = [ "crdt-sync" "default" "full-effect-system" "lean" ];
       };
-      "aura-transport" = rec {
-        crateName = "aura-transport";
-        version = "0.1.0";
-        edition = "2021";
-        description = "Privacy-aware transport data types and protocol definitions (Layer 2)";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-transport; };
-        libName = "aura_transport";
-        authors = [
-          "Sam Hart"
-        ];
-        dependencies = [
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" "rc" ];
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
-          }
-          {
-            name = "uuid";
-            packageId = "uuid";
-            features = [ "v4" "v5" "serde" "js" ];
-          }
-        ];
-        devDependencies = [
-          {
-            name = "criterion";
-            packageId = "criterion";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
-          }
-        ];
-
-      };
       "aura-ui" = rec {
         crateName = "aura-ui";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         description = "Shared Dioxus UI core for Aura frontends";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-ui; };
@@ -5658,15 +2736,6 @@ with optional architecture-specific hardware acceleration
           {
             name = "async-trait";
             packageId = "async-trait";
-          }
-          {
-            name = "aura-app";
-            packageId = "aura-app";
-            features = [ "signals" ];
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
           }
           {
             name = "cfg-if";
@@ -5685,6 +2754,17 @@ with optional architecture-specific hardware acceleration
           {
             name = "futures";
             packageId = "futures";
+          }
+          {
+            name = "hxrts-aura-app";
+            packageId = "hxrts-aura-app";
+            rename = "aura-app";
+            features = [ "signals" ];
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
           }
           {
             name = "serde";
@@ -5721,7 +2801,7 @@ with optional architecture-specific hardware acceleration
       };
       "aura-web" = rec {
         crateName = "aura-web";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         description = "Webapp for Aura built with Dioxus 0.7";
         crateBin = [
@@ -5743,24 +2823,6 @@ with optional architecture-specific hardware acceleration
           {
             name = "async-trait";
             packageId = "async-trait";
-          }
-          {
-            name = "aura-agent";
-            packageId = "aura-agent";
-            features = [ "web" ];
-          }
-          {
-            name = "aura-app";
-            packageId = "aura-app";
-            features = [ "web-js" ];
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
           }
           {
             name = "aura-ui";
@@ -5789,6 +2851,28 @@ with optional architecture-specific hardware acceleration
             packageId = "gloo-net";
             target = { target, features }: ("wasm32" == target."arch" or null);
             features = [ "http" ];
+          }
+          {
+            name = "hxrts-aura-agent";
+            packageId = "hxrts-aura-agent";
+            rename = "aura-agent";
+            features = [ "web" ];
+          }
+          {
+            name = "hxrts-aura-app";
+            packageId = "hxrts-aura-app";
+            rename = "aura-app";
+            features = [ "web-js" ];
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
           }
           {
             name = "js-sys";
@@ -6976,13 +4060,13 @@ constant-time operation and embedded-friendly no_std support
       };
       "cc" = rec {
         crateName = "cc";
-        version = "1.2.58";
+        version = "1.2.59";
         edition = "2018";
         description = "A build-time dependency for Cargo build scripts to assist in invoking the native
 C compiler to compile native C code into a static archive to be linked into Rust
 code.
 ";
-        sha256 = "1qb0zyqhn8pqzdp7d3scm19zmvgvbyh3iabmj1q7fc4ynva2isg1";
+        sha256 = "10sjxshjiyvglpqnap8z8fqdggf9mnxm8dn5kwr8mli4cpnd795p";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -12168,12 +9252,12 @@ decoding/encoding support
         ];
 
       };
-      "fastrand 2.3.0" = rec {
+      "fastrand 2.4.1" = rec {
         crateName = "fastrand";
-        version = "2.3.0";
+        version = "2.4.1";
         edition = "2018";
         description = "A simple and fast random number generator";
-        sha256 = "1ghiahsw1jd68df895cy5h3gzwk30hndidn3b682zmshpgmrx41p";
+        sha256 = "1mnqxxnxvd69ma9mczabpbbsgwlhd6l78yv3vd681453a9s247wz";
         authors = [
           "Stjepan Glavina <stjepang@gmail.com>"
         ];
@@ -14358,7 +11442,7 @@ as in the AES-GCM authenticated encryption cipher.
       };
       "hello-choreo" = rec {
         crateName = "hello-choreo";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         crateBin = [
           {
@@ -14374,24 +11458,27 @@ as in the AES-GCM authenticated encryption cipher.
             packageId = "async-trait";
           }
           {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
             name = "bincode";
             packageId = "bincode";
           }
           {
             name = "futures";
             packageId = "futures";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
           }
           {
             name = "serde";
@@ -14413,7 +11500,7 @@ as in the AES-GCM authenticated encryption cipher.
       };
       "hello-crdt" = rec {
         crateName = "hello-crdt";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         crateBin = [
           {
@@ -14425,8 +11512,9 @@ as in the AES-GCM authenticated encryption cipher.
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./examples/hello-crdt; };
         dependencies = [
           {
-            name = "aura-core";
-            packageId = "aura-core";
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
           }
         ];
 
@@ -14713,6 +11801,3125 @@ as in the AES-GCM authenticated encryption cipher.
         sha256 = "1aa9rd2sac0zhjqh24c9xvir96g188zldkx0hr6dnnlx5904cfyz";
         authors = [
           "Pyfisch <pyfisch@posteo.org>"
+        ];
+
+      };
+      "hxrts-aura-agent" = rec {
+        crateName = "hxrts-aura-agent";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Capability-based agents with clean service layer architecture for identity management";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-agent; };
+        libName = "aura_agent";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "dirs";
+            packageId = "dirs 5.0.1";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            features = [ "rand_core" "serde" ];
+          }
+          {
+            name = "frost-ed25519";
+            packageId = "frost-ed25519";
+            features = [ "serialization" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "futures-signals";
+            packageId = "futures-signals";
+          }
+          {
+            name = "get_if_addrs";
+            packageId = "get_if_addrs";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "gloo-net";
+            packageId = "gloo-net";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "http" "websocket" ];
+          }
+          {
+            name = "gloo-timers";
+            packageId = "gloo-timers 0.3.0";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "futures" ];
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-amp";
+            packageId = "hxrts-aura-amp";
+            rename = "aura-amp";
+          }
+          {
+            name = "hxrts-aura-app";
+            packageId = "hxrts-aura-app";
+            rename = "aura-app";
+            features = [ "signals" ];
+          }
+          {
+            name = "hxrts-aura-authentication";
+            packageId = "hxrts-aura-authentication";
+            rename = "aura-authentication";
+          }
+          {
+            name = "hxrts-aura-authorization";
+            packageId = "hxrts-aura-authorization";
+            rename = "aura-authorization";
+          }
+          {
+            name = "hxrts-aura-chat";
+            packageId = "hxrts-aura-chat";
+            rename = "aura-chat";
+          }
+          {
+            name = "hxrts-aura-composition";
+            packageId = "hxrts-aura-composition";
+            rename = "aura-composition";
+          }
+          {
+            name = "hxrts-aura-consensus";
+            packageId = "hxrts-aura-consensus";
+            rename = "aura-consensus";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-invitation";
+            packageId = "hxrts-aura-invitation";
+            rename = "aura-invitation";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-maintenance";
+            packageId = "hxrts-aura-maintenance";
+            rename = "aura-maintenance";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "hxrts-aura-protocol";
+            packageId = "hxrts-aura-protocol";
+            rename = "aura-protocol";
+          }
+          {
+            name = "hxrts-aura-recovery";
+            packageId = "hxrts-aura-recovery";
+            rename = "aura-recovery";
+          }
+          {
+            name = "hxrts-aura-relational";
+            packageId = "hxrts-aura-relational";
+            rename = "aura-relational";
+          }
+          {
+            name = "hxrts-aura-rendezvous";
+            packageId = "hxrts-aura-rendezvous";
+            rename = "aura-rendezvous";
+          }
+          {
+            name = "hxrts-aura-signature";
+            packageId = "hxrts-aura-signature";
+            rename = "aura-signature";
+          }
+          {
+            name = "hxrts-aura-social";
+            packageId = "hxrts-aura-social";
+            rename = "aura-social";
+          }
+          {
+            name = "hxrts-aura-store";
+            packageId = "hxrts-aura-store";
+            rename = "aura-store";
+          }
+          {
+            name = "hxrts-aura-sync";
+            packageId = "hxrts-aura-sync";
+            rename = "aura-sync";
+          }
+          {
+            name = "hxrts-aura-transport";
+            packageId = "hxrts-aura-transport";
+            rename = "aura-transport";
+          }
+          {
+            name = "once_cell";
+            packageId = "once_cell";
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot 0.12.5";
+            features = [ "deadlock_detection" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.5";
+          }
+          {
+            name = "rand_core";
+            packageId = "rand_core 0.6.4";
+            features = [ "std" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_cbor";
+            packageId = "serde_cbor";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "subtle";
+            packageId = "subtle";
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "telltale-machine";
+            packageId = "telltale-machine";
+            optional = true;
+            features = [ "multi-thread" ];
+          }
+          {
+            name = "telltale-types";
+            packageId = "telltale-types";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "time";
+            packageId = "time";
+            features = [ "serde" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "io-util" "macros" "rt" "sync" "time" "net" "rt-multi-thread" ];
+          }
+          {
+            name = "tokio-tungstenite";
+            packageId = "tokio-tungstenite 0.20.1";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "Window" "Location" ];
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
+            features = [ "derive" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+          }
+          {
+            name = "async-lock";
+            packageId = "async-lock 3.4.2";
+          }
+          {
+            name = "aura-testkit";
+            packageId = "aura-testkit";
+            rename = "aura-testkit";
+          }
+          {
+            name = "criterion";
+            packageId = "criterion";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "loom";
+            packageId = "loom";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "telltale-machine";
+            packageId = "telltale-machine";
+            features = [ "multi-thread" ];
+          }
+          {
+            name = "telltale-theory";
+            packageId = "telltale-theory";
+          }
+          {
+            name = "telltale-types";
+            packageId = "telltale-types";
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
+            name = "tracing-subscriber";
+            packageId = "tracing-subscriber";
+            usesDefaultFeatures = false;
+            features = [ "fmt" "env-filter" ];
+          }
+          {
+            name = "trybuild";
+            packageId = "trybuild";
+          }
+          {
+            name = "wasm-bindgen-test";
+            packageId = "wasm-bindgen-test";
+          }
+        ];
+        features = {
+          "choreo-backend-telltale-machine" = [ "dep:telltale-machine" "aura-effects/telltale-runtime-capability" ];
+          "default" = [ "choreo-backend-telltale-machine" ];
+          "simulation" = [ "aura-core/simulation" ];
+          "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" "aura-protocol/transparent_onion" "aura-social/transparent_onion" "aura-sync/transparent_onion" ];
+        };
+        resolvedDefaultFeatures = [ "android" "choreo-backend-telltale-machine" "default" "ios" "real-android-keystore" "simulation" "transparent_onion" "web" ];
+      };
+      "hxrts-aura-amp" = rec {
+        crateName = "hxrts-aura-amp";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Aura Messaging Protocol: reliable async messaging with acknowledgment and ordering";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-amp; };
+        libName = "aura_amp";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-consensus";
+            packageId = "hxrts-aura-consensus";
+            rename = "aura-consensus";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "hxrts-aura-transport";
+            packageId = "hxrts-aura-transport";
+            rename = "aura-transport";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+        features = {
+          "default" = [ "demo-crypto" ];
+          "simulation" = [ "aura-core/simulation" ];
+        };
+        resolvedDefaultFeatures = [ "default" "demo-crypto" "simulation" ];
+      };
+      "hxrts-aura-anti-entropy" = rec {
+        crateName = "hxrts-aura-anti-entropy";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Journal anti-entropy and fact synchronization for Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-anti-entropy; };
+        libName = "aura_anti_entropy";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-lock";
+            packageId = "async-lock 3.4.2";
+          }
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+        features = {
+          "simulation" = [ "aura-core/simulation" ];
+        };
+        resolvedDefaultFeatures = [ "default" "simulation" ];
+      };
+      "hxrts-aura-app" = rec {
+        crateName = "hxrts-aura-app";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Portable headless application core for Aura";
+        crateBin = [
+          {
+            name = "app-host";
+            path = "src/bin/app_host.rs";
+            requiredFeatures = [ "host" ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-app; };
+        libName = "aura_app";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+            optional = true;
+          }
+          {
+            name = "async-lock";
+            packageId = "async-lock 3.4.2";
+          }
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "console_error_panic_hook";
+            packageId = "console_error_panic_hook";
+            optional = true;
+          }
+          {
+            name = "dominator";
+            packageId = "dominator";
+            optional = true;
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "futures-signals";
+            packageId = "futures-signals";
+            optional = true;
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.17";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "js" ];
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-chat";
+            packageId = "hxrts-aura-chat";
+            rename = "aura-chat";
+          }
+          {
+            name = "hxrts-aura-composition";
+            packageId = "hxrts-aura-composition";
+            rename = "aura-composition";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-maintenance";
+            packageId = "hxrts-aura-maintenance";
+            rename = "aura-maintenance";
+          }
+          {
+            name = "hxrts-aura-protocol";
+            packageId = "hxrts-aura-protocol";
+            rename = "aura-protocol";
+          }
+          {
+            name = "hxrts-aura-recovery";
+            packageId = "hxrts-aura-recovery";
+            rename = "aura-recovery";
+          }
+          {
+            name = "hxrts-aura-relational";
+            packageId = "hxrts-aura-relational";
+            rename = "aura-relational";
+          }
+          {
+            name = "hxrts-aura-social";
+            packageId = "hxrts-aura-social";
+            rename = "aura-social";
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            optional = true;
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot 0.12.5";
+            features = [ "deadlock_detection" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.18";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            optional = true;
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" ];
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            optional = true;
+            features = [ "console" "Location" "Window" "WorkerGlobalScope" ];
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            features = [ "build" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "trybuild";
+            packageId = "trybuild";
+          }
+        ];
+        features = {
+          "android" = [ "uniffi" "mobile" ];
+          "host" = [ "dep:anyhow" ];
+          "instrumented" = [ "dep:tracing" ];
+          "ios" = [ "uniffi" "mobile" ];
+          "mobile" = [ "uniffi" "callbacks" ];
+          "native" = [ "signals" ];
+          "signals" = [ "dep:futures-signals" ];
+          "uniffi" = [ "dep:uniffi" "callbacks" ];
+          "wasm" = [ "dep:wasm-bindgen" "dep:js-sys" "dep:web-sys" "dep:console_error_panic_hook" ];
+          "web-dominator" = [ "wasm" "signals" "dep:dominator" ];
+          "web-js" = [ "wasm" ];
+        };
+        resolvedDefaultFeatures = [ "android" "app-internals" "callbacks" "debug-serialize" "default" "host" "instrumented" "ios" "mobile" "native" "signals" "uniffi" "wasm" "web-dominator" "web-js" ];
+      };
+      "hxrts-aura-authentication" = rec {
+        crateName = "hxrts-aura-authentication";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Authentication protocols and identity verification for Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-authentication; };
+        libName = "aura_authentication";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            features = [ "rand_core" "serde" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-authorization";
+            packageId = "hxrts-aura-authorization";
+            rename = "aura-authorization";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "hxrts-aura-protocol";
+            packageId = "hxrts-aura-protocol";
+            rename = "aura-protocol";
+          }
+          {
+            name = "hxrts-aura-relational";
+            packageId = "hxrts-aura-relational";
+            rename = "aura-relational";
+          }
+          {
+            name = "hxrts-aura-signature";
+            packageId = "hxrts-aura-signature";
+            rename = "aura-signature";
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.5";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "aura-testkit";
+            packageId = "aura-testkit";
+            rename = "aura-testkit";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+
+      };
+      "hxrts-aura-authorization" = rec {
+        crateName = "hxrts-aura-authorization";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Capability-based authorization for Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-authorization; };
+        libName = "aura_authorization";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+
+      };
+      "hxrts-aura-chat" = rec {
+        crateName = "hxrts-aura-chat";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Secure chat functionality for the Aura threshold identity platform";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-chat; };
+        libName = "aura_chat";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "hxrts-aura-composition";
+            packageId = "hxrts-aura-composition";
+            rename = "aura-composition";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "hxrts-aura-composition" = rec {
+        crateName = "hxrts-aura-composition";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Aura Layer 3: Handler composition and effect system assembly";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-composition; };
+        libName = "aura_composition";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" "serde" "v4" ];
+          }
+        ];
+
+      };
+      "hxrts-aura-consensus" = rec {
+        crateName = "hxrts-aura-consensus";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Single-shot consensus protocol for non-monotone operations in Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-consensus; };
+        libName = "aura_consensus";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-lock";
+            packageId = "async-lock 3.4.2";
+          }
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "curve25519-dalek";
+            packageId = "curve25519-dalek";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            features = [ "rand_core" "serde" ];
+          }
+          {
+            name = "frost-ed25519";
+            packageId = "frost-ed25519";
+            features = [ "serialization" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.17";
+            features = [ "js" ];
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.5";
+          }
+          {
+            name = "rand_chacha";
+            packageId = "rand_chacha 0.3.1";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "subtle";
+            packageId = "subtle";
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
+            features = [ "derive" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "telltale-theory";
+            packageId = "telltale-theory";
+          }
+        ];
+        features = {
+          "simulation" = [ "aura-core/simulation" ];
+        };
+        resolvedDefaultFeatures = [ "default" "simulation" ];
+      };
+      "hxrts-aura-core" = rec {
+        crateName = "hxrts-aura-core";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Foundation types, effect traits, and cryptographic utilities for Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-core; };
+        libName = "aura_core";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "blake3";
+            packageId = "blake3";
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            features = [ "rand_core" "serde" ];
+          }
+          {
+            name = "frost-ed25519";
+            packageId = "frost-ed25519";
+            features = [ "serialization" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot 0.12.5";
+            features = [ "deadlock_detection" ];
+          }
+          {
+            name = "paste";
+            packageId = "paste";
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.5";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_bytes";
+            packageId = "serde_bytes";
+          }
+          {
+            name = "serde_ipld_dagcbor";
+            packageId = "serde_ipld_dagcbor";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "time";
+            packageId = "time";
+            features = [ "serde" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "toml";
+            packageId = "toml 0.8.23";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+          {
+            name = "web-time";
+            packageId = "web-time";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
+            features = [ "derive" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "criterion";
+            packageId = "criterion";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "async_tokio" ];
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "io-util" "macros" "rt" "sync" "time" "rt-multi-thread" ];
+          }
+          {
+            name = "tracing-subscriber";
+            packageId = "tracing-subscriber";
+            usesDefaultFeatures = false;
+            features = [ "fmt" "env-filter" ];
+          }
+          {
+            name = "trybuild";
+            packageId = "trybuild";
+          }
+        ];
+        features = {
+          "proptest" = [ "dep:proptest" ];
+        };
+        resolvedDefaultFeatures = [ "default" "proptest" "simulation" "transparent_onion" ];
+      };
+      "hxrts-aura-effects" = rec {
+        crateName = "hxrts-aura-effects";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Standard library of context-free effect handler implementations";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-effects; };
+        libName = "aura_effects";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "aes-gcm";
+            packageId = "aes-gcm";
+          }
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "cfg-if";
+            packageId = "cfg-if";
+          }
+          {
+            name = "chacha20";
+            packageId = "chacha20";
+          }
+          {
+            name = "chacha20poly1305";
+            packageId = "chacha20poly1305";
+          }
+          {
+            name = "curve25519-dalek";
+            packageId = "curve25519-dalek";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            features = [ "rand_core" "serde" ];
+          }
+          {
+            name = "fastrand";
+            packageId = "fastrand 2.4.1";
+          }
+          {
+            name = "frost-core";
+            packageId = "frost-core";
+            features = [ "serialization" ];
+          }
+          {
+            name = "frost-ed25519";
+            packageId = "frost-ed25519";
+            features = [ "serialization" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "futures-util";
+            packageId = "futures-util";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.17";
+            features = [ "js" ];
+          }
+          {
+            name = "gloo-timers";
+            packageId = "gloo-timers 0.3.0";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "futures" ];
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "indexed_db_futures";
+            packageId = "indexed_db_futures";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "serde" ];
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "postcard";
+            packageId = "postcard";
+            features = [ "use-std" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.5";
+          }
+          {
+            name = "rand_chacha";
+            packageId = "rand_chacha 0.3.1";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "sha2";
+            packageId = "sha2 0.10.9";
+          }
+          {
+            name = "snow";
+            packageId = "snow";
+          }
+          {
+            name = "socket2";
+            packageId = "socket2 0.5.10";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "all" ];
+          }
+          {
+            name = "telltale-machine";
+            packageId = "telltale-machine";
+            optional = true;
+            features = [ "multi-thread" ];
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "io-util" "macros" "rt" "sync" "time" "fs" "net" ];
+          }
+          {
+            name = "tokio-tungstenite";
+            packageId = "tokio-tungstenite 0.23.1";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "url";
+            packageId = "url";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "Window" "Storage" ];
+          }
+          {
+            name = "web-time";
+            packageId = "web-time";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
+            features = [ "derive" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+        ];
+        features = {
+          "simulation" = [ "aura-core/simulation" ];
+          "telltale-runtime-capability" = [ "dep:telltale-machine" ];
+          "transparent_onion" = [ "aura-core/transparent_onion" ];
+        };
+        resolvedDefaultFeatures = [ "default" "simulation" "telltale-runtime-capability" "transparent_onion" ];
+      };
+      "hxrts-aura-guards" = rec {
+        crateName = "hxrts-aura-guards";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Guard chain enforcement for authorization, flow budgets, and leakage tracking";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-guards; };
+        libName = "aura_guards";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-authorization";
+            packageId = "hxrts-aura-authorization";
+            rename = "aura-authorization";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "parking_lot";
+            packageId = "parking_lot 0.12.5";
+            features = [ "deadlock_detection" ];
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+
+      };
+      "hxrts-aura-invitation" = rec {
+        crateName = "hxrts-aura-invitation";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Invitation lifecycle protocols for contacts, channels, and guardians";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-invitation; };
+        libName = "aura_invitation";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-authentication";
+            packageId = "hxrts-aura-authentication";
+            rename = "aura-authentication";
+          }
+          {
+            name = "hxrts-aura-authorization";
+            packageId = "hxrts-aura-authorization";
+            rename = "aura-authorization";
+          }
+          {
+            name = "hxrts-aura-composition";
+            packageId = "hxrts-aura-composition";
+            rename = "aura-composition";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "once_cell";
+            packageId = "once_cell";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "assert_matches";
+            packageId = "assert_matches";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+
+      };
+      "hxrts-aura-journal" = rec {
+        crateName = "hxrts-aura-journal";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Fact-based journal storage, validation, and deterministic reduction";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-journal; };
+        libName = "aura_journal";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "time";
+            packageId = "time";
+            features = [ "serde" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "criterion";
+            packageId = "criterion";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "rand_chacha";
+            packageId = "rand_chacha 0.3.1";
+          }
+        ];
+
+      };
+      "hxrts-aura-macros" = rec {
+        crateName = "hxrts-aura-macros";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Procedural macros for Aura ownership boundaries and choreography";
+        crateBin = [
+          {
+            name = "arch_lints";
+            path = "src/bin/arch_lints.rs";
+            requiredFeatures = [ ];
+          }
+          {
+            name = "ownership_lints";
+            path = "src/bin/ownership_lints.rs";
+            requiredFeatures = [ ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-macros; };
+        procMacro = true;
+        libName = "aura_macros";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            features = [ "span-locations" ];
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.117";
+            features = [ "full" "extra-traits" "visit" ];
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "telltale-language";
+            packageId = "telltale-language";
+          }
+          {
+            name = "telltale-theory";
+            packageId = "telltale-theory";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "trybuild";
+            packageId = "trybuild";
+          }
+        ];
+        features = {
+          "default" = [ "proc-macro" ];
+        };
+        resolvedDefaultFeatures = [ "default" "proc-macro" ];
+      };
+      "hxrts-aura-maintenance" = rec {
+        crateName = "hxrts-aura-maintenance";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Distributed maintenance: snapshots, garbage collection, and OTA upgrades";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-maintenance; };
+        libName = "aura_maintenance";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+
+      };
+      "hxrts-aura-mpst" = rec {
+        crateName = "hxrts-aura-mpst";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Multi-party session type extensions for Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-mpst; };
+        libName = "aura_mpst";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.117";
+            features = [ "full" ];
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "telltale-language";
+            packageId = "telltale-language";
+          }
+          {
+            name = "telltale-runtime";
+            packageId = "telltale-runtime";
+          }
+          {
+            name = "telltale-theory";
+            packageId = "telltale-theory";
+          }
+          {
+            name = "telltale-types";
+            packageId = "telltale-types";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "debug" "default" ];
+      };
+      "hxrts-aura-protocol" = rec {
+        crateName = "hxrts-aura-protocol";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Multi-party protocol orchestration and choreography execution";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-protocol; };
+        libName = "aura_protocol";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "aes-gcm";
+            packageId = "aes-gcm";
+          }
+          {
+            name = "async-lock";
+            packageId = "async-lock 3.4.2";
+          }
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "curve25519-dalek";
+            packageId = "curve25519-dalek";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            features = [ "rand_core" "serde" ];
+          }
+          {
+            name = "frost-ed25519";
+            packageId = "frost-ed25519";
+            features = [ "serialization" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "getrandom";
+            packageId = "getrandom 0.2.17";
+            features = [ "js" ];
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hmac";
+            packageId = "hmac";
+          }
+          {
+            name = "hxrts-aura-amp";
+            packageId = "hxrts-aura-amp";
+            rename = "aura-amp";
+          }
+          {
+            name = "hxrts-aura-anti-entropy";
+            packageId = "hxrts-aura-anti-entropy";
+            rename = "aura-anti-entropy";
+          }
+          {
+            name = "hxrts-aura-authorization";
+            packageId = "hxrts-aura-authorization";
+            rename = "aura-authorization";
+          }
+          {
+            name = "hxrts-aura-composition";
+            packageId = "hxrts-aura-composition";
+            rename = "aura-composition";
+          }
+          {
+            name = "hxrts-aura-consensus";
+            packageId = "hxrts-aura-consensus";
+            rename = "aura-consensus";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "hxrts-aura-store";
+            packageId = "hxrts-aura-store";
+            rename = "aura-store";
+          }
+          {
+            name = "hxrts-aura-transport";
+            packageId = "hxrts-aura-transport";
+            rename = "aura-transport";
+          }
+          {
+            name = "once_cell";
+            packageId = "once_cell";
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot 0.12.5";
+            features = [ "deadlock_detection" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.5";
+          }
+          {
+            name = "rand_chacha";
+            packageId = "rand_chacha 0.3.1";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "subtle";
+            packageId = "subtle";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+          {
+            name = "zeroize";
+            packageId = "zeroize";
+            features = [ "derive" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "criterion";
+            packageId = "criterion";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "async_tokio" "html_reports" ];
+          }
+        ];
+        features = {
+          "simulation" = [ "aura-core/simulation" ];
+          "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" ];
+        };
+        resolvedDefaultFeatures = [ "crdt-sync" "default" "simulation" "transparent_onion" ];
+      };
+      "hxrts-aura-recovery" = rec {
+        crateName = "hxrts-aura-recovery";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Guardian-based device recovery and key restoration protocols";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-recovery; };
+        libName = "aura_recovery";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-authentication";
+            packageId = "hxrts-aura-authentication";
+            rename = "aura-authentication";
+          }
+          {
+            name = "hxrts-aura-authorization";
+            packageId = "hxrts-aura-authorization";
+            rename = "aura-authorization";
+          }
+          {
+            name = "hxrts-aura-composition";
+            packageId = "hxrts-aura-composition";
+            rename = "aura-composition";
+          }
+          {
+            name = "hxrts-aura-consensus";
+            packageId = "hxrts-aura-consensus";
+            rename = "aura-consensus";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "hxrts-aura-protocol";
+            packageId = "hxrts-aura-protocol";
+            rename = "aura-protocol";
+          }
+          {
+            name = "hxrts-aura-relational";
+            packageId = "hxrts-aura-relational";
+            rename = "aura-relational";
+          }
+          {
+            name = "hxrts-aura-signature";
+            packageId = "hxrts-aura-signature";
+            rename = "aura-signature";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "assert_matches";
+            packageId = "assert_matches";
+          }
+          {
+            name = "aura-testkit";
+            packageId = "aura-testkit";
+            rename = "aura-testkit";
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+
+      };
+      "hxrts-aura-relational" = rec {
+        crateName = "hxrts-aura-relational";
+        version = "0.2.0";
+        edition = "2021";
+        description = "RelationalContext implementation for cross-authority coordination in Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-relational; };
+        libName = "aura_relational";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "hxrts-aura-consensus";
+            packageId = "hxrts-aura-consensus";
+            rename = "aura-consensus";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" "v4" "serde" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "hxrts-aura-rendezvous" = rec {
+        crateName = "hxrts-aura-rendezvous";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Secret-Branded Broadcasting (SBB) and rendezvous protocols for Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-rendezvous; };
+        libName = "aura_rendezvous";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-lock";
+            packageId = "async-lock 3.4.2";
+          }
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "curve25519-dalek";
+            packageId = "curve25519-dalek";
+          }
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            features = [ "rand_core" "serde" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "hxrts-aura-social";
+            packageId = "hxrts-aura-social";
+            rename = "aura-social";
+          }
+          {
+            name = "hxrts-aura-transport";
+            packageId = "hxrts-aura-transport";
+            rename = "aura-transport";
+          }
+          {
+            name = "indexmap";
+            packageId = "indexmap 2.13.1";
+          }
+          {
+            name = "rand_core";
+            packageId = "rand_core 0.6.4";
+            features = [ "std" ];
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.5";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "hxrts-aura-signature" = rec {
+        crateName = "hxrts-aura-signature";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Threshold signature schemes and attestation types for Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-signature; };
+        libName = "aura_signature";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "ed25519-dalek";
+            packageId = "ed25519-dalek";
+            features = [ "rand_core" "serde" ];
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.5";
+          }
+          {
+            name = "signature";
+            packageId = "signature";
+          }
+        ];
+
+      };
+      "hxrts-aura-social" = rec {
+        crateName = "hxrts-aura-social";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Social topology (blocks and neighborhoods) for the Aura threshold identity platform";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-social; };
+        libName = "aura_social";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+        features = {
+          "transparent_onion" = [ "aura-core/transparent_onion" ];
+        };
+        resolvedDefaultFeatures = [ "default" "transparent_onion" ];
+      };
+      "hxrts-aura-store" = rec {
+        crateName = "hxrts-aura-store";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Storage domain types, semantics, and pure logic for Aura";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-store; };
+        libName = "aura_store";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "proptest";
+            packageId = "proptest";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+        features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "hxrts-aura-sync" = rec {
+        crateName = "hxrts-aura-sync";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Journal synchronization and peer-to-peer fact exchange";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-sync; };
+        libName = "aura_sync";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "async-lock";
+            packageId = "async-lock 3.4.2";
+          }
+          {
+            name = "async-trait";
+            packageId = "async-trait";
+          }
+          {
+            name = "bincode";
+            packageId = "bincode";
+          }
+          {
+            name = "biscuit-auth";
+            packageId = "biscuit-auth";
+            features = [ "wasm" ];
+          }
+          {
+            name = "futures";
+            packageId = "futures";
+          }
+          {
+            name = "hex";
+            packageId = "hex";
+          }
+          {
+            name = "hxrts-aura-anti-entropy";
+            packageId = "hxrts-aura-anti-entropy";
+            rename = "aura-anti-entropy";
+          }
+          {
+            name = "hxrts-aura-authorization";
+            packageId = "hxrts-aura-authorization";
+            rename = "aura-authorization";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-guards";
+            packageId = "hxrts-aura-guards";
+            rename = "aura-guards";
+          }
+          {
+            name = "hxrts-aura-journal";
+            packageId = "hxrts-aura-journal";
+            rename = "aura-journal";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-maintenance";
+            packageId = "hxrts-aura-maintenance";
+            rename = "aura-maintenance";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "hxrts-aura-protocol";
+            packageId = "hxrts-aura-protocol";
+            rename = "aura-protocol";
+          }
+          {
+            name = "hxrts-aura-rendezvous";
+            packageId = "hxrts-aura-rendezvous";
+            rename = "aura-rendezvous";
+          }
+          {
+            name = "parking_lot";
+            packageId = "parking_lot 0.12.5";
+            features = [ "deadlock_detection" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.5";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "telltale";
+            packageId = "telltale";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 1.0.69";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "tracing";
+            packageId = "tracing";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+          {
+            name = "web-time";
+            packageId = "web-time";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+        ];
+        devDependencies = [
+          {
+            name = "aura-testkit";
+            packageId = "aura-testkit";
+            rename = "aura-testkit";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+        ];
+        features = {
+          "crdt-sync" = [ "aura-protocol/crdt-sync" ];
+          "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" "aura-protocol/transparent_onion" ];
+        };
+        resolvedDefaultFeatures = [ "crdt-sync" "default" "transparent_onion" ];
+      };
+      "hxrts-aura-transport" = rec {
+        crateName = "hxrts-aura-transport";
+        version = "0.2.0";
+        edition = "2021";
+        description = "Privacy-aware transport data types and protocol definitions (Layer 2)";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/aura-transport; };
+        libName = "aura_transport";
+        authors = [
+          "Sam Hart"
+        ];
+        dependencies = [
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "uuid";
+            packageId = "uuid";
+            features = [ "v4" "v5" "serde" "js" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "criterion";
+            packageId = "criterion";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
         ];
 
       };
@@ -17127,10 +17334,10 @@ be used outside of a proc-macro context.
       };
       "manganis" = rec {
         crateName = "manganis";
-        version = "0.7.4";
+        version = "0.7.5";
         edition = "2021";
         description = "Ergonomic, automatic, cross crate asset collection and optimization";
-        sha256 = "0vrdhzf1x0fqpsdaj8x0yxf5r06gn3kk7mnywsmiwa4hg7bshba9";
+        sha256 = "0wzkxvvc19bzai5d1g8kaz1h4cbrl7s4rm6ijdr561zy7b9f8w9j";
         authors = [
           "Evan Almloff"
         ];
@@ -19792,7 +19999,7 @@ This removes the `loom` target and dependency which helps with UniFFI's downstre
           }
           {
             name = "fastrand";
-            packageId = "fastrand 2.3.0";
+            packageId = "fastrand 2.4.1";
             usesDefaultFeatures = false;
           }
           {
@@ -21038,7 +21245,7 @@ a Message Authentication Code (MAC)
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.59.0";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -23079,10 +23286,10 @@ shorthands for guards with one of the implemented strategies.
       };
       "semver" = rec {
         crateName = "semver";
-        version = "1.0.27";
-        edition = "2018";
+        version = "1.0.28";
+        edition = "2021";
         description = "Parser and evaluator for Cargo's flavor of Semantic Versioning";
-        sha256 = "1qmi3akfrnqc2hfkdgcxhld5bv961wbk8my3ascv5068mc5fnryp";
+        sha256 = "1kaimrpy876bcgi8bfj0qqfxk77zm9iz2zhn1hp9hj685z854y4a";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
         ];
@@ -23819,10 +24026,10 @@ contains secrets (e.g. cryptographic keys)
       };
       "serial2" = rec {
         crateName = "serial2";
-        version = "0.2.34";
+        version = "0.2.35";
         edition = "2021";
         description = "Cross platform serial ports";
-        sha256 = "0l0m4h0f8yfwpsczvl4bnqfxw7l7lx8nx57qppywsn6kcbsh254y";
+        sha256 = "0vmy427fwi6vkpjpsd1p0rg1majv7asy3630diwmcr4c4ppbfsp6";
         dependencies = [
           {
             name = "cfg-if";
@@ -23940,7 +24147,7 @@ contains secrets (e.g. cryptographic keys)
       };
       "session-choreography" = rec {
         crateName = "session-choreography";
-        version = "0.1.0";
+        version = "0.2.0";
         edition = "2021";
         crateBin = [
           {
@@ -23956,32 +24163,38 @@ contains secrets (e.g. cryptographic keys)
             packageId = "anyhow";
           }
           {
-            name = "aura-agent";
-            packageId = "aura-agent";
-          }
-          {
-            name = "aura-core";
-            packageId = "aura-core";
-          }
-          {
-            name = "aura-effects";
-            packageId = "aura-effects";
-          }
-          {
-            name = "aura-macros";
-            packageId = "aura-macros";
-          }
-          {
-            name = "aura-mpst";
-            packageId = "aura-mpst";
-          }
-          {
-            name = "aura-protocol";
-            packageId = "aura-protocol";
-          }
-          {
             name = "futures";
             packageId = "futures";
+          }
+          {
+            name = "hxrts-aura-agent";
+            packageId = "hxrts-aura-agent";
+            rename = "aura-agent";
+          }
+          {
+            name = "hxrts-aura-core";
+            packageId = "hxrts-aura-core";
+            rename = "aura-core";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
+            name = "hxrts-aura-mpst";
+            packageId = "hxrts-aura-mpst";
+            rename = "aura-mpst";
+          }
+          {
+            name = "hxrts-aura-protocol";
+            packageId = "hxrts-aura-protocol";
+            rename = "aura-protocol";
           }
           {
             name = "serde";
@@ -25274,10 +25487,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale" = rec {
         crateName = "telltale";
-        version = "11.1.0";
+        version = "11.2.0";
         edition = "2021";
         description = "Session types for multi-party asynchronous communication.";
-        sha256 = "0idf1av6gkkg326ppp1mx3n6i9gzppbhxf8g57q7q4dfiv6d6myp";
+        sha256 = "0p081b138cqxy1lncckjf8kgkpqpyhknbwfq6scx2fd5ycslgr28";
         libPath = "rust/src/lib.rs";
         authors = [
           "Zak Cutner <me@zakcutner.uk>"
@@ -25442,11 +25655,11 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-bridge" = rec {
         crateName = "telltale-bridge";
-        version = "11.1.0";
+        version = "11.2.0";
         edition = "2021";
         description = "Lean verification bridge for Telltale session types";
         crateBin = [];
-        sha256 = "0nsvw8v06vga53zg1k985lgvzh0gmj3al3zpn5w2aiwshmilwc0b";
+        sha256 = "1yzcgy5y7wpf14cnxzpyd5bigjzxx766b80w239ik7c1a5rgf7yb";
         libName = "telltale_bridge";
         authors = [
           "Sam Hart <sam@hxrts.com>"
@@ -25522,10 +25735,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-language" = rec {
         crateName = "telltale-language";
-        version = "11.1.0";
+        version = "11.2.0";
         edition = "2021";
         description = "Shared choreography frontend for Telltale DSL parsing, projection, and macro code generation";
-        sha256 = "0k7zq65l6jdqnkan4scxzb4msybnrs4zky3k4jpfliafz4d1ypp1";
+        sha256 = "1j68d21v87ygyddksiianh7gq7ra2fb4kwg76dxdcvc9f969nbsr";
         libName = "telltale_language";
         authors = [
           "Sam Hart"
@@ -25582,11 +25795,11 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-machine" = rec {
         crateName = "telltale-machine";
-        version = "11.1.0";
+        version = "11.2.0";
         edition = "2021";
         description = "Protocol machine for choreographic session type protocols";
         crateBin = [];
-        sha256 = "0qffdh8r45llz0mc5a1h4dqllcj5x61i6rx2r9fza45397xszv6l";
+        sha256 = "1ipr8aqzlh7l52h79bnawhh0a7ismxf8njc1s0y3ygdm3jzhfq0c";
         libName = "telltale_machine";
         authors = [
           "Sam Hart"
@@ -25607,6 +25820,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
             features = [ "js" "js" ];
           }
           {
+            name = "parking_lot";
+            packageId = "parking_lot 0.12.5";
+          }
+          {
             name = "rayon";
             packageId = "rayon";
             optional = true;
@@ -25615,6 +25832,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
             name = "serde";
             packageId = "serde";
             features = [ "derive" "derive" ];
+          }
+          {
+            name = "serde_cbor";
+            packageId = "serde_cbor";
           }
           {
             name = "serde_json";
@@ -25657,10 +25878,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-macros" = rec {
         crateName = "telltale-macros";
-        version = "11.1.0";
+        version = "11.2.0";
         edition = "2021";
         description = "Procedural macros for Telltale session types (Aura flavored).";
-        sha256 = "0d6hpc80lf0rqjsfha882qm4mm7fnldaxxrlrssbvfqlz73l79ss";
+        sha256 = "0gmpycvpjfnp32s1z336af6f0244png99wa63rfh619r6hxndrhc";
         procMacro = true;
         libName = "telltale_macros";
         authors = [
@@ -25689,11 +25910,11 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-runtime" = rec {
         crateName = "telltale-runtime";
-        version = "11.1.0";
+        version = "11.2.0";
         edition = "2021";
         description = "Choreographic programming for Telltale - effect-based distributed protocols";
         crateBin = [];
-        sha256 = "004pz7yfg50m20k6rrpy2c63675mhhakxmp7k27zykiqndm7rdq2";
+        sha256 = "13gi2rw2hg55mir4mniflr125bklni4bk5i51k2kxn4cmna8z049";
         libName = "telltale_runtime";
         authors = [
           "Sam Hart"
@@ -25852,11 +26073,11 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-simulator" = rec {
         crateName = "telltale-simulator";
-        version = "11.1.0";
+        version = "11.2.0";
         edition = "2021";
         description = "Protocol-machine-backed simulation engine for Telltale choreographic protocols";
         crateBin = [];
-        sha256 = "07qc412scai9jzb6ssh1nivhhq3qrsm55g95nnd58m9zi511bpf7";
+        sha256 = "0n3zpxkv16qkh4za4qz76azhlc67xdmwcd7in3682lnywy8r689a";
         libName = "telltale_simulator";
         authors = [
           "Sam Hart"
@@ -25915,10 +26136,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-theory" = rec {
         crateName = "telltale-theory";
-        version = "11.1.0";
+        version = "11.2.0";
         edition = "2021";
         description = "Session type theory algorithms - projection, merge, subtyping";
-        sha256 = "013w3vvbkw1s8idfkq3cknzfsdn99zqwqnndcnchqxxk3547xjk7";
+        sha256 = "0f8kzjik43ixich28lj3x9hshkp2ny52jz1jkyvlrla3ln66rmmh";
         libName = "telltale_theory";
         authors = [
           "Sam Hart"
@@ -25942,10 +26163,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-types" = rec {
         crateName = "telltale-types";
-        version = "11.1.0";
+        version = "11.2.0";
         edition = "2021";
         description = "Core session types for Telltale - matching Lean definitions";
-        sha256 = "11xz6yzi1482f1n7270yn3am9gv100gr6cmgbv628d2xz4ppzq6m";
+        sha256 = "0l7j9xbnhm06wbjl75mzgq4yll315j30ij8xadg4jzpx8r54dy2x";
         libName = "telltale_types";
         authors = [
           "Sam Hart"
@@ -25996,7 +26217,7 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
         dependencies = [
           {
             name = "fastrand";
-            packageId = "fastrand 2.3.0";
+            packageId = "fastrand 2.4.1";
           }
           {
             name = "getrandom";
@@ -32335,7 +32556,273 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Threading" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_System" "Win32_System_Threading" "default" ];
+      };
+      "windows-sys 0.60.2" = rec {
+        crateName = "windows-sys";
+        version = "0.60.2";
+        edition = "2021";
+        description = "Rust for Windows";
+        sha256 = "1jrbc615ihqnhjhxplr2kw7rasrskv9wj3lr80hgfd42sbj01xgj";
+        libName = "windows_sys";
+        authors = [
+          "Microsoft"
+        ];
+        dependencies = [
+          {
+            name = "windows-targets";
+            packageId = "windows-targets 0.53.5";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "Wdk" = [ "Win32_Foundation" ];
+          "Wdk_Devices" = [ "Wdk" ];
+          "Wdk_Devices_Bluetooth" = [ "Wdk_Devices" ];
+          "Wdk_Devices_HumanInterfaceDevice" = [ "Wdk_Devices" ];
+          "Wdk_Foundation" = [ "Wdk" ];
+          "Wdk_Graphics" = [ "Wdk" ];
+          "Wdk_Graphics_Direct3D" = [ "Wdk_Graphics" ];
+          "Wdk_NetworkManagement" = [ "Wdk" ];
+          "Wdk_NetworkManagement_Ndis" = [ "Wdk_NetworkManagement" ];
+          "Wdk_NetworkManagement_WindowsFilteringPlatform" = [ "Wdk_NetworkManagement" ];
+          "Wdk_Storage" = [ "Wdk" ];
+          "Wdk_Storage_FileSystem" = [ "Wdk_Storage" ];
+          "Wdk_Storage_FileSystem_Minifilters" = [ "Wdk_Storage_FileSystem" ];
+          "Wdk_System" = [ "Wdk" ];
+          "Wdk_System_IO" = [ "Wdk_System" ];
+          "Wdk_System_Memory" = [ "Wdk_System" ];
+          "Wdk_System_OfflineRegistry" = [ "Wdk_System" ];
+          "Wdk_System_Registry" = [ "Wdk_System" ];
+          "Wdk_System_SystemInformation" = [ "Wdk_System" ];
+          "Wdk_System_SystemServices" = [ "Wdk_System" ];
+          "Wdk_System_Threading" = [ "Wdk_System" ];
+          "Win32" = [ "Win32_Foundation" ];
+          "Win32_Data" = [ "Win32" ];
+          "Win32_Data_HtmlHelp" = [ "Win32_Data" ];
+          "Win32_Data_RightsManagement" = [ "Win32_Data" ];
+          "Win32_Devices" = [ "Win32" ];
+          "Win32_Devices_AllJoyn" = [ "Win32_Devices" ];
+          "Win32_Devices_Beep" = [ "Win32_Devices" ];
+          "Win32_Devices_BiometricFramework" = [ "Win32_Devices" ];
+          "Win32_Devices_Bluetooth" = [ "Win32_Devices" ];
+          "Win32_Devices_Cdrom" = [ "Win32_Devices" ];
+          "Win32_Devices_Communication" = [ "Win32_Devices" ];
+          "Win32_Devices_DeviceAndDriverInstallation" = [ "Win32_Devices" ];
+          "Win32_Devices_DeviceQuery" = [ "Win32_Devices" ];
+          "Win32_Devices_Display" = [ "Win32_Devices" ];
+          "Win32_Devices_Dvd" = [ "Win32_Devices" ];
+          "Win32_Devices_Enumeration" = [ "Win32_Devices" ];
+          "Win32_Devices_Enumeration_Pnp" = [ "Win32_Devices_Enumeration" ];
+          "Win32_Devices_Fax" = [ "Win32_Devices" ];
+          "Win32_Devices_HumanInterfaceDevice" = [ "Win32_Devices" ];
+          "Win32_Devices_Nfc" = [ "Win32_Devices" ];
+          "Win32_Devices_Nfp" = [ "Win32_Devices" ];
+          "Win32_Devices_PortableDevices" = [ "Win32_Devices" ];
+          "Win32_Devices_Properties" = [ "Win32_Devices" ];
+          "Win32_Devices_Pwm" = [ "Win32_Devices" ];
+          "Win32_Devices_Sensors" = [ "Win32_Devices" ];
+          "Win32_Devices_SerialCommunication" = [ "Win32_Devices" ];
+          "Win32_Devices_Tapi" = [ "Win32_Devices" ];
+          "Win32_Devices_Usb" = [ "Win32_Devices" ];
+          "Win32_Devices_WebServicesOnDevices" = [ "Win32_Devices" ];
+          "Win32_Foundation" = [ "Win32" ];
+          "Win32_Gaming" = [ "Win32" ];
+          "Win32_Globalization" = [ "Win32" ];
+          "Win32_Graphics" = [ "Win32" ];
+          "Win32_Graphics_Dwm" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Gdi" = [ "Win32_Graphics" ];
+          "Win32_Graphics_GdiPlus" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Hlsl" = [ "Win32_Graphics" ];
+          "Win32_Graphics_OpenGL" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Printing" = [ "Win32_Graphics" ];
+          "Win32_Graphics_Printing_PrintTicket" = [ "Win32_Graphics_Printing" ];
+          "Win32_Management" = [ "Win32" ];
+          "Win32_Management_MobileDeviceManagementRegistration" = [ "Win32_Management" ];
+          "Win32_Media" = [ "Win32" ];
+          "Win32_Media_Audio" = [ "Win32_Media" ];
+          "Win32_Media_DxMediaObjects" = [ "Win32_Media" ];
+          "Win32_Media_KernelStreaming" = [ "Win32_Media" ];
+          "Win32_Media_Multimedia" = [ "Win32_Media" ];
+          "Win32_Media_Streaming" = [ "Win32_Media" ];
+          "Win32_Media_WindowsMediaFormat" = [ "Win32_Media" ];
+          "Win32_NetworkManagement" = [ "Win32" ];
+          "Win32_NetworkManagement_Dhcp" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Dns" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_InternetConnectionWizard" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_IpHelper" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Multicast" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Ndis" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetBios" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetManagement" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetShell" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_NetworkDiagnosticsFramework" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_P2P" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_QoS" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Rras" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_Snmp" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WNet" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WebDav" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WiFi" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsConnectionManager" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsFilteringPlatform" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsFirewall" = [ "Win32_NetworkManagement" ];
+          "Win32_NetworkManagement_WindowsNetworkVirtualization" = [ "Win32_NetworkManagement" ];
+          "Win32_Networking" = [ "Win32" ];
+          "Win32_Networking_ActiveDirectory" = [ "Win32_Networking" ];
+          "Win32_Networking_Clustering" = [ "Win32_Networking" ];
+          "Win32_Networking_HttpServer" = [ "Win32_Networking" ];
+          "Win32_Networking_Ldap" = [ "Win32_Networking" ];
+          "Win32_Networking_WebSocket" = [ "Win32_Networking" ];
+          "Win32_Networking_WinHttp" = [ "Win32_Networking" ];
+          "Win32_Networking_WinInet" = [ "Win32_Networking" ];
+          "Win32_Networking_WinSock" = [ "Win32_Networking" ];
+          "Win32_Networking_WindowsWebServices" = [ "Win32_Networking" ];
+          "Win32_Security" = [ "Win32" ];
+          "Win32_Security_AppLocker" = [ "Win32_Security" ];
+          "Win32_Security_Authentication" = [ "Win32_Security" ];
+          "Win32_Security_Authentication_Identity" = [ "Win32_Security_Authentication" ];
+          "Win32_Security_Authorization" = [ "Win32_Security" ];
+          "Win32_Security_Credentials" = [ "Win32_Security" ];
+          "Win32_Security_Cryptography" = [ "Win32_Security" ];
+          "Win32_Security_Cryptography_Catalog" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_Cryptography_Certificates" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_Cryptography_Sip" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_Cryptography_UI" = [ "Win32_Security_Cryptography" ];
+          "Win32_Security_DiagnosticDataQuery" = [ "Win32_Security" ];
+          "Win32_Security_DirectoryServices" = [ "Win32_Security" ];
+          "Win32_Security_EnterpriseData" = [ "Win32_Security" ];
+          "Win32_Security_ExtensibleAuthenticationProtocol" = [ "Win32_Security" ];
+          "Win32_Security_Isolation" = [ "Win32_Security" ];
+          "Win32_Security_LicenseProtection" = [ "Win32_Security" ];
+          "Win32_Security_NetworkAccessProtection" = [ "Win32_Security" ];
+          "Win32_Security_WinTrust" = [ "Win32_Security" ];
+          "Win32_Security_WinWlx" = [ "Win32_Security" ];
+          "Win32_Storage" = [ "Win32" ];
+          "Win32_Storage_Cabinets" = [ "Win32_Storage" ];
+          "Win32_Storage_CloudFilters" = [ "Win32_Storage" ];
+          "Win32_Storage_Compression" = [ "Win32_Storage" ];
+          "Win32_Storage_DistributedFileSystem" = [ "Win32_Storage" ];
+          "Win32_Storage_FileHistory" = [ "Win32_Storage" ];
+          "Win32_Storage_FileSystem" = [ "Win32_Storage" ];
+          "Win32_Storage_Imapi" = [ "Win32_Storage" ];
+          "Win32_Storage_IndexServer" = [ "Win32_Storage" ];
+          "Win32_Storage_InstallableFileSystems" = [ "Win32_Storage" ];
+          "Win32_Storage_IscsiDisc" = [ "Win32_Storage" ];
+          "Win32_Storage_Jet" = [ "Win32_Storage" ];
+          "Win32_Storage_Nvme" = [ "Win32_Storage" ];
+          "Win32_Storage_OfflineFiles" = [ "Win32_Storage" ];
+          "Win32_Storage_OperationRecorder" = [ "Win32_Storage" ];
+          "Win32_Storage_Packaging" = [ "Win32_Storage" ];
+          "Win32_Storage_Packaging_Appx" = [ "Win32_Storage_Packaging" ];
+          "Win32_Storage_ProjectedFileSystem" = [ "Win32_Storage" ];
+          "Win32_Storage_StructuredStorage" = [ "Win32_Storage" ];
+          "Win32_Storage_Vhd" = [ "Win32_Storage" ];
+          "Win32_Storage_Xps" = [ "Win32_Storage" ];
+          "Win32_System" = [ "Win32" ];
+          "Win32_System_AddressBook" = [ "Win32_System" ];
+          "Win32_System_Antimalware" = [ "Win32_System" ];
+          "Win32_System_ApplicationInstallationAndServicing" = [ "Win32_System" ];
+          "Win32_System_ApplicationVerifier" = [ "Win32_System" ];
+          "Win32_System_ClrHosting" = [ "Win32_System" ];
+          "Win32_System_Com" = [ "Win32_System" ];
+          "Win32_System_Com_Marshal" = [ "Win32_System_Com" ];
+          "Win32_System_Com_StructuredStorage" = [ "Win32_System_Com" ];
+          "Win32_System_Com_Urlmon" = [ "Win32_System_Com" ];
+          "Win32_System_ComponentServices" = [ "Win32_System" ];
+          "Win32_System_Console" = [ "Win32_System" ];
+          "Win32_System_CorrelationVector" = [ "Win32_System" ];
+          "Win32_System_DataExchange" = [ "Win32_System" ];
+          "Win32_System_DeploymentServices" = [ "Win32_System" ];
+          "Win32_System_DeveloperLicensing" = [ "Win32_System" ];
+          "Win32_System_Diagnostics" = [ "Win32_System" ];
+          "Win32_System_Diagnostics_Ceip" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_Debug" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_Debug_Extensions" = [ "Win32_System_Diagnostics_Debug" ];
+          "Win32_System_Diagnostics_Etw" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_ProcessSnapshotting" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_ToolHelp" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_Diagnostics_TraceLogging" = [ "Win32_System_Diagnostics" ];
+          "Win32_System_DistributedTransactionCoordinator" = [ "Win32_System" ];
+          "Win32_System_Environment" = [ "Win32_System" ];
+          "Win32_System_ErrorReporting" = [ "Win32_System" ];
+          "Win32_System_EventCollector" = [ "Win32_System" ];
+          "Win32_System_EventLog" = [ "Win32_System" ];
+          "Win32_System_EventNotificationService" = [ "Win32_System" ];
+          "Win32_System_GroupPolicy" = [ "Win32_System" ];
+          "Win32_System_HostCompute" = [ "Win32_System" ];
+          "Win32_System_HostComputeNetwork" = [ "Win32_System" ];
+          "Win32_System_HostComputeSystem" = [ "Win32_System" ];
+          "Win32_System_Hypervisor" = [ "Win32_System" ];
+          "Win32_System_IO" = [ "Win32_System" ];
+          "Win32_System_Iis" = [ "Win32_System" ];
+          "Win32_System_Ioctl" = [ "Win32_System" ];
+          "Win32_System_JobObjects" = [ "Win32_System" ];
+          "Win32_System_Js" = [ "Win32_System" ];
+          "Win32_System_Kernel" = [ "Win32_System" ];
+          "Win32_System_LibraryLoader" = [ "Win32_System" ];
+          "Win32_System_Mailslots" = [ "Win32_System" ];
+          "Win32_System_Mapi" = [ "Win32_System" ];
+          "Win32_System_Memory" = [ "Win32_System" ];
+          "Win32_System_Memory_NonVolatile" = [ "Win32_System_Memory" ];
+          "Win32_System_MessageQueuing" = [ "Win32_System" ];
+          "Win32_System_MixedReality" = [ "Win32_System" ];
+          "Win32_System_Ole" = [ "Win32_System" ];
+          "Win32_System_PasswordManagement" = [ "Win32_System" ];
+          "Win32_System_Performance" = [ "Win32_System" ];
+          "Win32_System_Performance_HardwareCounterProfiling" = [ "Win32_System_Performance" ];
+          "Win32_System_Pipes" = [ "Win32_System" ];
+          "Win32_System_Power" = [ "Win32_System" ];
+          "Win32_System_ProcessStatus" = [ "Win32_System" ];
+          "Win32_System_Recovery" = [ "Win32_System" ];
+          "Win32_System_Registry" = [ "Win32_System" ];
+          "Win32_System_RemoteDesktop" = [ "Win32_System" ];
+          "Win32_System_RemoteManagement" = [ "Win32_System" ];
+          "Win32_System_RestartManager" = [ "Win32_System" ];
+          "Win32_System_Restore" = [ "Win32_System" ];
+          "Win32_System_Rpc" = [ "Win32_System" ];
+          "Win32_System_Search" = [ "Win32_System" ];
+          "Win32_System_Search_Common" = [ "Win32_System_Search" ];
+          "Win32_System_SecurityCenter" = [ "Win32_System" ];
+          "Win32_System_Services" = [ "Win32_System" ];
+          "Win32_System_SetupAndMigration" = [ "Win32_System" ];
+          "Win32_System_Shutdown" = [ "Win32_System" ];
+          "Win32_System_StationsAndDesktops" = [ "Win32_System" ];
+          "Win32_System_SubsystemForLinux" = [ "Win32_System" ];
+          "Win32_System_SystemInformation" = [ "Win32_System" ];
+          "Win32_System_SystemServices" = [ "Win32_System" ];
+          "Win32_System_Threading" = [ "Win32_System" ];
+          "Win32_System_Time" = [ "Win32_System" ];
+          "Win32_System_TpmBaseServices" = [ "Win32_System" ];
+          "Win32_System_UserAccessLogging" = [ "Win32_System" ];
+          "Win32_System_Variant" = [ "Win32_System" ];
+          "Win32_System_VirtualDosMachines" = [ "Win32_System" ];
+          "Win32_System_WindowsProgramming" = [ "Win32_System" ];
+          "Win32_System_Wmi" = [ "Win32_System" ];
+          "Win32_UI" = [ "Win32" ];
+          "Win32_UI_Accessibility" = [ "Win32_UI" ];
+          "Win32_UI_ColorSystem" = [ "Win32_UI" ];
+          "Win32_UI_Controls" = [ "Win32_UI" ];
+          "Win32_UI_Controls_Dialogs" = [ "Win32_UI_Controls" ];
+          "Win32_UI_HiDpi" = [ "Win32_UI" ];
+          "Win32_UI_Input" = [ "Win32_UI" ];
+          "Win32_UI_Input_Ime" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_KeyboardAndMouse" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Pointer" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_Touch" = [ "Win32_UI_Input" ];
+          "Win32_UI_Input_XboxController" = [ "Win32_UI_Input" ];
+          "Win32_UI_InteractionContext" = [ "Win32_UI" ];
+          "Win32_UI_Magnification" = [ "Win32_UI" ];
+          "Win32_UI_Shell" = [ "Win32_UI" ];
+          "Win32_UI_Shell_Common" = [ "Win32_UI_Shell" ];
+          "Win32_UI_Shell_PropertiesSystem" = [ "Win32_UI_Shell" ];
+          "Win32_UI_TabletPC" = [ "Win32_UI" ];
+          "Win32_UI_TextServices" = [ "Win32_UI" ];
+          "Win32_UI_WindowsAndMessaging" = [ "Win32_UI" ];
+          "Win32_Web" = [ "Win32" ];
+          "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
+        };
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -32751,7 +33238,7 @@ dependency.
           }
           {
             name = "windows_i686_gnullvm";
-            packageId = "windows_i686_gnullvm";
+            packageId = "windows_i686_gnullvm 0.52.6";
             target = { target, features }: (target.name == "i686-pc-windows-gnullvm");
           }
           {
@@ -32772,6 +33259,63 @@ dependency.
           {
             name = "windows_x86_64_msvc";
             packageId = "windows_x86_64_msvc 0.52.6";
+            target = { target, features }: ((("x86_64" == target."arch" or null) || ("arm64ec" == target."arch" or null)) && ("msvc" == target."env" or null) && (!(target."windows_raw_dylib" or false)));
+          }
+        ];
+
+      };
+      "windows-targets 0.53.5" = rec {
+        crateName = "windows-targets";
+        version = "0.53.5";
+        edition = "2021";
+        description = "Import libs for Windows";
+        sha256 = "1wv9j2gv3l6wj3gkw5j1kr6ymb5q6dfc42yvydjhv3mqa7szjia9";
+        libName = "windows_targets";
+        dependencies = [
+          {
+            name = "windows-link";
+            packageId = "windows-link";
+            usesDefaultFeatures = false;
+            target = { target, features }: (target."windows_raw_dylib" or false);
+          }
+          {
+            name = "windows_aarch64_gnullvm";
+            packageId = "windows_aarch64_gnullvm 0.53.1";
+            target = { target, features }: (target.name == "aarch64-pc-windows-gnullvm");
+          }
+          {
+            name = "windows_aarch64_msvc";
+            packageId = "windows_aarch64_msvc 0.53.1";
+            target = { target, features }: (("aarch64" == target."arch" or null) && ("msvc" == target."env" or null) && (!(target."windows_raw_dylib" or false)));
+          }
+          {
+            name = "windows_i686_gnu";
+            packageId = "windows_i686_gnu 0.53.1";
+            target = { target, features }: (("x86" == target."arch" or null) && ("gnu" == target."env" or null) && (!("llvm" == target."abi" or null)) && (!(target."windows_raw_dylib" or false)));
+          }
+          {
+            name = "windows_i686_gnullvm";
+            packageId = "windows_i686_gnullvm 0.53.1";
+            target = { target, features }: (target.name == "i686-pc-windows-gnullvm");
+          }
+          {
+            name = "windows_i686_msvc";
+            packageId = "windows_i686_msvc 0.53.1";
+            target = { target, features }: (("x86" == target."arch" or null) && ("msvc" == target."env" or null) && (!(target."windows_raw_dylib" or false)));
+          }
+          {
+            name = "windows_x86_64_gnu";
+            packageId = "windows_x86_64_gnu 0.53.1";
+            target = { target, features }: (("x86_64" == target."arch" or null) && ("gnu" == target."env" or null) && (!("llvm" == target."abi" or null)) && (!(target."windows_raw_dylib" or false)));
+          }
+          {
+            name = "windows_x86_64_gnullvm";
+            packageId = "windows_x86_64_gnullvm 0.53.1";
+            target = { target, features }: (target.name == "x86_64-pc-windows-gnullvm");
+          }
+          {
+            name = "windows_x86_64_msvc";
+            packageId = "windows_x86_64_msvc 0.53.1";
             target = { target, features }: ((("x86_64" == target."arch" or null) || ("arm64ec" == target."arch" or null)) && ("msvc" == target."env" or null) && (!(target."windows_raw_dylib" or false)));
           }
         ];
@@ -32810,6 +33354,14 @@ dependency.
         ];
 
       };
+      "windows_aarch64_gnullvm 0.53.1" = rec {
+        crateName = "windows_aarch64_gnullvm";
+        version = "0.53.1";
+        edition = "2021";
+        description = "Import lib for Windows";
+        sha256 = "0lqvdm510mka9w26vmga7hbkmrw9glzc90l4gya5qbxlm1pl3n59";
+
+      };
       "windows_aarch64_msvc 0.42.2" = rec {
         crateName = "windows_aarch64_msvc";
         version = "0.42.2";
@@ -32841,6 +33393,14 @@ dependency.
         authors = [
           "Microsoft"
         ];
+
+      };
+      "windows_aarch64_msvc 0.53.1" = rec {
+        crateName = "windows_aarch64_msvc";
+        version = "0.53.1";
+        edition = "2021";
+        description = "Import lib for Windows";
+        sha256 = "01jh2adlwx043rji888b22whx4bm8alrk3khjpik5xn20kl85mxr";
 
       };
       "windows_i686_gnu 0.42.2" = rec {
@@ -32876,7 +33436,15 @@ dependency.
         ];
 
       };
-      "windows_i686_gnullvm" = rec {
+      "windows_i686_gnu 0.53.1" = rec {
+        crateName = "windows_i686_gnu";
+        version = "0.53.1";
+        edition = "2021";
+        description = "Import lib for Windows";
+        sha256 = "18wkcm82ldyg4figcsidzwbg1pqd49jpm98crfz0j7nqd6h6s3ln";
+
+      };
+      "windows_i686_gnullvm 0.52.6" = rec {
         crateName = "windows_i686_gnullvm";
         version = "0.52.6";
         edition = "2021";
@@ -32885,6 +33453,14 @@ dependency.
         authors = [
           "Microsoft"
         ];
+
+      };
+      "windows_i686_gnullvm 0.53.1" = rec {
+        crateName = "windows_i686_gnullvm";
+        version = "0.53.1";
+        edition = "2021";
+        description = "Import lib for Windows";
+        sha256 = "030qaxqc4salz6l4immfb6sykc6gmhyir9wzn2w8mxj8038mjwzs";
 
       };
       "windows_i686_msvc 0.42.2" = rec {
@@ -32920,6 +33496,14 @@ dependency.
         ];
 
       };
+      "windows_i686_msvc 0.53.1" = rec {
+        crateName = "windows_i686_msvc";
+        version = "0.53.1";
+        edition = "2021";
+        description = "Import lib for Windows";
+        sha256 = "1hi6scw3mn2pbdl30ji5i4y8vvspb9b66l98kkz350pig58wfyhy";
+
+      };
       "windows_x86_64_gnu 0.42.2" = rec {
         crateName = "windows_x86_64_gnu";
         version = "0.42.2";
@@ -32951,6 +33535,14 @@ dependency.
         authors = [
           "Microsoft"
         ];
+
+      };
+      "windows_x86_64_gnu 0.53.1" = rec {
+        crateName = "windows_x86_64_gnu";
+        version = "0.53.1";
+        edition = "2021";
+        description = "Import lib for Windows";
+        sha256 = "16d4yiysmfdlsrghndr97y57gh3kljkwhfdbcs05m1jasz6l4f4w";
 
       };
       "windows_x86_64_gnullvm 0.42.2" = rec {
@@ -32986,6 +33578,14 @@ dependency.
         ];
 
       };
+      "windows_x86_64_gnullvm 0.53.1" = rec {
+        crateName = "windows_x86_64_gnullvm";
+        version = "0.53.1";
+        edition = "2021";
+        description = "Import lib for Windows";
+        sha256 = "1qbspgv4g3q0vygkg8rnql5c6z3caqv38japiynyivh75ng1gyhg";
+
+      };
       "windows_x86_64_msvc 0.42.2" = rec {
         crateName = "windows_x86_64_msvc";
         version = "0.42.2";
@@ -33017,6 +33617,14 @@ dependency.
         authors = [
           "Microsoft"
         ];
+
+      };
+      "windows_x86_64_msvc 0.53.1" = rec {
+        crateName = "windows_x86_64_msvc";
+        version = "0.53.1";
+        edition = "2021";
+        description = "Import lib for Windows";
+        sha256 = "0l6npq76vlq4ksn4bwsncpr8508mk0gmznm6wnhjg95d19gzzfyn";
 
       };
       "winnow 0.7.15" = rec {

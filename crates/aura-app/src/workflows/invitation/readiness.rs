@@ -7,9 +7,10 @@ pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
     #[cfg(feature = "signals")]
-    let signal_has_pending = invitations_signal_has_pending_home_or_channel_invitation(
-        &read_signal_or_default(app_core, &*INVITATIONS_SIGNAL).await,
-    );
+    let signal_has_pending =
+        super::accept::invitations_signal_has_pending_home_or_channel_invitation(
+            &read_signal_or_default(app_core, &*INVITATIONS_SIGNAL).await,
+        );
     #[cfg(not(feature = "signals"))]
     let signal_has_pending = false;
 

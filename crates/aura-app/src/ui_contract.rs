@@ -2,6 +2,8 @@
 //!
 //! This module defines stable application-facing UI identifiers and snapshot
 //! types that can be shared across the web UI, TUI, and harness tooling.
+//! Shared-flow coverage and source-area metadata are exported from this facade
+//! even when their concrete tables live in `ui_contract/*` submodules.
 
 #![allow(missing_docs)] // Shared contract surface - refined incrementally during migration.
 

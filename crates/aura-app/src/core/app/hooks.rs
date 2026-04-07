@@ -53,7 +53,7 @@ impl AppCore {
     ) -> Result<(), IntentError> {
         {
             let mut core = app_core.write().await;
-            core.init_signals().await?;
+            core.ensure_signals_registered().await?;
         }
 
         let has_runtime = {

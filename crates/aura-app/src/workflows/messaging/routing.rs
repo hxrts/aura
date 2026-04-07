@@ -24,15 +24,13 @@ pub(super) async fn resolve_chat_channel_id_from_state_or_input(
     if let ChannelSelector::Id(channel_id) = &selector {
         return Ok(*channel_id);
     }
-    let raw = channel_input.trim();
-
-    let normalized_name = raw.trim_start_matches('#').trim();
+    let normalized_name = normalize_channel_name(channel_input);
 
     let local_authority = {
         let core = app_core.read().await;
         core.authority().cloned()
     };
-    if is_note_to_self_channel_name(normalized_name) {
+    if is_note_to_self_channel_name(&normalized_name) {
         if let Some(authority_id) = local_authority {
             return Ok(note_to_self_channel_id(authority_id));
         }
@@ -44,50 +42,13 @@ pub(super) async fn resolve_chat_channel_id_from_state_or_input(
         "resolve_chat_channel_id_from_state_or_input",
         "identify_materialized_channel_ids_by_name",
         ROUTING_RUNTIME_TIMEOUT,
-        || runtime.identify_materialized_channel_ids_by_name(normalized_name),
+        || runtime.identify_materialized_channel_ids_by_name(&normalized_name),
     )
     .await?
     .map_err(|error| error::runtime_call("identify materialized channel ids by name", error))?
     .into_iter()
     .next()
-    .ok_or_else(|| AuraError::not_found(normalized_name.to_string()))
-}
-
-#[aura_macros::authoritative_source(kind = "runtime")]
-pub(super) async fn matching_chat_channel_ids(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel_input: &str,
-) -> Result<Vec<ChannelId>, AuraError> {
-    let raw = channel_input.trim();
-    if raw.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let normalized_name = raw.trim_start_matches('#').trim();
-
-    let local_authority = {
-        let core = app_core.read().await;
-        core.authority().cloned()
-    };
-
-    if is_note_to_self_channel_name(normalized_name) {
-        if let Some(authority_id) = local_authority {
-            let channel_id = note_to_self_channel_id(authority_id);
-            return Ok(vec![channel_id]);
-        }
-    }
-
-    let runtime = require_runtime(app_core).await?;
-    let matches = timeout_runtime_call(
-        &runtime,
-        "matching_chat_channel_ids",
-        "identify_materialized_channel_ids_by_name",
-        ROUTING_RUNTIME_TIMEOUT,
-        || runtime.identify_materialized_channel_ids_by_name(normalized_name),
-    )
-    .await?
-    .map_err(|error| error::runtime_call("identify materialized channel ids by name", error))?;
-    Ok(matches)
+    .ok_or_else(|| AuraError::not_found(normalized_name.clone()))
 }
 
 pub(super) async fn resolve_local_chat_channel_id_from_observed_state_or_input(
@@ -99,12 +60,12 @@ pub(super) async fn resolve_local_chat_channel_id_from_observed_state_or_input(
         return Ok(*channel_id);
     }
 
-    let normalized_name = channel_input.trim().trim_start_matches('#').trim();
+    let normalized_name = normalize_channel_name(channel_input);
     let local_authority = {
         let core = app_core.read().await;
         core.authority().cloned()
     };
-    if is_note_to_self_channel_name(normalized_name) {
+    if is_note_to_self_channel_name(&normalized_name) {
         if let Some(authority_id) = local_authority {
             return Ok(note_to_self_channel_id(authority_id));
         }
@@ -114,13 +75,13 @@ pub(super) async fn resolve_local_chat_channel_id_from_observed_state_or_input(
     let chat = observed_chat_snapshot(app_core).await;
     if let Some(channel_id) = chat
         .all_channels()
-        .find(|channel| channel.name.eq_ignore_ascii_case(normalized_name))
+        .find(|channel| channel.name.eq_ignore_ascii_case(&normalized_name))
         .map(|channel| channel.id)
     {
         return Ok(channel_id);
     }
 
-    Err(AuraError::not_found(normalized_name.to_string()))
+    Err(AuraError::not_found(normalized_name.clone()))
 }
 
 pub(super) async fn matching_local_chat_channel_ids_from_observed_state(
@@ -132,13 +93,13 @@ pub(super) async fn matching_local_chat_channel_ids_from_observed_state(
         return Ok(Vec::new());
     }
 
-    let normalized_name = raw.trim_start_matches('#').trim();
+    let normalized_name = normalize_channel_name(raw);
     let local_authority = {
         let core = app_core.read().await;
         core.authority().cloned()
     };
 
-    if is_note_to_self_channel_name(normalized_name) {
+    if is_note_to_self_channel_name(&normalized_name) {
         if let Some(authority_id) = local_authority {
             return Ok(vec![note_to_self_channel_id(authority_id)]);
         }
@@ -148,7 +109,7 @@ pub(super) async fn matching_local_chat_channel_ids_from_observed_state(
     let chat = observed_chat_snapshot(app_core).await;
     Ok(chat
         .all_channels()
-        .filter(|channel| channel.name.eq_ignore_ascii_case(normalized_name))
+        .filter(|channel| channel.name.eq_ignore_ascii_case(&normalized_name))
         .map(|channel| channel.id)
         .collect())
 }

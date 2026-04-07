@@ -568,8 +568,7 @@ mod tests {
     use tokio::sync::mpsc;
 
     async fn init_signals_for_test(app_core: &Arc<RwLock<AppCore>>) {
-        let mut core = app_core.write().await;
-        core.init_signals()
+        AppCore::init_signals_with_hooks(app_core)
             .await
             .unwrap_or_else(|error| panic!("{error}"));
     }

@@ -32,6 +32,24 @@ use crate::workflows::signals::{emit_signal, read_signal};
 use crate::AppCore;
 use aura_core::AuraError;
 
+async fn replace_projection_observed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    state: T,
+    set_view: impl FnOnce(&mut AppCore, T),
+    signal: &aura_core::effects::reactive::Signal<T>,
+    signal_name: &str,
+) -> Result<(), AuraError>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    {
+        let mut core = app_core.write().await;
+        set_view(&mut core, state.clone());
+    }
+
+    emit_signal(app_core, signal, state, signal_name).await
+}
+
 #[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn homes_signal_snapshot(
     app_core: &Arc<RwLock<AppCore>>,
@@ -40,17 +58,39 @@ pub async fn homes_signal_snapshot(
 }
 
 #[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn replace_chat_projection_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    state: ChatState,
+) -> Result<(), AuraError> {
+    replace_projection_observed(
+        app_core,
+        state,
+        |core, state| {
+            // OWNERSHIP: observed-display-update
+            core.views_mut().set_chat(state);
+        },
+        &*CHAT_SIGNAL,
+        CHAT_SIGNAL_NAME,
+    )
+    .await
+}
+
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn replace_recovery_projection_observed(
     app_core: &Arc<RwLock<AppCore>>,
     state: RecoveryState,
 ) -> Result<(), AuraError> {
-    {
-        let mut core = app_core.write().await;
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_recovery(state.clone());
-    }
-
-    emit_signal(app_core, &*RECOVERY_SIGNAL, state, RECOVERY_SIGNAL_NAME).await
+    replace_projection_observed(
+        app_core,
+        state,
+        |core, state| {
+            // OWNERSHIP: observed-display-update
+            core.views_mut().set_recovery(state);
+        },
+        &*RECOVERY_SIGNAL,
+        RECOVERY_SIGNAL_NAME,
+    )
+    .await
 }
 
 #[cfg_attr(not(feature = "signals"), allow(dead_code))]
@@ -58,13 +98,53 @@ pub async fn replace_homes_projection_observed(
     app_core: &Arc<RwLock<AppCore>>,
     state: HomesState,
 ) -> Result<(), AuraError> {
-    {
-        let mut core = app_core.write().await;
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_homes(state.clone());
-    }
+    replace_projection_observed(
+        app_core,
+        state,
+        |core, state| {
+            // OWNERSHIP: observed-display-update
+            core.views_mut().set_homes(state);
+        },
+        &*HOMES_SIGNAL,
+        HOMES_SIGNAL_NAME,
+    )
+    .await
+}
 
-    emit_signal(app_core, &*HOMES_SIGNAL, state, HOMES_SIGNAL_NAME).await
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn replace_contacts_projection_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    state: ContactsState,
+) -> Result<(), AuraError> {
+    replace_projection_observed(
+        app_core,
+        state,
+        |core, state| {
+            // OWNERSHIP: observed-display-update
+            core.views_mut().set_contacts(state);
+        },
+        &*CONTACTS_SIGNAL,
+        CONTACTS_SIGNAL_NAME,
+    )
+    .await
+}
+
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn replace_neighborhood_projection_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    state: NeighborhoodState,
+) -> Result<(), AuraError> {
+    replace_projection_observed(
+        app_core,
+        state,
+        |core, state| {
+            // OWNERSHIP: observed-display-update
+            core.views_mut().set_neighborhood(state);
+        },
+        &*NEIGHBORHOOD_SIGNAL,
+        NEIGHBORHOOD_SIGNAL_NAME,
+    )
+    .await
 }
 
 /// Observed-only projection update helper for chat state.
@@ -80,16 +160,12 @@ pub async fn update_chat_projection_observed<T>(
     update: impl FnOnce(&mut ChatState) -> T,
 ) -> Result<T, AuraError> {
     let (output, state) = {
-        let mut core = app_core.write().await;
+        let core = app_core.read().await;
         let mut state = core.snapshot().chat;
-        let output = update(&mut state);
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_chat(state.clone());
-        (output, state)
+        (update(&mut state), state)
     };
 
-    // Also emit to CHAT_SIGNAL for ReactiveEffects subscribers
-    emit_signal(app_core, &*CHAT_SIGNAL, state, CHAT_SIGNAL_NAME).await?;
+    replace_chat_projection_observed(app_core, state).await?;
 
     Ok(output)
 }
@@ -110,24 +186,18 @@ pub async fn reduce_chat_fact_observed(
     let reducer = ChatViewReducer;
     let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &envelope.payload, None);
     let state = {
-        let current_state = {
-            let core = app_core.read().await;
-            core.views().get_chat()
-        };
-        let mut core = app_core.write().await;
-        let mut state = current_state;
+        let core = app_core.read().await;
+        let mut state = core.views().get_chat();
         for delta in deltas {
             let Some(chat_delta) = downcast_delta::<ChatDelta>(&delta) else {
                 continue;
             };
             apply_chat_delta_reduced(&mut state, chat_delta.clone())?;
         }
-        // OWNERSHIP: fact-backed
-        core.views_mut().set_chat(state.clone());
         state
     };
 
-    emit_signal(app_core, &*CHAT_SIGNAL, state, CHAT_SIGNAL_NAME).await?;
+    replace_chat_projection_observed(app_core, state).await?;
     Ok(())
 }
 
@@ -387,15 +457,12 @@ pub async fn update_contacts_projection_observed<T>(
     update: impl FnOnce(&mut ContactsState) -> T,
 ) -> Result<T, AuraError> {
     let (output, state) = {
-        let mut core = app_core.write().await;
+        let core = app_core.read().await;
         let mut state = core.snapshot().contacts;
-        let output = update(&mut state);
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_contacts(state.clone());
-        (output, state)
+        (update(&mut state), state)
     };
 
-    emit_signal(app_core, &*CONTACTS_SIGNAL, state, CONTACTS_SIGNAL_NAME).await?;
+    replace_contacts_projection_observed(app_core, state).await?;
 
     Ok(output)
 }
@@ -437,22 +504,12 @@ pub async fn update_neighborhood_projection_observed<T>(
     update: impl FnOnce(&mut NeighborhoodState) -> T,
 ) -> Result<T, AuraError> {
     let (output, state) = {
-        let mut core = app_core.write().await;
+        let core = app_core.read().await;
         let mut state = core.snapshot().neighborhood;
-        let output = update(&mut state);
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_neighborhood(state.clone());
-        (output, state)
+        (update(&mut state), state)
     };
 
-    // Also emit to NEIGHBORHOOD_SIGNAL for ReactiveEffects subscribers
-    emit_signal(
-        app_core,
-        &*NEIGHBORHOOD_SIGNAL,
-        state,
-        NEIGHBORHOOD_SIGNAL_NAME,
-    )
-    .await?;
+    replace_neighborhood_projection_observed(app_core, state).await?;
 
     Ok(output)
 }
@@ -671,11 +728,12 @@ mod tests {
             assert!(!source.contains("core.views_mut().set_homes("));
         }
 
-        let context_source =
-            std::fs::read_to_string(repo_root.join("crates/aura-app/src/workflows/context.rs"))
-                .unwrap_or_else(|error| panic!("failed to read context.rs: {error}"));
-        assert!(!context_source.contains("async fn homes_state_signal_snapshot("));
-        assert!(context_source.contains("homes_signal_snapshot"));
+        let neighborhood_source = std::fs::read_to_string(
+            repo_root.join("crates/aura-app/src/workflows/context/neighborhood.rs"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read context/neighborhood.rs: {error}"));
+        assert!(!neighborhood_source.contains("async fn homes_state_signal_snapshot("));
+        assert!(neighborhood_source.contains("homes_signal_snapshot"));
 
         let settings_source =
             std::fs::read_to_string(repo_root.join("crates/aura-app/src/workflows/settings.rs"))
@@ -684,5 +742,12 @@ mod tests {
         assert!(!settings_source.contains("core.views_mut().set_recovery("));
         assert!(settings_source.contains("replace_homes_projection_observed"));
         assert!(settings_source.contains("replace_recovery_projection_observed"));
+
+        let system_refresh_source = std::fs::read_to_string(
+            repo_root.join("crates/aura-app/src/workflows/system/refresh.rs"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read system/refresh.rs: {error}"));
+        assert!(!system_refresh_source.contains("emit_signal(app_core, &*CHAT_SIGNAL"));
+        assert!(system_refresh_source.contains("replace_chat_projection_observed"));
     }
 }

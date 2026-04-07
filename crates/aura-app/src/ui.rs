@@ -152,13 +152,14 @@ pub mod types {
     };
     pub use crate::workflows::budget::{
         check_can_add_member, check_can_join_neighborhood, check_can_pin, format_budget_compact,
-        format_budget_status, BudgetBreakdown, BudgetError, HomeFlowBudget, HOME_TOTAL_SIZE, KB,
-        MAX_MEMBERS, MAX_NEIGHBORHOODS, MB, MEMBER_ALLOCATION, NEIGHBORHOOD_ALLOCATION,
+        format_budget_status, BudgetBreakdown, BudgetError, BudgetValidationError, HomeFlowBudget,
+        HOME_TOTAL_SIZE, KB, MAX_MEMBERS, MAX_NEIGHBORHOODS, MB, MEMBER_ALLOCATION,
+        NEIGHBORHOOD_ALLOCATION,
     };
     pub use crate::workflows::chat_commands::{
         all_command_help, command_help, commands_in_category, is_command, normalize_channel_name,
         parse_chat_command, parse_duration, ChatCommand, CommandCapability, CommandCategory,
-        CommandError, CommandHelp,
+        CommandError, CommandHelp, ParseDurationError,
     };
     pub use crate::workflows::config::{
         default_port, generate_device_config, DeviceConfigDefaults, ACCOUNT_FILENAME,

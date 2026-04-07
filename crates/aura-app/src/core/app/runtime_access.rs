@@ -250,28 +250,7 @@ impl AppCore {
         Ok(Some((settings, devices, authorities)))
     }
 
-    pub async fn sync_peers(&self) -> Result<Vec<aura_core::DeviceId>, IntentError> {
-        self.with_runtime_timeout(
-            "sync_peers requires a runtime",
-            "sync_peers",
-            "try_get_sync_peers",
-            APP_RUNTIME_QUERY_TIMEOUT,
-            |runtime| async move { runtime.try_get_sync_peers().await },
-        )
-        .await?
-    }
-
-    pub async fn discover_peers(&self) -> Result<Vec<AuthorityId>, IntentError> {
-        self.with_runtime_timeout(
-            "discover_peers requires a runtime",
-            "discover_peers",
-            "try_get_discovered_peers",
-            APP_RUNTIME_QUERY_TIMEOUT,
-            |runtime| async move { runtime.try_get_discovered_peers().await },
-        )
-        .await?
-    }
-
+    /// Returns bootstrap candidates from the attached runtime for account-setup flows.
     pub async fn get_bootstrap_candidates(
         &self,
     ) -> Result<Vec<BootstrapCandidateInfo>, IntentError> {
@@ -291,35 +270,7 @@ impl AppCore {
         ))
     }
 
-    pub async fn is_online(&self) -> bool {
-        if let Some(runtime) = &self.runtime {
-            let sync = timeout_runtime_call_bounded(
-                runtime,
-                "is_online",
-                "try_get_sync_status",
-                APP_RUNTIME_QUERY_TIMEOUT,
-                || runtime.try_get_sync_status(),
-            )
-            .await
-            .ok()
-            .and_then(Result::ok);
-            let rendezvous = timeout_runtime_call_bounded(
-                runtime,
-                "is_online",
-                "try_get_rendezvous_status",
-                APP_RUNTIME_QUERY_TIMEOUT,
-                || runtime.try_get_rendezvous_status(),
-            )
-            .await
-            .ok()
-            .and_then(Result::ok);
-            return sync.as_ref().is_some_and(|status| status.is_running)
-                || rendezvous.as_ref().is_some_and(|status| status.is_running);
-        }
-        false
-    }
-
-    pub async fn trigger_sync(&self) -> Result<(), IntentError> {
+    pub(crate) async fn trigger_sync(&self) -> Result<(), IntentError> {
         self.with_runtime_timeout(
             "trigger_sync requires a runtime",
             "trigger_sync",
@@ -330,7 +281,7 @@ impl AppCore {
         .await?
     }
 
-    pub async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
+    pub(crate) async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
         self.with_runtime_timeout(
             "sync_with_peer requires a runtime",
             "sync_with_peer",
@@ -341,6 +292,7 @@ impl AppCore {
         .await?
     }
 
+    /// Exports an invitation in the runtime's external wire format.
     pub async fn export_invitation(&self, invitation_id: &str) -> Result<String, IntentError> {
         self.with_runtime_timeout(
             "export_invitation requires a runtime",
@@ -352,55 +304,7 @@ impl AppCore {
         .await?
     }
 
-    pub async fn authentication_status(
-        &self,
-    ) -> Result<crate::runtime_bridge::AuthenticationStatus, IntentError> {
-        if let Some(runtime) = &self.runtime {
-            return timeout_runtime_call_bounded(
-                runtime,
-                "authentication_status",
-                "authentication_status",
-                APP_RUNTIME_QUERY_TIMEOUT,
-                || runtime.authentication_status(),
-            )
-            .await
-            .map_err(|error| IntentError::internal_error(error.to_string()))?;
-        }
-        Ok(crate::runtime_bridge::AuthenticationStatus::Unauthenticated)
-    }
-
-    pub async fn rotate_guardian_keys(
-        &self,
-        threshold_k: FrostThreshold,
-        total_n: u16,
-        guardian_ids: &[AuthorityId],
-    ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
-        self.with_runtime_timeout(
-            "rotate_guardian_keys requires a runtime",
-            "rotate_guardian_keys",
-            "rotate_guardian_keys",
-            APP_RUNTIME_OPERATION_TIMEOUT,
-            |runtime| async move {
-                runtime
-                    .rotate_guardian_keys(threshold_k, total_n, guardian_ids)
-                    .await
-            },
-        )
-        .await?
-    }
-
-    pub async fn commit_guardian_key_rotation(&self, new_epoch: Epoch) -> Result<(), IntentError> {
-        self.with_runtime_timeout(
-            "commit_guardian_key_rotation requires a runtime",
-            "commit_guardian_key_rotation",
-            "commit_guardian_key_rotation",
-            APP_RUNTIME_OPERATION_TIMEOUT,
-            |runtime| async move { runtime.commit_guardian_key_rotation(new_epoch).await },
-        )
-        .await?
-    }
-
-    pub async fn rollback_guardian_key_rotation(
+    pub(crate) async fn rollback_guardian_key_rotation(
         &self,
         failed_epoch: Epoch,
     ) -> Result<(), IntentError> {
@@ -414,7 +318,7 @@ impl AppCore {
         .await?
     }
 
-    pub async fn initiate_guardian_ceremony(
+    pub(crate) async fn initiate_guardian_ceremony(
         &self,
         threshold_k: FrostThreshold,
         total_n: u16,
@@ -434,7 +338,7 @@ impl AppCore {
         .await?
     }
 
-    pub async fn initiate_device_threshold_ceremony(
+    pub(crate) async fn initiate_device_threshold_ceremony(
         &self,
         threshold_k: FrostThreshold,
         total_n: u16,
@@ -454,54 +358,7 @@ impl AppCore {
         .await?
     }
 
-    pub async fn initiate_device_enrollment_ceremony(
-        &self,
-        nickname_suggestion: String,
-        invitee_authority_id: AuthorityId,
-    ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, IntentError> {
-        self.with_runtime_timeout(
-            "initiate_device_enrollment_ceremony requires a runtime",
-            "initiate_device_enrollment_ceremony",
-            "initiate_device_enrollment_ceremony",
-            APP_RUNTIME_OPERATION_TIMEOUT,
-            |runtime| async move {
-                runtime
-                    .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
-                    .await
-            },
-        )
-        .await?
-    }
-
-    pub async fn initiate_device_removal_ceremony(
-        &self,
-        device_id: String,
-    ) -> Result<CeremonyId, IntentError> {
-        self.with_runtime_timeout(
-            "initiate_device_removal_ceremony requires a runtime",
-            "initiate_device_removal_ceremony",
-            "initiate_device_removal_ceremony",
-            APP_RUNTIME_OPERATION_TIMEOUT,
-            |runtime| async move { runtime.initiate_device_removal_ceremony(device_id).await },
-        )
-        .await?
-    }
-
-    pub async fn get_ceremony_status(
-        &self,
-        ceremony_id: &CeremonyId,
-    ) -> Result<crate::runtime_bridge::CeremonyStatus, IntentError> {
-        self.with_runtime_timeout(
-            "get_ceremony_status requires a runtime",
-            "get_ceremony_status",
-            "get_ceremony_status",
-            APP_RUNTIME_QUERY_TIMEOUT,
-            |runtime| async move { runtime.get_ceremony_status(ceremony_id).await },
-        )
-        .await?
-    }
-
-    pub async fn get_key_rotation_ceremony_status(
+    pub(crate) async fn get_key_rotation_ceremony_status(
         &self,
         ceremony_id: &CeremonyId,
     ) -> Result<crate::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
@@ -515,7 +372,7 @@ impl AppCore {
         .await?
     }
 
-    pub async fn cancel_key_rotation_ceremony(
+    pub(crate) async fn cancel_key_rotation_ceremony(
         &self,
         ceremony_id: &CeremonyId,
     ) -> Result<(), IntentError> {

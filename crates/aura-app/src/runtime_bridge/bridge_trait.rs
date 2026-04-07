@@ -27,7 +27,7 @@ use std::sync::Arc;
 #[allow(missing_docs)] // Trait method docs evolving with API
 pub trait RuntimeBridge: Send + Sync {
     // =========================================================================
-    // Identity & Authority
+    // Runtime Identity & Lifecycle
     // =========================================================================
 
     /// Get the authority ID for this runtime
@@ -51,6 +51,9 @@ pub trait RuntimeBridge: Send + Sync {
     fn cancellation_token(&self) -> OwnedShutdownToken {
         self.task_spawner().shutdown_token().clone()
     }
+
+    /// Query the explicit runtime authentication status.
+    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError>;
 
     // =========================================================================
     // Typed Fact Commit (Canonical)
@@ -150,21 +153,6 @@ pub trait RuntimeBridge: Send + Sync {
         let _ = (context, channel);
         Err(IntentError::no_agent(
             "Channel invitation acceptance resend not available in offline mode",
-        ))
-    }
-
-    /// Return authoritative moderation status for an authority within a
-    /// home-scoped context.
-    async fn moderation_status(
-        &self,
-        context_id: ContextId,
-        channel_id: ChannelId,
-        authority_id: AuthorityId,
-        current_time_ms: u64,
-    ) -> Result<AuthoritativeModerationStatus, IntentError> {
-        let _ = (context_id, channel_id, authority_id, current_time_ms);
-        Err(IntentError::no_agent(
-            "Authoritative moderation status not available in offline mode",
         ))
     }
 
@@ -298,6 +286,21 @@ pub trait RuntimeBridge: Send + Sync {
         channel_id: ChannelId,
         message_id: String,
     ) -> Result<(), IntentError>;
+
+    /// Return authoritative moderation status for an authority within a
+    /// home-scoped context.
+    async fn moderation_status(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        authority_id: AuthorityId,
+        current_time_ms: u64,
+    ) -> Result<AuthoritativeModerationStatus, IntentError> {
+        let _ = (context_id, channel_id, authority_id, current_time_ms);
+        Err(IntentError::no_agent(
+            "Authoritative moderation status not available in offline mode",
+        ))
+    }
 
     async fn channel_set_topic(
         &self,
@@ -721,13 +724,6 @@ pub trait RuntimeBridge: Send + Sync {
     ) -> Result<(), IntentError>;
 
     // =========================================================================
-    // Authentication
-    // =========================================================================
-
-    /// Query the explicit runtime authentication status.
-    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError>;
-
-    // =========================================================================
     // Authorization / Capabilities
     // =========================================================================
 
@@ -747,13 +743,6 @@ pub trait RuntimeBridge: Send + Sync {
     /// Returns `true` for all capabilities. Override in implementations that
     /// integrate with Biscuit tokens or other authorization systems.
     async fn has_command_capability(&self, _capability: &str) -> bool {
-        // Default: allow all capabilities.
-        //
-        // WARNING: This default is permissive by design so that offline and test
-        // bridges work without Biscuit integration.  Production RuntimeBridge
-        // implementations MUST override this to evaluate Biscuit tokens or an
-        // equivalent capability check.  Relying on this default in a production
-        // deployment disables command-level authorization.
         true
     }
 

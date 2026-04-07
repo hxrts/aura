@@ -419,12 +419,26 @@ pub enum SharedSettingsSectionId {
     Authority,
 }
 
+impl SharedSettingsSectionId {
+    pub const ALL: [Self; 5] = [
+        Self::Profile,
+        Self::GuardianThreshold,
+        Self::RequestRecovery,
+        Self::Devices,
+        Self::Authority,
+    ];
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FrontendSpecificSettingsSectionId {
     Appearance,
     Info,
     Observability,
+}
+
+impl FrontendSpecificSettingsSectionId {
+    pub const ALL: [Self; 3] = [Self::Appearance, Self::Info, Self::Observability];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -434,19 +448,11 @@ pub enum SettingsSectionSurfaceId {
     FrontendSpecific(FrontendSpecificSettingsSectionId),
 }
 
-pub const PARITY_CRITICAL_SETTINGS_SECTIONS: &[SharedSettingsSectionId] = &[
-    SharedSettingsSectionId::Profile,
-    SharedSettingsSectionId::GuardianThreshold,
-    SharedSettingsSectionId::RequestRecovery,
-    SharedSettingsSectionId::Devices,
-    SharedSettingsSectionId::Authority,
-];
+pub const PARITY_CRITICAL_SETTINGS_SECTIONS: &[SharedSettingsSectionId] =
+    &SharedSettingsSectionId::ALL;
 
-pub const FRONTEND_SPECIFIC_SETTINGS_SECTIONS: &[FrontendSpecificSettingsSectionId] = &[
-    FrontendSpecificSettingsSectionId::Appearance,
-    FrontendSpecificSettingsSectionId::Info,
-    FrontendSpecificSettingsSectionId::Observability,
-];
+pub const FRONTEND_SPECIFIC_SETTINGS_SECTIONS: &[FrontendSpecificSettingsSectionId] =
+    &FrontendSpecificSettingsSectionId::ALL;
 
 #[must_use]
 pub const fn screen_item_id(screen: ScreenId) -> &'static str {
@@ -784,5 +790,42 @@ pub fn contacts_friend_action_controls(
             ControlId::ContactsDeclineFriendRequestButton,
         ],
         ContactRelationshipState::Friend => &[ControlId::ContactsRemoveFriendButton],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        classify_settings_section_item_id, settings_section_item_id,
+        FrontendSpecificSettingsSectionId, SettingsSectionSurfaceId, SharedSettingsSectionId,
+        FRONTEND_SPECIFIC_SETTINGS_SECTIONS, PARITY_CRITICAL_SETTINGS_SECTIONS,
+    };
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn settings_section_inventories_round_trip_through_item_ids() {
+        let mut item_ids = BTreeSet::new();
+
+        for section in SharedSettingsSectionId::ALL {
+            assert!(
+                PARITY_CRITICAL_SETTINGS_SECTIONS.contains(&section),
+                "shared settings section inventory should include {section:?}",
+            );
+            let surface = SettingsSectionSurfaceId::Shared(section);
+            let item_id = settings_section_item_id(surface);
+            assert!(item_ids.insert(item_id), "settings item ids must be unique");
+            assert_eq!(classify_settings_section_item_id(item_id), Some(surface));
+        }
+
+        for section in FrontendSpecificSettingsSectionId::ALL {
+            assert!(
+                FRONTEND_SPECIFIC_SETTINGS_SECTIONS.contains(&section),
+                "frontend-specific settings inventory should include {section:?}",
+            );
+            let surface = SettingsSectionSurfaceId::FrontendSpecific(section);
+            let item_id = settings_section_item_id(surface);
+            assert!(item_ids.insert(item_id), "settings item ids must be unique");
+            assert_eq!(classify_settings_section_item_id(item_id), Some(surface));
+        }
     }
 }

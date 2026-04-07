@@ -136,98 +136,38 @@ pub struct SemanticCommandSupport {
     pub tui: FlowAvailability,
 }
 
-pub const SEMANTIC_COMMAND_SUPPORT: &[SemanticCommandSupport] = &[
-    SemanticCommandSupport {
-        intent: IntentKind::OpenScreen,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::CreateAccount,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::CreateHome,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::CreateChannel,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::StartDeviceEnrollment,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::ImportDeviceEnrollmentCode,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::OpenSettingsSection,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::RemoveSelectedDevice,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::SwitchAuthority,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::CreateContactInvitation,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::AcceptContactInvitation,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::AcceptPendingChannelInvitation,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::JoinChannel,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::InviteActorToChannel,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::SendChatMessage,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::SendFriendRequest,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::AcceptFriendRequest,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-    SemanticCommandSupport {
-        intent: IntentKind::DeclineFriendRequest,
-        web: FlowAvailability::Supported,
-        tui: FlowAvailability::Supported,
-    },
-];
+macro_rules! supported_on_all_frontends {
+    ($($intent:ident),+ $(,)?) => {
+        pub const SEMANTIC_COMMAND_SUPPORT: &[SemanticCommandSupport] = &[
+            $(SemanticCommandSupport {
+                intent: IntentKind::$intent,
+                web: FlowAvailability::Supported,
+                tui: FlowAvailability::Supported,
+            },)+
+        ];
+    };
+}
+
+supported_on_all_frontends!(
+    OpenScreen,
+    CreateAccount,
+    CreateHome,
+    CreateChannel,
+    StartDeviceEnrollment,
+    ImportDeviceEnrollmentCode,
+    OpenSettingsSection,
+    RemoveSelectedDevice,
+    SwitchAuthority,
+    CreateContactInvitation,
+    AcceptContactInvitation,
+    AcceptPendingChannelInvitation,
+    JoinChannel,
+    InviteActorToChannel,
+    SendChatMessage,
+    SendFriendRequest,
+    AcceptFriendRequest,
+    DeclineFriendRequest,
+);
 
 #[must_use]
 pub fn semantic_command_support(intent: IntentKind) -> &'static SemanticCommandSupport {

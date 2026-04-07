@@ -35,42 +35,44 @@ pub async fn handle_moderation(
         }
 
         EffectCommand::BanUser {
-            channel,
+            channel: _channel,
             target,
             reason,
         } => {
             let ts = super::time::current_time_ms(app_core).await;
-            match ban_user(app_core, channel.as_deref(), target, reason.as_deref(), ts).await {
+            match ban_user(app_core, target, reason.as_deref(), ts).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
         }
 
-        EffectCommand::UnbanUser { channel, target } => {
-            match unban_user(app_core, channel.as_deref(), target).await {
-                Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
-            }
-        }
+        EffectCommand::UnbanUser {
+            channel: _channel,
+            target,
+        } => match unban_user(app_core, target).await {
+            Ok(()) => Some(Ok(OpResponse::Ok)),
+            Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
+        },
 
         EffectCommand::MuteUser {
-            channel,
+            channel: _channel,
             target,
             duration_secs,
         } => {
             let ts = super::time::current_time_ms(app_core).await;
-            match mute_user(app_core, channel.as_deref(), target, *duration_secs, ts).await {
+            match mute_user(app_core, target, *duration_secs, ts).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
         }
 
-        EffectCommand::UnmuteUser { channel, target } => {
-            match unmute_user(app_core, channel.as_deref(), target).await {
-                Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
-            }
-        }
+        EffectCommand::UnmuteUser {
+            channel: _channel,
+            target,
+        } => match unmute_user(app_core, target).await {
+            Ok(()) => Some(Ok(OpResponse::Ok)),
+            Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
+        },
 
         EffectCommand::PinMessage { message_id } => match pin_message(app_core, message_id).await {
             Ok(()) => Some(Ok(OpResponse::Ok)),

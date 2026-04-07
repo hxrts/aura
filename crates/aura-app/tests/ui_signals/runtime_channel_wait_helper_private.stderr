@@ -7,9 +7,5 @@ error[E0603]: function `wait_for_runtime_channel_state` is private
 note: the function `wait_for_runtime_channel_state` is defined here
  --> src/workflows/messaging.rs
   |
-  | / pub(in crate::workflows) async fn wait_for_runtime_channel_state(
-  | |     _app_core: &Arc<RwLock<AppCore>>,
-  | |     runtime: &Arc<dyn RuntimeBridge>,
-  | |     channel: AuthoritativeChannelRef,
-  | | ) -> Result<(), AuraError> {
-  | |__________________________^
+  |     runtime_channel_state_exists, wait_for_runtime_channel_state,
+  |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
