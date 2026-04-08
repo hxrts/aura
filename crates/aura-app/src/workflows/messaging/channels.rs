@@ -1,5 +1,6 @@
 use super::*;
 use crate::workflows::error;
+use crate::workflows::parse::parse_context_id;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub(super) enum JoinChannelError {
@@ -662,16 +663,9 @@ fn authoritative_binding_from_witness(
             binding.channel_id
         ))
     })?;
-    let context_id = binding
-        .context_id
-        .as_deref()
-        .ok_or_else(|| AuraError::invalid("join fallback requires an authoritative context id"))?
-        .parse::<ContextId>()
-        .map_err(|error| {
-            AuraError::invalid(format!(
-                "join fallback carried invalid authoritative context id: {error}"
-            ))
-        })?;
+    let context_id = parse_context_id(binding.context_id.as_deref().ok_or_else(|| {
+        AuraError::invalid("join fallback requires an authoritative context id")
+    })?)?;
     Ok(crate::runtime_bridge::AuthoritativeChannelBinding {
         channel_id,
         context_id,

@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use super::*;
+use crate::workflows::parse::parse_context_id;
 
 /// Strong authoritative reference for parity-critical channel operations.
 ///
@@ -175,12 +176,7 @@ pub async fn materialize_authoritative_channel_binding_observed(
         ))
     })?;
     let context_id = match binding.context_id.as_deref() {
-        Some(context_id) => context_id.parse::<ContextId>().map_err(|error| {
-            AuraError::invalid(format!(
-                "accepted channel binding carried invalid authoritative context id '{}': {error}",
-                context_id
-            ))
-        })?,
+        Some(context_id) => parse_context_id(context_id)?,
         None => require_authoritative_context_id_for_channel(app_core, channel_id).await?,
     };
     ensure_channel_visible_after_join(app_core, channel_id, context_id, name_hint).await
