@@ -731,13 +731,9 @@ pub async fn join_authoritative_channel_binding_with_terminal_status(
             .publish_phase(SemanticOperationPhase::WorkflowDispatched)
             .await?;
         let authoritative_binding = authoritative_binding_from_witness(binding)?;
-        let _channel_id = join_channel_authoritative(
-            app_core,
-            authoritative_binding.clone(),
-            &owner,
-            channel_name,
-        )
-        .await?;
+        let _channel_id =
+            join_channel_authoritative(app_core, authoritative_binding, &owner, channel_name)
+                .await?;
         Ok(crate::ui_contract::ChannelBindingWitness::new(
             authoritative_binding.channel_id.to_string(),
             Some(authoritative_binding.context_id.to_string()),

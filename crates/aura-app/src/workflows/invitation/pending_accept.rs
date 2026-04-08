@@ -216,10 +216,10 @@ async fn pending_home_or_channel_invitation_for_accept(
             #[cfg(feature = "signals")]
             {
                 let invitations = list_invitations(&app_core).await;
-                return Ok(
+                Ok(
                     select_accepted_home_or_channel_invitation_from_signal(&invitations)
                         .map(PendingChannelInvitationSelection::Signal),
-                );
+                )
             }
             #[cfg(not(feature = "signals"))]
             {
@@ -234,10 +234,10 @@ async fn pending_home_or_channel_invitation_for_accept(
             #[cfg(feature = "signals")]
             {
                 let invitations = list_invitations(&app_core).await;
-                return Ok(
+                Ok(
                     select_accepted_home_or_channel_invitation_from_signal(&invitations)
                         .map(PendingChannelInvitationSelection::Signal),
-                );
+                )
             }
             #[cfg(not(feature = "signals"))]
             {
@@ -542,7 +542,8 @@ mod tests {
             &app_core,
             &*INVITATIONS_SIGNAL,
             crate::views::invitations::InvitationsState::from_parts(
-                Vec::new(),
+                Vec::<crate::views::invitations::Invitation>::new(),
+                Vec::<crate::views::invitations::Invitation>::new(),
                 vec![crate::views::invitations::Invitation {
                     id: "accepted-channel-history".to_string(),
                     invitation_type: crate::views::invitations::InvitationType::Chat,
@@ -558,7 +559,6 @@ mod tests {
                     home_id: Some(channel_id),
                     home_name: Some("shared-parity-lab".to_string()),
                 }],
-                Vec::new(),
             ),
             "invitations",
         )
