@@ -517,6 +517,8 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
 #[cfg(all(test, feature = "signals"))]
 mod tests {
     use super::*;
+    use crate::workflows::signals::emit_signal;
+    use crate::AppConfig;
 
     #[tokio::test]
     async fn pending_selector_uses_accepted_signal_history_as_browser_recovery_fallback() {
