@@ -111,11 +111,11 @@ and continue to map to the same canonical coverage anchors:
   assumptions and keeps those flows on the same typed dispatch and shared
   workflow path.
 - Pending channel-invitation acceptance now also requires terminal-status
-  wrappers to publish a terminal failure for the same operation instance if a
-  browser/TUI shared-flow error escapes before the owned accept path settles.
-  That keeps Scenario 13 authoritative for contacts navigation, invitation
-  create/accept, channel join, and shared-channel receive parity rather than
-  leaving the lifecycle stranded at
+  wrappers and `*_with_instance` entry points to publish a terminal failure for
+  the same operation instance if a browser/TUI shared-flow error escapes before
+  the owned accept path settles. That keeps Scenario 13 authoritative for
+  contacts navigation, invitation create/accept, channel join, and
+  shared-channel receive parity rather than leaving the lifecycle stranded at
   `SemanticOperationPhase::WorkflowDispatched`.
 - `aura-app` splits these same flows across more specific
   owner modules while preserving the coverage anchors above:

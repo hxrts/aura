@@ -351,7 +351,16 @@ pub async fn accept_pending_channel_invitation_with_instance(
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    accept_pending_channel_invitation_id_owned(app_core, &owner, instance_id, None).await
+    let result =
+        accept_pending_channel_invitation_id_owned(app_core, &owner, instance_id, None).await;
+    if let Err(error) = &result {
+        if owner.terminal_status().await.is_none() {
+            let _ = owner
+                .publish_failure(super::command_terminal_error(error.to_string()))
+                .await;
+        }
+    }
+    result
 }
 
 pub async fn accept_pending_channel_invitation_with_terminal_status(

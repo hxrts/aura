@@ -6,7 +6,9 @@
 //! even when their concrete tables live in `ui_contract/*` submodules.
 //! The current shared-flow anchors keep contacts navigation plus invitation
 //! create/accept and shared-channel messaging bound to Scenario 13, while
-//! device-enrollment/removal remains bound to Scenario 12.
+//! device-enrollment/removal remains bound to Scenario 12. Pending channel
+//! acceptance entry points must settle the same operation instance even when an
+//! early shared-flow error escapes before the owned accept path does.
 
 #![allow(missing_docs)] // Shared contract surface - refined incrementally during migration.
 
