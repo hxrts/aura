@@ -4,6 +4,9 @@
 //! types that can be shared across the web UI, TUI, and harness tooling.
 //! Shared-flow coverage and source-area metadata are exported from this facade
 //! even when their concrete tables live in `ui_contract/*` submodules.
+//! The current shared-flow anchors keep contacts navigation plus invitation
+//! create/accept and shared-channel messaging bound to Scenario 13, while
+//! device-enrollment/removal remains bound to Scenario 12.
 
 #![allow(missing_docs)] // Shared contract surface - refined incrementally during migration.
 

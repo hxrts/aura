@@ -370,6 +370,15 @@ pub async fn accept_pending_channel_invitation_with_terminal_status(
         accept_pending_channel_invitation_id_owned(app_core, &owner, instance_id, None).await
     }
     .await;
+
+    if let Err(error) = &result {
+        if owner.terminal_status().await.is_none() {
+            let _ = owner
+                .publish_failure(super::command_terminal_error(error.to_string()))
+                .await;
+        }
+    }
+
     crate::ui_contract::WorkflowTerminalOutcome {
         result,
         terminal: owner.terminal_status().await,
@@ -507,6 +516,14 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
         })
     }
     .await;
+
+    if let Err(error) = &result {
+        if owner.terminal_status().await.is_none() {
+            let _ = owner
+                .publish_failure(super::command_terminal_error(error.to_string()))
+                .await;
+        }
+    }
 
     crate::ui_contract::WorkflowTerminalOutcome {
         result,

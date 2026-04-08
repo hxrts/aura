@@ -176,6 +176,16 @@ invitation acceptance, and `workflows/messaging/{channel_refs,channels,send}.rs`
 for chat navigation, join, and message-send paths. The `aura-app::ui_contract`
 facade remains the canonical export surface for that coverage metadata.
 
+Shared pending-invitation acceptance has an additional invariant now: terminal
+status wrappers for `SemanticOperationKind::AcceptPendingChannelInvitation`
+must not strand the authoritative semantic lifecycle at
+`SemanticOperationPhase::WorkflowDispatched` when the shared browser/TUI flow
+fails before the owned accept path settles. If an early error escapes the
+owned path, the wrapper must synthesize the terminal failure publication for
+the same operation instance before returning to the shell or harness. Scenario
+13 remains the canonical mixed-runtime anchor for that browser shared-channel
+receive parity.
+
 Note-to-self is a real AMP channel provisioned at account bootstrap, not a display-only entry. It appears as a first-class channel backed by the runtime from first use, with its own context, deterministic channel ID, and standard message delivery. Channel creation parity coverage must not treat "has at least one contact" as a prerequisite for opening chat creation. TUI and web shells should expose the same semantic create-channel path when the only available participant is self, and scenario coverage should keep that path distinct from pairwise or group-member invitation flows.
 
 The notifications shared-flow anchor remains navigation-only. Parity coverage for notifications navigation requires the TUI and web shells to expose the same semantic screen transition and detail-view contract, but notification empty-state copy is informational only and must not introduce parity-critical invitation or recovery actions outside the canonical shared workflows.

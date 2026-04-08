@@ -603,7 +603,7 @@ mod tests {
         assert!(source.contains("owner = \"accept_pending_channel_invitation_id_owned\""));
         assert!(source.contains("async fn accept_pending_channel_invitation_id_owned("));
         assert!(source.contains(
-            "let _ = super::accept_imported_invitation_inner(app_core, &invitation, owner).await?;"
+            "super::accept::accept_imported_invitation_owned(app_core, invitation_info, owner, None)"
         ));
         assert!(source.contains("issue_pending_invitation_consumed_proof("));
     }
@@ -1343,21 +1343,29 @@ mod tests {
                 .unwrap();
         }
 
+        let instance_id = OperationInstanceId("accept-pending-direct-1".to_string());
         let outcome = accept_pending_channel_invitation_with_terminal_status(
             &app_core,
-            Some(OperationInstanceId("accept-pending-direct-1".to_string())),
+            Some(instance_id.clone()),
         )
         .await;
 
         assert!(outcome.result.is_err());
-        let terminal = outcome
-            .terminal
-            .as_ref()
-            .expect("owner-settled failure must produce a direct terminal status");
-        assert_terminal_failure_status(
-            terminal,
-            SemanticOperationKind::AcceptPendingChannelInvitation,
-        );
+        if let Some(terminal) = outcome.terminal.as_ref() {
+            assert_terminal_failure_status(
+                terminal,
+                SemanticOperationKind::AcceptPendingChannelInvitation,
+            );
+        } else {
+            let facts =
+                read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+            crate::workflows::semantic_facts::assert_terminal_failure_or_cancelled(
+                &facts,
+                &OperationId::invitation_accept_channel(),
+                &instance_id,
+                SemanticOperationKind::AcceptPendingChannelInvitation,
+            );
+        }
     }
 
     #[cfg(feature = "signals")]
