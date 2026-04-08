@@ -789,15 +789,25 @@ impl IntentAction {
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
-                    before_next_intent: vec![BarrierDeclaration::Readiness(UiReadiness::Ready)],
+                    before_next_intent: vec![BarrierDeclaration::OperationState {
+                        operation_id: OperationId::invitation_accept_channel(),
+                        state: OperationState::Succeeded,
+                    }],
                 },
                 post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Screen(ScreenId::Chat),
                 selection_semantics: SelectionSemantics::PreservesCurrent,
-                transitions: vec![AuthoritativeTransitionKind::Screen(ScreenId::Chat)],
+                transitions: vec![AuthoritativeTransitionKind::Operation(
+                    OperationId::invitation_accept_channel(),
+                )],
                 terminal_success: vec![
-                    TerminalSuccessKind::Screen(ScreenId::Chat),
-                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
+                    TerminalSuccessKind::OperationState {
+                        operation_id: OperationId::invitation_accept_channel(),
+                        state: OperationState::Succeeded,
+                    },
+                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::InvitationAccepted),
+                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelJoined),
+                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady),
                 ],
                 terminal_failure_codes: vec![
                     "pending_channel_invitation_issue_failed".to_string(),

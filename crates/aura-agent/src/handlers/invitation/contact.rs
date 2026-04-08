@@ -263,6 +263,16 @@ impl<'a> InvitationContactHandler<'a> {
                 let envelope = match effects.receive_envelope().await {
                     Ok(env) => env,
                     Err(TransportError::NoMessage) => break,
+                    Err(
+                        error @ (TransportError::InvalidEnvelope { .. }
+                        | TransportError::ReceiptValidationFailed { .. }),
+                    ) => {
+                        tracing::warn!(
+                            error = %error,
+                            "Skipping invalid envelope while scanning contact invitation mailbox"
+                        );
+                        continue;
+                    }
                     Err(e) => {
                         tracing::warn!("Error receiving contact invitation acceptance: {}", e);
                         break;
@@ -594,11 +604,26 @@ impl<'a> InvitationContactHandler<'a> {
                             _ => unreachable!("non-channel invitation filtered above"),
                         }
                     } else {
-                        let Some(home_name) = acceptance
+                        let resolved_home_name = acceptance
                             .channel_name
                             .as_ref()
                             .map(|value| value.trim().to_string())
-                            .filter(|value| !value.is_empty())
+                            .filter(|value| !value.is_empty());
+                        let resolved_home_name = match resolved_home_name {
+                            Some(home_name) => Some(home_name),
+                            None => self
+                                .handler
+                                .channel_created_fact_name(
+                                    effects.as_ref(),
+                                    local_authority,
+                                    acceptance.context_id,
+                                    acceptance.channel_id,
+                                )
+                                .await
+                                .map(|value| value.trim().to_string())
+                                .filter(|value| !value.is_empty()),
+                        };
+                        let Some(home_name) = resolved_home_name
                         else {
                             tracing::warn!(
                                 invitation_id = %acceptance.invitation_id,

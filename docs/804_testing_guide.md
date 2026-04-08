@@ -163,7 +163,7 @@ Browser-owned semantic snapshot publication should flow through one helper align
 The canonical shared-flow coverage anchors for the current parity-critical user flows are listed below.
 
 - `real-runtime-mixed-startup-smoke.toml` for startup, onboarding, and shared neighborhood navigation
-- `scenario13-mixed-contact-channel-message-e2e.toml` for the current TUI-stable chat, contacts, invitation, home creation, channel join, and message-send flow while browser shared-channel receive parity is under repair
+- `scenario13-mixed-contact-channel-message-e2e.toml` for the shared chat, contacts, invitation, home creation, channel join, and message-send flow
 - `scenario12-mixed-device-enrollment-removal-e2e.toml` for device add and remove
 - `shared-notifications-and-authority.toml` and `shared-settings-parity.toml` for the remaining shared settings, authority, and navigation flows
 

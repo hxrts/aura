@@ -432,6 +432,7 @@ mod tests {
         let open_block = &source[open_start..open_end];
         assert!(open_block.contains(&set_screen_call));
         assert!(open_block.contains(&select_channel));
+        assert!(open_block.contains("refresh_account(controller.app_core())"));
 
         let join_start = source
             .find("RoutedSemanticIntent::JoinChannel { channel_name } => {")

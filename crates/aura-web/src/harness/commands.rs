@@ -712,6 +712,9 @@ async fn execute_semantic_intent(
                     }
                 },
             );
+            if matches!(screen, ScreenId::Chat) {
+                let _ = system_workflows::refresh_account(controller.app_core()).await;
+            }
             declared_immediate_unit_response(&contract)
         }
         RoutedSemanticIntent::CreateAccount { account_name } => {
@@ -1105,6 +1108,19 @@ async fn execute_semantic_intent(
             declared_handle_unit_response(&contract, handle)
         }
         RoutedSemanticIntent::AcceptPendingChannelInvitation => {
+            let app_core_for_maintenance = controller.app_core().clone();
+            match runtime_workflows::require_runtime(&app_core_for_maintenance).await {
+                Ok(runtime) => {
+                    let _ = runtime_workflows::run_harness_runtime_maintenance_pass(
+                        &app_core_for_maintenance,
+                        &runtime,
+                    )
+                    .await;
+                }
+                Err(_) => {
+                    let _ = system_workflows::refresh_account(controller.app_core()).await;
+                }
+            }
             let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
                 &contract,
@@ -1128,7 +1144,25 @@ async fn execute_semantic_intent(
                     )
                     .await
                 },
-                |_controller, _accepted| async move { Ok(()) },
+                |controller, accepted| async move {
+                    let _ =
+                        messaging_workflows::materialize_authoritative_channel_binding_observed(
+                            controller.app_core(),
+                            &accepted.binding,
+                            accepted.channel_name.as_deref(),
+                        )
+                        .await;
+                    let channel_id = accepted.binding.channel_id.clone();
+                    let _ = system_workflows::refresh_account(controller.app_core()).await;
+                    crate::harness_bridge::apply_browser_ui_mutation(
+                        controller.clone(),
+                        move |controller| {
+                            controller.set_screen(ScreenId::Chat);
+                            controller.select_channel_by_id(&channel_id);
+                        },
+                    );
+                    Ok(())
+                },
             );
             declared_handle_unit_response(&contract, handle)
         }
@@ -1138,14 +1172,44 @@ async fn execute_semantic_intent(
                 &contract,
                 OperationId::join_channel(),
             )?;
-            let binding = messaging_workflows::join_channel_by_name_with_binding_terminal_status(
-                controller.app_core(),
-                &channel_name,
-                Some(handle.instance_id().clone()),
-            )
-            .await
-            .result
-            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let binding =
+                match messaging_workflows::join_channel_by_name_with_binding_terminal_status(
+                    controller.app_core(),
+                    &channel_name,
+                    Some(handle.instance_id().clone()),
+                )
+                .await
+                .result
+                {
+                    Ok(binding) => binding,
+                    Err(error) if error.to_string().contains("Not found:") => {
+                        let binding = selected_channel_binding(&controller).await.map_err(
+                            |fallback_error| JsValue::from_str(&fallback_error.detail()),
+                        )?;
+                        let outcome =
+                            messaging_workflows::join_authoritative_channel_binding_with_terminal_status(
+                                controller.app_core(),
+                                &binding,
+                                &channel_name,
+                                Some(handle.instance_id().clone()),
+                            )
+                            .await;
+                        let binding = outcome
+                            .result
+                            .map_err(|join_error| JsValue::from_str(&join_error.to_string()))?;
+                        messaging_workflows::materialize_authoritative_channel_binding_observed(
+                            controller.app_core(),
+                            &binding,
+                            Some(&channel_name),
+                        )
+                        .await
+                        .map_err(|materialize_error| {
+                            JsValue::from_str(&materialize_error.to_string())
+                        })?;
+                        binding
+                    }
+                    Err(error) => return Err(JsValue::from_str(&error.to_string())),
+                };
             controller.select_channel_by_id(&binding.channel_id);
             declared_handle_response(&contract, handle, binding.semantic_value())
         }
@@ -1226,6 +1290,15 @@ async fn execute_semantic_intent(
                         None,
                     )
                     .await;
+                if outcome.result.is_ok() {
+                    messaging_workflows::run_post_channel_invite_followups(
+                        &followup_app_core,
+                        followup_authority_id,
+                        followup_channel,
+                    )
+                    .await;
+                    let _ = system_workflows::refresh_account(&followup_app_core).await;
+                }
                 outcome
             };
             spawn_handoff_workflow_task(
@@ -1234,21 +1307,7 @@ async fn execute_semantic_intent(
                 transfer,
                 "invite_actor_to_channel callback",
                 workflow,
-                move |_controller, _invitation_id| async move {
-                    spawn_background_semantic_task(
-                        "invite_actor_to_channel_post_followups",
-                        async move {
-                            messaging_workflows::run_post_channel_invite_followups(
-                                &followup_app_core,
-                                followup_authority_id,
-                                followup_channel,
-                            )
-                            .await;
-                            Ok(())
-                        },
-                    );
-                    Ok(())
-                },
+                move |_controller, _invitation_id| async move { Ok(()) },
             );
             declared_handle_unit_response(&contract, handle)
         }
@@ -1476,6 +1535,60 @@ mod tests {
         assert!(
             !body.contains("canonical_channel_name_hint"),
             "browser invite path must not recover canonical channel names from weak observed state"
+        );
+    }
+
+    #[test]
+    fn accept_pending_channel_invitation_materializes_observed_channel_before_selection() {
+        let source = include_str!("commands.rs");
+        let start = source
+            .find("RoutedSemanticIntent::AcceptPendingChannelInvitation => {")
+            .expect("accept pending channel invitation branch");
+        let end = source[start..]
+            .find("RoutedSemanticIntent::JoinChannel { channel_name } => {")
+            .map(|offset| start + offset)
+            .expect("join channel branch marker");
+        let body = &source[start..end];
+        assert!(
+            body.contains("materialize_authoritative_channel_binding_observed("),
+            "browser accept path should materialize the accepted shared channel before selecting it"
+        );
+        assert!(
+            body.contains("refresh_account(controller.app_core()).await"),
+            "browser accept path should refresh authoritative account state before and after handoff"
+        );
+        assert!(
+            body.contains("accepted.channel_name.as_deref()"),
+            "browser accept path should forward the accepted canonical channel name when available"
+        );
+    }
+
+    #[test]
+    fn join_channel_reuses_selected_authoritative_binding_when_name_lookup_lags() {
+        let source = include_str!("commands.rs");
+        let start = source
+            .find("RoutedSemanticIntent::JoinChannel { channel_name } => {")
+            .expect("join channel branch");
+        let end = source[start..]
+            .find("RoutedSemanticIntent::InviteActorToChannel {")
+            .map(|offset| start + offset)
+            .expect("invite actor branch marker");
+        let body = &source[start..end];
+        assert!(
+            body.contains("Err(error) if error.to_string().contains(\"Not found:\")"),
+            "browser join path should only reuse the selected authoritative binding for the explicit not-found lag case"
+        );
+        assert!(
+            body.contains("selected_channel_binding(&controller)"),
+            "browser join fallback should reuse the already-authoritative selected binding"
+        );
+        assert!(
+            body.contains("join_authoritative_channel_binding_with_terminal_status("),
+            "browser join fallback should reuse the real authoritative join workflow when canonical name lookup lags"
+        );
+        assert!(
+            body.contains("materialize_authoritative_channel_binding_observed("),
+            "browser join fallback should materialize the recovered binding under the requested channel name"
         );
     }
 }

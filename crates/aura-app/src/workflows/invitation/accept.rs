@@ -187,7 +187,9 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
         })
         .or_else(|| {
             accepted_invitation.as_ref().and_then(|invitation| {
-                if invitation.invitation_type == crate::views::invitations::InvitationType::Chat {
+                if invitation.invitation_type == crate::views::invitations::InvitationType::Chat
+                    || invitation.home_id.is_some()
+                {
                     invitation
                         .home_id
                         .map(|channel_id| (channel_id, None, invitation.home_name.as_deref()))

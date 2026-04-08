@@ -535,7 +535,7 @@ async fn run_harness_transport_tick(app_core: Arc<RwLock<AppCore>>, agent: Arc<A
             &format!("authority={};drained={drained}", agent.authority_id()),
         );
         if let Err(error) =
-            runtime_workflows::run_harness_runtime_mailbox_pass(&app_core, &runtime).await
+            runtime_workflows::run_harness_runtime_maintenance_pass(&app_core, &runtime).await
         {
             emit_browser_harness_debug_event(
                 "transport_tick_maintenance_error",

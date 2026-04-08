@@ -48,14 +48,14 @@ This report is a traceability document for those classes. It is not a proof of p
 | TUI Global Navigation/Help Hotkeys | `scenarios/harness/tui-conformance-global-navigation-help-hotkeys.toml` | TUI frontend-conformance: global navigation, key mappings, and help modal behavior |
 | TUI Neighborhood Keypaths/Detail | `scenarios/harness/tui-conformance-neighborhood-keypaths-and-detail.toml` | TUI frontend-conformance: neighborhood keypaths, rendered map/detail text, and toast wiring |
 | Scenario 12 | `scenarios/harness/scenario12-mixed-device-enrollment-removal-e2e.toml` | Mixed TUI/Web device enrollment + removal |
-| Scenario 13 | `scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml` | TUI-stable contact invite + channel messaging (browser shared receive parity pending) |
+| Scenario 13 | `scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml` | Shared contact invite + channel messaging |
 | Shared Settings | `scenarios/harness/shared-settings-parity.toml` | Shared semantic settings parity |
 | Shared Notifications/Authority | `scenarios/harness/shared-notifications-and-authority.toml` | Shared semantic notifications navigation and authority-switch handling |
 | Browser Observation | `scenarios/harness/semantic-observation-browser-smoke.toml` | Browser semantic observation contract smoke |
 | TUI Observation | `scenarios/harness/semantic-observation-tui-smoke.toml` | TUI semantic observation contract smoke |
 | Quint Observation | `scenarios/harness/quint-semantic-observation-smoke.toml` | Quint-origin semantic observation reference |
 
-The two TUI-only conformance scenarios are retained as frontend-conformance coverage. All harness scenarios in this inventory now use the semantic scenario format.
+The two TUI-only conformance scenarios plus Scenario 13 are retained as frontend-conformance coverage. All harness scenarios in this inventory now use the semantic scenario format.
 
 ## User Flow Matrix
 

@@ -653,6 +653,31 @@ async fn join_channel_binding_witness(
     ))
 }
 
+fn authoritative_binding_from_witness(
+    binding: &crate::ui_contract::ChannelBindingWitness,
+) -> Result<crate::runtime_bridge::AuthoritativeChannelBinding, AuraError> {
+    let channel_id = binding.channel_id.parse::<ChannelId>().map_err(|error| {
+        AuraError::invalid(format!(
+            "join fallback carried invalid canonical channel id '{}': {error}",
+            binding.channel_id
+        ))
+    })?;
+    let context_id = binding
+        .context_id
+        .as_deref()
+        .ok_or_else(|| AuraError::invalid("join fallback requires an authoritative context id"))?
+        .parse::<ContextId>()
+        .map_err(|error| {
+            AuraError::invalid(format!(
+                "join fallback carried invalid authoritative context id: {error}"
+            ))
+        })?;
+    Ok(crate::runtime_bridge::AuthoritativeChannelBinding {
+        channel_id,
+        context_id,
+    })
+}
+
 /// Join an existing channel by name and return the channel selection/binding
 /// witness settled by the workflow.
 pub async fn join_channel_by_name_with_binding_terminal_status(
@@ -681,6 +706,44 @@ pub async fn join_channel_by_name_with_binding_terminal_status(
         let _channel_id =
             join_channel_authoritative(app_core, authoritative_binding, &owner, channel_name)
                 .await?;
+        Ok(crate::ui_contract::ChannelBindingWitness::new(
+            authoritative_binding.channel_id.to_string(),
+            Some(authoritative_binding.context_id.to_string()),
+        ))
+    }
+    .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
+/// Join an existing channel when the caller already holds an authoritative
+/// channel binding and needs the normal runtime join flow plus terminal status.
+pub async fn join_authoritative_channel_binding_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    binding: &crate::ui_contract::ChannelBindingWitness,
+    channel_name: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<crate::ui_contract::ChannelBindingWitness> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::join_channel(),
+        instance_id,
+        SemanticOperationKind::JoinChannel,
+    );
+    let result = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let authoritative_binding = authoritative_binding_from_witness(binding)?;
+        let _channel_id = join_channel_authoritative(
+            app_core,
+            authoritative_binding.clone(),
+            &owner,
+            channel_name,
+        )
+        .await?;
         Ok(crate::ui_contract::ChannelBindingWitness::new(
             authoritative_binding.channel_id.to_string(),
             Some(authoritative_binding.context_id.to_string()),

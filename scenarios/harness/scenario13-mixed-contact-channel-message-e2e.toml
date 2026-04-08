@@ -13,21 +13,21 @@
 #
 # Phase 3 - Shared chat setup:
 # 1. Alice creates a home from the neighborhood screen.
-# 2. Both actors navigate to chat.
-# 3. Alice creates a shared named channel.
-# 4. Alice invites Bob into that channel.
-# 5. Bob accepts the pending invitation/materialized channel path.
-# 6. Bob explicitly enters the shared channel and verifies authoritative membership readiness.
+# 2. Alice creates a shared named channel.
+# 3. Alice invites Bob into that channel.
+# 4. Bob waits for the pending shared invitation, accepts it, and explicitly joins the named channel.
+# 5. Verify Bob reaches authoritative shared-channel membership readiness.
 #
-# Phase 4 - Messaging:
-# 1. Bob sends a shared-channel message from the currently stable harness path.
-# 2. Verify alice receives bob's message on the shared channel.
+# Phase 4 - Bidirectional messaging:
+# 1. Alice waits for recipient resolution, then sends a shared-channel message.
+# 2. Verify Bob receives Alice's message.
+# 3. Bob waits for recipient resolution, then sends a shared-channel message.
+# 4. Verify Alice receives Bob's message.
 #
 # Success criteria: contact established, shared channel reachable,
-# shared-channel delivery reaches the remote actor.
-# In the TUI parity surface, inbound encrypted channel messages may render as
-# `[sealed: ... bytes]` rather than plaintext, so the scenario asserts delivery
-# by matching that stable sealed-message marker.
+# bidirectional shared-channel delivery reaches both frontend bindings.
+# In the current parity surface, Alice renders Bob's inbound shared-channel
+# message as plaintext, so the receive assertion matches the message body.
 
 id = "scenario13-mixed-contact-channel-message-e2e"
 goal = "Use two actors as distinct users: accept a contact invite and verify shared-channel message delivery on the currently stable harness path."
@@ -186,6 +186,13 @@ value = "${bob_authority_id}"
 timeout_ms = 15000
 
 [[steps]]
+id = "bob-pending-home-invitation-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "pending_home_invitation_ready"
+timeout_ms = 30000
+
+[[steps]]
 id = "bob-join-shared-channel"
 action = "accept_pending_channel_invitation"
 actor = "bob"
@@ -199,11 +206,67 @@ screen_id = "chat"
 timeout_ms = 6000
 
 [[steps]]
+id = "bob-join-shared-channel-explicit"
+action = "join_channel"
+actor = "bob"
+value = "shared-parity-lab"
+timeout_ms = 6000
+
+[[steps]]
+id = "bob-channel-membership-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "channel_membership_ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-recipient-peers-resolved"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "recipient_peers_resolved"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-open-chat-before-send"
+action = "open_screen"
+actor = "alice"
+screen_id = "chat"
+timeout_ms = 6000
+
+[[steps]]
+id = "alice-send-message"
+action = "send_chat_message"
+actor = "alice"
+value = "hello-from-tu1"
+timeout_ms = 6000
+
+[[steps]]
+id = "bob-open-chat-before-receive"
+action = "open_screen"
+actor = "bob"
+screen_id = "chat"
+timeout_ms = 6000
+
+[[steps]]
+id = "bob-receives-alice-message"
+action = "message_contains"
+actor = "bob"
+value = "hello-from-tu1"
+timeout_ms = 180000
+
+[[steps]]
 id = "bob-open-chat-before-send"
 action = "open_screen"
 actor = "bob"
 screen_id = "chat"
 timeout_ms = 6000
+
+[[steps]]
+id = "bob-recipient-peers-resolved"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "recipient_peers_resolved"
+timeout_ms = 120000
 
 [[steps]]
 id = "bob-send-message"
@@ -223,7 +286,7 @@ timeout_ms = 6000
 id = "alice-receives-bob-message"
 action = "message_contains"
 actor = "alice"
-value = "[sealed:"
+value = "hello-from-web"
 timeout_ms = 180000
 
 [[steps]]

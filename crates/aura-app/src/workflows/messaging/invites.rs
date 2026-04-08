@@ -394,5 +394,24 @@ pub(super) async fn invite_authority_to_channel_with_context(
         },
     )
     .await?;
+    emit_stage("ensure_invited_peer_channel");
+    update_workflow_stage(&stage_tracker, "ensure_invited_peer_channel");
+    if let Err(_error) = timeout_workflow_stage_with_deadline(
+        &runtime,
+        "invite_authority_to_channel",
+        "ensure_invited_peer_channel",
+        None,
+        ensure_invited_peer_channel(&runtime, context_id, receiver),
+    )
+    .await
+    {
+        messaging_warn!(
+            "Best-effort ensure_invited_peer_channel failed for {} on {} in {}: {}",
+            receiver,
+            channel_id,
+            context_id,
+            _error
+        );
+    }
     Ok(invitation.invitation_id)
 }

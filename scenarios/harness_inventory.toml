@@ -29,9 +29,9 @@ notes = "Primary shared device-enrollment/removal scenario."
 [[scenario]]
 id = "scenario13-mixed-contact-channel-message-e2e"
 path = "scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml"
-classification = "tui_conformance"
+classification = "shared"
 runtime_substrate = "real_runtime"
-notes = "Primary TUI-stable contact/channel/message scenario while browser shared-channel receive parity is being repaired."
+notes = "Primary shared contact/channel/message parity scenario."
 
 [[scenario]]
 id = "shared-notifications-and-authority"

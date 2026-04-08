@@ -115,6 +115,7 @@ pub(in crate::workflows) use channel_refs::{
 };
 pub use channel_refs::{
     authoritative_channel_ref, current_home_channel_id, current_home_channel_ref,
+    materialize_authoritative_channel_binding_observed,
     require_authoritative_context_id_for_channel, resolve_authoritative_context_id_for_channel,
     AuthoritativeChannelRef, CreatedChannel,
 };
@@ -126,7 +127,8 @@ use channel_refs::{
 use channels::JoinChannelError;
 pub use channels::{
     close_channel, close_channel_by_name, create_channel,
-    create_channel_with_authoritative_binding, join_channel, join_channel_by_name,
+    create_channel_with_authoritative_binding,
+    join_authoritative_channel_binding_with_terminal_status, join_channel, join_channel_by_name,
     join_channel_by_name_with_binding_terminal_status, join_channel_by_name_with_instance,
     join_channel_by_name_with_terminal_status, leave_channel, leave_channel_by_name, set_topic,
     set_topic_by_name,
@@ -490,6 +492,35 @@ async fn warm_invited_peer_connectivity(
     }
 
     false
+}
+
+async fn ensure_invited_peer_channel(
+    runtime: &Arc<dyn RuntimeBridge>,
+    context_id: ContextId,
+    receiver: AuthorityId,
+) -> Result<(), AuraError> {
+    timeout_runtime_call(
+        runtime,
+        "invite_authority_to_channel",
+        "ensure_invited_peer_channel",
+        MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.ensure_peer_channel(context_id, receiver),
+    )
+    .await
+    .map_err(|error| {
+        AuraError::from(crate::workflows::error::runtime_call(
+            "ensure invited peer channel",
+            error,
+        ))
+    })?
+    .map_err(|error| {
+        AuraError::from(crate::workflows::error::runtime_call(
+            "ensure invited peer channel",
+            error,
+        ))
+    })?;
+    converge_runtime(runtime).await;
+    Ok(())
 }
 
 /// Send a direct message to a contact

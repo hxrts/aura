@@ -163,6 +163,29 @@ pub(crate) async fn ensure_channel_visible_after_join(
     .await
 }
 
+pub async fn materialize_authoritative_channel_binding_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    binding: &crate::ui_contract::ChannelBindingWitness,
+    name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    let channel_id = binding.channel_id.parse::<ChannelId>().map_err(|error| {
+        AuraError::invalid(format!(
+            "accepted channel binding carried invalid canonical channel id '{}': {error}",
+            binding.channel_id
+        ))
+    })?;
+    let context_id = match binding.context_id.as_deref() {
+        Some(context_id) => context_id.parse::<ContextId>().map_err(|error| {
+            AuraError::invalid(format!(
+                "accepted channel binding carried invalid authoritative context id '{}': {error}",
+                context_id
+            ))
+        })?,
+        None => require_authoritative_context_id_for_channel(app_core, channel_id).await?,
+    };
+    ensure_channel_visible_after_join(app_core, channel_id, context_id, name_hint).await
+}
+
 pub(in crate::workflows) async fn apply_authoritative_membership_projection(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
