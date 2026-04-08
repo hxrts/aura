@@ -51,6 +51,12 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   `AccountConfig` metadata separately so preserved-profile restarts can rebind
   one active generation and recover the canonical runtime bootstrap path
   without browser-local semantic repair.
+- Persisted browser `AccountConfig` context selection is fail-closed and
+  authority-scoped: when the current runtime has no active home yet, browser
+  bootstrap storage may reuse only the persisted `AccountConfig` for that same
+  authority, otherwise it must fall back to
+  `default_context_id_for_authority(authority_id)` rather than fabricating a
+  browser-local home or treating "no home yet" as fatal during bootstrap.
 - Browser startup discovery uses the broker-backed bootstrap plane rather than
   native UDP LAN discovery. Broker results are surfaced as bootstrap
   candidates for enrollment and must not be counted or rendered as ordinary
@@ -229,6 +235,11 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
   observed snapshot/render publication, semantic-submit readiness metadata, and
   runtime identity staging for owned browser rebootstrap during create-account
   style flows.
+- The browser bootstrap/account-config compatibility surface also includes the
+  persisted-account-context resolution rule in `src/bootstrap_storage.rs`:
+  active home context wins, otherwise reuse the persisted context only when it
+  matches the selected authority, otherwise fall back to
+  `default_context_id_for_authority(authority_id)`.
 - The browser also exports explicit diagnostic publication-state globals for
   semantic snapshot and render-heartbeat availability so harness failures can
   distinguish unavailable publication from stale render convergence.
