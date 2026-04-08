@@ -2895,10 +2895,7 @@ mod tests {
         assert_eq!(received.destination, peer);
         assert_eq!(received.source, authority.authority_id());
         assert_eq!(
-            received
-                .metadata
-                .get("content-type")
-                .map(String::as_str),
+            received.metadata.get("content-type").map(String::as_str),
             Some("application/aura-invitation")
         );
     }

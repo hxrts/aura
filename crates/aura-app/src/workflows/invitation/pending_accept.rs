@@ -178,7 +178,8 @@ async fn pending_home_or_channel_invitation_for_accept(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<Option<PendingChannelInvitationSelection>, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    if let Some(selection) = select_pending_home_or_channel_invitation_once(app_core, &runtime).await?
+    if let Some(selection) =
+        select_pending_home_or_channel_invitation_once(app_core, &runtime).await?
     {
         return Ok(Some(selection));
     }
@@ -215,8 +216,10 @@ async fn pending_home_or_channel_invitation_for_accept(
             #[cfg(feature = "signals")]
             {
                 let invitations = list_invitations(&app_core).await;
-                return Ok(select_accepted_home_or_channel_invitation_from_signal(&invitations)
-                    .map(PendingChannelInvitationSelection::Signal));
+                return Ok(
+                    select_accepted_home_or_channel_invitation_from_signal(&invitations)
+                        .map(PendingChannelInvitationSelection::Signal),
+                );
             }
             #[cfg(not(feature = "signals"))]
             {
@@ -231,8 +234,10 @@ async fn pending_home_or_channel_invitation_for_accept(
             #[cfg(feature = "signals")]
             {
                 let invitations = list_invitations(&app_core).await;
-                return Ok(select_accepted_home_or_channel_invitation_from_signal(&invitations)
-                    .map(PendingChannelInvitationSelection::Signal));
+                return Ok(
+                    select_accepted_home_or_channel_invitation_from_signal(&invitations)
+                        .map(PendingChannelInvitationSelection::Signal),
+                );
             }
             #[cfg(not(feature = "signals"))]
             {
@@ -253,8 +258,10 @@ async fn select_pending_home_or_channel_invitation_once(
             #[cfg(feature = "signals")]
             {
                 let invitations = list_invitations(app_core).await;
-                Ok(select_pending_home_or_channel_invitation_from_signal(&invitations)
-                    .map(PendingChannelInvitationSelection::Signal))
+                Ok(
+                    select_pending_home_or_channel_invitation_from_signal(&invitations)
+                        .map(PendingChannelInvitationSelection::Signal),
+                )
             }
             #[cfg(not(feature = "signals"))]
             {
@@ -468,8 +475,13 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
 
         let invitation_id = pending_invitation.invitation_id();
         if let Some(invitation_info) = pending_invitation.runtime_invitation() {
-            super::accept::accept_imported_invitation_owned(app_core, invitation_info, &owner, None)
-                .await?;
+            super::accept::accept_imported_invitation_owned(
+                app_core,
+                invitation_info,
+                &owner,
+                None,
+            )
+            .await?;
         } else if pending_invitation.signal_is_accepted_history() {
         } else {
             super::accept::accept_invitation_id_owned(app_core, &invitation_id, &owner, None)
