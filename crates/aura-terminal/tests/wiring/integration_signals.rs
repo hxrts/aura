@@ -23,9 +23,13 @@ use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId};
 
 /// Helper to create a test AppCore with signals initialized
 async fn test_app_core() -> Arc<RwLock<AppCore>> {
-    let mut core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
-    core.init_signals().await.expect("Failed to init signals");
-    Arc::new(RwLock::new(core))
+    let app_core = Arc::new(RwLock::new(
+        AppCore::new(AppConfig::default()).expect("Failed to create test AppCore"),
+    ));
+    AppCore::init_signals_with_hooks(&app_core)
+        .await
+        .expect("Failed to init signals");
+    app_core
 }
 
 async fn wait_for_chat_signal(

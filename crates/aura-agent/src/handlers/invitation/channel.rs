@@ -95,7 +95,12 @@ impl<'a> InvitationChannelHandler<'a> {
             return Ok(());
         };
 
-        let InvitationType::Channel { home_id, .. } = invitation.invitation_type else {
+        let InvitationType::Channel {
+            home_id,
+            ref nickname_suggestion,
+            ..
+        } = invitation.invitation_type
+        else {
             return Ok(());
         };
 
@@ -111,6 +116,7 @@ impl<'a> InvitationChannelHandler<'a> {
             acceptor_id,
             context_id: invitation.context_id,
             channel_id: home_id,
+            channel_name: nickname_suggestion.clone(),
         };
         let payload =
             serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
@@ -161,7 +167,51 @@ impl<'a> InvitationChannelHandler<'a> {
             envelope,
         )
         .await
-        .map_err(|error| AgentError::effects(error.to_string()))
+        .map_err(|error| AgentError::effects(error.to_string()))?;
+
+        if let Some(channel_name) = nickname_suggestion
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            let updated_at_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
+            let update_fact = aura_chat::ChatFact::channel_updated_ms(
+                invitation.context_id,
+                home_id,
+                Some(channel_name),
+                None,
+                Some(2),
+                Some(vec![acceptor_id]),
+                updated_at_ms,
+                acceptor_id,
+            )
+            .to_generic();
+            let update_payload = aura_core::util::serialization::to_vec(&update_fact)
+                .map_err(|error| AgentError::internal(error.to_string()))?;
+            let update_envelope = TransportEnvelope {
+                destination: invitation.sender_id,
+                source: acceptor_id,
+                context: invitation.context_id,
+                payload: update_payload,
+                metadata: crate::handlers::shared::build_transport_metadata(
+                    CHAT_FACT_CONTENT_TYPE,
+                    [
+                        ("channel-id", home_id.to_string()),
+                        ("invitation-id", invitation.invitation_id.to_string()),
+                    ],
+                ),
+                receipt: None,
+            };
+            attempt_network_send_envelope(
+                effects,
+                "channel invitation acceptance chat projection envelope send failed",
+                update_envelope,
+            )
+            .await
+            .map_err(|error| AgentError::effects(error.to_string()))?;
+        }
+
+        Ok(())
     }
 
     async fn ensure_sender_peer_channel(

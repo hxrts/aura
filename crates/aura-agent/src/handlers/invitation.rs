@@ -146,6 +146,7 @@ struct ChannelInvitationAcceptance {
     acceptor_id: AuthorityId,
     context_id: ContextId,
     channel_id: ChannelId,
+    channel_name: Option<String>,
 }
 
 /// Result of an invitation action
@@ -1083,10 +1084,14 @@ impl InvitationHandler {
             .await;
 
         if let Some(invitation) = choreography_invitation.as_ref() {
-            if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+            if matches!(
+                invitation.invitation_type,
+                InvitationType::Contact { .. } | InvitationType::Channel { .. }
+            ) {
                 tracing::debug!(
                     invitation_id = %invitation_id,
-                    "Returning immediately after local contact invitation acceptance"
+                    invitation_type = ?invitation.invitation_type,
+                    "Returning immediately after local invitation acceptance; post-accept notification is best effort"
                 );
                 return Ok(InvitationResult::new(
                     invitation_id.clone(),
@@ -1485,19 +1490,25 @@ impl InvitationHandler {
             return None;
         };
 
-        for envelope in envelopes {
-            let Some(ChatFact::ChannelCreated {
-                context_id: seen_context,
-                channel_id: seen_channel,
-                name,
-                ..
-            }) = ChatFact::from_envelope(&envelope)
-            else {
-                continue;
-            };
-
-            if seen_context == context_id && seen_channel == channel_id {
-                return Some(name);
+        for envelope in envelopes.into_iter().rev() {
+            match ChatFact::from_envelope(&envelope) {
+                Some(ChatFact::ChannelCreated {
+                    context_id: seen_context,
+                    channel_id: seen_channel,
+                    name,
+                    ..
+                }) if seen_context == context_id && seen_channel == channel_id => {
+                    return Some(name);
+                }
+                Some(ChatFact::ChannelUpdated {
+                    context_id: seen_context,
+                    channel_id: seen_channel,
+                    name: Some(name),
+                    ..
+                }) if seen_context == context_id && seen_channel == channel_id => {
+                    return Some(name);
+                }
+                _ => {}
             }
         }
 
@@ -2408,13 +2419,29 @@ async fn execute_notify_peer(
     // peer path instead of assuming the invitee is already routable on that context.
     let delivery_context = default_context_id_for_authority(peer);
 
+    let transport_receipt = receipt.and_then(|receipt| {
+        if receipt.ctx == delivery_context {
+            Some(transport_receipt_from_flow(receipt))
+        } else {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                peer = %peer,
+                invitation_context = %invitation_context,
+                delivery_context = %delivery_context,
+                receipt_context = %receipt.ctx,
+                "Dropping invitation transport receipt because delivery uses the authority-scoped peer context"
+            );
+            None
+        }
+    });
+
     let envelope = TransportEnvelope {
         destination: peer,
         source: authority.authority_id(),
         context: delivery_context,
         payload: code.into_bytes(),
         metadata,
-        receipt: receipt.map(transport_receipt_from_flow),
+        receipt: transport_receipt,
     };
 
     if best_effort_network_failures {
@@ -2860,6 +2887,17 @@ mod tests {
 
         let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
         assert!(result.is_ok());
+
+        let received = timeout(Duration::from_secs(2), _peer_effects.receive_envelope())
+            .await
+            .expect("invitation envelope should arrive before timeout")
+            .expect("invitation delivery should not fail receipt validation");
+        assert_eq!(received.destination, peer);
+        assert_eq!(received.source, authority.authority_id());
+        assert_eq!(
+            received.metadata.get("content-type").map(String::as_str),
+            Some("application/aura-invitation")
+        );
     }
 
     #[tokio::test]
@@ -4023,6 +4061,7 @@ mod tests {
             acceptor_id: receiver_id,
             context_id,
             channel_id,
+            channel_name: Some("shared-parity-lab".to_string()),
         };
         let payload = serde_json::to_vec(&acceptance).unwrap();
         let mut metadata = HashMap::new();
@@ -4223,6 +4262,35 @@ mod tests {
         assert!(
             home.member(&receiver_id).is_some(),
             "sender home state should include receiver after transported acceptance"
+        );
+
+        let committed = sender_effects
+            .load_committed_facts(sender_id)
+            .await
+            .unwrap();
+        let updated_channel_projection = committed.iter().any(|fact| {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
+            else {
+                return false;
+            };
+            matches!(
+                ChatFact::from_envelope(envelope),
+                Some(ChatFact::ChannelUpdated {
+                    context_id: seen_context,
+                    channel_id: seen_channel,
+                    name: Some(name),
+                    member_count: Some(2),
+                    member_ids: Some(member_ids),
+                    ..
+                }) if seen_context == context_id
+                    && seen_channel == channel_id
+                    && name == "shared-parity-lab"
+                    && member_ids.as_slice() == [receiver_id]
+            )
+        });
+        assert!(
+            updated_channel_projection,
+            "sender should publish a canonical ChannelUpdated projection after transported acceptance"
         );
     }
 

@@ -23,6 +23,22 @@ Portable, platform-agnostic application core containing pure business logic (int
 | Produces | `AppCore`, `Intent`, `ViewState`, `Screen`, view states (`ChatState`, `ContactsState`, `InvitationsState`, `RecoveryState`), `RuntimeBridge` trait, shared UI contract surfaces, reactive signals |
 | Consumed by | `aura-agent` (runtime assembly), `aura-terminal` (TUI), `aura-web` (browser), `aura-harness` (test), `aura-testkit` (mocks) |
 
+## Module Layout
+
+The crate uses explicit concern-owned submodules.
+
+| Area | Current structure | Ownership intent |
+|---|---|---|
+| `src/core/app.rs` | `config.rs`, `hooks.rs`, `runtime_access.rs`, `signals.rs`, `state.rs` | Keep `AppCore` as the app boundary, not a mini runtime |
+| `src/runtime_bridge.rs` | `bridge_trait.rs`, `offline.rs`, `types/{sync,ceremony,invitation,settings,offline_state}.rs` | Keep runtime inversion auditable by contract, DTOs, and offline behavior |
+| `src/ui_contract.rs` | `ids.rs`, `operations.rs`, `shared_flow_support.rs`, `harness_metadata.rs`, `parity.rs`, `snapshots.rs` | Own shared semantic UI ids, shared-flow metadata, and typed diagnostics |
+| `src/scenario_contract.rs` | `actions.rs`, `expectations.rs`, `submission.rs`, `values.rs` | Keep shared scenario and semantic command inventory explicit |
+| `src/workflows/messaging.rs` | `channel_refs.rs`, `channels.rs`, `followups.rs`, `invites.rs`, `readiness.rs`, `routing.rs`, `send.rs`, `validation.rs` | One owned implementation path per messaging operation family |
+| `src/workflows/invitation.rs` | `accept.rs`, `create.rs`, `device_enrollment.rs`, `export.rs`, `followups.rs`, `import.rs`, `pending_accept.rs`, `readiness.rs`, `utils.rs` | Separate invitation create/accept/import/export/readiness phases |
+| `src/workflows/strong_command.rs` | `dispatch.rs`, `execute.rs`, `execution_model.rs`, `parse.rs`, `plan.rs`, `resolve.rs`, `resolved_refs.rs`, `snapshot.rs`, `terminal.rs` | Keep authoritative execution and failure classification inside app-owned workflow code |
+| `src/workflows/semantic_facts.rs` | `owner.rs`, `publication.rs`, `lifecycle.rs`, `proofs/{issues,validation}.rs` | Separate authoritative mutation, publication, and proof shaping |
+| `src/views/chat.rs`, `src/views/home.rs`, `src/views/recovery.rs` | split state/model/helper submodules | Keep view-state shaping explicit and scoped by concern |
+
 ## Invariants
 
 - **Pure logic**: no runtime dependencies or impure I/O.
@@ -41,7 +57,7 @@ Application workflows remain pure and frontend agnostic. Runtime effects are con
 
 Enforcement locus:
 - `src/workflows/` performs intent and state transitions.
-- `src/core/` exposes platform-neutral integration surfaces.
+- `src/core/app.rs` and `src/core/app/*.rs` expose platform-neutral integration surfaces.
 
 Failure mode:
 - Behavior diverges from the crate contract and produces non-reproducible outcomes.
@@ -61,7 +77,7 @@ Contract alignment:
 `aura-app` is the authoritative home for shared semantic UI identity, shared semantic command-plane types, shared-flow parity declarations, shared screen/modal/list parity declarations, typed harness-visible diagnostics, shared focus/selection semantics, shared action/readiness metadata, and the machine-checkable screen/module map used for web/TUI parity enforcement.
 
 Enforcement locus:
-- `src/ui_contract.rs` defines semantic ids, `UiSnapshot`, `RenderHeartbeat`, `RuntimeEventSnapshot`, `SHARED_FLOW_SUPPORT`, `SHARED_SCREEN_SUPPORT`, `SHARED_MODAL_SUPPORT`, `SHARED_LIST_SUPPORT`, `SHARED_SCREEN_MODULE_MAP`, and shared semantic command-plane types.
+- `src/ui_contract.rs` defines the shared contract boundary, with ownership split across `src/ui_contract/ids.rs`, `operations.rs`, `shared_flow_support.rs`, `harness_metadata.rs`, `parity.rs`, and `snapshots.rs`.
 - `src/ui.rs` re-exports the contract for harness and frontend consumption.
 
 Failure mode:
@@ -125,8 +141,8 @@ Strict authoritative-ref rule for parity-critical workflows:
 
 - Authoritative semantic lifecycle publication in `src/workflows/semantic_facts.rs`.
 - Authoritative readiness publication and replacement in `src/workflows/semantic_facts.rs`.
-- Workflow-owned semantic operation phase/failure publication in `src/workflows/messaging.rs`, `src/workflows/invitation.rs`, and related parity-critical workflow modules.
-- Workflow-owned readiness publication helpers in `src/workflows/messaging.rs` and `src/workflows/invitation.rs` now carry declaration-layer capability-boundary markers when they mint or publish authoritative readiness state directly.
+- Workflow-owned semantic operation phase/failure publication in the parity-critical workflow families under `src/workflows/messaging/*.rs`, `src/workflows/invitation/*.rs`, `src/workflows/strong_command/*.rs`, and related semantic-owner modules.
+- Workflow-owned readiness publication helpers in `src/workflows/messaging/readiness.rs` and `src/workflows/invitation/readiness.rs` now carry declaration-layer capability-boundary markers when they mint or publish authoritative readiness state directly.
 - Opaque shared command-plane and lifecycle surfaces in `src/ui_contract.rs` and `src/scenario_contract.rs`.
 
 Authoritative resolution is an explicit pre-step, not an implicit helper side
@@ -200,7 +216,7 @@ Converted semantic-owner paths also follow two stricter publication rules:
 
 ### Strategy
 
-Workflow purity and shared UI contract authority are the primary concerns. Compile-fail tests in `tests/ui/` enforce type-level boundaries: private semantic owner types, handle consumption semantics, and workflow internals. Inline tests verify view reduction, shared contract consistency, and concurrent fact publication safety.
+Workflow purity and shared UI contract authority are the primary concerns. Compile-fail tests in `tests/ui/` enforce type-level boundaries: private semantic owner types, handle consumption semantics, and workflow internals. Inline tests verify view reduction, shared contract consistency, runtime-bridge/query ownership splits, and concurrent fact publication safety.
 
 ### Commands
 

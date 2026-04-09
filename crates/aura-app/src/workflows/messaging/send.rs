@@ -1,7 +1,9 @@
+#![allow(missing_docs)]
+
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-enum SendMessageError {
+pub(super) enum SendMessageError {
     #[error("Failed to resolve channel {channel}: {detail}")]
     ChannelResolution { channel: String, detail: String },
     #[error("Missing authoritative context for channel {channel_id}")]
@@ -27,7 +29,7 @@ enum SendMessageError {
 }
 
 impl SendMessageError {
-    fn semantic_error(&self) -> SemanticOperationError {
+    pub(super) fn semantic_error(&self) -> SemanticOperationError {
         match self {
             Self::ChannelResolution { channel, detail } => SemanticOperationError::new(
                 SemanticFailureDomain::Command,
@@ -87,7 +89,7 @@ async fn fail_send_message<T>(
     Err(error.into())
 }
 
-async fn mark_message_delivery_failed(
+pub(super) async fn mark_message_delivery_failed(
     app_core: &Arc<RwLock<AppCore>>,
     context_id: ContextId,
     channel_id: ChannelId,
@@ -224,12 +226,14 @@ async fn deliver_message_fact_remotely(
             );
         }
         if !failed_fanout.is_empty() {
-            return Err(super::super::error::WorkflowError::DeliveryFanoutUnavailable {
-                peer: channel_id.to_string(),
-                attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                recipients: failed_fanout,
-            }
-            .into());
+            return Err(
+                super::super::error::WorkflowError::DeliveryFanoutUnavailable {
+                    peer: channel_id.to_string(),
+                    attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
+                    recipients: failed_fanout,
+                }
+                .into(),
+            );
         }
     }
 
@@ -244,35 +248,6 @@ async fn deliver_message_fact_remotely(
     }
 
     Ok(())
-}
-
-pub async fn send_direct_message(
-    app_core: &Arc<RwLock<AppCore>>,
-    target: &str,
-    content: &str,
-    timestamp_ms: u64,
-) -> Result<String, AuraError> {
-    let contact = crate::workflows::query::resolve_contact(app_core, target).await?;
-    let channel_id =
-        send_direct_message_to_authority(app_core, contact.id, content, timestamp_ms).await?;
-    Ok(channel_id.to_string())
-}
-
-pub async fn send_direct_message_to_authority(
-    app_core: &Arc<RwLock<AppCore>>,
-    target: AuthorityId,
-    content: &str,
-    timestamp_ms: u64,
-) -> Result<ChannelId, AuraError> {
-    if let Ok(runtime) = require_runtime(app_core).await {
-        if target == runtime.authority_id() {
-            return Err(AuraError::invalid("Cannot send direct message to yourself"));
-        }
-    }
-
-    let channel_id = start_direct_chat_with_authority(app_core, target, timestamp_ms).await?;
-    send_message(app_core, channel_id, content, timestamp_ms).await?;
-    Ok(channel_id)
 }
 
 pub async fn send_message(
@@ -301,15 +276,6 @@ pub async fn send_message_by_name(
 ) -> Result<String, AuraError> {
     let channel_ref = ChannelRef::Name(channel_name.to_string());
     send_message_ref(app_core, channel_ref, content, timestamp_ms).await
-}
-
-pub async fn send_message_by_name_now(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel_name: &str,
-    content: &str,
-) -> Result<String, AuraError> {
-    let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
-    send_message_by_name(app_core, channel_name, content, timestamp_ms).await
 }
 
 pub async fn send_message_with_instance(
@@ -1025,7 +991,9 @@ pub async fn start_direct_chat_with_authority(
         .await;
         if let Err(error) = create_result {
             if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-                return Err(super::super::error::runtime_call("create direct channel", error).into());
+                return Err(
+                    super::super::error::runtime_call("create direct channel", error).into(),
+                );
             }
         }
 
@@ -1061,7 +1029,9 @@ pub async fn start_direct_chat_with_authority(
         )
         .await
         .map_err(|error| super::super::error::runtime_call("add contact to direct channel", error))?
-        .map_err(|error| super::super::error::runtime_call("add contact to direct channel", error))?;
+        .map_err(|error| {
+            super::super::error::runtime_call("add contact to direct channel", error)
+        })?;
 
         let chat_fact = ChatFact::channel_created_ms(
             context_id,

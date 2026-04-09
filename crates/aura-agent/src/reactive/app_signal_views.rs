@@ -1197,6 +1197,37 @@ impl ChatSignalView {
         }
     }
 
+    async fn sender_allowed_via_channel_invitation(
+        &self,
+        channel_id: ChannelId,
+        sender_id: AuthorityId,
+    ) -> bool {
+        let invitations = match self.reactive.read(&*INVITATIONS_SIGNAL).await {
+            Ok(invitations) => invitations,
+            Err(_) => return false,
+        };
+
+        invitations.all_sent().iter().any(|invitation| {
+            invitation.to_id == Some(sender_id)
+                && invitation.home_id == Some(channel_id)
+                && (invitation.invitation_type
+                    == aura_app::views::invitations::InvitationType::Chat
+                    || invitation.home_id.is_some())
+                && matches!(
+                    invitation.status,
+                    InvitationStatus::Pending | InvitationStatus::Accepted
+                )
+        }) || invitations.all_history().iter().any(|invitation| {
+            invitation.direction == InvitationDirection::Sent
+                && invitation.to_id == Some(sender_id)
+                && invitation.home_id == Some(channel_id)
+                && (invitation.invitation_type
+                    == aura_app::views::invitations::InvitationType::Chat
+                    || invitation.home_id.is_some())
+                && invitation.status == InvitationStatus::Accepted
+        })
+    }
+
     async fn sender_allowed_for_context(
         &self,
         context_id: ContextId,
@@ -1215,7 +1246,9 @@ impl ChatSignalView {
         let candidates =
             app_signal_projection::collect_moderation_homes(&homes, context_id, channel_id);
         if candidates.is_empty() {
-            return false;
+            return self
+                .sender_allowed_via_channel_invitation(channel_id, sender_id)
+                .await;
         }
 
         if candidates.iter().any(|home| home.is_banned(&sender_id)) {
@@ -1232,9 +1265,17 @@ impl ChatSignalView {
             .iter()
             .any(|home| home.member(&sender_id).is_some());
         if !has_member_roster {
-            return false;
+            return self
+                .sender_allowed_via_channel_invitation(channel_id, sender_id)
+                .await;
         }
         if !sender_is_member {
+            if self
+                .sender_allowed_via_channel_invitation(channel_id, sender_id)
+                .await
+            {
+                return true;
+            }
             tracing::debug!(
                 context_id = %context_id,
                 channel_id = %channel_id,

@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use super::*;
+use thiserror::Error;
 
 pub async fn create_contact_invitation(
     app_core: &Arc<RwLock<AppCore>>,
@@ -287,6 +288,370 @@ pub async fn create_guardian_invitation_with_terminal_status(
         result,
         terminal: owner.terminal_status().await,
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub(super) enum ChannelInvitationBootstrapError {
+    #[error("InviteActorToChannel requires a canonical channel id, got {raw}")]
+    InvalidCanonicalChannelId { raw: String },
+    #[error("InviteActorToChannel requires an authoritative context for channel {channel_id}")]
+    MissingAuthoritativeContext { channel_id: ChannelId },
+    #[error(
+        "Failed to bootstrap channel invitation for channel {channel_id} in context {context_id}"
+    )]
+    BootstrapUnavailable {
+        channel_id: ChannelId,
+        context_id: ContextId,
+    },
+    #[error("Failed to bootstrap channel invitation for channel {channel_id}: {detail}")]
+    BootstrapTransport {
+        channel_id: ChannelId,
+        detail: String,
+    },
+    #[error(
+        "Failed to create channel invitation for channel {channel_id} and receiver {receiver_id}: {detail}"
+    )]
+    CreateFailed {
+        channel_id: ChannelId,
+        receiver_id: AuthorityId,
+        detail: String,
+    },
+    #[error(
+        "Timed out creating channel invitation for channel {channel_id} and receiver {receiver_id} after {timeout_ms}ms"
+    )]
+    CreateTimedOut {
+        channel_id: ChannelId,
+        receiver_id: AuthorityId,
+        timeout_ms: u64,
+    },
+}
+
+impl ChannelInvitationBootstrapError {
+    pub(super) fn semantic_error(&self) -> crate::ui_contract::SemanticOperationError {
+        use crate::ui_contract::{
+            SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+        };
+
+        match self {
+            Self::InvalidCanonicalChannelId { raw } => SemanticOperationError::new(
+                SemanticFailureDomain::Command,
+                SemanticFailureCode::MissingAuthoritativeContext,
+            )
+            .with_detail(format!("invalid_channel_id={raw}")),
+            Self::MissingAuthoritativeContext { channel_id } => SemanticOperationError::new(
+                SemanticFailureDomain::ChannelContext,
+                SemanticFailureCode::MissingAuthoritativeContext,
+            )
+            .with_detail(format!("channel_id={channel_id}")),
+            Self::BootstrapUnavailable {
+                channel_id,
+                context_id,
+            } => SemanticOperationError::new(
+                SemanticFailureDomain::Transport,
+                SemanticFailureCode::ChannelBootstrapUnavailable,
+            )
+            .with_detail(format!("channel_id={channel_id}; context_id={context_id}")),
+            Self::BootstrapTransport { channel_id, detail } => SemanticOperationError::new(
+                SemanticFailureDomain::Transport,
+                SemanticFailureCode::ChannelBootstrapUnavailable,
+            )
+            .with_detail(format!("channel_id={channel_id}; detail={detail}")),
+            Self::CreateFailed {
+                channel_id,
+                receiver_id,
+                detail,
+            } => SemanticOperationError::new(
+                SemanticFailureDomain::Invitation,
+                SemanticFailureCode::InternalError,
+            )
+            .with_detail(format!(
+                "channel_id={channel_id}; receiver_id={receiver_id}; detail={detail}"
+            )),
+            Self::CreateTimedOut {
+                channel_id,
+                receiver_id,
+                timeout_ms,
+            } => SemanticOperationError::new(
+                SemanticFailureDomain::Invitation,
+                SemanticFailureCode::OperationTimedOut,
+            )
+            .with_detail(format!(
+                "channel_id={channel_id}; receiver_id={receiver_id}; timeout_ms={timeout_ms}"
+            )),
+        }
+    }
+}
+
+impl From<ChannelInvitationBootstrapError> for AuraError {
+    fn from(error: ChannelInvitationBootstrapError) -> Self {
+        AuraError::agent(error.to_string())
+    }
+}
+
+fn channel_invitation_bootstrap_timeout(
+    deadline: Option<TimeoutBudget>,
+    channel_id: ChannelId,
+    stage: &'static str,
+    context_id: Option<ContextId>,
+) -> Result<Duration, ChannelInvitationBootstrapError> {
+    match deadline {
+        Some(deadline) => {
+            if deadline.timeout_ms() == 0 {
+                let context_detail =
+                    context_id.map_or_else(String::new, |context| format!(" in context {context}"));
+                return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                    channel_id,
+                    detail: format!(
+                        "create_channel_invitation deadline exhausted before {stage}{context_detail}"
+                    ),
+                });
+            }
+            Ok(std::cmp::min(
+                Duration::from_millis(deadline.timeout_ms()),
+                Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
+            ))
+        }
+        None => Ok(Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS)),
+    }
+}
+
+pub(super) async fn fail_channel_invitation<T>(
+    owner: &SemanticWorkflowOwner,
+    _deadline: Option<TimeoutBudget>,
+    error: ChannelInvitationBootstrapError,
+) -> Result<T, AuraError> {
+    publish_invitation_owner_failure(owner, None, error.semantic_error()).await?;
+    Err(error.into())
+}
+
+async fn ensure_channel_invitation_context_and_bootstrap(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    receiver: AuthorityId,
+    channel_id: ChannelId,
+    context_id: Option<ContextId>,
+    bootstrap: Option<ChannelBootstrapPackage>,
+    stage_tracker: &Option<WorkflowStageTracker>,
+    deadline: Option<TimeoutBudget>,
+) -> Result<(ContextId, ChannelBootstrapPackage), ChannelInvitationBootstrapError> {
+    let requested_context = context_id;
+    #[allow(unused_mut)]
+    let mut resolved_context = match context_id {
+        Some(context_id) => context_id,
+        None => {
+            update_channel_invitation_stage(stage_tracker, "resolve_context");
+            #[cfg(feature = "signals")]
+            {
+                crate::workflows::messaging::context_id_for_channel(
+                    app_core,
+                    channel_id,
+                    Some(runtime.authority_id()),
+                )
+                .await
+                .map_err(|_| {
+                    ChannelInvitationBootstrapError::MissingAuthoritativeContext { channel_id }
+                })?
+            }
+            #[cfg(not(feature = "signals"))]
+            {
+                let _ = app_core;
+                return Err(
+                    ChannelInvitationBootstrapError::MissingAuthoritativeContext { channel_id },
+                );
+            }
+        }
+    };
+
+    if let Some(bootstrap) = bootstrap {
+        return Ok((resolved_context, bootstrap));
+    }
+
+    let mut runtime_resolved_context = None;
+    update_channel_invitation_stage(stage_tracker, "resolve_runtime_channel_context");
+    if let Some(runtime_context) = timeout_channel_invitation_stage_with_deadline(
+        Some(runtime),
+        "resolve_runtime_channel_context",
+        deadline,
+        async {
+            timeout_runtime_call(
+                runtime,
+                "ensure_channel_invitation_context_and_bootstrap",
+                "resolve_amp_channel_context",
+                INVITATION_RUNTIME_QUERY_TIMEOUT,
+                || runtime.resolve_amp_channel_context(channel_id),
+            )
+            .await
+            .map_err(|error| AuraError::internal(error.to_string()))?
+            .map_err(|error| AuraError::internal(error.to_string()))
+        },
+    )
+    .await
+    .map_err(|error| ChannelInvitationBootstrapError::BootstrapTransport {
+        channel_id,
+        detail: format!(
+            "{error}; requested_context={requested_context:?}; resolved_context_before_runtime={resolved_context}"
+        ),
+    })? {
+        runtime_resolved_context = Some(runtime_context);
+        resolved_context = runtime_context;
+    }
+
+    let invitees = vec![receiver];
+    let retry_policy = workflow_retry_policy(
+        (CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS + 1) as u32,
+        Duration::from_millis(CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS),
+        Duration::from_millis(
+            CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS * (CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS as u64 + 1),
+        ),
+    )
+    .map_err(
+        |error| ChannelInvitationBootstrapError::BootstrapTransport {
+            channel_id,
+            detail: error.to_string(),
+        },
+    )?;
+    let mut attempts = retry_policy.attempt_budget();
+    loop {
+        let attempt = attempts.record_attempt().map_err(|error| {
+            ChannelInvitationBootstrapError::BootstrapTransport {
+                channel_id,
+                detail: error.to_string(),
+            }
+        })?;
+        update_channel_invitation_stage(stage_tracker, "amp_create_channel_bootstrap");
+        let bootstrap_timeout = channel_invitation_bootstrap_timeout(
+            deadline,
+            channel_id,
+            "amp_create_channel_bootstrap",
+            Some(resolved_context),
+        )?;
+        let bootstrap_budget = workflow_timeout_budget(runtime, bootstrap_timeout)
+            .await
+            .map_err(
+                |error| ChannelInvitationBootstrapError::BootstrapTransport {
+                    channel_id,
+                    detail: error.to_string(),
+                },
+            )?;
+        let bootstrap_attempt =
+            execute_with_runtime_timeout_budget(runtime, &bootstrap_budget, || {
+                runtime.amp_create_channel_bootstrap(resolved_context, channel_id, invitees.clone())
+            })
+            .await;
+        match bootstrap_attempt {
+            Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
+                return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                    channel_id,
+                    detail: format!(
+                        "amp_create_channel_bootstrap timed out after {}ms in context {resolved_context}",
+                        bootstrap_budget.timeout_ms()
+                    ),
+                });
+            }
+            Err(TimeoutRunError::Timeout(error)) => {
+                return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                    channel_id,
+                    detail: error.to_string(),
+                });
+            }
+            Ok(bootstrap) => return Ok((resolved_context, bootstrap)),
+            Err(TimeoutRunError::Operation(error))
+                if classify_amp_channel_error(&error)
+                    == AmpChannelErrorClass::ChannelStateUnavailable =>
+            {
+                if !attempts.can_attempt() {
+                    break;
+                }
+                converge_runtime(runtime).await;
+                runtime
+                    .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
+                    .await;
+                update_channel_invitation_stage(stage_tracker, "amp_channel_state_exists");
+                let exists_timeout = channel_invitation_bootstrap_timeout(
+                    deadline,
+                    channel_id,
+                    "amp_channel_state_exists",
+                    Some(resolved_context),
+                )?;
+                let exists_budget = workflow_timeout_budget(runtime, exists_timeout)
+                    .await
+                    .map_err(
+                        |error| ChannelInvitationBootstrapError::BootstrapTransport {
+                            channel_id,
+                            detail: error.to_string(),
+                        },
+                    )?;
+                let state_exists = match execute_with_runtime_timeout_budget(
+                    runtime,
+                    &exists_budget,
+                    || runtime.amp_channel_state_exists(resolved_context, channel_id),
+                )
+                .await
+                {
+                    Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded {
+                        ..
+                    })) => {
+                        return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                            channel_id,
+                            detail: format!(
+                                "amp_channel_state_exists timed out after {}ms in context {resolved_context}",
+                                exists_budget.timeout_ms()
+                            ),
+                        });
+                    }
+                    Err(TimeoutRunError::Timeout(error)) => {
+                        return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                            channel_id,
+                            detail: error.to_string(),
+                        });
+                    }
+                    Ok(state_exists) => state_exists,
+                    Err(TimeoutRunError::Operation(state_error)) => {
+                        return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                            channel_id,
+                            detail: format!(
+                                "failed to verify repaired channel state in context {resolved_context}: {state_error}"
+                            ),
+                        });
+                    }
+                };
+                #[cfg(feature = "signals")]
+                {
+                    if !state_exists {
+                        if let Ok(authoritative_context) =
+                            crate::workflows::messaging::context_id_for_channel(
+                                app_core,
+                                channel_id,
+                                Some(runtime.authority_id()),
+                            )
+                            .await
+                        {
+                            if authoritative_context != resolved_context {
+                                resolved_context = authoritative_context;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if !state_exists {
+                    continue;
+                }
+            }
+            Err(TimeoutRunError::Operation(error)) => {
+                return Err(ChannelInvitationBootstrapError::BootstrapTransport {
+                    channel_id,
+                    detail: format!(
+                        "{error}; requested_context={requested_context:?}; runtime_resolved_context={runtime_resolved_context:?}; bootstrap_context={resolved_context}"
+                    ),
+                });
+            }
+        }
+    }
+
+    Err(ChannelInvitationBootstrapError::BootstrapUnavailable {
+        channel_id,
+        context_id: resolved_context,
+    })
 }
 
 pub async fn create_channel_invitation(

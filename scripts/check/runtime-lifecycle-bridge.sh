@@ -28,6 +28,7 @@ check_present() {
 app_bridge_files=(
   crates/aura-app/src/runtime_bridge.rs
   crates/aura-app/src/runtime_bridge/*.rs
+  crates/aura-app/src/runtime_bridge/types/*.rs
 )
 agent_bridge="crates/aura-agent/src/runtime_bridge/mod.rs"
 agent_rendezvous="crates/aura-agent/src/runtime_bridge/rendezvous.rs"

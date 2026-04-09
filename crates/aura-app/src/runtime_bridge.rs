@@ -8,8 +8,6 @@
 #![allow(missing_docs)]
 
 pub mod bridge_trait;
-#[allow(dead_code)]
-mod legacy;
 pub mod offline;
 pub mod types;
 

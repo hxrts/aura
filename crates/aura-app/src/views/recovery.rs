@@ -3,8 +3,6 @@
 #![allow(missing_docs)]
 
 pub mod errors;
-#[allow(dead_code)]
-mod legacy;
 pub mod progress;
 pub mod security;
 pub mod state;

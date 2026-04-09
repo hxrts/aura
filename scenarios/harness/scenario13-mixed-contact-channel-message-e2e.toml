@@ -1,4 +1,4 @@
-# Mixed contact and channel-message end-to-end:
+# Contact and channel-message end-to-end:
 #
 # Phase 1 - Account setup:
 # 1. Launch alice and bob actors.
@@ -12,22 +12,25 @@
 # 5. Verify contact linked.
 #
 # Phase 3 - Shared chat setup:
-# 1. Both actors navigate to chat.
+# 1. Alice creates a home from the neighborhood screen.
 # 2. Alice creates a shared named channel.
 # 3. Alice invites Bob into that channel.
-# 4. Bob joins the same channel from the pending invitation path.
+# 4. Bob waits for the pending shared invitation, accepts it, and explicitly joins the named channel.
+# 5. Verify Bob reaches authoritative shared-channel membership readiness.
 #
 # Phase 4 - Bidirectional messaging:
-# 1. Alice sends a shared-channel message (hello-from-tu1).
-# 2. Bob sends a shared-channel message (hello-from-web).
-# 3. Verify alice receives bob's message.
-# 4. Verify bob receives alice's message.
+# 1. Alice waits for recipient resolution, then sends a shared-channel message.
+# 2. Verify Bob receives Alice's message.
+# 3. Bob waits for recipient resolution, then sends a shared-channel message.
+# 4. Verify Alice receives Bob's message.
 #
 # Success criteria: contact established, shared channel reachable,
-# bidirectional channel messages delivered across frontend bindings.
+# bidirectional shared-channel delivery reaches both frontend bindings.
+# In the current parity surface, Alice renders Bob's inbound shared-channel
+# message as plaintext, so the receive assertion matches the message body.
 
 id = "scenario13-mixed-contact-channel-message-e2e"
-goal = "Use two actors as distinct users: accept a contact invite and verify bidirectional shared-channel messaging across supported frontend bindings."
+goal = "Use two actors as distinct users: accept a contact invite and verify shared-channel message delivery on the currently stable harness path."
 
 [[steps]]
 id = "launch"
@@ -89,6 +92,13 @@ action = "readiness_is"
 actor = "bob"
 readiness = "ready"
 timeout_ms = 120000
+
+[[steps]]
+id = "alice-create-home"
+action = "create_home"
+actor = "alice"
+value = "Alice Home"
+timeout_ms = 12000
 
 [[steps]]
 id = "alice-open-contacts"
@@ -266,11 +276,11 @@ value = "hello-from-web"
 timeout_ms = 6000
 
 [[steps]]
-id = "alice-still-on-chat"
-action = "screen_is"
+id = "alice-open-chat-before-receive"
+action = "open_screen"
 actor = "alice"
 screen_id = "chat"
-timeout_ms = 12000
+timeout_ms = 6000
 
 [[steps]]
 id = "alice-receives-bob-message"
@@ -278,3 +288,10 @@ action = "message_contains"
 actor = "alice"
 value = "hello-from-web"
 timeout_ms = 180000
+
+[[steps]]
+id = "alice-still-on-chat"
+action = "screen_is"
+actor = "alice"
+screen_id = "chat"
+timeout_ms = 12000

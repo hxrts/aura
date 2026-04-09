@@ -5,7 +5,7 @@ use aura_app::ui::prelude::*;
 use aura_app::ui::types::RuntimeBridge;
 use aura_core::AuraError;
 
-/// A TUI-local wrapper that guarantees `AppCore::init_signals()` has been called.
+/// A TUI-local wrapper that guarantees `AppCore::init_signals_with_hooks()` has run.
 ///
 /// This prevents a class of bugs where screens subscribe/read before signals are
 /// registered (or before ViewState forwarding is active), which otherwise shows
@@ -23,16 +23,9 @@ impl InitializedAppCore {
             core.runtime().cloned()
         };
 
-        if runtime.is_some() {
-            AppCore::init_signals_with_hooks(&app_core)
-                .await
-                .map_err(|e| AuraError::internal(e.to_string()))?;
-        } else {
-            let mut core = app_core.write().await;
-            core.init_signals()
-                .await
-                .map_err(|e| AuraError::internal(e.to_string()))?;
-        }
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .map_err(|e| AuraError::internal(e.to_string()))?;
 
         Ok(Self { app_core, runtime })
     }

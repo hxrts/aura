@@ -7,25 +7,38 @@
 
 #![allow(missing_docs)] // This API is being introduced incrementally.
 
+mod consistency;
+mod dispatch;
 mod execute;
+mod execution_model;
 mod parse;
+mod plan;
 mod resolve;
+mod resolved_refs;
+mod snapshot;
+mod terminal;
 
 #[cfg(test)]
-use execute::consistency_for_resolved;
-pub use execute::{
-    classify_terminal_execution_error, execute_planned, CommandCompletionOutcome,
-    CommandConsistencySpec, CommandExecutionResult, CommandTerminalClassification,
-    CommandTerminalOutcomeStatus, CommandTerminalReasonCode, ConsistencyDegradedReason,
-    ConsistencyRequirement, ConsistencyWitness, PlannedCommand, COMMAND_CONSISTENCY_TABLE,
+use consistency::consistency_for_resolved;
+pub use execute::execute_planned;
+pub use execution_model::{
+    CommandCompletionOutcome, CommandConsistencySpec, CommandExecutionResult,
+    CommandTerminalClassification, CommandTerminalOutcomeStatus, CommandTerminalReasonCode,
+    ConsistencyDegradedReason, ConsistencyRequirement, ConsistencyWitness, PlannedCommand,
+    COMMAND_CONSISTENCY_TABLE,
 };
 pub use parse::ParsedCommand;
-pub use resolve::{
-    ChannelResolveOutcome, CommandPlan, CommandPlanError, CommandResolver, CommandResolverError,
-    CommandScope, ExistingChannelResolution, MembershipPlan, ModerationPlan, ModeratorPlan,
-    PlanPrecondition, ResolveTarget, ResolvedAuthorityId, ResolvedChannelId, ResolvedCommand,
-    ResolvedContextId, ResolverSnapshot, SnapshotToken,
+pub use plan::{
+    CommandPlan, CommandPlanError, CommandScope, MembershipPlan, ModerationPlan, ModeratorPlan,
+    PlanPrecondition,
 };
+pub use resolve::{CommandResolver, CommandResolverError};
+pub use resolved_refs::{
+    ChannelResolveOutcome, ExistingChannelResolution, ResolveTarget, ResolvedAuthorityId,
+    ResolvedChannelId, ResolvedCommand, ResolvedContextId,
+};
+pub use snapshot::{ResolverSnapshot, SnapshotToken};
+pub use terminal::classify_terminal_execution_error;
 
 /// Declare a command executor that can only accept `ResolvedCommand`.
 ///
@@ -68,7 +81,7 @@ mod tests {
     #[cfg(feature = "signals")]
     use crate::signal_defs::{register_app_signals, CHAT_SIGNAL, CHAT_SIGNAL_NAME};
     #[cfg(feature = "signals")]
-    use crate::ui::workflows::strong_command::execute::{home_for_scope, wait_for_consistency};
+    use crate::ui::workflows::strong_command::consistency::{home_for_scope, wait_for_consistency};
     use crate::views::{Channel, ChannelType, ChatState, Contact, ContactsState};
     #[cfg(feature = "signals")]
     use crate::AppConfig;

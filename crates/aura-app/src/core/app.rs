@@ -2,12 +2,13 @@
 //!
 //! This is the main entry point for the application.
 
+mod config;
 pub mod hooks;
-#[allow(dead_code)]
-mod legacy;
 pub mod runtime_access;
 pub mod signals;
+mod state;
 
+pub use config::AppConfig;
 #[cfg(feature = "callbacks")]
-pub use legacy::SubscriptionId;
-pub use legacy::{AppConfig, AppCore};
+pub use config::SubscriptionId;
+pub use state::AppCore;

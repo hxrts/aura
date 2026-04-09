@@ -1,4 +1,7 @@
+#![allow(missing_docs)]
+
 use super::*;
+use crate::workflows::parse::parse_context_id;
 
 /// Strong authoritative reference for parity-critical channel operations.
 ///
@@ -73,9 +76,7 @@ pub(crate) async fn context_id_for_channel(
     routing::context_id_for_channel(app_core, channel_id, local_authority).await
 }
 
-pub(crate) async fn next_observed_projection_timestamp_ms(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> u64 {
+pub(crate) async fn next_observed_projection_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
     // OWNERSHIP: observed-display-update - this helper inspects observed chat
     // projections only to synthesize a monotone local timestamp for projection
     // repair; it does not authorize semantic decisions.
@@ -114,11 +115,8 @@ pub(crate) async fn ensure_channel_visible_after_join(
         .filter(|name| !name.trim().is_empty())
         .filter(|name| name != &channel_id.to_string());
     let normalized_name = name_hint
-        .map(str::trim)
+        .map(normalize_channel_name)
         .filter(|value| !value.is_empty())
-        .map(|value| value.trim_start_matches('#'))
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
         .or(existing_name)
         .ok_or_else(|| {
             AuraError::from(super::super::error::WorkflowError::Precondition(
@@ -128,12 +126,14 @@ pub(crate) async fn ensure_channel_visible_after_join(
 
     let placeholder_channel = {
         let chat = observed_chat_snapshot(app_core).await;
-        chat.all_channels()
+        let existing = chat
+            .all_channels()
             .find(|channel| {
                 channel.id != channel_id
                     && channel.name.eq_ignore_ascii_case(normalized_name.as_str())
             })
-            .cloned()
+            .cloned();
+        existing
     };
     if let Some(placeholder_channel) = placeholder_channel {
         let canonical_name = normalized_name.clone();
@@ -162,6 +162,24 @@ pub(crate) async fn ensure_channel_visible_after_join(
         ),
     )
     .await
+}
+
+pub async fn materialize_authoritative_channel_binding_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    binding: &crate::ui_contract::ChannelBindingWitness,
+    name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    let channel_id = binding.channel_id.parse::<ChannelId>().map_err(|error| {
+        AuraError::invalid(format!(
+            "accepted channel binding carried invalid canonical channel id '{}': {error}",
+            binding.channel_id
+        ))
+    })?;
+    let context_id = match binding.context_id.as_deref() {
+        Some(context_id) => parse_context_id(context_id)?,
+        None => require_authoritative_context_id_for_channel(app_core, channel_id).await?,
+    };
+    ensure_channel_visible_after_join(app_core, channel_id, context_id, name_hint).await
 }
 
 pub(in crate::workflows) async fn apply_authoritative_membership_projection(
@@ -319,11 +337,11 @@ pub(crate) async fn resolve_authoritative_channel_binding_from_input(
             })
         }
         _ => {
-            let normalized_name = channel_input.trim().trim_start_matches('#').trim();
+            let normalized_name = normalize_channel_name(channel_input);
             let observed_chat = observed_chat_snapshot(app_core).await;
             let mut observed_matches = observed_chat
                 .all_channels()
-                .filter(|channel| channel.name.eq_ignore_ascii_case(normalized_name))
+                .filter(|channel| channel.name.eq_ignore_ascii_case(&normalized_name))
                 .filter_map(|channel| {
                     channel.context_id.map(|context_id| {
                         crate::runtime_bridge::AuthoritativeChannelBinding {
@@ -344,7 +362,7 @@ pub(crate) async fn resolve_authoritative_channel_binding_from_input(
                 "resolve_authoritative_channel_binding_from_input",
                 "identify_materialized_channel_bindings_by_name",
                 MESSAGING_RUNTIME_QUERY_TIMEOUT,
-                || runtime.identify_materialized_channel_bindings_by_name(normalized_name),
+                || runtime.identify_materialized_channel_bindings_by_name(&normalized_name),
             )
             .await
             .map_err(|error| {
@@ -361,7 +379,7 @@ pub(crate) async fn resolve_authoritative_channel_binding_from_input(
             })?
             .into_iter()
             .next()
-            .ok_or_else(|| AuraError::not_found(normalized_name.to_string()))
+            .ok_or_else(|| AuraError::not_found(normalized_name.clone()))
         }
     }
 }
@@ -384,18 +402,20 @@ pub(crate) async fn require_authoritative_channel_ref(
             return Ok(authoritative_channel_ref(channel_id, context_id));
         }
         converge_runtime(runtime).await;
-        Err(AuraError::from(super::super::error::WorkflowError::Precondition(
-            "authoritative context required for channel",
-        )))
+        Err(AuraError::from(
+            super::super::error::WorkflowError::Precondition(
+                "authoritative context required for channel",
+            ),
+        ))
     })
     .await
     .map_err(|error| match error {
         RetryRunError::Timeout(timeout_error) => timeout_error.into(),
-        RetryRunError::AttemptsExhausted { .. } => AuraError::from(
-            super::super::error::WorkflowError::Precondition(
+        RetryRunError::AttemptsExhausted { .. } => {
+            AuraError::from(super::super::error::WorkflowError::Precondition(
                 "authoritative context required for channel",
-            ),
-        ),
+            ))
+        }
     })
 }
 
@@ -412,10 +432,16 @@ pub(in crate::workflows) async fn runtime_channel_state_exists(
     )
     .await
     .map_err(|error| {
-        AuraError::from(super::super::error::runtime_call("inspect channel state", error))
+        AuraError::from(super::super::error::runtime_call(
+            "inspect channel state",
+            error,
+        ))
     })?
     .map_err(|error| {
-        AuraError::from(super::super::error::runtime_call("inspect channel state", error))
+        AuraError::from(super::super::error::runtime_call(
+            "inspect channel state",
+            error,
+        ))
     })
 }
 
@@ -434,18 +460,20 @@ pub(in crate::workflows) async fn wait_for_runtime_channel_state(
             return Ok(());
         }
         converge_runtime(runtime).await;
-        Err(AuraError::from(super::super::error::WorkflowError::Precondition(
-            "canonical AMP channel state required",
-        )))
+        Err(AuraError::from(
+            super::super::error::WorkflowError::Precondition(
+                "canonical AMP channel state required",
+            ),
+        ))
     })
     .await
     .map_err(|error| match error {
         RetryRunError::Timeout(timeout_error) => timeout_error.into(),
-        RetryRunError::AttemptsExhausted { .. } => AuraError::from(
-            super::super::error::WorkflowError::Precondition(
+        RetryRunError::AttemptsExhausted { .. } => {
+            AuraError::from(super::super::error::WorkflowError::Precondition(
                 "canonical AMP channel state required",
-            ),
-        ),
+            ))
+        }
     })
 }
 
@@ -473,20 +501,20 @@ async fn authoritative_channel_participants(
         || runtime.amp_list_channel_participants(context_id, channel_id),
     )
     .await
-    .map_err(|error| {
-        super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
+    .map_err(
+        |error| super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
             channel: channel_id.to_string(),
             context: context_id.to_string(),
             source: AuraError::agent(error.to_string()),
-        }
-    })?
-    .map_err(|error| {
-        super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
+        },
+    )?
+    .map_err(
+        |error| super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
             channel: channel_id.to_string(),
             context: context_id.to_string(),
             source: AuraError::agent(error.to_string()),
-        }
-    })?;
+        },
+    )?;
 
     for _ in 0..3 {
         let mut participants = last.clone();

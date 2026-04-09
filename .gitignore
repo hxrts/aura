@@ -62,6 +62,7 @@ work/
 ext/
 outcomes/
 .target-tmp
+wip
 
 # Tooling
 .claude

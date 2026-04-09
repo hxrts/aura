@@ -692,12 +692,9 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).expect("Failed to create test AppCore"),
         ));
-        {
-            let mut core = app_core.write().await;
-            core.init_signals()
-                .await
-                .expect("Failed to init signals for test AppCore");
-        }
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .expect("Failed to init signals for test AppCore");
 
         let dir = tempfile::tempdir().expect("Failed to create temp dir");
         let dispatch = test_dispatch_helper(app_core.clone(), dir.path().to_path_buf());

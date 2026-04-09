@@ -1,5 +1,7 @@
 use super::*;
 
+const CHANNEL_INVITE_POST_CREATE_PROPAGATION_ATTEMPTS: usize = 8;
+
 /// Best-effort channel connectivity warming.
 pub(crate) async fn warm_channel_connectivity(
     app_core: &Arc<RwLock<AppCore>>,
@@ -18,6 +20,7 @@ pub(crate) async fn warm_channel_connectivity(
                 .await?;
         let mut any_peer_ready = recipients.is_empty();
         for peer in recipients {
+            let peer_id = peer.to_string();
             if timeout_runtime_call(
                 runtime,
                 "warm_channel_connectivity",
@@ -30,6 +33,14 @@ pub(crate) async fn warm_channel_connectivity(
             {
                 any_peer_ready = true;
             }
+            let _ = timeout_runtime_call(
+                runtime,
+                "warm_channel_connectivity",
+                "sync_with_peer",
+                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.sync_with_peer(&peer_id),
+            )
+            .await;
         }
         let _ =
             refresh_authoritative_delivery_readiness_for_channel(app_core, runtime, channel).await;
@@ -42,9 +53,11 @@ pub(crate) async fn warm_channel_connectivity(
         {
             Ok(())
         } else {
-            Err(AuraError::from(super::super::error::WorkflowError::Precondition(
-                "channel peer connectivity not yet warmed",
-            )))
+            Err(AuraError::from(
+                super::super::error::WorkflowError::Precondition(
+                    "channel peer connectivity not yet warmed",
+                ),
+            ))
         }
     })
     .await;
@@ -62,6 +75,7 @@ pub(crate) async fn warm_channel_connectivity(
     warmed
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 async fn propagate_channel_invitation_to_peer(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
@@ -126,6 +140,8 @@ async fn propagate_channel_invitation_to_peer(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+/// Best-effort post-create follow-up work for a newly issued channel invitation.
 pub async fn run_post_channel_invite_followups(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
@@ -194,6 +210,8 @@ pub(in crate::workflows) async fn post_terminal_join_followups(
     let channel_id = authoritative_channel.channel_id();
     let context_id = authoritative_channel.context_id();
 
+    let _ = warm_channel_connectivity(app_core, &runtime, authoritative_channel).await;
+
     let _ = timeout_runtime_call(
         &runtime,
         "post_terminal_join_followups",
@@ -214,8 +232,5 @@ pub(in crate::workflows) async fn post_terminal_join_followups(
             error,
         ))
     });
-
-    let _ = warm_channel_connectivity(app_core, &runtime, authoritative_channel).await;
-    stabilize_authoritative_join_readiness(app_core, authoritative_channel, channel_name_hint)
-        .await
+    stabilize_authoritative_join_readiness(app_core, authoritative_channel, channel_name_hint).await
 }

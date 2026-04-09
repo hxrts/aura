@@ -4,7 +4,7 @@ error[E0624]: associated function `new` is private
 8 |     let _ = AuthoritativeChannelRef::new(channel_id, context_id);
   |                                      ^^^ private associated function
   |
- ::: src/workflows/messaging.rs
+ ::: src/workflows/messaging/channel_refs.rs
   |
   |     pub(crate) fn new(channel_id: ChannelId, context_id: ContextId) -> Self {
   |     ----------------------------------------------------------------------- private associated function defined here

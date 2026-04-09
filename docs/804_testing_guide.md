@@ -163,9 +163,28 @@ Browser-owned semantic snapshot publication should flow through one helper align
 The canonical shared-flow coverage anchors for the current parity-critical user flows are listed below.
 
 - `real-runtime-mixed-startup-smoke.toml` for startup, onboarding, and shared neighborhood navigation
-- `scenario13-mixed-contact-channel-message-e2e.toml` for chat, contacts, unilateral-contact to bilateral-friend transitions, invitation, home creation, channel join, and message-send flows
+- `scenario13-mixed-contact-channel-message-e2e.toml` for the shared chat, contacts, invitation, home creation, channel join, and message-send flow
 - `scenario12-mixed-device-enrollment-removal-e2e.toml` for device add and remove
 - `shared-notifications-and-authority.toml` and `shared-settings-parity.toml` for the remaining shared settings, authority, and navigation flows
+
+The current `aura-app` split keeps those anchors unchanged while moving the
+authoritative flow owners into more specific modules. Shared-flow source-area
+metadata should point at the owner modules that now carry those flows:
+`workflows/context/neighborhood.rs` for neighborhood/home creation,
+`workflows/invitation/{create,accept,readiness}.rs` for contacts and
+invitation acceptance, and `workflows/messaging/{channel_refs,channels,send}.rs`
+for chat navigation, join, and message-send paths. The `aura-app::ui_contract`
+facade remains the canonical export surface for that coverage metadata.
+
+Shared pending-invitation acceptance has an additional invariant now:
+`SemanticOperationKind::AcceptPendingChannelInvitation` entry points must not
+strand the authoritative semantic lifecycle at
+`SemanticOperationPhase::WorkflowDispatched` when the shared browser/TUI flow
+fails before the owned accept path settles. If an early error escapes the
+owned path, the wrapper or `*_with_instance` entry point must synthesize the
+terminal failure publication for the same operation instance before returning
+to the shell or harness. Scenario 13 remains the canonical mixed-runtime anchor
+for that browser shared-channel receive parity.
 
 Note-to-self is a real AMP channel provisioned at account bootstrap, not a display-only entry. It appears as a first-class channel backed by the runtime from first use, with its own context, deterministic channel ID, and standard message delivery. Channel creation parity coverage must not treat "has at least one contact" as a prerequisite for opening chat creation. TUI and web shells should expose the same semantic create-channel path when the only available participant is self, and scenario coverage should keep that path distinct from pairwise or group-member invitation flows.
 

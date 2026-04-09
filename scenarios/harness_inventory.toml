@@ -31,7 +31,7 @@ id = "scenario13-mixed-contact-channel-message-e2e"
 path = "scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml"
 classification = "shared"
 runtime_substrate = "real_runtime"
-notes = "Primary shared contact/channel/message scenario."
+notes = "Primary shared contact/channel/message parity scenario."
 
 [[scenario]]
 id = "shared-notifications-and-authority"

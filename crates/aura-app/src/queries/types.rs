@@ -7,8 +7,6 @@
 pub mod channels;
 pub mod common;
 pub mod contacts;
-#[allow(dead_code)]
-mod legacy;
 pub mod messages;
 pub mod recovery;
 

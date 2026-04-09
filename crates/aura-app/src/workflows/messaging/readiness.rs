@@ -1,24 +1,24 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct MessageSendReadiness {
-    pub(crate) recipient_resolution_ready: bool,
-    pub(crate) delivery_ready: bool,
+pub(super) struct MessageSendReadiness {
+    pub(super) recipient_resolution_ready: bool,
+    pub(super) delivery_ready: bool,
 }
 
 #[derive(Debug, Clone)]
-struct ChannelReadinessState {
+pub(super) struct ChannelReadinessState {
     channel_id: ChannelId,
     fact_key: ChannelFactKey,
     authoritative_channel: Option<AuthoritativeChannelRef>,
-    member_count: u32,
-    recipients: Vec<AuthorityId>,
-    delivery_supported: bool,
+    pub(super) member_count: u32,
+    pub(super) recipients: Vec<AuthorityId>,
+    pub(super) delivery_supported: bool,
     had_membership_fact: bool,
 }
 
 impl ChannelReadinessState {
-    fn new(
+    pub(super) fn new(
         channel_id: ChannelId,
         fact_key: ChannelFactKey,
         member_count: u32,
@@ -58,7 +58,7 @@ impl ChannelReadinessState {
             })
     }
 
-    fn delivery_facts(
+    pub(super) fn delivery_facts(
         &self,
         context_id: ContextId,
         ready_peers: &[AuthorityId],
@@ -84,7 +84,7 @@ impl ChannelReadinessState {
 }
 
 #[derive(Debug, Clone, Default)]
-struct ChannelReadinessCoordinator {
+pub(super) struct ChannelReadinessCoordinator {
     states: Vec<ChannelReadinessState>,
 }
 
@@ -128,15 +128,17 @@ impl ChannelReadinessSeed {
         {
             self.fact_key.name = Some(channel.name.clone());
         }
-        self.member_count = self
-            .member_count
-            .max(channel.member_count.max(channel.member_ids.len() as u32 + 1));
+        self.member_count = self.member_count.max(
+            channel
+                .member_count
+                .max(channel.member_ids.len() as u32 + 1),
+        );
         self.authoritative_context = self.authoritative_context.or(channel.context_id);
     }
 }
 
 impl ChannelReadinessCoordinator {
-    async fn load(
+    pub(super) async fn load(
         app_core: &Arc<RwLock<AppCore>>,
         resolve_recipients: bool,
     ) -> Result<Self, AuraError> {
@@ -248,7 +250,10 @@ impl ChannelReadinessCoordinator {
         &self.states
     }
 
-    fn state_for_channel(&self, channel_id: ChannelId) -> Option<&ChannelReadinessState> {
+    pub(super) fn state_for_channel(
+        &self,
+        channel_id: ChannelId,
+    ) -> Option<&ChannelReadinessState> {
         self.states
             .iter()
             .find(|state| state.channel_id == channel_id)
@@ -406,7 +411,9 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
             false
         }
         Err(error) => {
-            return Err(super::super::error::runtime_call("create note-to-self channel", error).into());
+            return Err(
+                super::super::error::runtime_call("create note-to-self channel", error).into(),
+            );
         }
     };
 
@@ -426,7 +433,9 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
     .await
     {
         if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-            return Err(super::super::error::runtime_call("join note-to-self channel", error).into());
+            return Err(
+                super::super::error::runtime_call("join note-to-self channel", error).into(),
+            );
         }
     }
 
@@ -624,14 +633,16 @@ pub(crate) async fn refresh_authoritative_delivery_readiness_for_channel(
     .await
 }
 
-fn channel_id_from_pending_channel_invitation(invitation: &InvitationInfo) -> Option<ChannelId> {
+pub(super) fn channel_id_from_pending_channel_invitation(
+    invitation: &InvitationInfo,
+) -> Option<ChannelId> {
     match &invitation.invitation_type {
         InvitationBridgeType::Channel { home_id, .. } => home_id.parse().ok(),
         _ => None,
     }
 }
 
-fn select_pending_channel_invitation(
+pub(super) fn select_pending_channel_invitation(
     pending: &[InvitationInfo],
     local_authority: AuthorityId,
     requested_channel_id: ChannelId,
@@ -669,8 +680,18 @@ pub(crate) async fn try_join_via_pending_channel_invitation(
         || runtime.try_list_pending_invitations(),
     )
     .await
-    .map_err(|e| AuraError::from(super::super::error::runtime_call("list pending invitations", e)))?
-    .map_err(|e| AuraError::from(super::super::error::runtime_call("list pending invitations", e)))?;
+    .map_err(|e| {
+        AuraError::from(super::super::error::runtime_call(
+            "list pending invitations",
+            e,
+        ))
+    })?
+    .map_err(|e| {
+        AuraError::from(super::super::error::runtime_call(
+            "list pending invitations",
+            e,
+        ))
+    })?;
     let Some(invitation) =
         select_pending_channel_invitation(&pending, runtime.authority_id(), requested_channel_id)
     else {
@@ -689,12 +710,15 @@ pub(crate) async fn try_join_via_pending_channel_invitation(
         || runtime.accept_invitation(invitation.invitation_id.as_str()),
     )
     .await
-    .map_err(|error| super::super::error::runtime_call("accept pending channel invitation", error))?
-    {
+    .map_err(|error| {
+        super::super::error::runtime_call("accept pending channel invitation", error)
+    })? {
         if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
-            return Err(
-                super::super::error::runtime_call("accept pending channel invitation", error).into(),
-            );
+            return Err(super::super::error::runtime_call(
+                "accept pending channel invitation",
+                error,
+            )
+            .into());
         }
     }
 

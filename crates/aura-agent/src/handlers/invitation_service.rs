@@ -251,6 +251,37 @@ impl InvitationServiceApi {
         }
     }
 
+    fn spawn_channel_acceptance_notification(&self, invitation_id: InvitationId) {
+        let handler = self.handler.clone();
+        let effects = self.effects.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.channel_acceptance.{}",
+            invitation_id
+        ));
+        let task_name = format!("notify.{}", invitation_id);
+        let invitation_id_for_log = invitation_id.clone();
+        let fut = async move {
+            if let Err(error) = handler
+                .notify_channel_invitation_acceptance(effects.as_ref(), &invitation_id)
+                .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation_id_for_log,
+                    error = %error,
+                    "Channel acceptance notification failed; continuing"
+                );
+            }
+        };
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _task_handle = tasks.spawn_local_named(task_name, fut);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _task_handle = tasks.spawn_named(task_name, fut);
+        }
+    }
+
     fn spawn_invitation_ceremony_registration(&self, invitation: &Invitation) {
         if !Self::should_track_ceremony(&invitation.invitation_type) {
             return;
@@ -608,6 +639,9 @@ impl InvitationServiceApi {
         {
             if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
                 self.spawn_contact_acceptance_notification(invitation.invitation_id.clone());
+            }
+            if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                self.spawn_channel_acceptance_notification(invitation.invitation_id.clone());
             }
             if matches!(
                 invitation.invitation_type,

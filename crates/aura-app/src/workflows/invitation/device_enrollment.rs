@@ -1,6 +1,58 @@
 #![allow(missing_docs)]
 
 use super::*;
+use aura_core::{AttemptBudget, RetryBudgetPolicy};
+
+fn device_enrollment_accept_retry_policy() -> Result<RetryBudgetPolicy, AuraError> {
+    workflow_retry_policy(80, Duration::from_millis(250), Duration::from_millis(500))
+        .map_err(AuraError::from)
+}
+
+enum DeviceEnrollmentAcceptConvergenceError {
+    Terminal(String),
+    Workflow(AuraError),
+}
+
+fn log_device_enrollment_accept_progress(message: impl Into<String>) {
+    let message = message.into();
+    #[cfg(feature = "wasm")]
+    crate::platform::wasm::console_log(&format!("[device-enrollment-accept] {message}"));
+    #[cfg(all(not(feature = "wasm"), feature = "instrumented"))]
+    tracing::info!(target: "device-enrollment-accept", "{message}");
+    #[cfg(all(not(feature = "wasm"), not(feature = "instrumented")))]
+    let _ = message;
+}
+
+async fn fail_device_enrollment_accept<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    detail: impl Into<String>,
+) -> Result<T, AuraError> {
+    let error = crate::ui_contract::SemanticOperationError::new(
+        crate::ui_contract::SemanticFailureDomain::Invitation,
+        crate::ui_contract::SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into());
+    super::publish_invitation_operation_failure(
+        app_core,
+        OperationId::device_enrollment(),
+        None,
+        None,
+        SemanticOperationKind::ImportDeviceEnrollmentCode,
+        error.clone(),
+    )
+    .await?;
+    Err(AuraError::agent(error.detail.unwrap_or_else(|| {
+        "device enrollment acceptance failed".to_string()
+    })))
+}
+
+async fn prime_device_enrollment_accept_connectivity(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) {
+    trigger_runtime_discovery_with_timeout(runtime).await;
+    let _ = drive_invitation_accept_convergence(app_core, runtime, None).await;
+}
 
 pub async fn accept_device_enrollment_invitation(
     app_core: &Arc<RwLock<AppCore>>,
@@ -29,7 +81,7 @@ pub async fn accept_device_enrollment_invitation(
         invitation.invitation_id,
         runtime.authority_id()
     ));
-    super::prime_device_enrollment_accept_connectivity(app_core, &runtime).await;
+    prime_device_enrollment_accept_connectivity(app_core, &runtime).await;
     log_device_enrollment_accept_progress(format!(
         "connectivity preflight complete invitation_id={}",
         invitation.invitation_id
