@@ -30,9 +30,9 @@ jobs:
         with:
           cache-name: conformance
       - name: Verify policy wiring
-        run: nix develop --command just ci-conformance-policy
+        run: nix develop .#ci --command just ci-conformance-policy
       - name: Run conformance gate
-        run: nix develop --command just ci-conformance
+        run: nix develop .#ci --command just ci-conformance
         env:
           CARGO_BUILD_JOBS: 4
           AURA_CONFORMANCE_WRITE_ARTIFACTS: 1
@@ -51,7 +51,7 @@ jobs:
         uses: ./.github/actions/failure-bundle
         with:
           name: conform-deep
-          replay-command: nix develop --command just ci-conformance
+          replay-command: nix develop .#ci --command just ci-conformance
 
   itf-conformance:
     name: Conformance ITF
@@ -61,13 +61,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: itf-conformance
-      - run: nix develop --command just ci-conformance-itf
+      - run: nix develop .#ci --command just ci-conformance-itf
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: conform-deep
-          replay-command: nix develop --command just ci-conformance-itf
+          replay-command: nix develop .#ci --command just ci-conformance-itf
 
   differential:
     name: Conformance Differential
