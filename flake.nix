@@ -349,6 +349,9 @@
 
             # Browser/build tooling used by harness and web checks
             nodejs_20
+
+            # Conformance ITF generation
+            quint
           ];
 
           shellHook = ''
