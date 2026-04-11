@@ -1115,7 +1115,7 @@ This is acceptable technical debt - the pattern consistency outweighs the semant
 The project includes an automated architectural compliance checker to enforce these layering principles:
 
 Command: `just check-arch`  
-Script: `scripts/check/arch.sh`
+Implementation: `policy/xtask` orchestration plus retained thin repo checks
 
 What it validates:
 - Layer boundary violations (no upward dependencies)

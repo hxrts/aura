@@ -610,7 +610,7 @@ just ci-harness-replay
 just ci-shared-flow-policy
 ```
 
-`just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent. It verifies that every fully shared flow has explicit parity-scenario coverage and that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics.
+`just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent. It verifies that every fully shared flow has explicit parity-scenario coverage and that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics. The shared-flow aggregate now calls Aura policy code for the adaptive-privacy runtime-locality and legacy-sweep gates through `policy/xtask`, while the remaining shared-flow checks stay as thin shell orchestration around harness governance and targeted contract tests.
 
 The shared-flow policy scripts target the published Cargo package names for renamed Layer 6 crates and macros. When invoking raw Cargo commands behind these lanes, use `hxrts-aura-app` and `hxrts-aura-macros` package ids instead of the legacy `aura-app` and `aura-macros` selectors. File-system crate paths remain `crates/aura-app` and `crates/aura-macros`.
 

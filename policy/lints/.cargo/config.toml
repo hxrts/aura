@@ -1,0 +1,2 @@
+[target.'cfg(not(target_os = "windows"))']
+linker = "toolkit-dylint-link"

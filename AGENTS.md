@@ -119,7 +119,7 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   runtime/integration checks, and governance wrappers
 - **Annotation ratchet gate**: new parity-critical workflow boundaries,
   runtime services, and first-party capability gates must pass the
-  changed-files ratchets in `scripts/check/ownership-annotation-ratchet.sh`;
+  changed-files ratchets in `just ci-annotation-ratchet`;
   prefer adding the declaration-layer attribute over adding a shell allowlist
 - **Frontend handoff boundary**: direct `LocalTerminalOperationOwner::submit`
   and `WorkflowHandoffOperationOwner::submit` allocation stays inside the

@@ -12,8 +12,8 @@ fail() {
 
 bash scripts/check/harness-governance.sh core-scenario-mechanics
 bash scripts/check/privacy-onion-quarantine.sh
-bash scripts/check/privacy-runtime-locality.sh
-bash scripts/check/privacy-legacy-sweep.sh
+cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check privacy-runtime-locality
+cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check privacy-legacy-sweep
 bash scripts/check/harness-ui-state-evented.sh
 bash scripts/check/harness-governance.sh ui-parity-contract
 # Inventory and converted shared-scenario contract

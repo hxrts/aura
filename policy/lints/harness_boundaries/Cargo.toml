@@ -1,0 +1,23 @@
+# Aura-local dylint library.
+# Run:
+#   ./scripts/toolkit-shell.sh toolkit-install-dylint
+#   ./scripts/toolkit-shell.sh toolkit-dylint --repo-root . --lint-path ./policy/lints/harness_boundaries --all -- --all-targets
+
+[package]
+name = "aura-harness-boundaries"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Aura-specific Dylint checks for harness/frontend semantic boundary rules"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dylint_linting = { git = "https://github.com/trailofbits/dylint.git", rev = "4bd91ce7729b74c7ee5664bbb588f7baf30b4a09", package = "dylint_linting" }
+
+[features]
+rlib = ["dylint_linting/constituent"]
+
+[package.metadata.rust-analyzer]
+rustc_private = true

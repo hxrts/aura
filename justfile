@@ -43,6 +43,12 @@ _nix-nightly *ARGS:
 _harness action *ARGS:
     scripts/harness/cmd.sh {{ action }} {{ ARGS }}
 
+_toolkit-shell *ARGS:
+    ./scripts/toolkit-shell.sh {{ ARGS }}
+
+_policy-check *ARGS:
+    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- {{ ARGS }}
+
 _ownership-lint mode *PATHS:
     if [ -x target/debug/ownership_lints ]; then \
         target/debug/ownership_lints {{ mode }} {{ PATHS }}; \
@@ -333,7 +339,67 @@ check-zed:
 
 # Run clippy linter
 clippy:
-    cargo clippy --workspace --all-targets -q -- -D warnings
+    just _toolkit-shell toolkit-clippy --workspace --all-targets -- -D warnings
+
+toolkit-install-dylint:
+    just _toolkit-shell toolkit-install-dylint
+
+toolkit-format:
+    just _toolkit-shell toolkit-fmt --config ./rustfmt.toml --all
+
+toolkit-format-check:
+    just _toolkit-shell toolkit-fmt --config ./rustfmt.toml --all -- --check
+
+toolkit-clippy:
+    just _toolkit-shell toolkit-clippy --workspace --all-targets -- -D warnings
+
+toolkit-clippy-strict:
+    just _toolkit-shell toolkit-clippy --workspace --all-targets -- -D warnings -D clippy::disallowed_methods -D clippy::disallowed_types -D clippy::unwrap_used -D clippy::expect_used -D clippy::duplicated_attributes -D clippy::implicit_clone
+
+toolkit-docs-links:
+    just _toolkit-shell toolkit-xtask check docs-link-check --repo-root . --config policy/toolkit.toml
+
+toolkit-docs-semantic-drift:
+    just _toolkit-shell toolkit-xtask check docs-semantic-drift --repo-root . --config policy/toolkit.toml
+
+toolkit-text-formatting:
+    just _toolkit-shell toolkit-xtask check text-formatting --repo-root . --config policy/toolkit.toml
+
+toolkit-workspace-hygiene:
+    just _toolkit-shell toolkit-xtask check workspace-hygiene --repo-root . --config policy/toolkit.toml
+
+toolkit-lean-style:
+    just _toolkit-shell toolkit-xtask check lean-style --repo-root . --config policy/toolkit.toml
+
+toolkit-lean-sorry-shadow:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ./scripts/toolkit-shell.sh toolkit-xtask check lean-style --repo-root . --config policy/toolkit-strict-lean.toml; then
+        echo "strict Lean shadow: no \`sorry\` usages found"
+    else
+        echo "strict Lean shadow: findings captured; inactive lane remains non-blocking"
+    fi
+
+toolkit-dylint-trait-purity:
+    just _toolkit-shell toolkit-dylint --repo-root . --toolkit-lint trait_purity --all -- --all-targets
+
+toolkit-dylint-trait-must-use:
+    just _toolkit-shell toolkit-dylint --repo-root . --toolkit-lint trait_must_use --all -- --all-targets
+
+policy-dylint-harness-boundaries:
+    just _toolkit-shell toolkit-dylint --repo-root . --lint-path ./policy/lints/harness_boundaries --all -- --all-targets
+
+toolkit-shadow:
+    just toolkit-format-check
+    just toolkit-docs-links
+    just toolkit-docs-semantic-drift
+    just toolkit-text-formatting
+    just toolkit-workspace-hygiene
+    just toolkit-lean-style
+    just toolkit-lean-sorry-shadow
+
+policy-runtime-typed-lifecycle-bridge:
+    just _policy-check check runtime-typed-lifecycle-bridge
 
 # Strict clippy check enforcing effects system usage
 clippy-strict:
@@ -360,11 +426,11 @@ ci-capability-model-audit:
 
 # Format code
 fmt:
-    cargo fmt --all
+    just toolkit-format
 
 # Check code formatting without modifying files
 fmt-check:
-    cargo fmt --all -- --check
+    just toolkit-format-check
 
 # Run security audit
 audit:
@@ -376,11 +442,11 @@ audit:
 
 # Check architectural layer compliance (all checks)
 check-arch *FLAGS:
-    scripts/check/arch.sh {{ FLAGS }}
+    just _policy-check check arch {{ FLAGS }}
 
 # Check invariant-focused lanes (docs + runtime property monitor)
 check-invariants:
-    scripts/check/arch.sh --invariants
+    just _policy-check check arch --invariants
     just ci-property-monitor
 
 # Quick architecture checks by lane
@@ -391,7 +457,7 @@ check-arch-lane lane:
     set -euo pipefail
     case "{{ lane }}" in
       layers|effects|deps|completeness|todos|concurrency|invariants|workflows)
-        scripts/check/arch.sh --{{ lane }} || true
+        just _policy-check check arch --{{ lane }} || true
         ;;
       *)
         echo "Unknown lane: {{ lane }}"
@@ -411,21 +477,14 @@ ci-book: summary
 
 # Format check
 ci-format:
-    cargo fmt --all -- --check
+    just toolkit-format-check
 
 # Clippy with effects enforcement (matches CI environment)
 # Note: CARGO_INCREMENTAL=0 forces fresh lint checking
 
 # Note: Nix clippy may not catch all implicit_clone cases; GitHub CI uses newer clippy
 ci-clippy:
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- \
-        -D warnings \
-        -D clippy::disallowed_methods \
-        -D clippy::disallowed_types \
-        -D clippy::unwrap_used \
-        -D clippy::expect_used \
-        -D clippy::duplicated_attributes \
-        -D clippy::implicit_clone
+    just toolkit-clippy-strict
 
 # Build check
 ci-build:
@@ -629,7 +688,7 @@ ci-effects:
 
 # Verify docs links referenced from crates/ resolve to existing files in docs/
 ci-crates-doc-links:
-    scripts/check/docs-link-check.sh
+    just toolkit-docs-links
 
 # Verify markdown links within docs/ using the same config as GitHub docs workflow
 ci-docs-links:
@@ -641,11 +700,11 @@ ci-docs-links:
 
 # Verify prose formatting rules used by the docs workflow
 ci-text-formatting:
-    scripts/check/docs-text-formatting.sh
+    just toolkit-text-formatting
 
 # Detect semantic drift in documentation (stale type/trait/command references)
 ci-docs-semantic-drift:
-    scripts/check/docs-drift-check.sh
+    just toolkit-docs-semantic-drift
 
 # Verify docs/998_verification_coverage.md metrics match actual codebase
 ci-verification-coverage:
@@ -666,18 +725,7 @@ ci-user-flow-policy:
     just ci-harness-ownership-policy
 
 ci-harness-ownership-policy:
-    bash scripts/check/ownership-category-declarations.sh
-    bash scripts/check/privacy-runtime-locality.sh
-    bash scripts/check/privacy-legacy-sweep.sh
-    bash scripts/check/harness-actor-vs-move-ownership.sh
-    just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
-    just _ownership-lint terminal-shell-explicit-exit-intent crates/aura-terminal/src
-    just _ownership-lint optional-owner-boundary crates/aura-app/src crates/aura-agent/src/runtime_bridge crates/aura-ui/src crates/aura-web/src crates/aura-testkit/src
-    bash scripts/check/harness-typed-semantic-errors.sh
-    bash scripts/check/harness-typed-json-boundary.sh
-    just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness
-    bash scripts/check/harness-authoritative-fact-boundary.sh
-    just ci-frontend-portability
+    just _policy-check check harness-ownership-policy
 
 ci-frontend-portability:
     cargo run -q -p hxrts-aura-macros --bin arch_lints -- frontend-portability crates
@@ -685,54 +733,10 @@ ci-frontend-portability:
     just web-check
 
 ci-testkit-exception-boundary:
-    bash scripts/check/testing-exception-boundary.sh
+    just _policy-check check testing-exception-boundary
 
 ci-ownership-policy:
-    just ci-ownership-categories
-    just ci-service-surface-policy
-    just ci-service-registry-ownership
-    just ci-annotation-ratchet
-    just ci-actor-lifecycle
-    just ci-async-session-ownership
-    just ci-async-concurrency-envelope
-    just ci-runtime-shutdown-order
-    just ci-runtime-instrumentation-schema
-    just ci-move-semantics
-    just ci-authoritative-fact-boundary
-    just ci-capability-boundaries
-    just ci-typed-errors
-    just ci-browser-promise-bounded-awaits
-    just ci-browser-transport-single-owner
-    just ci-semantic-owner-awaits
-    just ci-semantic-owner-detached-continuation
-    just ci-semantic-owner-no-spawn
-    just ci-semantic-owner-stable-wrapper
-    just ci-semantic-owner-proof-success
-    just ci-workflow-proof-bearing-success
-    just ci-proof-issuer-authoritative-source
-    just ci-device-enrollment-authority-contract
-    just ci-workflow-no-view-reads
-    just ci-workflow-no-view-writes
-    just ci-workflow-no-fallback-defaults
-    just ci-workflow-no-view-derived-readiness
-    just ci-workflow-no-view-derived-recipient-resolution
-    just ci-workflow-unbounded-runtime-awaits
-    just ci-runtime-typed-lifecycle-bridge
-    just ci-weak-to-strong-identifier-upgrade
-    just ci-workflow-ownership-tag-ratchet
-    just ci-parity-critical-ignored-results
-    just ci-optional-owner-boundary
-    just ci-best-effort-side-effects
-    just ci-must-settle-boundary
-    just ci-owner-issued-readiness-boundary
-    just ci-observed-layer-boundaries
-    just ci-frontend-handoff-boundary
-    just ci-parity-critical-callback-settlement
-    just ci-timeout-policy
-    just ci-timeout-time-domains
-    just ci-harness-ownership-policy
-    just ci-browser-semantic-restart-boundary
-    just ci-testkit-exception-boundary
+    just _policy-check check ownership-policy
 
 ci-ratchet-audit:
     just clippy
@@ -746,23 +750,23 @@ ci-ratchet-audit:
     cargo test -p hxrts-aura-macros --test compile_fail -- --nocapture
 
 ci-browser-semantic-restart-boundary:
-    bash scripts/check/browser-restart-boundary.sh
+    just _policy-check check browser-restart-boundary
 
 ci-annotation-ratchet:
-    bash scripts/check/ownership-annotation-ratchet.sh semantic-owner
-    bash scripts/check/ownership-annotation-ratchet.sh actor-owned
-    bash scripts/check/ownership-annotation-ratchet.sh capability-boundary
+    just _policy-check check ownership-annotation-ratchet semantic-owner
+    just _policy-check check ownership-annotation-ratchet actor-owned
+    just _policy-check check ownership-annotation-ratchet capability-boundary
 
 ci-ownership-categories:
-    bash scripts/check/ownership-category-declarations.sh
+    just _policy-check check ownership-category-declarations
 
 ci-service-surface-policy:
     mkdir -p target/tmp
     TMPDIR={{invocation_directory()}}/target/tmp cargo test -p hxrts-aura-macros --test service_surface_compile_fail -- --nocapture
-    bash scripts/check/service-surface-declarations.sh
+    just _policy-check check service-surface-declarations
 
 ci-service-registry-ownership:
-    bash scripts/check/service-registry-ownership.sh
+    just _policy-check check service-registry-ownership
 
 ci-adaptive-privacy-tuning:
     bash scripts/check/privacy-tuning-gate.sh
@@ -780,7 +784,7 @@ ci-capability-boundaries:
     cargo test -p hxrts-aura-core --test compile_fail -- --nocapture
 
 ci-typed-errors:
-    bash scripts/check/runtime-error-boundary.sh
+    just _policy-check check runtime-error-boundary
 
 ci-browser-promise-bounded-awaits:
     just _ownership-lint browser-promise-bounded-awaits crates
@@ -810,7 +814,7 @@ ci-proof-issuer-authoritative-source:
     just _ownership-lint proof-issuer-authoritative-source crates/aura-app/src/workflows
 
 ci-device-enrollment-authority-contract:
-    bash scripts/check/protocol-device-enrollment-contract.sh
+    just _policy-check check protocol-device-enrollment-contract
 
 ci-workflow-no-view-reads:
     just _ownership-lint workflow-no-view-reads-for-decisions crates/aura-app/src/workflows
@@ -831,13 +835,13 @@ ci-workflow-unbounded-runtime-awaits:
     just _ownership-lint workflow-unbounded-runtime-awaits crates/aura-app/src crates/aura-terminal/src/tui crates/aura-web/src crates/aura-ui/src
 
 ci-runtime-typed-lifecycle-bridge:
-    bash scripts/check/runtime-lifecycle-bridge.sh
+    just _policy-check check runtime-typed-lifecycle-bridge
 
 ci-weak-to-strong-identifier-upgrade:
     just _ownership-lint weak-to-strong-identifier-upgrade crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src
 
 ci-workflow-ownership-tag-ratchet:
-    bash scripts/check/ownership-workflow-tag-ratchet.sh
+    just _policy-check check ownership-workflow-tag-ratchet
 
 ci-parity-critical-ignored-results:
     just _ownership-lint parity-critical-ignored-results crates/aura-app/src/workflows crates/aura-agent/src/handlers
@@ -860,7 +864,7 @@ ci-owner-issued-readiness-boundary:
     just _ownership-lint owner-issued-readiness-boundary crates/aura-harness/src
 
 ci-observed-layer-boundaries:
-    bash scripts/check/ownership-observed-layer.sh
+    just _policy-check check observed-layer-boundaries
 
 ci-frontend-handoff-boundary:
     just _ownership-lint frontend-semantic-handoff-boundary crates/aura-terminal crates/aura-web
@@ -876,37 +880,37 @@ ci-timeout-time-domains:
 
 # Choreography wiring lint
 ci-choreo:
-    scripts/check/protocol-choreo-wiring.sh
+    just _policy-check check protocol-choreo-wiring
 
 ci-async-session-ownership:
     just _ownership-lint async-session-ownership crates/aura-agent/src/handlers crates/aura-agent/src/runtime/services crates/aura-agent/src/runtime_bridge
 
 ci-async-concurrency-envelope:
-    bash scripts/check/runtime-boundary-allowlist.sh concurrency
+    just _policy-check check runtime-boundary-allowlist concurrency
 
 ci-runtime-shutdown-order:
-    bash scripts/check/runtime-shutdown-order.sh
+    just _policy-check check runtime-shutdown-order
 
 ci-runtime-instrumentation-schema:
-    bash scripts/check/runtime-boundary-allowlist.sh instrumentation
+    just _policy-check check runtime-boundary-allowlist instrumentation
 
 ci-harness-readiness-ownership:
     just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
 
 ci-harness-typed-semantic-errors:
-    bash scripts/check/harness-typed-semantic-errors.sh
+    just _policy-check check harness-typed-semantic-errors
 
 ci-harness-typed-json-boundary:
-    bash scripts/check/harness-typed-json-boundary.sh
+    just policy-dylint-harness-boundaries
 
 ci-harness-move-ownership-boundary:
     just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness
 
 ci-harness-authoritative-fact-boundary:
-    bash scripts/check/harness-authoritative-fact-boundary.sh
+    just policy-dylint-harness-boundaries
 
 ci-harness-actor-vs-move-ownership:
-    bash scripts/check/harness-actor-vs-move-ownership.sh
+    just _policy-check check harness-actor-vs-move-ownership
 
 # Quint typecheck
 ci-quint-typecheck:
@@ -924,10 +928,10 @@ ci-lean-build:
 ci-lean-check-sorry:
     #!/usr/bin/env bash
     set -euo pipefail
-    if bash scripts/check/verification-lean-sorry.sh verification/lean/Aura; then
-        echo "::warning::Found incomplete proofs (sorry)"
-    else
+    if ./scripts/toolkit-shell.sh toolkit-xtask check lean-style --repo-root . --config policy/toolkit-strict-lean.toml; then
         echo "All proofs complete"
+    else
+        echo "::warning::Found incomplete proofs (sorry)"
     fi
 
 # Kani bounded model checking
@@ -1115,7 +1119,7 @@ ci-dry-run profile="push":
     add_step "Text Formatting Check"      "nix develop --command just ci-text-formatting"
     add_step "Semantic Drift Check"       "nix develop --command just ci-docs-semantic-drift"
     add_step "Docs Build"                 "nix develop --command just ci-book"
-    add_step "Architecture Check"         "nix develop --command scripts/check/arch.sh --quick"
+    add_step "Architecture Check"         "nix develop --command just check-arch --quick"
     add_step "User Flow Coverage"         "nix develop --command just ci-user-flow-coverage"
     add_step "User Flow Policy"           "nix develop --command just ci-user-flow-policy"
     add_step "Shared Flow Policy"         "nix develop --command just ci-shared-flow-policy"
@@ -1476,12 +1480,12 @@ verify-lean jobs="2": lean-init
     echo "Building Lean verification modules (threads={{ jobs }})..."
     cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{ jobs }}
     cd ../..
-    if bash scripts/check/verification-lean-sorry.sh verification/lean/Aura > "$sorry_report"; then
+    if ./scripts/toolkit-shell.sh toolkit-xtask check lean-style --repo-root . --config policy/toolkit-strict-lean.toml > "$sorry_report"; then
+        echo -e "${GREEN}✓ All proofs complete${NC}"
+    else
         count=$(wc -l < "$sorry_report" | tr -d ' ')
         echo -e "${YELLOW}⚠ Found $count incomplete proofs (sorry)${NC}"
         head -10 "$sorry_report" | sed 's/^/  /'
-    else
-        echo -e "${GREEN}✓ All proofs complete${NC}"
     fi
 
 # Backward-compatibility alias (prefer `just verify-lean`)

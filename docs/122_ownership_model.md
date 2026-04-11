@@ -544,8 +544,8 @@ Enforcement split:
   the invariant is inherently integration-level rather than compile-time.
 - Governance-only checks stay clearly separate from code-correctness
   enforcement:
-  - `scripts/check/ownership-category-declarations.sh`
-  - `scripts/check/harness-actor-vs-move-ownership.sh`
+  - `just ci-ownership-categories`
+  - `just ci-harness-actor-vs-move-ownership`
   - `scripts/check/user-flow-guidance-sync.sh`
 - Runtime/integration checks remain appropriate for properties such as runtime
   shutdown ordering and instrumentation schema discipline because those are
@@ -612,9 +612,9 @@ explicit:
     `just ci-ownership-policy` and `just lint-arch-syntax`
 - script-enforced:
   - thin repo-wide integration/governance gates such as
-    `scripts/check/service-surface-declarations.sh`,
-    `scripts/check/service-registry-ownership.sh`,
-    `scripts/check/privacy-legacy-sweep.sh`, and
+    `just ci-service-surface-policy`,
+    `just ci-service-registry-ownership`,
+    `just ci-harness-ownership-policy`, and
     `scripts/check/privacy-tuning-gate.sh`
 
 The default contributor path for service-family boundary work is:

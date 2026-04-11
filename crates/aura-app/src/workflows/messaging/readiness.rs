@@ -488,11 +488,10 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
                         true
                     }
                     Ok(false) => false,
-                    Err(error) if state.had_membership_fact => {
+                    Err(_error) if state.had_membership_fact => {
                         messaging_warn!(
-                            "Retaining ChannelMembershipReady for {} after runtime-state probe error: {}",
-                            state.channel_id,
-                            error
+                            "Retaining ChannelMembershipReady for {} after runtime-state probe error; authoritative leave/close owns revocation",
+                            state.channel_id
                         );
                         true
                     }
