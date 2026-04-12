@@ -47,8 +47,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::capabilities::SyncCapability;
 use crate::core::{
-    sync_biscuit_guard_error, sync_network_error, sync_serialization_error, sync_session_error,
-    SyncResult,
+    binary_serialize, json_serialize, receive_json_from_expected_peer, send_bytes_to_peer,
+    sync_biscuit_guard_error, sync_serialization_error, sync_session_error, SyncResult,
 };
 use crate::infrastructure::RetryPolicy;
 use aura_authorization::BiscuitTokenManager;
@@ -657,9 +657,7 @@ impl AntiEntropyProtocol {
         E: NetworkEffects + Send + Sync,
     {
         // Serialize local digest
-        let digest_data = serde_json::to_vec(local_digest).map_err(|e| {
-            sync_serialization_error("digest", format!("Failed to serialize digest: {e}"))
-        })?;
+        let digest_data = json_serialize("digest", "digest", local_digest)?;
 
         // Send digest to peer and wait for response
         tracing::debug!(
@@ -671,32 +669,10 @@ impl AntiEntropyProtocol {
         // Apply timeout for digest exchange
         let exchange_future = async {
             // Send our digest
-            effects
-                .send_to_peer(peer.0, digest_data)
-                .await
-                .map_err(|e| sync_network_error(format!("Failed to send digest: {e}")))?;
+            send_bytes_to_peer(effects, peer.0, &peer, "digest", digest_data).await?;
 
-            // Receive peer's digest
-            let (sender_id, remote_digest_data) = effects
-                .receive()
-                .await
-                .map_err(|e| sync_network_error(format!("Failed to receive digest: {e}")))?;
-
-            // Verify sender
-            if sender_id != peer.0 {
-                return Err(sync_session_error(format!(
-                    "Received digest from unexpected peer: expected {peer}, got {sender_id}"
-                )));
-            }
-
-            // Deserialize remote digest
-            let remote_digest: JournalDigest = serde_json::from_slice(&remote_digest_data)
-                .map_err(|e| {
-                    sync_serialization_error(
-                        "digest",
-                        format!("Failed to deserialize remote digest: {e}"),
-                    )
-                })?;
+            let remote_digest: JournalDigest =
+                receive_json_from_expected_peer(effects, peer.0, &peer, "digest", "digest").await?;
 
             tracing::debug!(
                 "Received digest from peer {} ({} ops)",
@@ -735,37 +711,14 @@ impl AntiEntropyProtocol {
         );
 
         // Send request to peer
-        let request_data = serde_json::to_vec(&request).map_err(|e| {
-            sync_serialization_error("request", format!("Failed to serialize request: {e}"))
-        })?;
+        let request_data = json_serialize("request", "request", &request)?;
 
         let pull_future = async {
-            effects
-                .send_to_peer(peer.0, request_data)
-                .await
-                .map_err(|e| {
-                    sync_network_error(format!("Failed to send operation request: {e}"))
-                })?;
+            send_bytes_to_peer(effects, peer.0, &peer, "operation request", request_data).await?;
 
-            // Receive operations
-            let (sender_id, ops_data) = effects
-                .receive()
-                .await
-                .map_err(|e| sync_network_error(format!("Failed to receive operations: {e}")))?;
-
-            if sender_id != peer.0 {
-                return Err(sync_session_error(format!(
-                    "Received operations from unexpected peer: expected {peer}, got {sender_id}"
-                )));
-            }
-
-            // Deserialize operations
-            let remote_ops: Vec<AttestedOp> = serde_json::from_slice(&ops_data).map_err(|e| {
-                sync_serialization_error(
-                    "operations",
-                    format!("Failed to deserialize operations: {e}"),
-                )
-            })?;
+            let remote_ops: Vec<AttestedOp> =
+                receive_json_from_expected_peer(effects, peer.0, &peer, "operations", "operations")
+                    .await?;
 
             tracing::debug!(
                 "Received {} operations from peer {}",
@@ -871,12 +824,7 @@ impl AntiEntropyProtocol {
                     format!("Failed to fingerprint applied op: {e}"),
                 )
             })?;
-            let serialized = aura_core::util::serialization::to_vec(op).map_err(|e| {
-                sync_serialization_error(
-                    "op_serialize",
-                    format!("Failed to serialize applied op: {e}"),
-                )
-            })?;
+            let serialized = binary_serialize("op_serialize", "applied op", op)?;
 
             let mut facts = aura_core::Fact::new();
             facts.insert_with_context(
@@ -926,18 +874,8 @@ impl AntiEntropyProtocol {
 
         if !ops_to_send.is_empty() {
             // Serialize operations
-            let ops_data = serde_json::to_vec(ops_to_send).map_err(|e| {
-                sync_serialization_error(
-                    "operations",
-                    format!("Failed to serialize operations: {e}"),
-                )
-            })?;
-
-            // Send to peer
-            effects
-                .send_to_peer(peer.0, ops_data)
-                .await
-                .map_err(|e| sync_network_error(format!("Failed to push operations: {e}")))?;
+            let ops_data = json_serialize("operations", "operations", ops_to_send)?;
+            send_bytes_to_peer(effects, peer.0, &peer, "operations", ops_data).await?;
 
             tracing::info!("Pushed {} operations to peer {}", ops_to_send.len(), peer);
         }
@@ -1116,8 +1054,7 @@ impl Default for AntiEntropyProtocol {
 // =============================================================================
 
 fn hash_serialized<T: Serialize>(value: &T) -> AuraResult<[u8; 32]> {
-    let bytes = aura_core::util::serialization::to_vec(value)
-        .map_err(|err| AuraError::serialization(err.to_string()))?;
+    let bytes = binary_serialize("hash_input", "hash input", value)?;
     Ok(hash::hash(&bytes))
 }
 

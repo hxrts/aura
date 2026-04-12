@@ -159,10 +159,7 @@ pub struct ConnectionMetadata {
 }
 
 impl ConnectionMetadata {
-    /// Create new connection metadata
-    ///
-    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
-    pub fn new(connection_id: String, peer_id: DeviceId, now: u64) -> Self {
+    fn base(connection_id: String, peer_id: DeviceId, now: u64) -> Self {
         Self {
             connection_id,
             peer_id,
@@ -176,6 +173,13 @@ impl ConnectionMetadata {
         }
     }
 
+    /// Create new connection metadata
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
+    pub fn new(connection_id: String, peer_id: DeviceId, now: u64) -> Self {
+        Self::base(connection_id, peer_id, now)
+    }
+
     /// Create new connection metadata with transport information
     pub fn new_with_transport(
         connection_id: String,
@@ -183,17 +187,9 @@ impl ConnectionMetadata {
         transport_info: TransportConnectionInfo,
         now: u64,
     ) -> Self {
-        Self {
-            connection_id,
-            peer_id,
-            session_id: None,
-            established_at: now,
-            last_used_at: now,
-            reuse_count: 0,
-            state: ConnectionState::Idle,
-            healthy: true,
-            transport_info: Some(transport_info),
-        }
+        let mut metadata = Self::base(connection_id, peer_id, now);
+        metadata.transport_info = Some(transport_info);
+        metadata
     }
 
     /// Check if connection is idle

@@ -3,6 +3,9 @@
 //! This module serves as the entry point for all integration tests,
 //! ensuring they can be discovered and run by the test harness.
 
+#[path = "support.rs"]
+mod shared_support;
+
 // Import all integration test modules
 mod integration;
 

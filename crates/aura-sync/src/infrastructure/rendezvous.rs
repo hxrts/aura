@@ -71,6 +71,28 @@ pub struct SyncBlendedHoldWindow {
 }
 
 impl RendezvousAdapter {
+    fn valid_descriptor<'a>(
+        &self,
+        descriptor: &'a RendezvousDescriptor,
+        context_id: ContextId,
+        now_ms: u64,
+    ) -> Option<&'a RendezvousDescriptor> {
+        (descriptor.context_id == context_id
+            && descriptor.is_valid(now_ms)
+            && descriptor.authority_id != self.local_authority)
+            .then_some(descriptor)
+    }
+
+    fn descriptor_peer(&self, descriptor: &RendezvousDescriptor) -> DiscoveredPeer {
+        DiscoveredPeer {
+            authority_id: descriptor.authority_id,
+            link_endpoints: descriptor.advertised_link_endpoints(),
+            service_descriptors: descriptor.advertised_service_descriptors(),
+            valid_until: descriptor.valid_until,
+            context_id: descriptor.context_id,
+        }
+    }
+
     /// Create a new rendezvous adapter
     pub fn new(local_authority: AuthorityId) -> Self {
         Self { local_authority }
@@ -96,18 +118,9 @@ impl RendezvousAdapter {
     ) -> HashMap<AuthorityId, DiscoveredPeer> {
         descriptors
             .iter()
-            .filter(|descriptor| descriptor.context_id == context_id)
-            .filter(|descriptor| {
-                descriptor.is_valid(now_ms) && descriptor.authority_id != self.local_authority
-            })
+            .filter_map(|descriptor| self.valid_descriptor(descriptor, context_id, now_ms))
             .map(|d| {
-                let peer = DiscoveredPeer {
-                    authority_id: d.authority_id,
-                    link_endpoints: d.advertised_link_endpoints(),
-                    service_descriptors: d.advertised_service_descriptors(),
-                    valid_until: d.valid_until,
-                    context_id: d.context_id,
-                };
+                let peer = self.descriptor_peer(d);
                 (d.authority_id, peer)
             })
             .collect()
@@ -143,13 +156,7 @@ impl RendezvousAdapter {
                     && descriptor.authority_id == peer
                     && descriptor.is_valid(now_ms)
             })
-            .map(|d| DiscoveredPeer {
-                authority_id: d.authority_id,
-                link_endpoints: d.advertised_link_endpoints(),
-                service_descriptors: d.advertised_service_descriptors(),
-                valid_until: d.valid_until,
-                context_id: d.context_id,
-            })
+            .map(|descriptor| self.descriptor_peer(descriptor))
     }
 
     /// Get peers that need descriptor refresh

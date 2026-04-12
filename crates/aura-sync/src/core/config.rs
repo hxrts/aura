@@ -352,134 +352,192 @@ impl SyncConfig {
     pub fn from_env() -> Self {
         let mut config = Self::default();
 
+        macro_rules! set_from_env {
+            ($target:expr, secs, $key:literal) => {
+                $target = duration_secs($key, $target);
+            };
+            ($target:expr, millis, $key:literal) => {
+                $target = duration_millis($key, $target);
+            };
+            ($target:expr, bool, $key:literal) => {
+                $target = parse_bool($key, $target);
+            };
+            ($target:expr, u32, $key:literal) => {
+                $target = parse_u32($key, $target);
+            };
+            ($target:expr, u64, $key:literal) => {
+                $target = parse_u64($key, $target);
+            };
+            ($target:expr, f64, $key:literal) => {
+                $target = parse_f64($key, $target);
+            };
+        }
+
         // Network
-        config.network.base_sync_interval = duration_secs(
-            "AURA_SYNC_BASE_SYNC_INTERVAL_SECS",
+        set_from_env!(
             config.network.base_sync_interval,
+            secs,
+            "AURA_SYNC_BASE_SYNC_INTERVAL_SECS"
         );
-        config.network.min_sync_interval = duration_secs(
-            "AURA_SYNC_MIN_SYNC_INTERVAL_SECS",
+        set_from_env!(
             config.network.min_sync_interval,
+            secs,
+            "AURA_SYNC_MIN_SYNC_INTERVAL_SECS"
         );
-        config.network.sync_timeout =
-            duration_secs("AURA_SYNC_TIMEOUT_SECS", config.network.sync_timeout);
-        config.network.cleanup_interval = duration_secs(
-            "AURA_SYNC_CLEANUP_INTERVAL_SECS",
+        set_from_env!(config.network.sync_timeout, secs, "AURA_SYNC_TIMEOUT_SECS");
+        set_from_env!(
             config.network.cleanup_interval,
+            secs,
+            "AURA_SYNC_CLEANUP_INTERVAL_SECS"
         );
 
         // Retry
-        config.retry.max_retries =
-            parse_u32("AURA_SYNC_RETRY_MAX_RETRIES", config.retry.max_retries);
-        config.retry.base_delay =
-            duration_millis("AURA_SYNC_RETRY_BASE_DELAY_MS", config.retry.base_delay);
-        config.retry.max_delay =
-            duration_millis("AURA_SYNC_RETRY_MAX_DELAY_MS", config.retry.max_delay);
-        config.retry.jitter_factor =
-            parse_f64("AURA_SYNC_RETRY_JITTER", config.retry.jitter_factor);
+        set_from_env!(config.retry.max_retries, u32, "AURA_SYNC_RETRY_MAX_RETRIES");
+        set_from_env!(
+            config.retry.base_delay,
+            millis,
+            "AURA_SYNC_RETRY_BASE_DELAY_MS"
+        );
+        set_from_env!(
+            config.retry.max_delay,
+            millis,
+            "AURA_SYNC_RETRY_MAX_DELAY_MS"
+        );
+        set_from_env!(config.retry.jitter_factor, f64, "AURA_SYNC_RETRY_JITTER");
 
         // Batching
-        config.batching.default_batch_size = parse_u32(
-            "AURA_SYNC_DEFAULT_BATCH_SIZE",
+        set_from_env!(
             config.batching.default_batch_size,
+            u32,
+            "AURA_SYNC_DEFAULT_BATCH_SIZE"
         );
-        config.batching.max_operations_per_round = parse_u32(
-            "AURA_SYNC_MAX_OPS_PER_ROUND",
+        set_from_env!(
             config.batching.max_operations_per_round,
+            u32,
+            "AURA_SYNC_MAX_OPS_PER_ROUND"
         );
-        config.batching.enable_compression = parse_bool(
-            "AURA_SYNC_ENABLE_COMPRESSION",
+        set_from_env!(
             config.batching.enable_compression,
+            bool,
+            "AURA_SYNC_ENABLE_COMPRESSION"
         );
-        config.batching.min_batch_size =
-            parse_u32("AURA_SYNC_MIN_BATCH_SIZE", config.batching.min_batch_size);
-        config.batching.batch_timeout =
-            duration_millis("AURA_SYNC_BATCH_TIMEOUT_MS", config.batching.batch_timeout);
+        set_from_env!(
+            config.batching.min_batch_size,
+            u32,
+            "AURA_SYNC_MIN_BATCH_SIZE"
+        );
+        set_from_env!(
+            config.batching.batch_timeout,
+            millis,
+            "AURA_SYNC_BATCH_TIMEOUT_MS"
+        );
 
         // Peer management
-        config.peer_management.max_concurrent_syncs = parse_u32(
-            "AURA_SYNC_MAX_CONCURRENT_SYNCS",
+        set_from_env!(
             config.peer_management.max_concurrent_syncs,
+            u32,
+            "AURA_SYNC_MAX_CONCURRENT_SYNCS"
         );
-        config.peer_management.min_priority_threshold = parse_u32(
-            "AURA_SYNC_MIN_PRIORITY_THRESHOLD",
+        set_from_env!(
             config.peer_management.min_priority_threshold,
+            u32,
+            "AURA_SYNC_MIN_PRIORITY_THRESHOLD"
         );
-        config.peer_management.pending_operations_boost = parse_u32(
-            "AURA_SYNC_PENDING_OPS_BOOST",
+        set_from_env!(
             config.peer_management.pending_operations_boost,
+            u32,
+            "AURA_SYNC_PENDING_OPS_BOOST"
         );
-        config.peer_management.failure_penalty = parse_u32(
-            "AURA_SYNC_FAILURE_PENALTY",
+        set_from_env!(
             config.peer_management.failure_penalty,
+            u32,
+            "AURA_SYNC_FAILURE_PENALTY"
         );
-        config.peer_management.failure_backoff_duration = duration_secs(
-            "AURA_SYNC_FAILURE_BACKOFF_SECS",
+        set_from_env!(
             config.peer_management.failure_backoff_duration,
+            secs,
+            "AURA_SYNC_FAILURE_BACKOFF_SECS"
         );
 
         // Protocols
-        config.protocols.anti_entropy.min_sync_interval = duration_secs(
-            "AURA_SYNC_ANTI_ENTROPY_MIN_INTERVAL_SECS",
+        set_from_env!(
             config.protocols.anti_entropy.min_sync_interval,
+            secs,
+            "AURA_SYNC_ANTI_ENTROPY_MIN_INTERVAL_SECS"
         );
-        config.protocols.anti_entropy.digest_timeout = duration_secs(
-            "AURA_SYNC_ANTI_ENTROPY_DIGEST_TIMEOUT_SECS",
+        set_from_env!(
             config.protocols.anti_entropy.digest_timeout,
+            secs,
+            "AURA_SYNC_ANTI_ENTROPY_DIGEST_TIMEOUT_SECS"
         );
-        config.protocols.anti_entropy.max_digest_entries = parse_u32(
-            "AURA_SYNC_ANTI_ENTROPY_MAX_DIGEST_ENTRIES",
+        set_from_env!(
             config.protocols.anti_entropy.max_digest_entries,
+            u32,
+            "AURA_SYNC_ANTI_ENTROPY_MAX_DIGEST_ENTRIES"
         );
 
-        config.protocols.verification.verification_timeout = duration_secs(
-            "AURA_SYNC_VERIFICATION_TIMEOUT_SECS",
+        set_from_env!(
             config.protocols.verification.verification_timeout,
+            secs,
+            "AURA_SYNC_VERIFICATION_TIMEOUT_SECS"
         );
-        config.protocols.verification.required_confirmations = parse_u32(
-            "AURA_SYNC_VERIFICATION_CONFIRMATIONS",
+        set_from_env!(
             config.protocols.verification.required_confirmations,
+            u32,
+            "AURA_SYNC_VERIFICATION_CONFIRMATIONS"
         );
-        config.protocols.verification.max_verification_attempts = parse_u32(
-            "AURA_SYNC_VERIFICATION_MAX_ATTEMPTS",
+        set_from_env!(
             config.protocols.verification.max_verification_attempts,
+            u32,
+            "AURA_SYNC_VERIFICATION_MAX_ATTEMPTS"
         );
 
-        config.protocols.ota_upgrade.soft_fork_timeout = duration_secs(
-            "AURA_SYNC_OTA_SOFT_FORK_TIMEOUT_SECS",
+        set_from_env!(
             config.protocols.ota_upgrade.soft_fork_timeout,
+            secs,
+            "AURA_SYNC_OTA_SOFT_FORK_TIMEOUT_SECS"
         );
-        config.protocols.ota_upgrade.hard_fork_timeout = duration_secs(
-            "AURA_SYNC_OTA_HARD_FORK_TIMEOUT_SECS",
+        set_from_env!(
             config.protocols.ota_upgrade.hard_fork_timeout,
+            secs,
+            "AURA_SYNC_OTA_HARD_FORK_TIMEOUT_SECS"
         );
-        config.protocols.ota_upgrade.default_threshold = parse_u32(
-            "AURA_SYNC_OTA_DEFAULT_THRESHOLD",
+        set_from_env!(
             config.protocols.ota_upgrade.default_threshold,
+            u32,
+            "AURA_SYNC_OTA_DEFAULT_THRESHOLD"
         );
-        config.protocols.ota_upgrade.max_session_duration = duration_secs(
-            "AURA_SYNC_OTA_MAX_SESSION_DURATION_SECS",
+        set_from_env!(
             config.protocols.ota_upgrade.max_session_duration,
+            secs,
+            "AURA_SYNC_OTA_MAX_SESSION_DURATION_SECS"
         );
-        config.protocols.ota_upgrade.enable_auto_validation = parse_bool(
-            "AURA_SYNC_OTA_ENABLE_AUTO_VALIDATION",
+        set_from_env!(
             config.protocols.ota_upgrade.enable_auto_validation,
+            bool,
+            "AURA_SYNC_OTA_ENABLE_AUTO_VALIDATION"
         );
 
         // Performance
-        config.performance.max_cpu_usage =
-            parse_u32("AURA_SYNC_MAX_CPU_USAGE", config.performance.max_cpu_usage);
-        config.performance.max_network_bandwidth = parse_u64(
-            "AURA_SYNC_MAX_NETWORK_BANDWIDTH",
+        set_from_env!(
+            config.performance.max_cpu_usage,
+            u32,
+            "AURA_SYNC_MAX_CPU_USAGE"
+        );
+        set_from_env!(
             config.performance.max_network_bandwidth,
+            u64,
+            "AURA_SYNC_MAX_NETWORK_BANDWIDTH"
         );
-        config.performance.adaptive_scheduling = parse_bool(
-            "AURA_SYNC_ADAPTIVE_SCHEDULING",
+        set_from_env!(
             config.performance.adaptive_scheduling,
+            bool,
+            "AURA_SYNC_ADAPTIVE_SCHEDULING"
         );
-        config.performance.memory_limit = parse_u64(
-            "AURA_SYNC_MEMORY_LIMIT_BYTES",
+        set_from_env!(
             config.performance.memory_limit,
+            u64,
+            "AURA_SYNC_MEMORY_LIMIT_BYTES"
         );
 
         config

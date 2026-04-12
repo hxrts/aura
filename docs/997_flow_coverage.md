@@ -226,7 +226,7 @@ Fast CI currently uses two separate gates:
 
 - `just ci-user-flow-coverage` enforces traceability heuristics between changed user flow-facing source files, canonical scenarios, and this report
 - `AURA_ALLOW_FLOW_COVERAGE_SKIP=1` is a local-only escape hatch. CI rejects it.
-- `just ci-user-flow-policy` enforces documentation and contributor-guidance updates for shared user flow contract and determinism surfaces via Aura's `policy/xtask` user-flow guidance sync check
+- `just ci-user-flow-policy` enforces documentation and contributor-guidance updates for shared user flow contract and determinism surfaces via Aura's `toolkit/xtask` user-flow guidance sync check
 - OTA and module release/update validation rows in this report are part of that same user-flow guidance surface and must be kept in sync as the release matrix evolves
 - The release/update rows are expected to land in staged order: mechanism validation first, candidate rehearsal second, and promotion-gate coverage last
 - `just ci-harness-matrix-inventory` enforces that scenario classification drives the TUI/web matrix lanes
@@ -250,7 +250,7 @@ Current limitation:
 ## References
 
 - [Testing Guide](804_testing_guide.md)
-- `policy/xtask` user-flow guidance sync check
+- `toolkit/xtask` user-flow guidance sync check
 - [Simulation Guide](805_simulation_guide.md)
 - [Verification Coverage Report](998_verification_coverage.md)
 - [Project Structure](999_project_structure.md)

@@ -90,7 +90,7 @@ Simulator substrate runs currently support local instances only. Browser instanc
 
 Harness governance is typed first. `aura-harness` exposes governance checks for shared scenario contracts, scenario-shape enforcement, barrier legality, user-flow coverage, UI parity metadata, and wrapper integrity.
 
-The main repository policy entry points are Aura's `policy/xtask` checks exposed through `just ci-shared-flow-policy`, `just ci-user-flow-policy`, and `just ci-harness-matrix-inventory`.
+The main repository policy entry points are Aura's `toolkit/xtask` checks exposed through `just ci-shared-flow-policy`, `just ci-user-flow-policy`, and `just ci-harness-matrix-inventory`.
 
 Harness mode may add instrumentation and render-stability hooks. It must not change parity-critical business semantics. Allowlisted exceptions must carry owner, justification, and design-note metadata.
 

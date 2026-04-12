@@ -39,7 +39,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::capabilities::SyncCapability;
-use crate::core::{sync_config_error, sync_peer_error, SyncResult};
+use crate::core::{physical_time_from_ms, sync_config_error, sync_peer_error, SyncResult};
 use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
 
@@ -52,10 +52,7 @@ static NEXT_PEER_TS: AtomicU64 = AtomicU64::new(1);
 /// Real deployments should use `PhysicalTime` from the time effect provider.
 #[cfg(test)]
 fn test_time_now() -> PhysicalTime {
-    PhysicalTime {
-        ts_ms: NEXT_PEER_TS.fetch_add(1, Ordering::SeqCst) * 1000,
-        uncertainty: None,
-    }
+    physical_time_from_ms(NEXT_PEER_TS.fetch_add(1, Ordering::SeqCst) * 1000)
 }
 use aura_guards::BiscuitGuardEvaluator;
 
@@ -242,13 +239,7 @@ impl PeerMetadata {
     ///
     /// Convenience constructor for backward compatibility.
     pub fn new_from_ms(device_id: DeviceId, now_ms: u64) -> Self {
-        Self::new(
-            device_id,
-            &PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            },
-        )
+        Self::new(device_id, &physical_time_from_ms(now_ms))
     }
 
     /// Update peer status
@@ -266,13 +257,7 @@ impl PeerMetadata {
     ///
     /// Convenience method for backward compatibility.
     pub fn set_status_ms(&mut self, status: PeerStatus, now_ms: u64) {
-        self.set_status(
-            status,
-            &PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            },
-        );
+        self.set_status(status, &physical_time_from_ms(now_ms));
     }
 
     /// Check if peer is available for new sync sessions
@@ -469,13 +454,7 @@ impl PeerManager {
     ///
     /// Convenience method for backward compatibility.
     pub fn add_peer_ms(&mut self, device_id: DeviceId, now_ms: u64) -> SyncResult<()> {
-        self.add_peer(
-            device_id,
-            &PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            },
-        )
+        self.add_peer(device_id, &physical_time_from_ms(now_ms))
     }
 
     /// Update peer metadata

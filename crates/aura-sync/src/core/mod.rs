@@ -13,6 +13,7 @@ pub mod errors;
 pub mod messages;
 pub mod metrics;
 pub mod session;
+pub mod wire;
 
 // Re-export key types for convenience
 pub use config::{
@@ -31,4 +32,8 @@ pub use metrics::{MetricsCollector, SyncMetrics};
 pub use session::{
     SessionConfig, SessionError, SessionManager, SessionManagerBuilder, SessionManagerStatistics,
     SessionResult, SessionState,
+};
+pub use wire::{
+    binary_deserialize, binary_serialize, json_deserialize, json_serialize, physical_time_from_ms,
+    receive_json_from_expected_peer, send_bytes_to_peer,
 };

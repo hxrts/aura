@@ -60,12 +60,28 @@ impl SessionCompatibilityPlan {
     /// Compatibility plan for coexistence-safe states.
     #[must_use]
     pub fn compatible_coexistence() -> Self {
-        Self {
-            new_sessions: NewSessionAdmission::Allow,
-            in_flight: InFlightIncompatibilityAction::Drain,
-            partition_required: false,
-        }
+        session_plan(
+            NewSessionAdmission::Allow,
+            InFlightIncompatibilityAction::Drain,
+            false,
+        )
     }
+}
+
+fn session_plan(
+    new_sessions: NewSessionAdmission,
+    in_flight: InFlightIncompatibilityAction,
+    partition_required: bool,
+) -> SessionCompatibilityPlan {
+    SessionCompatibilityPlan {
+        new_sessions,
+        in_flight,
+        partition_required,
+    }
+}
+
+fn upgrade_execution_fact(fact: UpgradeExecutionFact) -> MaintenanceFact {
+    MaintenanceFact::UpgradeExecution(fact)
 }
 
 /// Resolve the scoped mixed-version plan for an active cutover.
@@ -80,38 +96,38 @@ pub fn cutover_session_plan(
         | AuraCompatibilityClass::MixedCoexistenceAllowed => {
             SessionCompatibilityPlan::compatible_coexistence()
         }
-        AuraCompatibilityClass::ScopedHardFork => SessionCompatibilityPlan {
-            new_sessions: NewSessionAdmission::RejectIncompatible,
-            in_flight: resolve_in_flight_action(
+        AuraCompatibilityClass::ScopedHardFork => session_plan(
+            NewSessionAdmission::RejectIncompatible,
+            resolve_in_flight_action(
                 preferred_in_flight,
                 delegation_supported,
                 InFlightIncompatibilityAction::Drain,
             ),
-            partition_required: false,
-        },
-        AuraCompatibilityClass::IncompatibleWithoutPartition => SessionCompatibilityPlan {
-            new_sessions: NewSessionAdmission::RejectIncompatible,
-            in_flight: resolve_in_flight_action(
+            false,
+        ),
+        AuraCompatibilityClass::IncompatibleWithoutPartition => session_plan(
+            NewSessionAdmission::RejectIncompatible,
+            resolve_in_flight_action(
                 preferred_in_flight,
                 delegation_supported,
                 InFlightIncompatibilityAction::Abort,
             ),
-            partition_required: true,
-        },
+            true,
+        ),
     }
 }
 
 /// Resolve the scoped mixed-version plan for an explicit rollback.
 #[must_use]
 pub fn rollback_session_plan(compatibility: AuraCompatibilityClass) -> SessionCompatibilityPlan {
-    SessionCompatibilityPlan {
-        new_sessions: NewSessionAdmission::RejectIncompatible,
-        in_flight: InFlightIncompatibilityAction::Abort,
-        partition_required: matches!(
+    session_plan(
+        NewSessionAdmission::RejectIncompatible,
+        InFlightIncompatibilityAction::Abort,
+        matches!(
             compatibility,
             AuraCompatibilityClass::IncompatibleWithoutPartition
         ),
-    }
+    )
 }
 
 /// Determine the staged residency before an OTA scope has cut over.
@@ -141,7 +157,7 @@ pub fn rollback_executed_fact(
     failure: AuraUpgradeFailure,
     rolled_back_at: TimeStamp,
 ) -> MaintenanceFact {
-    MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::RollbackExecuted {
+    upgrade_execution_fact(UpgradeExecutionFact::RollbackExecuted {
         authority_id,
         scope,
         from_release_id,
@@ -160,7 +176,7 @@ pub fn partition_observed_fact(
     failure: AuraUpgradeFailure,
     observed_at: TimeStamp,
 ) -> MaintenanceFact {
-    MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::PartitionObserved {
+    upgrade_execution_fact(UpgradeExecutionFact::PartitionObserved {
         authority_id,
         scope,
         release_id,

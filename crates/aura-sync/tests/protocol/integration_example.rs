@@ -3,24 +3,14 @@
 //! This file shows how to structure comprehensive integration tests for aura-sync protocols
 //! using aura-testkit. It provides a simplified but complete example of the testing approach.
 
-use aura_core::{AuraResult, DeviceId};
-use aura_sync::core::SyncConfig;
+use crate::shared_support::{test_device_id, test_sync_config};
+use aura_core::AuraResult;
 use aura_testkit::simulation::{
     choreography::test_device_trio,
     network::{NetworkCondition, NetworkSimulator},
 };
 use std::time::Duration;
 use tokio::time::timeout;
-
-/// Helper for creating test device IDs
-fn test_device_id(seed: &[u8]) -> DeviceId {
-    use aura_core::hash::hash;
-    let hash_bytes = hash(seed);
-    let uuid_bytes: [u8; 16] = hash_bytes[..16]
-        .try_into()
-        .unwrap_or_else(|_| panic!("Failed to convert hash bytes to UUID bytes"));
-    DeviceId(uuid::Uuid::from_bytes(uuid_bytes))
-}
 
 #[cfg(test)]
 mod integration_examples {
@@ -331,7 +321,7 @@ mod integration_examples {
         println!("  ✓ Device ID generation working correctly");
 
         // Test configuration
-        let config = SyncConfig::for_testing();
+        let config = test_sync_config();
         assert!(
             config.network.sync_timeout > Duration::ZERO,
             "Config should have valid timeout"
@@ -492,7 +482,7 @@ mod usage_examples {
         assert_eq!(harness.device_count(), 3);
         println!("   ✓ Test harness validation");
 
-        let config = SyncConfig::for_testing();
+        let config = test_sync_config();
         assert!(config.network.sync_timeout > Duration::ZERO);
         println!("   ✓ Configuration validation");
 

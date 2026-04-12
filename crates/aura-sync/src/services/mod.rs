@@ -1,15 +1,18 @@
-//! Layer 5: Synchronization Service Layer - Orchestration & Lifecycle
+//! Layer 5: Synchronization Service Layer - Concrete Service Facades
 //!
 //! High-level services orchestrating multiple protocols and infrastructure for complete
-//! synchronization functionality. Implements **Service** trait for unified lifecycle management.
+//! synchronization functionality. The concrete facades remain in this module; health,
+//! builder, and bookkeeping helpers stay internal to each service file rather than
+//! turning `aura-sync` into a generalized runtime framework.
 //!
 //! **Key Services**:
 //! - **SyncService**: Main service orchestrating anti-entropy, journal sync, OTA, snapshots
 //! - **MaintenanceService**: Garbage collection, cache invalidation, snapshot proposals
 //!
 //! **Service Trait** (per docs/103_effect_system.md):
-//! All services implement `Service` trait with: `start()`, `stop()`, `health_check()`, `is_running()`
-//! enabling uniform lifecycle management and health monitoring across aura-agent services.
+//! All services implement `Service` trait with `start()`, `stop()`, `health_check()`,
+//! and `is_running()` so `aura-agent` can drive them consistently. These lifecycle
+//! types are crate-local support surfaces, not a standalone service framework API.
 //!
 //! # Architecture
 //!
@@ -17,15 +20,15 @@
 //! - Orchestrate protocols from `protocols/` module
 //! - Use infrastructure from `infrastructure/` module
 //! - Provide unified interfaces for applications
-//! - Handle cross-cutting concerns (health, metrics, lifecycle)
+//! - Handle local cross-cutting concerns (health, metrics, lifecycle)
 //!
 //! # Service Hierarchy
 //!
 //! ```text
-//! Services (Layer 5 - Runtime Libraries)
+//! Services (Layer 5 - Feature Facades)
 //!   ├── Compose Protocols (anti-entropy, journal sync, snapshots, OTA)
 //!   ├── Use Infrastructure (peers, connections, rate limiting)
-//!   └── Provide Application APIs
+//!   └── Provide Application APIs while runtime ownership stays in `aura-agent`
 //! ```
 //!
 //! # Usage

@@ -14,7 +14,7 @@ use tokio::time::timeout;
 /// Test complete partition healing and recovery workflow
 #[tokio::test]
 async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let mut fixture = ScenarioBuilder::threshold_group().build().await?;
 
     let session = fixture
         .create_coordinated_session("partition_healing_recovery")
@@ -105,7 +105,7 @@ async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
 /// Test coordinated multi-protocol sync workflow
 #[tokio::test]
 async fn test_multi_protocol_coordination() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let fixture = ScenarioBuilder::threshold_group().build().await?;
 
     let session = fixture
         .create_coordinated_session("multi_protocol_coordination")
@@ -200,7 +200,7 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
 #[tokio::test]
 async fn test_large_scale_device_coordination() -> AuraResult<()> {
     // Create larger device set for stress testing
-    let fixture = MultiDeviceTestFixture::new(8).await?; // 8 devices
+    let fixture = ScenarioBuilder::new(8).build().await?; // 8 devices
 
     let session = fixture
         .create_coordinated_session("large_scale_coordination")
@@ -280,7 +280,7 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
 /// Test recovery from multiple concurrent failures
 #[tokio::test]
 async fn test_concurrent_failure_recovery() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let mut fixture = ScenarioBuilder::threshold_group().build().await?;
 
     let session = fixture
         .create_coordinated_session("concurrent_failure_recovery")
@@ -434,7 +434,7 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
 /// Test end-to-end workflow with all protocol features
 #[tokio::test]
 async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let mut fixture = ScenarioBuilder::threshold_group().build().await?;
 
     let session = fixture
         .create_coordinated_session("complete_e2e_workflow")

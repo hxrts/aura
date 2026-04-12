@@ -45,6 +45,7 @@
 //!     .await?;
 //! ```
 
+use crate::core::binary_serialize;
 use crate::verification::{MerkleComparison, MerkleVerifier, VerificationResult};
 use aura_core::domain::journal::FactValue;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
@@ -325,8 +326,7 @@ impl FactSyncProtocol {
     /// Get local Bloom filter for exchange with peer
     pub async fn local_bloom_filter(&self) -> Result<Vec<u8>, AuraError> {
         let filter = self.verifier.local_bloom_filter().await?;
-        aura_core::util::serialization::to_vec(&filter)
-            .map_err(|err| AuraError::serialization(err.to_string()))
+        binary_serialize("bloom_filter", "local bloom filter", &filter)
     }
 
     /// Get protocol configuration
@@ -367,7 +367,7 @@ fn fact_to_bytes(fact: &IndexedFact) -> Vec<u8> {
         }
         FactValue::Nested(nested) => {
             bytes.push(4);
-            if let Ok(serialized) = aura_core::util::serialization::to_vec(nested.as_ref()) {
+            if let Ok(serialized) = binary_serialize("nested_fact", "nested fact value", nested) {
                 let hash = hash::hash(&serialized);
                 bytes.extend_from_slice(&hash);
             }

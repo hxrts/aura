@@ -47,7 +47,7 @@ _toolkit-shell *ARGS:
     ./scripts/toolkit-shell.sh {{ ARGS }}
 
 _policy-check *ARGS:
-    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- {{ ARGS }}
+    cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- {{ ARGS }}
 
 _ownership-lint mode *PATHS:
     if [ -x target/debug/ownership_lints ]; then \
@@ -259,7 +259,7 @@ harness-frontend-conformance-matrix *ARGS:
     just harness-frontend-conformance-lane all {{ ARGS }}
 
 ci-shared-flow-policy:
-    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check shared-flow-policy
+    cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check shared-flow-policy
 
 ci-harness-command-plane-boundary:
     just _policy-check check harness-command-plane-boundary
@@ -274,7 +274,7 @@ ci-harness-browser-observation-recovery:
     just _policy-check check browser-observation-recovery
 
 ci-harness-tui-observation-channel:
-    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check tui-observation-channel
+    cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check tui-observation-channel
 
 ci-ui-parity-contract:
     just _policy-check check harness-ui-parity-contract
@@ -300,7 +300,21 @@ test-verbose:
 
 # Run tests for a specific crate
 test-crate crate:
-    cargo test -p {{ crate }} -q
+    #!/usr/bin/env bash
+    set -euo pipefail
+    crate="{{ crate }}"
+    case "${crate}" in
+      aura-terminal|aura-ui|aura-web|aura-harness|aura-simulator|aura-quint|aura-testkit)
+        package="${crate}"
+        ;;
+      aura-*)
+        package="hxrts-${crate}"
+        ;;
+      *)
+        package="${crate}"
+        ;;
+    esac
+    cargo test -p "${package}" -q
 
 # Run tests for a specific crate in isolation (lib + unit tests only)
 test-crate-isolated crate:
@@ -322,16 +336,16 @@ check:
 
 # Detect legacy authority/device UUID coercions
 check-device-id-legacy:
-    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check protocol-device-id-legacy
+    cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check protocol-device-id-legacy
 
 audit-device-id-separation:
-    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check protocol-device-id-legacy audit-live
+    cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check protocol-device-id-legacy audit-live
 
 audit-runtime-device-id-separation:
-    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check protocol-device-id-legacy audit-runtime
+    cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check protocol-device-id-legacy audit-runtime
 
 check-bootstrap-guardrails:
-    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check runtime-bootstrap-guardrails
+    cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check runtime-bootstrap-guardrails
 
 # Run the exact same check that Zed editor runs (rust-analyzer checkOnSave)
 check-zed:
@@ -357,24 +371,19 @@ toolkit-clippy-strict:
     just _toolkit-shell toolkit-clippy --workspace --all-targets -- -D warnings -D clippy::disallowed_methods -D clippy::disallowed_types -D clippy::unwrap_used -D clippy::expect_used -D clippy::duplicated_attributes -D clippy::implicit_clone
 
 toolkit-docs-links:
-    just _toolkit-shell toolkit-xtask check docs-link-check --repo-root . --config policy/toolkit.toml
-
+    just _toolkit-shell toolkit-xtask check docs-link-check --repo-root .
 toolkit-docs-semantic-drift:
-    just _toolkit-shell toolkit-xtask check docs-semantic-drift --repo-root . --config policy/toolkit.toml
-
+    just _toolkit-shell toolkit-xtask check docs-semantic-drift --repo-root .
 toolkit-text-formatting:
-    just _toolkit-shell toolkit-xtask check text-formatting --repo-root . --config policy/toolkit.toml
-
+    just _toolkit-shell toolkit-xtask check text-formatting --repo-root .
 toolkit-workspace-hygiene:
-    just _toolkit-shell toolkit-xtask check workspace-hygiene --repo-root . --config policy/toolkit.toml
-
+    just _toolkit-shell toolkit-xtask check workspace-hygiene --repo-root .
 toolkit-lean-style:
-    just _toolkit-shell toolkit-xtask check lean-style --repo-root . --config policy/toolkit.toml
-
+    just _toolkit-shell toolkit-xtask check lean-style --repo-root .
 toolkit-lean-sorry-shadow:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ./scripts/toolkit-shell.sh toolkit-xtask check lean-style --repo-root . --config policy/toolkit-strict-lean.toml; then
+    if ./scripts/toolkit-shell.sh toolkit-xtask check lean-style --repo-root . --config toolkit/toolkit-strict-lean.toml; then
         echo "strict Lean shadow: no \`sorry\` usages found"
     else
         echo "strict Lean shadow: findings captured; inactive lane remains non-blocking"
@@ -386,8 +395,8 @@ toolkit-dylint-trait-purity:
 toolkit-dylint-trait-must-use:
     just _toolkit-shell toolkit-dylint --repo-root . --toolkit-lint trait_must_use --all -- --all-targets
 
-policy-dylint-harness-boundaries:
-    just _toolkit-shell toolkit-dylint --repo-root . --lint-path ./policy/lints/harness_boundaries --all -- --all-targets
+toolkit-dylint-harness-boundaries:
+    just _toolkit-shell toolkit-dylint --repo-root . --lint-path ./toolkit/lints/harness_boundaries --all -- --all-targets
 
 toolkit-shadow:
     just toolkit-format-check
@@ -928,7 +937,7 @@ ci-lean-build:
 ci-lean-check-sorry:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ./scripts/toolkit-shell.sh toolkit-xtask check lean-style --repo-root . --config policy/toolkit-strict-lean.toml; then
+    if ./scripts/toolkit-shell.sh toolkit-xtask check lean-style --repo-root . --config toolkit/toolkit-strict-lean.toml; then
         echo "All proofs complete"
     else
         echo "::warning::Found incomplete proofs (sorry)"
@@ -1480,7 +1489,7 @@ verify-lean jobs="2": lean-init
     echo "Building Lean verification modules (threads={{ jobs }})..."
     cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{ jobs }}
     cd ../..
-    if ./scripts/toolkit-shell.sh toolkit-xtask check lean-style --repo-root . --config policy/toolkit-strict-lean.toml > "$sorry_report"; then
+    if ./scripts/toolkit-shell.sh toolkit-xtask check lean-style --repo-root . --config toolkit/toolkit-strict-lean.toml > "$sorry_report"; then
         echo -e "${GREEN}✓ All proofs complete${NC}"
     else
         count=$(wc -l < "$sorry_report" | tr -d ' ')

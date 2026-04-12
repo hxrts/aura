@@ -22,47 +22,18 @@ pub mod ota_coordination;
 // Test utilities and helpers shared across integration tests
 pub mod test_utils;
 
-use aura_core::time::PhysicalTime;
-use aura_core::DeviceId;
-use aura_sync::core::{SessionManager, SyncConfig};
 use aura_testkit::simulation::{
     choreography::{test_device_trio, ChoreographyTestHarness},
     network::NetworkSimulator,
 };
 
-/// Create a test PhysicalTime from milliseconds
-pub fn test_time(ts_ms: u64) -> PhysicalTime {
-    PhysicalTime {
-        ts_ms,
-        uncertainty: None,
-    }
-}
-
-/// Common configuration for integration tests
-pub fn test_sync_config() -> SyncConfig {
-    SyncConfig::for_testing()
-}
+pub use crate::shared_support::{
+    test_device_id, test_session_manager, test_sync_config, test_time,
+};
 
 /// Create a test harness with three devices and mock network
 pub async fn setup_test_trio() -> (ChoreographyTestHarness, NetworkSimulator) {
     let harness = test_device_trio();
     let network = NetworkSimulator::new();
     (harness, network)
-}
-
-/// Create session manager for testing
-pub fn test_session_manager() -> SessionManager<()> {
-    let config = aura_sync::core::session::SessionConfig::default();
-    // Use deterministic timestamp for reproducible tests
-    let now = test_time(1700000000000); // 2023-11-15 in milliseconds
-    SessionManager::new(config, now)
-}
-
-/// Helper to create deterministic device IDs for test reproducibility
-#[allow(clippy::unwrap_used)]
-pub fn test_device_id(seed: &[u8]) -> DeviceId {
-    use aura_core::hash::hash;
-    let hash_bytes = hash(seed);
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
-    DeviceId(uuid::Uuid::from_bytes(uuid_bytes))
 }

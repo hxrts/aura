@@ -3,10 +3,16 @@ crate_roots = ["crates"]
 include_crates = []
 exclude_crates = []
 
-[checks.docs_link_check]
+# rust_base activates the full generic Rust check suite for crates/ and docs/.
+# Explicit [checks.*] sections below take precedence over bundle defaults.
+[bundles.rust_base]
 enabled = true
+rust_roots = ["crates"]
 docs_roots = ["docs"]
-scratch_dir_prefix = "work/"
+manifest_path = "Cargo.toml"
+workflow_roots = [".github/workflows"]
+
+# docs_link_check covered by rust_base defaults (docs_roots=["docs"], scratch="work/")
 
 [checks.docs_semantic_drift]
 enabled = true
@@ -104,6 +110,15 @@ todo_comment_markers = ["TODO:"]
 over_limit_comment_markers = ["long-block-exception:"]
 file_exemptions = []
 declaration_exemptions = []
+
+# Tracks Lean escape hatches (sorry, native_decide, etc.) with per-kind thresholds.
+# Default threshold 0 means any occurrence is a finding.
+[checks.lean_escape_hatches]
+enabled = true
+include_paths = ["verification/lean/Aura"]
+exclude_path_parts = ["/Generated/", "/lake-packages/"]
+kind_thresholds = {}
+file_exemptions = []
 
 [checks.text_formatting]
 enabled = true

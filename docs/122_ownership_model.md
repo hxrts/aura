@@ -546,7 +546,7 @@ Enforcement split:
   enforcement:
   - `just ci-ownership-categories`
   - `just ci-harness-actor-vs-move-ownership`
-  - Aura `policy/xtask` user-flow guidance sync check
+  - Aura `toolkit/xtask` user-flow guidance sync check
 - Runtime/integration checks remain appropriate for properties such as runtime
   shutdown ordering and instrumentation schema discipline because those are
   orchestration-level invariants, not just API-shape rules.

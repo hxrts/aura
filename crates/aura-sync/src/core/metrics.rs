@@ -301,6 +301,23 @@ pub struct OperationalSnapshot {
     pub success_rate_percent: f64,
 }
 
+impl Default for OperationalSnapshot {
+    fn default() -> Self {
+        Self {
+            sync_sessions_total: 0,
+            sync_sessions_completed_total: 0,
+            sync_sessions_failed_total: 0,
+            sync_operations_transferred_total: 0,
+            sync_bytes_transferred_total: 0,
+            active_sync_sessions: 0,
+            connected_peers: 0,
+            queue_depth: 0,
+            rate_limit_violations_total: 0,
+            success_rate_percent: 100.0,
+        }
+    }
+}
+
 /// Performance metrics snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceSnapshot {
@@ -320,6 +337,36 @@ pub struct PerformanceSnapshot {
     pub compression_ratio_stats: HistogramStats,
 }
 
+impl Default for PerformanceSnapshot {
+    fn default() -> Self {
+        Self {
+            sync_duration_stats: HistogramStats {
+                sum: 0,
+                count: 0,
+                buckets: vec![],
+            },
+            network_latency_stats: HistogramStats {
+                sum: 0,
+                count: 0,
+                buckets: vec![],
+            },
+            operation_processing_stats: HistogramStats {
+                sum: 0,
+                count: 0,
+                buckets: vec![],
+            },
+            operations_per_second: 0,
+            bytes_per_second: 0,
+            average_sync_duration_ms: 0,
+            compression_ratio_stats: HistogramStats {
+                sum: 0,
+                count: 0,
+                buckets: vec![],
+            },
+        }
+    }
+}
+
 /// Resource metrics snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceSnapshot {
@@ -335,6 +382,19 @@ pub struct ResourceSnapshot {
     pub message_queue_size: i64,
     /// Number of active timers
     pub active_timers_count: i64,
+}
+
+impl Default for ResourceSnapshot {
+    fn default() -> Self {
+        Self {
+            cpu_usage_percent: 0,
+            memory_usage_bytes: 0,
+            network_bandwidth_bps: 0,
+            peer_connection_pool_size: 0,
+            message_queue_size: 0,
+            active_timers_count: 0,
+        }
+    }
 }
 
 /// Error metrics snapshot
@@ -356,6 +416,124 @@ pub struct ErrorSnapshot {
     pub error_rate_percent: i64,
     /// Total errors across all categories
     pub total_errors: u64,
+}
+
+impl Default for ErrorSnapshot {
+    fn default() -> Self {
+        Self {
+            network_errors_total: 0,
+            protocol_errors_total: 0,
+            timeout_errors_total: 0,
+            validation_errors_total: 0,
+            resource_errors_total: 0,
+            authorization_errors_total: 0,
+            error_rate_percent: 0,
+            total_errors: 0,
+        }
+    }
+}
+
+fn sync_session_timer_key(session_id: &str) -> String {
+    format!("sync_session_{session_id}")
+}
+
+fn load_u64(counter: &AtomicU64) -> u64 {
+    counter.load(Ordering::Relaxed)
+}
+
+fn load_i64(counter: &AtomicI64) -> i64 {
+    counter.load(Ordering::Relaxed)
+}
+
+impl MetricsRegistry {
+    fn operational_snapshot(&self) -> OperationalSnapshot {
+        let Ok(operational) = self.operational.lock() else {
+            return OperationalSnapshot::default();
+        };
+
+        let total_sessions = load_u64(&operational.sync_sessions_total);
+        let completed_sessions = load_u64(&operational.sync_sessions_completed_total);
+        let success_rate_percent = if total_sessions > 0 {
+            (completed_sessions as f64 / total_sessions as f64) * 100.0
+        } else {
+            100.0
+        };
+
+        OperationalSnapshot {
+            sync_sessions_total: total_sessions,
+            sync_sessions_completed_total: completed_sessions,
+            sync_sessions_failed_total: load_u64(&operational.sync_sessions_failed_total),
+            sync_operations_transferred_total: load_u64(
+                &operational.sync_operations_transferred_total,
+            ),
+            sync_bytes_transferred_total: load_u64(&operational.sync_bytes_transferred_total),
+            active_sync_sessions: load_i64(&operational.active_sync_sessions),
+            connected_peers: load_i64(&operational.connected_peers),
+            queue_depth: load_i64(&operational.queue_depth),
+            rate_limit_violations_total: load_u64(&operational.rate_limit_violations_total),
+            success_rate_percent,
+        }
+    }
+
+    fn performance_snapshot(&self) -> PerformanceSnapshot {
+        let Ok(performance) = self.performance.lock() else {
+            return PerformanceSnapshot::default();
+        };
+
+        PerformanceSnapshot {
+            sync_duration_stats: performance.sync_duration_histogram.stats(),
+            network_latency_stats: performance.network_latency_histogram.stats(),
+            operation_processing_stats: performance.operation_processing_histogram.stats(),
+            operations_per_second: load_i64(&performance.operations_per_second),
+            bytes_per_second: load_i64(&performance.bytes_per_second),
+            average_sync_duration_ms: load_u64(&performance.average_sync_duration_ms),
+            compression_ratio_stats: performance.compression_ratio_histogram.stats(),
+        }
+    }
+
+    fn resource_snapshot(&self) -> ResourceSnapshot {
+        let Ok(resources) = self.resources.lock() else {
+            return ResourceSnapshot::default();
+        };
+
+        ResourceSnapshot {
+            cpu_usage_percent: load_i64(&resources.cpu_usage_percent),
+            memory_usage_bytes: load_u64(&resources.memory_usage_bytes),
+            network_bandwidth_bps: load_u64(&resources.network_bandwidth_bps),
+            peer_connection_pool_size: load_i64(&resources.peer_connection_pool_size),
+            message_queue_size: load_i64(&resources.message_queue_size),
+            active_timers_count: load_i64(&resources.active_timers_count),
+        }
+    }
+
+    fn error_snapshot(&self) -> ErrorSnapshot {
+        let Ok(errors) = self.errors.lock() else {
+            return ErrorSnapshot::default();
+        };
+
+        let network_errors_total = load_u64(&errors.network_errors_total);
+        let protocol_errors_total = load_u64(&errors.protocol_errors_total);
+        let timeout_errors_total = load_u64(&errors.timeout_errors_total);
+        let validation_errors_total = load_u64(&errors.validation_errors_total);
+        let resource_errors_total = load_u64(&errors.resource_errors_total);
+        let authorization_errors_total = load_u64(&errors.authorization_errors_total);
+
+        ErrorSnapshot {
+            network_errors_total,
+            protocol_errors_total,
+            timeout_errors_total,
+            validation_errors_total,
+            resource_errors_total,
+            authorization_errors_total,
+            error_rate_percent: load_i64(&errors.error_rate_percent),
+            total_errors: network_errors_total
+                + protocol_errors_total
+                + timeout_errors_total
+                + validation_errors_total
+                + resource_errors_total
+                + authorization_errors_total,
+        }
+    }
 }
 
 impl MetricsCollector {
@@ -389,7 +567,7 @@ impl MetricsCollector {
 
         // Start timing this session
         if let Ok(mut timers) = self.registry.active_timers.lock() {
-            timers.insert(format!("sync_session_{session_id}"), now);
+            timers.insert(sync_session_timer_key(session_id), now);
         }
     }
 
@@ -405,7 +583,7 @@ impl MetricsCollector {
     ) {
         let duration = if let Ok(mut timers) = self.registry.active_timers.lock() {
             timers
-                .remove(&format!("sync_session_{session_id}"))
+                .remove(&sync_session_timer_key(session_id))
                 .map(|start| {
                     let elapsed_secs = now.saturating_sub(start);
                     Duration::from_secs(elapsed_secs)
@@ -452,7 +630,7 @@ impl MetricsCollector {
     pub fn record_sync_failure(&self, session_id: &str, category: ErrorCategory, details: &str) {
         // Remove timer and update counters
         if let Ok(mut timers) = self.registry.active_timers.lock() {
-            timers.remove(&format!("sync_session_{session_id}"));
+            timers.remove(&sync_session_timer_key(session_id));
         }
 
         if let Ok(operational) = self.registry.operational.lock() {
@@ -682,152 +860,11 @@ impl MetricsCollector {
 
     /// Export comprehensive metrics snapshot
     pub fn export_snapshot(&self, timestamp_secs: u64) -> SyncMetricsSnapshot {
-        let operational_snapshot = if let Ok(operational) = self.registry.operational.lock() {
-            let total_sessions = operational.sync_sessions_total.load(Ordering::Relaxed);
-            let completed_sessions = operational
-                .sync_sessions_completed_total
-                .load(Ordering::Relaxed);
-            let success_rate = if total_sessions > 0 {
-                (completed_sessions as f64 / total_sessions as f64) * 100.0
-            } else {
-                100.0
-            };
-
-            OperationalSnapshot {
-                sync_sessions_total: total_sessions,
-                sync_sessions_completed_total: completed_sessions,
-                sync_sessions_failed_total: operational
-                    .sync_sessions_failed_total
-                    .load(Ordering::Relaxed),
-                sync_operations_transferred_total: operational
-                    .sync_operations_transferred_total
-                    .load(Ordering::Relaxed),
-                sync_bytes_transferred_total: operational
-                    .sync_bytes_transferred_total
-                    .load(Ordering::Relaxed),
-                active_sync_sessions: operational.active_sync_sessions.load(Ordering::Relaxed),
-                connected_peers: operational.connected_peers.load(Ordering::Relaxed),
-                queue_depth: operational.queue_depth.load(Ordering::Relaxed),
-                rate_limit_violations_total: operational
-                    .rate_limit_violations_total
-                    .load(Ordering::Relaxed),
-                success_rate_percent: success_rate,
-            }
-        } else {
-            OperationalSnapshot {
-                sync_sessions_total: 0,
-                sync_sessions_completed_total: 0,
-                sync_sessions_failed_total: 0,
-                sync_operations_transferred_total: 0,
-                sync_bytes_transferred_total: 0,
-                active_sync_sessions: 0,
-                connected_peers: 0,
-                queue_depth: 0,
-                rate_limit_violations_total: 0,
-                success_rate_percent: 100.0,
-            }
-        };
-
-        let performance_snapshot = if let Ok(performance) = self.registry.performance.lock() {
-            PerformanceSnapshot {
-                sync_duration_stats: performance.sync_duration_histogram.stats(),
-                network_latency_stats: performance.network_latency_histogram.stats(),
-                operation_processing_stats: performance.operation_processing_histogram.stats(),
-                operations_per_second: performance.operations_per_second.load(Ordering::Relaxed),
-                bytes_per_second: performance.bytes_per_second.load(Ordering::Relaxed),
-                average_sync_duration_ms: performance
-                    .average_sync_duration_ms
-                    .load(Ordering::Relaxed),
-                compression_ratio_stats: performance.compression_ratio_histogram.stats(),
-            }
-        } else {
-            PerformanceSnapshot {
-                sync_duration_stats: HistogramStats {
-                    sum: 0,
-                    count: 0,
-                    buckets: vec![],
-                },
-                network_latency_stats: HistogramStats {
-                    sum: 0,
-                    count: 0,
-                    buckets: vec![],
-                },
-                operation_processing_stats: HistogramStats {
-                    sum: 0,
-                    count: 0,
-                    buckets: vec![],
-                },
-                operations_per_second: 0,
-                bytes_per_second: 0,
-                average_sync_duration_ms: 0,
-                compression_ratio_stats: HistogramStats {
-                    sum: 0,
-                    count: 0,
-                    buckets: vec![],
-                },
-            }
-        };
-
-        let resources_snapshot = if let Ok(resources) = self.registry.resources.lock() {
-            ResourceSnapshot {
-                cpu_usage_percent: resources.cpu_usage_percent.load(Ordering::Relaxed),
-                memory_usage_bytes: resources.memory_usage_bytes.load(Ordering::Relaxed),
-                network_bandwidth_bps: resources.network_bandwidth_bps.load(Ordering::Relaxed),
-                peer_connection_pool_size: resources
-                    .peer_connection_pool_size
-                    .load(Ordering::Relaxed),
-                message_queue_size: resources.message_queue_size.load(Ordering::Relaxed),
-                active_timers_count: resources.active_timers_count.load(Ordering::Relaxed),
-            }
-        } else {
-            ResourceSnapshot {
-                cpu_usage_percent: 0,
-                memory_usage_bytes: 0,
-                network_bandwidth_bps: 0,
-                peer_connection_pool_size: 0,
-                message_queue_size: 0,
-                active_timers_count: 0,
-            }
-        };
-
-        let errors_snapshot = if let Ok(errors) = self.registry.errors.lock() {
-            let total_errors = errors.network_errors_total.load(Ordering::Relaxed)
-                + errors.protocol_errors_total.load(Ordering::Relaxed)
-                + errors.timeout_errors_total.load(Ordering::Relaxed)
-                + errors.validation_errors_total.load(Ordering::Relaxed)
-                + errors.resource_errors_total.load(Ordering::Relaxed)
-                + errors.authorization_errors_total.load(Ordering::Relaxed);
-
-            ErrorSnapshot {
-                network_errors_total: errors.network_errors_total.load(Ordering::Relaxed),
-                protocol_errors_total: errors.protocol_errors_total.load(Ordering::Relaxed),
-                timeout_errors_total: errors.timeout_errors_total.load(Ordering::Relaxed),
-                validation_errors_total: errors.validation_errors_total.load(Ordering::Relaxed),
-                resource_errors_total: errors.resource_errors_total.load(Ordering::Relaxed),
-                authorization_errors_total: errors
-                    .authorization_errors_total
-                    .load(Ordering::Relaxed),
-                error_rate_percent: errors.error_rate_percent.load(Ordering::Relaxed),
-                total_errors,
-            }
-        } else {
-            ErrorSnapshot {
-                network_errors_total: 0,
-                protocol_errors_total: 0,
-                timeout_errors_total: 0,
-                validation_errors_total: 0,
-                resource_errors_total: 0,
-                authorization_errors_total: 0,
-                error_rate_percent: 0,
-                total_errors: 0,
-            }
-        };
-
         SyncMetricsSnapshot {
-            operational: operational_snapshot,
-            performance: performance_snapshot,
-            resources: resources_snapshot,
-            errors: errors_snapshot,
+            operational: self.registry.operational_snapshot(),
+            performance: self.registry.performance_snapshot(),
+            resources: self.registry.resource_snapshot(),
+            errors: self.registry.error_snapshot(),
             timestamp: timestamp_secs,
         }
     }

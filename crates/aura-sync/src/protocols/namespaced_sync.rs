@@ -6,7 +6,7 @@
 //! with proper namespace isolation for authorities and contexts.
 
 use crate::core::config::SyncConfig;
-use crate::core::errors::{sync_network_error, sync_serialization_error, sync_session_error};
+use crate::core::{receive_json_from_expected_peer, send_bytes_to_peer, sync_session_error};
 use aura_core::types::identifiers::ContextId;
 use aura_core::{time::OrderTime, AuraError, AuthorityId, Result};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
@@ -520,44 +520,21 @@ impl NamespacedAntiEntropy {
         let peer_uuid: Uuid = peer.into();
 
         // Serialize the sync request
-        let request_data = serde_json::to_vec(&request).map_err(|e| {
-            sync_serialization_error(
-                "SyncRequest",
-                format!("Failed to serialize sync request: {e}"),
-            )
-        })?;
+        let request_data = crate::core::json_serialize("SyncRequest", "sync request", &request)?;
 
         // Send request to peer and receive response with timeout
         let exchange_future = async {
             // Send the sync request
-            effects
-                .send_to_peer(peer_uuid, request_data)
-                .await
-                .map_err(|e| {
-                    sync_network_error(format!("Failed to send sync request to peer {peer}: {e}"))
-                })?;
+            send_bytes_to_peer(effects, peer_uuid, &peer, "sync request", request_data).await?;
 
-            // Receive response from the peer
-            let (sender_id, response_data) = effects.receive().await.map_err(|e| {
-                sync_network_error(format!(
-                    "Failed to receive sync response from peer {peer}: {e}"
-                ))
-            })?;
-
-            // Verify the response came from the expected peer
-            if sender_id != peer_uuid {
-                return Err(sync_session_error(format!(
-                    "Received sync response from unexpected peer: expected {peer}, got {sender_id}"
-                )));
-            }
-
-            // Deserialize the sync response
-            let response: SyncResponse = serde_json::from_slice(&response_data).map_err(|e| {
-                sync_serialization_error(
-                    "SyncResponse",
-                    format!("Failed to deserialize sync response from peer {peer}: {e}"),
-                )
-            })?;
+            let response: SyncResponse = receive_json_from_expected_peer(
+                effects,
+                peer_uuid,
+                &peer,
+                "SyncResponse",
+                "sync response",
+            )
+            .await?;
 
             // Verify namespace consistency
             if response.namespace != request.namespace {

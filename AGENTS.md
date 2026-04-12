@@ -82,13 +82,13 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects`; no ad-hoc storage encryption
 - **Shared UX contract ownership**: parity-critical UI ids, focus semantics, action contracts, and parity metadata come from `aura-app::ui_contract`
 - **Harness mode discipline**: `AURA_HARNESS_MODE` may change instrumentation or rendering stability, but must not change parity-critical business-flow semantics
-- **Harness mode exceptions**: allowlisted harness-only hooks must carry owner, justification, and design-note metadata enforced by `policy/xtask` via `just ci-user-flow-policy`
+- **Harness mode exceptions**: allowlisted harness-only hooks must carry owner, justification, and design-note metadata enforced by `toolkit/xtask` via `just ci-user-flow-policy`
 - **Browser bridge compatibility**: changes to browser harness bridge, bounded browser task ownership, or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`; this includes the explicit `stage_runtime_identity` bootstrap handoff and the page-owned semantic queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`)
 - **Parity exception metadata**: every `ParityException` must have structured metadata in `aura-app::ui_contract` including reason code, scope, affected surface, and doc reference
 - **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
 - **Canonical entity materialization only**: reactive/view/harness-facing code may enrich already-materialized channel or invitation state, but it may not fabricate canonical metadata from partial facts such as membership events or raw ids; one explicit owned path must materialize the canonical entity shape end to end
 - **Reactive subscriptions**: subscribing before registration must fail fast; lagging subscribers may miss intermediate updates and resume from a newer snapshot
-- **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `policy/xtask` via `just ci-user-flow-policy`
+- **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `toolkit/xtask` via `just ci-user-flow-policy`
 - **Shared user-flow contributor sync**: when shared UX policy scripts change, keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented

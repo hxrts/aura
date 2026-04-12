@@ -3,7 +3,9 @@
 //! This module provides common utilities, helpers, and fixtures used across
 //! all integration test scenarios.
 
-use super::test_device_id;
+#![allow(missing_docs)]
+
+use crate::shared_support::{default_test_time, device_labels, test_device_id, test_sync_config};
 use aura_core::time::PhysicalTime;
 use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId};
@@ -42,10 +44,56 @@ pub struct MultiDeviceTestFixture {
     pub config: SyncConfig,
 }
 
+/// Builder for repeated multi-device topology setup.
+pub struct ScenarioBuilder {
+    device_count: usize,
+    partition: Option<(Vec<usize>, Vec<usize>)>,
+    isolated_indices: Vec<usize>,
+}
+
+impl ScenarioBuilder {
+    pub fn new(device_count: usize) -> Self {
+        Self {
+            device_count,
+            partition: None,
+            isolated_indices: Vec::new(),
+        }
+    }
+
+    pub fn trio() -> Self {
+        Self::new(3)
+    }
+
+    pub fn threshold_group() -> Self {
+        Self::new(5)
+    }
+
+    pub fn with_partition_indices(mut self, group1: &[usize], group2: &[usize]) -> Self {
+        self.partition = Some((group1.to_vec(), group2.to_vec()));
+        self
+    }
+
+    pub fn isolate_indices(mut self, isolated_indices: &[usize]) -> Self {
+        self.isolated_indices = isolated_indices.to_vec();
+        self
+    }
+
+    pub async fn build(self) -> AuraResult<MultiDeviceTestFixture> {
+        let mut fixture = MultiDeviceTestFixture::new(self.device_count).await?;
+        if let Some((group1, group2)) = self.partition {
+            fixture.partition_indices(&group1, &group2).await?;
+        }
+        for index in self.isolated_indices {
+            fixture.isolate_index(index).await?;
+        }
+        Ok(fixture)
+    }
+}
+
 impl MultiDeviceTestFixture {
     /// Create a new multi-device test fixture
     pub async fn new(device_count: usize) -> AuraResult<Self> {
-        let device_labels: Vec<String> = (0..device_count).map(|i| format!("device_{i}")).collect();
+        let device_labels = device_labels(device_count);
         let device_labels_refs: Vec<&str> = device_labels.iter().map(|s| s.as_str()).collect();
 
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels_refs);
@@ -96,9 +144,38 @@ impl MultiDeviceTestFixture {
         self.network.partition(group1, group2).await;
     }
 
+    pub async fn partition_indices(
+        &mut self,
+        group1: &[usize],
+        group2: &[usize],
+    ) -> AuraResult<()> {
+        self.create_partition(self.devices_for(group1)?, self.devices_for(group2)?)
+            .await;
+        Ok(())
+    }
+
     /// Heal all network partitions
     pub async fn heal_partitions(&mut self) {
         self.network.heal_partition().await;
+    }
+
+    pub async fn isolate_index(&mut self, index: usize) -> AuraResult<()> {
+        let isolated = self.device(index)?;
+        for device in &self.devices {
+            if *device != isolated {
+                let partition_condition = NetworkCondition {
+                    partitioned: true,
+                    ..Default::default()
+                };
+                self.network
+                    .set_conditions(isolated, *device, partition_condition.clone())
+                    .await;
+                self.network
+                    .set_conditions(*device, isolated, partition_condition)
+                    .await;
+            }
+        }
+        Ok(())
     }
 
     /// Get session manager for a device
@@ -106,13 +183,27 @@ impl MultiDeviceTestFixture {
         self.session_managers.get(&device)
     }
 
+    pub fn device(&self, index: usize) -> AuraResult<DeviceId> {
+        self.devices
+            .get(index)
+            .copied()
+            .ok_or_else(|| AuraError::internal(format!("No device at index {index}")))
+    }
+
+    pub fn authority(&self, index: usize) -> AuraResult<AuthorityId> {
+        self.authorities
+            .get(index)
+            .copied()
+            .ok_or_else(|| AuraError::internal(format!("No authority at index {index}")))
+    }
+
+    pub fn devices_for(&self, indices: &[usize]) -> AuraResult<Vec<DeviceId>> {
+        indices.iter().map(|&index| self.device(index)).collect()
+    }
+
     /// Get current time for session management
     fn current_time() -> PhysicalTime {
-        // Use deterministic timestamp for reproducible tests
-        PhysicalTime {
-            ts_ms: 1700000000000, // 2023-11-15 in milliseconds
-            uncertainty: None,
-        }
+        default_test_time()
     }
 
     /// Create coordinated session across all devices
@@ -194,11 +285,6 @@ pub fn create_epoch_coordinator(
     EpochRotationCoordinator::new(device_id, current_epoch, config)
 }
 
-/// Test sync configuration for integration tests
-pub fn test_sync_config() -> SyncConfig {
-    SyncConfig::for_testing()
-}
-
 /// Simulate journal state divergence between devices
 pub async fn create_divergent_journal_states(
     fixture: &mut MultiDeviceTestFixture,
@@ -212,33 +298,7 @@ pub async fn create_divergent_journal_states(
         )));
     }
 
-    // Simulate device 0 and 1 syncing while device 2 is partitioned
-    let device0 = fixture.devices[0];
-    let device1 = fixture.devices[1];
-    let device2 = fixture.devices[2];
-
-    // Partition device 2 from others
-    let partition_condition = NetworkCondition {
-        partitioned: true,
-        ..Default::default()
-    };
-
-    fixture
-        .network
-        .set_conditions(device0, device2, partition_condition.clone())
-        .await;
-    fixture
-        .network
-        .set_conditions(device1, device2, partition_condition.clone())
-        .await;
-    fixture
-        .network
-        .set_conditions(device2, device0, partition_condition.clone())
-        .await;
-    fixture
-        .network
-        .set_conditions(device2, device1, partition_condition)
-        .await;
+    fixture.partition_indices(&[0, 1], &[2]).await?;
 
     // At this point, device0 and device1 can sync while device2 is isolated
     // This creates the foundation for divergent journal states

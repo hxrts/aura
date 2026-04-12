@@ -15,7 +15,7 @@ use tokio::time::timeout;
 /// Test basic journal synchronization between two devices
 #[tokio::test]
 async fn test_basic_journal_sync() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::trio().await?;
+    let fixture = ScenarioBuilder::trio().build().await?;
     let _protocol = create_journal_sync_protocol();
 
     let _device1 = fixture.devices[0];
@@ -55,7 +55,7 @@ async fn test_basic_journal_sync() -> AuraResult<()> {
 /// Test journal sync with divergent states created by network partition
 #[tokio::test]
 async fn test_divergent_state_resolution() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::trio().await?;
+    let mut fixture = ScenarioBuilder::trio().build().await?;
     let _protocol = create_journal_sync_protocol();
 
     // Step 1: Create divergent states through partition
@@ -108,7 +108,7 @@ async fn test_divergent_state_resolution() -> AuraResult<()> {
 /// Test journal sync with batch processing
 #[tokio::test]
 async fn test_batched_journal_sync() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::trio().await?;
+    let fixture = ScenarioBuilder::trio().build().await?;
 
     // Configure protocol for small batches to test batching logic
     let config = JournalSyncConfig {
@@ -169,11 +169,11 @@ async fn test_batched_journal_sync() -> AuraResult<()> {
 /// Test journal sync with network interruptions
 #[tokio::test]
 async fn test_journal_sync_with_interruptions() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::trio().await?;
+    let mut fixture = ScenarioBuilder::trio().build().await?;
     let _protocol = create_journal_sync_protocol();
 
-    let device1 = fixture.devices[0];
-    let device2 = fixture.devices[1];
+    let device1 = fixture.device(0)?;
+    let device2 = fixture.device(1)?;
 
     let session = fixture
         .create_coordinated_session("interrupted_sync")
@@ -241,7 +241,7 @@ async fn test_journal_sync_with_interruptions() -> AuraResult<()> {
 /// Test journal sync state transitions
 #[tokio::test]
 async fn test_sync_state_transitions() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::trio().await?;
+    let fixture = ScenarioBuilder::trio().build().await?;
     let _protocol = create_journal_sync_protocol();
 
     let session = fixture
@@ -287,7 +287,7 @@ async fn test_sync_state_transitions() -> AuraResult<()> {
 /// Test journal sync with concurrent writers
 #[tokio::test]
 async fn test_concurrent_journal_writers() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let fixture = ScenarioBuilder::threshold_group().build().await?;
     let _protocol = create_journal_sync_protocol();
 
     let session = fixture
@@ -356,7 +356,7 @@ async fn test_concurrent_journal_writers() -> AuraResult<()> {
 /// Test journal sync message types and serialization
 #[tokio::test]
 async fn test_sync_message_handling() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::trio().await?;
+    let fixture = ScenarioBuilder::trio().build().await?;
     let _protocol = create_journal_sync_protocol();
 
     let session = fixture
@@ -420,7 +420,7 @@ async fn test_sync_message_handling() -> AuraResult<()> {
 /// Test journal sync retry logic on failures
 #[tokio::test]
 async fn test_sync_retry_logic() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::trio().await?;
+    let mut fixture = ScenarioBuilder::trio().build().await?;
 
     // Configure protocol with specific retry behavior
     let config = JournalSyncConfig {
@@ -431,8 +431,8 @@ async fn test_sync_retry_logic() -> AuraResult<()> {
     };
     let _protocol = JournalSyncProtocol::new(config);
 
-    let device1 = fixture.devices[0];
-    let device2 = fixture.devices[1];
+    let device1 = fixture.device(0)?;
+    let device2 = fixture.device(1)?;
 
     // Set up conditions that will cause initial failures
     let flaky_conditions = NetworkCondition {

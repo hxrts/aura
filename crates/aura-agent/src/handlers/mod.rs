@@ -53,9 +53,9 @@ pub use rendezvous::{ChannelResult, RendezvousHandler, RendezvousResult};
 pub use rendezvous_service::RendezvousServiceApi;
 
 // Re-export sync/maintenance types for CLI/tooling usage
-pub use aura_sync::maintenance::UpgradeProposal;
 pub use aura_sync::protocols::ota::UpgradeKind;
 pub use aura_sync::services::HealthStatus;
+pub use aura_sync::services::UpgradeProposal;
 
 // Re-export authentication types for CLI/tooling usage
 pub use aura_authentication::{DkdConfig, DkdProtocol, RecoveryContext, RecoveryOperationType};

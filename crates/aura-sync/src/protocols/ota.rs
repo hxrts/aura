@@ -225,14 +225,7 @@ impl OTAProtocol {
 
     /// Check if activation threshold is met
     pub fn check_threshold(&self) -> bool {
-        let ready_count = self
-            .readiness
-            .values()
-            .filter(|s| matches!(s, ReadinessStatus::Ready))
-            .count();
-
-        let ready_count_u32 = ready_count as u32;
-        ready_count_u32 >= self.config.readiness_threshold
+        self.ready_device_count() >= self.config.readiness_threshold
     }
 
     /// Activate upgrade if threshold is met
@@ -246,17 +239,7 @@ impl OTAProtocol {
             return Err(sync_protocol_error("sync", "Readiness threshold not met"));
         }
 
-        let ready_devices: Vec<AuthorityId> = self
-            .readiness
-            .iter()
-            .filter_map(|(device, status)| {
-                if matches!(status, ReadinessStatus::Ready) {
-                    Some(*device)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let ready_devices = self.ready_devices();
 
         Ok(OTAResult {
             proposal,
@@ -280,6 +263,19 @@ impl OTAProtocol {
         self.pending_proposal = None;
         self.readiness.clear();
         Ok(())
+    }
+
+    fn ready_devices(&self) -> Vec<AuthorityId> {
+        self.readiness
+            .iter()
+            .filter_map(|(device, status)| {
+                matches!(status, ReadinessStatus::Ready).then_some(*device)
+            })
+            .collect()
+    }
+
+    fn ready_device_count(&self) -> u32 {
+        self.ready_devices().len() as u32
     }
 }
 

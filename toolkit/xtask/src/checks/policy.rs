@@ -1265,7 +1265,7 @@ pub fn run_harness_ownership_policy() -> Result<()> {
             "--repo-root".into(),
             ".".into(),
             "--lint-path".into(),
-            "./policy/lints/harness_boundaries".into(),
+            "./toolkit/lints/harness_boundaries".into(),
             "--all".into(),
             "--".into(),
             "--all-targets".into(),

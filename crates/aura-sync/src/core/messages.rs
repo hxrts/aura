@@ -5,6 +5,7 @@
 //!
 //! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
+use super::wire::physical_time_from_ms;
 use aura_core::time::PhysicalTime;
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
@@ -84,13 +85,7 @@ impl<T> TimestampedMessage<T> {
     ///
     /// Convenience constructor for backward compatibility.
     pub fn new_from_ms(timestamp_ms: u64, payload: T) -> Self {
-        Self::new(
-            PhysicalTime {
-                ts_ms: timestamp_ms,
-                uncertainty: None,
-            },
-            payload,
-        )
+        Self::new(physical_time_from_ms(timestamp_ms), payload)
     }
 
     /// Extract the payload
@@ -418,10 +413,7 @@ mod tests {
     use aura_testkit::builders::test_device_id;
 
     fn test_time(ts_ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        }
+        physical_time_from_ms(ts_ms)
     }
 
     #[test]

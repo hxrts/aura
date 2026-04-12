@@ -16,7 +16,7 @@ fn run() -> Result<()> {
     match args.as_slice() {
         [command, check, rest @ ..] if command == "check" => checks::run(check, rest),
         _ => bail!(
-            "usage: cargo run --manifest-path policy/xtask/Cargo.toml -- check <name> [args...]"
+            "usage: cargo run --manifest-path toolkit/xtask/Cargo.toml -- check <name> [args...]"
         ),
     }
 }

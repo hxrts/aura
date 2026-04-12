@@ -38,7 +38,7 @@ mkdir -p "$web_tools_cache_root"
   npm run install-browsers
 )
 
-cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check browser-install
+cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check browser-install
 export AURA_HARNESS_WEB_BUILD_PROFILE=release
 export AURA_HARNESS_WEB_SERVER_READY_TIMEOUT_SECS=1800
 export AURA_WEB_TOOLS_CACHE_ROOT="$web_tools_cache_root"

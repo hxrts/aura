@@ -1,7 +1,7 @@
 # Aura-local dylint library.
 # Run:
 #   ./scripts/toolkit-shell.sh toolkit-install-dylint
-#   ./scripts/toolkit-shell.sh toolkit-dylint --repo-root . --lint-path ./policy/lints/harness_boundaries --all -- --all-targets
+#   ./scripts/toolkit-shell.sh toolkit-dylint --repo-root . --lint-path ./toolkit/lints/harness_boundaries --all -- --all-targets
 
 [package]
 name = "aura-harness-boundaries"

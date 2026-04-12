@@ -16,9 +16,9 @@
 - `clippy` and `ci-clippy` now use `toolkit-clippy`.
 - `ci-crates-doc-links`, `ci-text-formatting`, and `ci-docs-semantic-drift`
   now use toolkit `xtask` checks.
-- `check-arch` now runs the Aura-owned Rust entrypoint in `policy/xtask`
+- `check-arch` now runs the Aura-owned Rust entrypoint in `toolkit/xtask`
   instead of the deleted `scripts/check/arch.sh`.
-- The ownership/runtime/testkit lanes moved to `policy/xtask` include:
+- The ownership/runtime/testkit lanes moved to `toolkit/xtask` include:
   `ownership-category-declarations`, `service-surface-declarations`,
   `service-registry-ownership`, `ownership-annotation-ratchet`,
   `runtime-boundary-allowlist`, `runtime-shutdown-order`,
@@ -30,7 +30,7 @@
   `harness-typed-json-boundary`, `harness-authoritative-fact-boundary`,
   `harness-actor-vs-move-ownership`, and `browser-restart-boundary`.
 - Additional Aura-specific shared-flow/runtime policy lanes now live in
-  `policy/xtask` instead of shell:
+  `toolkit/xtask` instead of shell:
   `protocol-device-id-legacy`,
   `runtime-bootstrap-guardrails`,
   `shared-flow-policy`,
@@ -43,7 +43,7 @@
   `tui-selection-contract`, and
   `tui-semantic-snapshot`.
 - Additional browser/harness/verification shell checks now also live in
-  `policy/xtask`:
+  `toolkit/xtask`:
   `browser-cache-lifecycle`,
   `browser-cache-owner`,
   `browser-driver-contract-sync`,
@@ -53,7 +53,7 @@
   `harness-row-index-contract`,
   `harness-scenario-inventory`, and
   `verification-coverage`.
-- The next harness policy tranche also moved from shell into `policy/xtask`:
+- The next harness policy tranche also moved from shell into `toolkit/xtask`:
   `harness-action-preconditions`,
   `harness-backend-contract`,
   `harness-boundary-policy`,
@@ -75,13 +75,13 @@
   `harness-wait-contract`, and
   `ownership-capability-audit`.
 - The final retained shell-owned user-flow governance checks also moved into
-  `policy/xtask`:
+  `toolkit/xtask`:
   `browser-restart-boundary`,
   `privacy-onion-quarantine`,
   `user-flow-guidance-sync`, and
   `user-flow-policy-guardrails`.
 - The remaining active browser/harness wrapper checks that still sat on the
-  shared-flow path also moved into `policy/xtask`:
+  shared-flow path also moved into `toolkit/xtask`:
   `browser-toolchain`,
   `browser-install`,
   `browser-driver-types`,
@@ -99,9 +99,9 @@
   `privacy-tuning-gate`.
 - The old `scripts/check/testing-seed-uniqueness.sh` wrapper was removed as
   dead duplication because `check-arch --test-seeds` already enforced the same
-  policy from `policy/xtask`.
+  policy from `toolkit/xtask`.
 - Repo-owned compiler-shape enforcement now includes
-  `policy/lints/harness_boundaries`, consumed through `toolkit-dylint`.
+  `toolkit/lints/harness_boundaries`, consumed through `toolkit-dylint`.
 - `ci-lean-check-sorry` now uses toolkit Lean style with the strict config, but
   it intentionally preserves the repo's current non-blocking warning behavior
   because Aura still has a known `sorry`.

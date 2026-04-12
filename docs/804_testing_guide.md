@@ -109,13 +109,13 @@ For every migrated flow, delete actor wrappers around purely local or value tran
 
 If a change leaves one of those old abstractions in place, record it as explicit ownership cleanup debt with the owning module and removal milestone. Do not hide it behind temporary ambient lifecycle helpers, duplicate readiness emitters, or shell-local terminal state.
 
-The authoritative written update map for these surfaces now lives in Aura's `policy/xtask` user-flow guidance sync check and is enforced by `just ci-user-flow-policy`. Ownership-model policy for the shared semantic lane is enforced through the final CI entrypoints `just ci-ownership-policy`, `just ci-harness-ownership-policy`, and `just ci-user-flow-policy`.
+The authoritative written update map for these surfaces now lives in Aura's `toolkit/xtask` user-flow guidance sync check and is enforced by `just ci-user-flow-policy`. Ownership-model policy for the shared semantic lane is enforced through the final CI entrypoints `just ci-ownership-policy`, `just ci-harness-ownership-policy`, and `just ci-user-flow-policy`.
 
 ### Testing and Enforcement Split
 
 Prefer `trybuild` compile-fail coverage when the misuse is fundamentally an API-shape or visibility violation. Prefer Rust-native lint binaries in `aura-macros` when the misuse is a syntax-level boundary or naming and flow-shape rule. Keep shell scripts for repo-wide governance, integration topology, or end-to-end harness policy that cannot realistically be proved at compile time. When a stronger contract lands, remove the superseded legacy helper, compatibility branch, migration shim, or stale regression fixture rather than leaving both paths active.
 
-The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references enforced by Aura's `policy/xtask` user-flow policy guardrails. The diff-aware user-flow policy lane must tolerate empty local diff sets so `just ci-user-flow-policy` fails on real policy drift rather than environment-specific diff resolution.
+The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references enforced by Aura's `toolkit/xtask` user-flow policy guardrails. The diff-aware user-flow policy lane must tolerate empty local diff sets so `just ci-user-flow-policy` fails on real policy drift rather than environment-specific diff resolution.
 
 Changes to the browser harness bridge request, response, or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit.
 
@@ -610,7 +610,7 @@ just ci-harness-replay
 just ci-shared-flow-policy
 ```
 
-`just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent. It verifies that every fully shared flow has explicit parity-scenario coverage and that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics. The shared-flow aggregate now calls Aura policy code for the adaptive-privacy runtime-locality and legacy-sweep gates through `policy/xtask`, while the remaining shared-flow checks stay as thin shell orchestration around harness governance and targeted contract tests.
+`just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent. It verifies that every fully shared flow has explicit parity-scenario coverage and that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics. The shared-flow aggregate now calls Aura policy code for the adaptive-privacy runtime-locality and legacy-sweep gates through `toolkit/xtask`, while the remaining shared-flow checks stay as thin shell orchestration around harness governance and targeted contract tests.
 
 The shared-flow policy scripts target the published Cargo package names for renamed Layer 6 crates and macros. When invoking raw Cargo commands behind these lanes, use `hxrts-aura-app` and `hxrts-aura-macros` package ids instead of the legacy `aura-app` and `aura-macros` selectors. File-system crate paths remain `crates/aura-app` and `crates/aura-macros`.
 

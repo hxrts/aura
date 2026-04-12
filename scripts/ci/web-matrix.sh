@@ -37,7 +37,7 @@ mkdir -p "$web_tools_cache_root"
   npm run install-browsers
 )
 
-cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check browser-install
+cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check browser-install
 
 cargo build -p aura-harness --bin aura-harness -q
 export AURA_HARNESS_BIN="$repo_root/target/debug/aura-harness"
