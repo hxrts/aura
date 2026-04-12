@@ -546,7 +546,7 @@ Enforcement split:
   enforcement:
   - `just ci-ownership-categories`
   - `just ci-harness-actor-vs-move-ownership`
-  - `scripts/check/user-flow-guidance-sync.sh`
+  - Aura `policy/xtask` user-flow guidance sync check
 - Runtime/integration checks remain appropriate for properties such as runtime
   shutdown ordering and instrumentation schema discipline because those are
   orchestration-level invariants, not just API-shape rules.
@@ -615,7 +615,7 @@ explicit:
     `just ci-service-surface-policy`,
     `just ci-service-registry-ownership`,
     `just ci-harness-ownership-policy`, and
-    `scripts/check/privacy-tuning-gate.sh`
+    `just ci-adaptive-privacy-tuning`
 
 The default contributor path for service-family boundary work is:
 

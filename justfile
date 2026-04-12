@@ -185,13 +185,13 @@ browser-driver-smoke:
     cd crates/aura-harness/playwright-driver && npm test
 
 ci-harness-browser-driver-types:
-    bash scripts/check/browser-driver-types.sh
+    just _policy-check check browser-driver-types
 
 ci-browser-driver-contract-sync:
-    bash scripts/check/browser-driver-contract.sh
+    just _policy-check check browser-driver-contract-sync
 
 harness-browser-install-check:
-    bash scripts/check/browser-install.sh
+    just _policy-check check browser-install
 
 # Run harness scenario against browser backend config
 harness-run-browser scenario config="configs/harness/browser-loopback.toml" artifacts_dir="artifacts/harness/browser":
@@ -202,22 +202,22 @@ harness-lint-browser scenario config="configs/harness/browser-loopback.toml":
     just harness-lint -- --config {{ config }} --scenario {{ scenario }}
 
 harness-boundary-check:
-    bash scripts/check/harness-boundary-policy.sh
+    just _policy-check check harness-boundary-policy
 
 harness-command-plane-boundary-check:
-    bash scripts/check/harness-command-plane-boundary.sh
+    just _policy-check check harness-command-plane-boundary
 
 harness-scenario-inventory-check:
-    bash scripts/check/harness-scenario-inventory.sh
+    just _policy-check check harness-scenario-inventory
 
 harness-shared-scenario-contract-check:
-    bash scripts/check/harness-governance.sh shared-scenario-contract
+    just _policy-check check harness-shared-scenario-contract
 
 harness-scenario-legality-check:
-    bash scripts/check/harness-governance.sh scenario-legality
+    just _policy-check check harness-scenario-legality
 
 harness-ui-state-evented-check:
-    bash scripts/check/harness-ui-state-evented.sh
+    just _policy-check check harness-ui-state-evented
 
 harness-flake-metrics root="artifacts/harness":
     bash scripts/check/harness-flake-metrics.sh {{ root }}
@@ -259,25 +259,25 @@ harness-frontend-conformance-matrix *ARGS:
     just harness-frontend-conformance-lane all {{ ARGS }}
 
 ci-shared-flow-policy:
-    bash scripts/check/shared-flow-policy.sh
+    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check shared-flow-policy
 
 ci-harness-command-plane-boundary:
-    bash scripts/check/harness-command-plane-boundary.sh
+    just _policy-check check harness-command-plane-boundary
 
 ci-harness-scenario-shape-contract:
-    bash scripts/check/harness-governance.sh scenario-shape-contract
+    just _policy-check check harness-scenario-shape-contract
 
 ci-harness-runtime-events-authoritative:
-    bash scripts/check/harness-runtime-events-authoritative.sh
+    just _policy-check check harness-runtime-events-authoritative
 
 ci-harness-browser-observation-recovery:
-    bash scripts/check/browser-observation-recovery.sh
+    just _policy-check check browser-observation-recovery
 
 ci-harness-tui-observation-channel:
-    bash scripts/check/tui-observation-channel.sh
+    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check tui-observation-channel
 
 ci-ui-parity-contract:
-    bash scripts/check/harness-governance.sh ui-parity-contract
+    just _policy-check check harness-ui-parity-contract
 
 quint-observation-scenario:
     ./scripts/verify/quint-observation.sh
@@ -322,16 +322,16 @@ check:
 
 # Detect legacy authority/device UUID coercions
 check-device-id-legacy:
-    bash scripts/check/protocol-device-id-legacy.sh
+    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check protocol-device-id-legacy
 
 audit-device-id-separation:
-    bash scripts/check/protocol-device-id-legacy.sh audit-live
+    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check protocol-device-id-legacy audit-live
 
 audit-runtime-device-id-separation:
-    bash scripts/check/protocol-device-id-legacy.sh audit-runtime
+    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check protocol-device-id-legacy audit-runtime
 
 check-bootstrap-guardrails:
-    bash scripts/check/runtime-bootstrap-guardrails.sh
+    cargo run --quiet --manifest-path policy/xtask/Cargo.toml -- check runtime-bootstrap-guardrails
 
 # Run the exact same check that Zed editor runs (rust-analyzer checkOnSave)
 check-zed:
@@ -422,7 +422,7 @@ lint-arch-syntax:
 
 ci-capability-model-audit:
     cargo run -q -p hxrts-aura-macros --bin arch_lints -- capability-boundaries crates
-    bash scripts/check/ownership-capability-audit.sh
+    just _policy-check check ownership-capability-audit
 
 # Format code
 fmt:
@@ -501,14 +501,14 @@ ci-harness-contract:
 
 # Harness browser UiSnapshot evented policy
 ci-harness-ui-state-evented:
-    bash scripts/check/harness-ui-state-evented.sh
+    just _policy-check check harness-ui-state-evented
 
 ci-harness-matrix-inventory:
-    bash scripts/check/harness-matrix-inventory.sh
+    just _policy-check check harness-matrix-inventory
 
 # Harness shared intent-contract policy
 ci-harness-shared-intent-contract:
-    bash scripts/check/harness-governance.sh shared-scenario-contract
+    just _policy-check check harness-shared-scenario-contract
     cargo test -p hxrts-aura-app shared_intent_contract_accepts_intents --quiet
     cargo test -p hxrts-aura-app shared_intent_contract_rejects_ui_actions --quiet
 
@@ -708,11 +708,11 @@ ci-docs-semantic-drift:
 
 # Verify docs/998_verification_coverage.md metrics match actual codebase
 ci-verification-coverage:
-    scripts/check/verification-coverage.sh
+    just _policy-check check verification-coverage
 
 # Verify user flow coverage mapping remains aligned with changed flow surfaces
 ci-user-flow-coverage:
-    bash scripts/check/harness-governance.sh user-flow-coverage
+    just _policy-check check user-flow-coverage
 
 # Fast environment sanity checks before the expensive matrix.
 ci-preflight:
@@ -720,8 +720,8 @@ ci-preflight:
 
 # Verify shared user-flow policy guardrails and required docs/guidance sync
 ci-user-flow-policy:
-    scripts/check/user-flow-policy-guardrails.sh
-    scripts/check/user-flow-guidance-sync.sh
+    just _policy-check check user-flow-policy-guardrails
+    just _policy-check check user-flow-guidance-sync
     just ci-harness-ownership-policy
 
 ci-harness-ownership-policy:
@@ -769,7 +769,7 @@ ci-service-registry-ownership:
     just _policy-check check service-registry-ownership
 
 ci-adaptive-privacy-tuning:
-    bash scripts/check/privacy-tuning-gate.sh
+    just _policy-check check privacy-tuning-gate
 
 ci-actor-lifecycle:
     just _ownership-lint actor-owned-task-spawn crates/aura-agent/src crates/aura-app/src crates/aura-core/src crates/aura-effects/src crates/aura-harness/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src
@@ -987,7 +987,7 @@ ci-conformance-contracts:
 
 # Policy check: protected-branch CI must keep conformance gate job wired
 ci-conformance-policy:
-    scripts/check/harness-conformance-gate.sh
+    just _policy-check check harness-conformance-gate
 
 # Full conformance gate used by CI protected-branch workflows
 ci-conformance: ci-conformance-policy

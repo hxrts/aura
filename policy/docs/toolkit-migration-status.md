@@ -29,6 +29,77 @@
   `privacy-legacy-sweep`, `harness-typed-semantic-errors`,
   `harness-typed-json-boundary`, `harness-authoritative-fact-boundary`,
   `harness-actor-vs-move-ownership`, and `browser-restart-boundary`.
+- Additional Aura-specific shared-flow/runtime policy lanes now live in
+  `policy/xtask` instead of shell:
+  `protocol-device-id-legacy`,
+  `runtime-bootstrap-guardrails`,
+  `shared-flow-policy`,
+  `shared-flow-metadata`,
+  `shared-intent-flow`,
+  `shared-raw-quarantine`,
+  `shared-semantic-dedup`,
+  `tui-observation-channel`,
+  `tui-product-path`,
+  `tui-selection-contract`, and
+  `tui-semantic-snapshot`.
+- Additional browser/harness/verification shell checks now also live in
+  `policy/xtask`:
+  `browser-cache-lifecycle`,
+  `browser-cache-owner`,
+  `browser-driver-contract-sync`,
+  `browser-observation-recovery`,
+  `harness-bridge-contract`,
+  `harness-command-plane-boundary`,
+  `harness-row-index-contract`,
+  `harness-scenario-inventory`, and
+  `verification-coverage`.
+- The next harness policy tranche also moved from shell into `policy/xtask`:
+  `harness-action-preconditions`,
+  `harness-backend-contract`,
+  `harness-boundary-policy`,
+  `harness-conformance-gate`,
+  `harness-export-override-policy`,
+  `harness-focus-selection-contract`,
+  `harness-matrix-inventory`,
+  `harness-mode-allowlist`,
+  `harness-observation-determinism`,
+  `harness-observation-surface`,
+  `harness-onboarding-contract`,
+  `harness-onboarding-publication`,
+  `harness-raw-backend-quarantine`,
+  `harness-render-convergence`,
+  `harness-revision-contract`,
+  `harness-runtime-events-authoritative`,
+  `harness-scenario-config-boundary`,
+  `harness-semantic-primitive-contract`,
+  `harness-wait-contract`, and
+  `ownership-capability-audit`.
+- The final retained shell-owned user-flow governance checks also moved into
+  `policy/xtask`:
+  `browser-restart-boundary`,
+  `privacy-onion-quarantine`,
+  `user-flow-guidance-sync`, and
+  `user-flow-policy-guardrails`.
+- The remaining active browser/harness wrapper checks that still sat on the
+  shared-flow path also moved into `policy/xtask`:
+  `browser-toolchain`,
+  `browser-install`,
+  `browser-driver-types`,
+  `browser-observation-contract`,
+  `harness-core-scenario-mechanics`,
+  `harness-shared-scenario-contract`,
+  `harness-scenario-legality`,
+  `harness-scenario-shape-contract`,
+  `harness-settings-surface-contract`,
+  `harness-ui-parity-contract`,
+  `harness-ui-state-evented`,
+  `harness-trace-determinism`,
+  `harness-recovery-contract`,
+  `user-flow-coverage`, and
+  `privacy-tuning-gate`.
+- The old `scripts/check/testing-seed-uniqueness.sh` wrapper was removed as
+  dead duplication because `check-arch --test-seeds` already enforced the same
+  policy from `policy/xtask`.
 - Repo-owned compiler-shape enforcement now includes
   `policy/lints/harness_boundaries`, consumed through `toolkit-dylint`.
 - `ci-lean-check-sorry` now uses toolkit Lean style with the strict config, but
@@ -57,8 +128,24 @@
   `just ci-harness-authoritative-fact-boundary`,
   `just ci-harness-ownership-policy`,
   `just ci-ownership-policy`,
-  `just ci-shared-flow-policy`,
+  `just check-device-id-legacy`,
+  `just audit-device-id-separation`,
+  `just audit-runtime-device-id-separation`,
+  `just check-bootstrap-guardrails`,
+  `just ci-harness-tui-observation-channel`,
+  `just ci-browser-driver-contract-sync`,
+  `just harness-command-plane-boundary-check`,
+  `just harness-scenario-inventory-check`,
+  `just ci-harness-command-plane-boundary`,
+  `just ci-harness-browser-observation-recovery`,
+  `just harness-boundary-check`,
+  `just ci-conformance-policy`,
+  `just ci-harness-matrix-inventory`,
+  `just ci-harness-runtime-events-authoritative`,
+  `just ci-capability-model-audit`,
   `just ci-user-flow-policy`,
+  `just ci-verification-coverage`,
+  `just ci-shared-flow-policy`,
   and `just ci-lean-check-sorry`.
 - Full repo validation is green after the shell deletions:
   `just ci-dry-run push` completed successfully on April 11, 2026 after

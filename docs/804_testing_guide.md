@@ -109,13 +109,13 @@ For every migrated flow, delete actor wrappers around purely local or value tran
 
 If a change leaves one of those old abstractions in place, record it as explicit ownership cleanup debt with the owning module and removal milestone. Do not hide it behind temporary ambient lifecycle helpers, duplicate readiness emitters, or shell-local terminal state.
 
-The authoritative written update map for these surfaces lives in `scripts/check/user-flow-guidance-sync.sh` and is enforced by `just ci-user-flow-policy`. Ownership-model policy for the shared semantic lane is enforced through the final CI entrypoints `just ci-ownership-policy`, `just ci-harness-ownership-policy`, and `just ci-user-flow-policy`.
+The authoritative written update map for these surfaces now lives in Aura's `policy/xtask` user-flow guidance sync check and is enforced by `just ci-user-flow-policy`. Ownership-model policy for the shared semantic lane is enforced through the final CI entrypoints `just ci-ownership-policy`, `just ci-harness-ownership-policy`, and `just ci-user-flow-policy`.
 
 ### Testing and Enforcement Split
 
 Prefer `trybuild` compile-fail coverage when the misuse is fundamentally an API-shape or visibility violation. Prefer Rust-native lint binaries in `aura-macros` when the misuse is a syntax-level boundary or naming and flow-shape rule. Keep shell scripts for repo-wide governance, integration topology, or end-to-end harness policy that cannot realistically be proved at compile time. When a stronger contract lands, remove the superseded legacy helper, compatibility branch, migration shim, or stale regression fixture rather than leaving both paths active.
 
-The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Shared user-flow policy scripts must tolerate empty local diff sets and use portable Bash constructs so `just ci-user-flow-policy` fails on real policy drift rather than shell-specific array handling.
+The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references enforced by Aura's `policy/xtask` user-flow policy guardrails. The diff-aware user-flow policy lane must tolerate empty local diff sets so `just ci-user-flow-policy` fails on real policy drift rather than environment-specific diff resolution.
 
 Changes to the browser harness bridge request, response, or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit.
 

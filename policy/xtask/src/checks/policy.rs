@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeSet, HashSet},
+    fs,
     path::Path,
 };
 
@@ -8,7 +9,8 @@ use regex::Regex;
 
 use super::support::{
     command_stdout, contains, first_match_line, git_diff, read, read_lines, repo_relative,
-    repo_root, rg_exists, rg_lines, rg_non_comment_lines, run_ok, rust_files_under,
+    repo_root, rg_exists, rg_lines, rg_non_comment_lines, run_ok, run_ok_in_dir,
+    rust_files_under,
 };
 
 pub fn run_service_registry_ownership() -> Result<()> {
@@ -1365,8 +1367,6 @@ fn run_privacy_onion_quarantine() -> Result<()> {
         ".github/workflows/ci.yml",
         ".github/workflows/harness.yml",
         "Justfile",
-        "scripts/check/shared-flow-policy.sh",
-        "scripts/check/user-flow-policy-guardrails.sh",
         "scripts/ci/browser-smoke.sh",
         "scripts/ci/web-matrix.sh",
         "scripts/ci/tui-matrix.sh",
@@ -1668,4 +1668,525 @@ fn extract_ts_function(contents: &str, signature: &str) -> Option<String> {
         Some(idx) => body[..idx].to_string(),
         None => body.to_string(),
     })
+}
+
+fn run_head_shell_script(script: &str, extra_args: &[String]) -> Result<()> {
+    let repo_root = repo_root()?;
+    let script_path = repo_root.join(script);
+    let created = if script_path.exists() {
+        false
+    } else {
+        let contents = command_stdout("git", &["show".into(), format!("HEAD:{script}")])?;
+        if let Some(parent) = script_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        fs::write(&script_path, contents)
+            .with_context(|| format!("writing {}", script_path.display()))?;
+        true
+    };
+
+    let mut args = vec![repo_relative(&script_path)];
+    args.extend(extra_args.iter().cloned());
+    let result = run_ok("bash", &args);
+
+    if created {
+        let _ = fs::remove_file(&script_path);
+    }
+
+    result
+}
+
+fn browser_driver_dir() -> Result<std::path::PathBuf> {
+    Ok(repo_root()?.join("crates/aura-harness/playwright-driver"))
+}
+
+fn ensure_browser_toolchain() -> Result<()> {
+    run_ok("node", &["--version".into()]).context("harness-browser-toolchain: node not found in PATH")?;
+    run_ok("npm", &["--version".into()]).context("harness-browser-toolchain: npm not found in PATH")?;
+
+    let driver_dir = browser_driver_dir()?;
+    let compiler_path = driver_dir.join("node_modules/typescript/bin/tsc");
+    let playwright_path = driver_dir.join("node_modules/playwright/package.json");
+
+    if !compiler_path.exists() || !playwright_path.exists() {
+        run_ok_in_dir("npm", &["ci".into()], &driver_dir)?;
+    }
+
+    if !compiler_path.exists() {
+        bail!(
+            "harness-browser-toolchain: missing TypeScript compiler after npm ci: {}",
+            repo_relative(&compiler_path)
+        );
+    }
+    if !playwright_path.exists() {
+        bail!(
+            "harness-browser-toolchain: missing Playwright package after npm ci: {}",
+            repo_relative(&playwright_path)
+        );
+    }
+
+    Ok(())
+}
+
+fn run_harness_governance_check(check: &str) -> Result<()> {
+    run_ok(
+        "cargo",
+        &[
+            "run".into(),
+            "-p".into(),
+            "aura-harness".into(),
+            "--bin".into(),
+            "aura-harness".into(),
+            "--quiet".into(),
+            "--".into(),
+            "governance".into(),
+            check.into(),
+        ],
+    )
+}
+
+pub fn run_browser_cache_lifecycle() -> Result<()> {
+    run_head_shell_script("scripts/check/browser-cache-lifecycle.sh", &[])
+}
+
+pub fn run_browser_cache_owner() -> Result<()> {
+    run_head_shell_script("scripts/check/browser-cache-owner.sh", &[])
+}
+
+pub fn run_browser_driver_contract_sync() -> Result<()> {
+    run_head_shell_script("scripts/check/browser-driver-contract.sh", &[])
+}
+
+pub fn run_browser_toolchain() -> Result<()> {
+    ensure_browser_toolchain()?;
+    println!("harness browser toolchain: clean");
+    Ok(())
+}
+
+pub fn run_browser_install() -> Result<()> {
+    let driver_dir = browser_driver_dir()?;
+    let driver_script = driver_dir.join("playwright_driver.mjs");
+    if !driver_script.exists() {
+        bail!(
+            "harness-browser-install: missing Playwright driver script: {}",
+            repo_relative(&driver_script)
+        );
+    }
+
+    ensure_browser_toolchain()?;
+    run_ok_in_dir(
+        "node",
+        &[
+            "-e".into(),
+            "const { chromium } = require('playwright'); const p = chromium.executablePath(); if (!p) process.exit(2); process.stdout.write(p);".into(),
+        ],
+        &driver_dir,
+    )
+    .context(format!(
+        "harness-browser-install: Playwright chromium is unavailable; run npm ci and npm run install-browsers in {}",
+        repo_relative(&driver_dir)
+    ))?;
+
+    println!("harness browser install: clean");
+    Ok(())
+}
+
+pub fn run_browser_driver_types() -> Result<()> {
+    let driver_dir = browser_driver_dir()?;
+    ensure_browser_toolchain()?;
+    run_ok_in_dir("npm", &["run".into(), "typecheck".into()], &driver_dir)?;
+
+    let driver_src = driver_dir.join("src/playwright_driver.ts");
+    let wrapper = driver_dir.join("playwright_driver.mjs");
+    if !contains(&driver_src, "./contracts.js")? {
+        bail!("harness-browser-driver-types: driver does not import typed contracts");
+    }
+    if !contains(&driver_src, "./method_sets.js")? {
+        bail!("harness-browser-driver-types: driver does not import typed method sets");
+    }
+    if !contains(&wrapper, "./driver_loader.mjs")? {
+        bail!("harness-browser-driver-types: stable wrapper does not delegate to the driver loader");
+    }
+    if !contains(&wrapper, "ensureCompiledDriverFresh")?
+        || !contains(&wrapper, "pathToFileURL(compiledDriver).href")?
+    {
+        bail!("harness-browser-driver-types: stable wrapper does not load the compiled TS driver through the freshness loader");
+    }
+
+    println!("harness-browser-driver-types: clean");
+    Ok(())
+}
+
+pub fn run_browser_observation_contract() -> Result<()> {
+    let driver_dir = browser_driver_dir()?;
+    ensure_browser_toolchain()?;
+    run_ok_in_dir(
+        "node",
+        &["./playwright_driver.mjs".into(), "--selftest".into()],
+        &driver_dir,
+    )?;
+    println!("harness-browser-observation-contract: clean");
+    Ok(())
+}
+
+pub fn run_browser_observation_recovery() -> Result<()> {
+    run_head_shell_script("scripts/check/browser-observation-recovery.sh", &[])
+}
+
+pub fn run_harness_action_preconditions() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-action-preconditions.sh", &[])
+}
+
+pub fn run_harness_backend_contract() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-backend-contract.sh", &[])
+}
+
+pub fn run_harness_boundary_policy() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-boundary-policy.sh", &[])
+}
+
+pub fn run_harness_bridge_contract() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-bridge-contract.sh", &[])
+}
+
+pub fn run_harness_command_plane_boundary() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-command-plane-boundary.sh", &[])
+}
+
+pub fn run_harness_conformance_gate() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-conformance-gate.sh", &[])
+}
+
+pub fn run_harness_core_scenario_mechanics() -> Result<()> {
+    run_harness_governance_check("core-scenario-mechanics")
+}
+
+pub fn run_harness_export_override_policy() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-export-override-policy.sh", &[])
+}
+
+pub fn run_harness_focus_selection_contract() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-focus-selection-contract.sh", &[])
+}
+
+pub fn run_harness_matrix_inventory() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-matrix-inventory.sh", &[])
+}
+
+pub fn run_harness_mode_allowlist() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-mode-allowlist.sh", &[])
+}
+
+pub fn run_harness_observation_determinism() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-observation-determinism.sh", &[])
+}
+
+pub fn run_harness_observation_surface() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-observation-surface.sh", &[])
+}
+
+pub fn run_harness_onboarding_contract() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-onboarding-contract.sh", &[])
+}
+
+pub fn run_harness_onboarding_publication() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-onboarding-publication.sh", &[])
+}
+
+pub fn run_harness_raw_backend_quarantine() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-raw-backend-quarantine.sh", &[])
+}
+
+pub fn run_harness_recovery_contract() -> Result<()> {
+    run_ok(
+        "cargo",
+        &[
+            "test".into(),
+            "-p".into(),
+            "aura-harness".into(),
+            "registered_recoveries_cover_all_paths".into(),
+            "--quiet".into(),
+        ],
+    )?;
+
+    let driver_method_sets =
+        repo_root()?.join("crates/aura-harness/playwright-driver/src/method_sets.ts");
+    if !contains(&driver_method_sets, "export const RECOVERY_METHODS")? {
+        bail!("harness-recovery-contract: missing registered recovery metadata");
+    }
+    if !contains(&driver_method_sets, "'recover_ui_state'")? {
+        bail!(
+            "harness-recovery-contract: recover_ui_state must remain registered as an explicit recovery method"
+        );
+    }
+
+    println!("harness recovery contract: clean");
+    Ok(())
+}
+
+pub fn run_harness_render_convergence() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-render-convergence.sh", &[])
+}
+
+pub fn run_harness_revision_contract() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-revision-contract.sh", &[])
+}
+
+pub fn run_harness_row_index_contract() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-row-index-contract.sh", &[])
+}
+
+pub fn run_harness_runtime_events_authoritative() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-runtime-events-authoritative.sh", &[])
+}
+
+pub fn run_harness_scenario_config_boundary() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-scenario-config-boundary.sh", &[])
+}
+
+pub fn run_harness_scenario_inventory() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-scenario-inventory.sh", &[])
+}
+
+pub fn run_harness_scenario_legality() -> Result<()> {
+    run_harness_governance_check("scenario-legality")
+}
+
+pub fn run_harness_scenario_shape_contract() -> Result<()> {
+    run_harness_governance_check("scenario-shape-contract")
+}
+
+pub fn run_harness_semantic_primitive_contract() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-semantic-primitive-contract.sh", &[])
+}
+
+pub fn run_harness_settings_surface_contract() -> Result<()> {
+    run_harness_governance_check("settings-surface-contract")
+}
+
+pub fn run_harness_shared_scenario_contract() -> Result<()> {
+    run_harness_governance_check("shared-scenario-contract")
+}
+
+pub fn run_harness_trace_determinism() -> Result<()> {
+    run_ok(
+        "cargo",
+        &[
+            "test".into(),
+            "-p".into(),
+            "aura-harness".into(),
+            "repeated_runs_with_same_seed_share_same_report_shape".into(),
+            "--quiet".into(),
+        ],
+    )
+    .context("harness-trace-determinism: same-seed report/trace determinism test failed")?;
+    println!("harness trace determinism: clean");
+    Ok(())
+}
+
+pub fn run_harness_ui_parity_contract() -> Result<()> {
+    run_harness_governance_check("ui-parity-contract")
+}
+
+pub fn run_harness_ui_state_evented() -> Result<()> {
+    for test_name in [
+        "wait_contract_refs_cover_all_parity_wait_kinds",
+        "semantic_wait_helpers_do_not_use_raw_dom_or_text_fallbacks",
+        "raw_text_fallbacks_are_explicitly_diagnostic_only",
+    ] {
+        run_ok(
+            "cargo",
+            &[
+                "test".into(),
+                "-p".into(),
+                "aura-harness".into(),
+                test_name.into(),
+                "--quiet".into(),
+            ],
+        )?;
+    }
+
+    run_browser_observation_contract()?;
+    println!("harness ui-state evented policy: clean");
+    Ok(())
+}
+
+pub fn run_harness_wait_contract() -> Result<()> {
+    run_head_shell_script("scripts/check/harness-wait-contract.sh", &[])
+}
+
+pub fn run_ownership_capability_audit() -> Result<()> {
+    run_head_shell_script("scripts/check/ownership-capability-audit.sh", &[])
+}
+
+pub fn run_privacy_tuning_gate() -> Result<()> {
+    let repo_root = repo_root()?;
+    let artifact_root = std::env::var("AURA_ADAPTIVE_PRIVACY_ARTIFACT_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| repo_root.join("artifacts/adaptive-privacy/phase6"));
+    if artifact_root.exists() {
+        fs::remove_dir_all(&artifact_root)
+            .with_context(|| format!("adaptive-privacy-phase6: removing {}", artifact_root.display()))?;
+    }
+    fs::create_dir_all(&artifact_root)
+        .with_context(|| format!("adaptive-privacy-phase6: creating {}", artifact_root.display()))?;
+
+    let output = std::process::Command::new("cargo")
+        .env("AURA_ADAPTIVE_PRIVACY_ARTIFACT_ROOT", &artifact_root)
+        .args([
+            "test",
+            "-p",
+            "aura-simulator",
+            "--test",
+            "adaptive_privacy_phase_six",
+            "--",
+            "--nocapture",
+        ])
+        .output()
+        .context("starting adaptive privacy tuning test")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        bail!(
+            "adaptive-privacy-phase6: cargo test failed{}\n{}",
+            if stderr.trim().is_empty() { "" } else { ":" },
+            if stderr.trim().is_empty() {
+                stdout.trim()
+            } else {
+                stderr.trim()
+            }
+        );
+    }
+
+    for required in [
+        "tuning_report.json",
+        "matrix_results.json",
+        "control-plane/index.json",
+        "parity/report.json",
+    ] {
+        let path = artifact_root.join(required);
+        if !path.exists() {
+            bail!(
+                "adaptive-privacy-phase6: missing expected artifact {}",
+                repo_relative(&path)
+            );
+        }
+    }
+
+    println!(
+        "adaptive-privacy-phase6: archived artifacts at {}",
+        artifact_root.display()
+    );
+    Ok(())
+}
+
+pub fn run_protocol_compat(args: &[String]) -> Result<()> {
+    if args.is_empty() {
+        return run_head_shell_script("scripts/check/protocol-compat.sh", &[]);
+    }
+    run_head_shell_script("scripts/check/protocol-compat.sh", args)
+}
+
+pub fn run_protocol_device_id_legacy(args: &[String]) -> Result<()> {
+    run_head_shell_script("scripts/check/protocol-device-id-legacy.sh", args)
+}
+
+pub fn run_runtime_bootstrap_guardrails() -> Result<()> {
+    run_head_shell_script("scripts/check/runtime-bootstrap-guardrails.sh", &[])
+}
+
+pub fn run_shared_flow_metadata() -> Result<()> {
+    run_head_shell_script("scripts/check/shared-flow-metadata.sh", &[])
+}
+
+pub fn run_shared_intent_flow() -> Result<()> {
+    run_head_shell_script("scripts/check/shared-intent-flow.sh", &[])
+}
+
+pub fn run_shared_raw_quarantine() -> Result<()> {
+    run_head_shell_script("scripts/check/shared-raw-quarantine.sh", &[])
+}
+
+pub fn run_shared_semantic_dedup() -> Result<()> {
+    run_head_shell_script("scripts/check/shared-semantic-dedup.sh", &[])
+}
+
+pub fn run_tui_observation_channel() -> Result<()> {
+    run_head_shell_script("scripts/check/tui-observation-channel.sh", &[])
+}
+
+pub fn run_tui_product_path() -> Result<()> {
+    run_head_shell_script("scripts/check/tui-product-path.sh", &[])
+}
+
+pub fn run_tui_selection_contract() -> Result<()> {
+    run_head_shell_script("scripts/check/tui-selection-contract.sh", &[])
+}
+
+pub fn run_tui_semantic_snapshot() -> Result<()> {
+    run_head_shell_script("scripts/check/tui-semantic-snapshot.sh", &[])
+}
+
+pub fn run_user_flow_coverage() -> Result<()> {
+    run_harness_governance_check("user-flow-coverage")
+}
+
+pub fn run_user_flow_guidance_sync() -> Result<()> {
+    run_head_shell_script("scripts/check/user-flow-guidance-sync.sh", &[])
+}
+
+pub fn run_user_flow_policy_guardrails() -> Result<()> {
+    run_head_shell_script("scripts/check/user-flow-policy-guardrails.sh", &[])
+}
+
+pub fn run_verification_coverage() -> Result<()> {
+    run_head_shell_script("scripts/check/verification-coverage.sh", &[])
+}
+
+pub fn run_shared_flow_policy() -> Result<()> {
+    run_harness_core_scenario_mechanics()?;
+    run_harness_ui_state_evented()?;
+    run_harness_ui_parity_contract()?;
+    run_harness_shared_scenario_contract()?;
+    run_harness_scenario_legality()?;
+    run_harness_scenario_shape_contract()?;
+    run_harness_trace_determinism()?;
+    run_harness_recovery_contract()?;
+    run_harness_settings_surface_contract()?;
+    run_browser_observation_contract()?;
+    run_browser_driver_types()?;
+    run_harness_scenario_inventory()?;
+    run_harness_command_plane_boundary()?;
+    run_harness_row_index_contract()?;
+    run_harness_scenario_config_boundary()?;
+    run_harness_observation_determinism()?;
+    run_harness_observation_surface()?;
+    run_harness_action_preconditions()?;
+    run_harness_mode_allowlist()?;
+    run_harness_render_convergence()?;
+    run_harness_focus_selection_contract()?;
+    run_harness_revision_contract()?;
+    run_harness_wait_contract()?;
+    run_harness_semantic_primitive_contract()?;
+    run_harness_backend_contract()?;
+    run_harness_raw_backend_quarantine()?;
+    run_harness_onboarding_publication()?;
+    run_harness_runtime_events_authoritative()?;
+    run_harness_export_override_policy()?;
+    run_harness_bridge_contract()?;
+    run_browser_cache_owner()?;
+    run_browser_cache_lifecycle()?;
+    run_privacy_runtime_locality()?;
+    run_privacy_legacy_sweep()?;
+    run_shared_flow_metadata()?;
+    run_shared_intent_flow()?;
+    run_shared_raw_quarantine()?;
+    run_tui_semantic_snapshot()?;
+    run_shared_semantic_dedup()?;
+    run_tui_product_path()?;
+    run_tui_observation_channel()?;
+    run_tui_selection_contract()?;
+    println!("shared flow policy: clean");
+    Ok(())
 }

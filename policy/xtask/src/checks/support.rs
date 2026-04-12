@@ -111,6 +111,25 @@ pub fn command_output(program: &str, args: &[String]) -> Result<std::process::Ou
         .with_context(|| format!("starting {program} {}", args.join(" ")))
 }
 
+pub fn run_ok_in_dir(program: &str, args: &[String], dir: impl AsRef<Path>) -> Result<()> {
+    let dir = dir.as_ref();
+    let output = Command::new(program)
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .with_context(|| {
+            format!(
+                "starting {program} {} in {}",
+                args.join(" "),
+                dir.display()
+            )
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(command_error(program, args, &output))
+}
+
 pub fn command_error(
     program: &str,
     args: &[String],

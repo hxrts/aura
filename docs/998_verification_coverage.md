@@ -23,7 +23,7 @@ See [Formal Verification Reference](120_verification.md#assurance-summary) for t
 | ITF Trace Harnesses | 9 |
 | Testkit Tests | 118 |
 | Bridge Modules | 4 |
-| CI Verification Gates | 10 |
+| CI Verification Gates | 11 |
 | Telltale Parity Modules | 1 |
 | Bridge Pipeline Fixtures | 3 |
 
