@@ -24,6 +24,11 @@ Quint and other verification tools generate models, traces, and invariants. They
 
 `aura-app` owns the shared semantic scenario, command-plane, and UI contracts. `aura-harness` consumes those contracts and submits shared semantic commands to real frontends. `aura-simulator` is a separate alternate runtime substrate.
 
+User-facing docs and harness guidance must not point readers at scratch-note or
+ephemeral local-output paths. Describe outputs in terms of the stable harness
+artifact bundle, scenario reports, and configured run outputs rather than
+repo-local scratch directories.
+
 Use this lane matrix when selecting harness mode.
 
 | Lane | Backend | Command |

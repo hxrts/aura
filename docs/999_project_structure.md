@@ -2,7 +2,7 @@
 
 This document provides the authoritative reference for Aura's crate organization, dependencies, and development policies.
 
-The primary specifications live in `docs/` (e.g., consensus in `docs/108_consensus.md`, ceremony lifecycles in `docs/109_operation_categories.md`). The `work/` directory is non-authoritative scratch and may be removed.
+The primary specifications live in `docs/` (e.g., consensus in `docs/108_consensus.md`, ceremony lifecycles in `docs/109_operation_categories.md`). Non-authoritative scratch notes may be removed at any time.
 
 The repo-wide ownership taxonomy is defined in [Ownership Model](122_ownership_model.md). This document specifies how those ownership rules map onto Aura's crate and layer structure.
 

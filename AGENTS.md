@@ -13,7 +13,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Primary specs**: `docs/` directory (authoritative)
 - **Architecture**: `docs/001_system_architecture.md`, `docs/999_project_structure.md`
 - **Per-crate architecture docs**: each crate root has an `ARCHITECTURE.md` that explains the crate's purpose, boundaries, invariants, and key integration points; read it before making non-trivial changes in that crate
-- **Scratch**: `work/` is non-authoritative and may be removed
+- **Scratch**: scratch notes are non-authoritative and may be removed
 
 ### Documentation Layers
 

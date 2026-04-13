@@ -13,7 +13,7 @@
 // 5. Invitation Lifecycle: create → export → import → accept → contact
 // 6. Social Graph: contacts → homes → assignment → views
 //
-// See: work/tui_flows.md for design documentation
+// Design notes for these flows are maintained with the verification model.
 
 module tui_flows {
   // ============ TYPE DEFINITIONS ============

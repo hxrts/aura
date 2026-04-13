@@ -2,7 +2,7 @@
 
 This Phase 0 artifact inventories the current authorization capability strings,
 classifies their status, and records the canonical migration targets for the
-clean-cutover refactor currently tracked in `../work/3.md`.
+clean-cutover capability-vocabulary refactor.
 
 ## Scope
 
@@ -203,8 +203,8 @@ authorization capability vocabulary:
 
 ## Quarantine Notes
 
-- Historical scratch notes under `work/archive/` remain explicitly quarantined
-  as non-authoritative archive material.
+- Historical scratch notes remain explicitly quarantined as non-authoritative
+  archive material.
 - This file replaces ad hoc capability-name scratch lists for the Phase 0
   refactor inventory.
 - Remaining legacy names are recorded here only as migration/deletion targets.

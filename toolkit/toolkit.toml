@@ -12,7 +12,7 @@ docs_roots = ["docs"]
 manifest_path = "Cargo.toml"
 workflow_roots = [".github/workflows"]
 
-# docs_link_check covered by rust_base defaults (docs_roots=["docs"], scratch="work/")
+# docs_link_check covered by rust_base defaults.
 
 [checks.docs_semantic_drift]
 enabled = true
