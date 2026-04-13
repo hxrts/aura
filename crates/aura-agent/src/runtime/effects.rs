@@ -207,8 +207,7 @@ struct EffectApiLedgerState {
     epoch: u64,
     events: Vec<(u64, Vec<u8>)>,
     device_activity: HashMap<aura_core::DeviceId, u64>,
-    subscribers:
-        Vec<futures::channel::mpsc::Sender<aura_protocol::effects::EffectApiEvent>>,
+    subscribers: Vec<futures::channel::mpsc::Sender<aura_protocol::effects::EffectApiEvent>>,
 }
 
 #[derive(Clone, Default)]

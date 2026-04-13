@@ -1,4 +1,4 @@
-use super::AuraEffectSystem;
+use super::{AuraEffectSystem, EffectApiLedgerState};
 use async_trait::async_trait;
 use aura_core::effects::{ConsoleEffects, SystemEffects, SystemError};
 use aura_core::AuraError;
@@ -145,7 +145,7 @@ impl SystemEffects for AuraEffectSystem {
     async fn restart_component(&self, component: &str) -> Result<(), SystemError> {
         match component {
             "effect_api" => {
-                *self.effect_api_ledger.lock() = Default::default();
+                *self.effect_api_ledger.lock() = EffectApiLedgerState::default();
                 Ok(())
             }
             "network" | "network_connections" => {

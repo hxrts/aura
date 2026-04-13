@@ -1089,7 +1089,7 @@ impl SimulationScenarioHandler {
                     &mut state,
                     &group_name,
                     &creator,
-                    participants.clone(),
+                    participants,
                 )?;
                 state
                     .parameters
@@ -2040,8 +2040,7 @@ impl SimulationScenarioHandler {
         {
             return Ok(state
                 .parameters
-                .get(&format!("choreography_round:{round}"))
-                .is_some());
+                .contains_key(&format!("choreography_round:{round}")));
         }
 
         let result = match property {
@@ -2065,19 +2064,18 @@ impl SimulationScenarioHandler {
             }),
             "new_coordinator_elected" | "protocol_completes_after_recovery" => state
                 .parameters
-                .get("choreography:coordinator_failure_recovery:count")
-                .is_some(),
+                .contains_key("choreography:coordinator_failure_recovery:count"),
             "derived_keys_match" | "derivation_deterministic" => {
-                state.parameters.get("choreography:p2p_dkd:count").is_some()
+                state
+                    .parameters
+                    .contains_key("choreography:p2p_dkd:count")
                     || state
                         .parameters
-                        .get("choreography:dkd_handshake:count")
-                        .is_some()
+                        .contains_key("choreography:dkd_handshake:count")
             }
             "epoch_monotonic_increase" | "old_tickets_invalidated" => state
                 .parameters
-                .get("choreography:epoch_increment:count")
-                .is_some(),
+                .contains_key("choreography:epoch_increment:count"),
             "group_chat_created" => !state.chat_groups.is_empty(),
             "all_members_joined" => state
                 .chat_groups

@@ -192,7 +192,8 @@ impl aura_protocol::effects::EffectApiEffects for AuraEffectSystem {
         }
         let mut queue = indegree
             .iter()
-            .filter_map(|(node, degree)| (*degree == 0).then(|| node.clone()))
+            .filter(|(_, degree)| **degree == 0)
+            .map(|(node, _)| node.clone())
             .collect::<VecDeque<_>>();
         let mut ordered = Vec::new();
         let mut remaining = indegree;

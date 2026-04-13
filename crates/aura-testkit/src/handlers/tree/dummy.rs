@@ -126,7 +126,7 @@ impl TreeOperationEffects for DummyTreeHandler {
             .lock()
             .await
             .snapshots
-            .insert(proposal_id.clone(), snapshot);
+            .insert(proposal_id, snapshot);
         Ok(proposal_id)
     }
 
@@ -183,7 +183,7 @@ mod tests {
             .await
             .expect("snapshot proposal should succeed");
         let snapshot = handler
-            .finalize_snapshot(proposal.clone())
+            .finalize_snapshot(proposal)
             .await
             .expect("snapshot finalization should succeed");
         handler

@@ -121,6 +121,8 @@ pub fn run_cross_validation<E: QuintModelCheckExecutor>(
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::bridge_format::{
         BridgeBundleV1, ProofBackendV1, ProofCertificateV1, PropertyClassV1, PropertyInterchangeV1,
@@ -135,7 +137,7 @@ mod tests {
             source_expr: "coherent".to_string(),
             target_expr: Some("coherent".to_string()),
             assumptions: vec![],
-            metadata: Default::default(),
+            metadata: BTreeMap::default(),
         });
         bundle.certificates.push(ProofCertificateV1 {
             certificate_id: "c1".to_string(),
@@ -145,7 +147,7 @@ mod tests {
             artifact_digest_hex: "22".repeat(32),
             verified: true,
             verified_at_ms: Some(123),
-            toolchain: Default::default(),
+            toolchain: BTreeMap::default(),
         });
         bundle
     }
