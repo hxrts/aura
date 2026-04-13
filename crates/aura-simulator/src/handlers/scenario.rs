@@ -2066,9 +2066,7 @@ impl SimulationScenarioHandler {
                 .parameters
                 .contains_key("choreography:coordinator_failure_recovery:count"),
             "derived_keys_match" | "derivation_deterministic" => {
-                state
-                    .parameters
-                    .contains_key("choreography:p2p_dkd:count")
+                state.parameters.contains_key("choreography:p2p_dkd:count")
                     || state
                         .parameters
                         .contains_key("choreography:dkd_handshake:count")
