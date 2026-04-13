@@ -308,9 +308,10 @@ impl DispatchHelper {
         } else {
             // Unknown command.
             tracing::warn!("Unknown command not handled by Operational: {:?}", command);
-            let error = TerminalError::Operation(format!(
-                "Operational pipeline has no handler for command: {command:?}"
-            ));
+            let error = TerminalError::structured_operation(
+                "UNHANDLED_COMMAND",
+                format!("Operational pipeline has no handler for command: {command:?}"),
+            );
             self.operational.emit_error(error.clone()).await;
             Err(error)
         }
@@ -370,9 +371,10 @@ impl DispatchHelper {
             }
         } else {
             tracing::warn!("Unknown command not handled by Operational: {:?}", command);
-            let error = TerminalError::Operation(format!(
-                "Operational pipeline has no handler for command: {command:?}"
-            ));
+            let error = TerminalError::structured_operation(
+                "UNHANDLED_COMMAND",
+                format!("Operational pipeline has no handler for command: {command:?}"),
+            );
             self.operational.emit_error(error.clone()).await;
             Err(error)
         }

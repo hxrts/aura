@@ -208,7 +208,7 @@ struct EffectApiLedgerState {
     events: Vec<(u64, Vec<u8>)>,
     device_activity: HashMap<aura_core::DeviceId, u64>,
     subscribers:
-        Vec<futures::channel::mpsc::UnboundedSender<aura_protocol::effects::EffectApiEvent>>,
+        Vec<futures::channel::mpsc::Sender<aura_protocol::effects::EffectApiEvent>>,
 }
 
 #[derive(Clone, Default)]
@@ -505,9 +505,9 @@ impl AuraEffectSystem {
             std::mem::take(&mut ledger.subscribers)
         };
         let mut retained = Vec::with_capacity(subscribers.len());
-        for sender in subscribers {
+        for mut sender in subscribers {
             if sender
-                .unbounded_send(aura_protocol::effects::EffectApiEvent::EventAppended {
+                .try_send(aura_protocol::effects::EffectApiEvent::EventAppended {
                     epoch,
                     event: event.clone(),
                 })
@@ -525,9 +525,9 @@ impl AuraEffectSystem {
             std::mem::take(&mut ledger.subscribers)
         };
         let mut retained = Vec::with_capacity(subscribers.len());
-        for sender in subscribers {
+        for mut sender in subscribers {
             if sender
-                .unbounded_send(aura_protocol::effects::EffectApiEvent::DeviceActivity {
+                .try_send(aura_protocol::effects::EffectApiEvent::DeviceActivity {
                     device_id,
                     last_seen,
                 })

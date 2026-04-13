@@ -131,7 +131,7 @@ impl aura_protocol::effects::EffectApiEffects for AuraEffectSystem {
     }
 
     async fn subscribe_to_events(&self) -> Result<EffectApiEventStream, EffectApiError> {
-        let (sender, receiver) = mpsc::unbounded();
+        let (sender, receiver) = mpsc::channel(64);
         self.effect_api_ledger.lock().subscribers.push(sender);
         Ok(Box::new(Box::pin(receiver)))
     }

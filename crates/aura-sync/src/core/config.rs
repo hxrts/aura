@@ -274,33 +274,34 @@ impl PerformanceConfig {
 impl SyncConfig {
     /// Create a configuration optimized for testing
     pub fn for_testing() -> Self {
-        let mut config = Self::default();
-        config.network = NetworkConfig {
-            base_sync_interval: Duration::from_millis(100),
-            min_sync_interval: Duration::from_millis(50),
-            sync_timeout: Duration::from_secs(5),
-            cleanup_interval: Duration::from_secs(10),
-        };
-        config.retry = RetryConfig {
-            max_retries: 2,
-            base_delay: Duration::from_millis(10),
-            max_delay: Duration::from_millis(100),
-            jitter_factor: 0.0, // No jitter in tests for predictability
-        };
-        config.batching = BatchConfig {
-            default_batch_size: 10,
-            max_operations_per_round: 50,
-            enable_compression: false, // Faster for tests
-            min_batch_size: 1,
-            batch_timeout: Duration::from_millis(100),
-        };
-        config.performance = PerformanceConfig {
-            max_cpu_usage: 100, // No limits in tests
-            max_network_bandwidth: u64::MAX,
-            adaptive_scheduling: false, // Predictable behavior
-            memory_limit: u64::MAX,
-        };
-        config
+        Self {
+            network: NetworkConfig {
+                base_sync_interval: Duration::from_millis(100),
+                min_sync_interval: Duration::from_millis(50),
+                sync_timeout: Duration::from_secs(5),
+                cleanup_interval: Duration::from_secs(10),
+            },
+            retry: RetryConfig {
+                max_retries: 2,
+                base_delay: Duration::from_millis(10),
+                max_delay: Duration::from_millis(100),
+                jitter_factor: 0.0, // No jitter in tests for predictability
+            },
+            batching: BatchConfig {
+                default_batch_size: 10,
+                max_operations_per_round: 50,
+                enable_compression: false, // Faster for tests
+                min_batch_size: 1,
+                batch_timeout: Duration::from_millis(100),
+            },
+            performance: PerformanceConfig {
+                max_cpu_usage: 100, // No limits in tests
+                max_network_bandwidth: u64::MAX,
+                adaptive_scheduling: false, // Predictable behavior
+                memory_limit: u64::MAX,
+            },
+            ..Self::default()
+        }
     }
 
     /// Create a configuration optimized for production
