@@ -2,7 +2,7 @@
 
 This Phase 0 artifact inventories the current authorization capability strings,
 classifies their status, and records the canonical migration targets for the
-clean-cutover refactor currently tracked in `work/3.md`.
+clean-cutover refactor currently tracked in `../work/3.md`.
 
 ## Scope
 

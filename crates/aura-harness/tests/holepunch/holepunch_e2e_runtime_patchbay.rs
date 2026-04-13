@@ -15,6 +15,7 @@ use aura_harness::network_lab::{
 use patchbay::config::LabConfig;
 use patchbay::{check_caps, Lab, LabOpts, OutDir};
 use tokio::net::UdpSocket;
+use tokio::sync::oneshot;
 
 fn holepunch_topology() -> Result<TopologySpec> {
     ScenarioBuilder::new("holepunch-runtime-harness-e2e")

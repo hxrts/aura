@@ -1367,7 +1367,7 @@ fn run_privacy_onion_quarantine() -> Result<()> {
     let lane_files = [
         ".github/workflows/ci.yml",
         ".github/workflows/harness.yml",
-        "Justfile",
+        "justfile",
         "scripts/ci/browser-smoke.sh",
         "scripts/ci/web-matrix.sh",
         "scripts/ci/tui-matrix.sh",
