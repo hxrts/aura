@@ -59,6 +59,8 @@ Parity-critical shared semantic flows must use one explicit ownership category. 
 
 Terminal convenience modals stay in that observed-only category. Opening or editing a local TUI modal such as the contact invitation sheet may prefill or reshape local display state, but it must not become an alternate semantic ingress path or carry authoritative receiver ownership. Tests should prove the real semantic boundary remains the typed dispatch command and upstream `aura-app` workflow submission path rather than modal-local state.
 
+Clipboard copy affordances in TUI modals follow the same rule. Copy buttons and local clipboard helpers are convenience-only observed behavior, not shared semantic evidence. Headless CI and rustdoc builds must not rely on the host system clipboard being available. When a test or harness run needs to assert copied content, use `AURA_CLIPBOARD_MODE=file_only` together with `AURA_CLIPBOARD_FILE` and treat that capture file as diagnostic output rather than as proof of semantic success.
+
 If a migrated parity-critical flow needs both actor and move semantics, the split must stay explicit. The actor owns mutable lifecycle state. Move-owned handles and tokens define which caller may advance or transfer it. If that split is not explicit, the flow is not considered correct by construction.
 
 ### Parity-Critical Observation
@@ -611,6 +613,8 @@ just ci-shared-flow-policy
 ```
 
 `just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent. It verifies that every fully shared flow has explicit parity-scenario coverage and that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics. The shared-flow aggregate now calls Aura policy code for the adaptive-privacy runtime-locality and legacy-sweep gates through `toolkit/xtask`, while the remaining shared-flow checks stay as thin shell orchestration around harness governance and targeted contract tests.
+
+`just ci-user-flow-policy` is the diff-aware guidance gate for this surface. When shared UX contributor policy or parity-sensitive TUI and browser semantics change, update this guide in the same change so the user-flow guidance sync stays green. Local `.claude` skills may remain gitignored, but the authoritative contributor-facing testing guidance must still land in tracked docs.
 
 The shared-flow policy scripts target the published Cargo package names for renamed Layer 6 crates and macros. When invoking raw Cargo commands behind these lanes, use `hxrts-aura-app` and `hxrts-aura-macros` package ids instead of the legacy `aura-app` and `aura-macros` selectors. File-system crate paths remain `crates/aura-app` and `crates/aura-macros`.
 

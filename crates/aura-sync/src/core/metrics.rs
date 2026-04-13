@@ -368,7 +368,7 @@ impl Default for PerformanceSnapshot {
 }
 
 /// Resource metrics snapshot
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResourceSnapshot {
     /// CPU usage percentage
     pub cpu_usage_percent: i64,
@@ -384,21 +384,8 @@ pub struct ResourceSnapshot {
     pub active_timers_count: i64,
 }
 
-impl Default for ResourceSnapshot {
-    fn default() -> Self {
-        Self {
-            cpu_usage_percent: 0,
-            memory_usage_bytes: 0,
-            network_bandwidth_bps: 0,
-            peer_connection_pool_size: 0,
-            message_queue_size: 0,
-            active_timers_count: 0,
-        }
-    }
-}
-
 /// Error metrics snapshot
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ErrorSnapshot {
     /// Total network errors encountered
     pub network_errors_total: u64,
@@ -416,21 +403,6 @@ pub struct ErrorSnapshot {
     pub error_rate_percent: i64,
     /// Total errors across all categories
     pub total_errors: u64,
-}
-
-impl Default for ErrorSnapshot {
-    fn default() -> Self {
-        Self {
-            network_errors_total: 0,
-            protocol_errors_total: 0,
-            timeout_errors_total: 0,
-            validation_errors_total: 0,
-            resource_errors_total: 0,
-            authorization_errors_total: 0,
-            error_rate_percent: 0,
-            total_errors: 0,
-        }
-    }
 }
 
 fn sync_session_timer_key(session_id: &str) -> String {

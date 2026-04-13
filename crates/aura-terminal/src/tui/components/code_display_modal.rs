@@ -343,7 +343,6 @@ fn write_clipboard_capture_file(text: &str) -> Result<bool, String> {
 /// In `system` mode (default), clipboard-unavailable errors are ignored for headless environments.
 /// In `file_only` mode, writes only to `AURA_CLIPBOARD_FILE` and never touches the system clipboard.
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
-    use arboard::Clipboard;
     match clipboard_mode_from_env() {
         ClipboardMode::Disabled => Ok(()),
         ClipboardMode::FileOnly => {
@@ -366,19 +365,32 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
                 }
             };
 
-            match Clipboard::new() {
-                Ok(mut clipboard) => clipboard
-                    .set_text(text)
-                    .map_err(|e| format!("Failed to copy: {e}"))
-                    .or_else(|err| if fallback_written { Ok(()) } else { Err(err) }),
-                Err(e) => {
-                    // Log but don't fail - clipboard may not be available in all environments
-                    tracing::debug!("Clipboard unavailable: {}", e);
-                    Ok(())
-                }
-            }
+            copy_to_system_clipboard(text, fallback_written)
         }
     }
+}
+
+#[cfg(not(doctest))]
+fn copy_to_system_clipboard(text: &str, fallback_written: bool) -> Result<(), String> {
+    use arboard::Clipboard;
+
+    match Clipboard::new() {
+        Ok(mut clipboard) => clipboard
+            .set_text(text)
+            .map_err(|e| format!("Failed to copy: {e}"))
+            .or_else(|err| if fallback_written { Ok(()) } else { Err(err) }),
+        Err(e) => {
+            // Log but don't fail - clipboard may not be available in all environments
+            tracing::debug!("Clipboard unavailable: {}", e);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(doctest)]
+fn copy_to_system_clipboard(_text: &str, fallback_written: bool) -> Result<(), String> {
+    let _ = fallback_written;
+    Ok(())
 }
 
 #[cfg(test)]

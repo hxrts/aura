@@ -505,6 +505,7 @@ ci-harness-build:
 
 # Harness contract tests
 ci-harness-contract:
+    rm -rf .tmp/harness/instance-claims
     cargo test -p aura-harness --test contract_local_loopback -q
     cargo test -p aura-harness --test contract_suite -q
 
@@ -575,9 +576,9 @@ ci-bootstrap-discovery:
 ci-lan-deep:
     cargo test -p hxrts-aura-agent --test lan_integration -q -- --ignored
 
-# Test suite (excludes patchbay tests which run in ci-holepunch-tier2)
+# Test suite (excludes patchbay tests and contract_suite PTY/SSH tests which run in ci-harness-contract)
 ci-test:
-    cargo test --workspace -- --skip patchbay
+    cargo test --workspace -- --skip patchbay --skip contract_pty_control_path --skip contract_ssh_dry_run_lifecycle --skip contract_replay_and_artifacts_subsystems
 
 # Protocol evolution compatibility gate (async_subtype)
 ci-protocol-compat:

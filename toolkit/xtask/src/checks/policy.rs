@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeSet, HashSet},
-    fs,
+    env, fs,
     path::Path,
+    process::Command,
 };
 
 use anyhow::{bail, Context, Result};
@@ -1670,6 +1671,69 @@ fn extract_ts_function(contents: &str, signature: &str) -> Option<String> {
     })
 }
 
+/// Compute the git diff range for diff-aware policy checks.
+/// Priority: env var → GITHUB_BASE_REF PR range → HEAD (unstaged).
+fn compute_diff_range(env_var: &str) -> Result<Option<String>> {
+    if let Ok(range) = env::var(env_var) {
+        if !range.is_empty() {
+            return Ok(Some(range));
+        }
+    }
+    if let Ok(base_ref) = env::var("GITHUB_BASE_REF") {
+        if !base_ref.is_empty() {
+            let origin_ref = format!("origin/{base_ref}");
+            let ok = Command::new("git")
+                .args(["rev-parse", "--verify", &origin_ref])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if ok {
+                return Ok(Some(format!("{origin_ref}...HEAD")));
+            }
+        }
+    }
+    let head_ok = Command::new("git")
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if head_ok {
+        return Ok(Some("HEAD".to_owned()));
+    }
+    Ok(None)
+}
+
+/// Return the list of files changed in `diff_range` (via `git diff --name-only`).
+fn diff_names(diff_range: &str) -> Result<BTreeSet<String>> {
+    let output = Command::new("git")
+        .args(["diff", "--name-only", diff_range])
+        .output()
+        .context("running git diff --name-only")?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Resolve the changed-file list for guidance-sync checks.
+/// Honours `AURA_UX_GUIDANCE_CHANGED_FILES` (newline-separated) or falls back to git diff.
+fn changed_files_for_guidance() -> Result<BTreeSet<String>> {
+    if let Ok(files) = env::var("AURA_UX_GUIDANCE_CHANGED_FILES") {
+        return Ok(files
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect());
+    }
+    let range = match compute_diff_range("AURA_UX_GUIDANCE_DIFF_RANGE")? {
+        Some(r) => r,
+        None => return Ok(BTreeSet::new()),
+    };
+    diff_names(&range)
+}
+
 fn run_head_shell_script(script: &str, extra_args: &[String]) -> Result<()> {
     let repo_root = repo_root()?;
     let script_path = repo_root.join(script);
@@ -1747,15 +1811,245 @@ fn run_harness_governance_check(check: &str) -> Result<()> {
 }
 
 pub fn run_browser_cache_lifecycle() -> Result<()> {
-    run_head_shell_script("scripts/check/browser-cache-lifecycle.sh", &[])
+    let repo_root = repo_root()?;
+    let ui_contract_dir = repo_root.join("crates/aura-app/src/ui_contract");
+    let ui_contract_file = repo_root.join("crates/aura-app/src/ui_contract.rs");
+
+    let search_paths = {
+        let mut paths = vec![ui_contract_file.to_string_lossy().into_owned()];
+        if ui_contract_dir.exists() {
+            paths.push(ui_contract_dir.to_string_lossy().into_owned());
+        }
+        paths
+    };
+
+    let mut args = vec!["pub const BROWSER_CACHE_BOUNDARIES".into()];
+    args.extend(search_paths.clone());
+    if !rg_exists(&args)? {
+        bail!("harness-browser-cache-lifecycle: missing browser cache lifecycle metadata");
+    }
+
+    for reason in [
+        "session_start",
+        "authority_switch",
+        "device_import",
+        "storage_reset",
+        "navigation_recovery",
+    ] {
+        let mut args = vec![reason.into()];
+        args.extend(search_paths.clone());
+        if !rg_exists(&args)? {
+            bail!("harness-browser-cache-lifecycle: missing browser cache lifecycle reason: {reason}");
+        }
+    }
+
+    println!("harness browser cache lifecycle: clean");
+    Ok(())
 }
 
 pub fn run_browser_cache_owner() -> Result<()> {
-    run_head_shell_script("scripts/check/browser-cache-owner.sh", &[])
+    let repo_root = repo_root()?;
+    let driver = repo_root.join("crates/aura-harness/playwright-driver/src/playwright_driver.ts");
+
+    let start_line: Option<u64> = rg_lines(&[
+        "-n".into(),
+        "^function resetUiObservationState".into(),
+        driver.to_string_lossy().into_owned(),
+    ])?
+    .first()
+    .and_then(|l| l.split(':').next().and_then(|n| n.parse().ok()));
+
+    let end_line: Option<u64> = rg_lines(&[
+        "-n".into(),
+        "^function resetObservationState".into(),
+        driver.to_string_lossy().into_owned(),
+    ])?
+    .first()
+    .and_then(|l| l.split(':').next().and_then(|n| n.parse().ok()));
+
+    let (start, end) = match (start_line, end_line) {
+        (Some(s), Some(e)) => (s, e),
+        _ => bail!("harness-browser-cache-owner: could not locate browser cache owner function boundaries"),
+    };
+
+    let hits = command_stdout(
+        "rg",
+        &[
+            "--no-heading".into(),
+            "-n".into(),
+            r"session\.uiStateCache = null|session\.uiStateCacheJson = null|session\.uiStateVersion = 0|session\.requiredUiStateRevision = 0".into(),
+            driver.to_string_lossy().into_owned(),
+        ],
+    )
+    .unwrap_or_default();
+
+    for hit in hits.lines().filter(|l| !l.is_empty()) {
+        let line_num: u64 = hit.split(':').next().and_then(|n| n.parse().ok()).unwrap_or(0);
+        if line_num < start || line_num >= end {
+            eprintln!("{hit}");
+            bail!("harness-browser-cache-owner: browser cache reset logic must stay inside resetUiObservationState");
+        }
+    }
+
+    println!("harness browser cache owner: clean");
+    Ok(())
 }
 
 pub fn run_browser_driver_contract_sync() -> Result<()> {
-    run_head_shell_script("scripts/check/browser-driver-contract.sh", &[])
+    // long-block-exception: multi-stage sync check between Rust and TS driver contract files
+    let repo_root = repo_root()?;
+    let rust_contract = repo_root.join("crates/aura-web/src/harness/driver_contract.rs");
+    let ts_contract =
+        repo_root.join("crates/aura-harness/playwright-driver/src/driver_contract.ts");
+    let ts_driver =
+        repo_root.join("crates/aura-harness/playwright-driver/src/playwright_driver.ts");
+
+    if !rust_contract.exists() {
+        bail!("browser-driver-contract-sync: missing Rust contract file: {}", repo_relative(&rust_contract));
+    }
+    if !ts_contract.exists() {
+        bail!("browser-driver-contract-sync: missing TS contract file: {}", repo_relative(&ts_contract));
+    }
+    if !ts_driver.exists() {
+        bail!("browser-driver-contract-sync: missing TS driver file: {}", repo_relative(&ts_driver));
+    }
+
+    // Extract constants from Rust contract: `pub(crate) const NAME: &str = "value";`
+    let rust_src = read(&rust_contract)?;
+    let rust_const_re = Regex::new(r#"pub\(crate\) const (\w+): &str = "([^"]+)";"#)?;
+    let mut rust_consts: Vec<String> = rust_const_re
+        .captures_iter(&rust_src)
+        .map(|c| format!("{}={}", &c[1], &c[2]))
+        .collect();
+    rust_consts.sort();
+
+    // Extract constants from TS contract: `export const NAME = "value";`
+    let ts_src = read(&ts_contract)?;
+    let ts_const_re = Regex::new(r#"export const (\w+) = "([^"]+)";"#)?;
+    let mut ts_consts: Vec<String> = ts_const_re
+        .captures_iter(&ts_src)
+        .map(|c| format!("{}={}", &c[1], &c[2]))
+        .collect();
+    ts_consts.sort();
+
+    if rust_consts.is_empty() {
+        bail!("browser-driver-contract-sync: failed to extract Rust contract constants");
+    }
+    if ts_consts.is_empty() {
+        bail!("browser-driver-contract-sync: failed to extract TS contract constants");
+    }
+    if rust_consts != ts_consts {
+        eprintln!("Rust constants: {rust_consts:?}");
+        eprintln!("TS constants: {ts_consts:?}");
+        bail!("browser-driver-contract-sync: Rust and TS browser-driver contract constants differ");
+    }
+
+    // Check SemanticQueuePayload fields
+    let rust_semantic_re = Regex::new(r"struct SemanticQueuePayload \{([^}]*)\}")?;
+    let rust_semantic_field_re = Regex::new(r"pub\(crate\) (\w+):")?;
+    let mut rust_semantic: Vec<String> = rust_semantic_re
+        .captures(&rust_src)
+        .map(|c| {
+            rust_semantic_field_re
+                .captures_iter(&c[1])
+                .map(|f| f[1].to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    rust_semantic.sort();
+
+    let ts_semantic_re = Regex::new(r"type SemanticQueuePayload = \{([^}]*)\};")?;
+    let ts_field_re = Regex::new(r"(\w+):")?;
+    let mut ts_semantic: Vec<String> = ts_semantic_re
+        .captures(&ts_src)
+        .map(|c| {
+            ts_field_re
+                .captures_iter(&c[1])
+                .map(|f| f[1].to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    ts_semantic.sort();
+
+    if rust_semantic != ts_semantic {
+        bail!("browser-driver-contract-sync: Semantic queue payload fields differ between Rust and TS contracts");
+    }
+
+    // Check RuntimeStageQueuePayload fields
+    let rust_runtime_re = Regex::new(r"struct RuntimeStageQueuePayload \{([^}]*)\}")?;
+    let mut rust_runtime: Vec<String> = rust_runtime_re
+        .captures(&rust_src)
+        .map(|c| {
+            rust_semantic_field_re
+                .captures_iter(&c[1])
+                .map(|f| f[1].to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    rust_runtime.sort();
+
+    let ts_runtime_re = Regex::new(r"type RuntimeStageQueuePayload = \{([^}]*)\};")?;
+    let mut ts_runtime: Vec<String> = ts_runtime_re
+        .captures(&ts_src)
+        .map(|c| {
+            ts_field_re
+                .captures_iter(&c[1])
+                .map(|f| f[1].to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    ts_runtime.sort();
+
+    if rust_runtime != ts_runtime {
+        bail!("browser-driver-contract-sync: Runtime-stage queue payload fields differ between Rust and TS contracts");
+    }
+
+    // Check raw driver names against allowlist
+    let driver_src = read(&ts_driver)?;
+    let raw_name_re = Regex::new(r#""(__AURA_DRIVER_[A-Z0-9_]+)""#)?;
+    let mut raw_names: BTreeSet<String> = raw_name_re
+        .captures_iter(&driver_src)
+        .map(|c| c[1].to_string())
+        .collect();
+
+    let allowed_names: BTreeSet<&str> = [
+        "__AURA_DRIVER_OBSERVER_INSTALLED",
+        "__AURA_DRIVER_PUSH_CLIPBOARD",
+        "__AURA_DRIVER_PUSH_RENDER_HEARTBEAT",
+        "__AURA_DRIVER_PUSH_STATE",
+        "__AURA_DRIVER_PUSH_UI_STATE",
+        "__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE_DISPATCHED__",
+        "__AURA_DRIVER_SEMANTIC_ENQUEUE_DISPATCHED__",
+    ]
+    .into();
+
+    let ts_const_values: BTreeSet<String> = ts_const_re
+        .captures_iter(&ts_src)
+        .map(|c| c[2].to_string())
+        .collect();
+
+    for allowed in &allowed_names {
+        raw_names.remove(*allowed);
+    }
+    for val in &ts_const_values {
+        raw_names.remove(val.as_str());
+    }
+
+    if !raw_names.is_empty() {
+        eprintln!("Unexpected raw TS driver names: {raw_names:?}");
+        bail!("browser-driver-contract-sync: TS driver contains raw __AURA_DRIVER_* literals outside the sanctioned contract set");
+    }
+
+    // Verify TS driver doesn't hand-build queue payload JSON
+    if driver_src.contains(r#"JSON.stringify({ command_id: commandId, request_json: requestJson, })"#) {
+        bail!("browser-driver-contract-sync: TS driver still hand-builds semantic queue payload JSON");
+    }
+    if driver_src.contains(r#"JSON.stringify({ command_id: commandId, runtime_identity_json: runtimeIdentityJson, })"#) {
+        bail!("browser-driver-contract-sync: TS driver still hand-builds runtime-stage queue payload JSON");
+    }
+
+    println!("browser-driver-contract-sync: clean");
+    Ok(())
 }
 
 pub fn run_browser_toolchain() -> Result<()> {
@@ -1831,31 +2125,584 @@ pub fn run_browser_observation_contract() -> Result<()> {
 }
 
 pub fn run_browser_observation_recovery() -> Result<()> {
-    run_head_shell_script("scripts/check/browser-observation-recovery.sh", &[])
+    let repo_root = repo_root()?;
+    let driver = repo_root.join("crates/aura-harness/playwright-driver/src/playwright_driver.ts");
+    let method_sets =
+        repo_root.join("crates/aura-harness/playwright-driver/src/method_sets.ts");
+    let observation_module =
+        repo_root.join("crates/aura-harness/playwright-driver/src/observation.ts");
+
+    // Check ui_state function body doesn't do implicit recovery
+    let driver_src = read(&driver)?;
+    // Extract the uiState function body
+    let ui_state_body: String = {
+        let mut in_fn = false;
+        let mut depth = 0i32;
+        let mut lines = Vec::new();
+        for line in driver_src.lines() {
+            if line.starts_with("async function uiState(params)") {
+                in_fn = true;
+            }
+            if in_fn {
+                depth += line.chars().filter(|&c| c == '{').count() as i32;
+                depth -= line.chars().filter(|&c| c == '}').count() as i32;
+                lines.push(line);
+                if depth <= 0 && !lines.is_empty() {
+                    break;
+                }
+            }
+        }
+        lines.join("\n")
+    };
+
+    if ui_state_body.contains("readStructuredUiStateWithNavigationRecovery")
+        || ui_state_body.contains("resetObservationState(")
+    {
+        bail!("harness browser observation recovery: ui_state may not perform implicit browser recovery");
+    }
+
+    if !contains(&method_sets, "export const RECOVERY_METHODS: ReadonlySet<DriverMethod> = new Set")? {
+        bail!("harness browser observation recovery: driver must declare explicit recovery methods");
+    }
+
+    if !contains(&driver, "case \"recover_ui_state\"")? {
+        bail!("harness browser observation recovery: driver must expose explicit recover_ui_state");
+    }
+
+    if observation_module.exists() {
+        let obs_src = read(&observation_module)?;
+        if obs_src.contains("recover") || obs_src.contains("retry") || obs_src.contains("fallback") {
+            bail!("harness browser observation recovery: browser observation module must stay passive and recovery-free");
+        }
+    }
+
+    for forbidden in [
+        "click_button js_fallback_",
+        "click_button css fallback_key",
+        "click_button nav_label_first",
+        "fill_input fallback_done",
+        "locator_click_force:",
+        "key_press_dom_fallback_",
+        "selectorToFallbackLabel",
+    ] {
+        if driver_src.contains(forbidden) {
+            bail!("harness browser observation recovery: legacy implicit browser fallback remains in driver: {forbidden}");
+        }
+    }
+
+    run_browser_toolchain()?;
+
+    let driver_dir = browser_driver_dir()?;
+    run_ok_in_dir(
+        "node",
+        &["./playwright_driver.mjs".into(), "--selftest".into()],
+        &driver_dir,
+    )?;
+
+    println!("harness browser observation recovery: clean");
+    Ok(())
 }
 
 pub fn run_harness_action_preconditions() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-action-preconditions.sh", &[])
+    let repo_root = repo_root()?;
+    let executor = repo_root.join("crates/aura-harness/src/executor.rs");
+    let scenario_contract = repo_root.join("crates/aura-app/src/scenario_contract.rs");
+    let scenario_contract_dir = repo_root.join("crates/aura-app/src/scenario_contract");
+
+    let mut sc_paths = vec![scenario_contract.to_string_lossy().into_owned()];
+    if scenario_contract_dir.exists() {
+        sc_paths.push(scenario_contract_dir.to_string_lossy().into_owned());
+    }
+
+    let mut args = vec!["ActionPrecondition::Quiescence".into()];
+    args.extend(sc_paths);
+    if !rg_exists(&args)? {
+        bail!("harness-action-preconditions: shared action contracts must declare quiescence preconditions");
+    }
+
+    if !rg_exists(&["fn enforce_action_preconditions".into(), executor.to_string_lossy().into_owned()])? {
+        bail!("harness-action-preconditions: executor is missing typed action precondition enforcement");
+    }
+    if !rg_exists(&["-F".into(), "enforce_action_preconditions(step, tool_api, context, &intent".into(), executor.to_string_lossy().into_owned()])? {
+        bail!("harness-action-preconditions: shared action execution does not enforce preconditions before issue");
+    }
+    if !rg_exists(&["fn wait_for_contract_barriers".into(), executor.to_string_lossy().into_owned()])? {
+        bail!("harness-action-preconditions: executor is missing typed post-operation convergence enforcement");
+    }
+    if !rg_exists(&["-F".into(), "wait_for_contract_barriers(".into(), executor.to_string_lossy().into_owned()])? {
+        bail!("harness-action-preconditions: shared action execution does not enforce post-operation convergence before the next intent");
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "action_preconditions_fail_diagnostically_before_issue".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "missing_sync_prerequisites_fail_as_convergence_contract_violations".into(), "--quiet".into()])?;
+
+    println!("harness action preconditions: clean");
+    Ok(())
 }
 
 pub fn run_harness_backend_contract() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-backend-contract.sh", &[])
+    let repo_root = repo_root()?;
+    let backend_contract = repo_root.join("crates/aura-harness/src/backend/mod.rs");
+
+    let backend_src = read(&backend_contract)?;
+
+    // Extract InstanceBackend trait body
+    let trait_body = {
+        let marker = "pub trait InstanceBackend {";
+        let start = backend_src.find(marker).ok_or_else(|| anyhow::anyhow!("harness-backend-contract: could not extract InstanceBackend trait body"))?;
+        let rest = &backend_src[start + marker.len()..];
+        let mut depth = 1i32;
+        let mut end = 0;
+        for (i, c) in rest.char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        rest[..end].to_string()
+    };
+
+    for forbidden in [
+        "fn click_button",
+        "fn activate_control",
+        "fn click_target",
+        "fn fill_input",
+        "fn fill_field",
+        "fn activate_list_item",
+        "fn submit_create_account",
+        "fn submit_create_home",
+        "fn submit_create_contact_invitation",
+        "fn submit_accept_contact_invitation",
+        "fn submit_invite_actor_to_channel",
+        "fn submit_accept_pending_channel_invitation",
+        "fn submit_join_channel",
+        "fn submit_send_chat_message",
+    ] {
+        if trait_body.contains(forbidden) {
+            bail!("harness-backend-contract: InstanceBackend still carries forbidden surface: {forbidden}");
+        }
+    }
+
+    for required in [
+        "pub trait ObservationBackend",
+        "pub trait RawUiBackend",
+        "pub trait SharedSemanticBackend",
+    ] {
+        if !backend_src.contains(required) {
+            bail!("harness-backend-contract: missing backend contract surface: {required}");
+        }
+    }
+
+    if backend_src.contains("impl<T: InstanceBackend + ?Sized> SharedSemanticBackend for T") {
+        bail!("harness-backend-contract: blanket SharedSemanticBackend impl keeps fallback-heavy semantic execution alive");
+    }
+
+    let local_pty = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
+    if !contains(&local_pty, "impl SharedSemanticBackend for LocalPtyBackend")? {
+        bail!("harness-backend-contract: local PTY backend must explicitly implement SharedSemanticBackend");
+    }
+
+    let playwright = repo_root.join("crates/aura-harness/src/backend/playwright_browser.rs");
+    if !contains(&playwright, "impl SharedSemanticBackend for PlaywrightBrowserBackend")? {
+        bail!("harness-backend-contract: Playwright backend must explicitly implement SharedSemanticBackend");
+    }
+
+    println!("harness backend contract: clean");
+    Ok(())
 }
 
 pub fn run_harness_boundary_policy() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-boundary-policy.sh", &[])
+    let repo_root = repo_root()?;
+
+    // Check that scenario contracts don't contain frontend mechanics
+    let sc_files = {
+        let sc = repo_root.join("crates/aura-app/src/scenario_contract.rs");
+        let sc_dir = repo_root.join("crates/aura-app/src/scenario_contract");
+        let mut paths = vec![sc.to_string_lossy().into_owned()];
+        if sc_dir.exists() {
+            paths.push(sc_dir.to_string_lossy().into_owned());
+        }
+        paths
+    };
+
+    let forbidden_contract = r"send_keys|send_key|click_button|click_target|fill_input|selector|dom_snapshot";
+    let mut contract_args: Vec<String> = vec!["-n".into(), forbidden_contract.into()];
+    contract_args.extend(sc_files.clone());
+    let contract_hits = rg_lines(&contract_args)?;
+    let contract_real_hits: Vec<_> = contract_hits
+        .into_iter()
+        .filter(|l| {
+            let trimmed = l.trim_start();
+            !trimmed.starts_with("//!") && !trimmed.starts_with("//") && !trimmed.starts_with('*')
+        })
+        .collect();
+    if !contract_real_hits.is_empty() {
+        for hit in &contract_real_hits {
+            eprintln!("{hit}");
+        }
+        bail!("harness-boundary-policy: semantic scenario contract contains frontend-specific mechanics");
+    }
+
+    // Check that Quint/verification code doesn't reference frontend mechanics
+    let forbidden_quint =
+        r"aura_terminal|aura_ui|playwright|ToolRequest|send_keys|send_key|click_button|fill_input";
+    let quint_hits = rg_lines(&[
+        "-n".into(),
+        forbidden_quint.into(),
+        repo_root.join("crates/aura-quint").to_string_lossy().into_owned(),
+        repo_root.join("verification/quint").to_string_lossy().into_owned(),
+    ])?;
+    let quint_real_hits: Vec<_> = quint_hits
+        .into_iter()
+        .filter(|l| {
+            let trimmed = l.trim_start();
+            !trimmed.starts_with("//!") && !trimmed.starts_with("//") && !trimmed.starts_with('*')
+        })
+        .collect();
+    if !quint_real_hits.is_empty() {
+        for hit in &quint_real_hits {
+            eprintln!("{hit}");
+        }
+        bail!("harness-boundary-policy: Quint or verification code references frontend-driving mechanics");
+    }
+
+    // Check referenced scenarios are present and not legacy
+    let active_ref_roots = [
+        repo_root.join("justfile"),
+        repo_root.join("scripts/ci"),
+        repo_root.join("crates/aura-harness"),
+        repo_root.join("docs/804_testing_guide.md"),
+    ];
+    let scenario_re = Regex::new(r"scenarios/harness/[A-Za-z0-9._/-]+\.toml")?;
+    let mut referenced: BTreeSet<String> = BTreeSet::new();
+    for root in &active_ref_roots {
+        if !root.exists() {
+            continue;
+        }
+        let hits = command_stdout(
+            "rg",
+            &[
+                "-o".into(),
+                "--no-filename".into(),
+                r"scenarios/harness/[A-Za-z0-9._/-]+\.toml".into(),
+                root.to_string_lossy().into_owned(),
+            ],
+        )
+        .unwrap_or_default();
+        for line in hits.lines().filter(|l| !l.is_empty()) {
+            referenced.insert(line.trim().to_string());
+        }
+    }
+    let legacy_keys = ["schema_version", "execution_mode", "required_capabilities"];
+    for scenario in &referenced {
+        let path = repo_root.join(scenario);
+        if !path.exists() {
+            bail!("harness-boundary-policy: active entry point references missing scenario: {scenario}");
+        }
+        let src = read(&path)?;
+        for key in &legacy_keys {
+            let pat = format!("{key} =");
+            if src.contains(&pat) {
+                bail!("harness-boundary-policy: active entry point references legacy harness scenario: {scenario}");
+            }
+        }
+    }
+
+    // Check semantic scenarios for raw selectors / legacy actions
+    let scenario_dir = repo_root.join("scenarios/harness");
+    if scenario_dir.exists() {
+        for entry in fs::read_dir(&scenario_dir)
+            .with_context(|| format!("reading {}", scenario_dir.display()))?
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+                continue;
+            }
+            let src = read(&path)?;
+            let is_legacy = legacy_keys.iter().any(|k| src.contains(&format!("{k} =")));
+            if is_legacy {
+                continue;
+            }
+            if src.contains("selector =") {
+                bail!(
+                    "harness-boundary-policy: semantic scenario contains raw selector reference: {}",
+                    repo_relative(&path)
+                );
+            }
+            for legacy_action in [
+                r#"action = "wait_for""#,
+                r#"action = "click_button""#,
+                r#"action = "fill_input""#,
+                r#"action = "send_keys""#,
+                r#"action = "send_key""#,
+            ] {
+                if src.contains(legacy_action) {
+                    bail!(
+                        "harness-boundary-policy: semantic scenario contains legacy frontend action: {}",
+                        repo_relative(&path)
+                    );
+                }
+            }
+        }
+    }
+
+    let _ = scenario_re; // used above via command_stdout rg
+    println!("harness boundary policy: clean");
+    Ok(())
 }
 
 pub fn run_harness_bridge_contract() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-bridge-contract.sh", &[])
+    let repo_root = repo_root()?;
+    let ui_contract_file = repo_root.join("crates/aura-app/src/ui_contract.rs");
+    let ui_contract_dir = repo_root.join("crates/aura-app/src/ui_contract");
+
+    let mut ui_paths = vec![ui_contract_file.to_string_lossy().into_owned()];
+    if ui_contract_dir.exists() {
+        ui_paths.push(ui_contract_dir.to_string_lossy().into_owned());
+    }
+
+    for (const_name, label) in [
+        ("pub const BROWSER_HARNESS_BRIDGE_API_VERSION", "missing browser harness bridge API version"),
+        ("pub const BROWSER_HARNESS_BRIDGE_METHODS", "missing browser harness bridge method metadata"),
+        ("pub const BROWSER_OBSERVATION_SURFACE_API_VERSION", "missing browser observation surface API version"),
+        ("pub const BROWSER_OBSERVATION_SURFACE_METHODS", "missing browser observation surface method metadata"),
+        ("pub struct HarnessShellStructureSnapshot", "missing HarnessShellStructureSnapshot contract"),
+        ("pub fn validate_harness_shell_structure", "missing harness shell structure validator"),
+    ] {
+        let mut args = vec![const_name.into()];
+        args.extend(ui_paths.clone());
+        if !rg_exists(&args)? {
+            bail!("harness-bridge-contract: {label}");
+        }
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "browser_harness_bridge_contract_is_versioned_and_complete".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "browser_harness_bridge_read_methods_are_declared_deterministic".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "browser_observation_surface_contract_is_versioned_and_read_only".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "tui_observation_surface_contract_is_versioned_and_read_only".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "harness_shell_structure_accepts_exactly_one_app_shell".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "harness_shell_structure_accepts_single_onboarding_shell".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "harness_shell_structure_rejects_duplicate_or_ambiguous_roots".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "playwright_semantic_bridge_failure_and_projection_contracts_are_explicit".into(), "--quiet".into()])?;
+
+    println!("harness bridge contract: clean");
+    Ok(())
 }
 
 pub fn run_harness_command_plane_boundary() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-command-plane-boundary.sh", &[])
+    let repo_root = repo_root()?;
+
+    let allowed_rust_files: BTreeSet<&str> = [
+        "crates/aura-harness/src/backend/mod.rs",
+        "crates/aura-harness/src/backend/local_pty.rs",
+        "crates/aura-harness/src/backend/playwright_browser.rs",
+        "crates/aura-harness/src/tool_api.rs",
+        "crates/aura-harness/src/coordinator.rs",
+        "crates/aura-harness/src/executor.rs",
+        "crates/aura-web/src/harness_bridge.rs",
+        "crates/aura-web/src/harness/commands.rs",
+    ]
+    .into();
+
+    let allowed_ts_files: BTreeSet<&str> = [
+        "crates/aura-harness/playwright-driver/src/playwright_driver.ts",
+        "crates/aura-harness/playwright-driver/src/contracts.ts",
+        "crates/aura-harness/playwright-driver/src/method_sets.ts",
+    ]
+    .into();
+
+    // Check Rust files for unexpected semantic command handling surfaces.
+    let rust_hits: Vec<String> = {
+        let output = command_stdout(
+            "rg",
+            &[
+                "-l".into(),
+                r"fn submit_semantic_command\(|submit_semantic_command_via_ui\(".into(),
+                repo_root.join("crates/aura-harness").to_string_lossy().into_owned(),
+                repo_root.join("crates/aura-web").to_string_lossy().into_owned(),
+            ],
+        )
+        .unwrap_or_default();
+        output
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| {
+                let p = std::path::Path::new(l);
+                p.strip_prefix(&repo_root)
+                    .map(|r| r.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| l.to_string())
+            })
+            .collect()
+    };
+    for file in &rust_hits {
+        if !allowed_rust_files.contains(file.as_str()) {
+            bail!(
+                "harness-command-plane-boundary: unexpected semantic command handling surface in Rust module: {file}"
+            );
+        }
+    }
+
+    // Check TypeScript files for unexpected semantic command handling surfaces.
+    let ts_hits: Vec<String> = {
+        let output = command_stdout(
+            "rg",
+            &[
+                "-l".into(),
+                "submit_semantic_command".into(),
+                repo_root
+                    .join("crates/aura-harness/playwright-driver")
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+        )
+        .unwrap_or_default();
+        output
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| {
+                let p = std::path::Path::new(l);
+                p.strip_prefix(&repo_root)
+                    .map(|r| r.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| l.to_string())
+            })
+            .collect()
+    };
+    for file in &ts_hits {
+        if !allowed_ts_files.contains(file.as_str()) {
+            bail!(
+                "harness-command-plane-boundary: unexpected semantic command handling surface in Playwright driver: {file}"
+            );
+        }
+    }
+
+    // Verify executor uses the shared-intent path through ToolApi.
+    let executor_path = repo_root.join("crates/aura-harness/src/executor.rs");
+    if executor_path.exists() {
+        let executor_src = std::fs::read_to_string(&executor_path)?;
+        if !executor_src.contains(
+            "tool_api.submit_semantic_command(instance_id, SemanticCommandRequest::new(intent))",
+        ) {
+            bail!(
+                "harness-command-plane-boundary: executor must submit shared intents only through ToolApi::submit_semantic_command"
+            );
+        }
+    }
+
+    // Verify per-intent wrappers have not re-appeared in tool_api.rs.
+    let per_intent_patterns = [
+        "submit_create_account(",
+        "submit_create_home(",
+        "submit_create_contact_invitation(",
+        "submit_accept_contact_invitation(",
+        "submit_invite_actor_to_channel(",
+        "submit_accept_pending_channel_invitation(",
+        "submit_join_channel(",
+        "submit_send_chat_message(",
+    ];
+    let tool_api_path = repo_root.join("crates/aura-harness/src/tool_api.rs");
+    if tool_api_path.exists() {
+        let tool_api_src = std::fs::read_to_string(&tool_api_path)?;
+        for pat in &per_intent_patterns {
+            if tool_api_src.contains(pat) {
+                bail!(
+                    "harness-command-plane-boundary: per-intent semantic command wrappers must not reappear in ToolApi (found: {pat})"
+                );
+            }
+        }
+    }
+
+    // Verify per-intent wrappers have not re-appeared in coordinator.rs.
+    let per_intent_ui_patterns = [
+        "create_account_via_ui(",
+        "create_home_via_ui(",
+        "create_contact_invitation_via_ui(",
+        "accept_contact_invitation_via_ui(",
+        "invite_actor_to_channel_via_ui(",
+        "accept_pending_channel_invitation_via_ui(",
+        "join_channel_via_ui(",
+        "send_chat_message_via_ui(",
+    ];
+    let coordinator_path = repo_root.join("crates/aura-harness/src/coordinator.rs");
+    if coordinator_path.exists() {
+        let coordinator_src = std::fs::read_to_string(&coordinator_path)?;
+        for pat in &per_intent_ui_patterns {
+            if coordinator_src.contains(pat) {
+                bail!(
+                    "harness-command-plane-boundary: per-intent semantic command wrappers must not reappear in HarnessCoordinator (found: {pat})"
+                );
+            }
+        }
+    }
+
+    println!("harness command-plane boundary: clean");
+    Ok(())
 }
 
 pub fn run_harness_conformance_gate() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-conformance-gate.sh", &[])
+    let repo_root = repo_root()?;
+    let workflow = repo_root.join(".github/workflows/conform.yml");
+    let legacy_workflow = repo_root.join(".github/workflows/ci.yml");
+
+    let check_triggers = |path: &std::path::Path| -> Result<()> {
+        let src = read(path)?;
+        if !src.contains("pull_request:") || !src.contains("branches: [main, develop]") {
+            bail!(
+                "harness-conformance-gate: Conformance gate must run on pull_request for protected branches. Ensure trigger includes 'pull_request' with '[main, develop]' in {}",
+                repo_relative(path)
+            );
+        }
+        Ok(())
+    };
+
+    if workflow.exists() {
+        let src = read(&workflow)?;
+        if !src.contains("  conformance:") {
+            bail!("harness-conformance-gate: Missing 'conformance' job in {}. Add job 'conformance' that runs 'nix develop --command just ci-conformance'.", repo_relative(&workflow));
+        }
+        if !src.contains("just ci-conformance-policy") {
+            bail!("harness-conformance-gate: Conformance workflow must execute 'just ci-conformance-policy'.");
+        }
+        if !src.contains("just ci-conformance") {
+            bail!("harness-conformance-gate: Conformance workflow must execute 'just ci-conformance'.");
+        }
+        check_triggers(&workflow)?;
+        if !src.contains("upload-artifact@v4") || !src.contains("artifacts/conformance") {
+            bail!("harness-conformance-gate: Conformance workflow must upload conformance traces/diffs as artifacts. Add actions/upload-artifact@v4 step for artifacts/conformance.");
+        }
+        println!("[conformance-gate] OK: conformance gate wiring is present in {}", repo_relative(&workflow));
+        return Ok(());
+    }
+
+    if !legacy_workflow.exists() {
+        bail!(
+            "harness-conformance-gate: Missing {} (or legacy {}). Add a protected-branch conformance workflow that runs 'just ci-conformance'.",
+            repo_relative(&workflow),
+            repo_relative(&legacy_workflow)
+        );
+    }
+
+    let legacy_src = read(&legacy_workflow)?;
+    if !legacy_src.contains("  conformance-gate:") {
+        bail!("harness-conformance-gate: Missing 'conformance-gate' job in {}. Add job 'conformance-gate' that runs 'nix develop --command just ci-conformance'.", repo_relative(&legacy_workflow));
+    }
+    if !legacy_src.contains("just ci-conformance") {
+        bail!("harness-conformance-gate: Conformance gate job must execute 'just ci-conformance'.");
+    }
+    check_triggers(&legacy_workflow)?;
+    if !legacy_src.contains("upload-artifact@v4") || !legacy_src.contains("artifacts/conformance") {
+        bail!("harness-conformance-gate: Conformance gate must upload conformance traces/diffs as artifacts. Add actions/upload-artifact@v4 step for artifacts/conformance.");
+    }
+
+    println!("[conformance-gate] OK: conformance gate wiring is present in {}", repo_relative(&legacy_workflow));
+    Ok(())
 }
 
 pub fn run_harness_core_scenario_mechanics() -> Result<()> {
@@ -1863,39 +2710,481 @@ pub fn run_harness_core_scenario_mechanics() -> Result<()> {
 }
 
 pub fn run_harness_export_override_policy() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-export-override-policy.sh", &[])
+    let repo_root = repo_root()?;
+
+    let hits = command_stdout(
+        "rg",
+        &[
+            "--no-heading".into(),
+            "-n".into(),
+            "publish_.*override".into(),
+            repo_root.join("crates/aura-terminal/src/tui").to_string_lossy().into_owned(),
+            repo_root.join("crates/aura-ui/src").to_string_lossy().into_owned(),
+            repo_root.join("crates/aura-web/src").to_string_lossy().into_owned(),
+        ],
+    )
+    .unwrap_or_default();
+
+    let filtered: Vec<&str> = hits
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter(|l| !l.contains("crates/aura-terminal/src/tui/harness_state/"))
+        .collect();
+
+    if !filtered.is_empty() {
+        for hit in &filtered {
+            eprintln!("{hit}");
+        }
+        bail!("harness-export-override-policy: new parity-critical export helpers may not depend on override caches outside the quarantined TUI harness export module");
+    }
+
+    println!("harness export override policy: clean");
+    Ok(())
 }
 
 pub fn run_harness_focus_selection_contract() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-focus-selection-contract.sh", &[])
+    let repo_root = repo_root()?;
+    let sc = repo_root.join("crates/aura-app/src/scenario_contract.rs");
+    let sc_dir = repo_root.join("crates/aura-app/src/scenario_contract");
+    let mut sc_paths = vec![sc.to_string_lossy().into_owned()];
+    if sc_dir.exists() {
+        sc_paths.push(sc_dir.to_string_lossy().into_owned());
+    }
+
+    for (pattern, label) in [
+        ("pub enum FocusSemantics", "missing focus semantics contract"),
+        ("pub enum SelectionSemantics", "missing selection semantics contract"),
+        ("pub struct SharedActionContract", "missing shared action contract"),
+    ] {
+        let mut args = vec![pattern.into()];
+        args.extend(sc_paths.clone());
+        if !rg_exists(&args)? {
+            bail!("harness-focus-selection-contract: {label}");
+        }
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "every_intent_kind_declares_focus_and_selection_semantics".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "ui_snapshot_parity_detects_focus_semantic_drift".into(), "--quiet".into()])?;
+
+    println!("harness focus selection contract: clean");
+    Ok(())
 }
 
 pub fn run_harness_matrix_inventory() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-matrix-inventory.sh", &[])
+    let repo_root = repo_root()?;
+    let inventory = repo_root.join("scenarios/harness_inventory.toml");
+    let matrix_runner = repo_root.join("scripts/harness/run-matrix.sh");
+
+    if !inventory.exists() {
+        bail!("harness-matrix-inventory: missing inventory: scenarios/harness_inventory.toml");
+    }
+    if !matrix_runner.exists() {
+        bail!("harness-matrix-inventory: missing matrix runner: scripts/harness/run-matrix.sh");
+    }
+
+    // Parse inventory to collect expected scenario ids per lane
+    let inv_src = read(&inventory)?;
+    let mut expected_tui: BTreeSet<String> = BTreeSet::new();
+    let mut expected_web: BTreeSet<String> = BTreeSet::new();
+    let mut current_id = String::new();
+    let mut current_class = String::new();
+    for line in inv_src.lines() {
+        let line = line.trim();
+        if line == "[[scenario]]" {
+            if !current_id.is_empty() {
+                match current_class.as_str() {
+                    "shared" | "tui_conformance" => { expected_tui.insert(current_id.clone()); }
+                    _ => {}
+                }
+                match current_class.as_str() {
+                    "shared" | "web_conformance" => { expected_web.insert(current_id.clone()); }
+                    _ => {}
+                }
+                current_id.clear();
+                current_class.clear();
+            }
+        } else if let Some(rest) = line.strip_prefix("id = \"") {
+            if let Some(id) = rest.strip_suffix('"') {
+                current_id = id.to_string();
+            }
+        } else if let Some(rest) = line.strip_prefix("classification = \"") {
+            if let Some(class) = rest.strip_suffix('"') {
+                current_class = class.to_string();
+            }
+        }
+    }
+    // flush last entry
+    if !current_id.is_empty() {
+        match current_class.as_str() {
+            "shared" | "tui_conformance" => { expected_tui.insert(current_id.clone()); }
+            _ => {}
+        }
+        match current_class.as_str() {
+            "shared" | "web_conformance" => { expected_web.insert(current_id.clone()); }
+            _ => {}
+        }
+    }
+
+    // Collect actual scenario ids from matrix runner dry-run
+    let collect_actual = |lane: &str| -> Result<BTreeSet<String>> {
+        let out = command_stdout(
+            "bash",
+            &[
+                matrix_runner.to_string_lossy().into_owned(),
+                "--lane".into(),
+                lane.into(),
+                "--dry-run".into(),
+            ],
+        )
+        .unwrap_or_default();
+        let id_re = Regex::new(r"scenario=([A-Za-z0-9._-]+)")?;
+        Ok(id_re
+            .captures_iter(&out)
+            .map(|c| c[1].to_string())
+            .collect())
+    };
+
+    let actual_tui = collect_actual("tui")?;
+    let actual_web = collect_actual("web")?;
+
+    if expected_tui != actual_tui {
+        eprintln!("TUI lane mismatch:");
+        eprintln!("  expected: {expected_tui:?}");
+        eprintln!("  actual:   {actual_tui:?}");
+        bail!("harness-matrix-inventory: lane tui does not match inventory-derived scenario set");
+    }
+    if expected_web != actual_web {
+        eprintln!("Web lane mismatch:");
+        eprintln!("  expected: {expected_web:?}");
+        eprintln!("  actual:   {actual_web:?}");
+        bail!("harness-matrix-inventory: lane web does not match inventory-derived scenario set");
+    }
+
+    println!("harness matrix inventory: clean");
+    Ok(())
 }
 
 pub fn run_harness_mode_allowlist() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-mode-allowlist.sh", &[])
+    let repo_root = repo_root()?;
+    let ui_contract_file = repo_root.join("crates/aura-app/src/ui_contract.rs");
+    let ui_contract_dir = repo_root.join("crates/aura-app/src/ui_contract");
+
+    let mut ui_paths = vec![ui_contract_file.to_string_lossy().into_owned()];
+    if ui_contract_dir.exists() {
+        ui_paths.push(ui_contract_dir.to_string_lossy().into_owned());
+    }
+
+    {
+        let mut args = vec!["pub const HARNESS_MODE_ALLOWLIST".into()];
+        args.extend(ui_paths.clone());
+        if !rg_exists(&args)? {
+            bail!("harness-mode-allowlist: missing harness-mode allowlist metadata");
+        }
+    }
+    {
+        let mut args = vec!["enum HarnessModeChangeKind".into()];
+        args.extend(ui_paths);
+        if !rg_exists(&args)? {
+            bail!("harness-mode-allowlist: missing harness-mode change kind metadata");
+        }
+    }
+
+    // Check frontend modules don't branch on AURA_HARNESS_MODE
+    let frontend_hits = command_stdout(
+        "rg",
+        &[
+            "-l".into(),
+            "AURA_HARNESS_MODE".into(),
+            repo_root.join("crates/aura-terminal/src").to_string_lossy().into_owned(),
+            repo_root.join("crates/aura-web/src").to_string_lossy().into_owned(),
+        ],
+    )
+    .unwrap_or_default();
+
+    let filtered: Vec<&str> = frontend_hits
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter(|l| {
+            !l.ends_with("crates/aura-terminal/src/tui/screens/app/shell/events.rs")
+                && !l.ends_with("crates/aura-web/src/shell/maintenance.rs")
+        })
+        .collect();
+
+    if !filtered.is_empty() {
+        bail!(
+            "harness-mode-allowlist: frontend product modules must not branch on AURA_HARNESS_MODE: {:?}",
+            filtered
+        );
+    }
+
+    let web_main = repo_root.join("crates/aura-web/src/main.rs");
+    if web_main.exists() && contains(&web_main, "reset_harness_bootstrap_storage_once")? {
+        bail!("harness-mode-allowlist: web frontend may not carry harness-only bootstrap reset shortcuts");
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "harness_mode_allowlist_is_scoped_to_non_semantic_categories".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "connectivity_check_is_harness_mode_neutral".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "invitation_dispatch_uses_product_callbacks_without_harness_shortcuts".into(), "--quiet".into()])?;
+
+    println!("harness mode allowlist: clean");
+    Ok(())
 }
 
 pub fn run_harness_observation_determinism() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-observation-determinism.sh", &[])
+    let repo_root = repo_root()?;
+
+    let rust_observation_files = [
+        repo_root.join("crates/aura-terminal/src/tui/harness_state/snapshot.rs"),
+        repo_root.join("crates/aura-ui/src/model/mod.rs"),
+        repo_root.join("crates/aura-web/src/harness_bridge.rs"),
+    ];
+
+    let nondeterminism_pattern = r"SystemTime::now|Instant::now|std::time::SystemTime|std::time::Instant|chrono::Utc::now|chrono::Local::now|thread_rng\(\)|rand::thread_rng|rand::random|getrandom::|OsRng|Uuid::new_v4";
+
+    let mut rust_args = vec!["--no-heading".into(), "-n".into(), nondeterminism_pattern.into()];
+    for f in &rust_observation_files {
+        if f.exists() {
+            rust_args.push(f.to_string_lossy().into_owned());
+        }
+    }
+
+    let rust_hits = command_stdout("rg", &rust_args).unwrap_or_default();
+    if !rust_hits.trim().is_empty() {
+        eprintln!("{rust_hits}");
+        bail!("harness-observation-determinism: parity-critical observation paths may not read wall clock time, unseeded randomness, or nondeterministic ids");
+    }
+
+    let driver_mjs =
+        repo_root.join("crates/aura-harness/playwright-driver/playwright_driver.mjs");
+    if driver_mjs.exists() {
+        let js_hits = command_stdout(
+            "rg",
+            &[
+                "--no-heading".into(),
+                "-n".into(),
+                r"Math\.random|randomUUID\(".into(),
+                driver_mjs.to_string_lossy().into_owned(),
+            ],
+        )
+        .unwrap_or_default();
+        if !js_hits.trim().is_empty() {
+            eprintln!("{js_hits}");
+            bail!("harness-observation-determinism: browser observation path may not use JS randomness in parity-critical observation code");
+        }
+    }
+
+    println!("harness observation determinism: clean");
+    Ok(())
 }
 
 pub fn run_harness_observation_surface() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-observation-surface.sh", &[])
+    let repo_root = repo_root()?;
+    let backend_mod = repo_root.join("crates/aura-harness/src/backend/mod.rs");
+
+    if !contains(&backend_mod, "pub trait ObservationBackend")? {
+        bail!("harness-observation-surface: missing ObservationBackend trait");
+    }
+
+    // Extract ObservationBackend trait body and check for action-like methods
+    let backend_src = read(&backend_mod)?;
+    let trait_body = {
+        let marker = "pub trait ObservationBackend";
+        if let Some(start) = backend_src.find(marker) {
+            let rest = &backend_src[start + marker.len()..];
+            let mut depth = 0i32;
+            let mut end = 0;
+            for (i, c) in rest.char_indices() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = i;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            rest[..end].to_string()
+        } else {
+            String::new()
+        }
+    };
+
+    let action_method_re =
+        Regex::new(r"fn (send_|click_|fill_|create_|accept_|invite_|join_|inject_|restart|start|stop)")?;
+    if action_method_re.is_match(&trait_body) {
+        bail!("harness-observation-surface: ObservationBackend exports action-like methods");
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "observation_surface_methods_do_not_overlap_action_surface".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "observation_endpoints_are_side_effect_free".into(), "--quiet".into()])?;
+
+    println!("harness observation surface: clean");
+    Ok(())
 }
 
 pub fn run_harness_onboarding_contract() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-onboarding-contract.sh", &[])
+    let repo_root = repo_root()?;
+    let ui_contract_file = repo_root.join("crates/aura-app/src/ui_contract.rs");
+    let ui_contract_dir = repo_root.join("crates/aura-app/src/ui_contract");
+
+    let mut ui_paths = vec![ui_contract_file.to_string_lossy().into_owned()];
+    if ui_contract_dir.exists() {
+        ui_paths.push(ui_contract_dir.to_string_lossy().into_owned());
+    }
+
+    {
+        let mut args = vec!["ScreenId::Onboarding".into()];
+        args.extend(ui_paths);
+        if !rg_exists(&args)? {
+            bail!("harness-onboarding-contract: onboarding must be declared in the shared snapshot model");
+        }
+    }
+
+    let web_main = repo_root.join("crates/aura-web/src/main.rs");
+    if web_main.exists()
+        && !contains(&web_main, "controller.set_account_setup_state(")?
+    {
+        bail!("harness-onboarding-contract: web onboarding must publish through the canonical controller snapshot pipeline");
+    }
+
+    for (dir, label) in [
+        (repo_root.join("crates/aura-web/src"), "aura-web"),
+        (repo_root.join("crates/aura-harness/src"), "aura-harness"),
+    ] {
+        if !dir.exists() {
+            continue;
+        }
+        let hits = command_stdout(
+            "rg",
+            &[
+                "--no-heading".into(),
+                "-n".into(),
+                r"publish_onboarding_snapshot|stale_onboarding_publish|synthetic_onboarding_snapshot".into(),
+                dir.to_string_lossy().into_owned(),
+            ],
+        )
+        .unwrap_or_default();
+        if !hits.trim().is_empty() {
+            eprintln!("{hits}");
+            bail!("harness-onboarding-contract: onboarding must not introduce bespoke publication or recovery hooks (found in {label})");
+        }
+    }
+
+    if web_main.exists() && contains(&web_main, "reset_harness_bootstrap_storage_once")? {
+        bail!("harness-onboarding-contract: web onboarding may not carry harness-only bootstrap reset shortcuts");
+    }
+
+    println!("harness onboarding contract: clean");
+    Ok(())
 }
 
 pub fn run_harness_onboarding_publication() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-onboarding-publication.sh", &[])
+    let repo_root = repo_root()?;
+
+    let web_main = repo_root.join("crates/aura-web/src/main.rs");
+    if web_main.exists() && contains(&web_main, "publish_onboarding_snapshot")? {
+        bail!("harness-onboarding-publication: web onboarding may not publish through a bespoke snapshot path");
+    }
+
+    let harness_bridge = repo_root.join("crates/aura-web/src/harness_bridge.rs");
+    if harness_bridge.exists() && contains(&harness_bridge, "stale_onboarding_publish")? {
+        bail!("harness-onboarding-publication: browser harness bridge may not carry stale-onboarding publication recovery");
+    }
+
+    let driver_mjs =
+        repo_root.join("crates/aura-harness/playwright-driver/playwright_driver.mjs");
+    if driver_mjs.exists() {
+        let src = read(&driver_mjs)?;
+        if src.contains("staleOnboardingCache") || src.contains("stale_onboarding_") {
+            bail!("harness-onboarding-publication: playwright driver may not carry stale-onboarding recovery heuristics");
+        }
+    }
+
+    let local_pty = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
+    if local_pty.exists() && contains(&local_pty, "synthetic_onboarding_snapshot")? {
+        bail!("harness-onboarding-publication: local PTY backend may not fabricate onboarding snapshots");
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "onboarding_is_declared_in_the_shared_snapshot_model".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "onboarding_uses_canonical_snapshot_publication_path".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "onboarding_harness_paths_have_no_bespoke_recovery_logic".into(), "--quiet".into()])?;
+
+    println!("harness onboarding publication: clean");
+    Ok(())
 }
 
 pub fn run_harness_raw_backend_quarantine() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-raw-backend-quarantine.sh", &[])
+    let repo_root = repo_root()?;
+    let backend_dir = repo_root.join("crates/aura-harness/src/backend");
+
+    let raw_impls = command_stdout(
+        "rg",
+        &[
+            "-l".into(),
+            "impl RawUiBackend for".into(),
+            backend_dir.to_string_lossy().into_owned(),
+        ],
+    )
+    .unwrap_or_default();
+
+    let raw_impl_files: Vec<String> = raw_impls
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            std::path::Path::new(l)
+                .strip_prefix(&repo_root)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| l.to_string())
+        })
+        .collect();
+
+    let expected = [
+        "crates/aura-harness/src/backend/local_pty.rs",
+        "crates/aura-harness/src/backend/playwright_browser.rs",
+    ];
+
+    if raw_impl_files.len() != expected.len() {
+        bail!(
+            "harness-raw-backend-quarantine: expected exactly {} raw backend impls, found {}: {:?}",
+            expected.len(),
+            raw_impl_files.len(),
+            raw_impl_files
+        );
+    }
+
+    for exp in &expected {
+        if !raw_impl_files.iter().any(|f| f.as_str() == *exp) {
+            bail!("harness-raw-backend-quarantine: raw backend impl must stay quarantined to {exp}");
+        }
+    }
+
+    // Check raw accessor usage is quarantined
+    let accessor_hits = command_stdout(
+        "rg",
+        &[
+            "-l".into(),
+            r"as_raw_ui_mut\(".into(),
+            repo_root.join("crates/aura-harness/src").to_string_lossy().into_owned(),
+        ],
+    )
+    .unwrap_or_default();
+
+    for hit in accessor_hits.lines().filter(|l| !l.is_empty()) {
+        let rel = std::path::Path::new(hit)
+            .strip_prefix(&repo_root)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| hit.to_string());
+        match rel.as_str() {
+            "crates/aura-harness/src/backend/mod.rs" | "crates/aura-harness/src/coordinator.rs" => {}
+            _ => bail!("harness-raw-backend-quarantine: raw backend accessor escaped quarantine via {rel}"),
+        }
+    }
+
+    println!("harness raw backend quarantine: clean");
+    Ok(())
 }
 
 pub fn run_harness_recovery_contract() -> Result<()> {
@@ -1926,27 +3215,281 @@ pub fn run_harness_recovery_contract() -> Result<()> {
 }
 
 pub fn run_harness_render_convergence() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-render-convergence.sh", &[])
+    let repo_root = repo_root()?;
+
+    let harness_bridge = repo_root.join("crates/aura-web/src/harness_bridge.rs");
+    if !rg_exists(&["fn publish_ui_snapshot".into(), harness_bridge.to_string_lossy().into_owned()])? {
+        bail!("harness-render-convergence: missing web publish hook");
+    }
+
+    let publication = repo_root.join("crates/aura-web/src/harness/publication.rs");
+    if !rg_exists(&["requestAnimationFrame".into(), publication.to_string_lossy().into_owned()])? {
+        bail!("harness-render-convergence: web publish hook must go through requestAnimationFrame");
+    }
+    if !rg_exists(&["publish_render_heartbeat".into(), publication.to_string_lossy().into_owned()])? {
+        bail!("harness-render-convergence: web publish hook must emit render heartbeat");
+    }
+
+    let snapshot = repo_root
+        .join("crates/aura-terminal/src/tui/harness_state/snapshot.rs");
+    if !rg_exists(&["next_projection_revision".into(), snapshot.to_string_lossy().into_owned()])? {
+        bail!("harness-render-convergence: tui semantic snapshots must publish projection revisions");
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "render_convergence_accepts_matching_snapshot_and_heartbeat".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "render_convergence_rejects_semantic_state_published_ahead_of_renderer".into(), "--quiet".into()])?;
+
+    println!("harness render convergence: clean");
+    Ok(())
 }
 
 pub fn run_harness_revision_contract() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-revision-contract.sh", &[])
+    let repo_root = repo_root()?;
+    let ui_contract_file = repo_root.join("crates/aura-app/src/ui_contract.rs");
+    let ui_contract_dir = repo_root.join("crates/aura-app/src/ui_contract");
+
+    let mut ui_paths = vec![ui_contract_file.to_string_lossy().into_owned()];
+    if ui_contract_dir.exists() {
+        ui_paths.push(ui_contract_dir.to_string_lossy().into_owned());
+    }
+
+    {
+        let mut args = vec!["pub revision: ProjectionRevision".into()];
+        args.extend(ui_paths.clone());
+        if !rg_exists(&args)? {
+            bail!("harness-revision-contract: UiSnapshot must carry revision metadata");
+        }
+    }
+    {
+        let mut args = vec!["pub quiescence: QuiescenceSnapshot".into()];
+        args.extend(ui_paths);
+        if !rg_exists(&args)? {
+            bail!("harness-revision-contract: UiSnapshot must carry quiescence metadata");
+        }
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "projection_revision_detects_stale_snapshots_by_revision".into(), "--quiet".into()])?;
+
+    println!("harness revision contract: clean");
+    Ok(())
 }
 
 pub fn run_harness_row_index_contract() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-row-index-contract.sh", &[])
+    let repo_root = repo_root()?;
+    let inventory = repo_root.join("scenarios/harness_inventory.toml");
+
+    if !inventory.exists() {
+        bail!("harness-row-index-contract: missing inventory: scenarios/harness_inventory.toml");
+    }
+
+    // Parse inventory to find shared scenarios
+    let inv_src = read(&inventory)?;
+    let mut entries: Vec<(String, String)> = Vec::new(); // (path, class)
+    let mut current_path = String::new();
+    let mut current_class = String::new();
+    for line in inv_src.lines() {
+        let line = line.trim();
+        if line == "[[scenario]]" {
+            if !current_path.is_empty() {
+                entries.push((current_path.clone(), current_class.clone()));
+                current_path.clear();
+                current_class.clear();
+            }
+        } else if let Some(rest) = line.strip_prefix("path = \"") {
+            if let Some(path) = rest.strip_suffix('"') {
+                current_path = path.to_string();
+            }
+        } else if let Some(rest) = line.strip_prefix("classification = \"") {
+            if let Some(class) = rest.strip_suffix('"') {
+                current_class = class.to_string();
+            }
+        }
+    }
+    if !current_path.is_empty() {
+        entries.push((current_path, current_class));
+    }
+
+    let row_index_re = Regex::new(
+        r#"^\s*item_id\s*=\s*"(row[-_:]?[0-9]+|idx[-_:]?[0-9]+|index[-_:]?[0-9]+|[0-9]+)"\s*$"#,
+    )?;
+
+    for (path, class) in &entries {
+        if class != "shared" {
+            continue;
+        }
+        let scenario_path = repo_root.join(path);
+        if !scenario_path.exists() {
+            bail!("harness-row-index-contract: missing shared scenario: {path}");
+        }
+        let src = read(&scenario_path)?;
+        for line in src.lines() {
+            if row_index_re.is_match(line) {
+                bail!(
+                    "harness-row-index-contract: shared scenario targets parity-critical list items by row index: {path}"
+                );
+            }
+        }
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "snapshot_invariants_reject_row_index_ids".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "shared_intent_contract_rejects_row_index_item_ids".into(), "--quiet".into()])?;
+
+    println!("harness row-index contract: clean");
+    Ok(())
 }
 
 pub fn run_harness_runtime_events_authoritative() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-runtime-events-authoritative.sh", &[])
+    let repo_root = repo_root()?;
+    let snapshot = repo_root
+        .join("crates/aura-terminal/src/tui/harness_state/snapshot.rs");
+
+    if snapshot.exists() {
+        // Read only production source (before #[cfg(test)])
+        let full_src = read(&snapshot)?;
+        let production_source: String = full_src
+            .lines()
+            .take_while(|l| !l.trim_start().starts_with("#[cfg(test)]"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let fact_variant_re = Regex::new(
+            r"RuntimeFact::(ContactLinkReady|PendingHomeInvitationReady|ChannelMembershipReady|RecipientPeersResolved|MessageDeliveryReady)",
+        )?;
+        if fact_variant_re.is_match(&production_source) {
+            bail!("harness-runtime-events-authoritative: TUI snapshot export may not synthesize parity-critical runtime facts");
+        }
+
+        if production_source.contains("runtime_events.push(RuntimeEventSnapshot") {
+            bail!("harness-runtime-events-authoritative: TUI snapshot export may not append runtime events heuristically");
+        }
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "semantic_snapshot_exports_tui_owned_runtime_facts".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "semantic_snapshot_exporter_does_not_infer_parity_runtime_events".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "ui_snapshot_parity_detects_runtime_event_shape_drift".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "ui_snapshot_parity_detects_toast_drift".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "shared_intent_waits_bind_only_to_declared_barriers".into(), "--quiet".into()])?;
+
+    println!("harness runtime events authoritative: clean");
+    Ok(())
 }
 
 pub fn run_harness_scenario_config_boundary() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-scenario-config-boundary.sh", &[])
+    let repo_root = repo_root()?;
+    let configs_dir = repo_root.join("configs/harness");
+
+    if !configs_dir.exists() {
+        println!("harness scenario/config boundary: clean (no configs/harness dir)");
+        return Ok(());
+    }
+
+    // Check that instance ids don't use frontend-specific names
+    let forbidden_ids = command_stdout(
+        "rg",
+        &[
+            "-n".into(),
+            r#"^\s*id\s*=\s*"(web|tui|browser|local|playwright|pty)""#.into(),
+            configs_dir.to_string_lossy().into_owned(),
+            "-g".into(),
+            "*.toml".into(),
+        ],
+    )
+    .unwrap_or_default();
+
+    if !forbidden_ids.trim().is_empty() {
+        eprintln!("{forbidden_ids}");
+        bail!("harness-scenario-config-boundary: config instance ids must remain actor-based and frontend-neutral");
+    }
+
+    // Check that mode bindings are declared
+    let mode_hits = command_stdout(
+        "rg",
+        &[
+            "-n".into(),
+            r#"^\s*mode\s*=\s*"(local|browser|ssh)""#.into(),
+            configs_dir.to_string_lossy().into_owned(),
+            "-g".into(),
+            "*.toml".into(),
+        ],
+    )
+    .unwrap_or_default();
+
+    if mode_hits.trim().is_empty() {
+        bail!("harness-scenario-config-boundary: expected config frontend/runtime bindings declared via instance.mode");
+    }
+
+    println!("harness scenario/config boundary: clean");
+    Ok(())
 }
 
 pub fn run_harness_scenario_inventory() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-scenario-inventory.sh", &[])
+    let repo_root = repo_root()?;
+    let inventory_path = repo_root.join("scenarios/harness_inventory.toml");
+    let scenario_dir = repo_root.join("scenarios/harness");
+
+    if !inventory_path.exists() {
+        bail!("harness-scenario-inventory: missing inventory: scenarios/harness_inventory.toml");
+    }
+
+    let mut scenario_files: Vec<String> = fs::read_dir(&scenario_dir)
+        .context("reading scenarios/harness")?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("toml"))
+        .filter_map(|e| {
+            e.path()
+                .strip_prefix(&repo_root)
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+        .collect();
+    scenario_files.sort();
+
+    let inventory_content = read(&inventory_path)?;
+    let mut inventory_paths: Vec<String> = Vec::new();
+    let mut inventory_classes: Vec<String> = Vec::new();
+    for line in inventory_content.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("path = \"") {
+            if let Some(path) = rest.strip_suffix('"') {
+                inventory_paths.push(path.to_owned());
+            }
+        } else if let Some(rest) = line.strip_prefix("classification = \"") {
+            if let Some(class) = rest.strip_suffix('"') {
+                inventory_classes.push(class.to_owned());
+            }
+        }
+    }
+    inventory_paths.sort();
+
+    if scenario_files.len() != inventory_paths.len() {
+        bail!(
+            "harness-scenario-inventory: inventory path count ({}) does not match scenario file count ({})",
+            inventory_paths.len(),
+            scenario_files.len()
+        );
+    }
+
+    let inventory_set: BTreeSet<&str> = inventory_paths.iter().map(String::as_str).collect();
+    for path in &scenario_files {
+        if !inventory_set.contains(path.as_str()) {
+            bail!("harness-scenario-inventory: scenario missing from inventory: {path}");
+        }
+    }
+    for path in &inventory_paths {
+        if !repo_root.join(path).exists() {
+            bail!("harness-scenario-inventory: inventory references missing scenario: {path}");
+        }
+    }
+
+    let valid = ["shared", "web_conformance", "tui_conformance"];
+    for class in &inventory_classes {
+        if !valid.contains(&class.as_str()) {
+            bail!("harness-scenario-inventory: inventory contains invalid classification: {class}");
+        }
+    }
+
+    println!("harness-scenario-inventory: clean");
+    Ok(())
 }
 
 pub fn run_harness_scenario_legality() -> Result<()> {
@@ -1958,7 +3501,30 @@ pub fn run_harness_scenario_shape_contract() -> Result<()> {
 }
 
 pub fn run_harness_semantic_primitive_contract() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-semantic-primitive-contract.sh", &[])
+    let repo_root = repo_root()?;
+    let sc = repo_root.join("crates/aura-app/src/scenario_contract.rs");
+    let sc_dir = repo_root.join("crates/aura-app/src/scenario_contract");
+    let mut sc_paths = vec![sc.to_string_lossy().into_owned()];
+    if sc_dir.exists() {
+        sc_paths.push(sc_dir.to_string_lossy().into_owned());
+    }
+
+    for (pattern, label) in [
+        ("ScenarioAction::Intent", "canonical shared scenario model must expose typed intent actions"),
+        ("validate_shared_intent_contract", "shared scenario validation must enforce typed intent actions"),
+    ] {
+        let mut args = vec![pattern.into()];
+        args.extend(sc_paths.clone());
+        if !rg_exists(&args)? {
+            bail!("harness-semantic-primitive-contract: {label}");
+        }
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "shared_intent_contract_accepts_intents".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "shared_intent_contract_rejects_ui_actions".into(), "--quiet".into()])?;
+
+    println!("harness semantic primitive contract: clean");
+    Ok(())
 }
 
 pub fn run_harness_settings_surface_contract() -> Result<()> {
@@ -2013,11 +3579,131 @@ pub fn run_harness_ui_state_evented() -> Result<()> {
 }
 
 pub fn run_harness_wait_contract() -> Result<()> {
-    run_head_shell_script("scripts/check/harness-wait-contract.sh", &[])
+    let repo_root = repo_root()?;
+    let executor = repo_root.join("crates/aura-harness/src/executor.rs");
+    let executor_path = executor.to_string_lossy().into_owned();
+
+    for (pattern, label) in [
+        ("enum WaitContractRef", "missing typed wait contract reference"),
+        ("fn ensure_wait_contract_declared", "shared semantic waits must validate declared barrier contracts"),
+        ("WaitContractRef::OperationState", "typed wait contracts must include operation wait support"),
+    ] {
+        if !rg_exists(&[pattern.into(), executor_path.clone()])? {
+            bail!("harness-wait-contract: {label}");
+        }
+    }
+
+    // Modal wait check (either form)
+    let has_modal_wait = rg_exists(&["-F".into(), "waits.modal(".into(), executor_path.clone()])?
+        || rg_exists(&["-F".into(), "fn wait_for_modal(".into(), executor_path.clone()])?;
+    if !has_modal_wait {
+        bail!("harness-wait-contract: shared semantic execution must route modal waits through the typed wait contract");
+    }
+
+    // Runtime event wait check
+    let has_runtime_event_wait =
+        rg_exists(&["-F".into(), "BarrierDeclaration::RuntimeEvent".into(), executor_path.clone()])?
+        || rg_exists(&["-F".into(), "fn wait_for_runtime_event_snapshot(".into(), executor_path.clone()])?;
+    if !has_runtime_event_wait {
+        bail!("harness-wait-contract: shared semantic execution must route runtime-event waits through the typed wait contract");
+    }
+
+    // Semantic state wait check
+    let has_semantic_state_wait =
+        rg_exists(&["-F".into(), "waits.semantic_state(".into(), executor_path.clone()])?
+        || rg_exists(&["-F".into(), "fn wait_for_semantic_state(".into(), executor_path.clone()])?;
+    if !has_semantic_state_wait {
+        bail!("harness-wait-contract: shared semantic execution must route semantic waits through the typed wait contract");
+    }
+
+    if !rg_exists(&["-F".into(), "snapshot.operation_state(".into(), executor_path])? {
+        bail!("harness-wait-contract: typed wait contracts must read operation state through the shared snapshot surface");
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "shared_intent_waits_bind_only_to_declared_barriers".into(), "--quiet".into()])?;
+
+    println!("harness wait contract: clean");
+    Ok(())
 }
 
 pub fn run_ownership_capability_audit() -> Result<()> {
-    run_head_shell_script("scripts/check/ownership-capability-audit.sh", &[])
+    let repo_root = repo_root()?;
+    let mut had_hits = false;
+
+    let run_group = |title: &str, pattern: &str, extra_args: &[String]| -> Result<bool> {
+        let mut args = vec![
+            "-n".into(),
+            "--hidden".into(),
+            "--glob".into(),
+            "!work/**".into(),
+            "--glob".into(),
+            "!docs/book/**".into(),
+            "--glob".into(),
+            "!crates/aura-macros/tests/boundaries/**".into(),
+            "--glob".into(),
+            "!crates/aura-agent/tests/ui/**".into(),
+            pattern.into(),
+        ];
+        args.extend(extra_args.iter().cloned());
+
+        let output = command_stdout("rg", &args).unwrap_or_default();
+        let filtered: Vec<&str> = output
+            .lines()
+            .filter(|l| !l.contains("docs/809_capability_vocabulary_inventory.md:"))
+            .filter(|l| !l.is_empty())
+            .collect();
+
+        if !filtered.is_empty() {
+            eprintln!("## {title}");
+            for line in &filtered {
+                eprintln!("{line}");
+            }
+            eprintln!();
+            return Ok(true);
+        }
+        Ok(false)
+    };
+
+    if run_group(
+        "Product Choreography Vocabulary Drift",
+        r#"guard_capability = "[^"]*,[^"]+""#,
+        &["-g".into(), "*.tell".into(), repo_root.join("crates").to_string_lossy().into_owned()],
+    )? {
+        had_hits = true;
+    }
+
+    if run_group(
+        "Docs, Examples, and .claude Legacy Capability Guidance",
+        r#""send_ping"|"send_pong"|guard_capability = "send_request"|guard_capability = "respond"|permission_name|"create_session"|"join_session"|"decline_session"|"activate_session"|"broadcast_message"|"check_status"|"report_status"|"end_session""#,
+        &[
+            "-g".into(), "*.md".into(),
+            "-g".into(), "*.rs".into(),
+            "-g".into(), "*.tell".into(),
+            repo_root.join("docs").to_string_lossy().into_owned(),
+            repo_root.join("examples").to_string_lossy().into_owned(),
+            repo_root.join(".claude").to_string_lossy().into_owned(),
+        ],
+    )? {
+        had_hits = true;
+    }
+
+    if run_group(
+        "Support and Fixture Legacy Capability Vocabulary",
+        r#""invitation:create"|capability\("recovery_initiate"\)|capability\("recovery_approve"\)|capability\("threshold_sign"\)"#,
+        &[
+            repo_root.join("crates/aura-core/src/ownership.rs").to_string_lossy().into_owned(),
+            repo_root.join("crates/aura-testkit/src/fixtures/biscuit.rs").to_string_lossy().into_owned(),
+        ],
+    )? {
+        had_hits = true;
+    }
+
+    if had_hits {
+        bail!("capability-model-audit: remaining legacy/non-canonical hits detected");
+    }
+
+    println!("capability-model-audit: clean");
+    Ok(())
 }
 
 pub fn run_privacy_tuning_gate() -> Result<()> {
@@ -2089,43 +3775,538 @@ pub fn run_protocol_compat(args: &[String]) -> Result<()> {
 }
 
 pub fn run_protocol_device_id_legacy(args: &[String]) -> Result<()> {
-    run_head_shell_script("scripts/check/protocol-device-id-legacy.sh", args)
+    let repo_root = repo_root()?;
+    let mode = args.first().map(String::as_str).unwrap_or("legacy");
+
+    let mut violations = 0u32;
+
+    let check_pattern =
+        |description: &str, pattern: &str, extra_args: &[String]| -> Result<bool> {
+            let mut rg_args = vec!["-n".into(), "--glob".into(), "*.rs".into()];
+            rg_args.extend(extra_args.iter().cloned());
+            rg_args.push(pattern.into());
+            rg_args.push(repo_root.join("crates").to_string_lossy().into_owned());
+            let output = command_stdout("rg", &rg_args).unwrap_or_default();
+            if !output.trim().is_empty() {
+                eprintln!("✖ {description}");
+                eprintln!("{output}");
+                return Ok(true);
+            }
+            Ok(false)
+        };
+
+    match mode {
+        "legacy" => {
+            if check_pattern(
+                "removed authority/device helper constructor detected",
+                r"AuthorityId::for_device\(|DeviceId::for_authority\(",
+                &[],
+            )? { violations += 1; }
+
+            if check_pattern(
+                "legacy authority-from-device UUID coercion detected",
+                r"AuthorityId::from_uuid\(([^)]*device[^)]*)\)|AuthorityId\([^)]*device[^)]*\)",
+                &[],
+            )? { violations += 1; }
+
+            if check_pattern(
+                "legacy authority-from-device field coercion detected",
+                r"AuthorityId::from_uuid\(([^)]*(device|participant)[^)]*\.0[^)]*)\)",
+                &[],
+            )? { violations += 1; }
+
+            if check_pattern(
+                "legacy device-from-authority UUID coercion detected",
+                r"DeviceId::from_uuid\(([^)]*authority[^)]*)\)|DeviceId\([^)]*authority[^)]*\)",
+                &[],
+            )? { violations += 1; }
+
+            if check_pattern(
+                "open-coded authority-from-device derivation detected outside canonical bridge",
+                r"derived_uuid_with_bytes\(\s*AUTHORITY_FOR_DEVICE_DOMAIN",
+                &["--glob".into(), "!crates/aura-core/src/types/identifiers.rs".into()],
+            )? { violations += 1; }
+
+            if violations > 0 {
+                bail!("device-id-legacy: found {violations} legacy authority/device coercion pattern(s); use derive_legacy_authority_from_device(...) only, with explicit metadata");
+            }
+            println!("device-id-legacy: clean");
+        }
+        "audit-live" => {
+            let live_globs: Vec<String> = vec![
+                "--glob".into(), "!**/tests/**".into(),
+                "--glob".into(), "!**/test_*.rs".into(),
+                "--glob".into(), "!**/*_test.rs".into(),
+            ];
+
+            if check_pattern(
+                "live authority/device helper derivation detected",
+                r"^(?!\s*//).*(AuthorityId::for_device\(|DeviceId::for_authority\()",
+                &["-P".into(), live_globs[0].clone(), live_globs[1].clone(), live_globs[2].clone(), live_globs[3].clone(), live_globs[4].clone(), live_globs[5].clone()],
+            )? { violations += 1; }
+
+            if check_pattern(
+                "live bootstrap authority derivation helper detected",
+                r"^(?!\s*//).*(derive_authority_id\()",
+                &["-P".into(), live_globs[0].clone(), live_globs[1].clone(), live_globs[2].clone(), live_globs[3].clone(), live_globs[4].clone(), live_globs[5].clone()],
+            )? { violations += 1; }
+
+            if violations > 0 {
+                bail!("device-id-legacy audit: found {violations} live authority/device derivation pattern(s)");
+            }
+            println!("device-id-legacy audit: clean");
+        }
+        "audit-runtime" => {
+            let runtime_globs: Vec<String> = vec![
+                "--glob".into(), "!**/tests/**".into(),
+                "--glob".into(), "!**/test_*.rs".into(),
+                "--glob".into(), "!**/*_test.rs".into(),
+                "--glob".into(), "!crates/aura-agent/src/runtime/effects.rs".into(),
+                "--glob".into(), "!crates/aura-agent/src/handlers/sessions/coordination.rs".into(),
+                "--glob".into(), "!crates/aura-simulator/src/choreography_transport.rs".into(),
+                "--glob".into(), "!crates/aura-simulator/src/testkit_bridge.rs".into(),
+            ];
+
+            if check_pattern(
+                "runtime authority/device helper derivation detected",
+                r"^(?!\s*//).*(AuthorityId::for_device\(|DeviceId::for_authority\()",
+                &["-P".into(), runtime_globs[0].clone(), runtime_globs[1].clone(), runtime_globs[2].clone(), runtime_globs[3].clone(), runtime_globs[4].clone(), runtime_globs[5].clone(), runtime_globs[6].clone(), runtime_globs[7].clone(), runtime_globs[8].clone(), runtime_globs[9].clone(), runtime_globs[10].clone(), runtime_globs[11].clone(), runtime_globs[12].clone(), runtime_globs[13].clone()],
+            )? { violations += 1; }
+
+            if check_pattern(
+                "runtime bootstrap authority derivation helper detected",
+                r"^(?!\s*//).*(derive_authority_id\()",
+                &["-P".into(), runtime_globs[0].clone(), runtime_globs[1].clone(), runtime_globs[2].clone(), runtime_globs[3].clone(), runtime_globs[4].clone(), runtime_globs[5].clone(), runtime_globs[6].clone(), runtime_globs[7].clone(), runtime_globs[8].clone(), runtime_globs[9].clone(), runtime_globs[10].clone(), runtime_globs[11].clone(), runtime_globs[12].clone(), runtime_globs[13].clone()],
+            )? { violations += 1; }
+
+            if violations > 0 {
+                bail!("device-id-legacy runtime audit: found {violations} runtime authority/device derivation pattern(s)");
+            }
+            println!("device-id-legacy runtime audit: clean");
+        }
+        _ => {
+            bail!("usage: protocol-device-id-legacy [legacy|audit-live|audit-runtime]");
+        }
+    }
+
+    Ok(())
 }
 
 pub fn run_runtime_bootstrap_guardrails() -> Result<()> {
-    run_head_shell_script("scripts/check/runtime-bootstrap-guardrails.sh", &[])
+    let repo_root = repo_root()?;
+    let mut violations = 0u32;
+
+    let check = |description: &str, pattern: &str, path: &std::path::Path| -> Result<bool> {
+        if !path.exists() {
+            return Ok(false);
+        }
+        let hits = command_stdout(
+            "rg",
+            &["-n".into(), pattern.into(), path.to_string_lossy().into_owned()],
+        )
+        .unwrap_or_default();
+        if !hits.trim().is_empty() {
+            eprintln!("✖ {description}");
+            eprintln!("{hits}");
+            return Ok(true);
+        }
+        Ok(false)
+    };
+
+    if check(
+        "preset builder authority fallback detected",
+        r"self\.authority_id\.(unwrap_or|unwrap_or_else)\(",
+        &repo_root.join("crates/aura-agent/src/builder"),
+    )? { violations += 1; }
+
+    if check(
+        "preset builder creates authority directly instead of requiring explicit bootstrap identity",
+        r"AuthorityId::new_from_entropy\(|new_authority_id\(",
+        &repo_root.join("crates/aura-agent/src/builder"),
+    )? { violations += 1; }
+
+    if check(
+        "terminal main still hard-codes synthetic startup authority/context",
+        r#"ids::authority_id\("cli:main-authority"\)|ids::context_id\("cli:main-context"\)"#,
+        &repo_root.join("crates/aura-terminal/src/main.rs"),
+    )? { violations += 1; }
+
+    if violations > 0 {
+        bail!("bootstrap-guardrails: found {violations} bootstrap guardrail violation(s)");
+    }
+
+    println!("bootstrap-guardrails: clean");
+    Ok(())
 }
 
 pub fn run_shared_flow_metadata() -> Result<()> {
-    run_head_shell_script("scripts/check/shared-flow-metadata.sh", &[])
+    let repo_root = repo_root()?;
+    let sc = repo_root.join("crates/aura-app/src/scenario_contract.rs");
+    let sc_dir = repo_root.join("crates/aura-app/src/scenario_contract");
+    let mut sc_paths = vec![sc.to_string_lossy().into_owned()];
+    if sc_dir.exists() {
+        sc_paths.push(sc_dir.to_string_lossy().into_owned());
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "every_intent_kind_has_a_matching_contract".into(), "--quiet".into()])
+        .context("harness-shared-flow-metadata: shared intent metadata contract is incomplete")?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "every_intent_kind_declares_barrier_metadata".into(), "--quiet".into()])
+        .context("harness-shared-flow-metadata: shared intent barrier metadata contract is incomplete")?;
+    run_ok("cargo", &["test".into(), "-p".into(), "hxrts-aura-app".into(), "declared_post_operation_convergence_contracts_are_explicit".into(), "--quiet".into()])
+        .context("harness-shared-flow-metadata: shared intent convergence metadata contract is incomplete")?;
+
+    for (pattern, label) in [
+        ("pub struct SharedActionContract", "missing SharedActionContract schema"),
+        ("pub enum ActionPrecondition", "missing ActionPrecondition schema"),
+        ("pub struct SharedActionBarrierMetadata", "missing SharedActionBarrierMetadata schema"),
+        ("pub enum BarrierDeclaration", "missing BarrierDeclaration schema"),
+        ("pub struct PostOperationConvergenceContract", "missing PostOperationConvergenceContract schema"),
+    ] {
+        let mut args = vec![pattern.into()];
+        args.extend(sc_paths.clone());
+        if !rg_exists(&args)? {
+            bail!("harness-shared-flow-metadata: {label}");
+        }
+    }
+
+    println!("harness shared-flow metadata: clean");
+    Ok(())
 }
 
 pub fn run_shared_intent_flow() -> Result<()> {
-    run_head_shell_script("scripts/check/shared-intent-flow.sh", &[])
+    let repo_root = repo_root()?;
+    let backend_contract = repo_root.join("crates/aura-harness/src/backend/mod.rs");
+
+    if backend_contract.exists() {
+        let src = read(&backend_contract)?;
+        if src.contains("SHARED_INTENT_UI_BYPASS_ALLOWLIST") || src.contains("TemporaryHarnessBridgeShortcut") {
+            bail!("harness-shared-intent-ui-flow: legacy shared intent UI bypass allowlist machinery must be removed");
+        }
+    }
+
+    let backend_dir = repo_root.join("crates/aura-harness/src/backend");
+    let backend_hits = command_stdout(
+        "rg",
+        &[
+            "-n".into(),
+            "context_workflows::|invitation_workflows::".into(),
+            backend_dir.to_string_lossy().into_owned(),
+        ],
+    )
+    .unwrap_or_default();
+    if !backend_hits.trim().is_empty() {
+        bail!("harness-shared-intent-ui-flow: backend implementations must not call app-internal workflow shortcuts directly");
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "local_shared_intent_methods_use_semantic_harness_commands_for_shared_flows".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "playwright_shared_intent_methods_use_semantic_bridge".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "playwright_shared_semantic_methods_do_not_regress_to_raw_ui_driving".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "playwright_shared_semantic_bridge_replaces_shortcut_bypasses".into(), "--quiet".into()])?;
+
+    println!("harness shared-intent ui flow: clean");
+    Ok(())
 }
 
 pub fn run_shared_raw_quarantine() -> Result<()> {
-    run_head_shell_script("scripts/check/shared-raw-quarantine.sh", &[])
+    let repo_root = repo_root()?;
+    let executor = repo_root.join("crates/aura-harness/src/executor.rs");
+
+    if !executor.exists() {
+        println!("harness shared raw-ui quarantine: clean (no executor)");
+        return Ok(());
+    }
+
+    let executor_src = read(&executor)?;
+
+    // Extract execute_semantic_step function body
+    let fn_start = "fn execute_semantic_step(";
+    let fn_end = "\n\nfn execute_semantic_environment_action";
+    let semantic_fn = if let (Some(start), Some(end)) = (
+        executor_src.find(fn_start),
+        executor_src.find(fn_end),
+    ) {
+        if start < end {
+            executor_src[start..end].to_string()
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    if semantic_fn.is_empty() {
+        bail!("harness-shared-raw-ui-quarantine: could not extract execute_semantic_step");
+    }
+
+    for forbidden in [
+        "ToolRequest::ClickButton",
+        "ToolRequest::FillInput",
+        "ToolRequest::FillField",
+        ".click_button(",
+        ".fill_input(",
+        ".fill_field(",
+        ".click_target(",
+    ] {
+        if semantic_fn.contains(forbidden) {
+            bail!("harness-shared-raw-ui-quarantine: shared semantic execution still reaches raw helper: {forbidden}");
+        }
+    }
+
+    println!("harness shared raw-ui quarantine: clean");
+    Ok(())
 }
 
 pub fn run_shared_semantic_dedup() -> Result<()> {
-    run_head_shell_script("scripts/check/shared-semantic-dedup.sh", &[])
+    let repo_root = repo_root()?;
+    let backend_contract = repo_root.join("crates/aura-harness/src/backend/mod.rs");
+    let local_backend = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
+    let browser_backend = repo_root.join("crates/aura-harness/src/backend/playwright_browser.rs");
+
+    for path in [&backend_contract, &local_backend] {
+        if path.exists() {
+            let src = read(path)?;
+            if src.contains("submit_accept_contact_invitation_via_shared_ui")
+                || src.contains("submit_invite_actor_to_channel_via_shared_ui")
+            {
+                bail!("harness-shared-semantic-dedup: legacy shared semantic UI helper shortcuts must be removed (in {})", repo_relative(path));
+            }
+        }
+    }
+
+    let local_src = if local_backend.exists() { read(&local_backend)? } else { String::new() };
+    for command in [
+        "HarnessUiCommand::OpenSettingsSection",
+        "HarnessUiCommand::StartDeviceEnrollment",
+        "HarnessUiCommand::ImportDeviceEnrollmentCode",
+        "HarnessUiCommand::RemoveSelectedDevice",
+        "HarnessUiCommand::CreateContactInvitation",
+        "HarnessUiCommand::InviteActorToChannel",
+        "HarnessUiCommand::SelectChannel",
+    ] {
+        if !local_src.contains(command) {
+            bail!("harness-shared-semantic-dedup: local backend must route {command} through typed harness commands");
+        }
+    }
+
+    if backend_contract.exists() {
+        let contract_src = read(&backend_contract)?;
+        if contract_src.contains("SHARED_INTENT_UI_BYPASS_ALLOWLIST")
+            || contract_src.contains("TemporaryHarnessBridgeShortcut")
+        {
+            bail!("harness-shared-semantic-dedup: shared semantic browser bridge migration should remove the old bypass allowlist machinery");
+        }
+    }
+
+    if browser_backend.exists() {
+        let browser_src = read(&browser_backend)?;
+        if !browser_src.contains("fn submit_semantic_command(") {
+            bail!("harness-shared-semantic-dedup: browser backend must route supported semantic submissions through the typed bridge");
+        }
+        if browser_src.contains("submit_accept_contact_invitation_via_shared_ui")
+            || browser_src.contains("submit_invite_actor_to_channel_via_shared_ui")
+        {
+            bail!("harness-shared-semantic-dedup: browser backend should not keep local-only shared UI helper shortcuts");
+        }
+    }
+
+    println!("harness shared semantic dedup: clean");
+    Ok(())
 }
 
 pub fn run_tui_observation_channel() -> Result<()> {
-    run_head_shell_script("scripts/check/tui-observation-channel.sh", &[])
+    let repo_root = repo_root()?;
+    let backend = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
+    let executor = repo_root.join("crates/aura-harness/src/executor.rs");
+
+    if backend.exists() {
+        let backend_src = read(&backend)?;
+
+        // Extract ui_snapshot function body
+        let ui_snapshot_body = {
+            let marker = "fn ui_snapshot(&self) -> Result<UiSnapshot> {";
+            backend_src.find(marker).map(|start| {
+                let rest = &backend_src[start..];
+                // find end by locating the next double-newline + fn pattern
+                let end_marker = "\n\n    fn wait_for_ui_snapshot_event(";
+                rest.find(end_marker).map(|e| &rest[..e]).unwrap_or(rest)
+            })
+        };
+
+        if let Some(body) = ui_snapshot_body {
+            for forbidden in ["fs::read_to_string", "thread::sleep", "AURA_TUI_UI_STATE_FILE", "SNAPSHOT_WAIT_ATTEMPTS"] {
+                if body.contains(forbidden) {
+                    bail!("harness-tui-observation-channel: local PTY ui_snapshot may not poll the filesystem or sleep (found: {forbidden})");
+                }
+            }
+        }
+
+        // Extract wait_for_ui_snapshot_event body
+        let wait_body = {
+            let marker = "fn wait_for_ui_snapshot_event(";
+            backend_src.find(marker).map(|start| {
+                let rest = &backend_src[start..];
+                let end_marker = "\n\n    fn activate_control(";
+                rest.find(end_marker).map(|e| &rest[..e]).unwrap_or(rest)
+            })
+        };
+
+        if let Some(body) = wait_body {
+            if body.contains("thread::sleep") {
+                bail!("harness-tui-observation-channel: local PTY wait_for_ui_snapshot_event must use the event channel, not sleeps");
+            }
+        }
+
+        if !backend_src.contains("AURA_TUI_UI_STATE_SOCKET") {
+            bail!("harness-tui-observation-channel: local PTY backend must provision the TUI snapshot socket");
+        }
+    }
+
+    if executor.exists() {
+        // Extract wait_for_home_bootstrap_ready body
+        let executor_src = read(&executor)?;
+        let bootstrap_body = {
+            let marker = "fn wait_for_home_bootstrap_ready(";
+            executor_src.find(marker).map(|start| {
+                let rest = &executor_src[start..];
+                let end_marker = "\n}\n\nfn home_bootstrap_ready(";
+                rest.find(end_marker).map(|e| &rest[..e]).unwrap_or(rest)
+            })
+        };
+
+        if let Some(body) = bootstrap_body {
+            if body.contains("thread::sleep") || body.contains("std::thread::sleep") {
+                bail!("harness-tui-observation-channel: home bootstrap wait must not use raw sleep polling");
+            }
+        }
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "local_backend_uses_socket_driven_ui_snapshot_channel".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-harness".into(), "missing_tui_ui_snapshot_fails_loudly".into(), "--quiet".into()])?;
+
+    println!("harness tui observation channel: clean");
+    Ok(())
 }
 
 pub fn run_tui_product_path() -> Result<()> {
-    run_head_shell_script("scripts/check/tui-product-path.sh", &[])
+    let repo_root = repo_root()?;
+    let shell = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+
+    if shell.exists() {
+        if contains(&shell, "AURA_HARNESS_MODE")? {
+            bail!("harness-tui-product-path: TUI product action dispatch may not branch on AURA_HARNESS_MODE");
+        }
+        let shell_src = read(&shell)?;
+        for pattern in [
+            "runtime.create_contact_invitation(",
+            "runtime.export_invitation(",
+            "runtime.import_invitation(",
+            "runtime.accept_invitation(",
+        ] {
+            if shell_src.contains(pattern) {
+                bail!("harness-tui-product-path: TUI product action dispatch may not call runtime invitation shortcuts directly");
+            }
+        }
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "invitation_dispatch_uses_product_callbacks_without_harness_shortcuts".into(), "--quiet".into()])?;
+
+    println!("harness tui product path: clean");
+    Ok(())
 }
 
 pub fn run_tui_selection_contract() -> Result<()> {
-    run_head_shell_script("scripts/check/tui-selection-contract.sh", &[])
+    let repo_root = repo_root()?;
+    let events = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell/events.rs");
+    let shell = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+    let subscriptions =
+        repo_root.join("crates/aura-terminal/src/tui/screens/app/subscriptions.rs");
+
+    if events.exists()
+        && !rg_exists(&["fn resolve_committed_selected_channel_id".into(), events.to_string_lossy().into_owned()])?
+    {
+        bail!("harness-tui-selection-contract: missing committed TUI channel selection helper");
+    }
+
+    if shell.exists() {
+        let shell_src = read(&shell)?;
+        if !shell_src.contains("SharedCommittedChannelSelection") && !shell_src.contains("None::<CommittedChannelSelection>") {
+            bail!("harness-tui-selection-contract: shared TUI channel selection must be tracked by canonical committed channel identity");
+        }
+    }
+
+    if subscriptions.exists() && rg_exists(&[r"all_channels\(\)\s*\.next\(".into(), subscriptions.to_string_lossy().into_owned()])? {
+        bail!("harness-tui-selection-contract: message subscription may not fall back to first channel");
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "committed_channel_resolution_requires_authoritative_selection".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "send_dispatch_does_not_background_retry_selection".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "start_chat_dispatch_does_not_optimistically_navigate".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "message_subscription_requires_explicit_selected_channel_identity".into(), "--quiet".into()])?;
+
+    println!("harness tui selection contract: clean");
+    Ok(())
 }
 
 pub fn run_tui_semantic_snapshot() -> Result<()> {
-    run_head_shell_script("scripts/check/tui-semantic-snapshot.sh", &[])
+    let repo_root = repo_root()?;
+    let snapshot = repo_root
+        .join("crates/aura-terminal/src/tui/harness_state/snapshot.rs");
+
+    if snapshot.exists() {
+        let src = read(&snapshot)?;
+        let static_re = Regex::new(r"^static (CONTACTS_OVERRIDE|DEVICES_OVERRIDE|MESSAGES_OVERRIDE)")?;
+        if src.lines().any(|l| static_re.is_match(l)) {
+            bail!("harness-tui-semantic-snapshot: parity-critical TUI exporter may not use contact/device/message override caches");
+        }
+
+        let pub_fn_re = Regex::new(r"^pub fn (publish_contacts_list_export|publish_devices_list_export|publish_messages_export)")?;
+        if src.lines().any(|l| pub_fn_re.is_match(l)) {
+            bail!("harness-tui-semantic-snapshot: parity-critical TUI exporter may not declare contact/device/message publish overrides");
+        }
+
+        if !src.contains("pub struct TuiSemanticInputs") {
+            // Check in commands.rs instead
+            let commands = repo_root.join("crates/aura-terminal/src/tui/harness_state/commands.rs");
+            if commands.exists() && !contains(&commands, "pub struct TuiSemanticInputs")? {
+                bail!("harness-tui-semantic-snapshot: missing explicit TUI semantic input contract");
+            } else if !commands.exists() {
+                bail!("harness-tui-semantic-snapshot: missing explicit TUI semantic input contract");
+            }
+        }
+
+        if !src.contains("exported_runtime_events") {
+            bail!("harness-tui-semantic-snapshot: TUI exporter must consume runtime facts from owned state");
+        }
+    }
+
+    // Check that screens don't depend on override publish functions
+    for dir in [
+        repo_root.join("crates/aura-terminal/src/tui/screens"),
+        repo_root.join("crates/aura-terminal/src/tui/screens/app/subscriptions.rs"),
+    ] {
+        if !dir.exists() {
+            continue;
+        }
+        let hits = command_stdout(
+            "rg",
+            &[
+                "publish_contacts_list_export|publish_devices_list_export|publish_messages_export".into(),
+                dir.to_string_lossy().into_owned(),
+            ],
+        )
+        .unwrap_or_default();
+        if !hits.trim().is_empty() {
+            bail!("harness-tui-semantic-snapshot: parity-critical TUI exporter may not depend on contact/device/message publish overrides");
+        }
+    }
+
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "semantic_snapshot_does_not_synthesize_placeholder_contact_ids".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "semantic_snapshot_exporter_does_not_depend_on_parity_override_caches".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "semantic_snapshot_ready_state_is_projection_only".into(), "--quiet".into()])?;
+    run_ok("cargo", &["test".into(), "-p".into(), "aura-terminal".into(), "semantic_snapshot_exports_tui_owned_runtime_facts".into(), "--quiet".into()])?;
+
+    println!("harness tui semantic snapshot: clean");
+    Ok(())
 }
 
 pub fn run_user_flow_coverage() -> Result<()> {
@@ -2133,15 +4314,671 @@ pub fn run_user_flow_coverage() -> Result<()> {
 }
 
 pub fn run_user_flow_guidance_sync() -> Result<()> {
-    run_head_shell_script("scripts/check/user-flow-guidance-sync.sh", &[])
+    let changed = changed_files_for_guidance()?;
+    if changed.is_empty() {
+        println!("user-flow-guidance-sync: no changed files");
+        return Ok(());
+    }
+
+    // Rule sources: mapping each rule_id to the files that trigger it.
+    // Mirrors the `matches_any_rule_source` logic from the original shell script.
+    let triggers_testing_guide = changed.iter().any(|f| {
+        f == "crates/aura-app/src/ui_contract.rs"
+            || f.starts_with("crates/aura-harness/src/")
+            || f.starts_with("crates/aura-harness/playwright-driver/")
+            || f.starts_with("crates/aura-terminal/src/tui/")
+            || f.starts_with("crates/aura-ui/src/")
+            || f.starts_with("crates/aura-web/src/")
+    });
+    let triggers_coverage_report = changed.iter().any(|f| {
+        f == "crates/aura-app/src/ui_contract.rs"
+            || f.starts_with("scenarios/harness/")
+            || f == "scenarios/harness_inventory.toml"
+    });
+    let triggers_agent_guidance = changed.iter().any(|f| {
+        f == "toolkit/xtask/src/checks/policy.rs"
+    });
+    let triggers_skills_guidance = triggers_agent_guidance;
+
+    let mut triggered = 0;
+    let mut violations = 0;
+
+    if triggers_testing_guide {
+        triggered += 1;
+        if !changed.contains("docs/804_testing_guide.md") {
+            eprintln!("✖ testing_guide_sync: missing required updates");
+            eprintln!("  Shared UX contract, determinism, and parity-surface changes must update the testing guide.");
+            eprintln!("  - docs/804_testing_guide.md");
+            violations += 1;
+        } else {
+            println!("• testing_guide_sync: required guidance updates present");
+        }
+    }
+
+    if triggers_coverage_report {
+        triggered += 1;
+        if !changed.contains("docs/997_flow_coverage.md") {
+            eprintln!("✖ coverage_report_sync: missing required updates");
+            eprintln!("  Shared-flow coverage, scenario inventory, and parity classification changes must update the user flow coverage report.");
+            eprintln!("  - docs/997_flow_coverage.md");
+            violations += 1;
+        } else {
+            println!("• coverage_report_sync: required guidance updates present");
+        }
+    }
+
+    if triggers_agent_guidance {
+        triggered += 1;
+        if !changed.contains("AGENTS.md") {
+            eprintln!("✖ agent_guidance_sync: missing required updates");
+            eprintln!("  Changes to shared UX contributor policy must update AGENTS guidance.");
+            eprintln!("  - AGENTS.md");
+            violations += 1;
+        } else {
+            println!("• agent_guidance_sync: required guidance updates present");
+        }
+    }
+
+    if triggers_skills_guidance {
+        let skills = [
+            ".claude/skills/testing/SKILL.md",
+            ".claude/skills/harness-run/SKILL.md",
+            ".claude/skills/aura-quick-ref/SKILL.md",
+        ];
+        let repo_root = repo_root()?;
+        let claude_dir = repo_root.join(".claude");
+        if claude_dir.exists() {
+            // Only require git-tracked files to appear in the diff.
+            // Gitignored files (e.g. .claude/**) can never appear in
+            // `git diff --name-only` and must be skipped.
+            let tracked_skills: Vec<&str> = skills
+                .iter()
+                .copied()
+                .filter(|&s| {
+                    let p = repo_root.join(s);
+                    if !p.exists() {
+                        return false;
+                    }
+                    Command::new("git")
+                        .args(["ls-files", "--error-unmatch", s])
+                        .current_dir(&repo_root)
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+                })
+                .collect();
+            if !tracked_skills.is_empty() {
+                triggered += 1;
+                let missing: Vec<&str> = tracked_skills
+                    .iter()
+                    .copied()
+                    .filter(|&s| !changed.contains(s))
+                    .collect();
+                if !missing.is_empty() {
+                    eprintln!("✖ skills_guidance_sync: missing required updates");
+                    eprintln!("  Changes to shared UX contributor policy must update local skills.");
+                    for m in &missing {
+                        eprintln!("  - {m}");
+                    }
+                    violations += 1;
+                } else {
+                    println!("• skills_guidance_sync: required guidance updates present");
+                }
+            } else {
+                // All skill files are gitignored — cannot enforce via git diff.
+                println!("• skills_guidance_sync: skill files are untracked (gitignored); update manually");
+            }
+        }
+    }
+
+    if triggered == 0 {
+        println!("user-flow-guidance-sync: no mapped shared-user-flow guidance changes");
+        return Ok(());
+    }
+
+    if violations > 0 {
+        bail!("user-flow-guidance-sync: {violations} violation(s)");
+    }
+
+    println!("user-flow-guidance-sync: clean");
+    Ok(())
 }
 
+// long-block-exception: direct port of user-flow-policy-guardrails.sh diff parser;
+// each check maps one-to-one to a named policy invariant
 pub fn run_user_flow_policy_guardrails() -> Result<()> {
-    run_head_shell_script("scripts/check/user-flow-policy-guardrails.sh", &[])
+    // Static metadata check — always runs, independent of diff.
+    let repo_root = repo_root()?;
+    let allowlisted: &[(&str, &str, &str, &str)] = &[
+        (
+            "crates/aura-app/src/workflows/runtime.rs",
+            "aura-app-runtime",
+            "runtime harness toggles and deterministic instrumentation only",
+            "docs/804_testing_guide.md",
+        ),
+        (
+            "crates/aura-app/src/workflows/invitation.rs",
+            "aura-app-invitation",
+            "invitation harness instrumentation only; no parity-critical flow bypass",
+            "docs/804_testing_guide.md",
+        ),
+        (
+            "crates/aura-agent/src/handlers/invitation.rs",
+            "aura-agent-invitation",
+            "runtime-owned invitation handler instrumentation only",
+            "docs/804_testing_guide.md",
+        ),
+        (
+            "crates/aura-agent/src/runtime/effects.rs",
+            "aura-agent-runtime-effects",
+            "effect wiring for deterministic harness-mode runtime assembly only",
+            "docs/804_testing_guide.md",
+        ),
+        (
+            "crates/aura-agent/src/runtime_bridge/mod.rs",
+            "aura-agent-runtime-bridge",
+            "runtime bridge instrumentation and environment binding only",
+            "docs/804_testing_guide.md",
+        ),
+        (
+            "crates/aura-terminal/src/tui/context/io_context.rs",
+            "aura-terminal-tui-context",
+            "TUI IO instrumentation and deterministic harness plumbing only",
+            "crates/aura-terminal/ARCHITECTURE.md",
+        ),
+        (
+            "crates/aura-web/src/main.rs",
+            "aura-web-main",
+            "web harness instrumentation and snapshot publication only",
+            "docs/804_testing_guide.md",
+        ),
+    ];
+
+    let mut violations = 0u32;
+    for (file, owner, justification, design_ref) in allowlisted {
+        if owner.is_empty() {
+            eprintln!("✖ {file}: missing allowlisted harness-mode owner metadata");
+            violations += 1;
+        }
+        if justification.is_empty() {
+            eprintln!("✖ {file}: missing allowlisted harness-mode justification metadata");
+            violations += 1;
+        }
+        if design_ref.is_empty() {
+            eprintln!("✖ {file}: missing allowlisted harness-mode design-note reference");
+            violations += 1;
+        } else if !repo_root.join(design_ref).exists() {
+            eprintln!("✖ {file}: allowlisted harness-mode design-note reference does not exist: {design_ref}");
+            violations += 1;
+        }
+    }
+
+    // Diff-aware checks.
+    let diff_range = match compute_diff_range("AURA_UX_POLICY_DIFF_RANGE")? {
+        Some(r) => r,
+        None => {
+            println!("user-flow-policy-guardrails: unable to compute diff range; skipping diff checks");
+            if violations > 0 {
+                bail!("user-flow-policy-guardrails: {violations} violation(s)");
+            }
+            println!("user-flow-policy-guardrails: clean");
+            return Ok(());
+        },
+    };
+
+    // Browser bridge compat: check if bridge files changed without doc updates.
+    let diff_names = diff_names(&diff_range)?;
+    let bridge_changed = diff_names.iter().any(|f| {
+        f == "crates/aura-web/src/harness_bridge.rs"
+            || f == "crates/aura-web/src/main.rs"
+            || f == "crates/aura-harness/playwright-driver/playwright_driver.mjs"
+    });
+    if bridge_changed {
+        if !diff_names.contains("crates/aura-web/ARCHITECTURE.md") {
+            eprintln!("✖ browser harness bridge compatibility changes require crates/aura-web/ARCHITECTURE.md updates");
+            violations += 1;
+        }
+        if !diff_names.contains("docs/804_testing_guide.md") {
+            eprintln!("✖ browser harness bridge compatibility changes require docs/804_testing_guide.md updates");
+            violations += 1;
+        }
+    }
+
+    // Per-line diff checks.
+    let allowlisted_harness_mode_files: BTreeSet<&str> = allowlisted.iter().map(|(f, ..)| *f).collect();
+    let sleep_guard_paths: BTreeSet<&str> = [
+        "crates/aura-harness/src/coordinator.rs",
+        "crates/aura-harness/src/executor.rs",
+        "crates/aura-harness/playwright-driver/playwright_driver.mjs",
+        "crates/aura-terminal/src/tui/harness_state/snapshot.rs",
+        "crates/aura-web/src/harness_bridge.rs",
+    ]
+    .into();
+    let row_index_guard_paths: BTreeSet<&str> = [
+        "crates/aura-app/src/ui_contract.rs",
+        "crates/aura-terminal/src/tui/harness_state/snapshot.rs",
+    ]
+    .into();
+    let harness_entrypoint_allowlist: BTreeSet<&str> = [
+        "crates/aura-harness/src/backend/playwright_browser.rs",
+        "crates/aura-harness/playwright-driver/src/playwright_driver.ts",
+        "justfile",
+        ".github/workflows/ci.yml",
+        ".github/workflows/harness.yml",
+        "toolkit/xtask/src/checks/policy.rs",
+        "scripts/harness/run-matrix.sh",
+        "docs/804_testing_guide.md",
+        ".claude/skills/testing/SKILL.md",
+        ".claude/skills/aura-quick-ref/SKILL.md",
+        ".claude/skills/harness-run/SKILL.md",
+    ]
+    .into();
+    let _shared_scenario_allowed_actions: BTreeSet<&str> = [
+        "launch_actors",
+        "screen_is",
+        "create_account",
+        "readiness_is",
+        "open_screen",
+        "start_device_enrollment",
+        "runtime_event_occurred",
+        "import_device_enrollment_code",
+        "open_settings_section",
+        "selection_is",
+        "list_count_is",
+        "remove_selected_device",
+        "capture_current_authority_id",
+        "create_contact_invitation",
+        "accept_contact_invitation",
+        "join_channel",
+        "invite_actor_to_channel",
+        "accept_pending_channel_invitation",
+        "send_chat_message",
+        "parity_with_actor",
+    ]
+    .into();
+
+    let diff_output = command_stdout(
+        "git",
+        &[
+            "diff".into(),
+            "--unified=0".into(),
+            "--no-color".into(),
+            diff_range.clone(),
+        ],
+    )?;
+
+    let mut current_file = String::new();
+    let mut new_line: u64 = 0;
+
+    for raw_line in diff_output.lines() {
+        if let Some(rest) = raw_line.strip_prefix("+++ b/") {
+            current_file = rest.to_owned();
+            continue;
+        }
+        if raw_line == "+++ /dev/null" {
+            current_file.clear();
+            continue;
+        }
+        if let Some(rest) = raw_line.strip_prefix("@@ ") {
+            // Parse `@@ -a,b +c[,d] @@`
+            if let Some(plus_part) = rest.split_whitespace().nth(1) {
+                let num_str = plus_part.trim_start_matches('+').split(',').next().unwrap_or("0");
+                new_line = num_str.parse().unwrap_or(0);
+            }
+            continue;
+        }
+        if current_file.is_empty() || !raw_line.starts_with('+') || raw_line.starts_with("+++") {
+            continue;
+        }
+
+        let text = &raw_line[1..];
+
+        // AURA_HARNESS_MODE outside allowlist
+        if text.contains("AURA_HARNESS_MODE")
+            && current_file.starts_with("crates/")
+            && !current_file.starts_with("crates/aura-harness/")
+            && !text.contains(r#"contains("AURA_HARNESS_MODE")"#)
+            && !text.contains("assert!(!")
+            && !allowlisted_harness_mode_files.contains(current_file.as_str())
+        {
+            eprintln!(
+                "✖ {current_file}:{new_line}: new AURA_HARNESS_MODE branch outside allowlisted instrumentation surface"
+            );
+            violations += 1;
+        }
+
+        // Sleep/polling in parity-critical harness paths
+        if sleep_guard_paths.contains(current_file.as_str())
+            && (text.contains("thread::sleep")
+                || text.contains("std::thread::sleep")
+                || text.contains("tokio::time::sleep")
+                || text.contains("recv_timeout")
+                || text.contains("POLL_INTERVAL")
+                || text.contains("poll_interval"))
+        {
+            eprintln!("✖ {current_file}:{new_line}: new sleep/polling helper in parity-critical harness or export path");
+            violations += 1;
+        }
+
+        // Parity remap/normalization helpers
+        if current_file.starts_with("crates/")
+            && (text.contains("normalize_parity_")
+                || text.contains("parity_normalize")
+                || text.contains("parity_remap")
+                || text.contains("normalize_parity")
+                || text.contains("remap_parity"))
+        {
+            eprintln!("✖ {current_file}:{new_line}: new parity remap/normalization helper");
+            violations += 1;
+        }
+
+        // Stringly-typed parity identifiers outside ui_contract
+        if current_file.starts_with("crates/")
+            && current_file != "crates/aura-app/src/ui_contract.rs"
+            && (text.contains(r#"ScreenId(""#)
+                || text.contains(r#"ModalId(""#)
+                || text.contains(r#"ControlId(""#)
+                || text.contains(r#"FieldId(""#)
+                || text.contains(r#"ListId(""#)
+                || text.contains(r#"OperationId(""#)
+                || text.contains(r#"RuntimeEventId(""#)
+                || text.contains(r#"ToastId(""#))
+        {
+            eprintln!("✖ {current_file}:{new_line}: new stringly-typed parity identifier outside aura-app::ui_contract");
+            violations += 1;
+        }
+
+        // Row-index selection in parity paths
+        if row_index_guard_paths.contains(current_file.as_str())
+            && (text.contains("selected_idx")
+                || text.contains("selected_by_index")
+                || text.contains("selected_channel_index"))
+        {
+            eprintln!("✖ {current_file}:{new_line}: new row-index selection/addressing in parity-critical export or contract code");
+            violations += 1;
+        }
+
+        // Legacy scenario dialect fields
+        if current_file.starts_with("scenarios/harness/") && current_file.ends_with(".toml") {
+            let trimmed = text.trim_start();
+            if trimmed.starts_with("schema_version ")
+                || trimmed.starts_with("execution_mode ")
+                || trimmed.starts_with("required_capabilities ")
+            {
+                eprintln!("✖ {current_file}:{new_line}: new legacy scenario-dialect field in scenarios/harness");
+                violations += 1;
+            }
+        }
+
+        // Non-allowlisted harness entrypoints
+        if !harness_entrypoint_allowlist.contains(current_file.as_str())
+            && !current_file.starts_with("scripts/check/")
+            && (text.contains("just harness-run")
+                || text.contains("just harness-run-browser")
+                || text.contains("aura-harness -- run")
+                || text.contains("cargo run -p aura-harness --bin aura-harness")
+                || text.contains("window.__AURA_HARNESS__"))
+        {
+            eprintln!("✖ {current_file}:{new_line}: new frontend-driving harness entry point outside approved owner files");
+            violations += 1;
+        }
+
+        // Raw String parity identifiers in TUI
+        if (current_file.starts_with("crates/aura-terminal/src/tui/")
+            || current_file == "crates/aura-terminal/src/handlers/tui.rs")
+            && (text.contains("screen_id: String")
+                || text.contains("modal_id: String")
+                || text.contains("control_id: String")
+                || text.contains("field_id: String")
+                || text.contains("list_id: String")
+                || text.contains("operation_id: String"))
+        {
+            eprintln!("✖ {current_file}:{new_line}: new parity-critical TUI surface uses raw String identifier");
+            violations += 1;
+        }
+
+        new_line += 1;
+    }
+
+    if violations > 0 {
+        bail!("user-flow-policy-guardrails: {violations} violation(s)");
+    }
+
+    println!("user-flow-policy-guardrails: clean");
+    Ok(())
 }
 
 pub fn run_verification_coverage() -> Result<()> {
-    run_head_shell_script("scripts/check/verification-coverage.sh", &[])
+    // long-block-exception: multi-section verification coverage check comparing documented vs actual counts
+    let repo_root = repo_root()?;
+    let doc = repo_root.join("docs/998_verification_coverage.md");
+
+    if !doc.exists() {
+        bail!("verification-coverage: docs/998_verification_coverage.md not found");
+    }
+
+    let doc_src = read(&doc)?;
+    let mut mismatches = 0u32;
+
+    // Helper: extract documented value from summary table "| Metric | Count |"
+    let get_documented = |metric: &str| -> Option<u64> {
+        let pat = format!("| {metric} |");
+        doc_src.lines().find(|l| l.contains(&pat)).and_then(|l| {
+            let parts: Vec<&str> = l.split('|').collect();
+            parts.get(2).and_then(|s| s.trim().parse().ok())
+        })
+    };
+
+    // Helper: count files under a path matching extension
+    let count_files = |path: &std::path::Path, ext: &str| -> u64 {
+        if !path.exists() {
+            return 0;
+        }
+        walkdir_count(path, ext)
+    };
+
+    fn walkdir_count(path: &std::path::Path, ext: &str) -> u64 {
+        let Ok(entries) = std::fs::read_dir(path) else { return 0 };
+        let mut count = 0u64;
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                count += walkdir_count(&p, ext);
+            } else if p.extension().and_then(|s| s.to_str()) == Some(ext) {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    let check_metric = |name: &str, documented: Option<u64>, actual: u64, mismatches: &mut u32| {
+        match documented {
+            None => {
+                eprintln!("  ? {name:<30} {actual:>4} (not documented)");
+                *mismatches += 1;
+            }
+            Some(d) if d == actual => {
+                println!("  ✓ {name:<30} {actual:>4}");
+            }
+            Some(d) => {
+                let diff = actual as i64 - d as i64;
+                eprintln!("  ✗ {name:<30} {actual:>4} (doc: {d}, diff: {diff:+})");
+                *mismatches += 1;
+            }
+        }
+    };
+
+    println!("Verification Coverage Check");
+    println!("============================");
+    println!();
+    println!("Summary Metrics");
+    println!("---------------");
+
+    let quint_dir = repo_root.join("verification/quint");
+    let lean_dir = repo_root.join("verification/lean");
+
+    let quint_specs = count_files(&quint_dir, "qnt");
+    check_metric("Quint Specifications", get_documented("Quint Specifications"), quint_specs, &mut mismatches);
+
+    let quint_invariants = {
+        command_stdout("rg", &["-rh".into(), r"^\s*val [A-Za-z]*[Ii]nvariant".into(), quint_dir.to_string_lossy().into_owned()])
+            .unwrap_or_default()
+            .lines()
+            .count() as u64
+    };
+    check_metric("Quint Invariants", get_documented("Quint Invariants"), quint_invariants, &mut mismatches);
+
+    let quint_temporal = {
+        command_stdout("rg", &["-rh".into(), r"^\s*temporal [a-zA-Z]".into(), quint_dir.to_string_lossy().into_owned()])
+            .unwrap_or_default()
+            .lines()
+            .count() as u64
+    };
+    check_metric("Quint Temporal Properties", get_documented("Quint Temporal Properties"), quint_temporal, &mut mismatches);
+
+    let quint_types = {
+        command_stdout("rg", &["-rh".into(), r"^\s*type ".into(), quint_dir.to_string_lossy().into_owned()])
+            .unwrap_or_default()
+            .lines()
+            .count() as u64
+    };
+    check_metric("Quint Type Definitions", get_documented("Quint Type Definitions"), quint_types, &mut mismatches);
+
+    let lean_files = count_files(&lean_dir, "lean");
+    check_metric("Lean Source Files", get_documented("Lean Source Files"), lean_files, &mut mismatches);
+
+    let lean_theorems = {
+        command_stdout("rg", &["-rh".into(), r"^(theorem|lemma) ".into(), lean_dir.to_string_lossy().into_owned()])
+            .unwrap_or_default()
+            .lines()
+            .count() as u64
+    };
+    check_metric("Lean Theorems", get_documented("Lean Theorems"), lean_theorems, &mut mismatches);
+
+    let conformance_fixtures = count_files(
+        &repo_root.join("crates/aura-testkit/fixtures/conformance"),
+        "json",
+    );
+    check_metric("Conformance Fixtures", get_documented("Conformance Fixtures"), conformance_fixtures, &mut mismatches);
+
+    let itf_harnesses = count_files(&quint_dir.join("harness"), "qnt");
+    check_metric("ITF Trace Harnesses", get_documented("ITF Trace Harnesses"), itf_harnesses, &mut mismatches);
+
+    let testkit_tests = {
+        let testkit_src = repo_root.join("crates/aura-testkit/src");
+        let testkit_tests_dir = repo_root.join("crates/aura-testkit/tests");
+        let mut count = 0u64;
+        for dir in [&testkit_src, &testkit_tests_dir] {
+            count += command_stdout("rg", &["-rh".into(), r"^#\[test\]".into(), dir.to_string_lossy().into_owned()])
+                .unwrap_or_default()
+                .lines()
+                .count() as u64;
+        }
+        count
+    };
+    check_metric("Testkit Tests", get_documented("Testkit Tests"), testkit_tests, &mut mismatches);
+
+    // Only count bridge_*.rs files
+    let bridge_modules = {
+        let dir = repo_root.join("crates/aura-quint/src");
+        if dir.exists() {
+            std::fs::read_dir(&dir).ok()
+                .map(|entries| {
+                    entries.flatten()
+                        .filter(|e| {
+                            e.file_name().to_string_lossy().starts_with("bridge_")
+                                && e.path().extension().and_then(|s| s.to_str()) == Some("rs")
+                        })
+                        .count() as u64
+                })
+                .unwrap_or(0)
+        } else { 0 }
+    };
+    let _ = bridge_modules; // suppress unused warning from first binding
+    check_metric("Bridge Modules", get_documented("Bridge Modules"), bridge_modules, &mut mismatches);
+
+    let telltale_parity_modules = {
+        let dir = repo_root.join("crates/aura-simulator/src");
+        if dir.exists() {
+            std::fs::read_dir(&dir).ok()
+                .map(|e| e.flatten().filter(|e| e.file_name() == "telltale_parity.rs").count() as u64)
+                .unwrap_or(0)
+        } else { 0 }
+    };
+    check_metric("Telltale Parity Modules", get_documented("Telltale Parity Modules"), telltale_parity_modules, &mut mismatches);
+
+    let bridge_pipeline_fixtures = count_files(
+        &repo_root.join("crates/aura-quint/tests/fixtures/bridge"),
+        "json",
+    );
+    check_metric("Bridge Pipeline Fixtures", get_documented("Bridge Pipeline Fixtures"), bridge_pipeline_fixtures, &mut mismatches);
+
+    // CI gates check
+    let justfile = repo_root.join("justfile");
+    let ci_gate_names = [
+        "ci-property-monitor:",
+        "ci-simulator-telltale-parity:",
+        "ci-choreo-parity:",
+        "ci-quint-typecheck:",
+        "ci-conformance-policy:",
+        "ci-conformance-contracts:",
+        "ci-lean-build:",
+        "ci-lean-check-sorry:",
+        "ci-telltale-bridge:",
+        "ci-kani:",
+    ];
+    let justfile_src = if justfile.exists() { read(&justfile)? } else { String::new() };
+    let ci_gate_count = ci_gate_names.iter().filter(|&&g| justfile_src.contains(g)).count() as u64 + 1;
+    check_metric("CI Verification Gates", get_documented("CI Verification Gates"), ci_gate_count, &mut mismatches);
+
+    println!();
+
+    // Bridge modules existence check
+    let bridge_ok: Vec<&str> = ["bridge_export", "bridge_import", "bridge_format", "bridge_validate"]
+        .iter()
+        .filter(|&&m| repo_root.join(format!("crates/aura-quint/src/{m}.rs")).exists())
+        .copied()
+        .collect();
+    let bridge_missing = 4 - bridge_ok.len();
+    if bridge_missing > 0 {
+        eprintln!("  ✗ bridge modules: {}/{} found", bridge_ok.len(), 4);
+        mismatches += 1;
+    } else {
+        println!("  ✓ All {} bridge modules found", bridge_ok.len());
+    }
+
+    // Schema references check
+    let check_schema = |schema: &str, source_file: &std::path::Path, label: &str, mismatches: &mut u32| {
+        let in_doc = doc_src.contains(schema);
+        let in_source = source_file.exists() && read(source_file).map(|s| s.contains(schema)).unwrap_or(false);
+        if in_doc && in_source {
+            println!("  ✓ {label}");
+        } else {
+            eprintln!("  ✗ {label} (doc={in_doc}, source={in_source})");
+            *mismatches += 1;
+        }
+    };
+
+    check_schema(
+        "aura.telltale-parity.report.v1",
+        &repo_root.join("crates/aura-simulator/src/telltale_parity.rs"),
+        "Telltale parity report schema documented and implemented",
+        &mut mismatches,
+    );
+    check_schema(
+        "aura.telltale-bridge.discrepancy.v1",
+        &repo_root.join("crates/aura-quint/tests/bridge_pipeline.rs"),
+        "Bridge discrepancy schema documented and implemented",
+        &mut mismatches,
+    );
+
+    println!();
+    if mismatches > 0 {
+        bail!("verification-coverage: {mismatches} check(s) failed. Update docs/998_verification_coverage.md to match actual counts.");
+    }
+
+    println!("verification-coverage: PASSED");
+    Ok(())
 }
 
 pub fn run_shared_flow_policy() -> Result<()> {

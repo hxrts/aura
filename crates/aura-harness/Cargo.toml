@@ -56,3 +56,4 @@ patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura", o
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura" }
+serial_test = "3.0"
