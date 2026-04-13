@@ -144,7 +144,7 @@ pub fn attribute_failure(message: &str) -> FailureAttribution {
             "appcore",
             "failed to initialize app signals",
             "runtime bridge",
-            "time not implemented on this platform",
+            "platform time service unavailable",
         ],
     ) {
         (FailureLayer::Runtime, FailurePhase::Execution, "runtime")

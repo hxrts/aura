@@ -100,6 +100,67 @@ impl SshTunnelBackend {
         args
     }
 
+    fn build_ssh_command_args(&self, command: &str, args: &[String]) -> Vec<String> {
+        let mut ssh_args = self.build_ssh_args();
+        ssh_args.pop();
+        ssh_args.push(command.to_string());
+        ssh_args.extend(args.iter().cloned());
+        ssh_args
+    }
+
+    fn run_remote_capture(&self, command: &str, args: &[String]) -> Result<String> {
+        let output = Command::new("ssh")
+            .args(self.build_ssh_command_args(command, args))
+            .output()
+            .with_context(|| {
+                format!(
+                    "failed to invoke ssh binary for remote command on {}",
+                    self.config.id
+                )
+            })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!(
+                "remote command '{}' failed for {}: {}",
+                command,
+                self.config.id,
+                stderr.trim()
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    fn config_env_value(&self, key: &str) -> Option<String> {
+        self.config.env.iter().find_map(|entry| {
+            let (name, value) = entry.split_once('=')?;
+            (name.trim() == key).then(|| value.to_string())
+        })
+    }
+
+    fn remote_clipboard_path(&self) -> PathBuf {
+        self.config_env_value("AURA_CLIPBOARD_FILE")
+            .map(PathBuf::from)
+            .or_else(|| {
+                self.config
+                    .remote_workdir
+                    .as_ref()
+                    .map(|root| root.join(".harness-transient").join("clipboard.txt"))
+            })
+            .unwrap_or_else(|| PathBuf::from("clipboard.txt"))
+    }
+
+    fn remote_ui_state_path(&self) -> PathBuf {
+        self.config_env_value("AURA_TUI_UI_STATE_FILE")
+            .map(PathBuf::from)
+            .or_else(|| {
+                self.config
+                    .remote_workdir
+                    .as_ref()
+                    .map(|root| root.join(".harness-transient").join("ui-state.json"))
+            })
+            .unwrap_or_else(|| PathBuf::from("ui-state.json"))
+    }
+
     fn run_probe(&self) -> Result<()> {
         let args = self.build_ssh_args();
         let output = Command::new("ssh")
@@ -166,7 +227,13 @@ impl InstanceBackend for SshTunnelBackend {
 
 impl DiagnosticBackend for SshTunnelBackend {
     fn diagnostic_screen_snapshot(&self) -> Result<String> {
-        bail!("ssh_tunnel snapshot is not implemented yet")
+        let path = self.remote_ui_state_path();
+        let body = self.run_remote_capture("cat", &[path.display().to_string()])?;
+        let trimmed = body.trim().to_string();
+        if trimmed.is_empty() {
+            bail!("ssh_tunnel UI snapshot file {} is empty", path.display());
+        }
+        Ok(trimmed)
     }
 
     fn diagnostic_dom_snapshot(&self) -> Result<String> {
@@ -207,7 +274,13 @@ impl DiagnosticBackend for SshTunnelBackend {
     }
 
     fn read_clipboard(&self) -> Result<String> {
-        bail!("ssh_tunnel clipboard reads are not implemented yet")
+        let path = self.remote_clipboard_path();
+        let text = self.run_remote_capture("cat", &[path.display().to_string()])?;
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() {
+            bail!("clipboard for instance {} is empty", self.config.id);
+        }
+        Ok(trimmed)
     }
 }
 

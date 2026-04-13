@@ -10,6 +10,8 @@ use aura_agent::handlers::{ChatGroupId, ChatMessageId};
 use aura_agent::AuraEffectSystem;
 use aura_core::effects::ConsoleEffects;
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 /// Execute chat management commands through the ChatServiceApi
 ///
@@ -314,14 +316,92 @@ pub async fn handle_chat(
         ChatCommands::Export {
             group_id,
             output,
-            format: _,
-            include_system: _,
+            format,
+            include_system,
         } => {
-            // Export functionality requires additional infrastructure
+            let group_id = ChatGroupId::from_uuid(*group_id);
+            let history = chat.get_history(&group_id, None, None).await?;
+            let include_system = *include_system;
+            let filtered_history = history
+                .into_iter()
+                .filter(|message| include_system || !message.is_system())
+                .collect::<Vec<_>>();
+
+            let format = format.to_lowercase();
+            let body = match format.as_str() {
+                "json" => serde_json::to_string_pretty(&filtered_history).map_err(|error| {
+                    TerminalError::Operation(format!("Failed to serialize chat export: {error}"))
+                })?,
+                "csv" => {
+                    let mut rows = vec![
+                        "message_id,group_id,sender_id,message_type,timestamp,reply_to,content"
+                            .to_string(),
+                    ];
+                    for message in &filtered_history {
+                        let content = message.content.replace('"', "\"\"");
+                        let reply_to = message
+                            .reply_to
+                            .clone()
+                            .map(|reply| reply.to_string())
+                            .unwrap_or_default();
+                        rows.push(format!(
+                            "\"{}\",\"{}\",\"{}\",\"{:?}\",\"{:?}\",\"{}\",\"{}\"",
+                            message.id,
+                            message.group_id,
+                            message.sender_id,
+                            message.message_type,
+                            message.timestamp,
+                            reply_to,
+                            content
+                        ));
+                    }
+                    rows.join("\n")
+                }
+                "text" => filtered_history
+                    .iter()
+                    .map(|message| {
+                        format!(
+                            "[{:?}] {} {:?}: {}",
+                            message.timestamp,
+                            message.sender_id,
+                            message.message_type,
+                            message.content
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                other => {
+                    return Err(TerminalError::Input(format!(
+                        "Unsupported chat export format: {other}"
+                    )));
+                }
+            };
+
+            let output_path = Path::new(output);
+            if let Some(parent) = output_path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                fs::create_dir_all(parent).map_err(|error| {
+                    TerminalError::Operation(format!(
+                        "Failed to create export directory {}: {error}",
+                        parent.display()
+                    ))
+                })?;
+            }
+            fs::write(output_path, body).map_err(|error| {
+                TerminalError::Operation(format!(
+                    "Failed to write chat export {}: {error}",
+                    output_path.display()
+                ))
+            })?;
             ConsoleEffects::log_info(
                 ctx.effects(),
                 &format!(
-                    "Export functionality for group {group_id} to {output} not yet implemented"
+                    "Exported {} chat messages from group {} to {}",
+                    filtered_history.len(),
+                    group_id,
+                    output_path.display()
                 ),
             )
             .await?;

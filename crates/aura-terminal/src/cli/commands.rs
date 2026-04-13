@@ -32,6 +32,9 @@ pub struct ThresholdArgs {
     pub configs: String,
     pub threshold: u32,
     pub mode: String,
+    pub message: Option<String>,
+    pub message_hex: Option<String>,
+    pub signature: Option<String>,
 }
 
 /// Replay command arguments for conformance/effect trace debugging.
@@ -179,11 +182,26 @@ fn threshold_command() -> impl Parser<Commands> {
     let mode = long("mode")
         .help("Operation mode")
         .argument::<String>("MODE");
+    let message = long("message")
+        .help("Verification message as UTF-8 text (verify mode)")
+        .argument::<String>("MESSAGE")
+        .optional();
+    let message_hex = long("message-hex")
+        .help("Verification message as hex bytes (verify mode)")
+        .argument::<String>("HEX")
+        .optional();
+    let signature = long("signature")
+        .help("Hex/base64 encoded threshold signature (verify mode)")
+        .argument::<String>("SIGNATURE")
+        .optional();
 
     construct!(ThresholdArgs {
         configs,
         threshold,
-        mode
+        mode,
+        message,
+        message_hex,
+        signature
     })
     .to_options()
     .command("threshold")

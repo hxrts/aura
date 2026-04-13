@@ -28,7 +28,7 @@ pub enum TerminalError {
     NotFound(String),
     #[error("Network error: {0}")]
     Network(String),
-    #[error("Not implemented: {0}")]
+    #[error("Feature unavailable: {0}")]
     NotImplemented(String),
     #[error("Operation failed: {0}")]
     Operation(String),

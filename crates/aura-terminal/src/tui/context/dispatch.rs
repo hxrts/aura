@@ -308,7 +308,9 @@ impl DispatchHelper {
         } else {
             // Unknown command.
             tracing::warn!("Unknown command not handled by Operational: {:?}", command);
-            let error = TerminalError::NotImplemented(format!("Unknown command: {command:?}"));
+            let error = TerminalError::Operation(format!(
+                "Operational pipeline has no handler for command: {command:?}"
+            ));
             self.operational.emit_error(error.clone()).await;
             Err(error)
         }
@@ -330,9 +332,7 @@ impl DispatchHelper {
                         self.toasts
                             .success("account-backup", format!("Backup code: {code}"))
                             .await;
-                        return Err(TerminalError::NotImplemented(
-                            "dispatch_with_response does not support backup export".into(),
-                        ));
+                        return Ok(OpResponse::Data(code));
                     }
                     Err(error) => {
                         self.operational.emit_error(error.clone()).await;
@@ -346,9 +346,7 @@ impl DispatchHelper {
                         self.toasts
                             .success("account-backup", "Backup imported successfully")
                             .await;
-                        return Err(TerminalError::NotImplemented(
-                            "dispatch_with_response does not support backup import".into(),
-                        ));
+                        return Ok(OpResponse::Ok);
                     }
                     Err(error) => {
                         self.operational.emit_error(error.clone()).await;
@@ -372,7 +370,9 @@ impl DispatchHelper {
             }
         } else {
             tracing::warn!("Unknown command not handled by Operational: {:?}", command);
-            let error = TerminalError::NotImplemented(format!("Unknown command: {command:?}"));
+            let error = TerminalError::Operation(format!(
+                "Operational pipeline has no handler for command: {command:?}"
+            ));
             self.operational.emit_error(error.clone()).await;
             Err(error)
         }
@@ -645,14 +645,14 @@ mod tests {
         let _ = ctx.dispatch(EffectCommand::UnknownCommandForTest).await;
         let err = wait_for_error(app_core.raw()).await;
         assert_eq!(err.code(), "INTERNAL");
-        assert!(err.to_string().contains("Unknown command"));
+        assert!(err.to_string().contains("no handler for command"));
     }
 
-    /// Regression test: CreateAccount dispatch must not produce "Unknown command".
+    /// Regression test: CreateAccount dispatch must not be rejected as an unhandled command.
     ///
     /// Previously, `EffectCommand::CreateAccount` was not handled by any operational
     /// sub-handler, so the dispatch layer emitted:
-    ///   INTERNAL: operation: Unknown command: CreateAccount { nickname_suggestion: "..." }
+    ///   INTERNAL: operation: Operational pipeline has no handler for command: CreateAccount { nickname_suggestion: "..." }
     #[tokio::test]
     async fn create_account_dispatch_does_not_emit_unknown_command() {
         let app_core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
@@ -678,10 +678,10 @@ mod tests {
             .await;
 
         // The command may succeed or fail for domain reasons, but it must NOT
-        // fail with "Unknown command" — that means no handler recognized it.
-        if let Err(TerminalError::NotImplemented(message)) = result {
+        // fail as an unhandled command — that means no handler recognized it.
+        if let Err(TerminalError::Operation(message)) = result {
             assert!(
-                !message.contains("Unknown command"),
+                !message.contains("no handler for command"),
                 "CreateAccount must be handled, not rejected as unknown. Got: {message}"
             );
         }

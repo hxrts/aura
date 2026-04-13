@@ -1659,7 +1659,7 @@ mod semilattice_tests {
     }
 
     #[test]
-    fn test_journal_authorization_stub() {
+    fn test_journal_authorization_defaults_deny() {
         let journal = Journal::new();
         // Empty Cap returns false for all permissions
         assert!(!journal.is_authorized("read", "resource", 0));

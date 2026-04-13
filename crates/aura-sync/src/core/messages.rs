@@ -9,6 +9,7 @@ use super::wire::physical_time_from_ms;
 use aura_core::time::PhysicalTime;
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use uuid::Uuid;
 
@@ -155,12 +156,7 @@ impl<T> RequestMessage<T> {
     ///
     /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and use `with_id()`
     pub fn new(from: DeviceId, to: DeviceId, payload: T, request_uuid: Uuid) -> Self {
-        Self {
-            request_id: request_uuid,
-            from,
-            to,
-            payload,
-        }
+        Self::with_id(request_uuid, from, to, payload)
     }
 
     /// Create request with specific ID (for testing)
@@ -188,24 +184,23 @@ pub struct ResponseMessage<T> {
 }
 
 impl<T> ResponseMessage<T> {
-    /// Create a success response
-    pub fn success(request: &RequestMessage<impl Clone>, payload: T) -> Self {
+    fn from_payload<U>(request: &RequestMessage<U>, payload: ResponsePayload<T>) -> Self {
         Self {
             request_id: request.request_id,
             from: request.to,
             to: request.from,
-            payload: ResponsePayload::Success(payload),
+            payload,
         }
+    }
+
+    /// Create a success response
+    pub fn success(request: &RequestMessage<impl Clone>, payload: T) -> Self {
+        Self::from_payload(request, ResponsePayload::Success(payload))
     }
 
     /// Create an error response
     pub fn error(request: &RequestMessage<impl Clone>, error: String) -> Self {
-        Self {
-            request_id: request.request_id,
-            from: request.to,
-            to: request.from,
-            payload: ResponsePayload::Error(error),
-        }
+        Self::from_payload(request, ResponsePayload::Error(error))
     }
 
     /// Check if this response is successful
@@ -247,6 +242,16 @@ pub struct SyncResult<T> {
 }
 
 impl<T> SyncResult<T> {
+    fn failure_with_operations(operations_synced: u64, error: String, duration_ms: u64) -> Self {
+        Self {
+            success: false,
+            operations_synced,
+            data: None,
+            error: Some(error),
+            duration_ms,
+        }
+    }
+
     /// Create a successful sync result
     pub fn success(operations_synced: u64, data: Option<T>, duration_ms: u64) -> Self {
         Self {
@@ -260,24 +265,12 @@ impl<T> SyncResult<T> {
 
     /// Create a failed sync result
     pub fn failure(error: String, duration_ms: u64) -> Self {
-        Self {
-            success: false,
-            operations_synced: 0,
-            data: None,
-            error: Some(error),
-            duration_ms,
-        }
+        Self::failure_with_operations(0, error, duration_ms)
     }
 
     /// Create a partial success result
     pub fn partial(operations_synced: u64, error: String, duration_ms: u64) -> Self {
-        Self {
-            success: false,
-            operations_synced,
-            data: None,
-            error: Some(error),
-            duration_ms,
-        }
+        Self::failure_with_operations(operations_synced, error, duration_ms)
     }
 
     /// Convert to a different data type
@@ -384,7 +377,7 @@ impl ProgressMessage {
             progress: progress.clamp(0.0, 1.0),
             status,
             eta_seconds: None,
-            metadata: std::collections::HashMap::new(),
+            metadata: HashMap::new(),
         }
     }
 

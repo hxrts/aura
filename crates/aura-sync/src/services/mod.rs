@@ -79,6 +79,7 @@ pub use ota_transition::{
 };
 pub use sync::{SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth};
 
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -186,6 +187,37 @@ impl ServiceState {
     pub fn is_running(&self) -> bool {
         matches!(self, ServiceState::Running)
     }
+}
+
+pub(crate) fn begin_service_start(
+    state: &RwLock<ServiceState>,
+    started_at: &RwLock<Option<MonotonicInstant>>,
+    now: MonotonicInstant,
+) -> SyncResult<()> {
+    let mut state_guard = state.write();
+    if state_guard.is_running() {
+        return Err(crate::core::sync_session_error("Service already running"));
+    }
+    *state_guard = ServiceState::Starting;
+    *started_at.write() = Some(now);
+    Ok(())
+}
+
+pub(crate) fn finish_service_start(state: &RwLock<ServiceState>) {
+    *state.write() = ServiceState::Running;
+}
+
+pub(crate) fn begin_service_stop(state: &RwLock<ServiceState>) -> bool {
+    let mut state_guard = state.write();
+    if *state_guard == ServiceState::Stopped {
+        return false;
+    }
+    *state_guard = ServiceState::Stopping;
+    true
+}
+
+pub(crate) fn finish_service_stop(state: &RwLock<ServiceState>) {
+    *state.write() = ServiceState::Stopped;
 }
 
 /// Common service metrics

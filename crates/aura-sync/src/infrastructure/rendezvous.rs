@@ -71,6 +71,22 @@ pub struct SyncBlendedHoldWindow {
 }
 
 impl RendezvousAdapter {
+    fn deadline_window<T: Clone>(
+        entries: &[T],
+        now_ms: u64,
+        max_batch: usize,
+        deadline: impl Fn(&T) -> u64,
+    ) -> Vec<T> {
+        let mut entries = entries
+            .iter()
+            .filter(|entry| deadline(entry) >= now_ms)
+            .cloned()
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| deadline(entry));
+        entries.truncate(max_batch);
+        entries
+    }
+
     fn valid_descriptor<'a>(
         &self,
         descriptor: &'a RendezvousDescriptor,
@@ -205,25 +221,11 @@ impl RendezvousAdapter {
         now_ms: u64,
         max_batch: usize,
     ) -> SyncBlendedHoldWindow {
-        let mut retrievals = retrievals
-            .iter()
-            .filter(|entry| entry.deadline_ms >= now_ms)
-            .cloned()
-            .collect::<Vec<_>>();
-        retrievals.sort_by_key(|entry| entry.deadline_ms);
-        retrievals.truncate(max_batch);
-
-        let mut replies = replies
-            .iter()
-            .filter(|entry| entry.deadline_ms >= now_ms)
-            .cloned()
-            .collect::<Vec<_>>();
-        replies.sort_by_key(|entry| entry.deadline_ms);
-        replies.truncate(max_batch);
-
         SyncBlendedHoldWindow {
-            retrievals,
-            replies,
+            retrievals: Self::deadline_window(retrievals, now_ms, max_batch, |entry| {
+                entry.deadline_ms
+            }),
+            replies: Self::deadline_window(replies, now_ms, max_batch, |entry| entry.deadline_ms),
         }
     }
 }

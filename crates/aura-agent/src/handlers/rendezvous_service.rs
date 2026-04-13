@@ -734,9 +734,7 @@ mod tests {
             .request_relay(context_id, relay, target)
             .await
             .unwrap();
-        // Note: Relay support is not yet implemented in Phase 1,
-        // so this returns success=false with an error message
-        assert!(!result.success);
-        assert!(result.error.is_some());
+        assert!(result.success);
+        assert!(result.error.is_none());
     }
 }

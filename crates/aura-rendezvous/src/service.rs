@@ -544,12 +544,13 @@ impl RendezvousService {
         }
     }
 
-    /// Prepare a relay request (placeholder for Phase 2+)
+    /// Prepare a relay request using the same capability and hop-budget checks
+    /// as direct rendezvous establishment.
     pub fn prepare_relay_request(
         &self,
         _context_id: ContextId,
-        _relay: AuthorityId,
-        _target: AuthorityId,
+        relay: AuthorityId,
+        target: AuthorityId,
         snapshot: &GuardSnapshot,
     ) -> GuardOutcome {
         // Check capability
@@ -559,10 +560,19 @@ impl RendezvousService {
             return outcome;
         }
 
-        // Relay support will be added in Phase 2+
-        GuardOutcome::denied(types::GuardViolation::other(
-            "Relay support not yet implemented",
-        ))
+        if relay == target {
+            return GuardOutcome::denied(types::GuardViolation::other(
+                "relay authority must differ from relay target",
+            ));
+        }
+
+        if self.config.max_relay_hops == 0 {
+            return GuardOutcome::denied(types::GuardViolation::other(
+                "relay requests are disabled by max_relay_hops=0",
+            ));
+        }
+
+        GuardOutcome::allowed(Vec::new())
     }
 }
 

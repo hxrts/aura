@@ -28,6 +28,60 @@ fn failed_gate_names(candidate: &ActivationCandidate) -> Vec<String> {
         .collect()
 }
 
+fn require_builder_threshold(
+    required: Option<u16>,
+    observed: u16,
+    reason: impl FnOnce(u16, u16) -> ActivationDecisionReason,
+) -> Option<ActivationDecision> {
+    required.and_then(|required| {
+        (observed < required).then(|| ActivationDecision::denied(reason(required, observed)))
+    })
+}
+
+fn require_rollout_cohort(
+    policy: &AuraReleaseActivationPolicy,
+    candidate: &ActivationCandidate,
+) -> Option<ActivationDecision> {
+    policy
+        .required_rollout_cohort
+        .as_ref()
+        .and_then(|required_cohort| {
+            (candidate.rollout_cohort.as_ref() != Some(required_cohort)).then(|| {
+                ActivationDecision::deferred(
+                    policy.auto_stage,
+                    ActivationDecisionReason::RolloutCohortMismatch {
+                        required: required_cohort.clone(),
+                        observed: candidate.rollout_cohort.clone(),
+                    },
+                )
+            })
+        })
+}
+
+fn require_suggested_activation_time(
+    policy: &AuraReleaseActivationPolicy,
+    candidate: &ActivationCandidate,
+) -> Option<ActivationDecision> {
+    if !policy.respect_suggested_activation_time {
+        return None;
+    }
+
+    candidate
+        .manifest
+        .suggested_activation_time_unix_ms
+        .and_then(|suggested_time| {
+            (candidate.local_unix_time_ms < suggested_time).then(|| {
+                ActivationDecision::deferred(
+                    policy.auto_stage,
+                    ActivationDecisionReason::SuggestedActivationTimePending {
+                        suggested_time_unix_ms: suggested_time,
+                        local_unix_time_ms: candidate.local_unix_time_ms,
+                    },
+                )
+            })
+        })
+}
+
 pub(super) fn evaluate_activation(
     policy: &AuraReleaseActivationPolicy,
     candidate: &ActivationCandidate,
@@ -50,21 +104,25 @@ pub(super) fn evaluate_activation(
     }) {
         return ActivationDecision::denied(ActivationDecisionReason::BuilderAuthorityNotAllowed);
     }
-    if let Some(required) = policy.trust_policy.required_builder_threshold {
-        let observed = distinct_builder_count(candidate);
-        if observed < required {
-            return ActivationDecision::denied(
-                ActivationDecisionReason::BuilderThresholdNotSatisfied { required, observed },
-            );
-        }
+    if let Some(decision) = require_builder_threshold(
+        policy.trust_policy.required_builder_threshold,
+        distinct_builder_count(candidate),
+        |required, observed| ActivationDecisionReason::BuilderThresholdNotSatisfied {
+            required,
+            observed,
+        },
+    ) {
+        return decision;
     }
-    if let Some(required) = policy.trust_policy.required_tee_builder_threshold {
-        let observed = distinct_tee_builder_count(candidate);
-        if observed < required {
-            return ActivationDecision::denied(
-                ActivationDecisionReason::TeeBuilderThresholdNotSatisfied { required, observed },
-            );
-        }
+    if let Some(decision) = require_builder_threshold(
+        policy.trust_policy.required_tee_builder_threshold,
+        distinct_tee_builder_count(candidate),
+        |required, observed| ActivationDecisionReason::TeeBuilderThresholdNotSatisfied {
+            required,
+            observed,
+        },
+    ) {
+        return decision;
     }
     match candidate.compatibility {
         AuraCompatibilityClass::BackwardCompatible
@@ -89,16 +147,8 @@ pub(super) fn evaluate_activation(
     if policy.trust_policy.require_local_rebuild && !candidate.local_rebuild_available {
         return ActivationDecision::denied(ActivationDecisionReason::LocalRebuildRequired);
     }
-    if let Some(required_cohort) = &policy.required_rollout_cohort {
-        if candidate.rollout_cohort.as_ref() != Some(required_cohort) {
-            return ActivationDecision::deferred(
-                policy.auto_stage,
-                ActivationDecisionReason::RolloutCohortMismatch {
-                    required: required_cohort.clone(),
-                    observed: candidate.rollout_cohort.clone(),
-                },
-            );
-        }
+    if let Some(decision) = require_rollout_cohort(policy, candidate) {
+        return decision;
     }
     if policy.trust_policy.block_on_trusted_revocation && !candidate.revoked_by.is_empty() {
         return ActivationDecision::denied(ActivationDecisionReason::RevokedByTrustedAuthorities {
@@ -119,18 +169,8 @@ pub(super) fn evaluate_activation(
             return decision;
         }
     }
-    if policy.respect_suggested_activation_time {
-        if let Some(suggested_time) = candidate.manifest.suggested_activation_time_unix_ms {
-            if candidate.local_unix_time_ms < suggested_time {
-                return ActivationDecision::deferred(
-                    policy.auto_stage,
-                    ActivationDecisionReason::SuggestedActivationTimePending {
-                        suggested_time_unix_ms: suggested_time,
-                        local_unix_time_ms: candidate.local_unix_time_ms,
-                    },
-                );
-            }
-        }
+    if let Some(decision) = require_suggested_activation_time(policy, candidate) {
+        return decision;
     }
     let failed_gates = failed_gate_names(candidate);
     if !failed_gates.is_empty() {

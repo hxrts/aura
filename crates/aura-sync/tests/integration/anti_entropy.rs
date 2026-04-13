@@ -128,10 +128,7 @@ async fn test_anti_entropy_with_network_conditions() -> AuraResult<()> {
     // Set poor network conditions between devices
     let poor_conditions = NetworkCondition::poor();
     fixture
-        .set_network_condition(device1, device2, poor_conditions.clone())
-        .await;
-    fixture
-        .set_network_condition(device2, device1, poor_conditions)
+        .set_network_condition_bidirectional(device1, device2, poor_conditions)
         .await;
 
     let session = fixture
@@ -152,14 +149,7 @@ async fn test_anti_entropy_with_network_conditions() -> AuraResult<()> {
     );
 
     // End the session and wait for completion using type-state pattern
-    let ended = session
-        .end()
-        .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
-    ended
-        .wait_for_completion(Duration::from_secs(45))
-        .await
-        .map_err(|e| AuraError::internal(e.to_string()))?;
+    finish_session(session, Duration::from_secs(45)).await?;
 
     // Verify eventual consistency
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -190,10 +180,7 @@ async fn test_anti_entropy_with_packet_loss() -> AuraResult<()> {
     };
 
     fixture
-        .set_network_condition(device1, device2, lossy_conditions.clone())
-        .await;
-    fixture
-        .set_network_condition(device2, device1, lossy_conditions)
+        .set_network_condition_bidirectional(device1, device2, lossy_conditions)
         .await;
 
     let session = fixture

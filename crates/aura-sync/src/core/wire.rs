@@ -118,3 +118,26 @@ where
 
     json_deserialize(data_type, description, &payload)
 }
+
+/// Serialize a JSON request, send it to the expected peer, and decode the JSON response.
+pub async fn exchange_json_with_peer<E, Req, Resp, P>(
+    effects: &E,
+    peer_id: Uuid,
+    peer: &P,
+    request_type: &str,
+    request_description: &str,
+    request: &Req,
+    response_type: &str,
+    response_description: &str,
+) -> SyncResult<Resp>
+where
+    E: NetworkEffects + Send + Sync,
+    Req: Serialize + ?Sized,
+    Resp: DeserializeOwned,
+    P: Display + ?Sized,
+{
+    let request_data = json_serialize(request_type, request_description, request)?;
+    send_bytes_to_peer(effects, peer_id, peer, request_description, request_data).await?;
+    receive_json_from_expected_peer(effects, peer_id, peer, response_type, response_description)
+        .await
+}

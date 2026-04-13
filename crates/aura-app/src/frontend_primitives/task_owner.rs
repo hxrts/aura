@@ -276,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn dropping_temporary_owner_clone_does_not_shutdown_shared_owner() {
+    fn dropping_ephemeral_owner_clone_does_not_shutdown_shared_owner() {
         let owner = FrontendTaskOwner::new(FrontendTaskRuntime::new(
             noop_spawn_boxed,
             noop_spawn_local_boxed,
@@ -285,8 +285,8 @@ mod tests {
         assert!(!spawner.shutdown_token().is_cancelled());
 
         {
-            let temporary = owner.clone();
-            drop(temporary);
+            let ephemeral = owner.clone();
+            drop(ephemeral);
         }
 
         assert!(!spawner.shutdown_token().is_cancelled());

@@ -185,6 +185,12 @@ pub struct AuraEffectSystem {
     /// Cached Biscuit token for guard chain authorization.
     biscuit_cache: parking_lot::RwLock<Option<BiscuitCache>>,
 
+    /// Runtime-owned in-memory ledger surface for EffectApiEffects consumers.
+    effect_api_ledger: parking_lot::Mutex<EffectApiLedgerState>,
+
+    /// Runtime-owned config overrides exposed through SystemEffects.
+    system_config: parking_lot::RwLock<HashMap<String, String>>,
+
     /// Runtime-managed connection handles for `NetworkExtendedEffects::open/send/close`.
     ///
     /// The key is an opaque connection handle UUID, not the remote address.
@@ -194,6 +200,15 @@ pub struct AuraEffectSystem {
     /// Browser websocket endpoints keyed by opaque connection handle UUID.
     #[cfg(target_arch = "wasm32")]
     network_connections: parking_lot::RwLock<HashMap<uuid::Uuid, String>>,
+}
+
+#[derive(Default)]
+struct EffectApiLedgerState {
+    epoch: u64,
+    events: Vec<(u64, Vec<u8>)>,
+    device_activity: HashMap<aura_core::DeviceId, u64>,
+    subscribers:
+        Vec<futures::channel::mpsc::UnboundedSender<aura_protocol::effects::EffectApiEvent>>,
 }
 
 #[derive(Clone, Default)]
@@ -440,6 +455,8 @@ impl AuraEffectSystem {
             rendezvous_manager: parking_lot::RwLock::new(None),
             move_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
+            effect_api_ledger: parking_lot::Mutex::new(EffectApiLedgerState::default()),
+            system_config: parking_lot::RwLock::new(HashMap::new()),
             #[cfg(not(target_arch = "wasm32"))]
             network_connections: parking_lot::RwLock::new(HashMap::new()),
             #[cfg(target_arch = "wasm32")]
@@ -481,27 +498,45 @@ impl AuraEffectSystem {
         }
     }
 
-    fn ensure_mock_system(&self, operation: &str) -> Result<(), SystemError> {
-        if self.execution_mode.is_deterministic() {
-            Ok(())
-        } else {
-            Err(SystemError::OperationFailed {
-                message: format!("SystemEffects::{operation} not implemented for production"),
-            })
+    fn effect_api_append(&self, event: Vec<u8>, epoch: u64) {
+        let subscribers = {
+            let mut ledger = self.effect_api_ledger.lock();
+            ledger.events.push((epoch, event.clone()));
+            std::mem::take(&mut ledger.subscribers)
+        };
+        let mut retained = Vec::with_capacity(subscribers.len());
+        for sender in subscribers {
+            if sender
+                .unbounded_send(aura_protocol::effects::EffectApiEvent::EventAppended {
+                    epoch,
+                    event: event.clone(),
+                })
+                .is_ok()
+            {
+                retained.push(sender);
+            }
         }
+        self.effect_api_ledger.lock().subscribers = retained;
     }
 
-    fn ensure_mock_effect_api(
-        &self,
-        operation: &str,
-    ) -> Result<(), aura_protocol::effects::EffectApiError> {
-        if self.execution_mode.is_deterministic() {
-            Ok(())
-        } else {
-            Err(aura_protocol::effects::EffectApiError::Backend {
-                error: format!("EffectApi::{operation} not implemented for production"),
-            })
+    fn effect_api_publish_device_activity(&self, device_id: aura_core::DeviceId, last_seen: u64) {
+        let subscribers = {
+            let mut ledger = self.effect_api_ledger.lock();
+            std::mem::take(&mut ledger.subscribers)
+        };
+        let mut retained = Vec::with_capacity(subscribers.len());
+        for sender in subscribers {
+            if sender
+                .unbounded_send(aura_protocol::effects::EffectApiEvent::DeviceActivity {
+                    device_id,
+                    last_seen,
+                })
+                .is_ok()
+            {
+                retained.push(sender);
+            }
         }
+        self.effect_api_ledger.lock().subscribers = retained;
     }
 
     /// Get the shared reactive handler (signal graph) for this runtime.

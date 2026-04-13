@@ -7,6 +7,7 @@
 use aura_core::effects::RandomEffects;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::str::FromStr;
 use std::time::Duration;
 
 /// Master configuration for all aura-sync operations
@@ -273,56 +274,45 @@ impl PerformanceConfig {
 impl SyncConfig {
     /// Create a configuration optimized for testing
     pub fn for_testing() -> Self {
-        Self {
-            network: NetworkConfig {
-                base_sync_interval: Duration::from_millis(100),
-                min_sync_interval: Duration::from_millis(50),
-                sync_timeout: Duration::from_secs(5),
-                cleanup_interval: Duration::from_secs(10),
-            },
-            retry: RetryConfig {
-                max_retries: 2,
-                base_delay: Duration::from_millis(10),
-                max_delay: Duration::from_millis(100),
-                jitter_factor: 0.0, // No jitter in tests for predictability
-            },
-            batching: BatchConfig {
-                default_batch_size: 10,
-                max_operations_per_round: 50,
-                enable_compression: false, // Faster for tests
-                min_batch_size: 1,
-                batch_timeout: Duration::from_millis(100),
-            },
-            performance: PerformanceConfig {
-                max_cpu_usage: 100, // No limits in tests
-                max_network_bandwidth: u64::MAX,
-                adaptive_scheduling: false, // Predictable behavior
-                memory_limit: u64::MAX,
-            },
-            ..Self::default()
-        }
+        let mut config = Self::default();
+        config.network = NetworkConfig {
+            base_sync_interval: Duration::from_millis(100),
+            min_sync_interval: Duration::from_millis(50),
+            sync_timeout: Duration::from_secs(5),
+            cleanup_interval: Duration::from_secs(10),
+        };
+        config.retry = RetryConfig {
+            max_retries: 2,
+            base_delay: Duration::from_millis(10),
+            max_delay: Duration::from_millis(100),
+            jitter_factor: 0.0, // No jitter in tests for predictability
+        };
+        config.batching = BatchConfig {
+            default_batch_size: 10,
+            max_operations_per_round: 50,
+            enable_compression: false, // Faster for tests
+            min_batch_size: 1,
+            batch_timeout: Duration::from_millis(100),
+        };
+        config.performance = PerformanceConfig {
+            max_cpu_usage: 100, // No limits in tests
+            max_network_bandwidth: u64::MAX,
+            adaptive_scheduling: false, // Predictable behavior
+            memory_limit: u64::MAX,
+        };
+        config
     }
 
     /// Create a configuration optimized for production
     pub fn for_production() -> Self {
-        Self {
-            network: NetworkConfig {
-                base_sync_interval: Duration::from_secs(60), // Less frequent in prod
-                sync_timeout: Duration::from_secs(300),      // Longer timeout
-                ..NetworkConfig::default()
-            },
-            retry: RetryConfig {
-                max_retries: 5,                     // More retries in production
-                max_delay: Duration::from_secs(60), // Longer max delay
-                ..RetryConfig::default()
-            },
-            performance: PerformanceConfig {
-                max_cpu_usage: 60, // Conservative CPU usage
-                adaptive_scheduling: true,
-                ..PerformanceConfig::default()
-            },
-            ..Self::default()
-        }
+        let mut config = Self::default();
+        config.network.base_sync_interval = Duration::from_secs(60); // Less frequent in prod
+        config.network.sync_timeout = Duration::from_secs(300); // Longer timeout
+        config.retry.max_retries = 5; // More retries in production
+        config.retry.max_delay = Duration::from_secs(60); // Longer max delay
+        config.performance.max_cpu_usage = 60; // Conservative CPU usage
+        config.performance.adaptive_scheduling = true;
+        config
     }
 
     /// Validate the entire configuration
@@ -606,48 +596,42 @@ impl SyncConfigBuilder {
 }
 
 fn parse_bool(key: &str, default: bool) -> bool {
-    env::var(key)
-        .ok()
+    parse_env::<String>(key)
         .as_deref()
-        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(default)
 }
 
 fn parse_u32(key: &str, default: u32) -> u32 {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(default)
+    parse_env(key).unwrap_or(default)
 }
 
 fn parse_u64(key: &str, default: u64) -> u64 {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(default)
+    parse_env(key).unwrap_or(default)
 }
 
 fn parse_f64(key: &str, default: f64) -> f64 {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .unwrap_or(default)
+    parse_env(key).unwrap_or(default)
 }
 
 fn duration_secs(key: &str, default: Duration) -> Duration {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(default)
+    parse_env(key).map(Duration::from_secs).unwrap_or(default)
 }
 
 fn duration_millis(key: &str, default: Duration) -> Duration {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(default)
+    parse_env(key).map(Duration::from_millis).unwrap_or(default)
+}
+
+fn parse_env<T>(key: &str) -> Option<T>
+where
+    T: FromStr,
+{
+    env::var(key).ok().and_then(|value| value.parse::<T>().ok())
 }
 
 impl Default for SyncConfigBuilder {

@@ -8,6 +8,7 @@ use crate::handlers::config::load_config_utf8;
 use crate::handlers::{CliOutput, HandlerContext};
 use aura_agent::handlers::{DkdConfig, DkdProtocol};
 use aura_core::DeviceId;
+use base64::Engine;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -21,6 +22,9 @@ pub async fn handle_threshold(
     configs: &str,
     threshold: u32,
     mode: &str,
+    message: Option<&str>,
+    message_hex: Option<&str>,
+    signature: Option<&str>,
 ) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
     let config_paths: Vec<&str> = configs.split(',').collect();
@@ -58,7 +62,15 @@ pub async fn handle_threshold(
     match mode {
         "sign" => execute_threshold_signing(ctx, &valid_configs, threshold, &mut output).await?,
         "verify" => {
-            execute_threshold_verification(ctx, &valid_configs, threshold, &mut output).await?;
+            let verify_input = resolve_verify_input(message, message_hex, signature)?;
+            execute_threshold_verification(
+                ctx,
+                &valid_configs,
+                threshold,
+                &verify_input,
+                &mut output,
+            )
+            .await?;
         }
         "keygen" => execute_threshold_keygen(ctx, &valid_configs, threshold, &mut output).await?,
         "dkd" => execute_dkd_protocol(ctx, &valid_configs, threshold, &mut output).await?,
@@ -183,9 +195,10 @@ async fn execute_threshold_verification(
     ctx: &HandlerContext<'_>,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
+    verify_input: &ThresholdVerifyInput,
     output: &mut CliOutput,
 ) -> TerminalResult<()> {
-    use aura_core::effects::{CryptoExtendedEffects, ThresholdSigningEffects};
+    use aura_core::effects::{crypto::SigningMode, CryptoExtendedEffects, ThresholdSigningEffects};
 
     output.section("Threshold Verification Operation");
 
@@ -211,38 +224,107 @@ async fn execute_threshold_verification(
         format!("{}/{} required", threshold, configs.len()),
     );
 
-    // Create a test message and empty signature for demonstration
-    let test_message = b"test message for verification";
+    output.kv("Message source", verify_input.message_description.as_str());
+    output.kv("Message bytes", verify_input.message.len().to_string());
+    output.kv("Signature bytes", verify_input.signature.len().to_string());
 
-    // Verify using frost_verify (this will fail without a real signature)
-    output.blank();
-    output.println("Verification requires a valid signature to check.");
-    output.println("To verify a real signature:");
-    output.println("  1. Obtain the signature bytes from a previous signing operation");
-    output.println("  2. Use `aura verify --signature <bytes> --message <msg>`");
-
-    // Demonstrate the verification call structure
-    let empty_signature = vec![0u8; 64]; // Placeholder
     match ctx
         .effects()
-        .frost_verify(&public_key_package, test_message, &empty_signature)
+        .verify_signature(
+            &verify_input.message,
+            &verify_input.signature,
+            &public_key_package,
+            SigningMode::Threshold,
+        )
         .await
     {
-        Ok(valid) => {
-            if valid {
-                output.println("Signature verification: VALID");
-            } else {
-                output.println("Signature verification: INVALID (expected for placeholder)");
-            }
+        Ok(true) => {
+            output.println("Signature verification: VALID");
+        }
+        Ok(false) => {
+            output.println("Signature verification: INVALID");
         }
         Err(e) => {
-            output.println(format!(
-                "Verification failed: {e} (expected for placeholder signature)"
-            ));
+            output.eprintln(format!("Threshold verification failed: {e}"));
+            return Err(TerminalError::Operation(format!(
+                "Threshold verification failed: {e}"
+            )));
         }
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ThresholdVerifyInput {
+    message: Vec<u8>,
+    message_description: String,
+    signature: Vec<u8>,
+}
+
+fn resolve_verify_input(
+    message: Option<&str>,
+    message_hex: Option<&str>,
+    signature: Option<&str>,
+) -> TerminalResult<ThresholdVerifyInput> {
+    let signature = signature.ok_or_else(|| {
+        TerminalError::Input(
+            "threshold verify requires --signature with hex/base64 signature bytes".into(),
+        )
+    })?;
+
+    let (message, message_description) = match (message, message_hex) {
+        (Some(_), Some(_)) => {
+            return Err(TerminalError::Input(
+                "threshold verify accepts either --message or --message-hex, not both".into(),
+            ));
+        }
+        (Some(message), None) => (
+            message.as_bytes().to_vec(),
+            "utf-8 command line argument".to_string(),
+        ),
+        (None, Some(message_hex)) => (
+            decode_cli_bytes(message_hex, "message")?,
+            "hex/base64 encoded bytes".to_string(),
+        ),
+        (None, None) => {
+            return Err(TerminalError::Input(
+                "threshold verify requires --message or --message-hex".into(),
+            ));
+        }
+    };
+
+    Ok(ThresholdVerifyInput {
+        message,
+        message_description,
+        signature: decode_cli_bytes(signature, "signature")?,
+    })
+}
+
+fn decode_cli_bytes(encoded: &str, field_name: &str) -> TerminalResult<Vec<u8>> {
+    if !encoded.is_empty()
+        && encoded.len() % 2 == 0
+        && encoded.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return hex::decode(encoded).map_err(|err| {
+            TerminalError::Input(format!("Invalid {field_name} hex encoding: {err}"))
+        });
+    }
+
+    for engine in [
+        &base64::engine::general_purpose::STANDARD,
+        &base64::engine::general_purpose::STANDARD_NO_PAD,
+        &base64::engine::general_purpose::URL_SAFE,
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+    ] {
+        if let Ok(bytes) = engine.decode(encoded) {
+            return Ok(bytes);
+        }
+    }
+
+    Err(TerminalError::Input(format!(
+        "Invalid {field_name} encoding: expected hex or base64"
+    )))
 }
 
 /// Execute threshold key generation operation
@@ -486,5 +568,26 @@ total_devices = 3
         let result = validate_threshold_params(&configs, 5, &mut output);
         assert!(result.is_err());
         assert!(output.stderr_lines().iter().any(|l| l.contains("exceed")));
+    }
+
+    #[test]
+    fn test_resolve_verify_input_requires_signature() {
+        let result = resolve_verify_input(Some("hello"), None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_verify_input_decodes_hex_message_and_signature() {
+        let input =
+            resolve_verify_input(None, Some("68656c6c6f"), Some("7369676e6174757265")).unwrap();
+        assert_eq!(input.message, b"hello");
+        assert_eq!(input.signature, b"signature");
+        assert_eq!(input.message_description, "hex/base64 encoded bytes");
+    }
+
+    #[test]
+    fn test_decode_cli_bytes_accepts_base64() {
+        let decoded = decode_cli_bytes("aGVsbG8=", "message").unwrap();
+        assert_eq!(decoded, b"hello");
     }
 }

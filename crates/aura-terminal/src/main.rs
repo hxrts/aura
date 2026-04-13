@@ -187,8 +187,18 @@ async fn main() -> Result<(), AuraError> {
             configs,
             threshold,
             mode,
+            message,
+            message_hex,
+            signature,
         }) => cli_handler
-            .handle_threshold(&configs, threshold, &mode)
+            .handle_threshold(
+                &configs,
+                threshold,
+                &mode,
+                message.as_deref(),
+                message_hex.as_deref(),
+                signature.as_deref(),
+            )
             .await
             .map_err(|e| AuraError::agent(format!("{e}")))?,
         #[cfg(feature = "development")]

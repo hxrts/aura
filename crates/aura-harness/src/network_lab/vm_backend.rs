@@ -73,7 +73,7 @@ impl VmPatchbayBackend {
             .arg("--work-dir")
             .arg(&self.work_dir)
             .arg("--patchbay-version")
-            .arg("git:hxrts/aura")
+            .arg("git:n0-computer/main")
             .env("QEMU_VM_WORK_DIR", &self.work_dir)
             .env("CARGO_TARGET_DIR", &vm_target_dir)
             .env("NETSIM_TARGET_DIR", &vm_target_dir)

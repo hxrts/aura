@@ -168,7 +168,7 @@ async fn run_scenario_file(
         )
         .await;
         for (idx, phase) in phases.iter().enumerate() {
-            execute_phase(effects_ref, &mut lines, &sim_handler, idx, phase).await;
+            execute_phase(effects_ref, &mut lines, &sim_handler, idx, phase).await?;
         }
     } else {
         ConsoleEffects::log_warn(effects_ref, "No phases defined")
@@ -264,7 +264,7 @@ async fn execute_phase(
     sim_handler: &SimulationScenarioHandler,
     idx: usize,
     phase: &toml::Value,
-) {
+) -> TerminalResult<()> {
     let name = phase
         .get("name")
         .and_then(|v| v.as_str())
@@ -274,10 +274,12 @@ async fn execute_phase(
     if let Some(actions) = phase.get("actions").and_then(|a| a.as_array()) {
         log_line(effects_ref, lines, &format!("  Actions: {}", actions.len())).await;
         for (a_idx, action) in actions.iter().enumerate() {
-            let summary = execute_action(effects_ref, lines, sim_handler, a_idx, action).await;
+            let summary = execute_action(effects_ref, lines, sim_handler, a_idx, action).await?;
             log_line(effects_ref, lines, &summary).await;
         }
     }
+
+    Ok(())
 }
 
 /// Execute a single action and return a summary string
@@ -287,7 +289,7 @@ async fn execute_action(
     sim_handler: &SimulationScenarioHandler,
     a_idx: usize,
     action: &toml::Value,
-) -> String {
+) -> TerminalResult<String> {
     let mut summary = String::new();
     let action_type = action
         .get("type")
@@ -296,8 +298,8 @@ async fn execute_action(
     let _ = write!(&mut summary, "    {}. type={}", a_idx + 1, action_type);
 
     match action_type {
-        "run_choreography" => execute_run_choreography(action, sim_handler, &mut summary),
-        "verify_property" => execute_verify_property(action, sim_handler, &mut summary),
+        "run_choreography" => execute_run_choreography(action, sim_handler, &mut summary).await?,
+        "verify_property" => execute_verify_property(action, sim_handler, &mut summary)?,
         "simulate_data_loss" => {
             execute_simulate_data_loss(action, sim_handler, &mut summary, effects_ref, lines).await
         }
@@ -311,7 +313,9 @@ async fn execute_action(
         "export_choreo_trace" => execute_export_trace(action, sim_handler),
         "generate_timeline" => execute_generate_timeline(action, sim_handler),
         "verify_all_properties" => {
-            let _ = sim_handler.verify_all_properties();
+            sim_handler
+                .verify_all_properties()
+                .map_err(|error| TerminalError::Operation(error.to_string()))?;
         }
         "setup_choreography" => execute_setup_choreography(action, sim_handler),
         "load_key_shares" => execute_load_key_shares(action, sim_handler),
@@ -320,14 +324,14 @@ async fn execute_action(
         _ => execute_generic_action(action, &mut summary),
     }
 
-    summary
+    Ok(summary)
 }
 
-fn execute_run_choreography(
+async fn execute_run_choreography(
     action: &toml::Value,
     sim_handler: &SimulationScenarioHandler,
     summary: &mut String,
-) {
+) -> TerminalResult<()> {
     if let Some(name) = action.get("choreography").and_then(|v| v.as_str()) {
         let _ = write!(summary, " choreo={}", name);
     }
@@ -336,12 +340,6 @@ fn execute_run_choreography(
         if !names.is_empty() {
             let _ = write!(summary, " participants={:?}", names);
         }
-    }
-    if let Some(target) = action.get("target").and_then(|v| v.as_str()) {
-        let _ = write!(summary, " target={}", target);
-    }
-    if let Some(threshold) = action.get("threshold").and_then(|v| v.as_integer()) {
-        let _ = write!(summary, " threshold={}", threshold);
     }
     let participants: Vec<String> = action
         .get("participants")
@@ -353,28 +351,36 @@ fn execute_run_choreography(
         })
         .unwrap_or_default();
     let mut params = HashMap::new();
-    if let Some(target) = action.get("target").and_then(|v| v.as_str()) {
-        params.insert("target".to_string(), target.to_string());
-    }
-    if let Some(threshold) = action.get("threshold").and_then(|v| v.as_integer()) {
-        params.insert("threshold".to_string(), threshold.to_string());
-    }
-    if let Some(app_id) = action.get("app_id").and_then(|v| v.as_str()) {
-        params.insert("app_id".to_string(), app_id.to_string());
-    }
-    if let Some(context) = action.get("context").and_then(|v| v.as_str()) {
-        params.insert("context".to_string(), context.to_string());
+    if let Some(table) = action.as_table() {
+        for (key, value) in table {
+            if matches!(key.as_str(), "type" | "choreography" | "participants") {
+                continue;
+            }
+            let rendered = match value {
+                toml::Value::String(value) => value.clone(),
+                toml::Value::Integer(value) => value.to_string(),
+                toml::Value::Boolean(value) => value.to_string(),
+                _ => continue,
+            };
+            let _ = write!(summary, " {key}={rendered}");
+            params.insert(key.clone(), rendered);
+        }
     }
     if let Some(name) = action.get("choreography").and_then(|v| v.as_str()) {
-        let _ = sim_handler.run_choreography(name, participants, params);
+        sim_handler
+            .run_choreography(name, participants, params)
+            .await
+            .map_err(|error| TerminalError::Operation(error.to_string()))?;
     }
+
+    Ok(())
 }
 
 fn execute_verify_property(
     action: &toml::Value,
     sim_handler: &SimulationScenarioHandler,
     summary: &mut String,
-) {
+) -> TerminalResult<()> {
     if let Some(prop) = action.get("property").and_then(|v| v.as_str()) {
         let _ = write!(summary, " property={}", prop);
     }
@@ -386,7 +392,10 @@ fn execute_verify_property(
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
     let expected_str = action.get("expected").map(|v| v.to_string());
-    let _ = sim_handler.verify_property_stub(property, expected_str);
+    sim_handler
+        .verify_property(property, expected_str)
+        .map_err(|error| TerminalError::Operation(error.to_string()))?;
+    Ok(())
 }
 
 async fn execute_simulate_data_loss(

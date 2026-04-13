@@ -50,10 +50,12 @@ regex = "1.11"
 nix = "0.26"
 which = "6"
 ctrlc = "3.4"
-patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura", optional = true }
+patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "f1ef699f1c0c43063382af41de0509c18dea6d0c", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
-patchbay = { git = "https://github.com/hxrts/patchbay", branch = "hxrts/aura" }
 serial_test = "3.0"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "f1ef699f1c0c43063382af41de0509c18dea6d0c" }

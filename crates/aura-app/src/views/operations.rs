@@ -229,7 +229,7 @@ impl ContextChanged {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OperationError {
     /// Feature unavailable
-    #[error("Not implemented: {0}")]
+    #[error("Feature unavailable: {0}")]
     NotImplemented(String),
     /// Invalid argument provided
     #[error("Invalid argument: {0}")]

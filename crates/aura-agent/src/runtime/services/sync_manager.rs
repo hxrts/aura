@@ -1076,6 +1076,26 @@ mod tests {
         facts: Mutex<Vec<IndexedFact>>,
     }
 
+    struct EmptyFactStreamReceiver;
+
+    impl FactStreamReceiver for EmptyFactStreamReceiver {
+        fn recv(
+            &mut self,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<Vec<IndexedFact>, aura_core::AuraError>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn try_recv(&mut self) -> Result<Option<Vec<IndexedFact>>, aura_core::AuraError> {
+            Ok(None)
+        }
+    }
+
     impl MockIndexedJournal {
         fn new(root: [u8; 32]) -> Self {
             Self {
@@ -1088,7 +1108,7 @@ mod tests {
     #[async_trait]
     impl IndexedJournalEffects for MockIndexedJournal {
         fn watch_facts(&self) -> Box<dyn FactStreamReceiver> {
-            panic!("Not implemented for mock")
+            Box::new(EmptyFactStreamReceiver)
         }
 
         async fn facts_by_predicate(

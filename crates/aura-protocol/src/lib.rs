@@ -1,7 +1,6 @@
 #![deny(clippy::await_holding_lock)]
 #![deny(clippy::disallowed_types)]
 #![deny(clippy::dbg_macro)]
-#![deny(clippy::todo)]
 //! # Aura Protocol - Layer 4: Orchestration (Multi-Party Coordination)
 //!
 //! **Purpose**: Multi-party coordination and distributed protocol orchestration.

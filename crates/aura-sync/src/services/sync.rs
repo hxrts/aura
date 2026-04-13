@@ -39,10 +39,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::{HealthCheck, MonotonicInstant, Service, ServiceState};
-use crate::core::{
-    sync_session_error, MetricsCollector, SessionConfig, SessionManager, SyncResult,
+use super::{
+    begin_service_start, begin_service_stop, finish_service_start, finish_service_stop,
+    HealthCheck, MonotonicInstant, Service, ServiceState,
 };
+use crate::core::{MetricsCollector, SessionConfig, SessionManager, SyncResult};
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol, SyncProtocolEffects};
 use aura_core::effects::{PhysicalTimeEffects, TimeError};
@@ -388,53 +389,34 @@ impl SyncService {
         time_effects: &T,
         now_instant: MonotonicInstant,
     ) -> SyncResult<()> {
+        begin_service_start(&self.state, &self.started_at, now_instant)?;
         // Use PhysicalTimeEffects for deterministic wall-clock; store MonotonicInstant for uptime tracking
         let _ts = time_effects
             .physical_time()
             .await
             .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
-
-        self.start(now_instant).await
+        finish_service_start(&self.state);
+        Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl Service for SyncService {
     async fn start(&self, now: MonotonicInstant) -> SyncResult<()> {
-        {
-            let mut state = self.state.write();
-            if state.is_running() {
-                return Err(sync_session_error("Service already running"));
-            }
-
-            *state = ServiceState::Starting;
-            *self.started_at.write() = Some(now);
-        } // Drop state lock before await
-
-        {
-            let mut state = self.state.write();
-            *state = ServiceState::Running;
-        }
+        begin_service_start(&self.state, &self.started_at, now)?;
+        finish_service_start(&self.state);
         Ok(())
     }
 
     async fn stop(&self, now: MonotonicInstant) -> SyncResult<()> {
-        {
-            let mut state = self.state.write();
-            if *state == ServiceState::Stopped {
-                return Ok(());
-            }
-
-            *state = ServiceState::Stopping;
-        } // Drop state lock before await
+        if !begin_service_stop(&self.state) {
+            return Ok(());
+        }
 
         // Wait for active sessions to complete with timeout
         self.wait_for_sessions_to_complete(now).await?;
 
-        {
-            let mut state = self.state.write();
-            *state = ServiceState::Stopped;
-        }
+        finish_service_stop(&self.state);
         Ok(())
     }
 

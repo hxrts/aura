@@ -37,6 +37,8 @@ All shared flows should use typed scenario primitives, typed semantic command su
 
 Shared-semantic preflight is intentionally stricter than generic backend startup. A run config that includes SSH instances does not automatically qualify for the shared semantic lane. Until a backend implements the shared semantic contract, SSH remains diagnostic-only for harness purposes. Shared-semantic scenarios must fail closed before execution.
 
+For SSH-backed diagnostic runs, remote artifact capture now has two explicit modes. When `ssh_dry_run = true`, the harness records a simulated sync summary only. When `ssh_dry_run = false`, the harness copies `logs/` from the instance's `remote_workdir` back into the local artifact bundle under `remote/<instance-id>/logs/` using `scp`, then records the copied file manifest and checksums in the per-instance sync summary plus `remote_artifact_sync.json`. Use `require_remote_artifact_sync = true` when the run should fail closed if that SSH artifact copy does not complete.
+
 `aura-app::ui_contract` is the canonical module for shared flow support. It defines `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`, `UiSnapshot`, `compare_ui_snapshots_for_parity`, `OperationInstanceId`, and `RuntimeEventSnapshot`. The root file is a facade; parity metadata, harness/browser bridge metadata, and shared-flow support tables may live in dedicated `ui_contract/*` modules, but the canonical public contract stays `aura-app::ui_contract`. Use semantic readiness and state assertions before using fallback text matching.
 
 Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits.

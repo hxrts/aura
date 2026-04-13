@@ -34,6 +34,6 @@ pub use session::{
     SessionResult, SessionState,
 };
 pub use wire::{
-    binary_deserialize, binary_serialize, json_deserialize, json_serialize, physical_time_from_ms,
-    receive_json_from_expected_peer, send_bytes_to_peer,
+    binary_deserialize, binary_serialize, exchange_json_with_peer, json_deserialize,
+    json_serialize, physical_time_from_ms, receive_json_from_expected_peer, send_bytes_to_peer,
 };

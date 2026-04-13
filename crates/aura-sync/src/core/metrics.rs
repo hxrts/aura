@@ -409,6 +409,11 @@ fn sync_session_timer_key(session_id: &str) -> String {
     format!("sync_session_{session_id}")
 }
 
+fn with_locked<T, R>(mutex: &Mutex<T>, f: impl FnOnce(&mut T) -> R) -> Option<R> {
+    let mut guard = mutex.lock().ok()?;
+    Some(f(&mut guard))
+}
+
 fn load_u64(counter: &AtomicU64) -> u64 {
     counter.load(Ordering::Relaxed)
 }
@@ -418,41 +423,48 @@ fn load_i64(counter: &AtomicI64) -> i64 {
 }
 
 impl MetricsRegistry {
-    fn operational_snapshot(&self) -> OperationalSnapshot {
-        let Ok(operational) = self.operational.lock() else {
-            return OperationalSnapshot::default();
-        };
-
-        let total_sessions = load_u64(&operational.sync_sessions_total);
-        let completed_sessions = load_u64(&operational.sync_sessions_completed_total);
-        let success_rate_percent = if total_sessions > 0 {
-            (completed_sessions as f64 / total_sessions as f64) * 100.0
-        } else {
-            100.0
-        };
-
-        OperationalSnapshot {
-            sync_sessions_total: total_sessions,
-            sync_sessions_completed_total: completed_sessions,
-            sync_sessions_failed_total: load_u64(&operational.sync_sessions_failed_total),
-            sync_operations_transferred_total: load_u64(
-                &operational.sync_operations_transferred_total,
-            ),
-            sync_bytes_transferred_total: load_u64(&operational.sync_bytes_transferred_total),
-            active_sync_sessions: load_i64(&operational.active_sync_sessions),
-            connected_peers: load_i64(&operational.connected_peers),
-            queue_depth: load_i64(&operational.queue_depth),
-            rate_limit_violations_total: load_u64(&operational.rate_limit_violations_total),
-            success_rate_percent,
+    fn new() -> Self {
+        Self {
+            operational: Mutex::new(OperationalMetrics::default()),
+            performance: Mutex::new(PerformanceMetrics::default()),
+            resources: Mutex::new(ResourceMetrics::default()),
+            errors: Mutex::new(ErrorMetrics::default()),
+            active_timers: Mutex::new(HashMap::new()),
+            last_sync_timestamp_ms: AtomicU64::new(0),
+            last_operation_timestamp_ms: AtomicU64::new(0),
         }
     }
 
-    fn performance_snapshot(&self) -> PerformanceSnapshot {
-        let Ok(performance) = self.performance.lock() else {
-            return PerformanceSnapshot::default();
-        };
+    fn operational_snapshot(&self) -> OperationalSnapshot {
+        with_locked(&self.operational, |operational| {
+            let total_sessions = load_u64(&operational.sync_sessions_total);
+            let completed_sessions = load_u64(&operational.sync_sessions_completed_total);
+            let success_rate_percent = if total_sessions > 0 {
+                (completed_sessions as f64 / total_sessions as f64) * 100.0
+            } else {
+                100.0
+            };
 
-        PerformanceSnapshot {
+            OperationalSnapshot {
+                sync_sessions_total: total_sessions,
+                sync_sessions_completed_total: completed_sessions,
+                sync_sessions_failed_total: load_u64(&operational.sync_sessions_failed_total),
+                sync_operations_transferred_total: load_u64(
+                    &operational.sync_operations_transferred_total,
+                ),
+                sync_bytes_transferred_total: load_u64(&operational.sync_bytes_transferred_total),
+                active_sync_sessions: load_i64(&operational.active_sync_sessions),
+                connected_peers: load_i64(&operational.connected_peers),
+                queue_depth: load_i64(&operational.queue_depth),
+                rate_limit_violations_total: load_u64(&operational.rate_limit_violations_total),
+                success_rate_percent,
+            }
+        })
+        .unwrap_or_default()
+    }
+
+    fn performance_snapshot(&self) -> PerformanceSnapshot {
+        with_locked(&self.performance, |performance| PerformanceSnapshot {
             sync_duration_stats: performance.sync_duration_histogram.stats(),
             network_latency_stats: performance.network_latency_histogram.stats(),
             operation_processing_stats: performance.operation_processing_histogram.stats(),
@@ -460,51 +472,48 @@ impl MetricsRegistry {
             bytes_per_second: load_i64(&performance.bytes_per_second),
             average_sync_duration_ms: load_u64(&performance.average_sync_duration_ms),
             compression_ratio_stats: performance.compression_ratio_histogram.stats(),
-        }
+        })
+        .unwrap_or_default()
     }
 
     fn resource_snapshot(&self) -> ResourceSnapshot {
-        let Ok(resources) = self.resources.lock() else {
-            return ResourceSnapshot::default();
-        };
-
-        ResourceSnapshot {
+        with_locked(&self.resources, |resources| ResourceSnapshot {
             cpu_usage_percent: load_i64(&resources.cpu_usage_percent),
             memory_usage_bytes: load_u64(&resources.memory_usage_bytes),
             network_bandwidth_bps: load_u64(&resources.network_bandwidth_bps),
             peer_connection_pool_size: load_i64(&resources.peer_connection_pool_size),
             message_queue_size: load_i64(&resources.message_queue_size),
             active_timers_count: load_i64(&resources.active_timers_count),
-        }
+        })
+        .unwrap_or_default()
     }
 
     fn error_snapshot(&self) -> ErrorSnapshot {
-        let Ok(errors) = self.errors.lock() else {
-            return ErrorSnapshot::default();
-        };
+        with_locked(&self.errors, |errors| {
+            let network_errors_total = load_u64(&errors.network_errors_total);
+            let protocol_errors_total = load_u64(&errors.protocol_errors_total);
+            let timeout_errors_total = load_u64(&errors.timeout_errors_total);
+            let validation_errors_total = load_u64(&errors.validation_errors_total);
+            let resource_errors_total = load_u64(&errors.resource_errors_total);
+            let authorization_errors_total = load_u64(&errors.authorization_errors_total);
 
-        let network_errors_total = load_u64(&errors.network_errors_total);
-        let protocol_errors_total = load_u64(&errors.protocol_errors_total);
-        let timeout_errors_total = load_u64(&errors.timeout_errors_total);
-        let validation_errors_total = load_u64(&errors.validation_errors_total);
-        let resource_errors_total = load_u64(&errors.resource_errors_total);
-        let authorization_errors_total = load_u64(&errors.authorization_errors_total);
-
-        ErrorSnapshot {
-            network_errors_total,
-            protocol_errors_total,
-            timeout_errors_total,
-            validation_errors_total,
-            resource_errors_total,
-            authorization_errors_total,
-            error_rate_percent: load_i64(&errors.error_rate_percent),
-            total_errors: network_errors_total
-                + protocol_errors_total
-                + timeout_errors_total
-                + validation_errors_total
-                + resource_errors_total
-                + authorization_errors_total,
-        }
+            ErrorSnapshot {
+                network_errors_total,
+                protocol_errors_total,
+                timeout_errors_total,
+                validation_errors_total,
+                resource_errors_total,
+                authorization_errors_total,
+                error_rate_percent: load_i64(&errors.error_rate_percent),
+                total_errors: network_errors_total
+                    + protocol_errors_total
+                    + timeout_errors_total
+                    + validation_errors_total
+                    + resource_errors_total
+                    + authorization_errors_total,
+            }
+        })
+        .unwrap_or_default()
     }
 }
 
@@ -512,15 +521,7 @@ impl MetricsCollector {
     /// Create a new metrics collector
     pub fn new() -> Self {
         Self {
-            registry: Arc::new(MetricsRegistry {
-                operational: Mutex::new(OperationalMetrics::default()),
-                performance: Mutex::new(PerformanceMetrics::default()),
-                resources: Mutex::new(ResourceMetrics::default()),
-                errors: Mutex::new(ErrorMetrics::default()),
-                active_timers: Mutex::new(HashMap::new()),
-                last_sync_timestamp_ms: AtomicU64::new(0),
-                last_operation_timestamp_ms: AtomicU64::new(0),
-            }),
+            registry: Arc::new(MetricsRegistry::new()),
         }
     }
 
@@ -528,19 +529,19 @@ impl MetricsCollector {
     ///
     /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
     pub fn record_sync_start(&self, session_id: &str, now: u64) {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .sync_sessions_total
                 .fetch_add(1, Ordering::Relaxed);
             operational
                 .active_sync_sessions
                 .fetch_add(1, Ordering::Relaxed);
-        }
+        });
 
         // Start timing this session
-        if let Ok(mut timers) = self.registry.active_timers.lock() {
+        with_locked(&self.registry.active_timers, |timers| {
             timers.insert(sync_session_timer_key(session_id), now);
-        }
+        });
     }
 
     /// Record sync session completion
@@ -553,19 +554,15 @@ impl MetricsCollector {
         bytes_transferred: u64,
         now: u64,
     ) {
-        let duration = if let Ok(mut timers) = self.registry.active_timers.lock() {
+        let duration = with_locked(&self.registry.active_timers, |timers| {
             timers
                 .remove(&sync_session_timer_key(session_id))
-                .map(|start| {
-                    let elapsed_secs = now.saturating_sub(start);
-                    Duration::from_secs(elapsed_secs)
-                })
+                .map(|start| Duration::from_millis(now.saturating_sub(start)))
                 .unwrap_or(Duration::ZERO)
-        } else {
-            Duration::ZERO
-        };
+        })
+        .unwrap_or(Duration::ZERO);
 
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .sync_sessions_completed_total
                 .fetch_add(1, Ordering::Relaxed);
@@ -578,9 +575,9 @@ impl MetricsCollector {
             operational
                 .sync_bytes_transferred_total
                 .fetch_add(bytes_transferred, Ordering::Relaxed);
-        }
+        });
 
-        if let Ok(performance) = self.registry.performance.lock() {
+        with_locked(&self.registry.performance, |performance| {
             performance
                 .sync_duration_histogram
                 .observe(duration.as_millis() as f64);
@@ -595,88 +592,86 @@ impl MetricsCollector {
             performance
                 .average_sync_duration_ms
                 .store(new_avg, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Record sync session failure
     pub fn record_sync_failure(&self, session_id: &str, category: ErrorCategory, details: &str) {
         // Remove timer and update counters
-        if let Ok(mut timers) = self.registry.active_timers.lock() {
+        with_locked(&self.registry.active_timers, |timers| {
             timers.remove(&sync_session_timer_key(session_id));
-        }
+        });
 
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .sync_sessions_failed_total
                 .fetch_add(1, Ordering::Relaxed);
             operational
                 .active_sync_sessions
                 .fetch_sub(1, Ordering::Relaxed);
-        }
+        });
 
         self.record_error(category, details);
     }
 
     /// Record an error by category
     pub fn record_error(&self, category: ErrorCategory, _details: &str) {
-        if let Ok(errors) = self.registry.errors.lock() {
-            match category {
-                ErrorCategory::Network => {
-                    errors.network_errors_total.fetch_add(1, Ordering::Relaxed);
-                }
-                ErrorCategory::Protocol => {
-                    errors.protocol_errors_total.fetch_add(1, Ordering::Relaxed);
-                }
-                ErrorCategory::Timeout => {
-                    errors.timeout_errors_total.fetch_add(1, Ordering::Relaxed);
-                }
-                ErrorCategory::Validation => {
-                    errors
-                        .validation_errors_total
-                        .fetch_add(1, Ordering::Relaxed);
-                }
-                ErrorCategory::Resource => {
-                    errors.resource_errors_total.fetch_add(1, Ordering::Relaxed);
-                }
-                ErrorCategory::Authorization => {
-                    errors
-                        .authorization_errors_total
-                        .fetch_add(1, Ordering::Relaxed);
-                }
+        with_locked(&self.registry.errors, |errors| match category {
+            ErrorCategory::Network => {
+                errors.network_errors_total.fetch_add(1, Ordering::Relaxed);
             }
-        }
+            ErrorCategory::Protocol => {
+                errors.protocol_errors_total.fetch_add(1, Ordering::Relaxed);
+            }
+            ErrorCategory::Timeout => {
+                errors.timeout_errors_total.fetch_add(1, Ordering::Relaxed);
+            }
+            ErrorCategory::Validation => {
+                errors
+                    .validation_errors_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            ErrorCategory::Resource => {
+                errors.resource_errors_total.fetch_add(1, Ordering::Relaxed);
+            }
+            ErrorCategory::Authorization => {
+                errors
+                    .authorization_errors_total
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        });
     }
 
     /// Record network latency measurement
     pub fn record_network_latency(&self, _peer: DeviceId, latency: Duration) {
-        if let Ok(performance) = self.registry.performance.lock() {
+        with_locked(&self.registry.performance, |performance| {
             performance
                 .network_latency_histogram
                 .observe(latency.as_millis() as f64);
-        }
+        });
     }
 
     /// Record operation processing time
     pub fn record_operation_processing_time(&self, _operation: &str, duration: Duration) {
-        if let Ok(performance) = self.registry.performance.lock() {
+        with_locked(&self.registry.performance, |performance| {
             performance
                 .operation_processing_histogram
                 .observe(duration.as_micros() as f64);
-        }
+        });
     }
 
     /// Record compression ratio achieved
     pub fn record_compression_ratio(&self, ratio: f32) {
-        if let Ok(performance) = self.registry.performance.lock() {
+        with_locked(&self.registry.performance, |performance| {
             performance
                 .compression_ratio_histogram
                 .observe(ratio as f64);
-        }
+        });
     }
 
     /// Update resource usage metrics
     pub fn update_resource_usage(&self, cpu_percent: u32, memory_bytes: u64, network_bps: u64) {
-        if let Ok(resources) = self.registry.resources.lock() {
+        with_locked(&self.registry.resources, |resources| {
             resources
                 .cpu_usage_percent
                 .store(cpu_percent as i64, Ordering::Relaxed);
@@ -686,61 +681,61 @@ impl MetricsCollector {
             resources
                 .network_bandwidth_bps
                 .store(network_bps, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Update peer connection count
     pub fn update_peer_count(&self, count: u64) {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .connected_peers
                 .store(count as i64, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Update queue depth
     pub fn update_queue_depth(&self, depth: u64) {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .queue_depth
                 .store(depth as i64, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Record rate limit violation
     pub fn record_rate_limit_violation(&self, _peer: DeviceId) {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .rate_limit_violations_total
                 .fetch_add(1, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Increment sync attempts for a peer
     pub fn increment_sync_attempts(&self, _peer: DeviceId) {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .sync_sessions_total
                 .fetch_add(1, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Increment sync successes for a peer
     pub fn increment_sync_successes(&self, _peer: DeviceId) {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .sync_sessions_completed_total
                 .fetch_add(1, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Add synced operations count for a peer
     pub fn add_synced_operations(&self, _peer: DeviceId, ops_count: u64) {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .sync_operations_transferred_total
                 .fetch_add(ops_count, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Update last sync timestamp for a peer (callers provide wall-clock ms)
@@ -752,16 +747,16 @@ impl MetricsCollector {
 
     /// Increment auto sync rounds counter
     pub fn increment_auto_sync_rounds(&self) {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .sync_sessions_total
                 .fetch_add(1, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Add auto sync results
     pub fn add_auto_sync_results(&self, results: &[(DeviceId, u64)]) {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             let mut total_ops = 0u64;
             for &(_, ops) in results {
                 total_ops += ops;
@@ -769,16 +764,16 @@ impl MetricsCollector {
             operational
                 .sync_operations_transferred_total
                 .fetch_add(total_ops, Ordering::Relaxed);
-        }
+        });
     }
 
     /// Update auto sync timing
     pub fn update_auto_sync_timing(&self, duration: Duration) {
-        if let Ok(performance) = self.registry.performance.lock() {
+        with_locked(&self.registry.performance, |performance| {
             performance
                 .sync_duration_histogram
                 .observe(duration.as_millis() as f64);
-        }
+        });
     }
 
     /// Get last sync timestamp in milliseconds since Unix epoch
@@ -789,36 +784,34 @@ impl MetricsCollector {
 
     /// Get total number of requests processed
     pub fn get_total_requests_processed(&self) -> u64 {
-        if let Ok(operational) = self.registry.operational.lock() {
+        with_locked(&self.registry.operational, |operational| {
             operational
                 .sync_sessions_completed_total
                 .load(Ordering::Relaxed)
-        } else {
-            0
-        }
+        })
+        .unwrap_or(0)
     }
 
     /// Get total number of errors encountered
     pub fn get_total_errors_encountered(&self) -> u64 {
-        if let Ok(errors) = self.registry.errors.lock() {
+        with_locked(&self.registry.errors, |errors| {
             errors.network_errors_total.load(Ordering::Relaxed)
                 + errors.protocol_errors_total.load(Ordering::Relaxed)
                 + errors.timeout_errors_total.load(Ordering::Relaxed)
+                + errors.validation_errors_total.load(Ordering::Relaxed)
                 + errors.resource_errors_total.load(Ordering::Relaxed)
                 + errors.authorization_errors_total.load(Ordering::Relaxed)
-        } else {
-            0
-        }
+        })
+        .unwrap_or(0)
     }
 
     /// Get average sync latency in milliseconds
     pub fn get_average_sync_latency_ms(&self) -> f64 {
-        if let Ok(performance) = self.registry.performance.lock() {
+        with_locked(&self.registry.performance, |performance| {
             // Simple average calculation - in a real implementation this would use proper statistics
             performance.network_latency_histogram.stats().average()
-        } else {
-            0.0
-        }
+        })
+        .unwrap_or(0.0)
     }
 
     /// Get last operation timestamp in milliseconds since Unix epoch

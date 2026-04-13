@@ -253,11 +253,23 @@ impl CliHandler {
         configs: &str,
         threshold: u32,
         mode: &str,
+        message: Option<&str>,
+        message_hex: Option<&str>,
+        signature: Option<&str>,
     ) -> TerminalResult<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = &*effects_arc;
         let ctx = self.make_ctx(effects, false);
-        let output = threshold::handle_threshold(&ctx, configs, threshold, mode).await?;
+        let output = threshold::handle_threshold(
+            &ctx,
+            configs,
+            threshold,
+            mode,
+            message,
+            message_hex,
+            signature,
+        )
+        .await?;
         output.render();
         Ok(())
     }

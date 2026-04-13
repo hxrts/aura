@@ -85,6 +85,29 @@ pub struct AuthoritySyncResult {
 }
 
 impl AuthorityJournalSyncProtocol {
+    async fn elapsed_duration<E: AuraEffects>(&self, effects: &E, start_ms: u64) -> Duration {
+        Duration::from_millis(
+            effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms.saturating_sub(start_ms))
+                .unwrap_or(0),
+        )
+    }
+
+    fn collect_facts_by_orders(
+        &self,
+        remote_journal: &Journal,
+        fact_ids: &[OrderTime],
+    ) -> Vec<Fact> {
+        let wanted: BTreeSet<_> = fact_ids.iter().cloned().collect();
+        remote_journal
+            .iter_facts()
+            .filter(|fact| wanted.contains(&fact.order))
+            .cloned()
+            .collect()
+    }
+
     /// Create a new authority journal sync protocol
     pub fn new(config: AuthorityJournalSyncConfig) -> Self {
         Self { config }
@@ -128,13 +151,7 @@ impl AuthorityJournalSyncProtocol {
             }
         }
 
-        result.duration = Duration::from_millis(
-            effects
-                .physical_time()
-                .await
-                .map(|t| t.ts_ms.saturating_sub(start))
-                .unwrap_or(0),
-        );
+        result.duration = self.elapsed_duration(effects, start).await;
         Ok(result)
     }
 
@@ -320,16 +337,11 @@ impl AuthorityJournalSyncProtocol {
         remote_journal: Journal,
         fact_ids: Vec<OrderTime>,
     ) -> SyncResult<Vec<Fact>> {
-        let mut received = Vec::new();
         if fact_ids.is_empty() {
-            return Ok(received);
+            return Ok(Vec::new());
         }
 
-        for fact in remote_journal.iter_facts() {
-            if fact_ids.contains(&fact.order) {
-                received.push(fact.clone());
-            }
-        }
+        let received = self.collect_facts_by_orders(&remote_journal, &fact_ids);
 
         tracing::debug!(
             "Fetched {} facts from peer {} based on delta plan",

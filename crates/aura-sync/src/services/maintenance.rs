@@ -49,8 +49,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{HealthCheck, MonotonicInstant, Service, ServiceState};
-use crate::core::{sync_session_error, SyncResult};
+use super::{
+    begin_service_start, begin_service_stop, finish_service_start, finish_service_stop,
+    HealthCheck, MonotonicInstant, Service, ServiceState,
+};
+use crate::core::SyncResult;
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
@@ -318,22 +321,14 @@ impl MaintenanceService {
         time_effects: &T,
         now_instant: MonotonicInstant,
     ) -> SyncResult<()> {
-        {
-            let mut state = self.state.write();
-            if state.is_running() {
-                return Err(sync_session_error("Service already running"));
-            }
-            *state = ServiceState::Starting;
-        } // Lock dropped here
+        begin_service_start(&self.state, &self.started_at, now_instant)?;
 
         // Use PhysicalTimeEffects for deterministic wall-clock; store MonotonicInstant for uptime tracking
         let _ts = time_effects
             .physical_time()
             .await
             .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
-        *self.started_at.write() = Some(now_instant);
-
-        *self.state.write() = ServiceState::Running;
+        finish_service_start(&self.state);
         Ok(())
     }
 }
@@ -342,30 +337,19 @@ impl MaintenanceService {
 impl Service for MaintenanceService {
     async fn start(&self, now: MonotonicInstant) -> SyncResult<()> {
         // NOTE: Prefer start_with_time_effects() for proper effect system integration
-        let mut state = self.state.write();
-        if state.is_running() {
-            return Err(sync_session_error("Service already running"));
-        }
-
-        *state = ServiceState::Starting;
-        *self.started_at.write() = Some(now);
-
-        *state = ServiceState::Running;
+        begin_service_start(&self.state, &self.started_at, now)?;
+        finish_service_start(&self.state);
         Ok(())
     }
 
     async fn stop(&self, _now: MonotonicInstant) -> SyncResult<()> {
-        {
-            let mut state = self.state.write();
-            if *state == ServiceState::Stopped {
-                return Ok(());
-            }
-            *state = ServiceState::Stopping;
+        if !begin_service_stop(&self.state) {
+            return Ok(());
         }
 
         self.flush_pending_operations().await?;
 
-        *self.state.write() = ServiceState::Stopped;
+        finish_service_stop(&self.state);
         Ok(())
     }
 

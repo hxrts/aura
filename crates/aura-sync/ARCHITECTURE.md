@@ -102,7 +102,7 @@ Service implementation note:
 
 ### Strategy
 
-Merkle verification and anti-entropy determinism are the primary concerns. Tests are organized into three groups: `tests/integrity/` for data integrity and digest stability, `tests/protocol/` for sync protocol integration, and `tests/integration/` for multi-device and network partition scenarios. Shared deterministic fixture/time/device helpers live under `tests/support/`, while `tests/integration/test_utils.rs` owns only the mechanical multi-device topology builders used across scenario tests.
+Merkle verification and anti-entropy determinism are the primary concerns. Tests are organized into three groups: `tests/integrity/` for data integrity and digest stability, `tests/protocol/` for sync protocol integration, and `tests/integration/` for multi-device and network partition scenarios. Shared deterministic fixture/time/device helpers live in [`tests/support.rs`](tests/support.rs), while [`tests/integration/test_utils.rs`](tests/integration/test_utils.rs) owns only the mechanical multi-device topology builders, bidirectional network helpers, and session-finish helpers used across scenario tests.
 
 ### Commands
 

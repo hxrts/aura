@@ -13,7 +13,7 @@ use aura_harness::network_lab::{
     TopologySpec,
 };
 use patchbay::config::{LabConfig, RouterConfig};
-use patchbay::{check_caps, Lab, LabOpts};
+use patchbay::{check_caps, Lab, LabOpts, OutDir};
 use tokio::net::UdpSocket;
 use tokio::sync::oneshot;
 
@@ -301,7 +301,7 @@ async fn runtime_harness_patchbay_holepunch_works_e2e() -> Result<()> {
     let lab = Lab::from_config_with_opts(
         lab_config,
         LabOpts::default()
-            .outdir(out.path())
+            .outdir(OutDir::Nested(out.path().to_path_buf()))
             .label("aura-harness-holepunch-e2e"),
     )
     .await

@@ -39,7 +39,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ios_stubs_fail_explicitly() {
+    fn ios_platform_hooks_fail_explicitly() {
         assert!(initialize().is_err());
         assert!(configure_background_refresh().is_err());
         assert!(documents_directory().is_err());

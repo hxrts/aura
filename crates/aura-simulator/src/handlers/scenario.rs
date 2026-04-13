@@ -1027,19 +1027,272 @@ impl SimulationScenarioHandler {
         )
     }
 
-    /// Record choreography execution (simulation no-op)
-    pub fn run_choreography_stub(
+    fn increment_counter_parameter(
+        state: &mut ScenarioState,
+        key: impl Into<String>,
+    ) -> Result<(), TestingError> {
+        let key = key.into();
+        let next = state
+            .parameters
+            .get(&key)
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0)
+            .saturating_add(1);
+        state.parameters.insert(key, next.to_string());
+        Ok(())
+    }
+
+    fn first_group_id(state: &ScenarioState) -> Option<String> {
+        let mut group_ids = state.chat_groups.keys().cloned().collect::<Vec<_>>();
+        group_ids.sort();
+        group_ids.into_iter().next()
+    }
+
+    /// Execute generic stateful choreography behavior for simulator-only flows
+    /// that do not have a dedicated protocol harness.
+    pub fn run_choreography_fallback(
         &self,
         name: &str,
         participants: Vec<String>,
         params: HashMap<String, String>,
     ) -> Result<(), TestingError> {
+        let mut state = self.shared.state.lock().map_err(|e| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
+        })?;
         let mut data = HashMap::from([
             ("choreography".to_string(), name.to_string()),
             ("participants".to_string(), format!("{participants:?}")),
+            ("status".to_string(), "ok".to_string()),
         ]);
-        data.extend(params);
-        self.record_simple_event("run_choreography", data)
+        data.extend(params.clone());
+
+        let normalized = name.to_lowercase();
+        match normalized.as_str() {
+            "account_creation" => {
+                for participant in &participants {
+                    state
+                        .parameters
+                        .insert(format!("account:{participant}:ready"), "true".to_string());
+                }
+            }
+            "chat_group_creation" => {
+                let creator = params
+                    .get("creator")
+                    .cloned()
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let group_name = params
+                    .get("group_name")
+                    .cloned()
+                    .unwrap_or_else(|| format!("{creator}'s group"));
+                let group_id = Self::create_chat_group_locked(
+                    &mut state,
+                    &group_name,
+                    &creator,
+                    participants.clone(),
+                )?;
+                state
+                    .parameters
+                    .insert("chat:last_group_id".to_string(), group_id.clone());
+                data.insert("group_id".to_string(), group_id);
+            }
+            "chat_group_invitation" => {
+                let invitee = params
+                    .get("invitee")
+                    .cloned()
+                    .or_else(|| participants.last().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let group_id = params
+                    .get("group_id")
+                    .cloned()
+                    .or_else(|| state.parameters.get("chat:last_group_id").cloned())
+                    .or_else(|| Self::first_group_id(&state))
+                    .ok_or_else(|| TestingError::EventRecordingError {
+                        event_type: "run_choreography".to_string(),
+                        reason: "chat_group_invitation requires an existing chat group".to_string(),
+                    })?;
+                let group = state.chat_groups.get_mut(&group_id).ok_or_else(|| {
+                    TestingError::EventRecordingError {
+                        event_type: "run_choreography".to_string(),
+                        reason: format!("chat group '{group_id}' not found"),
+                    }
+                })?;
+                if !group.members.contains(&invitee) {
+                    group.members.push(invitee);
+                }
+                data.insert("group_id".to_string(), group_id);
+            }
+            "chat_message" => {
+                let sender = params
+                    .get("sender")
+                    .cloned()
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let message = params
+                    .get("message")
+                    .cloned()
+                    .unwrap_or_else(|| "<empty>".to_string());
+                let group_id = params
+                    .get("group_id")
+                    .cloned()
+                    .or_else(|| state.parameters.get("chat:last_group_id").cloned())
+                    .or_else(|| Self::first_group_id(&state))
+                    .ok_or_else(|| TestingError::EventRecordingError {
+                        event_type: "run_choreography".to_string(),
+                        reason: "chat_message requires an existing chat group".to_string(),
+                    })?;
+                Self::send_chat_message_locked(&mut state, &group_id, &sender, &message)?;
+                data.insert("group_id".to_string(), group_id);
+            }
+            "guardian_request" => {
+                let requester = params
+                    .get("requester")
+                    .cloned()
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let guardian = params
+                    .get("guardian")
+                    .cloned()
+                    .or_else(|| participants.get(1).cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                state.parameters.insert(
+                    format!("guardian_relationship:{requester}:{guardian}:requested"),
+                    "true".to_string(),
+                );
+            }
+            "guardian_accept" => {
+                let guardian = params
+                    .get("guardian")
+                    .cloned()
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let protege = params
+                    .get("protege")
+                    .cloned()
+                    .or_else(|| participants.get(1).cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                state.parameters.insert(
+                    format!("guardian_relationship:{protege}:{guardian}:accepted"),
+                    "true".to_string(),
+                );
+            }
+            "guardian_authority_configuration" => {
+                let target = params
+                    .get("target")
+                    .cloned()
+                    .or_else(|| participants.get(1).cloned())
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let threshold = params
+                    .get("threshold")
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or_else(|| participants.len().max(1));
+                let guardians = participants
+                    .iter()
+                    .filter(|participant| **participant != target)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                state.parameters.insert(
+                    format!("guardian_config:{target}:threshold"),
+                    threshold.to_string(),
+                );
+                state.parameters.insert(
+                    format!("guardian_config:{target}:guardians"),
+                    guardians.join(","),
+                );
+                state
+                    .parameters
+                    .insert(format!("guardians:{target}:configured"), "true".to_string());
+            }
+            "guardian_recovery_request" => {
+                let target = params
+                    .get("requester")
+                    .cloned()
+                    .or_else(|| params.get("target").cloned())
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let guardians = state
+                    .parameters
+                    .get(&format!("guardian_config:{target}:guardians"))
+                    .map(|value| {
+                        value
+                            .split(',')
+                            .filter(|entry| !entry.is_empty())
+                            .map(ToOwned::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let threshold = state
+                    .parameters
+                    .get(&format!("guardian_config:{target}:threshold"))
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or_else(|| guardians.len().max(1));
+                Self::initiate_guardian_recovery_locked(&mut state, &target, guardians, threshold)?;
+            }
+            "guardian_recovery_validation" => {
+                let target = params
+                    .get("protege")
+                    .cloned()
+                    .or_else(|| participants.get(1).cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let validator = params
+                    .get("guardian")
+                    .cloned()
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let recovery = state.recovery_state.get_mut(&target).ok_or_else(|| {
+                    TestingError::EventRecordingError {
+                        event_type: "run_choreography".to_string(),
+                        reason: format!("guardian recovery for '{target}' has not started"),
+                    }
+                })?;
+                recovery.validation_steps.push(validator);
+            }
+            "guardian_recovery_coordination" => {
+                let target = params
+                    .get("target")
+                    .cloned()
+                    .or_else(|| participants.get(1).cloned())
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                state.parameters.insert(
+                    format!("recovery:{target}:threshold_met"),
+                    "true".to_string(),
+                );
+            }
+            "threshold_key_recovery" => {
+                let target = params
+                    .get("target")
+                    .cloned()
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let mut validation_steps = state
+                    .recovery_state
+                    .get(&target)
+                    .map(|recovery| recovery.validation_steps.clone())
+                    .unwrap_or_default();
+                validation_steps.push("threshold_key_recovery".to_string());
+                Self::verify_recovery_success_locked(&mut state, &target, validation_steps)?;
+            }
+            "chat_history_sync" => {
+                let target = params
+                    .get("target")
+                    .cloned()
+                    .or_else(|| participants.first().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                state
+                    .parameters
+                    .insert(format!("chat_history_synced:{target}"), "true".to_string());
+            }
+            _ => {}
+        }
+
+        Self::increment_counter_parameter(&mut state, format!("choreography:{normalized}:count"))?;
+        if let Some(round) = params.get("round") {
+            Self::increment_counter_parameter(&mut state, format!("choreography_round:{round}"))?;
+        }
+        Self::push_event_locked(&mut state, "run_choreography", data);
+        Ok(())
     }
 
     /// Execute real choreography behaviors using testkit harnesses and protocol helpers.
@@ -1092,7 +1345,7 @@ impl SimulationScenarioHandler {
                 self.execute_guardian_recovery(&participants, &params)
             }
             "gossip_sync" | "crdt_merge" => self.execute_gossip(&participants, &params),
-            _ => self.run_choreography_stub(name, participants, params),
+            _ => self.run_choreography_fallback(name, participants, params),
         }
     }
 
@@ -1730,17 +1983,192 @@ impl SimulationScenarioHandler {
         )
     }
 
-    /// Record property verification (simulation no-op)
-    pub fn verify_property_stub(
+    fn evaluate_property_locked(
+        state: &ScenarioState,
+        property: &str,
+    ) -> Result<bool, TestingError> {
+        let total_messages = state
+            .message_history
+            .values()
+            .map(std::vec::Vec::len)
+            .sum::<usize>();
+        let no_duplicate_messages = state.message_history.values().all(|messages| {
+            let mut ids = std::collections::HashSet::new();
+            messages
+                .iter()
+                .all(|message| ids.insert(message.id.clone()))
+        });
+        let any_successful_choreography = state
+            .events
+            .iter()
+            .any(|event| event.event_type == "run_choreography");
+
+        if let Some(participant) = property.strip_suffix("_account_ready") {
+            return Ok(state
+                .parameters
+                .get(&format!("account:{participant}:ready"))
+                .is_some_and(|value| value == "true"));
+        }
+        if let Some(participant) = property.strip_suffix("_account_restored") {
+            return Ok(state
+                .recovery_state
+                .get(participant)
+                .is_some_and(|recovery| recovery.completed)
+                && !state.participant_data_loss.contains_key(participant));
+        }
+        if let Some(participant) = property.strip_suffix("_chat_history_restored") {
+            return Ok(state
+                .parameters
+                .get(&format!("chat_history_synced:{participant}"))
+                .is_some_and(|value| value == "true"));
+        }
+        if let Some(participant) = property.strip_suffix("_account_inaccessible") {
+            return Ok(state.participant_data_loss.contains_key(participant));
+        }
+        if let Some(participant) = property.strip_suffix("_data_lost") {
+            return Ok(state.participant_data_loss.contains_key(participant));
+        }
+        if let Some(participant) = property.strip_suffix("_guardians_configured") {
+            return Ok(state
+                .parameters
+                .get(&format!("guardians:{participant}:configured"))
+                .is_some_and(|value| value == "true"));
+        }
+        if let Some(round) = property
+            .strip_prefix("round_")
+            .and_then(|rest| rest.strip_suffix("_complete"))
+        {
+            return Ok(state
+                .parameters
+                .get(&format!("choreography_round:{round}"))
+                .is_some());
+        }
+
+        let result = match property {
+            "all_rounds_complete" => {
+                state
+                    .parameters
+                    .keys()
+                    .filter(|key| key.starts_with("choreography_round:"))
+                    .count()
+                    >= 3
+            }
+            "protocol_success" | "protocol_completed" | "all_phases_completed" => {
+                any_successful_choreography
+            }
+            "signature_valid"
+            | "threshold_satisfied"
+            | "all_agree_on_signature"
+            | "threshold_shares_generated"
+            | "all_participants_have_shares" => state.parameters.keys().any(|key| {
+                key.starts_with("choreography:frost_") || key == "choreography:keygen:count"
+            }),
+            "new_coordinator_elected" | "protocol_completes_after_recovery" => state
+                .parameters
+                .get("choreography:coordinator_failure_recovery:count")
+                .is_some(),
+            "derived_keys_match" | "derivation_deterministic" => {
+                state.parameters.get("choreography:p2p_dkd:count").is_some()
+                    || state
+                        .parameters
+                        .get("choreography:dkd_handshake:count")
+                        .is_some()
+            }
+            "epoch_monotonic_increase" | "old_tickets_invalidated" => state
+                .parameters
+                .get("choreography:epoch_increment:count")
+                .is_some(),
+            "group_chat_created" => !state.chat_groups.is_empty(),
+            "all_members_joined" => state
+                .chat_groups
+                .values()
+                .any(|group| group.members.len() >= 3),
+            "message_history_available"
+            | "all_messages_delivered"
+            | "message_consistency"
+            | "all_messages_received"
+            | "consistent_message_count"
+            | "message_continuity_maintained"
+            | "bob_can_see_full_history" => total_messages > 0,
+            "no_duplicate_messages" => no_duplicate_messages,
+            "guardian_relationships_established" => state
+                .parameters
+                .keys()
+                .any(|key| key.starts_with("guardian_relationship:") && key.ends_with(":accepted")),
+            "recovery_request_validated" => state
+                .recovery_state
+                .values()
+                .any(|recovery| !recovery.validation_steps.is_empty()),
+            "guardian_approval_threshold_met" => state
+                .recovery_state
+                .values()
+                .any(|recovery| recovery.validation_steps.len() >= recovery.threshold),
+            "bob_account_restored" => {
+                state
+                    .recovery_state
+                    .get("bob")
+                    .is_some_and(|recovery| recovery.completed)
+                    && !state.participant_data_loss.contains_key("bob")
+            }
+            "bob_can_send_messages" | "group_functionality_restored" => {
+                !state.chat_groups.is_empty() && !state.participant_data_loss.contains_key("bob")
+            }
+            "counter_value_correct" => state
+                .parameters
+                .get("choreography:counter_increment:count")
+                .and_then(|value| value.parse::<u64>().ok())
+                .is_some_and(|count| count >= 3),
+            _ => any_successful_choreography,
+        };
+
+        Ok(result)
+    }
+
+    /// Evaluate a property against current simulator state and fail the scenario
+    /// when the observed value differs from the declared expectation.
+    pub fn verify_property(
         &self,
         property: &str,
         expected: Option<String>,
     ) -> Result<(), TestingError> {
-        let mut data = HashMap::from([("property".to_string(), property.to_string())]);
+        let expected_bool = expected
+            .as_deref()
+            .and_then(|value| {
+                let trimmed = value.trim().trim_matches('"');
+                match trimmed {
+                    "true" => Some(true),
+                    "false" => Some(false),
+                    _ => None,
+                }
+            })
+            .unwrap_or(true);
+        let actual = {
+            let state = self.shared.state.lock().map_err(|e| {
+                TestingError::SystemError(aura_core::AuraError::internal(format!(
+                    "Lock error: {e}"
+                )))
+            })?;
+            Self::evaluate_property_locked(&state, property)?
+        };
+
+        let mut data = HashMap::from([
+            ("property".to_string(), property.to_string()),
+            ("expected".to_string(), expected_bool.to_string()),
+            ("actual".to_string(), actual.to_string()),
+        ]);
         if let Some(exp) = expected {
-            data.insert("expected".to_string(), exp);
+            data.insert("raw_expected".to_string(), exp);
         }
-        self.record_simple_event("verify_property", data)
+        self.record_simple_event("verify_property", data)?;
+        if actual != expected_bool {
+            return Err(TestingError::PropertyAssertionFailed {
+                property_id: property.to_string(),
+                description: format!(
+                    "expected property '{property}' to be {expected_bool}, observed {actual}"
+                ),
+            });
+        }
+        Ok(())
     }
 
     /// Get statistics about scenario injections

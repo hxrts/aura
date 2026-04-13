@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capabilities::SyncCapability;
 use crate::core::{
-    binary_serialize, json_serialize, receive_json_from_expected_peer, send_bytes_to_peer,
+    binary_serialize, exchange_json_with_peer, json_serialize, send_bytes_to_peer,
     sync_biscuit_guard_error, sync_serialization_error, sync_session_error, SyncResult,
 };
 use crate::infrastructure::RetryPolicy;
@@ -408,6 +408,41 @@ pub struct AntiEntropyProtocol {
 }
 
 impl AntiEntropyProtocol {
+    fn status_result(final_status: DigestStatus) -> AntiEntropyResult {
+        AntiEntropyResult {
+            final_status: Some(final_status),
+            rounds: 1,
+            ..AntiEntropyResult::default()
+        }
+    }
+
+    fn with_status(final_status: DigestStatus, result: AntiEntropyResult) -> AntiEntropyResult {
+        AntiEntropyResult {
+            final_status: Some(final_status),
+            rounds: 1,
+            ..result
+        }
+    }
+
+    fn operations_to_push<'a>(
+        &self,
+        local_ops: &'a [AttestedOp],
+        local_digest: &JournalDigest,
+        remote_digest: &JournalDigest,
+    ) -> &'a [AttestedOp] {
+        let missing_count = local_digest
+            .operation_count
+            .saturating_sub(remote_digest.operation_count);
+        if missing_count == 0 {
+            return &[];
+        }
+
+        let start_index = remote_digest.operation_count as usize;
+        let batch = (self.config.batch_size as u64).min(missing_count) as usize;
+        let end_index = (start_index + batch).min(local_ops.len());
+        &local_ops[start_index..end_index]
+    }
+
     /// Create a new anti-entropy protocol with the given configuration
     pub fn new(config: AntiEntropyConfig) -> Self {
         Self {
@@ -599,13 +634,7 @@ impl AntiEntropyProtocol {
         match digest_status {
             DigestStatus::Equal => {
                 // Already synchronized
-                Ok(AntiEntropyResult {
-                    applied: 0,
-                    duplicates: 0,
-                    applied_ops: Vec::new(),
-                    final_status: Some(DigestStatus::Equal),
-                    rounds: 1,
-                })
+                Ok(Self::status_result(DigestStatus::Equal))
             }
             DigestStatus::LocalBehind => {
                 // We need operations from peer
@@ -624,13 +653,7 @@ impl AntiEntropyProtocol {
                 .await?;
 
                 // Return result indicating we pushed operations
-                Ok(AntiEntropyResult {
-                    applied: 0, // We didn't apply anything locally
-                    duplicates: 0,
-                    applied_ops: Vec::new(),
-                    final_status: Some(DigestStatus::RemoteBehind),
-                    rounds: 1,
-                })
+                Ok(Self::status_result(DigestStatus::RemoteBehind))
             }
             DigestStatus::Diverged => {
                 // Both sides need operations - more complex reconciliation
@@ -656,24 +679,26 @@ impl AntiEntropyProtocol {
     where
         E: NetworkEffects + Send + Sync,
     {
-        // Serialize local digest
-        let digest_data = json_serialize("digest", "digest", local_digest)?;
-
         // Send digest to peer and wait for response
         tracing::debug!(
             "Sending digest to peer {} ({} bytes)",
             peer,
-            digest_data.len()
+            json_serialize("digest", "digest", local_digest)?.len()
         );
 
         // Apply timeout for digest exchange
         let exchange_future = async {
-            // Send our digest
-            send_bytes_to_peer(effects, peer.0, &peer, "digest", digest_data).await?;
-
-            let remote_digest: JournalDigest =
-                receive_json_from_expected_peer(effects, peer.0, &peer, "digest", "digest").await?;
-
+            let remote_digest: JournalDigest = exchange_json_with_peer(
+                effects,
+                peer.0,
+                &peer,
+                "digest",
+                "digest",
+                local_digest,
+                "digest",
+                "digest",
+            )
+            .await?;
             tracing::debug!(
                 "Received digest from peer {} ({} ops)",
                 peer,
@@ -710,15 +735,18 @@ impl AntiEntropyProtocol {
             request.from_index
         );
 
-        // Send request to peer
-        let request_data = json_serialize("request", "request", &request)?;
-
         let pull_future = async {
-            send_bytes_to_peer(effects, peer.0, &peer, "operation request", request_data).await?;
-
-            let remote_ops: Vec<AttestedOp> =
-                receive_json_from_expected_peer(effects, peer.0, &peer, "operations", "operations")
-                    .await?;
+            let remote_ops: Vec<AttestedOp> = exchange_json_with_peer(
+                effects,
+                peer.0,
+                &peer,
+                "request",
+                "operation request",
+                &request,
+                "operations",
+                "operations",
+            )
+            .await?;
 
             tracing::debug!(
                 "Received {} operations from peer {}",
@@ -858,17 +886,7 @@ impl AntiEntropyProtocol {
         E: NetworkEffects + Send + Sync,
     {
         // Determine which operations to send
-        let missing_count = local_digest
-            .operation_count
-            .saturating_sub(remote_digest.operation_count);
-        let ops_to_send = if missing_count > 0 {
-            let start_index = remote_digest.operation_count as usize;
-            let batch = (self.config.batch_size as u64).min(missing_count) as usize;
-            let end_index = (start_index + batch).min(local_ops.len());
-            &local_ops[start_index..end_index]
-        } else {
-            &[]
-        };
+        let ops_to_send = self.operations_to_push(local_ops, local_digest, remote_digest);
 
         tracing::debug!("Pushing {} operations to peer {}", ops_to_send.len(), peer);
 
@@ -916,13 +934,7 @@ impl AntiEntropyProtocol {
             .pull_operations_from_peer(effects, peer, local_digest, remote_digest)
             .await?;
 
-        Ok(AntiEntropyResult {
-            applied: pull_result.applied,
-            duplicates: pull_result.duplicates,
-            applied_ops: pull_result.applied_ops,
-            final_status: Some(DigestStatus::Diverged),
-            rounds: 1,
-        })
+        Ok(Self::with_status(DigestStatus::Diverged, pull_result))
     }
 
     /// Compute a digest for the given journal state and operation log

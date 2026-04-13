@@ -351,6 +351,28 @@ pub struct PeerManager {
 }
 
 impl PeerManager {
+    fn peer_not_found() -> aura_core::AuraError {
+        sync_peer_error("update", "Peer not found")
+    }
+
+    fn peer_info_mut(&mut self, device_id: DeviceId) -> SyncResult<&mut PeerInfo> {
+        self.peers
+            .get_mut(&device_id)
+            .ok_or_else(Self::peer_not_found)
+    }
+
+    fn eligible_sync_peers(&self) -> impl Iterator<Item = &PeerInfo> {
+        let max_concurrent_sessions = self.config.max_concurrent_sessions;
+        let min_trust_level = self.config.min_trust_level;
+        let capability_filtering = self.config.capability_filtering;
+
+        self.peers.values().filter(move |peer| {
+            peer.metadata.is_available(max_concurrent_sessions)
+                && (!capability_filtering || peer.metadata.has_sync_capability)
+                && peer.metadata.trust_level >= min_trust_level
+        })
+    }
+
     /// Create a new peer manager with the given configuration
     pub fn new(config: PeerDiscoveryConfig) -> Self {
         Self {
@@ -416,21 +438,9 @@ impl PeerManager {
         Ok(all_peers)
     }
 
-    // =============================================================================
-    // Rendezvous Discovery Integration (Week 2 - not yet implemented)
-    // =============================================================================
-    // The following functions are gated because they reference types from
-    // `aura_rendezvous::discovery` which don't exist yet. These will be enabled
-    // when the rendezvous peer discovery integration is completed (Week 2 tasks).
-    //
-    // Functions:
-    // - create_discovery_service: Creates rendezvous discovery service
-    // - create_sync_discovery_query: Builds sync-specific discovery query
-    // - validate_discovered_peer: Validates peers from discovery results
-    // - extract_device_id_from_peer_token: Extracts DeviceId from peer token
-    // - validate_peer_sync_capabilities: Validates peer has sync capabilities
-    // - verify_peer_identity: Verifies peer identity using aura-signature
-    // =============================================================================
+    // Future rendezvous-backed discovery hooks live here once the sync crate
+    // consumes a typed peer-discovery surface. Until then, discovery remains
+    // intentionally constrained to explicitly tracked peers.
 
     /// Add a discovered peer to tracking
     ///
@@ -462,11 +472,7 @@ impl PeerManager {
     where
         F: FnOnce(&mut PeerMetadata),
     {
-        let peer = self
-            .peers
-            .get_mut(&device_id)
-            .ok_or_else(|| sync_peer_error("update", "Peer not found"))?;
-
+        let peer = self.peer_info_mut(device_id)?;
         f(&mut peer.metadata);
         Ok(())
     }
@@ -479,10 +485,6 @@ impl PeerManager {
         device_id: DeviceId,
         token_bytes: Vec<u8>,
     ) -> SyncResult<()> {
-        if !self.peers.contains_key(&device_id) {
-            return Err(sync_peer_error("update", "Peer not found"));
-        }
-
         // Check sync capability using Biscuit token if evaluator available
         let has_sync_capability = if let Some(ref evaluator) = self.guard_evaluator {
             let validated = self
@@ -503,11 +505,7 @@ impl PeerManager {
             true
         };
 
-        let peer = self
-            .peers
-            .get_mut(&device_id)
-            .ok_or_else(|| sync_peer_error("update", "Peer not found"))?;
-
+        let peer = self.peer_info_mut(device_id)?;
         peer.metadata.has_sync_capability = has_sync_capability;
         peer.token = Some(token_bytes);
         Ok(())
@@ -597,13 +595,8 @@ impl PeerManager {
     ///
     /// Returns up to `count` peers sorted by score (highest first)
     pub fn select_sync_peers(&self, count: usize) -> Vec<DeviceId> {
-        let max_concurrent_sessions = self.config.max_concurrent_sessions;
         let mut scored_peers: Vec<_> = self
-            .peers
-            .values()
-            .filter(|p| p.metadata.is_available(max_concurrent_sessions))
-            .filter(|p| !self.config.capability_filtering || p.metadata.has_sync_capability)
-            .filter(|p| p.metadata.trust_level >= self.config.min_trust_level)
+            .eligible_sync_peers()
             .map(|p| (p.metadata.device_id, p.metadata.calculate_score()))
             .collect();
 
@@ -660,19 +653,13 @@ impl PeerManager {
 
     /// Get statistics about tracked peers
     pub fn statistics(&self) -> PeerManagerStatistics {
-        let max_concurrent_sessions = self.config.max_concurrent_sessions;
         let connected = self
             .peers
             .values()
             .filter(|p| matches!(p.metadata.status, PeerStatus::Connected))
             .count();
 
-        let available = self
-            .peers
-            .values()
-            .filter(|p| p.metadata.is_available(max_concurrent_sessions))
-            .count();
-
+        let available = self.eligible_sync_peers().count();
         let with_capability = self
             .peers
             .values()
@@ -712,10 +699,7 @@ impl PeerManager {
     ///
     /// Convenience method for backward compatibility.
     pub fn needs_refresh_ms(&self, now_ms: u64) -> bool {
-        self.needs_refresh(&PhysicalTime {
-            ts_ms: now_ms,
-            uncertainty: None,
-        })
+        self.needs_refresh(&physical_time_from_ms(now_ms))
     }
 
     /// List all tracked peers

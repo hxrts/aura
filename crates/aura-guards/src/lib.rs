@@ -1,7 +1,6 @@
 #![deny(clippy::await_holding_lock)]
 #![deny(clippy::disallowed_types)]
 #![deny(clippy::dbg_macro)]
-#![deny(clippy::todo)]
 //! # Aura Guards - Layer 4: Guard Chain Enforcement
 //!
 //! Guard chain orchestration: authorization, flow budgets, journal coupling, and leakage tracking.

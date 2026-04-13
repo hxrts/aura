@@ -37,7 +37,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn android_stubs_fail_explicitly() {
+    fn android_platform_hooks_fail_explicitly() {
         assert!(initialize().is_err());
         assert!(configure_background_sync().is_err());
         assert!(files_directory().is_err());

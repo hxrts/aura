@@ -1,4 +1,5 @@
 use super::{MetricsCollector, SessionConfig, SessionManager};
+use crate::core::physical_time_from_ms;
 use aura_core::time::PhysicalTime;
 use serde::{Deserialize, Serialize};
 
@@ -50,10 +51,7 @@ where
     ///
     /// Convenience method for backward compatibility.
     pub fn build_ms(self, now_ms: u64) -> SessionManager<T> {
-        self.build(PhysicalTime {
-            ts_ms: now_ms,
-            uncertainty: None,
-        })
+        self.build(physical_time_from_ms(now_ms))
     }
 }
 

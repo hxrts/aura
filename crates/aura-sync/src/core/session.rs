@@ -7,8 +7,8 @@
 
 use crate::core::metrics::ErrorCategory;
 use crate::core::{
-    sync_resource_with_limit, sync_session_error, sync_timeout_error, sync_validation_error,
-    MetricsCollector, SyncConfig, SyncResult,
+    physical_time_from_ms, sync_resource_with_limit, sync_session_error, sync_timeout_error,
+    sync_validation_error, MetricsCollector, SyncConfig, SyncResult,
 };
 use aura_core::time::PhysicalTime;
 use aura_core::{DeviceId, SessionId};
@@ -143,6 +143,41 @@ pub enum SessionResult {
 }
 
 impl SessionResult {
+    fn success(
+        duration_ms: u64,
+        operations_count: u64,
+        bytes_transferred: u64,
+        participants: Vec<DeviceId>,
+        metadata: HashMap<String, String>,
+    ) -> Self {
+        Self::Success {
+            duration_ms,
+            operations_count,
+            bytes_transferred,
+            participants,
+            metadata,
+        }
+    }
+
+    fn failure(
+        error: SessionError,
+        duration_ms: u64,
+        partial_results: Option<PartialResults>,
+    ) -> Self {
+        Self::Failure {
+            error,
+            duration_ms,
+            partial_results,
+        }
+    }
+
+    fn timeout(duration_ms: u64, last_known_state: String) -> Self {
+        Self::Timeout {
+            duration_ms,
+            last_known_state,
+        }
+    }
+
     /// Check if result represents success
     pub fn is_success(&self) -> bool {
         matches!(self, SessionResult::Success { .. })
@@ -168,6 +203,19 @@ impl SessionResult {
                 ..
             } => partial.operations_completed,
             _ => 0,
+        }
+    }
+}
+
+impl SessionError {
+    fn metrics_category(&self) -> ErrorCategory {
+        match self {
+            SessionError::Timeout { .. } => ErrorCategory::Timeout,
+            SessionError::ParticipantDisconnected { .. } => ErrorCategory::Network,
+            SessionError::ResourceLimitExceeded { .. } => ErrorCategory::Resource,
+            SessionError::ProtocolViolation { .. } => ErrorCategory::Protocol,
+            SessionError::CapacityExceeded { .. } => ErrorCategory::Resource,
+            SessionError::InvalidStateTransition { .. } => ErrorCategory::Protocol,
         }
     }
 }
@@ -293,6 +341,23 @@ impl<T> SessionManager<T>
 where
     T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
 {
+    fn timeout_at(now: &PhysicalTime, duration: Duration) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms: now.ts_ms + duration.as_millis() as u64,
+            uncertainty: now.uncertainty,
+        }
+    }
+
+    fn missing_session(session_id: SessionId) -> aura_core::AuraError {
+        sync_session_error(format!("Session {session_id} not found"))
+    }
+
+    fn session_mut(&mut self, session_id: SessionId) -> SyncResult<&mut SessionState<T>> {
+        self.sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| Self::missing_session(session_id))
+    }
+
     /// Create a new session manager
     ///
     /// **Time System**: Uses `PhysicalTime` for timestamps.
@@ -310,13 +375,7 @@ where
     ///
     /// Convenience constructor for backward compatibility.
     pub fn new_from_ms(config: SessionConfig, now_ms: u64) -> Self {
-        Self::new(
-            config,
-            PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            },
-        )
+        Self::new(config, physical_time_from_ms(now_ms))
     }
 
     /// Create session manager with metrics collection
@@ -380,14 +439,9 @@ where
         }
 
         let session_id = self.generate_session_id(now);
-        let timeout_ms = now.ts_ms + self.config.timeout.as_millis() as u64;
-
         let session_state = SessionState::Initializing {
             participants,
-            timeout_at: PhysicalTime {
-                ts_ms: timeout_ms,
-                uncertainty: now.uncertainty,
-            },
+            timeout_at: Self::timeout_at(now, self.config.timeout),
             created_at: now.clone(),
         };
 
@@ -409,13 +463,7 @@ where
         participants: Vec<DeviceId>,
         now_ms: u64,
     ) -> SyncResult<SessionId> {
-        self.create_session(
-            participants,
-            &PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            },
-        )
+        self.create_session(participants, &physical_time_from_ms(now_ms))
     }
 
     /// Activate a session with initial protocol state
@@ -427,10 +475,8 @@ where
         protocol_state: T,
         current_time: &PhysicalTime,
     ) -> SyncResult<()> {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let max_session_duration = self.config.resource_limits.max_session_duration;
+        let session = self.session_mut(session_id)?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
         if session.is_timed_out(current_time) {
@@ -443,16 +489,11 @@ where
         match session {
             SessionState::Initializing { participants, .. } => {
                 let participants = participants.clone();
-                let timeout_ms = current_time.ts_ms
-                    + self.config.resource_limits.max_session_duration.as_millis() as u64;
                 *session = SessionState::Active {
                     protocol_state,
                     started_at: current_time.clone(),
                     participants,
-                    timeout_at: PhysicalTime {
-                        ts_ms: timeout_ms,
-                        uncertainty: current_time.uncertainty,
-                    },
+                    timeout_at: Self::timeout_at(current_time, max_session_duration),
                 };
 
                 Ok(())
@@ -475,10 +516,7 @@ where
         self.activate_session(
             session_id,
             protocol_state,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
+            &physical_time_from_ms(current_timestamp_ms),
         )
     }
 
@@ -494,10 +532,7 @@ where
     where
         T: std::fmt::Debug,
     {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let session = self.session_mut(session_id)?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
         if session.is_timed_out(current_time) {
@@ -531,10 +566,7 @@ where
         self.update_session(
             session_id,
             new_state,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
+            &physical_time_from_ms(current_timestamp_ms),
         )
     }
 
@@ -549,21 +581,18 @@ where
         metadata: HashMap<String, String>,
         current_time: &PhysicalTime,
     ) -> SyncResult<()> {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let session = self.session_mut(session_id)?;
 
         let duration_ms = session.duration_ms(current_time).unwrap_or(0);
         let participants = session.participants().to_vec();
 
-        let result = SessionResult::Success {
+        let result = SessionResult::success(
             duration_ms,
             operations_count,
             bytes_transferred,
             participants,
             metadata,
-        };
+        );
 
         *session = SessionState::Completed(result);
 
@@ -596,10 +625,7 @@ where
             operations_count,
             bytes_transferred,
             metadata,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
+            &physical_time_from_ms(current_timestamp_ms),
         )
     }
 
@@ -613,32 +639,20 @@ where
         partial_results: Option<PartialResults>,
         current_time: &PhysicalTime,
     ) -> SyncResult<()> {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let session = self.session_mut(session_id)?;
 
         let duration_ms = session.duration_ms(current_time).unwrap_or(0);
-
-        let result = SessionResult::Failure {
-            error: error.clone(),
-            duration_ms,
-            partial_results,
-        };
+        let result = SessionResult::failure(error.clone(), duration_ms, partial_results);
 
         *session = SessionState::Completed(result);
 
         // Record metrics
         if let Some(ref metrics) = self.metrics {
-            let category = match error {
-                SessionError::Timeout { .. } => ErrorCategory::Timeout,
-                SessionError::ParticipantDisconnected { .. } => ErrorCategory::Network,
-                SessionError::ResourceLimitExceeded { .. } => ErrorCategory::Resource,
-                SessionError::ProtocolViolation { .. } => ErrorCategory::Protocol,
-                SessionError::CapacityExceeded { .. } => ErrorCategory::Resource,
-                SessionError::InvalidStateTransition { .. } => ErrorCategory::Protocol,
-            };
-            metrics.record_sync_failure(&session_id.to_string(), category, &error.to_string());
+            metrics.record_sync_failure(
+                &session_id.to_string(),
+                error.metrics_category(),
+                &error.to_string(),
+            );
         }
 
         Ok(())
@@ -658,10 +672,7 @@ where
             session_id,
             error,
             partial_results,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
+            &physical_time_from_ms(current_timestamp_ms),
         )
     }
 
@@ -676,18 +687,12 @@ where
     where
         T: std::fmt::Debug,
     {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let session = self.session_mut(session_id)?;
 
         let duration_ms = session.duration_ms(current_time).unwrap_or(0);
         let last_known_state = format!("{session:?}");
 
-        let result = SessionResult::Timeout {
-            duration_ms,
-            last_known_state,
-        };
+        let result = SessionResult::timeout(duration_ms, last_known_state);
 
         *session = SessionState::Completed(result);
 
@@ -714,13 +719,7 @@ where
     where
         T: std::fmt::Debug,
     {
-        self.timeout_session(
-            session_id,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
-        )
+        self.timeout_session(session_id, &physical_time_from_ms(current_timestamp_ms))
     }
 
     /// Get session state
@@ -811,10 +810,7 @@ where
     where
         T: std::fmt::Debug,
     {
-        self.cleanup_stale_sessions(&PhysicalTime {
-            ts_ms: now_ms,
-            uncertainty: None,
-        })
+        self.cleanup_stale_sessions(&physical_time_from_ms(now_ms))
     }
 
     /// Get session statistics

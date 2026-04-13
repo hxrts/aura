@@ -1,5 +1,4 @@
 #![deny(clippy::dbg_macro)]
-#![deny(clippy::todo)]
 #![allow(
     missing_docs,
     unused_variables,

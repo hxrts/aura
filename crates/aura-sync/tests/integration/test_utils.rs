@@ -139,6 +139,17 @@ impl MultiDeviceTestFixture {
         self.network.set_conditions(from, to, condition).await;
     }
 
+    pub async fn set_network_condition_bidirectional(
+        &mut self,
+        left: DeviceId,
+        right: DeviceId,
+        condition: NetworkCondition,
+    ) {
+        self.set_network_condition(left, right, condition.clone())
+            .await;
+        self.set_network_condition(right, left, condition).await;
+    }
+
     /// Partition the network between two device groups
     pub async fn create_partition(&mut self, group1: Vec<DeviceId>, group2: Vec<DeviceId>) {
         self.network.partition(group1, group2).await;
@@ -161,17 +172,19 @@ impl MultiDeviceTestFixture {
 
     pub async fn isolate_index(&mut self, index: usize) -> AuraResult<()> {
         let isolated = self.device(index)?;
-        for device in &self.devices {
-            if *device != isolated {
+        let peers: Vec<_> = self
+            .devices
+            .iter()
+            .copied()
+            .filter(|device| *device != isolated)
+            .collect();
+        for device in peers {
+            if device != isolated {
                 let partition_condition = NetworkCondition {
                     partitioned: true,
                     ..Default::default()
                 };
-                self.network
-                    .set_conditions(isolated, *device, partition_condition.clone())
-                    .await;
-                self.network
-                    .set_conditions(*device, isolated, partition_condition)
+                self.set_network_condition_bidirectional(isolated, device, partition_condition)
                     .await;
             }
         }
@@ -237,6 +250,20 @@ pub fn create_anti_entropy_protocol() -> AntiEntropyProtocol {
         ..Default::default()
     };
     AntiEntropyProtocol::new(config)
+}
+
+pub async fn finish_session(
+    session: CoordinatedSession,
+    timeout_duration: Duration,
+) -> AuraResult<()> {
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(timeout_duration)
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))
 }
 
 /// Helper for creating journal sync protocol instances

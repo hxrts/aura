@@ -362,7 +362,7 @@ impl SystemEffects for LoggingSystemHandler {
     }
 
     async fn restart_component(&self, _component: &str) -> Result<(), SystemError> {
-        warn!("Restart not implemented for logging system handler");
+        warn!("Restart is unavailable for logging system handler");
         Ok(())
     }
 

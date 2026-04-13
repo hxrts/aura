@@ -211,6 +211,26 @@ impl ActivationDecision {
     }
 }
 
+impl DiscoveryDecision {
+    fn denied(reason: impl Into<String>) -> Self {
+        Self {
+            allow_discovery: false,
+            fetch_metadata: false,
+            fetch_artifacts: false,
+            reason: Some(reason.into()),
+        }
+    }
+
+    fn allowed(policy: &AuraReleaseDiscoveryPolicy) -> Self {
+        Self {
+            allow_discovery: true,
+            fetch_metadata: policy.auto_fetch_metadata,
+            fetch_artifacts: policy.auto_fetch_artifacts,
+            reason: None,
+        }
+    }
+}
+
 /// Stateless OTA policy evaluator.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OtaPolicyEvaluator;
@@ -231,23 +251,13 @@ impl OtaPolicyEvaluator {
             .allowed_release_sources
             .matches(&candidate.release_authority)
         {
-            return DiscoveryDecision {
-                allow_discovery: false,
-                fetch_metadata: false,
-                fetch_artifacts: false,
-                reason: Some("release authority not allowed by discovery policy".to_string()),
-            };
+            return DiscoveryDecision::denied("release authority not allowed by discovery policy");
         }
         if !policy
             .allowed_contexts
             .matches_policy_scope(&candidate.scope)
         {
-            return DiscoveryDecision {
-                allow_discovery: false,
-                fetch_metadata: false,
-                fetch_artifacts: false,
-                reason: Some("discovery scope not allowed by discovery policy".to_string()),
-            };
+            return DiscoveryDecision::denied("discovery scope not allowed by discovery policy");
         }
         if !candidate.builder_authorities.is_empty()
             && !candidate
@@ -255,20 +265,10 @@ impl OtaPolicyEvaluator {
                 .iter()
                 .all(|builder| policy.allowed_builder_sources.matches(builder))
         {
-            return DiscoveryDecision {
-                allow_discovery: false,
-                fetch_metadata: false,
-                fetch_artifacts: false,
-                reason: Some("builder authority not allowed by discovery policy".to_string()),
-            };
+            return DiscoveryDecision::denied("builder authority not allowed by discovery policy");
         }
 
-        DiscoveryDecision {
-            allow_discovery: true,
-            fetch_metadata: policy.auto_fetch_metadata,
-            fetch_artifacts: policy.auto_fetch_artifacts,
-            reason: None,
-        }
+        DiscoveryDecision::allowed(policy)
     }
 
     /// Evaluate sharing policy independently from discovery or activation.
