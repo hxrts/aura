@@ -116,7 +116,6 @@ EXCLUDE_GLOBS=(
   "docs/book/**"
   "target/**"
   ".git/**"
-  "work/**"
   "scripts/dev/terminology.sh"
 )
 
@@ -128,7 +127,7 @@ done
 is_excluded_path() {
   local path="$1"
   case "$path" in
-    docs/book/*|target/*|.git/*|work/*|scripts/dev/terminology.sh) return 0 ;;
+    docs/book/*|target/*|.git/*|scripts/dev/terminology.sh) return 0 ;;
     *) return 1 ;;
   esac
 }

@@ -3635,8 +3635,6 @@ pub fn run_ownership_capability_audit() -> Result<()> {
             "-n".into(),
             "--hidden".into(),
             "--glob".into(),
-            "!work/**".into(),
-            "--glob".into(),
             "!docs/book/**".into(),
             "--glob".into(),
             "!crates/aura-macros/tests/boundaries/**".into(),
