@@ -12,10 +12,9 @@ use aura_harness::network_lab::{
     AuthoritySpec, FirewallPreset, LinkConditionPreset, LinkSpec, NatPreset, RouterSpec,
     TopologySpec,
 };
-use patchbay::config::{LabConfig, RouterConfig};
+use patchbay::config::LabConfig;
 use patchbay::{check_caps, Lab, LabOpts, OutDir};
 use tokio::net::UdpSocket;
-use tokio::sync::oneshot;
 
 fn holepunch_topology() -> Result<TopologySpec> {
     ScenarioBuilder::new("holepunch-runtime-harness-e2e")
@@ -135,20 +134,43 @@ fn find_link_condition(
 }
 
 fn to_patchbay_lab_config(spec: &TopologySpec) -> Result<LabConfig> {
+    #[derive(serde::Serialize)]
+    struct RouterConfigDoc {
+        name: String,
+        region: Option<String>,
+        upstream: Option<String>,
+        nat: patchbay::Nat,
+        ip_support: patchbay::IpSupport,
+        nat_v6: patchbay::NatV6Mode,
+        ra_enabled: Option<bool>,
+        ra_interval_secs: Option<u64>,
+        ra_lifetime_secs: Option<u64>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct LabConfigDoc {
+        region: Option<BTreeMap<String, toml::Value>>,
+        router: Vec<RouterConfigDoc>,
+        device: BTreeMap<String, toml::Value>,
+    }
+
     let routers = spec
         .routers
         .iter()
-        .map(|router| RouterConfig {
+        .map(|router| RouterConfigDoc {
             name: router.name.clone(),
             region: None,
             upstream: router.upstream.clone(),
             nat: to_patchbay_nat(router.nat),
             ip_support: patchbay::IpSupport::V4Only,
             nat_v6: patchbay::NatV6Mode::None,
+            ra_enabled: None,
+            ra_interval_secs: None,
+            ra_lifetime_secs: None,
         })
         .collect();
 
-    let mut device = std::collections::HashMap::new();
+    let mut device = BTreeMap::new();
     for authority in &spec.authorities {
         let mut table = toml::map::Map::new();
         table.insert(
@@ -171,11 +193,13 @@ fn to_patchbay_lab_config(spec: &TopologySpec) -> Result<LabConfig> {
         device.insert(authority.device_name.clone(), toml::Value::Table(table));
     }
 
-    Ok(LabConfig {
+    let config_doc = LabConfigDoc {
         region: None,
         router: routers,
         device,
-    })
+    };
+    let encoded = toml::to_string(&config_doc).context("encode patchbay lab config TOML")?;
+    toml::from_str(&encoded).context("decode patchbay lab config from TOML")
 }
 
 async fn discover_public_addr(socket: &UdpSocket, reflector: SocketAddr) -> Result<SocketAddr> {
@@ -310,29 +334,14 @@ async fn runtime_harness_patchbay_holepunch_works_e2e() -> Result<()> {
     let relay = lab
         .device_by_name("relay-dev")
         .ok_or_else(|| anyhow!("relay-dev not found in lab"))?;
-    let (reflector_tx, reflector_rx) = oneshot::channel::<SocketAddr>();
-
-    let relay_task = relay.spawn(async move |ctx| {
-        let relay_ip = ctx
-            .ip()
-            .ok_or_else(|| anyhow!("relay context missing IPv4 address"))?;
-        let reflector = SocketAddr::from((relay_ip, 46_000));
-        ctx.spawn_reflector(reflector)
-            .context("spawn relay reflector")?;
-        reflector_tx
-            .send(reflector)
-            .map_err(|_| anyhow!("failed to publish reflector address"))?;
-        Ok::<(), anyhow::Error>(())
-    })?;
-
-    relay_task
+    let relay_ip = relay
+        .ip()
+        .ok_or_else(|| anyhow!("relay device missing IPv4 address"))?;
+    let reflector = SocketAddr::from((relay_ip, 46_000));
+    let _reflector_guard = relay
+        .spawn_reflector(reflector)
         .await
-        .map_err(|error| anyhow!("relay setup task join failure: {error}"))??;
-
-    let reflector = tokio::time::timeout(Duration::from_secs(5), reflector_rx)
-        .await
-        .context("timed out waiting for reflector address")?
-        .map_err(|_| anyhow!("reflector setup channel closed"))?;
+        .context("spawn relay reflector")?;
 
     // Round 1: baseline simultaneous open through Home NAT on both sides.
     run_holepunch_round(&lab, reflector, Duration::ZERO).await?;
