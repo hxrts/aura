@@ -9,11 +9,22 @@ if [ -d "${local_toolkit}/xtask" ]; then
   export TOOLKIT_ROOT="${local_toolkit}"
 fi
 
-if [ -n "${IN_NIX_SHELL:-}" ] && [ -n "${TOOLKIT_ROOT:-}" ] && command -v toolkit-xtask >/dev/null 2>&1; then
+requested_command="${1:-}"
+
+if [ -n "${IN_NIX_SHELL:-}" ] && [ -n "${TOOLKIT_ROOT:-}" ] && [ -n "${requested_command}" ] && command -v "${requested_command}" >/dev/null 2>&1; then
   exec "$@"
 fi
 
 if [ -n "${TOOLKIT_ROOT:-}" ] && [ -f "${TOOLKIT_ROOT}/flake.nix" ]; then
+  if [ -n "${requested_command}" ] && [[ "${requested_command}" == toolkit-* ]]; then
+    if [ "${requested_command}" = "toolkit-dylint" ]; then
+      if ! command -v cargo-dylint >/dev/null 2>&1; then
+        nix shell "${TOOLKIT_ROOT}#toolkit-install-dylint" --command toolkit-install-dylint
+      fi
+      exec nix shell "${TOOLKIT_ROOT}#toolkit-dylint" "${TOOLKIT_ROOT}#toolkit-dylint-link" --command "$@"
+    fi
+    exec nix shell "${TOOLKIT_ROOT}#${requested_command}" --command "$@"
+  fi
   exec nix develop "${TOOLKIT_ROOT}" --command "$@"
 fi
 
