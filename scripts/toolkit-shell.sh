@@ -11,6 +11,20 @@ fi
 
 requested_command="${1:-}"
 
+setup_toolkit_dylint_tmpdir() {
+  local current_tmpdir="${TMPDIR:-}"
+  if [ -z "${current_tmpdir}" ]; then
+    export TMPDIR="/tmp"
+    return
+  fi
+
+  case "${current_tmpdir}" in
+    "${repo_root}" | "${repo_root}"/*)
+      export TMPDIR="/tmp"
+      ;;
+  esac
+}
+
 setup_toolkit_dylint_env() {
   if [ -n "${HOME:-}" ]; then
     export PATH="${HOME}/.cargo/bin:${PATH}"
@@ -57,6 +71,7 @@ EOF
 
 if [ "${requested_command}" = "toolkit-dylint" ]; then
   setup_toolkit_dylint_env
+  setup_toolkit_dylint_tmpdir
 fi
 
 can_exec_directly=0
