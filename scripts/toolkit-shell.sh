@@ -11,7 +11,15 @@ fi
 
 requested_command="${1:-}"
 
+can_exec_directly=0
 if [ -n "${IN_NIX_SHELL:-}" ] && [ -n "${TOOLKIT_ROOT:-}" ] && [ -n "${requested_command}" ] && command -v "${requested_command}" >/dev/null 2>&1; then
+  can_exec_directly=1
+  if [ "${requested_command}" = "toolkit-dylint" ] && ! command -v toolkit-dylint-link >/dev/null 2>&1; then
+    can_exec_directly=0
+  fi
+fi
+
+if [ "${can_exec_directly}" -eq 1 ]; then
   exec "$@"
 fi
 
