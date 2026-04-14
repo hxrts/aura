@@ -238,6 +238,7 @@
             git
             jq
             ripgrep
+            rustup
 
             # POSIX tools (for Justfile scripts)
             coreutils
