@@ -70,6 +70,9 @@
           extensions = [
             "rust-src"
             "rust-analyzer"
+            "rustc-dev"
+            "llvm-tools-preview"
+            "rustfmt"
           ];
           targets = [ "wasm32-unknown-unknown" ];
         };
@@ -346,6 +349,7 @@
           buildInputs = with pkgs; [
             # Rust toolchain
             rustToolchain
+            rustToolchainNightly
 
             # Build tools
             pkg-config
@@ -358,6 +362,7 @@
             git
             jq
             ripgrep
+            rustup
 
             # POSIX tools (for Justfile scripts)
             coreutils
@@ -389,6 +394,7 @@
             export MACOSX_DEPLOYMENT_TARGET=11.0
             export CARGO_TARGET_DIR="$PWD/target"
             export AURA_WORKSPACE_ROOT="$PWD"
+            export AURA_TOOLKIT_NIGHTLY_BIN="${rustToolchainNightly}/bin"
           '';
         };
 

@@ -11,6 +11,54 @@ fi
 
 requested_command="${1:-}"
 
+setup_toolkit_dylint_env() {
+  if [ -n "${HOME:-}" ]; then
+    export PATH="${HOME}/.cargo/bin:${PATH}"
+  fi
+
+  if [ -z "${AURA_TOOLKIT_NIGHTLY_BIN:-}" ] || [ ! -x "${AURA_TOOLKIT_NIGHTLY_BIN}/cargo" ]; then
+    return
+  fi
+
+  local host
+  host="$("${AURA_TOOLKIT_NIGHTLY_BIN}/rustc" -vV | awk '/^host: / { print $2 }')"
+  if [ -z "${host}" ]; then
+    return
+  fi
+
+  local toolchain_name="${RUSTUP_TOOLCHAIN:-toolkit-nightly-${host}}"
+  export RUSTUP_TOOLCHAIN="${toolchain_name}"
+
+  local shim_root="${XDG_CACHE_HOME:-${HOME}/.cache}/toolkit/nightly-shims/${host}"
+  mkdir -p "${shim_root}"
+
+  cat > "${shim_root}/cargo" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export RUSTUP_TOOLCHAIN="${toolchain_name}"
+exec "${AURA_TOOLKIT_NIGHTLY_BIN}/cargo" "\$@"
+EOF
+  cat > "${shim_root}/rustc" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export RUSTUP_TOOLCHAIN="${toolchain_name}"
+exec "${AURA_TOOLKIT_NIGHTLY_BIN}/rustc" "\$@"
+EOF
+  cat > "${shim_root}/rustdoc" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export RUSTUP_TOOLCHAIN="${toolchain_name}"
+exec "${AURA_TOOLKIT_NIGHTLY_BIN}/rustdoc" "\$@"
+EOF
+  chmod +x "${shim_root}/cargo" "${shim_root}/rustc" "${shim_root}/rustdoc"
+
+  export PATH="${shim_root}:${AURA_TOOLKIT_NIGHTLY_BIN}:${PATH}"
+}
+
+if [ "${requested_command}" = "toolkit-dylint" ]; then
+  setup_toolkit_dylint_env
+fi
+
 can_exec_directly=0
 if [ -n "${IN_NIX_SHELL:-}" ] && [ -n "${TOOLKIT_ROOT:-}" ] && [ -n "${requested_command}" ] && command -v "${requested_command}" >/dev/null 2>&1; then
   can_exec_directly=1
@@ -52,7 +100,8 @@ if [ -n "${TOOLKIT_ROOT:-}" ] && [ -f "${TOOLKIT_ROOT}/flake.nix" ]; then
       if ! command -v cargo-dylint >/dev/null 2>&1; then
         nix shell "${TOOLKIT_ROOT}#toolkit-install-dylint" --command toolkit-install-dylint
       fi
-      exec nix shell "${TOOLKIT_ROOT}#toolkit-dylint" "${TOOLKIT_ROOT}#toolkit-dylint-link" "nixpkgs#rustup" --command "$@"
+      setup_toolkit_dylint_env
+      exec nix shell "${TOOLKIT_ROOT}#toolkit-dylint" "${TOOLKIT_ROOT}#toolkit-dylint-link" --command "$@"
     fi
     exec nix shell "${TOOLKIT_ROOT}#${requested_command}" --command "$@"
   fi
