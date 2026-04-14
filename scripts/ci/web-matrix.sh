@@ -11,6 +11,25 @@ exec > >(tee "$log_file") 2>&1
 
 web_tools_cache_root="$repo_root/target/aura-web-tools-ci"
 
+run_dx_build() {
+  local attempt=1
+  local max_attempts=2
+
+  while true; do
+    mkdir -p \
+      "$repo_root/target/dx/aura-web/release/web/public/assets" \
+      "$repo_root/target/dx/aura-web/release/web/public/fonts"
+    if NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web >/dev/null; then
+      return 0
+    fi
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      return 1
+    fi
+    echo "[web-matrix] dx build failed; recreating output directories and retrying once" >&2
+    attempt=$((attempt + 1))
+  done
+}
+
 prepare_browser_web_assets() {
   (
     cd crates/aura-web
@@ -24,7 +43,7 @@ prepare_browser_web_assets() {
     target_css="$repo_root/target/dx/aura-web/release/web/public/assets/tailwind.css"
     rm -f "$target_css"
     ln -s "$repo_root/crates/aura-web/public/assets/tailwind.css" "$target_css"
-    NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web >/dev/null
+    run_dx_build
   )
 }
 
@@ -37,7 +56,7 @@ mkdir -p "$web_tools_cache_root"
   npm run install-browsers
 )
 
-bash scripts/check/browser-install.sh
+cargo run --quiet --manifest-path toolkit/xtask/Cargo.toml -- check browser-install
 
 cargo build -p aura-harness --bin aura-harness -q
 export AURA_HARNESS_BIN="$repo_root/target/debug/aura-harness"

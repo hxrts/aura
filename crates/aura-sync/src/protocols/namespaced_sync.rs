@@ -6,7 +6,7 @@
 //! with proper namespace isolation for authorities and contexts.
 
 use crate::core::config::SyncConfig;
-use crate::core::errors::{sync_network_error, sync_serialization_error, sync_session_error};
+use crate::core::{exchange_json_with_peer, sync_session_error};
 use aura_core::types::identifiers::ContextId;
 use aura_core::{time::OrderTime, AuraError, AuthorityId, Result};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
@@ -15,6 +15,7 @@ use biscuit_auth;
 use hex;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -95,6 +96,29 @@ pub struct SyncStats {
 }
 
 impl NamespacedSync {
+    fn known_order_set(known_fact_ids: &[OrderTime]) -> BTreeSet<OrderTime> {
+        known_fact_ids.iter().cloned().collect()
+    }
+
+    fn paginated_unknown_facts(
+        &self,
+        facts: Vec<Fact>,
+        known_fact_ids: &[OrderTime],
+        max_facts: u32,
+    ) -> (Vec<Fact>, bool) {
+        let known_orders = Self::known_order_set(known_fact_ids);
+        let mut unknown_facts: Vec<Fact> = facts
+            .into_iter()
+            .filter(|fact| !known_orders.contains(&fact.order))
+            .collect();
+        unknown_facts.sort_by(|a, b| a.order.cmp(&b.order));
+
+        let total_unknown = unknown_facts.len();
+        let max_facts = max_facts as usize;
+        let page_facts = unknown_facts.into_iter().take(max_facts).collect();
+        (page_facts, total_unknown > max_facts)
+    }
+
     /// Create a new namespace-aware sync instance
     pub fn new(namespace: JournalNamespace, journal: Arc<RwLock<Journal>>) -> Self {
         Self { namespace, journal }
@@ -383,23 +407,7 @@ impl NamespacedSync {
         known_fact_ids: &[OrderTime],
         max_facts: u32,
     ) -> SyncResponse {
-        // Filter out already known facts
-        let mut unknown_facts: Vec<Fact> = facts
-            .into_iter()
-            .filter(|f| !known_fact_ids.contains(&f.order))
-            .collect();
-
-        // Sort facts for deterministic pagination ordering
-        unknown_facts.sort_by(|a, b| a.order.cmp(&b.order));
-
-        let total_unknown = unknown_facts.len();
-        let max_facts = max_facts as usize;
-
-        // Take the requested page size
-        let page_facts: Vec<Fact> = unknown_facts.into_iter().take(max_facts).collect();
-
-        // Determine if there are more facts available
-        let has_more = total_unknown > max_facts;
+        let (page_facts, has_more) = self.paginated_unknown_facts(facts, known_fact_ids, max_facts);
 
         SyncResponse {
             namespace: self.namespace.clone(),
@@ -518,46 +526,18 @@ impl NamespacedAntiEntropy {
         request: SyncRequest,
     ) -> Result<SyncResponse> {
         let peer_uuid: Uuid = peer.into();
-
-        // Serialize the sync request
-        let request_data = serde_json::to_vec(&request).map_err(|e| {
-            sync_serialization_error(
-                "SyncRequest",
-                format!("Failed to serialize sync request: {e}"),
-            )
-        })?;
-
-        // Send request to peer and receive response with timeout
         let exchange_future = async {
-            // Send the sync request
-            effects
-                .send_to_peer(peer_uuid, request_data)
-                .await
-                .map_err(|e| {
-                    sync_network_error(format!("Failed to send sync request to peer {peer}: {e}"))
-                })?;
-
-            // Receive response from the peer
-            let (sender_id, response_data) = effects.receive().await.map_err(|e| {
-                sync_network_error(format!(
-                    "Failed to receive sync response from peer {peer}: {e}"
-                ))
-            })?;
-
-            // Verify the response came from the expected peer
-            if sender_id != peer_uuid {
-                return Err(sync_session_error(format!(
-                    "Received sync response from unexpected peer: expected {peer}, got {sender_id}"
-                )));
-            }
-
-            // Deserialize the sync response
-            let response: SyncResponse = serde_json::from_slice(&response_data).map_err(|e| {
-                sync_serialization_error(
-                    "SyncResponse",
-                    format!("Failed to deserialize sync response from peer {peer}: {e}"),
-                )
-            })?;
+            let response: SyncResponse = exchange_json_with_peer(
+                effects,
+                peer_uuid,
+                &peer,
+                "SyncRequest",
+                "sync request",
+                &request,
+                "SyncResponse",
+                "sync response",
+            )
+            .await?;
 
             // Verify namespace consistency
             if response.namespace != request.namespace {

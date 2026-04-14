@@ -88,7 +88,7 @@ impl UiModel {
                     self.operation_causalities.insert(operation_id, causality);
                     return;
                 }
-                Some(operation)
+                Some(_operation)
                     if Self::incoming_causality_is_older(current_causality, causality) =>
                 {
                     return;

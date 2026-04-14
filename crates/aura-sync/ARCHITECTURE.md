@@ -89,6 +89,9 @@ Verification hooks:
 | health, metrics, verification outputs, and status inspection | `Observed` | Downstream inspection surfaces. |
 | rendezvous adapter peer views | `Pure` | Derives `LinkEndpoint` and `ServiceDescriptor` views from runtime snapshots without turning descriptor compatibility data into routing policy. Includes sync-blended `Hold` retrieval batching over selector-based requests and bounded reply windows. |
 
+Service implementation note:
+- `src/services/sync.rs` and `src/services/maintenance.rs` keep orchestration in the main file and push health, builder/tests, and narrow bookkeeping into private submodules. This keeps the public `services` surface concrete while still making `ActorOwned` state easier to audit.
+
 ### Capability-Gated Points
 
 - typed terminal protocol/service failure is required at async boundaries
@@ -99,7 +102,7 @@ Verification hooks:
 
 ### Strategy
 
-Merkle verification and anti-entropy determinism are the primary concerns. Tests are organized into three groups: `tests/integrity/` for data integrity and digest stability, `tests/protocol/` for sync protocol integration, and `tests/integration/` for multi-device and network partition scenarios.
+Merkle verification and anti-entropy determinism are the primary concerns. Tests are organized into three groups: `tests/integrity/` for data integrity and digest stability, `tests/protocol/` for sync protocol integration, and `tests/integration/` for multi-device and network partition scenarios. Shared deterministic fixture/time/device helpers live in [`tests/support.rs`](tests/support.rs), while [`tests/integration/test_utils.rs`](tests/integration/test_utils.rs) owns only the mechanical multi-device topology builders, bidirectional network helpers, and session-finish helpers used across scenario tests.
 
 ### Commands
 

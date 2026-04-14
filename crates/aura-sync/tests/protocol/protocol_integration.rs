@@ -4,28 +4,13 @@
 //! snapshots, OTA, receipts, and epochs) function correctly when integrated with
 //! the aura-testkit testing framework and with each other.
 
-use aura_core::time::PhysicalTime;
+use crate::shared_support::{device, test_time, TEST_TIMESTAMP_MS};
 use aura_core::types::Epoch;
-use aura_core::DeviceId;
 use aura_sync::protocols::{
     AntiEntropyConfig, AntiEntropyProtocol, EpochConfig, EpochRotationCoordinator,
     JournalSyncConfig, JournalSyncProtocol, OTAConfig, OTAProtocol, ReceiptVerificationConfig,
     ReceiptVerificationProtocol, SnapshotConfig, SnapshotProtocol,
 };
-
-fn device(seed: u8) -> DeviceId {
-    DeviceId::new_from_entropy([seed; 32])
-}
-
-// Test fixture: deterministic timestamp for reproducible tests
-const TEST_TIMESTAMP_MS: u64 = 1700000000000; // 2023-11-15 in milliseconds
-
-fn test_time(ts_ms: u64) -> PhysicalTime {
-    PhysicalTime {
-        ts_ms,
-        uncertainty: None,
-    }
-}
 
 // =============================================================================
 // Anti-Entropy Protocol Tests

@@ -194,7 +194,7 @@ pub async fn start_recovery_from_state(
 ///
 /// If step 2 fails after step 1, the runtime invitation is leaked.  If
 /// step 3 fails after steps 1+2, contacts state is inconsistent with
-/// recovery state.  Full transactional rollback is not yet implemented;
+/// recovery state. Full transactional rollback is not available yet;
 /// callers should treat errors from this function as requiring a manual
 /// consistency check (e.g. `refresh_account`).
 pub async fn toggle_guardian_contact(

@@ -64,17 +64,6 @@ cfg_if! {
                     .ok_or_else(|| anyhow!("patchbay backend has not been provisioned"))
             }
 
-            fn node_id(&self, name: &str) -> Result<patchbay::NodeId> {
-                let lab = self.lab()?;
-                if let Some(device) = lab.device_by_name(name) {
-                    return Ok(device.id());
-                }
-                if let Some(router) = lab.router_by_name(name) {
-                    return Ok(router.id());
-                }
-                bail!("node not found in patchbay lab: {name}")
-            }
-
             fn affected_authorities_for_router(&self, router: &str) -> Vec<String> {
                 self.topology
                     .as_ref()
@@ -144,7 +133,7 @@ impl NetworkLabBackend for PatchbayBackend {
             if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
                 let config = topology_adapter::to_patchbay_lab_config(&topology)?;
                 let opts = patchbay::LabOpts::default()
-                    .outdir(self.artifact_root.clone())
+                    .outdir(patchbay::OutDir::Nested(self.artifact_root.clone()))
                     .label(format!("aura-{}", topology.name));
                 let lab = patchbay::Lab::from_config_with_opts(config, opts)
                     .await
@@ -210,7 +199,11 @@ impl NetworkLabBackend for PatchbayBackend {
                         let device = lab
                             .device_by_name(&context.device_name)
                             .ok_or_else(|| anyhow!("device {} not found", context.device_name))?;
-                        device.link_down(iface).await?;
+                        device
+                            .iface(iface)
+                            .ok_or_else(|| anyhow!("iface {iface} not found on device {}", context.device_name))?
+                            .link_down()
+                            .await?;
                         RawEventReceipt {
                             event_type: "link_toggle".to_string(),
                             applied_at_ms: super::unix_time_ms(),
@@ -233,7 +226,11 @@ impl NetworkLabBackend for PatchbayBackend {
                         let device = lab
                             .device_by_name(&context.device_name)
                             .ok_or_else(|| anyhow!("device {} not found", context.device_name))?;
-                        device.link_up(iface).await?;
+                        device
+                            .iface(iface)
+                            .ok_or_else(|| anyhow!("iface {iface} not found on device {}", context.device_name))?
+                            .link_up()
+                            .await?;
                         RawEventReceipt {
                             event_type: "link_toggle".to_string(),
                             applied_at_ms: super::unix_time_ms(),
@@ -284,10 +281,20 @@ impl NetworkLabBackend for PatchbayBackend {
                         right_node,
                         condition,
                     } => {
-                        let left = self.node_id(left_node)?;
-                        let right = self.node_id(right_node)?;
                         let impair = topology_adapter::to_patchbay_link_condition(*condition);
-                        lab.set_link_condition(left, right, Some(impair)).await?;
+                        // Link conditions are set on the device's uplink interface.
+                        // Find which of the two nodes is a device (vs router) and apply there.
+                        let device = lab
+                            .device_by_name(left_node)
+                            .or_else(|| lab.device_by_name(right_node))
+                            .ok_or_else(|| {
+                                anyhow!("no device found among nodes {left_node}, {right_node}")
+                            })?;
+                        device
+                            .iface("eth0")
+                            .ok_or_else(|| anyhow!("eth0 not found on device {left_node}"))?
+                            .set_condition(impair, patchbay::LinkDirection::Both)
+                            .await?;
 
                         RawEventReceipt {
                             event_type: "set_link_condition".to_string(),

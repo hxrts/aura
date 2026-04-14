@@ -52,6 +52,10 @@ fn next_sequence() -> u64 {
     NEXT_CONN_ID.fetch_add(1, Ordering::SeqCst)
 }
 
+fn elapsed_duration(now: u64, started_at: u64) -> Duration {
+    Duration::from_secs(now.saturating_sub(started_at))
+}
+
 // =============================================================================
 // Transport Integration Types
 // =============================================================================
@@ -159,10 +163,7 @@ pub struct ConnectionMetadata {
 }
 
 impl ConnectionMetadata {
-    /// Create new connection metadata
-    ///
-    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
-    pub fn new(connection_id: String, peer_id: DeviceId, now: u64) -> Self {
+    fn base(connection_id: String, peer_id: DeviceId, now: u64) -> Self {
         Self {
             connection_id,
             peer_id,
@@ -176,6 +177,13 @@ impl ConnectionMetadata {
         }
     }
 
+    /// Create new connection metadata
+    ///
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
+    pub fn new(connection_id: String, peer_id: DeviceId, now: u64) -> Self {
+        Self::base(connection_id, peer_id, now)
+    }
+
     /// Create new connection metadata with transport information
     pub fn new_with_transport(
         connection_id: String,
@@ -183,17 +191,9 @@ impl ConnectionMetadata {
         transport_info: TransportConnectionInfo,
         now: u64,
     ) -> Self {
-        Self {
-            connection_id,
-            peer_id,
-            session_id: None,
-            established_at: now,
-            last_used_at: now,
-            reuse_count: 0,
-            state: ConnectionState::Idle,
-            healthy: true,
-            transport_info: Some(transport_info),
-        }
+        let mut metadata = Self::base(connection_id, peer_id, now);
+        metadata.transport_info = Some(transport_info);
+        metadata
     }
 
     /// Check if connection is idle
@@ -208,8 +208,7 @@ impl ConnectionMetadata {
         if !self.is_idle() {
             return false;
         }
-        let elapsed_secs = now.saturating_sub(self.last_used_at);
-        Duration::from_secs(elapsed_secs) > timeout
+        elapsed_duration(now, self.last_used_at) > timeout
     }
 
     /// Mark connection as acquired
@@ -296,8 +295,7 @@ impl ConnectionHandle {
     ///
     /// Note: Callers should obtain `now` as Unix timestamp via their time provider
     pub fn age(&self, now: u64) -> Duration {
-        let elapsed_secs = now.saturating_sub(self.acquired_at);
-        Duration::from_secs(elapsed_secs)
+        elapsed_duration(now, self.acquired_at)
     }
 }
 
@@ -324,6 +322,15 @@ pub struct ConnectionPool {
 }
 
 impl ConnectionPool {
+    fn connections_for_peer_mut(
+        &mut self,
+        peer_id: DeviceId,
+    ) -> SyncResult<&mut Vec<ConnectionMetadata>> {
+        self.connections
+            .get_mut(&peer_id)
+            .ok_or_else(|| sync_session_error("No connections for peer"))
+    }
+
     /// Create a new connection pool
     pub fn new(config: PoolConfig) -> Self {
         Self {
@@ -419,10 +426,7 @@ impl ConnectionPool {
         handle: ConnectionHandle,
         now: u64,
     ) -> SyncResult<()> {
-        let connections = self
-            .connections
-            .get_mut(&peer_id)
-            .ok_or_else(|| sync_session_error("No connections for peer"))?;
+        let connections = self.connections_for_peer_mut(peer_id)?;
 
         let conn = connections
             .iter_mut()
@@ -437,10 +441,7 @@ impl ConnectionPool {
 
     /// Close a connection
     pub async fn close(&mut self, peer_id: DeviceId, connection_id: &str) -> SyncResult<()> {
-        let connections = self
-            .connections
-            .get_mut(&peer_id)
-            .ok_or_else(|| sync_session_error("No connections for peer"))?;
+        let connections = self.connections_for_peer_mut(peer_id)?;
 
         if let Some(pos) = connections
             .iter()

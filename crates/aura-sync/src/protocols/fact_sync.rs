@@ -45,6 +45,7 @@
 //!     .await?;
 //! ```
 
+use crate::core::binary_serialize;
 use crate::verification::{MerkleComparison, MerkleVerifier, VerificationResult};
 use aura_core::domain::journal::FactValue;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
@@ -83,6 +84,13 @@ impl Default for FactSyncConfig {
 }
 
 impl FactSyncConfig {
+    fn with_batch_size(max_batch_size: u32) -> Self {
+        Self {
+            max_batch_size,
+            ..Self::default()
+        }
+    }
+
     /// Create config for production use with all verification enabled
     pub fn production() -> Self {
         Self::default()
@@ -90,12 +98,7 @@ impl FactSyncConfig {
 
     /// Create config for testing with smaller batch sizes
     pub fn for_testing() -> Self {
-        Self {
-            max_batch_size: 100,
-            verify_merkle: true,
-            use_bloom_filter: true,
-            skip_on_root_match: true,
-        }
+        Self::with_batch_size(100)
     }
 
     /// Create config that disables optimizations for debugging
@@ -170,6 +173,26 @@ pub struct FactSyncProtocol {
 }
 
 impl FactSyncProtocol {
+    fn skipped_result(local_root: [u8; 32], remote_root: [u8; 32]) -> FactSyncResult {
+        FactSyncResult {
+            facts_received: 0,
+            facts_sent: 0,
+            facts_verified: 0,
+            facts_rejected: 0,
+            in_sync: true,
+            local_root,
+            remote_root,
+            skipped: true,
+        }
+    }
+
+    fn limited_facts(&self, facts: Vec<IndexedFact>) -> Vec<IndexedFact> {
+        facts
+            .into_iter()
+            .take(self.config.max_batch_size as usize)
+            .collect()
+    }
+
     /// Create a new fact sync protocol with the given configuration, journal, and time effects
     pub fn new(
         config: FactSyncConfig,
@@ -217,19 +240,7 @@ impl FactSyncProtocol {
                 // Already in sync, nothing to do
                 tracing::debug!("Merkle roots match - skipping sync");
                 let local_root = self.verifier.local_merkle_root().await?;
-                return Ok((
-                    FactSyncResult {
-                        facts_received: 0,
-                        facts_sent: 0,
-                        facts_verified: 0,
-                        facts_rejected: 0,
-                        in_sync: true,
-                        local_root,
-                        remote_root: peer_root,
-                        skipped: true,
-                    },
-                    vec![],
-                ));
+                return Ok((Self::skipped_result(local_root, peer_root), vec![]));
             }
             _ => {
                 // Need to sync - continue with protocol
@@ -289,11 +300,12 @@ impl FactSyncProtocol {
         if self.config.use_bloom_filter && !peer_bloom.is_empty() {
             match aura_core::util::serialization::from_slice::<BloomFilter>(peer_bloom) {
                 Ok(filter) => {
-                    let filtered: Vec<IndexedFact> = all_facts
-                        .into_iter()
-                        .filter(|fact| !bloom_might_contain(&filter, fact))
-                        .take(self.config.max_batch_size as usize)
-                        .collect();
+                    let filtered = self.limited_facts(
+                        all_facts
+                            .into_iter()
+                            .filter(|fact| !bloom_might_contain(&filter, fact))
+                            .collect(),
+                    );
 
                     return Ok(filtered);
                 }
@@ -304,12 +316,7 @@ impl FactSyncProtocol {
         }
 
         // Apply batch size limit
-        let facts: Vec<IndexedFact> = all_facts
-            .into_iter()
-            .take(self.config.max_batch_size as usize)
-            .collect();
-
-        Ok(facts)
+        Ok(self.limited_facts(all_facts))
     }
 
     /// Get the internal verifier for direct Merkle operations
@@ -325,8 +332,7 @@ impl FactSyncProtocol {
     /// Get local Bloom filter for exchange with peer
     pub async fn local_bloom_filter(&self) -> Result<Vec<u8>, AuraError> {
         let filter = self.verifier.local_bloom_filter().await?;
-        aura_core::util::serialization::to_vec(&filter)
-            .map_err(|err| AuraError::serialization(err.to_string()))
+        binary_serialize("bloom_filter", "local bloom filter", &filter)
     }
 
     /// Get protocol configuration
@@ -367,7 +373,7 @@ fn fact_to_bytes(fact: &IndexedFact) -> Vec<u8> {
         }
         FactValue::Nested(nested) => {
             bytes.push(4);
-            if let Ok(serialized) = aura_core::util::serialization::to_vec(nested.as_ref()) {
+            if let Ok(serialized) = binary_serialize("nested_fact", "nested fact value", nested) {
                 let hash = hash::hash(&serialized);
                 bytes.extend_from_slice(&hash);
             }
@@ -469,6 +475,22 @@ mod tests {
         facts: Mutex<Vec<IndexedFact>>,
     }
 
+    struct EmptyFactStreamReceiver;
+
+    impl FactStreamReceiver for EmptyFactStreamReceiver {
+        fn recv(
+            &mut self,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Vec<IndexedFact>, AuraError>> + Send + '_>,
+        > {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn try_recv(&mut self) -> Result<Option<Vec<IndexedFact>>, AuraError> {
+            Ok(None)
+        }
+    }
+
     impl MockIndexedJournal {
         fn new(root: [u8; 32]) -> Self {
             Self {
@@ -488,7 +510,7 @@ mod tests {
     #[async_trait]
     impl IndexedJournalEffects for MockIndexedJournal {
         fn watch_facts(&self) -> Box<dyn FactStreamReceiver> {
-            panic!("Not implemented for mock")
+            Box::new(EmptyFactStreamReceiver)
         }
 
         async fn facts_by_predicate(

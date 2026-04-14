@@ -287,7 +287,7 @@ Run the recovery demo from the repository root:
 cargo run -p aura-terminal -- scenarios run --directory scenarios/integration --pattern cli_recovery_demo
 ```
 
-This command uses the CLI scenario runner plus the simulator to execute the guardian setup and recovery choreography. Logs are written to `work/scenario_logs/cli_recovery_demo.log`.
+This command uses the CLI scenario runner plus the simulator to execute the guardian setup and recovery choreography. Logs are written to the scenario runner's output log bundle.
 
 The scenario executes in eight phases:
 

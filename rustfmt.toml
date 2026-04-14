@@ -1,0 +1,2 @@
+# Aura currently relies on rustfmt defaults.
+# This file exists so toolkit-fmt can be pointed at a repo-owned config path.

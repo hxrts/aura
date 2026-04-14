@@ -30,7 +30,7 @@ run_test() {
 case "$mode" in
   tier2)
     prepare artifacts/holepunch/tier2
-    run_test artifacts/holepunch/tier2 --test holepunch_tier2_patchbay --test holepunch_e2e_runtime_patchbay
+    run_test artifacts/holepunch/tier2 --test holepunch -- --skip tier3
     ;;
   daily)
     prepare artifacts/holepunch/daily
@@ -38,7 +38,7 @@ case "$mode" in
     failures=0
     for run in $(seq 1 "$runs"); do
       echo "daily-smoke run $run/$runs"
-      if ! run_test "artifacts/holepunch/daily/run-${run}" --test holepunch_tier2_patchbay; then
+      if ! run_test "artifacts/holepunch/daily/run-${run}" --test holepunch -- tier2_patchbay; then
         failures=$((failures + 1))
       fi
     done
@@ -54,7 +54,7 @@ JSON
     ;;
   nightly)
     prepare artifacts/holepunch/nightly
-    run_test artifacts/holepunch/nightly --test holepunch_tier3_stress
+    run_test artifacts/holepunch/nightly --test holepunch -- tier3_stress
     ;;
   verify-artifacts)
     test -d artifacts/holepunch/nightly
@@ -65,7 +65,7 @@ JSON
     runs="${AURA_HOLEPUNCH_TRIAGE_RUNS:-10}"
     failures=0
     for run in $(seq 1 "$runs"); do
-      if ! run_test "artifacts/holepunch/weekly/triage-run-${run}" --test holepunch_tier2_patchbay; then
+      if ! run_test "artifacts/holepunch/weekly/triage-run-${run}" --test holepunch -- tier2_patchbay; then
         failures=$((failures + 1))
       fi
     done
@@ -80,7 +80,7 @@ EOF_MD
   audit)
     mkdir -p artifacts/holepunch/weekly
     rg -n -F 'name = "patchbay"' Cargo.lock
-    rg -n -F 'source = "git+https://github.com/hxrts/patchbay?branch=hxrts/aura#' Cargo.lock
+    rg -n -F 'source = "git+https://github.com/n0-computer/patchbay?rev=' Cargo.lock
     {
       echo "# Holepunch Toolchain Audit"
       echo "cargo-lock-pin: ok"

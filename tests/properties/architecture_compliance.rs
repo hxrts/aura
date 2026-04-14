@@ -394,7 +394,7 @@ fn test_layer_population() {
 // CRYPTOGRAPHIC ARCHITECTURE COMPLIANCE TESTS
 // ============================================================================
 //
-// These tests enforce the crypto architecture defined in work/crypto.md:
+// These tests enforce the documented crypto architecture:
 // - ed25519_dalek imports only in allowed locations
 // - OsRng/getrandom usage only in effect handlers (Layer 3) and test code
 //

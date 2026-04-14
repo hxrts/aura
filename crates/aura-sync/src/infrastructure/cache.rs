@@ -101,19 +101,7 @@ impl CacheEpochTracker {
     /// Updates epoch floors for the specified keys, ensuring monotonicity.
     pub fn apply_invalidation(&mut self, invalidation: &CacheInvalidation) {
         for key in &invalidation.keys {
-            let is_new = !self.floors.contains_key(key);
-            let floor = self
-                .floors
-                .entry(key.clone())
-                .or_insert(invalidation.epoch_floor);
-
-            // Epoch floors are monotonic - only increase
-            if invalidation.epoch_floor > *floor {
-                *floor = invalidation.epoch_floor;
-            }
-            if is_new {
-                self.order.push_back(key.clone());
-            }
+            self.record_floor(key.clone(), invalidation.epoch_floor);
         }
         self.evict_if_needed();
     }
@@ -138,15 +126,7 @@ impl CacheEpochTracker {
 
     /// Invalidate a single key at the specified epoch
     pub fn invalidate_key(&mut self, key: impl Into<String>, epoch_floor: TreeEpoch) {
-        let key = key.into();
-        let is_new = !self.floors.contains_key(&key);
-        let floor = self.floors.entry(key.clone()).or_insert(epoch_floor);
-        if epoch_floor > *floor {
-            *floor = epoch_floor;
-        }
-        if is_new {
-            self.order.push_back(key);
-        }
+        self.record_floor(key.into(), epoch_floor);
         self.evict_if_needed();
     }
 
@@ -164,6 +144,17 @@ impl CacheEpochTracker {
             } else {
                 break;
             }
+        }
+    }
+
+    fn record_floor(&mut self, key: String, epoch_floor: TreeEpoch) {
+        let is_new = !self.floors.contains_key(&key);
+        let floor = self.floors.entry(key.clone()).or_insert(epoch_floor);
+        if epoch_floor > *floor {
+            *floor = epoch_floor;
+        }
+        if is_new {
+            self.order.push_back(key);
         }
     }
 
@@ -218,8 +209,7 @@ impl CacheManager {
     /// Apply a cache invalidation event
     pub fn apply_invalidation(&mut self, invalidation: &CacheInvalidation) {
         self.epoch_tracker.apply_invalidation(invalidation);
-        self.stats.total_invalidations += 1;
-        self.stats.total_keys_invalidated += invalidation.keys.len() as u64;
+        self.record_invalidation_stats(invalidation.keys.len());
     }
 
     /// Check if a key is fresh at the current epoch
@@ -239,8 +229,7 @@ impl CacheManager {
     /// Invalidate keys at the specified epoch
     pub fn invalidate_keys(&mut self, keys: &[impl AsRef<str>], epoch_floor: TreeEpoch) {
         self.epoch_tracker.invalidate_keys(keys, epoch_floor);
-        self.stats.total_invalidations += 1;
-        self.stats.total_keys_invalidated += keys.len() as u64;
+        self.record_invalidation_stats(keys.len());
     }
 
     /// Get epoch floor for a key
@@ -257,6 +246,12 @@ impl CacheManager {
     pub fn clear(&mut self) {
         self.epoch_tracker.clear();
         self.stats = CacheStatistics::default();
+    }
+
+    fn record_invalidation_stats(&mut self, key_count: usize) {
+        self.stats.total_invalidations += 1;
+        self.stats.total_keys_invalidated += key_count as u64;
+        self.stats.tracked_keys = self.epoch_tracker.tracked_keys() as u32;
     }
 }
 

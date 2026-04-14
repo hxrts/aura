@@ -27,25 +27,35 @@
 //! # }
 //! ```
 
+mod bookkeeping;
+mod builder;
+mod health;
+#[cfg(test)]
+mod tests;
+
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::{HealthCheck, HealthStatus, MonotonicInstant, Service, ServiceMetrics, ServiceState};
-use crate::core::{
-    sync_session_error, MetricsCollector, SessionConfig, SessionManager, SyncResult,
+use super::{
+    begin_service_start, begin_service_stop, finish_service_start, finish_service_stop,
+    HealthCheck, MonotonicInstant, Service, ServiceState,
 };
+use crate::core::{MetricsCollector, SessionConfig, SessionManager, SyncResult};
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol, SyncProtocolEffects};
 use aura_core::effects::{PhysicalTimeEffects, TimeError};
-use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, DeviceId};
 
 fn time_error_to_aura(err: TimeError) -> AuraError {
     AuraError::internal(format!("time error: {err}"))
 }
+
+pub use bookkeeping::SyncMaintenanceStats;
+pub use builder::SyncServiceBuilder;
+pub use health::SyncServiceHealth;
 
 // =============================================================================
 // Configuration
@@ -84,39 +94,6 @@ impl Default for SyncServiceConfig {
             max_concurrent_syncs: 5,
         }
     }
-}
-
-// =============================================================================
-// Service Health
-// =============================================================================
-
-/// Sync service health information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncServiceHealth {
-    /// Overall health status
-    pub status: HealthStatus,
-
-    /// Number of active sync sessions
-    pub active_sessions: u32,
-
-    /// Number of tracked peers
-    pub tracked_peers: u32,
-
-    /// Number of available peers
-    pub available_peers: u32,
-
-    /// Last sync timestamp
-    pub last_sync: Option<u64>,
-
-    /// Service uptime
-    pub uptime: Duration,
-}
-
-/// Maintenance cleanup statistics.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SyncMaintenanceStats {
-    pub sessions_removed: u32,
-    pub peer_states_pruned: u32,
 }
 
 // =============================================================================
@@ -263,31 +240,6 @@ impl SyncService {
         Ok(())
     }
 
-    /// Run maintenance cleanup for long-lived state.
-    pub async fn maintenance_cleanup(
-        &self,
-        now_ms: u64,
-        peer_state_ttl_ms: u64,
-        max_peer_states: usize, // usize ok: function parameter for collection sizing
-    ) -> SyncResult<SyncMaintenanceStats> {
-        let now = PhysicalTime {
-            ts_ms: now_ms,
-            uncertainty: None,
-        };
-
-        let mut session_manager = self.session_manager.write();
-        let sessions_removed = session_manager.cleanup_stale_sessions(&now)?;
-
-        let mut journal_sync = self.journal_sync.write();
-        let peer_states_pruned =
-            journal_sync.prune_peer_states(now_ms, peer_state_ttl_ms, max_peer_states);
-
-        Ok(SyncMaintenanceStats {
-            sessions_removed: sessions_removed as u32,
-            peer_states_pruned: peer_states_pruned as u32,
-        })
-    }
-
     /// Discover and sync with available peers
     ///
     /// # Arguments
@@ -340,84 +292,6 @@ impl SyncService {
         Ok(())
     }
 
-    /// Get service health
-    pub fn get_health(&self) -> SyncServiceHealth {
-        let state = self.state.read().clone();
-        let status = match state {
-            ServiceState::Running => HealthStatus::Healthy,
-            ServiceState::Starting => HealthStatus::Starting,
-            ServiceState::Stopping => HealthStatus::Stopping,
-            ServiceState::Stopped | ServiceState::Failed(_) => HealthStatus::Unhealthy,
-        };
-
-        let session_stats = self.session_manager.read().get_statistics();
-        let peer_stats = self.peer_manager.read().statistics();
-
-        let uptime = self
-            .started_at
-            .read()
-            .map(|t| t.elapsed())
-            .unwrap_or(Duration::ZERO);
-
-        // Track last_sync from metrics (millis since epoch)
-        let last_sync = self.metrics.read().get_last_sync_timestamp();
-
-        SyncServiceHealth {
-            status,
-            active_sessions: session_stats.active_sessions as u32,
-            tracked_peers: peer_stats.total_tracked,
-            available_peers: peer_stats.available_peers,
-            last_sync,
-            uptime,
-        }
-    }
-
-    /// Get service metrics
-    pub fn get_metrics(&self) -> ServiceMetrics {
-        let metrics = self.metrics.read();
-
-        ServiceMetrics {
-            uptime_seconds: self
-                .started_at
-                .read()
-                .map(|t| t.elapsed().as_secs())
-                .unwrap_or(0),
-            requests_processed: metrics.get_total_requests_processed(), // Populate from metrics
-            errors_encountered: metrics.get_total_errors_encountered(), // Populate from metrics
-            avg_latency_ms: metrics.get_average_sync_latency_ms(),      // Populate from metrics
-            last_operation_at: metrics.get_last_operation_timestamp(),
-        }
-    }
-
-    /// Check rate limits for peer sync operations
-    ///
-    /// # Arguments
-    /// - `peers`: List of peer device IDs to check
-    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
-    async fn check_rate_limits(
-        &self,
-        peers: &[DeviceId],
-        now_instant: MonotonicInstant,
-    ) -> SyncResult<Vec<DeviceId>> {
-        let mut allowed_peers = Vec::new();
-        let mut rate_limiter = self.rate_limiter.write();
-
-        for &peer in peers {
-            let result = rate_limiter.check_rate_limit(peer, 1, now_instant);
-            if result.is_allowed() {
-                allowed_peers.push(peer);
-            } else if let Some(retry_after) = result.retry_after() {
-                tracing::debug!(
-                    "Rate limit exceeded for peer {}, retry after {:?}",
-                    peer,
-                    retry_after
-                );
-            }
-        }
-
-        Ok(allowed_peers)
-    }
-
     /// Execute journal sync protocol with peers
     #[allow(clippy::await_holding_lock)]
     async fn execute_journal_sync_protocol<E>(
@@ -455,97 +329,6 @@ impl SyncService {
         }
 
         Ok(sync_results)
-    }
-
-    /// Update sync metrics based on sync results
-    async fn update_sync_metrics(&self, results: &[(DeviceId, u64)]) -> SyncResult<()> {
-        // Get the time first (async) before acquiring the lock
-        let now_ms = self
-            .time_effects
-            .physical_time()
-            .await
-            .map_err(time_error_to_aura)?
-            .ts_ms;
-
-        // Now acquire the lock and do synchronous work
-        let metrics = self.metrics.write();
-        for &(peer, synced_ops) in results {
-            metrics.increment_sync_attempts(peer);
-            metrics.increment_sync_successes(peer);
-            // Update last_sync even if synced_ops is 0 - a successful sync session
-            // means we're in sync with the peer, even if there was nothing new.
-            metrics.update_last_sync(peer, now_ms);
-
-            if synced_ops > 0 {
-                metrics.add_synced_operations(peer, synced_ops);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Clean up sync sessions after completion
-    async fn cleanup_sync_sessions(&self, peers: &[DeviceId]) -> SyncResult<()> {
-        let mut session_manager = self.session_manager.write();
-
-        for &peer in peers {
-            if let Err(e) = session_manager.close_session(peer) {
-                tracing::warn!("Failed to clean up session for peer {}: {}", peer, e);
-            } else {
-                tracing::debug!("Cleaned up sync session for peer {}", peer);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Discover available peers via peer_manager
-    async fn discover_available_peers(&self) -> SyncResult<Vec<DeviceId>> {
-        let peer_manager = self.peer_manager.read();
-        let mut available_peers = Vec::new();
-
-        // Get all known peers from the peer manager
-        let all_peers = peer_manager.list_peers();
-
-        // Filter for peers that are currently available and healthy
-        for peer in all_peers {
-            if peer_manager.is_peer_available(&peer) && peer_manager.get_peer_health(&peer) > 0.5 {
-                available_peers.push(peer);
-            }
-        }
-
-        tracing::debug!(
-            "Discovered {} available peers for sync",
-            available_peers.len()
-        );
-        Ok(available_peers)
-    }
-
-    /// Update peer states after sync operations
-    async fn update_peer_states(&self, peers: &[DeviceId]) -> SyncResult<()> {
-        // Get time before taking lock to avoid holding MutexGuard across await
-        let now = self
-            .time_effects
-            .physical_time()
-            .await
-            .map_err(time_error_to_aura)?;
-
-        let mut peer_manager = self.peer_manager.write();
-
-        for &peer in peers {
-            // Update last contact time
-            peer_manager.update_last_contact(peer, &now);
-
-            // Update peer availability based on recent sync attempts
-            let recent_success_rate = peer_manager.get_recent_sync_success_rate(&peer);
-            if recent_success_rate < 0.3 {
-                peer_manager.mark_peer_degraded(&peer, &now);
-            } else if recent_success_rate > 0.8 {
-                peer_manager.mark_peer_healthy(&peer, &now);
-            }
-        }
-
-        Ok(())
     }
 
     /// Wait for active sessions to complete with timeout
@@ -596,107 +379,6 @@ impl SyncService {
         Ok(())
     }
 
-    /// Select best auto-sync peers based on health and priority (static helper)
-    async fn select_best_auto_sync_peers(
-        peer_manager: &RwLock<PeerManager>,
-        peers: &[DeviceId],
-        max_peers: usize, // usize ok: function parameter for collection sizing
-    ) -> SyncResult<Vec<DeviceId>> {
-        let manager = peer_manager.read();
-        let mut peer_scores = Vec::new();
-
-        for &peer in peers {
-            let health = manager.get_peer_health(&peer);
-            let priority = manager.get_peer_priority(&peer);
-            let score = health * priority;
-            peer_scores.push((peer, score));
-        }
-
-        peer_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        let selected: Vec<DeviceId> = peer_scores
-            .into_iter()
-            .take(max_peers)
-            .map(|(peer, _)| peer)
-            .collect();
-
-        Ok(selected)
-    }
-
-    /// Create sync sessions for selected peers (static method)
-    async fn create_sync_sessions<T: PhysicalTimeEffects>(
-        session_manager: &RwLock<SessionManager<serde_json::Value>>,
-        peers: &[DeviceId],
-        time_effects: &T,
-    ) -> SyncResult<Vec<DeviceId>> {
-        let mut session_peers = Vec::new();
-
-        // Get timestamp first to avoid holding lock across await
-        let now = time_effects
-            .physical_time()
-            .await
-            .map_err(time_error_to_aura)?;
-
-        // Now acquire lock and create sessions
-        let mut manager = session_manager.write();
-        for &peer in peers {
-            match manager.create_session(vec![peer], &now) {
-                Ok(_session_id) => {
-                    session_peers.push(peer);
-                    tracing::debug!("Created auto-sync session for peer {}", peer);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to create auto-sync session for peer {}: {}",
-                        peer,
-                        e
-                    );
-                }
-            }
-        }
-
-        Ok(session_peers)
-    }
-
-    /// Update peer scores based on sync results (static method)
-    async fn update_peer_scores_from_sync(
-        peer_manager: &RwLock<PeerManager>,
-        results: &[(DeviceId, bool)],
-        now: &aura_core::time::PhysicalTime,
-    ) -> SyncResult<()> {
-        let mut manager = peer_manager.write();
-
-        for &(peer, success) in results {
-            if success {
-                manager.increment_sync_success(&peer, now);
-                manager.update_last_successful_sync(&peer, now);
-                manager.recalculate_peer_health(&peer);
-            } else {
-                manager.increment_sync_failure(&peer);
-                manager.recalculate_peer_health(&peer);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Update auto-sync metrics (static method)
-    async fn update_auto_sync_metrics(results: &[(DeviceId, bool)]) -> SyncResult<()> {
-        let total_peers = results.len();
-        let successful_syncs = results.iter().filter(|(_, success)| *success).count();
-        let failed_syncs = total_peers - successful_syncs;
-
-        tracing::info!(
-            "Auto-sync metrics: {} total peers, {} successful, {} failed",
-            total_peers,
-            successful_syncs,
-            failed_syncs
-        );
-
-        // Structured metrics sinks can consume this result tuple at the service boundary.
-
-        Ok(())
-    }
-
     /// Start the service using PhysicalTimeEffects
     ///
     /// # Arguments
@@ -707,90 +389,39 @@ impl SyncService {
         time_effects: &T,
         now_instant: MonotonicInstant,
     ) -> SyncResult<()> {
+        begin_service_start(&self.state, &self.started_at, now_instant)?;
         // Use PhysicalTimeEffects for deterministic wall-clock; store MonotonicInstant for uptime tracking
         let _ts = time_effects
             .physical_time()
             .await
             .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
-
-        self.start(now_instant).await
+        finish_service_start(&self.state);
+        Ok(())
     }
 }
 
 #[async_trait::async_trait]
 impl Service for SyncService {
     async fn start(&self, now: MonotonicInstant) -> SyncResult<()> {
-        {
-            let mut state = self.state.write();
-            if state.is_running() {
-                return Err(sync_session_error("Service already running"));
-            }
-
-            *state = ServiceState::Starting;
-            *self.started_at.write() = Some(now);
-        } // Drop state lock before await
-
-        {
-            let mut state = self.state.write();
-            *state = ServiceState::Running;
-        }
+        begin_service_start(&self.state, &self.started_at, now)?;
+        finish_service_start(&self.state);
         Ok(())
     }
 
     async fn stop(&self, now: MonotonicInstant) -> SyncResult<()> {
-        {
-            let mut state = self.state.write();
-            if *state == ServiceState::Stopped {
-                return Ok(());
-            }
-
-            *state = ServiceState::Stopping;
-        } // Drop state lock before await
+        if !begin_service_stop(&self.state) {
+            return Ok(());
+        }
 
         // Wait for active sessions to complete with timeout
         self.wait_for_sessions_to_complete(now).await?;
 
-        {
-            let mut state = self.state.write();
-            *state = ServiceState::Stopped;
-        }
+        finish_service_stop(&self.state);
         Ok(())
     }
 
     async fn health_check(&self) -> SyncResult<HealthCheck> {
-        let health = self.get_health();
-        let mut details = std::collections::HashMap::new();
-
-        details.insert(
-            "active_sessions".to_string(),
-            health.active_sessions.to_string(),
-        );
-        details.insert(
-            "tracked_peers".to_string(),
-            health.tracked_peers.to_string(),
-        );
-        details.insert(
-            "available_peers".to_string(),
-            health.available_peers.to_string(),
-        );
-        details.insert(
-            "uptime".to_string(),
-            format!("{}s", health.uptime.as_secs()),
-        );
-
-        Ok(HealthCheck {
-            status: health.status,
-            message: Some("Sync service operational".to_string()),
-            checked_at: {
-                self.time_effects
-                    .physical_time()
-                    .await
-                    .map_err(|e| aura_core::AuraError::internal(format!("Time error: {e}")))?
-                    .ts_ms
-                    / 1000
-            },
-            details,
-        })
+        self.build_health_check().await
     }
 
     fn name(&self) -> &str {
@@ -799,149 +430,5 @@ impl Service for SyncService {
 
     fn is_running(&self) -> bool {
         self.state.read().is_running()
-    }
-}
-
-// =============================================================================
-// Builder
-// =============================================================================
-
-/// Builder for SyncService
-#[derive(Default)]
-pub struct SyncServiceBuilder {
-    config: Option<SyncServiceConfig>,
-}
-
-impl SyncServiceBuilder {
-    /// Set configuration
-    pub fn with_config(mut self, config: SyncServiceConfig) -> Self {
-        self.config = Some(config);
-        self
-    }
-
-    /// Set auto-sync enabled
-    pub fn with_auto_sync(mut self, enabled: bool) -> Self {
-        self.config
-            .get_or_insert_with(Default::default)
-            .auto_sync_enabled = enabled;
-        self
-    }
-
-    /// Set auto-sync interval
-    pub fn with_sync_interval(mut self, interval: Duration) -> Self {
-        self.config
-            .get_or_insert_with(Default::default)
-            .auto_sync_interval = interval;
-        self
-    }
-
-    /// Build the service
-    ///
-    /// # Arguments
-    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
-    pub async fn build(
-        self,
-        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
-        now_instant: MonotonicInstant,
-    ) -> SyncResult<SyncService> {
-        let config = self.config.unwrap_or_default();
-        SyncService::new(config, time_effects, now_instant).await
-    }
-}
-
-// =============================================================================
-// Tests
-// =============================================================================
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::disallowed_methods)] // Test code uses monotonic clock for coordination
-    use super::*;
-
-    #[derive(Clone)]
-    struct TestTimeEffects {
-        now_ms: u64,
-    }
-
-    impl TestTimeEffects {
-        fn new(now_ms: u64) -> Self {
-            Self { now_ms }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl PhysicalTimeEffects for TestTimeEffects {
-        async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
-            Ok(aura_core::time::PhysicalTime {
-                ts_ms: self.now_ms,
-                uncertainty: None,
-            })
-        }
-
-        async fn sleep_ms(&self, _ms: u64) -> Result<(), TimeError> {
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn test_sync_service_creation() {
-        let config = SyncServiceConfig::default();
-        let time_effects = Arc::new(TestTimeEffects::new(0));
-        let service = SyncService::new(config, time_effects, SyncService::monotonic_now())
-            .await
-            .unwrap();
-
-        assert_eq!(service.name(), "SyncService");
-        assert!(!service.is_running());
-    }
-
-    #[tokio::test]
-    async fn test_sync_service_builder() {
-        let time_effects = Arc::new(TestTimeEffects::new(0));
-        let service = SyncService::builder()
-            .with_auto_sync(true)
-            .with_sync_interval(Duration::from_secs(30))
-            .build(time_effects.clone(), SyncService::monotonic_now())
-            .await
-            .unwrap();
-
-        assert!(service.config.auto_sync_enabled);
-        assert_eq!(service.config.auto_sync_interval, Duration::from_secs(30));
-    }
-
-    #[tokio::test]
-    async fn test_sync_service_lifecycle() {
-        let time_effects = Arc::new(TestTimeEffects::new(0));
-        let service = SyncService::builder()
-            .build(time_effects.clone(), SyncService::monotonic_now())
-            .await
-            .unwrap();
-
-        assert!(!service.is_running());
-        service
-            .start_with_time_effects(time_effects.as_ref(), SyncService::monotonic_now())
-            .await
-            .unwrap();
-        assert!(service.is_running());
-
-        service.stop(SyncService::monotonic_now()).await.unwrap();
-        assert!(!service.is_running());
-    }
-
-    #[tokio::test]
-    async fn test_sync_service_health_check() {
-        let time_effects = Arc::new(TestTimeEffects::new(0));
-        let service = SyncService::builder()
-            .build(time_effects.clone(), SyncService::monotonic_now())
-            .await
-            .unwrap();
-        service
-            .start_with_time_effects(time_effects.as_ref(), SyncService::monotonic_now())
-            .await
-            .unwrap();
-
-        let health = service.health_check().await.unwrap();
-        assert_eq!(health.status, HealthStatus::Healthy);
-        assert!(health.details.contains_key("active_sessions"));
     }
 }

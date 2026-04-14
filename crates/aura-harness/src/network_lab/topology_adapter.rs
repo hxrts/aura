@@ -5,24 +5,47 @@ use super::{AuthoritySpec, LinkConditionPreset, LinkSpec, RouterSpec, TopologySp
 
 cfg_if! {
     if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
-        use std::collections::HashMap;
+        use std::collections::BTreeMap;
 
         /// Convert Aura `TopologySpec` into patchbay `LabConfig`.
         pub fn to_patchbay_lab_config(spec: &TopologySpec) -> Result<patchbay::config::LabConfig> {
+            #[derive(serde::Serialize)]
+            struct RouterConfigDoc {
+                name: String,
+                region: Option<String>,
+                upstream: Option<String>,
+                nat: patchbay::Nat,
+                ip_support: patchbay::IpSupport,
+                nat_v6: patchbay::NatV6Mode,
+                ra_enabled: Option<bool>,
+                ra_interval_secs: Option<u64>,
+                ra_lifetime_secs: Option<u64>,
+            }
+
+            #[derive(serde::Serialize)]
+            struct LabConfigDoc {
+                region: Option<BTreeMap<String, toml::Value>>,
+                router: Vec<RouterConfigDoc>,
+                device: BTreeMap<String, toml::Value>,
+            }
+
             let routers = spec
                 .routers
                 .iter()
-                .map(|router| patchbay::config::RouterConfig {
+                .map(|router| RouterConfigDoc {
                     name: router.name.clone(),
                     region: None,
                     upstream: router.upstream.clone(),
                     nat: to_patchbay_nat(router.nat),
                     ip_support: patchbay::IpSupport::V4Only,
                     nat_v6: patchbay::NatV6Mode::None,
+                    ra_enabled: None,
+                    ra_interval_secs: None,
+                    ra_lifetime_secs: None,
                 })
                 .collect();
 
-            let mut device = HashMap::new();
+            let mut device = BTreeMap::new();
             for authority in &spec.authorities {
                 let mut table = toml::map::Map::new();
                 table.insert(
@@ -46,11 +69,14 @@ cfg_if! {
                 device.insert(authority.device_name.clone(), toml::Value::Table(table));
             }
 
-            Ok(patchbay::config::LabConfig {
+            let encoded = toml::to_string(&LabConfigDoc {
                 region: None,
                 router: routers,
                 device,
             })
+            .context("encode patchbay lab config TOML")?;
+
+            toml::from_str(&encoded).context("decode patchbay lab config from TOML")
         }
 
         /// Convert patchbay `LabConfig` into Aura `TopologySpec`.

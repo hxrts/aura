@@ -82,13 +82,13 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: arch
-      - run: nix develop .#ci --command scripts/check/arch.sh --quick
+      - run: nix develop .#ci --command just check-arch --quick
       - name: Failure bundle
         if: failure()
         uses: ./.github/actions/failure-bundle
         with:
           name: ci-fast
-          replay-command: nix develop .#ci --command scripts/check/arch.sh --quick
+          replay-command: nix develop .#ci --command just check-arch --quick
 
   user-flow-coverage:
     name: User Flow Coverage

@@ -1413,12 +1413,12 @@ impl VisitMut for ChoreoPathRewriter {
                 let inner = (*path.tree).clone();
                 let wrapped = syn::UseTree::Path(syn::UsePath {
                     ident: Ident::new(&inner_ident.to_string(), span),
-                    colon2_token: Default::default(),
+                    colon2_token: syn::token::PathSep::default(),
                     tree: Box::new(inner),
                 });
                 *tree = syn::UseTree::Path(syn::UsePath {
                     ident: Ident::new("aura_mpst", span),
-                    colon2_token: Default::default(),
+                    colon2_token: syn::token::PathSep::default(),
                     tree: Box::new(wrapped),
                 });
                 return;

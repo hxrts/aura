@@ -6,6 +6,7 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 use aura_core::hash::hasher;
@@ -31,6 +32,13 @@ pub struct RemoteArtifactSyncReport {
     pub required: bool,
     pub complete: bool,
     pub records: Vec<RemoteArtifactRecord>,
+}
+
+#[derive(Debug, Clone)]
+struct LocalArtifactFile {
+    relative_path: String,
+    size_bytes: u64,
+    checksum_hex: String,
 }
 
 pub fn sync_remote_artifacts(
@@ -68,7 +76,7 @@ pub fn sync_remote_artifacts(
         })?;
 
         let destination_file = destination_dir.join("sync-summary.txt");
-        let status = if instance.ssh_dry_run {
+        let (status, destination_path) = if instance.ssh_dry_run {
             let body = format!(
                 "simulated remote sync for instance={} host={} source={}",
                 instance.id,
@@ -77,16 +85,47 @@ pub fn sync_remote_artifacts(
             );
             fs::write(&destination_file, body)
                 .with_context(|| format!("failed to write {}", destination_file.display()))?;
-            "simulated".to_string()
-        } else {
-            // Real remote copy will be added in Phase 6. Keep explicit incomplete state for now.
-            complete = false;
-            fs::write(
-                &destination_file,
-                "remote sync pending implementation; source metadata captured",
+            (
+                "simulated".to_string(),
+                destination_file.display().to_string(),
             )
-            .with_context(|| format!("failed to write {}", destination_file.display()))?;
-            "incomplete".to_string()
+        } else {
+            let destination_root = destination_dir.join("logs");
+            fs::create_dir_all(&destination_root).with_context(|| {
+                format!(
+                    "failed to create remote artifact destination {}",
+                    destination_root.display()
+                )
+            })?;
+
+            match copy_remote_artifacts(instance, &source_path, &destination_root) {
+                Ok(files) => {
+                    let body = render_sync_summary(
+                        &instance.id,
+                        &host,
+                        &source_path,
+                        &destination_root,
+                        &files,
+                    );
+                    fs::write(&destination_file, body).with_context(|| {
+                        format!("failed to write {}", destination_file.display())
+                    })?;
+                    ("copied".to_string(), destination_root.display().to_string())
+                }
+                Err(error) => {
+                    complete = false;
+                    let body = format!(
+                        "remote sync failed for instance={} host={} source={} error={error:#}",
+                        instance.id,
+                        host,
+                        source_path.display()
+                    );
+                    fs::write(&destination_file, body).with_context(|| {
+                        format!("failed to write {}", destination_file.display())
+                    })?;
+                    ("failed".to_string(), destination_file.display().to_string())
+                }
+            }
         };
 
         let checksum_hex = checksum_file(&destination_file)?;
@@ -95,7 +134,7 @@ pub fn sync_remote_artifacts(
             instance_id: instance.id.clone(),
             source_host: host,
             source_path: source_path.display().to_string(),
-            destination_path: destination_file.display().to_string(),
+            destination_path,
             checksum_hex,
             status,
         });
@@ -120,6 +159,164 @@ pub fn sync_remote_artifacts(
     })
 }
 
+fn copy_remote_artifacts(
+    instance: &crate::config::InstanceConfig,
+    source_path: &Path,
+    destination_root: &Path,
+) -> Result<Vec<LocalArtifactFile>> {
+    let remote_target = ssh_target(instance)?;
+    let remote_source = format!("{remote_target}:{}", remote_directory_spec(source_path));
+    let output = Command::new("scp")
+        .args(build_scp_args(instance, &remote_source, destination_root))
+        .output()
+        .context("failed to spawn scp for remote artifact sync")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        anyhow::bail!(
+            "scp exited with {}: {}{}",
+            output.status,
+            stderr.trim(),
+            if stdout.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" | stdout: {}", stdout.trim())
+            }
+        );
+    }
+
+    collect_local_artifact_files(destination_root)
+}
+
+fn ssh_target(instance: &crate::config::InstanceConfig) -> Result<String> {
+    let host = instance
+        .ssh_host
+        .as_deref()
+        .filter(|host| !host.is_empty())
+        .context("ssh instance missing ssh_host for remote artifact sync")?;
+
+    Ok(match instance.ssh_user.as_deref() {
+        Some(user) if !user.is_empty() => format!("{user}@{host}"),
+        _ => host.to_string(),
+    })
+}
+
+fn remote_directory_spec(source_path: &Path) -> String {
+    format!("{}/.", source_path.display())
+}
+
+fn build_scp_args(
+    instance: &crate::config::InstanceConfig,
+    remote_source: &str,
+    destination_root: &Path,
+) -> Vec<String> {
+    let mut args = vec!["-r".to_string()];
+
+    if let Some(port) = instance.ssh_port {
+        args.push("-P".to_string());
+        args.push(port.to_string());
+    }
+
+    args.push("-o".to_string());
+    args.push(format!(
+        "StrictHostKeyChecking={}",
+        if instance.ssh_strict_host_key_checking {
+            "yes"
+        } else {
+            "no"
+        }
+    ));
+
+    if let Some(known_hosts) = instance.ssh_known_hosts_file.as_ref() {
+        args.push("-o".to_string());
+        args.push(format!("UserKnownHostsFile={}", known_hosts.display()));
+    }
+
+    args.push(remote_source.to_string());
+    args.push(destination_root.display().to_string());
+    args
+}
+
+fn collect_local_artifact_files(root: &Path) -> Result<Vec<LocalArtifactFile>> {
+    let mut files = Vec::new();
+    collect_local_artifact_files_impl(root, root, &mut files)?;
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(files)
+}
+
+fn collect_local_artifact_files_impl(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<LocalArtifactFile>,
+) -> Result<()> {
+    for entry in fs::read_dir(current)
+        .with_context(|| format!("failed to read directory {}", current.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", current.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+
+        if file_type.is_dir() {
+            collect_local_artifact_files_impl(root, &path, files)?;
+            continue;
+        }
+
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let relative_path = path
+            .strip_prefix(root)
+            .with_context(|| format!("failed to relativize {}", path.display()))?
+            .display()
+            .to_string();
+        let size_bytes = entry
+            .metadata()
+            .with_context(|| format!("failed to stat {}", path.display()))?
+            .len();
+        let checksum_hex = checksum_file(&path)?;
+
+        files.push(LocalArtifactFile {
+            relative_path,
+            size_bytes,
+            checksum_hex,
+        });
+    }
+
+    Ok(())
+}
+
+fn render_sync_summary(
+    instance_id: &str,
+    host: &str,
+    source_path: &Path,
+    destination_root: &Path,
+    files: &[LocalArtifactFile],
+) -> String {
+    let total_bytes = files.iter().map(|file| file.size_bytes).sum::<u64>();
+    let mut summary = vec![
+        format!("instance={instance_id}"),
+        format!("host={host}"),
+        format!("source={}", source_path.display()),
+        format!("destination={}", destination_root.display()),
+        format!("files={}", files.len()),
+        format!("bytes={total_bytes}"),
+    ];
+
+    for file in files {
+        summary.push(format!(
+            "file={} size={} checksum={}",
+            file.relative_path, file.size_bytes, file.checksum_hex
+        ));
+    }
+
+    summary.join("\n")
+}
+
 pub fn checksum_file(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path)
         .with_context(|| format!("failed to open file for checksum {}", path.display()))?;
@@ -142,7 +339,7 @@ pub fn checksum_file(path: &Path) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::*;
     use crate::config::{InstanceConfig, InstanceMode, RunSection};
@@ -159,6 +356,41 @@ mod tests {
         assert_eq!(report.records.len(), 1);
         assert_eq!(report.records[0].status, "simulated");
         assert!(!report.records[0].checksum_hex.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn build_scp_args_preserves_port_and_known_hosts() {
+        let mut config = sample_run_config();
+        let instance = config.instances.remove(0);
+        let args = build_scp_args(
+            &instance,
+            "dev@example.org:/home/dev/aura/logs/.",
+            Path::new("/tmp/out"),
+        );
+
+        assert!(args.iter().any(|arg| arg == "-r"));
+        assert!(args.iter().any(|arg| arg == "-P"));
+        assert!(args.iter().any(|arg| arg == "22"));
+        assert!(args.iter().any(|arg| arg == "StrictHostKeyChecking=yes"));
+    }
+
+    #[test]
+    fn collect_local_artifact_files_returns_relative_paths_and_checksums() -> Result<()> {
+        let temp = tempfile::tempdir().context("tempdir failed")?;
+        let nested = temp.path().join("logs/subdir");
+        fs::create_dir_all(&nested).context("create nested dir failed")?;
+        fs::write(temp.path().join("logs/root.txt"), "root").context("write root file failed")?;
+        fs::write(nested.join("nested.txt"), "nested").context("write nested file failed")?;
+
+        let files = collect_local_artifact_files(&temp.path().join("logs"))?;
+        let paths: Vec<_> = files
+            .iter()
+            .map(|file| file.relative_path.as_str())
+            .collect();
+
+        assert_eq!(paths, vec!["root.txt", "subdir/nested.txt"]);
+        assert!(files.iter().all(|file| !file.checksum_hex.is_empty()));
         Ok(())
     }
 

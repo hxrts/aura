@@ -7,14 +7,20 @@
 
 use crate::core::metrics::ErrorCategory;
 use crate::core::{
-    sync_resource_with_limit, sync_session_error, sync_timeout_error, sync_validation_error,
-    MetricsCollector, SyncConfig, SyncResult,
+    physical_time_from_ms, sync_resource_with_limit, sync_session_error, sync_timeout_error,
+    sync_validation_error, MetricsCollector, SyncConfig, SyncResult,
 };
 use aura_core::time::PhysicalTime;
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+
+mod builder;
+#[cfg(test)]
+mod tests;
+
+pub use builder::SessionManagerBuilder;
 
 /// Unified session state machine following choreographic patterns
 ///
@@ -137,6 +143,41 @@ pub enum SessionResult {
 }
 
 impl SessionResult {
+    fn success(
+        duration_ms: u64,
+        operations_count: u64,
+        bytes_transferred: u64,
+        participants: Vec<DeviceId>,
+        metadata: HashMap<String, String>,
+    ) -> Self {
+        Self::Success {
+            duration_ms,
+            operations_count,
+            bytes_transferred,
+            participants,
+            metadata,
+        }
+    }
+
+    fn failure(
+        error: SessionError,
+        duration_ms: u64,
+        partial_results: Option<PartialResults>,
+    ) -> Self {
+        Self::Failure {
+            error,
+            duration_ms,
+            partial_results,
+        }
+    }
+
+    fn timeout(duration_ms: u64, last_known_state: String) -> Self {
+        Self::Timeout {
+            duration_ms,
+            last_known_state,
+        }
+    }
+
     /// Check if result represents success
     pub fn is_success(&self) -> bool {
         matches!(self, SessionResult::Success { .. })
@@ -162,6 +203,19 @@ impl SessionResult {
                 ..
             } => partial.operations_completed,
             _ => 0,
+        }
+    }
+}
+
+impl SessionError {
+    fn metrics_category(&self) -> ErrorCategory {
+        match self {
+            SessionError::Timeout { .. } => ErrorCategory::Timeout,
+            SessionError::ParticipantDisconnected { .. } => ErrorCategory::Network,
+            SessionError::ResourceLimitExceeded { .. } => ErrorCategory::Resource,
+            SessionError::ProtocolViolation { .. } => ErrorCategory::Protocol,
+            SessionError::CapacityExceeded { .. } => ErrorCategory::Resource,
+            SessionError::InvalidStateTransition { .. } => ErrorCategory::Protocol,
         }
     }
 }
@@ -287,6 +341,23 @@ impl<T> SessionManager<T>
 where
     T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
 {
+    fn timeout_at(now: &PhysicalTime, duration: Duration) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms: now.ts_ms + duration.as_millis() as u64,
+            uncertainty: now.uncertainty,
+        }
+    }
+
+    fn missing_session(session_id: SessionId) -> aura_core::AuraError {
+        sync_session_error(format!("Session {session_id} not found"))
+    }
+
+    fn session_mut(&mut self, session_id: SessionId) -> SyncResult<&mut SessionState<T>> {
+        self.sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| Self::missing_session(session_id))
+    }
+
     /// Create a new session manager
     ///
     /// **Time System**: Uses `PhysicalTime` for timestamps.
@@ -304,13 +375,7 @@ where
     ///
     /// Convenience constructor for backward compatibility.
     pub fn new_from_ms(config: SessionConfig, now_ms: u64) -> Self {
-        Self::new(
-            config,
-            PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            },
-        )
+        Self::new(config, physical_time_from_ms(now_ms))
     }
 
     /// Create session manager with metrics collection
@@ -374,14 +439,9 @@ where
         }
 
         let session_id = self.generate_session_id(now);
-        let timeout_ms = now.ts_ms + self.config.timeout.as_millis() as u64;
-
         let session_state = SessionState::Initializing {
             participants,
-            timeout_at: PhysicalTime {
-                ts_ms: timeout_ms,
-                uncertainty: now.uncertainty,
-            },
+            timeout_at: Self::timeout_at(now, self.config.timeout),
             created_at: now.clone(),
         };
 
@@ -403,13 +463,7 @@ where
         participants: Vec<DeviceId>,
         now_ms: u64,
     ) -> SyncResult<SessionId> {
-        self.create_session(
-            participants,
-            &PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            },
-        )
+        self.create_session(participants, &physical_time_from_ms(now_ms))
     }
 
     /// Activate a session with initial protocol state
@@ -421,10 +475,8 @@ where
         protocol_state: T,
         current_time: &PhysicalTime,
     ) -> SyncResult<()> {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let max_session_duration = self.config.resource_limits.max_session_duration;
+        let session = self.session_mut(session_id)?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
         if session.is_timed_out(current_time) {
@@ -437,16 +489,11 @@ where
         match session {
             SessionState::Initializing { participants, .. } => {
                 let participants = participants.clone();
-                let timeout_ms = current_time.ts_ms
-                    + self.config.resource_limits.max_session_duration.as_millis() as u64;
                 *session = SessionState::Active {
                     protocol_state,
                     started_at: current_time.clone(),
                     participants,
-                    timeout_at: PhysicalTime {
-                        ts_ms: timeout_ms,
-                        uncertainty: current_time.uncertainty,
-                    },
+                    timeout_at: Self::timeout_at(current_time, max_session_duration),
                 };
 
                 Ok(())
@@ -469,10 +516,7 @@ where
         self.activate_session(
             session_id,
             protocol_state,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
+            &physical_time_from_ms(current_timestamp_ms),
         )
     }
 
@@ -488,10 +532,7 @@ where
     where
         T: std::fmt::Debug,
     {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let session = self.session_mut(session_id)?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
         if session.is_timed_out(current_time) {
@@ -525,10 +566,7 @@ where
         self.update_session(
             session_id,
             new_state,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
+            &physical_time_from_ms(current_timestamp_ms),
         )
     }
 
@@ -543,21 +581,18 @@ where
         metadata: HashMap<String, String>,
         current_time: &PhysicalTime,
     ) -> SyncResult<()> {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let session = self.session_mut(session_id)?;
 
         let duration_ms = session.duration_ms(current_time).unwrap_or(0);
         let participants = session.participants().to_vec();
 
-        let result = SessionResult::Success {
+        let result = SessionResult::success(
             duration_ms,
             operations_count,
             bytes_transferred,
             participants,
             metadata,
-        };
+        );
 
         *session = SessionState::Completed(result);
 
@@ -590,10 +625,7 @@ where
             operations_count,
             bytes_transferred,
             metadata,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
+            &physical_time_from_ms(current_timestamp_ms),
         )
     }
 
@@ -607,32 +639,20 @@ where
         partial_results: Option<PartialResults>,
         current_time: &PhysicalTime,
     ) -> SyncResult<()> {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let session = self.session_mut(session_id)?;
 
         let duration_ms = session.duration_ms(current_time).unwrap_or(0);
-
-        let result = SessionResult::Failure {
-            error: error.clone(),
-            duration_ms,
-            partial_results,
-        };
+        let result = SessionResult::failure(error.clone(), duration_ms, partial_results);
 
         *session = SessionState::Completed(result);
 
         // Record metrics
         if let Some(ref metrics) = self.metrics {
-            let category = match error {
-                SessionError::Timeout { .. } => ErrorCategory::Timeout,
-                SessionError::ParticipantDisconnected { .. } => ErrorCategory::Network,
-                SessionError::ResourceLimitExceeded { .. } => ErrorCategory::Resource,
-                SessionError::ProtocolViolation { .. } => ErrorCategory::Protocol,
-                SessionError::CapacityExceeded { .. } => ErrorCategory::Resource,
-                SessionError::InvalidStateTransition { .. } => ErrorCategory::Protocol,
-            };
-            metrics.record_sync_failure(&session_id.to_string(), category, &error.to_string());
+            metrics.record_sync_failure(
+                &session_id.to_string(),
+                error.metrics_category(),
+                &error.to_string(),
+            );
         }
 
         Ok(())
@@ -652,10 +672,7 @@ where
             session_id,
             error,
             partial_results,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
+            &physical_time_from_ms(current_timestamp_ms),
         )
     }
 
@@ -670,18 +687,12 @@ where
     where
         T: std::fmt::Debug,
     {
-        let session = self
-            .sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
+        let session = self.session_mut(session_id)?;
 
         let duration_ms = session.duration_ms(current_time).unwrap_or(0);
         let last_known_state = format!("{session:?}");
 
-        let result = SessionResult::Timeout {
-            duration_ms,
-            last_known_state,
-        };
+        let result = SessionResult::timeout(duration_ms, last_known_state);
 
         *session = SessionState::Completed(result);
 
@@ -708,13 +719,7 @@ where
     where
         T: std::fmt::Debug,
     {
-        self.timeout_session(
-            session_id,
-            &PhysicalTime {
-                ts_ms: current_timestamp_ms,
-                uncertainty: None,
-            },
-        )
+        self.timeout_session(session_id, &physical_time_from_ms(current_timestamp_ms))
     }
 
     /// Get session state
@@ -805,10 +810,7 @@ where
     where
         T: std::fmt::Debug,
     {
-        self.cleanup_stale_sessions(&PhysicalTime {
-            ts_ms: now_ms,
-            uncertainty: None,
-        })
+        self.cleanup_stale_sessions(&physical_time_from_ms(now_ms))
     }
 
     /// Get session statistics
@@ -929,345 +931,5 @@ impl Default for SessionManagerStatistics {
             average_duration_ms: 0,
             total_operations: 0,
         }
-    }
-}
-
-/// Session manager builder for easy configuration
-pub struct SessionManagerBuilder<T> {
-    config: SessionConfig,
-    metrics: Option<MetricsCollector>,
-    _phantom: std::marker::PhantomData<T>,
-}
-
-impl<T> SessionManagerBuilder<T>
-where
-    T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
-{
-    /// Create new builder with default configuration
-    pub fn new() -> Self {
-        Self {
-            config: SessionConfig::default(),
-            metrics: None,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-
-    /// Set custom configuration
-    pub fn config(mut self, config: SessionConfig) -> Self {
-        self.config = config;
-        self
-    }
-
-    /// Enable metrics collection
-    pub fn with_metrics(mut self, metrics: MetricsCollector) -> Self {
-        self.metrics = Some(metrics);
-        self
-    }
-
-    /// Build the session manager
-    ///
-    /// **Time System**: Uses `PhysicalTime` for timestamps.
-    /// Note: Callers should obtain `now` via their time provider and pass it to this method
-    pub fn build(self, now: PhysicalTime) -> SessionManager<T> {
-        if let Some(metrics) = self.metrics {
-            SessionManager::with_metrics(self.config, metrics, now)
-        } else {
-            SessionManager::new(self.config, now)
-        }
-    }
-
-    /// Build the session manager (from milliseconds)
-    ///
-    /// Convenience method for backward compatibility.
-    pub fn build_ms(self, now_ms: u64) -> SessionManager<T> {
-        self.build(PhysicalTime {
-            ts_ms: now_ms,
-            uncertainty: None,
-        })
-    }
-}
-
-impl<T> Default for SessionManagerBuilder<T>
-where
-    T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use aura_core::AuraError;
-    use aura_testkit::builders::test_device_id;
-
-    /// Helper function to create PhysicalTime for tests
-    fn test_time(ts_ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        }
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-    struct TestProtocolState {
-        phase: String,
-        data: Vec<u8>,
-    }
-
-    #[test]
-    fn test_session_creation_and_activation() {
-        let now = test_time(1000000); // Unix timestamp in ms
-        let mut manager =
-            SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
-        let participants = vec![test_device_id(1), test_device_id(2)];
-
-        // Create session
-        let session_id = manager.create_session(participants.clone(), &now).unwrap();
-        assert_eq!(manager.count_active_sessions(), 0); // Not active yet
-
-        // Activate session
-        let initial_state = TestProtocolState {
-            phase: "initialization".to_string(),
-            data: vec![1, 2, 3],
-        };
-        manager
-            .activate_session(session_id, initial_state.clone(), &now)
-            .unwrap();
-        assert_eq!(manager.count_active_sessions(), 1);
-
-        // Verify session state
-        let session = manager.get_session(&session_id).unwrap();
-        match session {
-            SessionState::Active {
-                protocol_state,
-                participants: session_participants,
-                ..
-            } => {
-                assert_eq!(protocol_state, &initial_state);
-                assert_eq!(session_participants, &participants);
-            }
-            _ => panic!("Session should be active"),
-        }
-    }
-
-    #[test]
-    fn test_session_completion() {
-        let now = test_time(1000000); // Unix timestamp in ms
-        let mut manager =
-            SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
-        let session_id = manager
-            .create_session(vec![test_device_id(1)], &now)
-            .unwrap();
-
-        let initial_state = TestProtocolState {
-            phase: "test".to_string(),
-            data: vec![],
-        };
-        manager
-            .activate_session(session_id, initial_state, &now)
-            .unwrap();
-
-        // Complete session
-        let mut metadata = HashMap::new();
-        metadata.insert("test_key".to_string(), "test_value".to_string());
-
-        manager
-            .complete_session(session_id, 100, 1024, metadata, &test_time(1000100))
-            .unwrap();
-        assert_eq!(manager.count_active_sessions(), 0);
-        assert_eq!(manager.count_completed_sessions(), 1);
-
-        // Verify result
-        let session = manager.get_session(&session_id).unwrap();
-        match session {
-            SessionState::Completed(SessionResult::Success {
-                operations_count,
-                bytes_transferred,
-                ..
-            }) => {
-                assert_eq!(*operations_count, 100);
-                assert_eq!(*bytes_transferred, 1024);
-            }
-            _ => panic!("Session should be completed successfully"),
-        }
-    }
-
-    #[test]
-    fn test_session_failure() {
-        let now = test_time(1000000); // Unix timestamp in ms
-        let mut manager =
-            SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
-        let session_id = manager
-            .create_session(vec![test_device_id(1)], &now)
-            .unwrap();
-
-        let initial_state = TestProtocolState {
-            phase: "test".to_string(),
-            data: vec![],
-        };
-        manager
-            .activate_session(session_id, initial_state, &now)
-            .unwrap();
-
-        // Fail session
-        let error = SessionError::ProtocolViolation {
-            constraint: "test constraint".to_string(),
-        };
-        manager
-            .fail_session(session_id, error, None, &test_time(1000010))
-            .unwrap();
-
-        // Verify failure
-        let session = manager.get_session(&session_id).unwrap();
-        match session {
-            SessionState::Completed(SessionResult::Failure {
-                error: session_error,
-                ..
-            }) => match session_error {
-                SessionError::ProtocolViolation { constraint } => {
-                    assert_eq!(constraint, "test constraint");
-                }
-                _ => panic!("Wrong error type"),
-            },
-            _ => panic!("Session should be completed with failure"),
-        }
-    }
-
-    #[test]
-    fn test_concurrent_session_limit() {
-        let config = SessionConfig {
-            max_concurrent_sessions: 2,
-            ..SessionConfig::default()
-        };
-        let now = test_time(1000000); // Unix timestamp in ms
-        let mut manager = SessionManager::<TestProtocolState>::new(config, now.clone());
-
-        // Create and activate maximum sessions
-        let session1 = manager
-            .create_session(vec![test_device_id(1)], &now)
-            .unwrap();
-        let session2 = manager
-            .create_session(vec![test_device_id(1)], &now)
-            .unwrap();
-
-        let state = TestProtocolState {
-            phase: "test".to_string(),
-            data: vec![],
-        };
-        manager
-            .activate_session(session1, state.clone(), &now)
-            .unwrap();
-        manager.activate_session(session2, state, &now).unwrap();
-
-        // Try to exceed limit
-        let result = manager.create_session(vec![test_device_id(1)], &now);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), AuraError::Internal { .. }));
-    }
-
-    #[test]
-    fn test_session_timeout() {
-        let config = SessionConfig {
-            timeout: Duration::from_millis(100),
-            ..SessionConfig::default()
-        };
-        let now = test_time(1000000); // Unix timestamp in ms
-        let mut manager = SessionManager::<TestProtocolState>::new(config, now.clone());
-
-        let session_id = manager
-            .create_session(vec![test_device_id(1)], &now)
-            .unwrap();
-
-        // Advance time past timeout (100ms timeout, we advance 200ms)
-        let future_time = test_time(1000200);
-
-        // Try to activate - should fail due to timeout
-        let state = TestProtocolState {
-            phase: "test".to_string(),
-            data: vec![],
-        };
-        let result = manager.activate_session(session_id, state, &future_time);
-        assert!(result.is_err());
-        // Timeout errors now map to Internal
-        assert!(matches!(result.unwrap_err(), AuraError::Internal { .. }));
-    }
-
-    #[test]
-    fn test_cleanup_stale_sessions() {
-        let config = SessionConfig {
-            cleanup_interval: Duration::from_millis(50),
-            ..SessionConfig::default()
-        };
-        let now = test_time(1000000); // Unix timestamp in ms
-        let mut manager = SessionManager::<TestProtocolState>::new(config, now.clone());
-
-        // Create and complete a session
-        let session_id = manager
-            .create_session(vec![test_device_id(1)], &now)
-            .unwrap();
-        let state = TestProtocolState {
-            phase: "test".to_string(),
-            data: vec![],
-        };
-        manager.activate_session(session_id, state, &now).unwrap();
-        manager
-            .complete_session(session_id, 0, 0, HashMap::new(), &test_time(1000050))
-            .unwrap();
-
-        assert_eq!(manager.sessions.len(), 1);
-
-        // Advance time past cleanup interval (50ms interval, we advance 200ms total)
-        let cleanup_time = test_time(1000200);
-
-        // Cleanup should remove completed sessions
-        let removed = manager.cleanup_stale_sessions(&cleanup_time).unwrap();
-        assert!(removed > 0);
-    }
-
-    #[test]
-    fn test_session_statistics() {
-        let now = test_time(1000000); // Unix timestamp in ms
-        let mut manager =
-            SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
-
-        // Create and complete some sessions
-        for i in 0..3 {
-            let session_id = manager
-                .create_session(vec![test_device_id(1)], &now)
-                .unwrap();
-            let state = TestProtocolState {
-                phase: "test".to_string(),
-                data: vec![],
-            };
-            manager.activate_session(session_id, state, &now).unwrap();
-
-            if i < 2 {
-                manager
-                    .complete_session(
-                        session_id,
-                        10 * (i + 1),
-                        100 * (i + 1),
-                        HashMap::new(),
-                        &test_time(1000000 + 100 * (i + 1)),
-                    )
-                    .unwrap();
-            } else {
-                let error = SessionError::ProtocolViolation {
-                    constraint: "test".to_string(),
-                };
-                manager
-                    .fail_session(session_id, error, None, &test_time(1000050))
-                    .unwrap();
-            }
-        }
-
-        let stats = manager.get_statistics();
-        assert_eq!(stats.total_sessions, 3);
-        assert_eq!(stats.completed_sessions, 2);
-        assert_eq!(stats.failed_sessions, 1);
-        assert_eq!(stats.timeout_sessions, 0);
-        assert!((stats.success_rate_percent - 66.67).abs() < 0.1); // 2/3 * 100
     }
 }

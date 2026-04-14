@@ -15,6 +15,7 @@ use aura_harness::determinism::build_seed_bundle;
 use aura_harness::replay::{ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::routing::AddressResolver;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
+use serial_test::serial;
 
 fn artifact_run_dir(artifact_root: &Path, run_name: &str) -> PathBuf {
     let run_root = artifact_root.join("harness").join(run_name);
@@ -37,6 +38,7 @@ fn artifact_run_dir(artifact_root: &Path, run_name: &str) -> PathBuf {
 }
 
 #[test]
+#[serial]
 fn contract_pty_control_path() {
     let run_config = local_run_config("contract-pty", 51001);
     let coordinator = match HarnessCoordinator::from_run_config(&run_config) {
@@ -66,6 +68,7 @@ fn contract_pty_control_path() {
 }
 
 #[test]
+#[serial]
 fn contract_ssh_dry_run_lifecycle() {
     let run_config = mixed_run_config("contract-ssh", 51002, 51003);
     let coordinator = match HarnessCoordinator::from_run_config(&run_config) {
@@ -82,6 +85,7 @@ fn contract_ssh_dry_run_lifecycle() {
 }
 
 #[test]
+#[serial]
 fn contract_replay_and_artifacts_subsystems() {
     let run_config = local_run_config("contract-replay", 51004);
     let coordinator = match HarnessCoordinator::from_run_config(&run_config) {

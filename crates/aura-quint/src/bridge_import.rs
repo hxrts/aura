@@ -92,6 +92,8 @@ pub fn map_certificates_to_quint_assertions(certificates: &[ProofCertificateV1])
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::bridge_format::{
         BridgeBundleV1, ProofBackendV1, ProofCertificateV1, PropertyClassV1, PropertyInterchangeV1,
@@ -107,7 +109,7 @@ mod tests {
             source_expr: "coherent".to_string(),
             target_expr: Some("coherent".to_string()),
             assumptions: vec![],
-            metadata: Default::default(),
+            metadata: BTreeMap::default(),
         });
         bundle.properties.push(PropertyInterchangeV1 {
             id: "p2".to_string(),
@@ -116,7 +118,7 @@ mod tests {
             source_expr: "ignored".to_string(),
             target_expr: None,
             assumptions: vec![],
-            metadata: Default::default(),
+            metadata: BTreeMap::default(),
         });
 
         let imported = parse_telltale_properties(&bundle);
@@ -133,7 +135,7 @@ mod tests {
             source_expr: "ByzSafe".to_string(),
             target_expr: Some("ByzSafe".to_string()),
             assumptions: vec![],
-            metadata: Default::default(),
+            metadata: BTreeMap::default(),
         }];
 
         let module = generate_quint_invariant_module("ImportedProofs", &properties)
@@ -152,7 +154,7 @@ mod tests {
             artifact_digest_hex: "22".repeat(32),
             verified: true,
             verified_at_ms: Some(1234),
-            toolchain: Default::default(),
+            toolchain: BTreeMap::default(),
         }]);
 
         assert_eq!(assertions.len(), 1);
@@ -170,7 +172,7 @@ mod tests {
                 source_expr: "safe".to_string(),
                 target_expr: Some("safe".to_string()),
                 assumptions: vec![],
-                metadata: Default::default(),
+                metadata: BTreeMap::default(),
             });
         }
 

@@ -233,7 +233,7 @@ impl BiscuitTestFixture {
             r#"
             issuer({issuer});
             authority({recipient_str});
-            role("temporary");
+            role("ephemeral");
             capability("read");
 
             // Time-based expiration

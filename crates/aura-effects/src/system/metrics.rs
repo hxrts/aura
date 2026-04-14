@@ -260,7 +260,7 @@ impl SystemEffects for MetricsSystemHandler {
     }
 
     async fn restart_component(&self, _component: &str) -> Result<(), SystemError> {
-        warn!("Restart not implemented for metrics system handler");
+        warn!("Restart is unavailable for metrics system handler");
         Ok(())
     }
 

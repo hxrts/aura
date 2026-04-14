@@ -38,7 +38,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::{sync_session_error, SyncResult};
+use crate::core::{physical_time_from_ms, sync_session_error, SyncResult};
 use crate::infrastructure::RetryPolicy;
 use crate::protocols::anti_entropy::{AntiEntropyConfig, AntiEntropyProtocol, JournalDigest};
 use aura_authorization::BiscuitTokenManager;
@@ -107,10 +107,7 @@ impl SyncState {
     /// Create a Synced state from milliseconds timestamp
     pub fn synced_from_ms(timestamp_ms: u64, operations: u64) -> Self {
         SyncState::Synced {
-            last_sync: PhysicalTime {
-                ts_ms: timestamp_ms,
-                uncertainty: None,
-            },
+            last_sync: physical_time_from_ms(timestamp_ms),
             operations,
         }
     }
@@ -119,10 +116,7 @@ impl SyncState {
     pub fn failed_from_ms(error: String, timestamp_ms: u64) -> Self {
         SyncState::Failed {
             error,
-            failed_at: PhysicalTime {
-                ts_ms: timestamp_ms,
-                uncertainty: None,
-            },
+            failed_at: physical_time_from_ms(timestamp_ms),
         }
     }
 }
@@ -319,10 +313,10 @@ impl JournalSyncProtocol {
                         peers_synced.push(peer);
 
                         // Update peer state to synced with current wall-clock time
-                        let sync_time = effects.physical_time().await.unwrap_or(PhysicalTime {
-                            ts_ms: 0,
-                            uncertainty: None,
-                        });
+                        let sync_time = effects
+                            .physical_time()
+                            .await
+                            .unwrap_or_else(|_| physical_time_from_ms(0));
                         self.peer_states.insert(
                             peer,
                             SyncState::Synced {
@@ -341,10 +335,10 @@ impl JournalSyncProtocol {
                         peers_failed.push(peer);
 
                         // Update peer state to failed with current wall-clock time
-                        let failed_time = effects.physical_time().await.unwrap_or(PhysicalTime {
-                            ts_ms: 0,
-                            uncertainty: None,
-                        });
+                        let failed_time = effects
+                            .physical_time()
+                            .await
+                            .unwrap_or_else(|_| physical_time_from_ms(0));
                         self.peer_states.insert(
                             peer,
                             SyncState::Failed {
@@ -570,10 +564,7 @@ mod tests {
     use super::*;
 
     fn test_time(ts_ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        }
+        physical_time_from_ms(ts_ms)
     }
 
     #[test]

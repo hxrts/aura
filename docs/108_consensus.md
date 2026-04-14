@@ -1025,7 +1025,9 @@ Ceremonies establish shared cryptographic context. Operations within that contex
 
 Once a relational context exists (established via Category C invitation ceremony), channels and messages within that context are Category A. The expensive part is establishing WHO is in the relationship. Once established, operations WITHIN the relationship derive keys deterministically from shared state.
 
-See `work/optimistic.md` for detailed design and effect policy integration.
+The optimistic-path design follows the same effect-policy integration described
+throughout this document: cheap operations are permitted only after the shared
+cryptographic context has been established by the ceremony boundary.
 
 ## 18. BFT‑DKG Transcript Finalization (K3)
 

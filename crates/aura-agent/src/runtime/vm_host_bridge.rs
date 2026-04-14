@@ -930,7 +930,7 @@ mod tests {
     }
 
     #[test]
-    fn role_scoped_image_keeps_stubbed_peer_edges() {
+    fn role_scoped_image_keeps_projected_peer_edges() {
         let global = GlobalType::send("Sender", "Receiver", Label::new("msg"), GlobalType::End);
         let locals = BTreeMap::from([
             (

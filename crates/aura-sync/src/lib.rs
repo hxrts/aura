@@ -152,9 +152,9 @@ pub mod protocols;
 
 /// Service layer for sync operations
 ///
-/// This module provides high-level services that orchestrate protocols and
-/// infrastructure to provide complete synchronization functionality.
-/// All services implement the unified Service trait.
+/// This module provides concrete Layer 5 service facades that orchestrate
+/// protocols and infrastructure while leaving runtime ownership in
+/// `aura-agent`.
 pub mod services;
 
 /// Verification module for Merkle-based fact verification
@@ -187,9 +187,6 @@ pub use core::{
 
 // Protocol re-exports
 pub use protocols::{WriterFence, WriterFenceGuard};
-
-// Services re-exports
-pub use services::maintenance;
 
 // Verification re-exports
 pub use verification::{MerkleComparison, MerkleVerifier, VerificationResult, VerificationStats};

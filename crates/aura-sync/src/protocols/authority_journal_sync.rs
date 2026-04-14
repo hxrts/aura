@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::SyncResult;
+use crate::core::{binary_deserialize, binary_serialize, SyncResult};
 use crate::infrastructure::RetryPolicy;
 use aura_core::time::OrderTime;
 use aura_core::{hash, Authority, AuthorityId};
@@ -85,6 +85,29 @@ pub struct AuthoritySyncResult {
 }
 
 impl AuthorityJournalSyncProtocol {
+    async fn elapsed_duration<E: AuraEffects>(&self, effects: &E, start_ms: u64) -> Duration {
+        Duration::from_millis(
+            effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms.saturating_sub(start_ms))
+                .unwrap_or(0),
+        )
+    }
+
+    fn collect_facts_by_orders(
+        &self,
+        remote_journal: &Journal,
+        fact_ids: &[OrderTime],
+    ) -> Vec<Fact> {
+        let wanted: BTreeSet<_> = fact_ids.iter().cloned().collect();
+        remote_journal
+            .iter_facts()
+            .filter(|fact| wanted.contains(&fact.order))
+            .cloned()
+            .collect()
+    }
+
     /// Create a new authority journal sync protocol
     pub fn new(config: AuthorityJournalSyncConfig) -> Self {
         Self { config }
@@ -128,13 +151,7 @@ impl AuthorityJournalSyncProtocol {
             }
         }
 
-        result.duration = Duration::from_millis(
-            effects
-                .physical_time()
-                .await
-                .map(|t| t.ts_ms.saturating_sub(start))
-                .unwrap_or(0),
-        );
+        result.duration = self.elapsed_duration(effects, start).await;
         Ok(result)
     }
 
@@ -208,8 +225,7 @@ impl AuthorityJournalSyncProtocol {
             .map_err(|e| aura_core::AuraError::storage(format!("load journal: {e}")))?;
 
         if let Some(bytes) = maybe_bytes {
-            aura_core::util::serialization::from_slice::<Journal>(&bytes)
-                .map_err(|e| aura_core::AuraError::serialization(format!("decode journal: {e}")))
+            binary_deserialize("journal", "stored authority journal", &bytes)
         } else {
             Ok(Journal::new(JournalNamespace::Authority(authority_id)))
         }
@@ -228,8 +244,7 @@ impl AuthorityJournalSyncProtocol {
         let mut leaf_hashes: Vec<[u8; 32]> = facts
             .iter()
             .map(|fact| {
-                aura_core::util::serialization::to_vec(fact)
-                    .map_err(|e| aura_core::AuraError::serialization(e.to_string()))
+                binary_serialize("fact", "authority journal fact", *fact)
                     .map(|bytes| hash::hash(&bytes))
             })
             .collect::<Result<Vec<_>, _>>()
@@ -322,16 +337,11 @@ impl AuthorityJournalSyncProtocol {
         remote_journal: Journal,
         fact_ids: Vec<OrderTime>,
     ) -> SyncResult<Vec<Fact>> {
-        let mut received = Vec::new();
         if fact_ids.is_empty() {
-            return Ok(received);
+            return Ok(Vec::new());
         }
 
-        for fact in remote_journal.iter_facts() {
-            if fact_ids.contains(&fact.order) {
-                received.push(fact.clone());
-            }
-        }
+        let received = self.collect_facts_by_orders(&remote_journal, &fact_ids);
 
         tracing::debug!(
             "Fetched {} facts from peer {} based on delta plan",
@@ -349,8 +359,7 @@ impl AuthorityJournalSyncProtocol {
         journal: &Journal,
     ) -> SyncResult<()> {
         let key = Self::storage_key(authority_id);
-        let bytes = aura_core::util::serialization::to_vec(journal)
-            .map_err(|e| aura_core::AuraError::serialization(format!("encode journal: {e}")))?;
+        let bytes = binary_serialize("journal", "authority journal", journal)?;
         effects
             .store(&key, bytes)
             .await

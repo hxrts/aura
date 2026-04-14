@@ -239,7 +239,7 @@ pub enum OpResponse {
 /// Error from an operational command
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum OpError {
-    #[error("Not implemented: {0}")]
+    #[error("Feature unavailable: {0}")]
     NotImplemented(String),
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),

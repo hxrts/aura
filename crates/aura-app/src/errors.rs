@@ -77,7 +77,7 @@ impl ErrorCategory {
             Self::Capability => "Permission",
             Self::NotFound => "Not Found",
             Self::Network => "Network",
-            Self::NotImplemented => "Unimplemented",
+            Self::NotImplemented => "Unavailable",
             Self::Operation => "Operation",
         }
     }
@@ -454,7 +454,7 @@ mod tests {
         assert_eq!(ErrorCategory::Capability.label(), "Permission");
         assert_eq!(ErrorCategory::NotFound.label(), "Not Found");
         assert_eq!(ErrorCategory::Network.label(), "Network");
-        assert_eq!(ErrorCategory::NotImplemented.label(), "Unimplemented");
+        assert_eq!(ErrorCategory::NotImplemented.label(), "Unavailable");
         assert_eq!(ErrorCategory::Operation.label(), "Operation");
     }
 

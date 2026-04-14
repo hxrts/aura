@@ -13,11 +13,11 @@ use tokio::time::timeout;
 /// Test basic network partition detection and handling
 #[tokio::test]
 async fn test_partition_detection() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let mut fixture = ScenarioBuilder::threshold_group().build().await?;
 
-    let group1 = vec![fixture.devices[0], fixture.devices[1]];
-    let group2 = vec![fixture.devices[2], fixture.devices[3]];
-    let isolated = fixture.devices[4];
+    let group1 = fixture.devices_for(&[0, 1])?;
+    let group2 = fixture.devices_for(&[2, 3])?;
+    let isolated = fixture.device(4)?;
 
     let session = fixture
         .create_coordinated_session("partition_detection")
@@ -29,24 +29,7 @@ async fn test_partition_detection() -> AuraResult<()> {
         fixture
             .create_partition(group1.clone(), group2.clone())
             .await;
-
-        // Also isolate one device completely
-        for device in &fixture.devices {
-            if *device != isolated {
-                let partition_condition = NetworkCondition {
-                    partitioned: true,
-                    ..Default::default()
-                };
-                fixture
-                    .network
-                    .set_conditions(isolated, *device, partition_condition.clone())
-                    .await;
-                fixture
-                    .network
-                    .set_conditions(*device, isolated, partition_condition)
-                    .await;
-            }
-        }
+        fixture.isolate_index(4).await?;
 
         println!("Created network partition: {group1:?} | {group2:?} | {isolated:?}");
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -95,11 +78,11 @@ async fn test_partition_detection() -> AuraResult<()> {
 /// Test split-brain prevention mechanisms
 #[tokio::test]
 async fn test_split_brain_prevention() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let mut fixture = ScenarioBuilder::threshold_group().build().await?;
 
     // Create two equal-sized partitions (potential split-brain scenario)
-    let partition1 = vec![fixture.devices[0], fixture.devices[1]];
-    let partition2 = vec![fixture.devices[2], fixture.devices[3]];
+    let partition1 = fixture.devices_for(&[0, 1])?;
+    let partition2 = fixture.devices_for(&[2, 3])?;
     // Device 4 is isolated (cannot participate in either partition)
 
     let session = fixture
@@ -161,11 +144,11 @@ async fn test_split_brain_prevention() -> AuraResult<()> {
 /// Test partition with majority quorum
 #[tokio::test]
 async fn test_majority_partition_operation() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let mut fixture = ScenarioBuilder::threshold_group().build().await?;
 
     // Create partition where one side has majority
-    let majority_partition = vec![fixture.devices[0], fixture.devices[1], fixture.devices[2]]; // 3/5
-    let minority_partition = vec![fixture.devices[3], fixture.devices[4]]; // 2/5
+    let majority_partition = fixture.devices_for(&[0, 1, 2])?; // 3/5
+    let minority_partition = fixture.devices_for(&[3, 4])?; // 2/5
 
     let session = fixture
         .create_coordinated_session("majority_partition")
@@ -225,11 +208,11 @@ async fn test_majority_partition_operation() -> AuraResult<()> {
 /// Test partition during active sync operations
 #[tokio::test]
 async fn test_partition_during_active_sync() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::trio().await?;
+    let mut fixture = ScenarioBuilder::trio().build().await?;
 
-    let device1 = fixture.devices[0];
-    let device2 = fixture.devices[1];
-    let device3 = fixture.devices[2];
+    let device1 = fixture.device(0)?;
+    let device2 = fixture.device(1)?;
+    let device3 = fixture.device(2)?;
 
     let session = fixture
         .create_coordinated_session("partition_during_sync")
@@ -296,7 +279,7 @@ async fn test_partition_during_active_sync() -> AuraResult<()> {
 /// Test cascading partition failures
 #[tokio::test]
 async fn test_cascading_partition_failures() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let fixture = ScenarioBuilder::threshold_group().build().await?;
 
     let session = fixture
         .create_coordinated_session("cascading_failures")
@@ -309,7 +292,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
         tokio::time::sleep(Duration::from_millis(400)).await;
 
         // Step 2: First device becomes isolated
-        let isolated1 = fixture.devices[4];
+        let isolated1 = fixture.device(4)?;
         for device in &fixture.devices[0..4] {
             let partition_condition = NetworkCondition {
                 partitioned: true,
@@ -328,7 +311,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
         tokio::time::sleep(Duration::from_millis(600)).await;
 
         // Step 3: Second device becomes isolated
-        let isolated2 = fixture.devices[3];
+        let isolated2 = fixture.device(3)?;
         for device in &fixture.devices[0..3] {
             let partition_condition = NetworkCondition {
                 partitioned: true,
@@ -347,7 +330,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
         tokio::time::sleep(Duration::from_millis(600)).await;
 
         // Step 4: Third device becomes isolated (now 2/5 remaining - no majority)
-        let isolated3 = fixture.devices[2];
+        let isolated3 = fixture.device(2)?;
         for device in &fixture.devices[0..2] {
             let partition_condition = NetworkCondition {
                 partitioned: true,
@@ -401,10 +384,10 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
 /// Test partition with flapping network conditions
 #[tokio::test]
 async fn test_flapping_network_partition() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::trio().await?;
+    let fixture = ScenarioBuilder::trio().build().await?;
 
-    let device1 = fixture.devices[0];
-    let device2 = fixture.devices[1];
+    let device1 = fixture.device(0)?;
+    let device2 = fixture.device(1)?;
 
     let session = fixture
         .create_coordinated_session("flapping_network")
@@ -479,7 +462,7 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
 /// Test partition with partial connectivity (complex network topology)
 #[tokio::test]
 async fn test_partial_connectivity_partition() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let fixture = ScenarioBuilder::threshold_group().build().await?;
 
     let session = fixture
         .create_coordinated_session("partial_connectivity")
@@ -564,10 +547,10 @@ async fn test_partial_connectivity_partition() -> AuraResult<()> {
 /// Test partition detection timeouts and false positives
 #[tokio::test]
 async fn test_partition_detection_accuracy() -> AuraResult<()> {
-    let fixture = MultiDeviceTestFixture::trio().await?;
+    let fixture = ScenarioBuilder::trio().build().await?;
 
-    let device1 = fixture.devices[0];
-    let device2 = fixture.devices[1];
+    let device1 = fixture.device(0)?;
+    let device2 = fixture.device(1)?;
 
     let session = fixture
         .create_coordinated_session("detection_accuracy")

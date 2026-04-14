@@ -1,0 +1,29 @@
+[workspace]
+crate_roots = ["crates"]
+include_crates = []
+exclude_crates = []
+
+[checks.lean_style]
+enabled = true
+include_paths = ["verification/lean/Aura"]
+exclude_path_parts = ["/Generated/", "/lake-packages/"]
+non_trivial_file_lines = 100000
+section_header_min_lines = 100000
+max_file_lines = 100000
+max_decl_lines_target = 100000
+max_decl_lines_hard_limit = 100000
+enforce_target_decl_lines = false
+require_problem_statement = false
+enforce_top_of_file_structure = false
+require_section_headers = false
+require_over_limit_comment = false
+require_explanatory_comment_for_long_blocks = false
+require_public_theorem_lemma_docstrings = false
+forbid_sorry = true
+banned_imports = []
+banned_import_exemptions = []
+require_todo_for_sorry = true
+todo_comment_markers = ["TODO:"]
+over_limit_comment_markers = ["long-block-exception:"]
+file_exemptions = []
+declaration_exemptions = []

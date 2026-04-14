@@ -1,0 +1,131 @@
+[workspace]
+crate_roots = ["crates"]
+include_crates = []
+exclude_crates = []
+
+# rust_base activates the full generic Rust check suite for crates/ and docs/.
+# Explicit [checks.*] sections below take precedence over bundle defaults.
+[bundles.rust_base]
+enabled = true
+rust_roots = ["crates"]
+docs_roots = ["docs"]
+manifest_path = "Cargo.toml"
+workflow_roots = [".github/workflows"]
+
+# docs_link_check covered by rust_base defaults.
+
+[checks.docs_semantic_drift]
+enabled = true
+docs_roots = ["docs"]
+manifest_path = "Cargo.toml"
+planned_crates = [
+  "aura-agent",
+  "aura-amp",
+  "aura-anti-entropy",
+  "aura-app",
+  "aura-authentication",
+  "aura-authorization",
+  "aura-chat",
+  "aura-composition",
+  "aura-consensus",
+  "aura-core",
+  "aura-effects",
+  "aura-guards",
+  "aura-harness",
+  "aura-invitation",
+  "aura-journal",
+  "aura-macros",
+  "aura-maintenance",
+  "aura-mpst",
+  "aura-protocol",
+  "aura-quint",
+  "aura-recovery",
+  "aura-relational",
+  "aura-rendezvous",
+  "aura-signature",
+  "aura-simulator",
+  "aura-social",
+  "aura-store",
+  "aura-sync",
+  "aura-terminal",
+  "aura-testkit",
+  "aura-transport",
+  "aura-ui",
+  "aura-web",
+]
+file_exemptions = [
+  "CLAUDE.md",
+  "docs/100_crypto.md",
+  "docs/102_authority_and_identity.md",
+  "docs/002_theoretical_model.md",
+  "docs/003_information_flow_contract.md",
+  "docs/004_distributed_systems_contract.md",
+  "docs/103_effect_system.md",
+  "docs/104_runtime.md",
+  "docs/105_journal.md",
+  "docs/106_authorization.md",
+  "docs/107_database.md",
+  "docs/108_consensus.md",
+  "docs/110_mpst_and_choreography.md",
+  "docs/112_amp.md",
+  "docs/114_relational_contexts.md",
+  "docs/115_social_architecture.md",
+  "docs/116_maintenance.md",
+  "docs/117_user_interface.md",
+  "docs/118_testkit.md",
+  "docs/119_simulator.md",
+  "docs/120_verification.md",
+  "docs/122_ownership_model.md",
+  "docs/801_hello_world_guide.md",
+  "docs/805_simulation_guide.md",
+  "docs/806_verification_guide.md",
+  "docs/804_testing_guide.md",
+  "docs/808_maintenance_guide.md",
+  "docs/997_flow_coverage.md",
+  "docs/998_verification_coverage.md",
+  "docs/999_project_structure.md",
+]
+
+[checks.lean_style]
+enabled = true
+include_paths = ["verification/lean/Aura"]
+exclude_path_parts = ["/Generated/", "/lake-packages/"]
+non_trivial_file_lines = 100000
+section_header_min_lines = 100000
+max_file_lines = 100000
+max_decl_lines_target = 100000
+max_decl_lines_hard_limit = 100000
+enforce_target_decl_lines = false
+require_problem_statement = false
+enforce_top_of_file_structure = false
+require_section_headers = false
+require_over_limit_comment = false
+require_explanatory_comment_for_long_blocks = false
+require_public_theorem_lemma_docstrings = false
+forbid_sorry = false
+banned_imports = []
+banned_import_exemptions = []
+require_todo_for_sorry = false
+todo_comment_markers = ["TODO:"]
+over_limit_comment_markers = ["long-block-exception:"]
+file_exemptions = []
+declaration_exemptions = []
+
+# Tracks Lean escape hatches (sorry, native_decide, etc.) with per-kind thresholds.
+# Default threshold 0 means any occurrence is a finding.
+[checks.lean_escape_hatches]
+enabled = true
+include_paths = ["verification/lean/Aura"]
+exclude_path_parts = ["/Generated/", "/lake-packages/"]
+kind_thresholds = {}
+file_exemptions = []
+
+[checks.text_formatting]
+enabled = true
+include_paths = ["docs", "AGENTS.md", "CLAUDE.md", "README.md"]
+exclude_path_parts = ["docs/book/"]
+
+[checks.workspace_hygiene]
+enabled = true
+include_paths = ["crates"]
+exclude_path_parts = ["/target/", "/artifacts/", "/artifacts"]

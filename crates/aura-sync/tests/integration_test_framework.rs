@@ -4,24 +4,17 @@
 //! using aura-testkit. It provides examples of all the requested test scenarios while working
 //! with the current API state.
 
-use aura_core::{AuraResult, DeviceId};
-use aura_sync::core::SyncConfig;
+#[path = "support.rs"]
+mod shared_support;
+
+use aura_core::AuraResult;
 use aura_testkit::simulation::{
     choreography::{test_device_trio, ChoreographyTestHarness},
     network::{NetworkCondition, NetworkSimulator},
 };
+use shared_support::{test_device_id, test_sync_config};
 use std::time::Duration;
 use tokio::time::timeout;
-
-/// Helper for creating test device IDs
-fn test_device_id(seed: &[u8]) -> DeviceId {
-    use aura_core::hash::hash;
-    let hash_bytes = hash(seed);
-    let uuid_bytes: [u8; 16] = hash_bytes[..16]
-        .try_into()
-        .unwrap_or_else(|_| panic!("Failed to convert hash bytes to UUID bytes"));
-    DeviceId(uuid::Uuid::from_bytes(uuid_bytes))
-}
 
 /// Test framework demonstrating multi-device sync scenarios
 #[cfg(test)]
@@ -560,7 +553,7 @@ mod integration_tests {
         }
 
         // Test configuration
-        let config = SyncConfig::for_testing();
+        let config = test_sync_config();
         assert!(
             config.network.sync_timeout > Duration::ZERO,
             "Config should have valid timeout"

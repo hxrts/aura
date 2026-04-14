@@ -12,6 +12,12 @@
       url = "github:timewave-computer/crate2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    toolkit = {
+      url = "github:hxrts/toolkit";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.follows = "rust-overlay";
+      inputs.flake-utils.follows = "flake-utils";
+    };
     # Aeneas: Rust-to-Lean/Coq/F*/HOL4 verification toolchain
     aeneas = {
       url = "github:AeneasVerif/aeneas";
@@ -31,6 +37,7 @@
       flake-utils,
       rust-overlay,
       crate2nix,
+      toolkit,
       aeneas,
       patchbay,
     }:
@@ -41,6 +48,13 @@
         pkgs = import nixpkgs {
           inherit system overlays;
         };
+        toolkitSupport = toolkit.lib.${system}.consumerShellSupport;
+        toolkitCommands = with toolkit.packages.${system}; [
+          toolkit-clippy
+          toolkit-dylint
+          toolkit-dylint-link
+          toolkit-install-dylint
+        ];
 
         # Pin to specific Rust version for reproducible CI behavior
         rustToolchain = pkgs.rust-bin.stable."1.93.0".default.override {
@@ -56,6 +70,9 @@
           extensions = [
             "rust-src"
             "rust-analyzer"
+            "rustc-dev"
+            "llvm-tools-preview"
+            "rustfmt"
           ];
           targets = [ "wasm32-unknown-unknown" ];
         };
@@ -224,6 +241,7 @@
             git
             jq
             ripgrep
+            rustup
 
             # POSIX tools (for Justfile scripts)
             coreutils
@@ -247,6 +265,9 @@
             nixpkgs-fmt
             crate2nix.packages.${system}.default
           ]
+          ++ toolkitSupport.packages
+          ++ toolkitCommands
+          ++ toolkitSupport.buildInputs
           # Linux-only: patchbay network simulation dependencies
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             iproute2  # tc command for traffic control
@@ -255,6 +276,10 @@
           ];
 
           shellHook = ''
+            ${toolkitSupport.shellHook}
+            if [ -d "$PWD/../toolkit/xtask" ]; then
+              export TOOLKIT_ROOT="$PWD/../toolkit"
+            fi
             [[ -r "$HOME/.local/state/secrets/cargo-registry-token" ]] && export CARGO_REGISTRY_TOKEN="$(cat "$HOME/.local/state/secrets/cargo-registry-token")"
             export AURA_SUPPRESS_NIX_WELCOME=1
             export CARGO_TARGET_DIR="$PWD/target"
@@ -324,6 +349,7 @@
           buildInputs = with pkgs; [
             # Rust toolchain
             rustToolchain
+            rustToolchainNightly
 
             # Build tools
             pkg-config
@@ -336,6 +362,7 @@
             git
             jq
             ripgrep
+            rustup
 
             # POSIX tools (for Justfile scripts)
             coreutils
@@ -352,14 +379,22 @@
 
             # Conformance ITF generation
             quint
-          ];
+          ]
+          ++ toolkitSupport.packages
+          ++ toolkitCommands
+          ++ toolkitSupport.buildInputs;
 
           shellHook = ''
+            ${toolkitSupport.shellHook}
+            if [ -d "$PWD/../toolkit/xtask" ]; then
+              export TOOLKIT_ROOT="$PWD/../toolkit"
+            fi
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0
             export CARGO_TARGET_DIR="$PWD/target"
             export AURA_WORKSPACE_ROOT="$PWD"
+            export AURA_TOOLKIT_NIGHTLY_BIN="${rustToolchainNightly}/bin"
           '';
         };
 

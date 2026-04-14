@@ -1,0 +1,33 @@
+name: CI / Toolkit Shadow
+run-name: ci/toolkit-shadow/${{ github.event_name }}
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  AURA_SUPPRESS_NIX_WELCOME: 1
+
+jobs:
+  shadow:
+    name: Toolkit Shadow
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: toolkit-shadow
+      - name: Run toolkit shadow bundle
+        run: nix develop .#ci --command just toolkit-shadow
+      - name: Run repo-local policy shadow
+        run: nix develop .#ci --command just policy-runtime-typed-lifecycle-bridge
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: toolkit-shadow
+          replay-command: nix develop .#ci --command 'just toolkit-shadow && just policy-runtime-typed-lifecycle-bridge'

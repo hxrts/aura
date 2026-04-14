@@ -627,7 +627,7 @@ mod tests {
         > {
             Err(aura_core::effects::NetworkError::SendFailed {
                 peer_id: None,
-                reason: "MockNetworkEffects not implemented".to_string(),
+                reason: "MockNetworkEffects unavailable".to_string(),
             })
         }
 

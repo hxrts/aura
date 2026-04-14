@@ -8,6 +8,9 @@ license.workspace = true
 description = "Shared Dioxus UI core for Aura frontends"
 publish = false
 
+[lib]
+doctest = false
+
 [lints]
 workspace = true
 

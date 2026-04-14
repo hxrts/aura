@@ -13,7 +13,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Primary specs**: `docs/` directory (authoritative)
 - **Architecture**: `docs/001_system_architecture.md`, `docs/999_project_structure.md`
 - **Per-crate architecture docs**: each crate root has an `ARCHITECTURE.md` that explains the crate's purpose, boundaries, invariants, and key integration points; read it before making non-trivial changes in that crate
-- **Scratch**: `work/` is non-authoritative and may be removed
+- **Scratch**: scratch notes are non-authoritative and may be removed
 
 ### Documentation Layers
 
@@ -82,14 +82,14 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects`; no ad-hoc storage encryption
 - **Shared UX contract ownership**: parity-critical UI ids, focus semantics, action contracts, and parity metadata come from `aura-app::ui_contract`
 - **Harness mode discipline**: `AURA_HARNESS_MODE` may change instrumentation or rendering stability, but must not change parity-critical business-flow semantics
-- **Harness mode exceptions**: allowlisted harness-only hooks must carry owner, justification, and design-note metadata in `scripts/check/user-flow-policy-guardrails.sh`
+- **Harness mode exceptions**: allowlisted harness-only hooks must carry owner, justification, and design-note metadata enforced by `toolkit/xtask` via `just ci-user-flow-policy`
 - **Browser bridge compatibility**: changes to browser harness bridge, bounded browser task ownership, or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`; this includes the explicit `stage_runtime_identity` bootstrap handoff and the page-owned semantic queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`)
 - **Parity exception metadata**: every `ParityException` must have structured metadata in `aura-app::ui_contract` including reason code, scope, affected surface, and doc reference
 - **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
 - **Canonical entity materialization only**: reactive/view/harness-facing code may enrich already-materialized channel or invitation state, but it may not fabricate canonical metadata from partial facts such as membership events or raw ids; one explicit owned path must materialize the canonical entity shape end to end
 - **Reactive subscriptions**: subscribing before registration must fail fast; lagging subscribers may miss intermediate updates and resume from a newer snapshot
-- **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `scripts/check/user-flow-guidance-sync.sh`
-- **Shared user-flow contributor sync**: when shared UX policy scripts change, keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
+- **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `toolkit/xtask` via `just ci-user-flow-policy`
+- **Shared user-flow contributor sync**: when shared UX policy checks change (Rust in `toolkit/xtask/src/checks/policy.rs` or shell wrappers in `scripts/check/`), keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
 - **Authoritative-ref discipline**: once parity-critical code has
@@ -119,7 +119,7 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   runtime/integration checks, and governance wrappers
 - **Annotation ratchet gate**: new parity-critical workflow boundaries,
   runtime services, and first-party capability gates must pass the
-  changed-files ratchets in `scripts/check/ownership-annotation-ratchet.sh`;
+  changed-files ratchets in `just ci-annotation-ratchet`;
   prefer adding the declaration-layer attribute over adding a shell allowlist
 - **Frontend handoff boundary**: direct `LocalTerminalOperationOwner::submit`
   and `WorkflowHandoffOperationOwner::submit` allocation stays inside the

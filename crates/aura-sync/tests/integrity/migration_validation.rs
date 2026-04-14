@@ -5,8 +5,8 @@
 //! scattered patterns they replace. Tests validate API compatibility, performance,
 //! and behavioral equivalence during the refactoring process.
 
-use aura_core::time::PhysicalTime;
-use aura_core::{AuraError, DeviceId, SessionId};
+use crate::shared_support::{device, test_time};
+use aura_core::{AuraError, SessionId};
 use aura_sync::core::{
     config::{RetryConfig, SyncConfig},
     errors::{
@@ -28,10 +28,6 @@ use std::collections::HashMap;
 use std::time::Duration;
 use uuid::Uuid;
 
-fn device(seed: u8) -> DeviceId {
-    DeviceId::new_from_entropy([seed; 32])
-}
-
 /// Generate a UUID from random bytes for testing
 fn generate_test_uuid() -> Uuid {
     // Use a deterministic approach for testing
@@ -48,14 +44,6 @@ fn generate_test_uuid() -> Uuid {
         bytes[0..8].copy_from_slice(&val.to_le_bytes());
         Uuid::from_bytes(bytes)
     })
-}
-
-/// Create a test PhysicalTime from milliseconds
-fn test_time(ts_ms: u64) -> PhysicalTime {
-    PhysicalTime {
-        ts_ms,
-        uncertainty: None,
-    }
 }
 
 /// Test protocol state for session management tests

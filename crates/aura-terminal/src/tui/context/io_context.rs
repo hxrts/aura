@@ -555,8 +555,8 @@ impl IoContext {
                 self.operational.emit_error(terr).await;
                 Err(err.into())
             }
-            None => Err(TerminalError::NotImplemented(
-                "ExportInvitation not handled".to_string(),
+            None => Err(TerminalError::Operation(
+                "Operational pipeline did not route ExportInvitation".to_string(),
             )),
         }
     }
@@ -590,8 +590,8 @@ impl IoContext {
                 self.operational.emit_error(terr).await;
                 Err(err.into())
             }
-            None => Err(TerminalError::NotImplemented(
-                "CreateInvitation not handled".to_string(),
+            None => Err(TerminalError::Operation(
+                "Operational pipeline did not route CreateInvitation".to_string(),
             )),
         }
     }

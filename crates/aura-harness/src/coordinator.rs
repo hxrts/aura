@@ -1884,7 +1884,7 @@ mod tests {
             "target/debug/tool_repl --config scenarios/harness.toml"
         ));
         assert!(super::looks_like_live_harness_owner(
-            "cargo run -q -p aura-harness --bin tool_repl -- --config work/browser-loopback-interactive.toml"
+            "cargo run -q -p aura-harness --bin tool_repl -- --config scenarios/harness.toml"
         ));
         assert!(!super::looks_like_live_harness_owner(
             "/bin/zsh -lc scripts/web/serve-static.sh"

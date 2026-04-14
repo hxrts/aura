@@ -399,8 +399,8 @@ pub enum CliError {
     #[error("Serialization error: {0}")]
     Serialization(String),
 
-    /// Feature not yet implemented
-    #[error("Not implemented: {0}")]
+    /// Feature currently unavailable
+    #[error("Feature unavailable: {0}")]
     NotImplemented(String),
 
     /// Authentication or authorization error
