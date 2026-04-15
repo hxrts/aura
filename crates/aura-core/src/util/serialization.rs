@@ -278,6 +278,64 @@ mod tests {
     }
 
     #[test]
+    fn test_nested_map_decode_recanonicalizes_noncanonical_input() {
+        #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+        struct NestedEnvelope {
+            fields: HashMap<String, HashMap<String, u64>>,
+        }
+
+        let noncanonical = CborValue::Map(vec![(
+            CborValue::Text("fields".to_string()),
+            CborValue::Map(vec![
+                (
+                    CborValue::Text("beta".to_string()),
+                    CborValue::Map(vec![
+                        (
+                            CborValue::Text("zeta".to_string()),
+                            CborValue::Integer(6.into()),
+                        ),
+                        (
+                            CborValue::Text("alpha".to_string()),
+                            CborValue::Integer(1.into()),
+                        ),
+                    ]),
+                ),
+                (
+                    CborValue::Text("alpha".to_string()),
+                    CborValue::Map(vec![
+                        (
+                            CborValue::Text("delta".to_string()),
+                            CborValue::Integer(4.into()),
+                        ),
+                        (
+                            CborValue::Text("beta".to_string()),
+                            CborValue::Integer(2.into()),
+                        ),
+                    ]),
+                ),
+            ]),
+        )]);
+        let mut bytes = Vec::new();
+        cbor_into_writer(&noncanonical, &mut bytes).unwrap();
+
+        let decoded: NestedEnvelope = from_slice(&bytes).unwrap();
+
+        let mut expected = HashMap::new();
+        expected.insert(
+            "beta".to_string(),
+            HashMap::from([("alpha".to_string(), 1), ("zeta".to_string(), 6)]),
+        );
+        expected.insert(
+            "alpha".to_string(),
+            HashMap::from([("beta".to_string(), 2), ("delta".to_string(), 4)]),
+        );
+        let expected = NestedEnvelope { fields: expected };
+
+        assert_eq!(decoded, expected);
+        assert_eq!(to_vec(&decoded).unwrap(), to_vec(&expected).unwrap());
+    }
+
+    #[test]
     fn test_duplicate_map_keys_are_rejected() {
         let duplicate_map = CborValue::Map(vec![
             (
@@ -297,9 +355,51 @@ mod tests {
     }
 
     #[test]
+    fn test_nested_duplicate_map_keys_are_rejected() {
+        let duplicate_map = CborValue::Map(vec![(
+            CborValue::Text("fields".to_string()),
+            CborValue::Map(vec![(
+                CborValue::Text("nested".to_string()),
+                CborValue::Map(vec![
+                    (
+                        CborValue::Text("dup".to_string()),
+                        CborValue::Integer(1.into()),
+                    ),
+                    (
+                        CborValue::Text("dup".to_string()),
+                        CborValue::Integer(2.into()),
+                    ),
+                ]),
+            )]),
+        )]);
+        let mut bytes = Vec::new();
+        cbor_into_writer(&duplicate_map, &mut bytes).unwrap();
+
+        let err = from_slice::<HashMap<String, HashMap<String, HashMap<String, u64>>>>(&bytes)
+            .unwrap_err();
+        assert!(err.to_string().contains("duplicate canonical keys"));
+    }
+
+    #[test]
     fn test_tags_are_rejected() {
         let tagged = CborValue::Tag(42, Box::new(CborValue::Bytes(vec![0, 1, 2])));
         let err = to_vec(&tagged).unwrap_err();
+        assert!(err.to_string().contains("Unsupported DAG-CBOR tag"));
+    }
+
+    #[test]
+    fn test_nested_tags_are_rejected_on_decode() {
+        let tagged = CborValue::Map(vec![(
+            CborValue::Text("items".to_string()),
+            CborValue::Array(vec![
+                CborValue::Integer(1.into()),
+                CborValue::Tag(42, Box::new(CborValue::Bytes(vec![0, 1, 2]))),
+            ]),
+        )]);
+        let mut bytes = Vec::new();
+        cbor_into_writer(&tagged, &mut bytes).unwrap();
+
+        let err = from_slice::<HashMap<String, Vec<u64>>>(&bytes).unwrap_err();
         assert!(err.to_string().contains("Unsupported DAG-CBOR tag"));
     }
 }
