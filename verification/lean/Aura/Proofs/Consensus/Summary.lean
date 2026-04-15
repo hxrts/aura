@@ -29,7 +29,7 @@ Each module provides a Claims bundle that collects its theorems:
 
 ## Proof Status
 
-All proofs are complete (no `sorry` placeholders):
+All proofs are complete (no placeholder gaps):
 
 **Agreement**:
 - `agreement`: Valid commits for same consensus have same result

@@ -108,14 +108,14 @@ socket2 = { version = "0.5", features = ["all"] }
 
 # Session types
 # Current upstream Telltale package layout.
-telltale = "11.2.0"
-telltale-types = "11.2.0"
-telltale-theory = "11.2.0"
-telltale-language = "11.2.0"
-telltale-runtime = "11.2.0"
-telltale-machine = "11.2.0"
-telltale-bridge = "11.2.0"
-telltale-simulator = "11.2.0"
+telltale = "14.0.0"
+telltale-types = "14.0.0"
+telltale-theory = "14.0.0"
+telltale-language = "14.0.0"
+telltale-runtime = "14.0.0"
+telltale-machine = "14.0.0"
+telltale-bridge = "14.0.0"
+telltale-simulator = "14.0.0"
 
 # Authorization
 biscuit-auth = { version = "5.0", features = ["wasm"] }
