@@ -10,6 +10,11 @@
 //! - Efficient binary encoding
 
 use crate::crypto::hash;
+use ciborium::{
+    de::from_reader as cbor_from_reader,
+    ser::into_writer as cbor_into_writer,
+    value::{CanonicalValue, Value as CborValue},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -28,16 +33,73 @@ pub enum SerializationError {
 /// Standard Result type for serialization operations
 pub type Result<T> = std::result::Result<T, SerializationError>;
 
+fn canonicalize_value(value: CborValue) -> Result<CborValue> {
+    match value {
+        CborValue::Integer(_)
+        | CborValue::Bytes(_)
+        | CborValue::Float(_)
+        | CborValue::Text(_)
+        | CborValue::Bool(_)
+        | CborValue::Null => Ok(value),
+        CborValue::Tag(tag, _) => Err(SerializationError::InvalidFormat(format!(
+            "Unsupported DAG-CBOR tag in Aura serialization: {tag}"
+        ))),
+        CborValue::Array(values) => values
+            .into_iter()
+            .map(canonicalize_value)
+            .collect::<Result<Vec<_>>>()
+            .map(CborValue::Array),
+        CborValue::Map(entries) => canonicalize_map(entries),
+        _ => Err(SerializationError::InvalidFormat(
+            "Unsupported CBOR value variant in Aura serialization".to_string(),
+        )),
+    }
+}
+
+fn canonicalize_map(entries: Vec<(CborValue, CborValue)>) -> Result<CborValue> {
+    let mut canonical_entries = entries
+        .into_iter()
+        .map(|(key, value)| Ok((canonicalize_value(key)?, canonicalize_value(value)?)))
+        .collect::<Result<Vec<_>>>()?;
+
+    canonical_entries.sort_by(|(left, _), (right, _)| {
+        CanonicalValue::from(left.clone()).cmp(&CanonicalValue::from(right.clone()))
+    });
+
+    for pair in canonical_entries.windows(2) {
+        let left = CanonicalValue::from(pair[0].0.clone());
+        let right = CanonicalValue::from(pair[1].0.clone());
+        if left == right {
+            return Err(SerializationError::InvalidFormat(
+                "DAG-CBOR map contains duplicate canonical keys".to_string(),
+            ));
+        }
+    }
+
+    Ok(CborValue::Map(canonical_entries))
+}
+
 /// Serialize any serde-compatible type to DAG-CBOR bytes
 pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    serde_ipld_dagcbor::to_vec(value).map_err(|e| {
-        SerializationError::InvalidFormat(format!("Failed to serialize to DAG-CBOR: {e}"))
-    })
+    let value = CborValue::serialized(value).map_err(|e| {
+        SerializationError::InvalidFormat(format!("Failed to serialize to DAG-CBOR value: {e}"))
+    })?;
+    let value = canonicalize_value(value)?;
+    let mut bytes = Vec::new();
+    cbor_into_writer(&value, &mut bytes).map_err(|e| {
+        SerializationError::DagCbor(format!("Failed to encode DAG-CBOR bytes: {e}"))
+    })?;
+    Ok(bytes)
 }
 
 /// Deserialize DAG-CBOR bytes to any serde-compatible type
 pub fn from_slice<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
-    serde_ipld_dagcbor::from_slice(bytes).map_err(|e| SerializationError::DagCbor(e.to_string()))
+    let value: CborValue =
+        cbor_from_reader(bytes).map_err(|e| SerializationError::DagCbor(e.to_string()))?;
+    let value = canonicalize_value(value)?;
+    value
+        .deserialized()
+        .map_err(|e| SerializationError::DagCbor(e.to_string()))
 }
 
 /// Serialize to DAG-CBOR and return the canonical hash
@@ -118,7 +180,9 @@ impl<T> VersionedMessage<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ciborium::{ser::into_writer as cbor_into_writer, value::Value as CborValue};
     use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
     struct TestData {
@@ -191,5 +255,51 @@ mod tests {
         assert_eq!(decoded.payload, data);
         assert_eq!(decoded.version.major, 1);
         assert_eq!(decoded.metadata.get("source").unwrap(), "test");
+    }
+
+    #[test]
+    fn test_hash_map_encoding_is_canonical() {
+        #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+        struct MapEnvelope {
+            fields: HashMap<String, u64>,
+        }
+
+        let mut left = HashMap::new();
+        left.insert("beta".to_string(), 2);
+        left.insert("alpha".to_string(), 1);
+
+        let mut right = HashMap::new();
+        right.insert("alpha".to_string(), 1);
+        right.insert("beta".to_string(), 2);
+
+        let left_bytes = to_vec(&MapEnvelope { fields: left }).unwrap();
+        let right_bytes = to_vec(&MapEnvelope { fields: right }).unwrap();
+        assert_eq!(left_bytes, right_bytes);
+    }
+
+    #[test]
+    fn test_duplicate_map_keys_are_rejected() {
+        let duplicate_map = CborValue::Map(vec![
+            (
+                CborValue::Text("dup".to_string()),
+                CborValue::Integer(1.into()),
+            ),
+            (
+                CborValue::Text("dup".to_string()),
+                CborValue::Integer(2.into()),
+            ),
+        ]);
+        let mut bytes = Vec::new();
+        cbor_into_writer(&duplicate_map, &mut bytes).unwrap();
+
+        let err = from_slice::<HashMap<String, u64>>(&bytes).unwrap_err();
+        assert!(err.to_string().contains("duplicate canonical keys"));
+    }
+
+    #[test]
+    fn test_tags_are_rejected() {
+        let tagged = CborValue::Tag(42, Box::new(CborValue::Bytes(vec![0, 1, 2])));
+        let err = to_vec(&tagged).unwrap_err();
+        assert!(err.to_string().contains("Unsupported DAG-CBOR tag"));
     }
 }
