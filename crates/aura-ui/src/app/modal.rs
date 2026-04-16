@@ -42,6 +42,7 @@ pub(in crate::app) fn modal_view(
     let mut details = Vec::new();
     let mut keybind_rows = Vec::new();
     let mut inputs = Vec::new();
+    let mut values = Vec::new();
 
     match modal {
         ModalState::Help => {
@@ -63,6 +64,22 @@ pub(in crate::app) fn modal_view(
                 field_id: FieldId::InvitationTtl,
                 value: modal_state.ttl_hours.to_string(),
             });
+            if let Some(code) = model.last_invite_code.as_ref() {
+                details.push("The invite code was copied to your clipboard.".to_string());
+                details
+                    .push("Share it out of band, or copy it again from this dialog.".to_string());
+                keybind_rows.push((
+                    ControlId::ModalCopyButton
+                        .activation_key()
+                        .unwrap_or("c")
+                        .to_string(),
+                    "Copy the invite code again".to_string(),
+                ));
+                values.push(ModalValueView {
+                    label: "Invite Code".to_string(),
+                    value: code.clone(),
+                });
+            }
         }
         ModalState::AcceptContactInvitation => {
             details.push("Paste a contact invite code, then press Enter.".to_string());
@@ -432,6 +449,13 @@ pub(in crate::app) fn modal_view(
 
     let enter_label = match modal {
         ModalState::Help | ModalState::ChannelInfo => "Close".to_string(),
+        ModalState::CreateInvitation => {
+            if model.last_invite_code.is_some() {
+                "Close".to_string()
+            } else {
+                "Create".to_string()
+            }
+        }
         ModalState::CreateChannel => match model.create_channel_modal().map(|state| state.step) {
             Some(CreateChannelWizardStep::Threshold) => "Create".to_string(),
             _ => "Next".to_string(),
@@ -478,6 +502,16 @@ pub(in crate::app) fn modal_view(
     } else {
         vec![]
     };
+
+    let footer_actions =
+        if matches!(modal, ModalState::CreateInvitation) && model.last_invite_code.is_some() {
+            vec![ModalFooterActionView {
+                control_id: Some(ControlId::ModalCopyButton),
+                label: "Copy Code".to_string(),
+            }]
+        } else {
+            vec![]
+        };
 
     let selectable_items = match modal {
         ModalState::CreateChannel => model
@@ -547,10 +581,58 @@ pub(in crate::app) fn modal_view(
         details,
         keybind_rows,
         inputs,
+        values,
         selectable_items,
         enter_label,
         footer_shortcuts,
+        footer_actions,
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::*;
+    use crate::model::CreateInvitationModalState;
+
+    #[test]
+    fn create_invitation_modal_shows_generated_code_and_copy_action() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.last_invite_code = Some("INVITE-123".to_string());
+        model.active_modal = Some(ActiveModal::CreateInvitation(
+            CreateInvitationModalState::default(),
+        ));
+
+        let Some(modal) = modal_view(&model, &ChatRuntimeView::default()) else {
+            panic!("create invitation modal should render");
+        };
+
+        assert_eq!(modal.enter_label, "Close");
+        assert_eq!(modal.values.len(), 1);
+        assert_eq!(modal.values[0].label, "Invite Code");
+        assert_eq!(modal.values[0].value, "INVITE-123");
+        assert_eq!(modal.footer_actions.len(), 1);
+        assert_eq!(
+            modal.footer_actions[0].control_id,
+            Some(ControlId::ModalCopyButton)
+        );
+    }
+
+    #[test]
+    fn create_invitation_modal_without_generated_code_keeps_create_state() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.active_modal = Some(ActiveModal::CreateInvitation(
+            CreateInvitationModalState::default(),
+        ));
+
+        let Some(modal) = modal_view(&model, &ChatRuntimeView::default()) else {
+            panic!("create invitation modal should render");
+        };
+
+        assert_eq!(modal.enter_label, "Create");
+        assert!(modal.values.is_empty());
+        assert!(modal.footer_actions.is_empty());
+    }
 }
 
 fn help_modal_content(screen: ScreenId) -> (Vec<String>, Vec<(String, String)>) {

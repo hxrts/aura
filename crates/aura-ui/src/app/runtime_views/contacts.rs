@@ -18,6 +18,11 @@ pub(in crate::app) struct ContactsRuntimeContact {
     pub(in crate::app) is_online: bool,
     pub(in crate::app) relationship_state: ContactRelationshipState,
     pub(in crate::app) confirmation: ConfirmationState,
+    /// Invitation code that established this contact, from the
+    /// authoritative Contact view. Sourced from
+    /// `ContactFact::Added.invitation_code`; `None` for contacts added
+    /// through non-invitation paths or legacy facts.
+    pub(in crate::app) invitation_code: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,6 +74,7 @@ fn build_contacts_runtime_view(
                 ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
                 _ => ConfirmationState::Confirmed,
             },
+            invitation_code: contact.invitation_code.clone(),
         })
         .collect();
     rows.sort_by(|left, right| left.name.cmp(&right.name));
@@ -126,6 +132,7 @@ pub(in crate::app) async fn load_contacts_runtime_view(
                     contact.name.clone(),
                     contact.is_guardian,
                     contact.relationship_state,
+                    contact.invitation_code.clone(),
                 )
             })
             .collect(),
@@ -159,6 +166,7 @@ mod tests {
                 is_online: true,
                 read_receipt_policy: ReadReceiptPolicy::default(),
                 relationship_state: ContactRelationshipState::Contact,
+                invitation_code: None,
             },
             Contact {
                 id: bob,
@@ -170,6 +178,7 @@ mod tests {
                 is_online: false,
                 read_receipt_policy: ReadReceiptPolicy::default(),
                 relationship_state: ContactRelationshipState::PendingOutbound,
+                invitation_code: None,
             },
             Contact {
                 id: carol,
@@ -181,6 +190,7 @@ mod tests {
                 is_online: false,
                 read_receipt_policy: ReadReceiptPolicy::default(),
                 relationship_state: ContactRelationshipState::PendingInbound,
+                invitation_code: None,
             },
             Contact {
                 id: dave,
@@ -192,6 +202,7 @@ mod tests {
                 is_online: true,
                 read_receipt_policy: ReadReceiptPolicy::default(),
                 relationship_state: ContactRelationshipState::Friend,
+                invitation_code: None,
             },
         ]);
         let discovered = DiscoveredPeersState {

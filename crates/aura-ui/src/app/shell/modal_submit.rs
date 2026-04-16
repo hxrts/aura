@@ -797,6 +797,7 @@ fn submit_simple_modal_action(
                                             .complete_runtime_contact_invitation_acceptance(
                                                 accepted_authority_id,
                                                 display_name,
+                                                Some(code.clone()),
                                             );
                                         let post_accept_app_core = app_core.clone();
                                         spawn_ui(async move {
@@ -856,6 +857,15 @@ fn submit_simple_modal_action(
             true
         }
         SimpleModalSubmitAction::CreateInvitation => {
+            if current_model
+                .as_ref()
+                .is_some_and(|model| model.last_invite_code.is_some())
+            {
+                controller.close_modal();
+                rerender();
+                return true;
+            }
+
             let Some(create_state) = current_model
                 .as_ref()
                 .and_then(UiModel::create_invitation_modal)
@@ -905,8 +915,7 @@ fn submit_simple_modal_action(
                             source_operation: OperationId::invitation_create(),
                             code: Some(code),
                         });
-                        controller
-                            .complete_runtime_modal_success("Invitation code copied to clipboard");
+                        controller.info_toast("Invitation code copied to clipboard");
                         tracing::info!("create_invitation operation succeeded");
                         tracing::info!("create_invitation complete");
                     }

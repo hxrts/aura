@@ -380,6 +380,15 @@ impl<'a> InvitationContactHandler<'a> {
                     .await?;
                     effects.await_next_view_update().await;
 
+                    // Derive the shareable code from the originating
+                    // invitation so the contact record persists the code
+                    // that was exported for this invitation.
+                    let invitation_code =
+                        crate::handlers::invitation::shareable::ShareableInvitation::from(
+                            &invitation,
+                        )
+                        .to_code()
+                        .ok();
                     let contact_fact = ContactFact::Added {
                         context_id,
                         owner_id: self.handler.context.authority.authority_id(),
@@ -389,6 +398,7 @@ impl<'a> InvitationContactHandler<'a> {
                             ts_ms: now_ms,
                             uncertainty: None,
                         },
+                        invitation_code,
                     };
 
                     effects
@@ -779,7 +789,7 @@ impl<'a> InvitationContactHandler<'a> {
         &self,
         effects: &AuraEffectSystem,
         invitation_id: &InvitationId,
-    ) -> AgentResult<Option<(AuthorityId, String)>> {
+    ) -> AgentResult<Option<(AuthorityId, String, Option<String>)>> {
         let own_id = self.handler.context.authority.authority_id();
 
         tracing::debug!(
@@ -807,12 +817,16 @@ impl<'a> InvitationContactHandler<'a> {
                     inv.sender_id
                 };
                 let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
+                let code = crate::handlers::invitation::shareable::ShareableInvitation::from(&inv)
+                    .to_code()
+                    .ok();
                 tracing::debug!(
                     contact_id = %other,
                     nickname = %nickname,
+                    has_code = code.is_some(),
                     "resolve_contact_invitation: resolved from cache"
                 );
-                return Ok(Some((other, nickname)));
+                return Ok(Some((other, nickname, code)));
             }
         } else {
             tracing::debug!(
@@ -831,16 +845,18 @@ impl<'a> InvitationContactHandler<'a> {
                 sender_id = %shareable.sender_id,
                 "resolve_contact_invitation: found in persisted store"
             );
-            if let InvitationType::Contact { nickname } = shareable.invitation_type {
+            if let InvitationType::Contact { nickname } = &shareable.invitation_type {
                 if shareable.sender_id != own_id {
                     let other = shareable.sender_id;
-                    let nickname = nickname.unwrap_or_else(|| other.to_string());
+                    let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
+                    let code = shareable.to_code().ok();
                     tracing::debug!(
                         contact_id = %other,
                         nickname = %nickname,
+                        has_code = code.is_some(),
                         "resolve_contact_invitation: resolved from persisted store"
                     );
-                    return Ok(Some((other, nickname)));
+                    return Ok(Some((other, nickname, code)));
                 }
             }
         } else {
@@ -902,7 +918,11 @@ impl<'a> InvitationContactHandler<'a> {
                 })
                 .unwrap_or_else(|| sender_id.to_string());
 
-            return Ok(Some((sender_id, nickname)));
+            // No code available via the fact-level fallback path — the
+            // invitation fact does not carry the exported code string.
+            // The cache and persisted-store paths above already returned
+            // with a code when one was derivable.
+            return Ok(Some((sender_id, nickname, None)));
         }
 
         Ok(None)

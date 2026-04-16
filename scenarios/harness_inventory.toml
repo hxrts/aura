@@ -34,6 +34,13 @@ runtime_substrate = "real_runtime"
 notes = "Primary shared contact/channel/message parity scenario."
 
 [[scenario]]
+id = "mixed-contact-invite-notification-roundtrip"
+path = "scenarios/harness/mixed-contact-invite-notification-roundtrip.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Shared mixed-runtime contact invite roundtrip with creator-side acceptance notification assertions on the notifications screen."
+
+[[scenario]]
 id = "shared-notifications-and-authority"
 path = "scenarios/harness/shared-notifications-and-authority.toml"
 classification = "shared"

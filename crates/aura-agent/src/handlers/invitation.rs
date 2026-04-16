@@ -891,6 +891,12 @@ impl InvitationHandler {
                 &invitation.invitation_type,
             )
         {
+            // Reissuance: we always emit a ContactFact::Added here so the
+            // recorded invitation_code reflects the latest invitation the
+            // sender issued. The signal-view reducer only overwrites the
+            // code when the incoming fact carries one, so re-emits with
+            // the new code update the contact record; nickname and other
+            // fields are preserved by the reducer on idempotent re-adds.
             let sender_contact_exists = self
                 .sender_contact_exists(
                     effects.as_ref(),
@@ -898,7 +904,17 @@ impl InvitationHandler {
                     invitation.receiver_id,
                 )
                 .await;
-            if !sender_contact_exists {
+            let should_emit_contact_fact = !sender_contact_exists;
+            let should_update_code = sender_contact_exists;
+            if should_emit_contact_fact || should_update_code {
+                // Derive the shareable code from the invitation so the
+                // contact record persists the code that was (or will be)
+                // exported for this invitation. Errors fall through as
+                // None — the contact is still valid without the code.
+                let invitation_code =
+                    crate::handlers::invitation::shareable::ShareableInvitation::from(&invitation)
+                        .to_code()
+                        .ok();
                 let contact_fact = ContactFact::Added {
                     context_id: invitation.context_id,
                     owner_id: invitation.sender_id,
@@ -908,6 +924,7 @@ impl InvitationHandler {
                         ts_ms: current_time,
                         uncertainty: None,
                     },
+                    invitation_code,
                 };
 
                 timeout_prepare_invitation_stage(
@@ -1145,7 +1162,7 @@ impl InvitationHandler {
     ) -> AgentResult<()> {
         // Accepting a contact invitation must materialize sender contact state so
         // CONTACTS_SIGNAL converges from facts rather than UI-local mutation.
-        if let Some((contact_id, nickname)) = self
+        if let Some((contact_id, nickname, invitation_code)) = self
             .resolve_contact_invitation(effects, invitation_id)
             .await?
         {
@@ -1159,6 +1176,7 @@ impl InvitationHandler {
                     ts_ms: accepted_at_ms,
                     uncertainty: None,
                 },
+                invitation_code,
             };
 
             tracing::debug!(
@@ -1451,7 +1469,7 @@ impl InvitationHandler {
         &self,
         effects: &AuraEffectSystem,
         invitation_id: &InvitationId,
-    ) -> AgentResult<Option<(AuthorityId, String)>> {
+    ) -> AgentResult<Option<(AuthorityId, String, Option<String>)>> {
         InvitationContactHandler::new(self)
             .resolve_contact_invitation(effects, invitation_id)
             .await
@@ -3615,7 +3633,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn creating_contact_invitation_does_not_overwrite_existing_sender_contact() {
+    async fn creating_contact_invitation_reissues_fact_with_current_code() {
+        // Reissuance semantic: when a sender calls
+        // create_invitation for a target that already has a pending
+        // contact record, a new ContactFact::Added is emitted so the
+        // recorded invitation_code reflects the latest reissued code. The
+        // signal-view reducer preserves user-set nickname on re-emits;
+        // the journal-level assertion here is that reissuance does
+        // produce a fact (count increases) and that the latest fact
+        // carries an invitation_code.
         let sender_id = AuthorityId::new_from_entropy([130u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([131u8; 32]);
         let config = AgentConfig::default();
@@ -3634,6 +3660,7 @@ mod tests {
                 ts_ms: 1,
                 uncertainty: None,
             },
+            invitation_code: None,
         };
         effects
             .commit_generic_fact_bytes(
@@ -3645,30 +3672,35 @@ mod tests {
             .unwrap();
         effects.await_next_view_update().await;
 
-        let before_count = effects
-            .load_committed_facts(sender_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .filter_map(|fact| match fact.content {
-                FactContent::Relational(RelationalFact::Generic { envelope, .. })
-                    if envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID =>
-                {
-                    ContactFact::from_envelope(&envelope)
-                }
-                _ => None,
-            })
-            .filter(|fact| {
-                matches!(
-                    fact,
-                    ContactFact::Added {
-                        owner_id,
-                        contact_id,
-                        ..
-                    } if *owner_id == sender_id && *contact_id == receiver_id
-                )
-            })
-            .count();
+        let collect_added_facts = |effects: Arc<AuraEffectSystem>| async move {
+            effects
+                .load_committed_facts(sender_id)
+                .await
+                .unwrap()
+                .into_iter()
+                .filter_map(|fact| match fact.content {
+                    FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                        if envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID =>
+                    {
+                        ContactFact::from_envelope(&envelope)
+                    }
+                    _ => None,
+                })
+                .filter(|fact| {
+                    matches!(
+                        fact,
+                        ContactFact::Added {
+                            owner_id,
+                            contact_id,
+                            ..
+                        } if *owner_id == sender_id && *contact_id == receiver_id
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let before = collect_added_facts(effects.clone()).await;
+        let before_count = before.len();
 
         handler
             .create_invitation(
@@ -3681,34 +3713,30 @@ mod tests {
             .await
             .unwrap();
 
-        let after_count = effects
-            .load_committed_facts(sender_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .filter_map(|fact| match fact.content {
-                FactContent::Relational(RelationalFact::Generic { envelope, .. })
-                    if envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID =>
-                {
-                    ContactFact::from_envelope(&envelope)
-                }
-                _ => None,
-            })
-            .filter(|fact| {
-                matches!(
-                    fact,
-                    ContactFact::Added {
-                        owner_id,
-                        contact_id,
-                        ..
-                    } if *owner_id == sender_id && *contact_id == receiver_id
-                )
-            })
-            .count();
-
+        let after = collect_added_facts(effects.clone()).await;
         assert_eq!(
-            after_count, before_count,
-            "sender-side contact materialization should not overwrite an existing contact"
+            after.len(),
+            before_count + 1,
+            "reissuance should emit a new ContactFact::Added with the updated invitation code"
+        );
+
+        // The reissue should produce at least one Added fact that carries
+        // a derived invitation code. (The signal-view reducer treats
+        // later Addeds as last-writer-wins for the code field.)
+        let has_code = after.iter().any(|fact| {
+            matches!(
+                fact,
+                ContactFact::Added {
+                    invitation_code: Some(_),
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_code,
+            "reissuance emission should carry a derived invitation code \
+             (none of {} Added facts had a code)",
+            after.len()
         );
     }
 

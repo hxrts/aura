@@ -3284,6 +3284,7 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
 
         {

@@ -38,7 +38,7 @@ mod tests {
         ScreenId, UiReadiness,
     };
     use aura_app::ui::types::StateSnapshot;
-    use aura_app::ui_contract::RuntimeFact;
+    use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
     use aura_core::effects::PhysicalTimeEffects;
     use aura_core::{
         execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError,
@@ -990,6 +990,40 @@ mod tests {
                 && !production_source.contains("if home_ids.is_empty()"),
             "ready-state TUI export must stay pure projection without reconstruction fallbacks"
         );
+    }
+
+    #[test]
+    fn semantic_snapshot_exports_passive_notification_runtime_items() {
+        let mut state = TuiState::new();
+        state.notifications.selected_index = 0;
+        state.upsert_runtime_fact(RuntimeFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: Some("peer-a".to_string()),
+            operation_state: Some(OperationState::Succeeded),
+        });
+
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        );
+
+        let notifications = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Notifications)
+            .unwrap_or_else(|| panic!("notifications list should exist"));
+
+        assert!(notifications
+            .items
+            .iter()
+            .any(|item| item.id == "contact-accepted:peer-a"));
     }
 
     #[test]

@@ -11,4 +11,8 @@ pub struct NotificationsViewState {
     pub selected_index: usize,
     /// Total notification count (for wrap-around navigation)
     pub item_count: usize,
+    /// Base invitation + recovery notification count.
+    pub base_item_count: usize,
+    /// Stored runtime-event-backed notification count.
+    pub runtime_item_count: usize,
 }

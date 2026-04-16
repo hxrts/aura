@@ -11,8 +11,10 @@ use aura_app::ui::contract::{
     screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
     ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
 };
+use aura_app::ui::types::StateSnapshot;
 use aura_app::ui_contract::{
-    next_projection_revision, ProjectionRevision, QuiescenceSnapshot, QuiescenceState,
+    next_projection_revision, InvitationFactKind, OperationState, ProjectionRevision,
+    QuiescenceSnapshot, QuiescenceState, RuntimeFact,
 };
 use parking_lot::Mutex;
 use std::fs;
@@ -45,6 +47,52 @@ fn configured_ui_state_socket() -> Option<&'static PathBuf> {
 
 fn last_written_snapshot() -> &'static Mutex<Option<Vec<u8>>> {
     LAST_WRITTEN_SNAPSHOT.get_or_init(|| Mutex::new(None))
+}
+
+fn passive_notification_runtime_fact_id(fact: &RuntimeFact) -> Option<String> {
+    match fact {
+        RuntimeFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: Some(authority_id),
+            operation_state: Some(OperationState::Succeeded),
+        } => Some(format!("contact-accepted:{authority_id}")),
+        RuntimeFact::GuardianInvitationAccepted { authority_id, .. } => Some(format!(
+            "guardian-accepted:{}",
+            authority_id.as_deref().unwrap_or("*")
+        )),
+        RuntimeFact::DeviceEnrollmentAccepted { device_id, .. } => Some(format!(
+            "device-accepted:{}",
+            device_id.as_deref().unwrap_or("*")
+        )),
+        _ => None,
+    }
+}
+
+fn exported_notification_ids(state: &TuiState, app_snapshot: &StateSnapshot) -> Vec<String> {
+    let mut notification_ids = app_snapshot
+        .invitations
+        .all_pending()
+        .iter()
+        .filter(|invitation| {
+            invitation.direction == aura_app::ui::types::InvitationDirection::Received
+                && invitation.status == aura_app::ui::types::InvitationStatus::Pending
+        })
+        .map(|invitation| invitation.id.clone())
+        .collect::<Vec<_>>();
+    notification_ids.extend(
+        app_snapshot
+            .recovery
+            .pending_requests()
+            .iter()
+            .map(|request| request.id.to_string()),
+    );
+    notification_ids.extend(
+        state
+            .runtime_facts
+            .iter()
+            .filter_map(passive_notification_runtime_fact_id),
+    );
+    notification_ids
 }
 
 fn write_snapshot_file(path: &Path, snapshot_json: &str) -> io::Result<()> {
@@ -153,14 +201,7 @@ fn build_authoritative_ui_snapshot(
         selected_contact_id,
     );
 
-    let notification_ids = app_snapshot
-        .invitations
-        .all_pending()
-        .iter()
-        .chain(app_snapshot.invitations.all_sent().iter())
-        .chain(app_snapshot.invitations.all_history().iter())
-        .map(|invitation| invitation.id.clone())
-        .collect::<Vec<_>>();
+    let notification_ids = exported_notification_ids(state, app_snapshot);
     let notification_items = notification_ids
         .iter()
         .enumerate()

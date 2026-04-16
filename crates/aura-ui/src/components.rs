@@ -37,17 +37,31 @@ pub struct ModalInputView {
 }
 
 #[derive(Clone, PartialEq)]
+pub struct ModalValueView {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ModalFooterActionView {
+    pub control_id: Option<ControlId>,
+    pub label: String,
+}
+
+#[derive(Clone, PartialEq)]
 pub struct ModalView {
     pub modal_id: ModalId,
     pub title: String,
     pub details: Vec<String>,
     pub keybind_rows: Vec<(String, String)>,
     pub inputs: Vec<ModalInputView>,
+    pub values: Vec<ModalValueView>,
     pub selectable_items: Vec<SelectableItem>,
     pub enter_label: String,
     /// Optional shortcut buttons shown in the footer (e.g., demo invitation codes).
     /// Each entry is (label, value) where value is filled into the first input field.
     pub footer_shortcuts: Vec<(String, String)>,
+    pub footer_actions: Vec<ModalFooterActionView>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -257,6 +271,7 @@ pub fn UiModal(
     on_input_change: EventHandler<(FieldId, String)>,
     on_input_focus: EventHandler<FieldId>,
     #[props(default)] on_toggle_selection: Option<EventHandler<usize>>,
+    #[props(default)] on_footer_action: Option<EventHandler<usize>>,
 ) -> Element {
     rsx! {
         div {
@@ -294,6 +309,24 @@ pub fn UiModal(
                     }
                     for line in modal.details {
                         p { class: "m-0 whitespace-pre-wrap break-words", "{line}" }
+                    }
+                    if !modal.values.is_empty() {
+                        div {
+                            class: "space-y-3",
+                            for value_view in modal.values.clone() {
+                                div {
+                                    class: "rounded-sm border border-border bg-background/70 px-3 py-3",
+                                    p {
+                                        class: "m-0 text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
+                                        "{value_view.label}"
+                                    }
+                                    p {
+                                        class: "m-0 mt-2 break-all font-mono text-sm text-foreground",
+                                        "{value_view.value}"
+                                    }
+                                }
+                            }
+                        }
                     }
                     if !modal.keybind_rows.is_empty() {
                         div {
@@ -379,6 +412,25 @@ pub fn UiModal(
                 }
                 div {
                     class: "bg-card px-4 pt-4 pb-3 border-t border-border flex items-center justify-end gap-2",
+                        for (index, action) in modal.footer_actions.clone().into_iter().enumerate() {
+                            UiButton {
+                                id: action
+                                    .control_id
+                                    .and_then(ControlId::web_dom_id)
+                                    .map(str::to_string),
+                                label: action.label,
+                                variant: ButtonVariant::Secondary,
+                                width_class: None,
+                                onclick: {
+                                    let handler = on_footer_action;
+                                    move |_| {
+                                        if let Some(handler) = handler.as_ref() {
+                                            handler.call(index);
+                                        }
+                                    }
+                                },
+                            }
+                        }
                         for (shortcut_label, shortcut_value) in modal.footer_shortcuts.clone() {
                             UiButton {
                                 label: shortcut_label,

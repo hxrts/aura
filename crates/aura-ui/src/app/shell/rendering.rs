@@ -525,6 +525,25 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                     controller.toggle_selectable_item(index);
                                     render_tick.set(render_tick() + 1);
                                 }
+                            },
+                            on_footer_action: {
+                                let controller = controller.clone();
+                                move |index: usize| {
+                                    if index == 0
+                                        && matches!(modal_state, Some(ModalState::CreateInvitation))
+                                    {
+                                        if let Some(code) = controller
+                                            .ui_model()
+                                            .and_then(|model| model.last_invite_code)
+                                        {
+                                            controller.write_clipboard(&code);
+                                            controller.info_toast(
+                                                "Invitation code copied to clipboard",
+                                            );
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    }
+                                }
                             }
                         }
                         }
@@ -689,6 +708,25 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             move |index: usize| {
                                 controller.toggle_selectable_item(index);
                                 render_tick.set(render_tick() + 1);
+                            }
+                        },
+                        on_footer_action: {
+                            let controller = controller.clone();
+                            move |index: usize| {
+                                if index == 0
+                                    && matches!(modal_state, Some(ModalState::CreateInvitation))
+                                {
+                                    if let Some(code) = controller
+                                        .ui_model()
+                                        .and_then(|model| model.last_invite_code)
+                                    {
+                                        controller.write_clipboard(&code);
+                                        controller.info_toast(
+                                            "Invitation code copied to clipboard",
+                                        );
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                }
                             }
                         }
                         }

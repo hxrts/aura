@@ -234,6 +234,7 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
         {
             let mut core = app_core.write().await;
@@ -275,6 +276,7 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
         let channel_id = ChannelId::from_bytes([9u8; 32]);
         {

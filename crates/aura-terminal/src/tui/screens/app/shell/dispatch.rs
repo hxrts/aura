@@ -23,6 +23,7 @@ pub(super) enum NotificationSelection {
     ReceivedInvitation(String),
     SentInvitation(String),
     RecoveryRequest(String),
+    PassiveRuntimeEvent(String),
 }
 
 pub(super) async fn complete_ready_join_binding_submissions(
@@ -163,10 +164,27 @@ pub(super) fn set_authoritative_operation_state_sanctioned(
     state.set_authoritative_operation_state(operation_id, instance_id, causality, next_state);
 }
 
+fn runtime_notification_timestamp(total_facts: usize, index: usize) -> u64 {
+    u64::MAX.saturating_sub(total_facts.saturating_sub(index) as u64)
+}
+
+fn is_passive_notification_runtime_fact(fact: &RuntimeFact) -> bool {
+    matches!(
+        fact,
+        RuntimeFact::InvitationAccepted {
+            invitation_kind: aura_app::ui_contract::InvitationFactKind::Contact,
+            operation_state: Some(OperationState::Succeeded),
+            ..
+        } | RuntimeFact::GuardianInvitationAccepted { .. }
+            | RuntimeFact::DeviceEnrollmentAccepted { .. }
+    )
+}
+
 pub(super) fn read_selected_notification(
     selected_index: usize,
     invitations: &std::sync::Arc<parking_lot::RwLock<Vec<Invitation>>>,
     pending_requests: &std::sync::Arc<parking_lot::RwLock<Vec<crate::tui::types::PendingRequest>>>,
+    runtime_facts: &[RuntimeFact],
 ) -> Option<NotificationSelection> {
     let invitation_items = invitations
         .read()
@@ -200,8 +218,23 @@ pub(super) fn read_selected_notification(
         })
         .collect::<Vec<_>>();
 
+    let runtime_items = runtime_facts
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, fact)| {
+            if !is_passive_notification_runtime_fact(fact) {
+                return None;
+            }
+            Some((
+                runtime_notification_timestamp(runtime_facts.len(), idx),
+                NotificationSelection::PassiveRuntimeEvent(fact.key()),
+            ))
+        })
+        .collect::<Vec<_>>();
+
     let mut notifications = invitation_items;
     notifications.extend(recovery_items);
+    notifications.extend(runtime_items);
     notifications.sort_by(|left, right| right.0.cmp(&left.0));
 
     notifications
@@ -430,6 +463,7 @@ pub(super) fn execute_harness_followup_command(
                 state.notifications.selected_index,
                 shared_invitations,
                 shared_pending_requests,
+                &state.runtime_facts,
             );
             let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected else {
                 return Err("Select a received invitation to accept".to_string());

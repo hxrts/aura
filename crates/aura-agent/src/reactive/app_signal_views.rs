@@ -596,6 +596,7 @@ impl ReactiveView for ContactsSignalView {
                                 contact_id,
                                 nickname,
                                 added_at,
+                                invitation_code,
                                 ..
                             } => {
                                 tracing::info!(
@@ -621,6 +622,13 @@ impl ReactiveView for ContactsSignalView {
                                         contact.nickname_suggestion = Some(suggested_name);
                                     }
                                     contact.last_interaction = Some(added_at.ts_ms);
+                                    // Only overwrite the invitation code if the incoming
+                                    // fact carries one — later plain contact updates (e.g.
+                                    // nickname changes) should preserve the code that was
+                                    // recorded at establishment time.
+                                    if invitation_code.is_some() {
+                                        contact.invitation_code = invitation_code;
+                                    }
                                 } else {
                                     // Contact invitations carry an optional nickname, which we treat as
                                     // a nickname_suggestion. The user's nickname is a separate local label.
@@ -638,6 +646,7 @@ impl ReactiveView for ContactsSignalView {
                                         is_online: false,
                                         read_receipt_policy: ReadReceiptPolicy::default(),
                                         relationship_state: ContactRelationshipState::Contact,
+                                        invitation_code,
                                     });
                                 }
                                 changed = true;
@@ -2189,6 +2198,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn contacts_signal_view_surfaces_invitation_code_from_contact_added_fact() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([61u8; 32]);
+        let peer = AuthorityId::new_from_entropy([62u8; 32]);
+        let contact_context = ContextId::new_from_entropy([63u8; 32]);
+        let view = ContactsSignalView::new(own_authority, reactive.clone());
+
+        // New contact established with an invitation code: the code must
+        // land on the Contact view.
+        let contact_added = ContactFact::Added {
+            context_id: contact_context,
+            owner_id: own_authority,
+            contact_id: peer,
+            nickname: "Peer".to_string(),
+            added_at: PhysicalTime {
+                ts_ms: 10,
+                uncertainty: None,
+            },
+            invitation_code: Some("aura:v1:INITIAL".to_string()),
+        }
+        .to_generic();
+        view.update(&[fact_from_relational(contact_added)]).await;
+
+        let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
+        assert_eq!(
+            contacts
+                .contact(&peer)
+                .and_then(|c| c.invitation_code.clone()),
+            Some("aura:v1:INITIAL".to_string())
+        );
+
+        // Reissuance: a later Added fact with a different code overwrites
+        // the previous code (last-writer-wins on the code field).
+        let reissued = ContactFact::Added {
+            context_id: contact_context,
+            owner_id: own_authority,
+            contact_id: peer,
+            nickname: "Peer".to_string(),
+            added_at: PhysicalTime {
+                ts_ms: 20,
+                uncertainty: None,
+            },
+            invitation_code: Some("aura:v1:REISSUED".to_string()),
+        }
+        .to_generic();
+        view.update(&[fact_from_relational(reissued)]).await;
+
+        let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
+        assert_eq!(
+            contacts
+                .contact(&peer)
+                .and_then(|c| c.invitation_code.clone()),
+            Some("aura:v1:REISSUED".to_string())
+        );
+
+        // A later fact without a code (e.g. a rename-equivalent) must
+        // preserve the previously recorded code.
+        let no_code = ContactFact::Added {
+            context_id: contact_context,
+            owner_id: own_authority,
+            contact_id: peer,
+            nickname: "Peer".to_string(),
+            added_at: PhysicalTime {
+                ts_ms: 30,
+                uncertainty: None,
+            },
+            invitation_code: None,
+        }
+        .to_generic();
+        view.update(&[fact_from_relational(no_code)]).await;
+
+        let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
+        assert_eq!(
+            contacts
+                .contact(&peer)
+                .and_then(|c| c.invitation_code.clone()),
+            Some("aura:v1:REISSUED".to_string()),
+            "absent invitation_code must preserve previously recorded code"
+        );
+    }
+
+    #[tokio::test]
     async fn contacts_signal_view_projects_friendship_states_from_relational_facts() {
         let reactive = ReactiveHandler::new();
         register_app_signals(&reactive).await.unwrap();
@@ -2209,6 +2301,7 @@ mod tests {
                 ts_ms: 10,
                 uncertainty: None,
             },
+            invitation_code: None,
         }
         .to_generic();
         view.update(&[fact_from_relational(contact_added)]).await;

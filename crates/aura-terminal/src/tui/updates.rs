@@ -279,6 +279,9 @@ pub enum UiUpdate {
     /// Pending startup runtime bootstrap finished converging.
     RuntimeBootstrapFinalized,
 
+    /// A locally observed runtime fact should be persisted into TUI state.
+    RuntimeFactObserved(RuntimeFact),
+
     /// Device enrollment ("add device") ceremony started.
     DeviceEnrollmentStarted {
         ceremony_id: String,

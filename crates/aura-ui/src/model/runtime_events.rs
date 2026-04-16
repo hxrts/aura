@@ -58,7 +58,13 @@ impl UiController {
 
     pub fn publish_runtime_contacts_projection(
         &self,
-        contacts: Vec<(AuthorityId, String, bool, ContactRelationshipState)>,
+        contacts: Vec<(
+            AuthorityId,
+            String,
+            bool,
+            ContactRelationshipState,
+            Option<String>,
+        )>,
         facts: Vec<RuntimeFact>,
     ) {
         self.try_update_model(|model| {
@@ -81,7 +87,7 @@ impl UiController {
         relationship_state: ContactRelationshipState,
     ) {
         self.try_update_model(|model| {
-            model.ensure_runtime_contact(authority_id, name, is_guardian, relationship_state);
+            model.ensure_runtime_contact(authority_id, name, is_guardian, relationship_state, None);
         });
         self.request_rerender();
     }
@@ -117,10 +123,16 @@ impl UiController {
 
     /// Apply the shared UI completion effects for a successful imported contact
     /// invitation acceptance.
+    ///
+    /// `invitation_code` is the code that was pasted/accepted — it is
+    /// recorded on the new contact's row so the Details panel can surface
+    /// the code used to establish the link. Phase 2 session-scoped; Phase 3
+    /// will persist this through the authoritative contact fact.
     pub fn complete_runtime_contact_invitation_acceptance(
         &self,
         authority_id: AuthorityId,
         display_name: String,
+        invitation_code: Option<String>,
     ) {
         let mut model = write_model(&self.model);
         model.ensure_runtime_contact(
@@ -128,6 +140,7 @@ impl UiController {
             display_name,
             false,
             ContactRelationshipState::Contact,
+            invitation_code,
         );
         model.push_runtime_fact(RuntimeFact::InvitationAccepted {
             invitation_kind: InvitationFactKind::Contact,

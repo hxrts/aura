@@ -24,6 +24,7 @@ use crate::tui::state::{
     GuardianSetupStep, NeighborhoodMode, QueuedModal, TuiState,
 };
 use crate::tui::types::{AccessLevel, Contact, Device};
+use aura_app::ui_contract::RuntimeFact;
 use aura_core::threshold::AgreementMode;
 use tracing::warn;
 
@@ -448,6 +449,7 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
 pub struct NotificationsViewProps {
     pub focus: crate::tui::navigation::TwoPanelFocus,
     pub selected_index: usize,
+    pub runtime_facts: Vec<RuntimeFact>,
 }
 
 /// Extract NotificationsScreen view props from TuiState
@@ -455,6 +457,7 @@ pub fn extract_notifications_view_props(state: &TuiState) -> NotificationsViewPr
     NotificationsViewProps {
         focus: state.notifications.focus,
         selected_index: state.notifications.selected_index,
+        runtime_facts: state.runtime_facts.clone(),
     }
 }
 

@@ -169,7 +169,6 @@ pub(in crate::app) fn export_invitation_action(
         {
             Ok(code) => {
                 controller.write_clipboard(&code);
-                controller.remember_invitation_code(&code);
                 controller.complete_runtime_modal_success("Invitation code copied to clipboard");
             }
             Err(error) => handle_workflow_error(&controller, error),

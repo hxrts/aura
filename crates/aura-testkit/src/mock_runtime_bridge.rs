@@ -321,6 +321,7 @@ impl MockRuntimeBridge {
                         is_online: false,
                         read_receipt_policy: ReadReceiptPolicy::default(),
                         relationship_state: ContactRelationshipState::Contact,
+                        invitation_code: None,
                     });
                 }
                 true
@@ -350,6 +351,7 @@ impl MockRuntimeBridge {
                     is_online: false,
                     read_receipt_policy: ReadReceiptPolicy::default(),
                     relationship_state: ContactRelationshipState::Contact,
+                    invitation_code: None,
                 });
                 true
             }
@@ -1274,6 +1276,7 @@ impl RuntimeBridge for MockRuntimeBridge {
                 is_online: false,
                 read_receipt_policy: ReadReceiptPolicy::default(),
                 relationship_state: ContactRelationshipState::Contact,
+                invitation_code: None,
             };
 
             // Add to contacts list, avoiding duplicates

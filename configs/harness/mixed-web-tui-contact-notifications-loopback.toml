@@ -1,0 +1,43 @@
+schema_version = 1
+
+[run]
+name = "mixed-web-tui-contact-notifications-loopback"
+pty_rows = 40
+pty_cols = 120
+artifact_dir = "artifacts/harness/mixed-web-tui-contact-notifications-loopback"
+
+[[instances]]
+id = "alice"
+mode = "local"
+data_dir = "artifacts/harness/state/mixed-web-tui-contact-notifications-loopback/alice"
+device_id = "alice-local-21"
+bind_address = "127.0.0.1:43121"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19553
+
+[[instances]]
+id = "bob"
+mode = "browser"
+data_dir = ".tmp/harness-browser/mixed-web-tui-contact-notifications-loopback/bob"
+device_id = "bob-browser-21"
+bind_address = "127.0.0.1:53121"
+demo_mode = false
+env = [
+  "AURA_HARNESS_BROWSER_HEADLESS=true",
+]
+
+[[instances]]
+id = "carol"
+mode = "browser"
+data_dir = ".tmp/harness-browser/mixed-web-tui-contact-notifications-loopback/carol"
+device_id = "carol-browser-21"
+bind_address = "127.0.0.1:53122"
+demo_mode = false
+env = [
+  "AURA_HARNESS_BROWSER_HEADLESS=true",
+]

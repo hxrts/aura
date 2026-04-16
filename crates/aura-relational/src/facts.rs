@@ -128,6 +128,13 @@ pub enum ContactFact {
         nickname: String,
         /// Timestamp when contact was added (uses unified time system)
         added_at: PhysicalTime,
+        /// Invitation code that was used to establish this contact, if
+        /// the link was established via invitation. Captured at the
+        /// point of creation/acceptance so it survives across app
+        /// restarts. `None` for contacts added through non-invitation
+        /// paths.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invitation_code: Option<String>,
     },
     /// Contact removed from authority's contact list
     Removed {
@@ -216,6 +223,7 @@ impl ContactFact {
                 ts_ms: added_at_ms,
                 uncertainty: None,
             },
+            invitation_code: None,
         }
     }
 
@@ -524,6 +532,64 @@ mod tests {
         } else {
             panic!("Expected Generic variant");
         }
+    }
+
+    #[test]
+    fn contact_added_roundtrips_invitation_code() {
+        let fact = ContactFact::Added {
+            context_id: test_context_id(),
+            owner_id: test_authority_id(1),
+            contact_id: test_authority_id(2),
+            nickname: "Alice".to_string(),
+            added_at: PhysicalTime {
+                ts_ms: 1234567890,
+                uncertainty: None,
+            },
+            invitation_code: Some("aura:v1:ABC123".to_string()),
+        };
+
+        let envelope = fact.to_envelope();
+        let Some(restored) = ContactFact::from_envelope(&envelope) else {
+            panic!("roundtrip decode should succeed");
+        };
+
+        assert_eq!(fact, restored);
+        if let ContactFact::Added {
+            invitation_code, ..
+        } = restored
+        {
+            assert_eq!(invitation_code, Some("aura:v1:ABC123".to_string()));
+        } else {
+            panic!("Expected Added variant");
+        }
+    }
+
+    #[test]
+    fn contact_added_without_code_is_none_and_backward_compatible() {
+        // Using the legacy helper (no invitation_code parameter) yields
+        // None. Also verifies that the envelope encoding of a fact with
+        // invitation_code=None matches — important for ensuring that
+        // pre-existing journal data stays loadable after the field was
+        // added.
+        let fact = ContactFact::added_with_timestamp_ms(
+            test_context_id(),
+            test_authority_id(1),
+            test_authority_id(2),
+            "Alice".to_string(),
+            1234567890,
+        );
+        match &fact {
+            ContactFact::Added {
+                invitation_code, ..
+            } => assert!(invitation_code.is_none()),
+            other => panic!("expected Added, got {other:?}"),
+        }
+
+        let envelope = fact.to_envelope();
+        let Some(restored) = ContactFact::from_envelope(&envelope) else {
+            panic!("roundtrip decode should succeed");
+        };
+        assert_eq!(fact, restored);
     }
 
     /// Reducing the same fact twice produces identical bindings — needed

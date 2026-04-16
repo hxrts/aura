@@ -126,6 +126,13 @@ pub struct ContactRow {
     pub is_guardian: bool,
     pub relationship_state: ContactRelationshipState,
     pub confirmation: ConfirmationState,
+    /// Invitation code used to establish this contact, if known.
+    ///
+    /// Populated by the outbound create-invitation flow (with the generated
+    /// code) and the inbound accept flow (with the pasted code). Session
+    /// state only — not yet persisted across restarts. Preserved across
+    /// projections from the authoritative runtime contacts view.
+    pub invitation_code: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -472,6 +479,7 @@ impl UiModel {
             is_guardian: false,
             relationship_state: ContactRelationshipState::Contact,
             confirmation: ConfirmationState::Confirmed,
+            invitation_code: None,
         });
         if self.contacts.len() == 1 {
             self.selected_contact_id = Some(authority_id);
@@ -484,6 +492,7 @@ impl UiModel {
         name: String,
         is_guardian: bool,
         relationship_state: ContactRelationshipState,
+        invitation_code: Option<String>,
     ) {
         if let Some(existing) = self
             .contacts
@@ -497,6 +506,9 @@ impl UiModel {
                 ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
                 _ => ConfirmationState::Confirmed,
             };
+            if let Some(code) = invitation_code {
+                existing.invitation_code = Some(code);
+            }
             return;
         }
 
@@ -510,6 +522,7 @@ impl UiModel {
                 ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
                 _ => ConfirmationState::Confirmed,
             },
+            invitation_code,
         });
 
         if self.selected_contact_id.is_none() {
@@ -673,24 +686,47 @@ impl UiModel {
 
     pub fn replace_contacts(
         &mut self,
-        contacts: Vec<(AuthorityId, String, bool, ContactRelationshipState)>,
+        contacts: Vec<(
+            AuthorityId,
+            String,
+            bool,
+            ContactRelationshipState,
+            Option<String>,
+        )>,
     ) {
         let previous = self.selected_contact_id;
+        // Preserve invitation_code from the previous list as a fallback —
+        // outbound/inbound UI flows may populate the code session-locally
+        // before the authoritative fact has been projected into the view.
+        // Prefer the projection's value when present.
+        let previous_invitation_codes: std::collections::HashMap<AuthorityId, String> = self
+            .contacts
+            .iter()
+            .filter_map(|row| {
+                row.invitation_code
+                    .as_ref()
+                    .map(|code| (row.authority_id, code.clone()))
+            })
+            .collect();
         self.contacts = contacts
             .into_iter()
             .map(
-                |(authority_id, name, is_guardian, relationship_state)| ContactRow {
-                    authority_id,
-                    name,
-                    selected: false,
-                    is_guardian,
-                    relationship_state,
-                    confirmation: match relationship_state {
-                        ContactRelationshipState::PendingOutbound => {
-                            ConfirmationState::PendingLocal
-                        }
-                        _ => ConfirmationState::Confirmed,
-                    },
+                |(authority_id, name, is_guardian, relationship_state, invitation_code)| {
+                    ContactRow {
+                        authority_id,
+                        name,
+                        selected: false,
+                        is_guardian,
+                        relationship_state,
+                        confirmation: match relationship_state {
+                            ContactRelationshipState::PendingOutbound => {
+                                ConfirmationState::PendingLocal
+                            }
+                            _ => ConfirmationState::Confirmed,
+                        },
+                        invitation_code: invitation_code
+                            .or_else(|| previous_invitation_codes.get(&authority_id).cloned()),
+                    }
                 },
             )
             .collect();
@@ -1035,6 +1071,7 @@ impl UiController {
     ) {
         let mut model = write_model(&self.model);
         model.clear_operation(&OperationId::invitation_create());
+        model.last_invite_code = None;
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
             message: String::new(),
             ttl_hours: 24,
@@ -1064,6 +1101,34 @@ impl UiController {
     pub fn remember_invitation_code(&self, code: &str) {
         let mut model = write_model(&self.model);
         model.last_invite_code = Some(code.to_string());
+        drop(model);
+        self.request_rerender();
+    }
+
+    /// Record the invitation code associated with a specific contact.
+    ///
+    /// Called by the outbound create-invitation flow with the target
+    /// authority and the generated code, and by the inbound accept flow
+    /// with the sender authority and the pasted code. Updates the contact
+    /// row if it exists; contacts added later will pick up the code via
+    /// `ensure_runtime_contact`. Phase 2 session-scoped; Phase 3 will
+    /// persist it.
+    pub fn set_contact_invitation_code(&self, authority_id: AuthorityId, code: String) {
+        self.try_update_model(|model| {
+            if let Some(row) = model
+                .contacts
+                .iter_mut()
+                .find(|row| row.authority_id == authority_id)
+            {
+                row.invitation_code = Some(code);
+            }
+        });
+        self.request_rerender();
+    }
+
+    pub fn close_modal(&self) {
+        let mut model = write_model(&self.model);
+        model.dismiss_modal();
         drop(model);
         self.request_rerender();
     }
@@ -1217,11 +1282,166 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActiveModal, NeighborhoodMode, ScreenId, TextModalState, UiModel};
+    use super::{
+        ActiveModal, ContactRelationshipState, NeighborhoodMode, ScreenId, TextModalState, UiModel,
+    };
     use aura_app::ui::contract::{
         OperationId, OperationInstanceId, OperationState, RuntimeEventKind,
     };
     use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
+    use aura_core::types::identifiers::AuthorityId;
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    #[test]
+    fn ensure_runtime_contact_records_invitation_code_on_insert() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:ABC".to_string()),
+        );
+
+        let Some(row) = model.contacts.iter().find(|r| r.authority_id == alice) else {
+            panic!("contact should exist");
+        };
+        assert_eq!(row.invitation_code, Some("aura:v1:ABC".to_string()));
+    }
+
+    #[test]
+    fn ensure_runtime_contact_preserves_existing_code_when_none_supplied() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:KEEP".to_string()),
+        );
+        // Subsequent update without a code (e.g. a refresh projection
+        // that doesn't carry the code) must preserve the existing value.
+        model.ensure_runtime_contact(
+            alice,
+            "Alice Updated".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            None,
+        );
+
+        let Some(row) = model.contacts.iter().find(|r| r.authority_id == alice) else {
+            panic!("contact should exist");
+        };
+        assert_eq!(row.invitation_code, Some("aura:v1:KEEP".to_string()));
+        assert_eq!(row.name, "Alice Updated".to_string());
+    }
+
+    #[test]
+    fn ensure_runtime_contact_overwrites_code_on_reissue() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:OLD".to_string()),
+        );
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:NEW".to_string()),
+        );
+
+        let Some(row) = model.contacts.iter().find(|r| r.authority_id == alice) else {
+            panic!("contact should exist");
+        };
+        assert_eq!(row.invitation_code, Some("aura:v1:NEW".to_string()));
+    }
+
+    #[test]
+    fn replace_contacts_carries_invitation_code_from_projection() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+        let bob = test_authority(2);
+
+        model.replace_contacts(vec![
+            (
+                alice,
+                "Alice".to_string(),
+                false,
+                ContactRelationshipState::Contact,
+                Some("aura:v1:FROM_PROJECTION".to_string()),
+            ),
+            (
+                bob,
+                "Bob".to_string(),
+                false,
+                ContactRelationshipState::Contact,
+                None,
+            ),
+        ]);
+
+        assert_eq!(
+            model
+                .contacts
+                .iter()
+                .find(|r| r.authority_id == alice)
+                .and_then(|r| r.invitation_code.clone()),
+            Some("aura:v1:FROM_PROJECTION".to_string())
+        );
+        assert!(model
+            .contacts
+            .iter()
+            .find(|r| r.authority_id == bob)
+            .and_then(|r| r.invitation_code.clone())
+            .is_none());
+    }
+
+    #[test]
+    fn replace_contacts_preserves_ui_local_code_when_projection_is_none() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+
+        // Session-local code set by the UI flow before the authoritative
+        // fact is projected back.
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:SESSION".to_string()),
+        );
+
+        // Refresh projection from the runtime view that does not yet
+        // carry the code — the UI-local code should not be wiped.
+        model.replace_contacts(vec![(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            None,
+        )]);
+
+        assert_eq!(
+            model
+                .contacts
+                .iter()
+                .find(|r| r.authority_id == alice)
+                .and_then(|r| r.invitation_code.clone()),
+            Some("aura:v1:SESSION".to_string())
+        );
+    }
 
     #[test]
     fn set_screen_clears_input_mode_and_buffer() {

@@ -61,6 +61,17 @@ pub(super) fn ContactsScreen(
         .as_ref()
         .map(|contact| contact.name.clone())
         .unwrap_or_else(|| "none".to_string());
+    // Look up the invitation code the UI model has recorded for the
+    // selected contact. Populated by outbound create-invite and inbound
+    // accept flows. Phase 2: session-scoped; Phase 3 will surface it
+    // through the authoritative runtime view.
+    let selected_invitation_code = selected_contact.as_ref().and_then(|contact| {
+        model
+            .contacts
+            .iter()
+            .find(|row| row.authority_id == contact.authority_id)
+            .and_then(|row| row.invitation_code.clone())
+    });
     let invite_controller = controller.clone();
     let accept_invitation_controller = controller.clone();
     let start_chat_controller = controller.clone();
@@ -155,7 +166,10 @@ pub(super) fn ContactsScreen(
                                                         {
                                                             Ok(code) => {
                                                                 controller.write_clipboard(&code);
-                                                                controller.remember_invitation_code(&code);
+                                                                controller.set_contact_invitation_code(
+                                                                    authority_id,
+                                                                    code.clone(),
+                                                                );
                                                                 controller.push_runtime_fact(
                                                                     RuntimeFact::InvitationCodeReady {
                                                                         receiver_authority_id: Some(authority_id.to_string()),
@@ -294,7 +308,10 @@ pub(super) fn ContactsScreen(
                                                 {
                                                     Ok(code) => {
                                                         controller.write_clipboard(&code);
-                                                        controller.remember_invitation_code(&code);
+                                                        controller.set_contact_invitation_code(
+                                                            authority_id,
+                                                            code.clone(),
+                                                        );
                                                         controller.push_runtime_fact(
                                                             RuntimeFact::InvitationCodeReady {
                                                                 receiver_authority_id: Some(authority_id.to_string()),
@@ -347,6 +364,13 @@ pub(super) fn ContactsScreen(
                             secondary: contact.nickname_hint.clone().or_else(|| Some("No shared nickname suggestion".to_string())),
                             active: false,
                         }
+                        if let Some(code) = selected_invitation_code.as_ref() {
+                            UiListItem {
+                                label: format!("Invitation code: {code}"),
+                                secondary: Some("Code used to establish this contact".to_string()),
+                                active: false,
+                            }
+                        }
                         UiListItem {
                             label: if contact.is_online { "Status: Online".to_string() } else { "Status: Offline".to_string() },
                             secondary: Some(if contact.is_guardian {
@@ -381,13 +405,6 @@ pub(super) fn ContactsScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
-                            if let Some(code) = model.last_invite_code.as_ref() {
-                                div {
-                                    class: "w-full rounded-md border border-border bg-background/60 px-3 py-2 text-xs",
-                                    p { class: "m-0 text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground", "Last Invitation Code" }
-                                    p { class: "m-0 mt-1 break-all font-mono text-foreground", "{code}" }
-                                }
-                            }
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 if contacts_friend_action_controls(contact.relationship_state)
                                     .contains(&ControlId::ContactsSendFriendRequestButton) {

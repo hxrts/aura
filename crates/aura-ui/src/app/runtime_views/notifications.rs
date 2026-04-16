@@ -3,6 +3,9 @@ use aura_app::ui::signals::{CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL, R
 use aura_app::ui::types::{
     AppError, ContactRelationshipState, ContactsState, InvitationsState, RecoveryState,
 };
+use aura_app::ui_contract::{
+    InvitationFactKind, OperationState, RuntimeEventSnapshot, RuntimeFact,
+};
 use aura_core::effects::reactive::ReactiveEffects;
 use std::sync::Arc;
 
@@ -39,6 +42,7 @@ fn build_notifications_runtime_view(
     recovery: RecoveryState,
     contacts: ContactsState,
     error: Option<AppError>,
+    runtime_events: &[RuntimeEventSnapshot],
 ) -> NotificationsRuntimeView {
     let mut items = Vec::new();
 
@@ -225,6 +229,17 @@ fn build_notifications_runtime_view(
         });
     }
 
+    for (idx, event) in runtime_events.iter().enumerate() {
+        let Some(item) = runtime_event_notification(
+            event,
+            &contacts,
+            runtime_event_timestamp(runtime_events.len(), idx),
+        ) else {
+            continue;
+        };
+        items.push(item);
+    }
+
     if let Some(error) = error {
         items.push(NotificationRuntimeItem {
             id: "runtime-error".to_string(),
@@ -241,6 +256,110 @@ fn build_notifications_runtime_view(
     NotificationsRuntimeView {
         loaded: true,
         items,
+    }
+}
+
+fn runtime_event_timestamp(total_events: usize, index: usize) -> u64 {
+    u64::MAX.saturating_sub(total_events.saturating_sub(index) as u64)
+}
+
+fn display_contact_name(contact: &aura_app::ui::types::Contact) -> String {
+    if !contact.nickname.trim().is_empty() {
+        return contact.nickname.clone();
+    }
+    if let Some(suggestion) = contact
+        .nickname_suggestion
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return suggestion.clone();
+    }
+    contact.id.to_string().chars().take(8).collect()
+}
+
+fn display_contact_name_for_authority(contacts: &ContactsState, authority_id: &str) -> String {
+    contacts
+        .all_contacts()
+        .find(|contact| contact.id.to_string() == authority_id)
+        .map(display_contact_name)
+        .unwrap_or_else(|| authority_id.chars().take(8).collect())
+}
+
+fn runtime_event_notification(
+    event: &RuntimeEventSnapshot,
+    contacts: &ContactsState,
+    timestamp: u64,
+) -> Option<NotificationRuntimeItem> {
+    match &event.fact {
+        RuntimeFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: Some(authority_id),
+            operation_state: Some(OperationState::Succeeded),
+        } => {
+            let name = display_contact_name_for_authority(contacts, authority_id);
+            Some(NotificationRuntimeItem {
+                id: format!("contact-accepted:{authority_id}"),
+                kind_label: "Contact Invite Accepted".to_string(),
+                title: format!("{name} is now a contact"),
+                subtitle: "Contact link ready".to_string(),
+                detail: authority_id.clone(),
+                timestamp,
+                action: NotificationRuntimeAction::None,
+            })
+        }
+        RuntimeFact::GuardianInvitationAccepted {
+            authority_id,
+            guardian_name,
+        } => {
+            let name = guardian_name
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    authority_id
+                        .as_deref()
+                        .map(|value| display_contact_name_for_authority(contacts, value))
+                })
+                .unwrap_or_else(|| "Guardian".to_string());
+            Some(NotificationRuntimeItem {
+                id: format!(
+                    "guardian-accepted:{}",
+                    authority_id.as_deref().unwrap_or("*")
+                ),
+                kind_label: "Guardian Invite Accepted".to_string(),
+                title: format!("{name} is now a guardian"),
+                subtitle: "Guardian link ready".to_string(),
+                detail: authority_id.clone().unwrap_or_else(|| name.clone()),
+                timestamp,
+                action: NotificationRuntimeAction::None,
+            })
+        }
+        RuntimeFact::DeviceEnrollmentAccepted {
+            device_id,
+            device_name,
+            device_count,
+        } => {
+            let name = device_name
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| {
+                    device_id
+                        .as_deref()
+                        .map(|value| value.chars().take(8).collect())
+                        .unwrap_or_else(|| "Device".to_string())
+                });
+            Some(NotificationRuntimeItem {
+                id: format!("device-accepted:{}", device_id.as_deref().unwrap_or("*")),
+                kind_label: "Device Invite Accepted".to_string(),
+                title: format!("{name} joined this account"),
+                subtitle: device_count
+                    .map(|count| format!("{count} registered devices"))
+                    .unwrap_or_else(|| "Device enrollment completed".to_string()),
+                detail: device_id.clone().unwrap_or_else(|| name.clone()),
+                timestamp,
+                action: NotificationRuntimeAction::None,
+            })
+        }
+        _ => None,
     }
 }
 
@@ -263,7 +382,12 @@ pub(in crate::app) async fn load_notifications_runtime_view(
         let core = controller.app_core().read().await;
         core.read(&*ERROR_SIGNAL).await.unwrap_or_default()
     };
-    let runtime = build_notifications_runtime_view(invitations, recovery, contacts, error);
+    let runtime_events = controller
+        .ui_model()
+        .map(|model| model.runtime_events)
+        .unwrap_or_default();
+    let runtime =
+        build_notifications_runtime_view(invitations, recovery, contacts, error, &runtime_events);
     controller.publish_runtime_notifications_projection(
         runtime
             .items
@@ -273,4 +397,94 @@ pub(in crate::app) async fn load_notifications_runtime_view(
         Vec::new(),
     );
     runtime
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_app::ui::contract::RuntimeEventId;
+    use aura_app::ui::types::Contact;
+    use aura_app::views::ReadReceiptPolicy;
+    use aura_core::types::identifiers::AuthorityId;
+
+    #[test]
+    fn build_notifications_runtime_view_surfaces_contact_acceptance_events() {
+        let alice = AuthorityId::new_from_entropy([1u8; 32]);
+        let contacts = ContactsState::from_contacts([Contact {
+            id: alice,
+            nickname: "Alice".to_string(),
+            nickname_suggestion: None,
+            is_guardian: false,
+            is_member: false,
+            last_interaction: None,
+            is_online: true,
+            read_receipt_policy: ReadReceiptPolicy::default(),
+            relationship_state: ContactRelationshipState::Contact,
+            invitation_code: None,
+        }]);
+        let runtime = build_notifications_runtime_view(
+            InvitationsState::default(),
+            RecoveryState::default(),
+            contacts,
+            None,
+            &[RuntimeEventSnapshot {
+                id: RuntimeEventId("runtime-event-1".to_string()),
+                fact: RuntimeFact::InvitationAccepted {
+                    invitation_kind: InvitationFactKind::Contact,
+                    authority_id: Some(alice.to_string()),
+                    operation_state: Some(OperationState::Succeeded),
+                },
+            }],
+        );
+
+        assert_eq!(runtime.items.len(), 1);
+        assert_eq!(runtime.items[0].id, format!("contact-accepted:{alice}"));
+        assert_eq!(runtime.items[0].kind_label, "Contact Invite Accepted");
+        assert_eq!(runtime.items[0].title, "Alice is now a contact");
+    }
+
+    #[test]
+    fn build_notifications_runtime_view_surfaces_guardian_acceptance_events() {
+        let runtime = build_notifications_runtime_view(
+            InvitationsState::default(),
+            RecoveryState::default(),
+            ContactsState::default(),
+            None,
+            &[RuntimeEventSnapshot {
+                id: RuntimeEventId("runtime-event-2".to_string()),
+                fact: RuntimeFact::GuardianInvitationAccepted {
+                    authority_id: Some("guardian-1".to_string()),
+                    guardian_name: Some("Alice".to_string()),
+                },
+            }],
+        );
+
+        assert_eq!(runtime.items.len(), 1);
+        assert_eq!(runtime.items[0].id, "guardian-accepted:guardian-1");
+        assert_eq!(runtime.items[0].kind_label, "Guardian Invite Accepted");
+        assert_eq!(runtime.items[0].title, "Alice is now a guardian");
+    }
+
+    #[test]
+    fn build_notifications_runtime_view_surfaces_device_acceptance_events() {
+        let runtime = build_notifications_runtime_view(
+            InvitationsState::default(),
+            RecoveryState::default(),
+            ContactsState::default(),
+            None,
+            &[RuntimeEventSnapshot {
+                id: RuntimeEventId("runtime-event-3".to_string()),
+                fact: RuntimeFact::DeviceEnrollmentAccepted {
+                    device_id: Some("device-1".to_string()),
+                    device_name: Some("Laptop".to_string()),
+                    device_count: Some(2),
+                },
+            }],
+        );
+
+        assert_eq!(runtime.items.len(), 1);
+        assert_eq!(runtime.items[0].id, "device-accepted:device-1");
+        assert_eq!(runtime.items[0].kind_label, "Device Invite Accepted");
+        assert_eq!(runtime.items[0].title, "Laptop joined this account");
+    }
 }

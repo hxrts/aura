@@ -1017,6 +1017,7 @@ mod tests {
             is_online: false,
             read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
 
         emit_signal(
@@ -1074,6 +1075,7 @@ mod tests {
                     is_online: false,
                     read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
                     relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+                    invitation_code: None,
                 },
             ]),
             crate::signal_defs::CONTACTS_SIGNAL_NAME,
@@ -1574,6 +1576,7 @@ mod tests {
                     is_online: false,
                     read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
                     relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+                    invitation_code: None,
                 },
             ]),
             CONTACTS_SIGNAL_NAME,
