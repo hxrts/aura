@@ -1288,7 +1288,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let policy =
             aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::AmpEpochBump);
-        if policy.allows_mode(AgreementMode::ConsensusFinalized) {
+        let consensus_required = crate::runtime::consensus::consensus_required_for_authority(
+            effects.as_ref(),
+            authority_id,
+        )
+        .await;
+        if policy.allows_mode(AgreementMode::ConsensusFinalized) && consensus_required {
             let tree_state = effects
                 .get_current_state()
                 .await

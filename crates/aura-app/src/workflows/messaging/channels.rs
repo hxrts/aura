@@ -108,7 +108,7 @@ pub async fn create_channel_with_authoritative_binding(
                 );
             }
             let runtime = require_runtime(app_core).await?;
-            let context_id = current_home_context(app_core).await?;
+            let context_id = current_group_context(app_core).await?;
             channel_context = Some(context_id);
             let channel_hint = (!name.trim().is_empty())
                 .then(|| channel_id_from_input(name))

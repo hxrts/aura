@@ -66,6 +66,8 @@ struct BrowserDiagnosticScreenPayload {
     _normalized_screen: Option<String>,
     #[serde(default, rename = "capture_consistency")]
     _capture_consistency: Option<String>,
+    #[serde(default, rename = "screenshot_path")]
+    _screenshot_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1256,8 +1258,9 @@ fn require_existing_path(path: &Path, label: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        browser_app_url, control_selector, field_selector, navigation_control_id,
-        parse_bool_setting, parse_u64_setting, tool_key_name, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+        browser_app_url, control_selector, decode_rpc_payload, field_selector,
+        navigation_control_id, parse_bool_setting, parse_u64_setting, tool_key_name,
+        BrowserDiagnosticScreenPayload, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
         PLAYWRIGHT_DRIVER_OWNED_MARKER,
     };
     use crate::tool_api::ToolKey;
@@ -1344,6 +1347,24 @@ mod tests {
     #[test]
     fn browser_driver_maps_dismiss_key_name() {
         assert_eq!(tool_key_name(ToolKey::Esc), "esc");
+    }
+
+    #[test]
+    fn browser_diagnostic_snapshot_decode_accepts_optional_screenshot_path() {
+        let payload = serde_json::json!({
+            "screen": "Contacts",
+            "raw_screen": "Contacts",
+            "authoritative_screen": "Contacts",
+            "normalized_screen": "contacts",
+            "capture_consistency": "settled",
+            "screenshot_path": "artifacts/browser/capture.png",
+        });
+
+        let decoded: BrowserDiagnosticScreenPayload =
+            decode_rpc_payload(payload, || "decode browser diagnostic snapshot".to_string())
+                .unwrap_or_else(|error| panic!("{error}"));
+
+        assert_eq!(decoded.authoritative_screen, "Contacts");
     }
 
     #[test]

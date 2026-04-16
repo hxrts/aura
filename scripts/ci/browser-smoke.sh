@@ -7,7 +7,8 @@ cd "$repo_root"
 
 mkdir -p artifacts/harness/browser
 log_file="$repo_root/artifacts/harness/browser/ci-browser.log"
-exec > >(tee "$log_file") 2>&1
+: >"$log_file"
+exec >>"$log_file" 2>&1
 
 web_tools_cache_root="$repo_root/target/aura-web-tools-ci"
 

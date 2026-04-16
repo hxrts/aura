@@ -41,3 +41,17 @@ demo_mode = false
 env = [
   "AURA_HARNESS_BROWSER_HEADLESS=true",
 ]
+
+[[instances]]
+id = "dave"
+mode = "local"
+data_dir = "artifacts/harness/state/mixed-web-tui-contact-notifications-loopback/dave"
+device_id = "dave-local-21"
+bind_address = "127.0.0.1:43122"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19553

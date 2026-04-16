@@ -13,7 +13,9 @@ use crate::ui_contract::{
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
 #[allow(unused_imports)]
-use crate::workflows::context::{authority_default_relational_context, current_home_context};
+use crate::workflows::context::{
+    authority_default_relational_context, current_group_context, current_home_context,
+};
 use crate::workflows::harness_determinism;
 use crate::workflows::observed_projection::{
     reduce_chat_fact_observed, update_chat_projection_observed,

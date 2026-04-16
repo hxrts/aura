@@ -38,6 +38,17 @@ pub(crate) fn membership_hash_from_participants(participants: &[AuthorityId]) ->
     Hash32(hash(&bytes))
 }
 
+pub(crate) async fn consensus_required_for_authority(
+    signing_service: &impl ThresholdSigningEffects,
+    authority_id: AuthorityId,
+) -> bool {
+    signing_service
+        .threshold_state(&authority_id)
+        .await
+        .map(|state| state.threshold > 1 || state.total_participants > 1)
+        .unwrap_or(true)
+}
+
 pub(crate) async fn load_consensus_key_material(
     effects: &crate::runtime::AuraEffectSystem,
     authority_id: AuthorityId,
@@ -204,7 +215,75 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::runtime::AuraEffectSystem;
+    use async_trait::async_trait;
     use aura_core::effects::ThresholdSigningEffects;
+    use aura_core::threshold::{
+        AgreementMode, SigningContext, ThresholdConfig, ThresholdSignature,
+    };
+    use aura_core::AuraError;
+
+    struct StubSigningService {
+        state: Option<ThresholdState>,
+    }
+
+    #[async_trait]
+    impl aura_core::effects::ThresholdSigningEffects for StubSigningService {
+        async fn bootstrap_authority(
+            &self,
+            _authority: &AuthorityId,
+        ) -> Result<Vec<u8>, AuraError> {
+            Err(AuraError::internal("unused bootstrap_authority"))
+        }
+
+        async fn sign(
+            &self,
+            _context: SigningContext,
+        ) -> Result<ThresholdSignature, AuraError> {
+            Err(AuraError::internal("unused sign"))
+        }
+
+        async fn threshold_config(&self, _authority: &AuthorityId) -> Option<ThresholdConfig> {
+            None
+        }
+
+        async fn threshold_state(&self, _authority: &AuthorityId) -> Option<ThresholdState> {
+            self.state.clone()
+        }
+
+        async fn has_signing_capability(&self, _authority: &AuthorityId) -> bool {
+            false
+        }
+
+        async fn public_key_package(&self, _authority: &AuthorityId) -> Option<Vec<u8>> {
+            None
+        }
+
+        async fn rotate_keys(
+            &self,
+            _authority: &AuthorityId,
+            _new_threshold: u16,
+            _new_total_participants: u16,
+            _participants: &[ParticipantIdentity],
+        ) -> Result<(u64, Vec<Vec<u8>>, Vec<u8>), AuraError> {
+            Err(AuraError::internal("unused rotate_keys"))
+        }
+
+        async fn commit_key_rotation(
+            &self,
+            _authority: &AuthorityId,
+            _new_epoch: u64,
+        ) -> Result<(), AuraError> {
+            Err(AuraError::internal("unused commit_key_rotation"))
+        }
+
+        async fn rollback_key_rotation(
+            &self,
+            _authority: &AuthorityId,
+            _failed_epoch: u64,
+        ) -> Result<(), AuraError> {
+            Err(AuraError::internal("unused rollback_key_rotation"))
+        }
+    }
 
     #[tokio::test]
     async fn load_threshold_state_uses_threshold_config_metadata_written_by_effects() {
@@ -234,5 +313,41 @@ mod tests {
             state.agreement_mode,
             aura_core::threshold::AgreementMode::CoordinatorSoftSafe
         );
+    }
+
+    #[tokio::test]
+    async fn consensus_required_for_authority_skips_single_signer_authorities() {
+        let authority = AuthorityId::new_from_entropy([7u8; 32]);
+        let signing_service = StubSigningService {
+            state: Some(ThresholdState {
+                epoch: 0,
+                threshold: 1,
+                total_participants: 1,
+                participants: vec![ParticipantIdentity::guardian(authority)],
+                agreement_mode: AgreementMode::Provisional,
+            }),
+        };
+
+        assert!(!consensus_required_for_authority(&signing_service, authority).await);
+    }
+
+    #[tokio::test]
+    async fn consensus_required_for_authority_keeps_threshold_authorities() {
+        let authority = AuthorityId::new_from_entropy([8u8; 32]);
+        let guardian = AuthorityId::new_from_entropy([9u8; 32]);
+        let signing_service = StubSigningService {
+            state: Some(ThresholdState {
+                epoch: 3,
+                threshold: 2,
+                total_participants: 2,
+                participants: vec![
+                    ParticipantIdentity::guardian(authority),
+                    ParticipantIdentity::guardian(guardian),
+                ],
+                agreement_mode: AgreementMode::CoordinatorSoftSafe,
+            }),
+        };
+
+        assert!(consensus_required_for_authority(&signing_service, authority).await);
     }
 }

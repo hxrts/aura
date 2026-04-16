@@ -359,17 +359,26 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
         }
     });
 
-    let submit_account = {
+    // Extracted as an Arc so both the onclick handler and the onkeydown
+    // (Enter-in-field) handler below can trigger the same submit action.
+    let run_account_submit: Arc<dyn Fn()> = Arc::new({
         let controller = controller.clone();
         let account_name = account_name.clone();
-        let mut account_error = account_error.clone();
-        let mut creating_account = creating_account.clone();
-        move |_| {
+        let account_error = account_error.clone();
+        let creating_account = creating_account.clone();
+        move || {
+            let mut account_error = account_error.clone();
+            let mut creating_account = creating_account.clone();
             if creating_account() {
                 return;
             }
 
             let nickname = account_name();
+            // Guard against Enter-on-empty-field; the button is disabled
+            // for empty input, so the click path already has this guard.
+            if nickname.trim().is_empty() {
+                return;
+            }
             web_sys::console::log_1(
                 &format!(
                     "[web-onboarding] submit_account start nickname={}",
@@ -382,6 +391,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
             controller.set_account_setup_state(false, nickname.clone(), None);
 
             let controller = controller.clone();
+            let mut account_error = account_error.clone();
             shared_web_task_owner().spawn_local(async move {
                 let result: Result<_, WebUiError> = async {
                     let result =
@@ -425,6 +435,11 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                 }
             });
         }
+    });
+
+    let submit_account = {
+        let run = run_account_submit.clone();
+        move |_| run()
     };
 
     let submit_import = {
@@ -491,6 +506,17 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                                     let value = event.value();
                                     account_name.set(value.clone());
                                     account_error.set(None);
+                                },
+                                onkeydown: {
+                                    let run = run_account_submit.clone();
+                                    move |event| {
+                                        if matches!(event.data().key(), Key::Enter)
+                                            && !event.data().modifiers().contains(Modifiers::SHIFT)
+                                        {
+                                            event.prevent_default();
+                                            run();
+                                        }
+                                    }
                                 },
                             }
                         }
@@ -562,6 +588,22 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                                 oninput: move |event| {
                                     import_code.set(event.value());
                                     import_error.set(None);
+                                },
+                                onkeydown: {
+                                    let import_code = import_code.clone();
+                                    let importing_code = importing_code.clone();
+                                    let run_import = run_import.clone();
+                                    move |event| {
+                                        if matches!(event.data().key(), Key::Enter)
+                                            && !event.data().modifiers().contains(Modifiers::SHIFT)
+                                        {
+                                            event.prevent_default();
+                                            let code = import_code();
+                                            if !code.trim().is_empty() && !importing_code() {
+                                                run_import(code);
+                                            }
+                                        }
+                                    }
                                 },
                             }
                         }

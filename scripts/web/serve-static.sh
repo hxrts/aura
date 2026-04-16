@@ -10,6 +10,9 @@ build_profile="${AURA_HARNESS_WEB_BUILD_PROFILE:-release}"
 dioxus_config="$web_root/Dioxus.toml"
 config_backup=""
 
+source "$script_dir/log-bootstrap.sh"
+aura_web_redirect_logs "$repo_root" "$repo_root/artifacts/aura-web/serve-static-${port}.log"
+
 restore_dioxus_config() {
     if [[ -n "$config_backup" && -f "$config_backup" ]]; then
         cp "$config_backup" "$dioxus_config"

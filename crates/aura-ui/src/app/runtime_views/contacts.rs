@@ -6,6 +6,7 @@ use aura_app::ui::types::{ContactRelationshipState, ContactsState};
 use aura_app::ui_contract::RuntimeFact;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::AuthorityId;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +58,7 @@ fn build_contacts_runtime_view(
     contacts: ContactsState,
     discovered_peers: DiscoveredPeersState,
 ) -> ContactsRuntimeView {
+    let known_contact_ids: HashSet<_> = contacts.contact_ids().copied().collect();
     let mut rows: Vec<_> = contacts
         .all_contacts()
         .map(|contact| ContactsRuntimeContact {
@@ -84,6 +86,7 @@ fn build_contacts_runtime_view(
         .into_iter()
         .filter(|peer| {
             peer.method == aura_app::ui::signals::DiscoveredPeerMethod::BootstrapCandidate
+                && !known_contact_ids.contains(&peer.authority_id)
         })
         .map(|peer| ContactsRuntimePeer {
             authority_id: peer.authority_id,
@@ -154,6 +157,7 @@ mod tests {
         let bob = AuthorityId::new_from_entropy([2u8; 32]);
         let carol = AuthorityId::new_from_entropy([3u8; 32]);
         let dave = AuthorityId::new_from_entropy([4u8; 32]);
+        let eve = AuthorityId::new_from_entropy([5u8; 32]);
 
         let contacts = ContactsState::from_contacts([
             Contact {
@@ -214,6 +218,12 @@ mod tests {
                     invited: false,
                 },
                 DiscoveredPeer {
+                    authority_id: eve,
+                    address: "192.0.2.5:9000".to_string(),
+                    method: DiscoveredPeerMethod::BootstrapCandidate,
+                    invited: true,
+                },
+                DiscoveredPeer {
                     authority_id: carol,
                     address: String::new(),
                     method: DiscoveredPeerMethod::Rendezvous,
@@ -227,6 +237,14 @@ mod tests {
 
         assert_eq!(runtime.contacts.len(), 4);
         assert_eq!(runtime.lan_peers.len(), 1);
+        assert_eq!(
+            runtime.lan_peers.first(),
+            Some(&ContactsRuntimePeer {
+                authority_id: eve,
+                address: "192.0.2.5:9000".to_string(),
+                invited: true,
+            })
+        );
         assert_eq!(
             runtime
                 .contacts

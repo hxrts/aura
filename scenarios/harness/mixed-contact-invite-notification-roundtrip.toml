@@ -6,8 +6,8 @@
 # 3. Alice opens notifications and the contact-acceptance notification is present.
 #
 # Flow 2:
-# 1. Carol uses the web app to create a contact invite for Alice on TUI.
-# 2. Alice accepts via the shared contacts accept flow.
+# 1. Carol uses the web app to create a contact invite for Dave on TUI.
+# 2. Dave accepts via the shared contacts accept flow.
 # 3. Carol opens notifications and the contact-acceptance notification is present.
 #
 # Success criteria: both invite directions execute on mixed frontends and
@@ -43,6 +43,13 @@ screen_id = "onboarding"
 timeout_ms = 60000
 
 [[steps]]
+id = "dave-onboarding-visible"
+action = "screen_is"
+actor = "dave"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
 id = "alice-create-account"
 action = "create_account"
 actor = "alice"
@@ -61,6 +68,13 @@ id = "carol-create-account"
 action = "create_account"
 actor = "carol"
 value = "CarolWeb"
+timeout_ms = 4000
+
+[[steps]]
+id = "dave-create-account"
+action = "create_account"
+actor = "dave"
+value = "DaveTui"
 timeout_ms = 4000
 
 [[steps]]
@@ -85,6 +99,13 @@ readiness = "ready"
 timeout_ms = 120000
 
 [[steps]]
+id = "dave-neighborhood-ready"
+action = "readiness_is"
+actor = "dave"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
 id = "alice-open-contacts"
 action = "open_screen"
 actor = "alice"
@@ -102,6 +123,13 @@ timeout_ms = 4000
 id = "carol-open-contacts"
 action = "open_screen"
 actor = "carol"
+screen_id = "contacts"
+timeout_ms = 4000
+
+[[steps]]
+id = "dave-open-contacts"
+action = "open_screen"
+actor = "dave"
 screen_id = "contacts"
 timeout_ms = 4000
 
@@ -171,10 +199,17 @@ item_id = "contact-accepted:${bob_authority_id}"
 timeout_ms = 120000
 
 [[steps]]
+id = "capture-dave-authority-id"
+action = "capture_current_authority_id"
+actor = "dave"
+name = "dave_authority_id"
+timeout_ms = 4000
+
+[[steps]]
 id = "carol-create-contact-invitation"
 action = "create_contact_invitation"
 actor = "carol"
-value = "${alice_authority_id}"
+value = "${dave_authority_id}"
 timeout_ms = 30000
 
 [[steps]]
@@ -182,27 +217,27 @@ id = "carol-invitation-code-ready"
 action = "runtime_event_occurred"
 actor = "carol"
 runtime_event_kind = "invitation_code_ready"
-name = "carol_to_alice_invite_code"
+name = "carol_to_dave_invite_code"
 timeout_ms = 30000
 
 [[steps]]
-id = "alice-reopen-contacts"
+id = "dave-reopen-contacts"
 action = "open_screen"
-actor = "alice"
+actor = "dave"
 screen_id = "contacts"
 timeout_ms = 4000
 
 [[steps]]
-id = "alice-accept-contact-invitation"
+id = "dave-accept-contact-invitation"
 action = "accept_contact_invitation"
-actor = "alice"
-value = "${carol_to_alice_invite_code}"
+actor = "dave"
+value = "${carol_to_dave_invite_code}"
 timeout_ms = 15000
 
 [[steps]]
-id = "alice-second-contact-link-ready"
+id = "dave-contact-link-ready"
 action = "runtime_event_occurred"
-actor = "alice"
+actor = "dave"
 runtime_event_kind = "contact_link_ready"
 timeout_ms = 30000
 
@@ -225,5 +260,5 @@ id = "carol-contact-acceptance-notification-visible"
 action = "list_contains"
 actor = "carol"
 list_id = "notifications"
-item_id = "contact-accepted:${alice_authority_id}"
+item_id = "contact-accepted:${dave_authority_id}"
 timeout_ms = 120000
