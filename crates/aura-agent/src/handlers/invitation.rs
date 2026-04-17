@@ -1750,6 +1750,11 @@ impl InvitationHandler {
             }
         }
 
+        fn promote_transport_hint(transport_hints: &mut Vec<TransportHint>, hint: TransportHint) {
+            transport_hints.retain(|existing| existing != &hint);
+            transport_hints.insert(0, hint);
+        }
+
         let Some(manager) = effects.rendezvous_manager() else {
             return;
         };
@@ -1761,9 +1766,7 @@ impl InvitationHandler {
         {
             let mut transport_hints = existing.transport_hints.clone();
             if let Some(hint) = descriptor_hint_from_addr(addr) {
-                if !transport_hints.contains(&hint) {
-                    transport_hints.push(hint);
-                }
+                promote_transport_hint(&mut transport_hints, hint);
             }
             RendezvousDescriptor {
                 authority_id: existing.authority_id,
@@ -1816,9 +1819,7 @@ impl InvitationHandler {
                 local_descriptor.device_id = device_id;
             }
             if let Some(hint) = descriptor_hint_from_addr(addr) {
-                if !local_descriptor.transport_hints.contains(&hint) {
-                    local_descriptor.transport_hints.push(hint);
-                }
+                promote_transport_hint(&mut local_descriptor.transport_hints, hint);
             }
             local_descriptor.valid_from = local_descriptor.valid_from.min(now_ms.saturating_sub(1));
             local_descriptor.valid_until = local_descriptor
@@ -4323,6 +4324,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cache_peer_descriptor_promotes_fresh_explicit_transport_hints() {
+        let authority_id = AuthorityId::new_from_entropy([225u8; 32]);
+        let peer_id = AuthorityId::new_from_entropy([226u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority_id).unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(authority_id)).unwrap();
+        let manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            authority_id,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(effects.time_effects().clone()),
+        );
+        effects.attach_rendezvous_manager(manager.clone());
+
+        let now_ms = 1_700_000_000_000;
+        handler
+            .cache_peer_descriptor_for_peer(
+                effects.as_ref(),
+                peer_id,
+                None,
+                Some("ws://127.0.0.1:4173"),
+                now_ms,
+            )
+            .await;
+        handler
+            .cache_peer_descriptor_for_peer(
+                effects.as_ref(),
+                peer_id,
+                None,
+                Some("ws://127.0.0.1:43011"),
+                now_ms + 1,
+            )
+            .await;
+
+        let fresh_hint = TransportHint::websocket_direct("127.0.0.1:43011").unwrap();
+        let peer_descriptor = manager
+            .get_descriptor(default_context_id_for_authority(peer_id), peer_id)
+            .await
+            .expect("peer default-context descriptor should exist");
+        assert_eq!(peer_descriptor.transport_hints.first(), Some(&fresh_hint));
+
+        let local_descriptor = manager
+            .get_descriptor(default_context_id_for_authority(authority_id), peer_id)
+            .await
+            .expect("local-context descriptor should exist");
+        assert_eq!(local_descriptor.transport_hints.first(), Some(&fresh_hint));
+    }
+
+    #[tokio::test]
     async fn import_channel_invitation_requires_authoritative_context() {
         let receiver_id = AuthorityId::new_from_entropy([217u8; 32]);
         let config = AgentConfig::default();
@@ -4421,6 +4472,120 @@ mod tests {
             error,
             AgentError::Runtime(_) | AgentError::Effects(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn channel_acceptance_notification_uses_materialized_channel_context() {
+        let sender_id = AuthorityId::new_from_entropy([221u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([222u8; 32]);
+        let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let receiver_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        register_test_app_signals(sender_effects.as_ref()).await;
+        register_test_app_signals(receiver_effects.as_ref()).await;
+        let _sender_rendezvous =
+            attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
+        let _receiver_rendezvous =
+            attach_test_rendezvous_manager(receiver_effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
+            sender_effects.as_ref(),
+            sender_id,
+            receiver_id,
+            "tcp://127.0.0.1:55119",
+            1_700_000_000_000,
+        )
+        .await;
+        cache_test_peer_descriptor(
+            receiver_effects.as_ref(),
+            receiver_id,
+            sender_id,
+            "tcp://127.0.0.1:55120",
+            1_700_000_000_000,
+        )
+        .await;
+
+        let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        let invitation_context = ContextId::new_from_entropy([57u8; 32]);
+        let materialized_context = default_context_id_for_authority(sender_id);
+        let home_id = canonical_home_id(20);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-channel-context-materialized"),
+            sender_id,
+            context_id: Some(invitation_context),
+            invitation_type: InvitationType::Channel {
+                home_id,
+                nickname_suggestion: Some("Materialized Context House".to_string()),
+                bootstrap: None,
+            },
+            expires_at: None,
+            message: Some("Join Materialized Context House".to_string()),
+        };
+
+        receiver_effects
+            .commit_relational_facts(vec![ChatFact::channel_created_ms(
+                materialized_context,
+                home_id,
+                "Materialized Context House".to_string(),
+                Some(format!("Home channel {}", home_id)),
+                false,
+                1_700_000_000_100,
+                sender_id,
+            )
+            .to_generic()])
+            .await
+            .unwrap();
+
+        let imported = handler
+            .import_invitation_code(
+                receiver_effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
+            .await
+            .expect("channel invitation import should succeed");
+
+        handler
+            .notify_channel_invitation_acceptance(receiver_effects.as_ref(), &imported.invitation_id)
+            .await
+            .expect("notification should use the materialized channel context");
+
+        let received = timeout(Duration::from_secs(5), async {
+            loop {
+                let envelope = sender_effects
+                    .receive_envelope()
+                    .await
+                    .expect("receiver notification should arrive");
+                if envelope
+                    .metadata
+                    .get("content-type")
+                    .map(String::as_str)
+                    == Some(CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE)
+                {
+                    break envelope;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for channel acceptance envelope");
+
+        assert_eq!(received.context, materialized_context);
     }
 
     #[tokio::test]

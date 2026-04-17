@@ -16,22 +16,24 @@ impl<'a> InvitationChannelHandler<'a> {
         sender_id: AuthorityId,
         invitation_context: ContextId,
     ) {
+        fn promote_transport_hint(transport_hints: &mut Vec<TransportHint>, hint: TransportHint) {
+            transport_hints.retain(|existing| existing != &hint);
+            transport_hints.insert(0, hint);
+        }
+
         let Some(rendezvous_manager) = effects.rendezvous_manager() else {
             return;
         };
 
-        if rendezvous_manager
+        let existing_invitation_descriptor = rendezvous_manager
             .get_descriptor(invitation_context, sender_id)
             .await
-            .is_some()
-        {
-            return;
-        }
+            ;
 
         let local_context_id = self.handler.context.authority.default_context_id();
         let peer_default_context = default_context_id_for_authority(sender_id);
 
-        let descriptor = if let Some(existing) = rendezvous_manager
+        let source_descriptor = if let Some(existing) = rendezvous_manager
             .get_descriptor(local_context_id, sender_id)
             .await
         {
@@ -48,9 +50,29 @@ impl<'a> InvitationChannelHandler<'a> {
                 .map(|peer| peer.descriptor)
         };
 
-        let Some(mut descriptor) = descriptor else {
+        let Some(mut descriptor) = existing_invitation_descriptor.clone().or(source_descriptor.clone()) else {
             return;
         };
+
+        if let Some(source_descriptor) = source_descriptor {
+            for hint in source_descriptor.transport_hints.iter().rev() {
+                promote_transport_hint(&mut descriptor.transport_hints, hint.clone());
+            }
+            if descriptor.device_id.is_none() {
+                descriptor.device_id = source_descriptor.device_id;
+            }
+            if descriptor.handshake_psk_commitment == [0u8; 32] {
+                descriptor.handshake_psk_commitment = source_descriptor.handshake_psk_commitment;
+            }
+            if descriptor.public_key == [0u8; 32] {
+                descriptor.public_key = source_descriptor.public_key;
+            }
+            descriptor.valid_from = descriptor.valid_from.min(source_descriptor.valid_from);
+            descriptor.valid_until = descriptor.valid_until.max(source_descriptor.valid_until);
+            if descriptor.nickname_suggestion.is_none() {
+                descriptor.nickname_suggestion = source_descriptor.nickname_suggestion.clone();
+            }
+        }
 
         descriptor.context_id = invitation_context;
         let _ = rendezvous_manager.cache_descriptor(descriptor).await;
@@ -103,18 +125,28 @@ impl<'a> InvitationChannelHandler<'a> {
         else {
             return Ok(());
         };
+        let invitation_context = if let Some(channel_invite) = self
+            .handler
+            .resolve_channel_invitation(effects, invitation_id)
+            .await?
+        {
+            self.resolve_channel_context_from_chat_facts(effects, &channel_invite)
+                .await
+        } else {
+            invitation.context_id
+        };
 
         let acceptor_id = self.handler.context.authority.authority_id();
         if invitation.sender_id == acceptor_id {
             return Ok(());
         }
-        self.ensure_sender_peer_channel(effects, invitation.sender_id, invitation.context_id)
+        self.ensure_sender_peer_channel(effects, invitation.sender_id, invitation_context)
             .await?;
 
         let acceptance = ChannelInvitationAcceptance {
             invitation_id: invitation.invitation_id.clone(),
             acceptor_id,
-            context_id: invitation.context_id,
+            context_id: invitation_context,
             channel_id: home_id,
             channel_name: nickname_suggestion.clone(),
         };
@@ -155,7 +187,7 @@ impl<'a> InvitationChannelHandler<'a> {
         let envelope = TransportEnvelope {
             destination: invitation.sender_id,
             source: acceptor_id,
-            context: invitation.context_id,
+            context: invitation_context,
             payload,
             metadata,
             receipt: None,
@@ -176,7 +208,7 @@ impl<'a> InvitationChannelHandler<'a> {
         {
             let updated_at_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
             let update_fact = aura_chat::ChatFact::channel_updated_ms(
-                invitation.context_id,
+                invitation_context,
                 home_id,
                 Some(channel_name),
                 None,
@@ -191,7 +223,7 @@ impl<'a> InvitationChannelHandler<'a> {
             let update_envelope = TransportEnvelope {
                 destination: invitation.sender_id,
                 source: acceptor_id,
-                context: invitation.context_id,
+                context: invitation_context,
                 payload: update_payload,
                 metadata: crate::handlers::shared::build_transport_metadata(
                     CHAT_FACT_CONTENT_TYPE,
@@ -846,5 +878,111 @@ impl<'a> InvitationChannelHandler<'a> {
             .map_err(|e| AgentError::effects(e.to_string()))?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use crate::runtime::services::{
+        RendezvousManager, RendezvousManagerConfig, RuntimeService, RuntimeServiceContext,
+    };
+    use crate::runtime::TaskSupervisor;
+    use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn seed_sender_descriptor_for_invitation_context_refreshes_stale_context_hint() {
+        let local_authority = AuthorityId::new_from_entropy([31u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([32u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, local_authority).unwrap(),
+        );
+        let handler = InvitationHandler::new(crate::core::AuthorityContext::new(local_authority))
+            .unwrap();
+        let channel_handler = InvitationChannelHandler::new(&handler);
+        let manager = RendezvousManager::new_with_default_udp(
+            local_authority,
+            RendezvousManagerConfig::default(),
+            Arc::new(effects.time_effects().clone()),
+        );
+        effects.attach_rendezvous_manager(manager.clone());
+        let tasks = Arc::new(TaskSupervisor::new());
+        let service_context =
+            RuntimeServiceContext::new(tasks, Arc::new(effects.time_effects().clone()));
+        RuntimeService::start(&manager, &service_context)
+            .await
+            .unwrap();
+
+        let invitation_context = ContextId::new_from_entropy([33u8; 32]);
+        let local_context = handler.context.authority.default_context_id();
+        let peer_context = default_context_id_for_authority(sender_id);
+        let stale_hint = TransportHint::websocket_direct("127.0.0.1:4173").unwrap();
+        let fresh_hint = TransportHint::websocket_direct("127.0.0.1:43011").unwrap();
+
+        manager
+            .cache_descriptor(RendezvousDescriptor {
+                authority_id: sender_id,
+                device_id: None,
+                context_id: invitation_context,
+                transport_hints: vec![stale_hint.clone()],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: 1,
+                valid_until: 100,
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            })
+            .await
+            .unwrap();
+        manager
+            .cache_descriptor(RendezvousDescriptor {
+                authority_id: sender_id,
+                device_id: None,
+                context_id: local_context,
+                transport_hints: vec![fresh_hint.clone()],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: 2,
+                valid_until: 200,
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            })
+            .await
+            .unwrap();
+        if local_context != peer_context {
+            manager
+                .cache_descriptor(RendezvousDescriptor {
+                    authority_id: sender_id,
+                    device_id: None,
+                    context_id: peer_context,
+                    transport_hints: vec![fresh_hint.clone()],
+                    handshake_psk_commitment: [0u8; 32],
+                    public_key: [0u8; 32],
+                    valid_from: 2,
+                    valid_until: 200,
+                    nonce: [0u8; 32],
+                    nickname_suggestion: None,
+                })
+                .await
+                .unwrap();
+        }
+
+        channel_handler
+            .seed_sender_descriptor_for_invitation_context(
+                effects.as_ref(),
+                sender_id,
+                invitation_context,
+            )
+            .await;
+
+        let refreshed = manager
+            .get_descriptor(invitation_context, sender_id)
+            .await
+            .expect("invitation-context descriptor should remain cached");
+        assert_eq!(refreshed.transport_hints.first(), Some(&fresh_hint));
+        assert!(refreshed.transport_hints.contains(&stale_hint));
     }
 }

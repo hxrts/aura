@@ -80,8 +80,19 @@ pub(super) fn NotificationsScreen(
                                 NotificationActionBar {
                                     action: item.action.clone(),
                                     item_id: item.id,
-                                    controller,
+                                    controller: controller.clone(),
                                     render_tick,
+                                }
+                                UiButton {
+                                    label: "Dismiss".to_string(),
+                                    variant: ButtonVariant::Secondary,
+                                    onclick: {
+                                        let controller = controller.clone();
+                                        move |_| {
+                                            controller.dismiss_selected_notification();
+                                            render_tick.set(render_tick() + 1);
+                                        }
+                                    },
                                 }
                             }
                         }

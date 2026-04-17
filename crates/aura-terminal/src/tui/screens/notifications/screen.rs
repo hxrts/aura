@@ -304,6 +304,15 @@ pub fn NotificationsScreen(
     );
     notifications.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
+    // Filter out dismissed notifications.
+    notifications.retain(|item| !props.view.dismissed_ids.contains(&item.id));
+
+    // Write back the visible IDs so the keyboard handler can resolve
+    // selected_index → concrete notification ID for dismissal.
+    if let Ok(mut sink) = props.view.visible_ids_sink.lock() {
+        *sink = notifications.iter().map(|item| item.id.clone()).collect();
+    }
+
     let selected_index = props
         .view
         .selected_index

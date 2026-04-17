@@ -1,6 +1,7 @@
 //! Consensus helpers for building params and loading key material.
 
 use aura_consensus::protocol::ConsensusParams;
+use aura_core::crypto::single_signer::SingleSignerPublicKeyPackage;
 use aura_core::crypto::tree_signing::{
     public_key_package_from_bytes, share_from_key_package_bytes,
 };
@@ -42,11 +43,14 @@ pub(crate) async fn consensus_required_for_authority(
     signing_service: &impl ThresholdSigningEffects,
     authority_id: AuthorityId,
 ) -> bool {
-    signing_service
-        .threshold_state(&authority_id)
-        .await
-        .map(|state| state.threshold > 1 || state.total_participants > 1)
-        .unwrap_or(true)
+    if let Some(state) = signing_service.threshold_state(&authority_id).await {
+        return state.threshold > 1 || state.total_participants > 1;
+    }
+
+    match signing_service.public_key_package(&authority_id).await {
+        Some(bytes) => SingleSignerPublicKeyPackage::from_bytes(&bytes).is_err(),
+        None => false,
+    }
 }
 
 pub(crate) async fn load_consensus_key_material(
@@ -224,6 +228,7 @@ mod tests {
 
     struct StubSigningService {
         state: Option<ThresholdState>,
+        public_key_package: Option<Vec<u8>>,
     }
 
     #[async_trait]
@@ -235,10 +240,7 @@ mod tests {
             Err(AuraError::internal("unused bootstrap_authority"))
         }
 
-        async fn sign(
-            &self,
-            _context: SigningContext,
-        ) -> Result<ThresholdSignature, AuraError> {
+        async fn sign(&self, _context: SigningContext) -> Result<ThresholdSignature, AuraError> {
             Err(AuraError::internal("unused sign"))
         }
 
@@ -255,7 +257,7 @@ mod tests {
         }
 
         async fn public_key_package(&self, _authority: &AuthorityId) -> Option<Vec<u8>> {
-            None
+            self.public_key_package.clone()
         }
 
         async fn rotate_keys(
@@ -326,6 +328,7 @@ mod tests {
                 participants: vec![ParticipantIdentity::guardian(authority)],
                 agreement_mode: AgreementMode::Provisional,
             }),
+            public_key_package: None,
         };
 
         assert!(!consensus_required_for_authority(&signing_service, authority).await);
@@ -346,8 +349,35 @@ mod tests {
                 ],
                 agreement_mode: AgreementMode::CoordinatorSoftSafe,
             }),
+            public_key_package: None,
         };
 
         assert!(consensus_required_for_authority(&signing_service, authority).await);
+    }
+
+    #[tokio::test]
+    async fn consensus_required_for_authority_skips_single_signer_public_key_packages() {
+        let authority = AuthorityId::new_from_entropy([10u8; 32]);
+        let signing_service = StubSigningService {
+            state: None,
+            public_key_package: Some(
+                SingleSignerPublicKeyPackage::new(vec![11u8; 32])
+                    .to_bytes()
+                    .expect("single-signer package should serialize"),
+            ),
+        };
+
+        assert!(!consensus_required_for_authority(&signing_service, authority).await);
+    }
+
+    #[tokio::test]
+    async fn consensus_required_for_authority_skips_missing_signing_metadata() {
+        let authority = AuthorityId::new_from_entropy([12u8; 32]);
+        let signing_service = StubSigningService {
+            state: None,
+            public_key_package: None,
+        };
+
+        assert!(!consensus_required_for_authority(&signing_service, authority).await);
     }
 }

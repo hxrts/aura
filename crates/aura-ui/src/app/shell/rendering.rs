@@ -534,14 +534,16 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                     {
                                         if let Some(code) = controller
                                             .ui_model()
-                                            .and_then(|model| model.last_invite_code)
+                                            .and_then(|model| model.current_invitation_code())
                                         {
                                             controller.write_clipboard(&code);
                                             controller.info_toast(
                                                 "Invitation code copied to clipboard",
                                             );
-                                            render_tick.set(render_tick() + 1);
+                                        } else {
+                                            controller.info_toast("Create an invitation first");
                                         }
+                                        render_tick.set(render_tick() + 1);
                                     }
                                 }
                             }
@@ -718,14 +720,16 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                 {
                                     if let Some(code) = controller
                                         .ui_model()
-                                        .and_then(|model| model.last_invite_code)
+                                        .and_then(|model| model.current_invitation_code())
                                     {
                                         controller.write_clipboard(&code);
                                         controller.info_toast(
                                             "Invitation code copied to clipboard",
                                         );
-                                        render_tick.set(render_tick() + 1);
+                                    } else {
+                                        controller.info_toast("Create an invitation first");
                                     }
+                                    render_tick.set(render_tick() + 1);
                                 }
                             }
                         }

@@ -505,8 +505,9 @@ impl AgentRuntimeBridge {
             format!("ws://{addr}")
         };
 
-        #[cfg(target_arch = "wasm32")]
-        if is_harness_browser_mailbox_url(&url) {
+        if self.agent.runtime().effects().harness_mode_enabled()
+            && (url.starts_with("ws://") || url.starts_with("wss://"))
+        {
             return Err(IntentError::network_error(format!(
                 "Harness browser mailbox transport does not support relational fact sync pull to {peer}"
             )));
@@ -1020,7 +1021,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn resend_channel_invitation_acceptance_notifications(
         &self,
-        context: ContextId,
+        _context: ContextId,
         channel: ChannelId,
     ) -> Result<(), IntentError> {
         let invitation_service = self.agent.invitations().map_err(|error| {
@@ -1055,7 +1056,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             else {
                 continue;
             };
-            if invitation.context_id != context || home_id != channel {
+            if home_id != channel {
                 continue;
             }
             let resend_result: Result<(), crate::core::AgentError> = handler

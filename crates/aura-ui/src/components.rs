@@ -56,6 +56,7 @@ pub struct ModalView {
     pub keybind_rows: Vec<(String, String)>,
     pub inputs: Vec<ModalInputView>,
     pub values: Vec<ModalValueView>,
+    pub values_after_inputs: bool,
     pub selectable_items: Vec<SelectableItem>,
     pub enter_label: String,
     /// Optional shortcut buttons shown in the footer (e.g., demo invitation codes).
@@ -310,7 +311,7 @@ pub fn UiModal(
                     for line in modal.details {
                         p { class: "m-0 whitespace-pre-wrap break-words", "{line}" }
                     }
-                    if !modal.values.is_empty() {
+                    if !modal.values_after_inputs && !modal.values.is_empty() {
                         div {
                             class: "space-y-3",
                             for value_view in modal.values.clone() {
@@ -372,6 +373,24 @@ pub fn UiModal(
                                                 on_input_change.call((field_id, evt.value()));
                                             }
                                         },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if modal.values_after_inputs && !modal.values.is_empty() {
+                        div {
+                            class: "space-y-3",
+                            for value_view in modal.values.clone() {
+                                div {
+                                    class: "rounded-sm border border-border bg-background/70 px-3 py-3",
+                                    p {
+                                        class: "m-0 text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
+                                        "{value_view.label}"
+                                    }
+                                    p {
+                                        class: "m-0 mt-2 break-all font-mono text-sm text-foreground",
+                                        "{value_view.value}"
                                     }
                                 }
                             }

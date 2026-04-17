@@ -43,6 +43,7 @@ pub(in crate::app) fn modal_view(
     let mut keybind_rows = Vec::new();
     let mut inputs = Vec::new();
     let mut values = Vec::new();
+    let mut values_after_inputs = false;
 
     match modal {
         ModalState::Help => {
@@ -64,21 +65,18 @@ pub(in crate::app) fn modal_view(
                 field_id: FieldId::InvitationTtl,
                 value: modal_state.ttl_hours.to_string(),
             });
-            if let Some(code) = model.last_invite_code.as_ref() {
+            values_after_inputs = true;
+            values.push(ModalValueView {
+                label: "Invite Code".to_string(),
+                value: model
+                    .current_invitation_code()
+                    .clone()
+                    .unwrap_or_else(|| "Create an invitation to generate a code.".to_string()),
+            });
+            if model.current_invitation_code().is_some() {
                 details.push("The invite code was copied to your clipboard.".to_string());
                 details
                     .push("Share it out of band, or copy it again from this dialog.".to_string());
-                keybind_rows.push((
-                    ControlId::ModalCopyButton
-                        .activation_key()
-                        .unwrap_or("c")
-                        .to_string(),
-                    "Copy the invite code again".to_string(),
-                ));
-                values.push(ModalValueView {
-                    label: "Invite Code".to_string(),
-                    value: code.clone(),
-                });
             }
         }
         ModalState::AcceptContactInvitation => {
@@ -449,13 +447,7 @@ pub(in crate::app) fn modal_view(
 
     let enter_label = match modal {
         ModalState::Help | ModalState::ChannelInfo => "Close".to_string(),
-        ModalState::CreateInvitation => {
-            if model.last_invite_code.is_some() {
-                "Close".to_string()
-            } else {
-                "Create".to_string()
-            }
-        }
+        ModalState::CreateInvitation => "Create".to_string(),
         ModalState::CreateChannel => match model.create_channel_modal().map(|state| state.step) {
             Some(CreateChannelWizardStep::Threshold) => "Create".to_string(),
             _ => "Next".to_string(),
@@ -503,15 +495,14 @@ pub(in crate::app) fn modal_view(
         vec![]
     };
 
-    let footer_actions =
-        if matches!(modal, ModalState::CreateInvitation) && model.last_invite_code.is_some() {
-            vec![ModalFooterActionView {
-                control_id: Some(ControlId::ModalCopyButton),
-                label: "Copy Code".to_string(),
-            }]
-        } else {
-            vec![]
-        };
+    let footer_actions = if matches!(modal, ModalState::CreateInvitation) {
+        vec![ModalFooterActionView {
+            control_id: Some(ControlId::ModalCopyButton),
+            label: "Copy Code".to_string(),
+        }]
+    } else {
+        vec![]
+    };
 
     let selectable_items = match modal {
         ModalState::CreateChannel => model
@@ -582,6 +573,7 @@ pub(in crate::app) fn modal_view(
         keybind_rows,
         inputs,
         values,
+        values_after_inputs,
         selectable_items,
         enter_label,
         footer_shortcuts,
@@ -607,10 +599,12 @@ mod tests {
             panic!("create invitation modal should render");
         };
 
-        assert_eq!(modal.enter_label, "Close");
+        assert_eq!(modal.enter_label, "Create");
         assert_eq!(modal.values.len(), 1);
+        assert!(modal.values_after_inputs);
         assert_eq!(modal.values[0].label, "Invite Code");
         assert_eq!(modal.values[0].value, "INVITE-123");
+        assert!(modal.keybind_rows.is_empty());
         assert_eq!(modal.footer_actions.len(), 1);
         assert_eq!(
             modal.footer_actions[0].control_id,
@@ -630,8 +624,38 @@ mod tests {
         };
 
         assert_eq!(modal.enter_label, "Create");
-        assert!(modal.values.is_empty());
-        assert!(modal.footer_actions.is_empty());
+        assert_eq!(modal.values.len(), 1);
+        assert!(modal.values_after_inputs);
+        assert_eq!(
+            modal.values[0].value,
+            "Create an invitation to generate a code."
+        );
+        assert_eq!(modal.footer_actions.len(), 1);
+    }
+
+    #[test]
+    fn create_invitation_modal_uses_runtime_fact_code_when_local_cache_is_empty() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.active_modal = Some(ActiveModal::CreateInvitation(
+            CreateInvitationModalState::default(),
+        ));
+        model
+            .runtime_events
+            .push(aura_app::ui::contract::RuntimeEventSnapshot {
+                id: aura_app::ui::contract::RuntimeEventId("runtime-event-1".to_string()),
+                fact: RuntimeFact::InvitationCodeReady {
+                    receiver_authority_id: None,
+                    source_operation: OperationId::invitation_create(),
+                    code: Some("INVITE-RUNTIME".to_string()),
+                },
+            });
+
+        let Some(modal) = modal_view(&model, &ChatRuntimeView::default()) else {
+            panic!("create invitation modal should render");
+        };
+
+        assert_eq!(modal.values.len(), 1);
+        assert_eq!(modal.values[0].value, "INVITE-RUNTIME");
     }
 }
 

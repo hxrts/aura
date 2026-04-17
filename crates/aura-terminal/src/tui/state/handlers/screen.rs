@@ -567,6 +567,27 @@ pub fn handle_notifications_key(
                 );
             }
         }
+        KeyCode::Char('d') => {
+            let idx = state.notifications.selected_index;
+            let Ok(visible) = state.notifications.visible_ids.lock() else {
+                return;
+            };
+            if let Some(id) = visible.get(idx).cloned() {
+                drop(visible);
+                state.notifications.dismissed_ids.insert(id);
+                // Shrink item count so navigation wraps correctly.
+                if state.notifications.item_count > 0 {
+                    state.notifications.item_count -= 1;
+                }
+                // Advance selection to keep a valid index.
+                if state.notifications.item_count == 0 {
+                    state.notifications.selected_index = 0;
+                } else {
+                    state.notifications.selected_index =
+                        idx.min(state.notifications.item_count - 1);
+                }
+            }
+        }
         _ => {}
     }
 }

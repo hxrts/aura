@@ -445,11 +445,28 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
 // ============================================================================
 
 /// View state extracted from TuiState for NotificationsScreen
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct NotificationsViewProps {
     pub focus: crate::tui::navigation::TwoPanelFocus,
     pub selected_index: usize,
     pub runtime_facts: Vec<RuntimeFact>,
+    pub dismissed_ids: std::collections::HashSet<String>,
+    /// Shared write-back for the visible notification IDs (same Arc as
+    /// `TuiState.notifications.visible_ids`). The screen component
+    /// populates this after sorting and filtering.
+    pub visible_ids_sink: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl Default for NotificationsViewProps {
+    fn default() -> Self {
+        Self {
+            focus: Default::default(),
+            selected_index: 0,
+            runtime_facts: Vec::new(),
+            dismissed_ids: std::collections::HashSet::new(),
+            visible_ids_sink: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
 }
 
 /// Extract NotificationsScreen view props from TuiState
@@ -458,6 +475,8 @@ pub fn extract_notifications_view_props(state: &TuiState) -> NotificationsViewPr
         focus: state.notifications.focus,
         selected_index: state.notifications.selected_index,
         runtime_facts: state.runtime_facts.clone(),
+        dismissed_ids: state.notifications.dismissed_ids.clone(),
+        visible_ids_sink: state.notifications.visible_ids.clone(),
     }
 }
 

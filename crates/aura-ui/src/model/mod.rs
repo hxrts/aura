@@ -203,6 +203,10 @@ pub struct UiModel {
     pub selected_channel: Option<String>,
     pub selected_neighborhood_member_key: Option<NeighborhoodMemberSelectionKey>,
     pub selected_notification_id: Option<NotificationSelectionId>,
+    /// Session-scoped set of notification IDs the user has dismissed.
+    /// Notifications in this set are filtered out during
+    /// `sync_runtime_notifications`. Cleared on session restart.
+    pub dismissed_notification_ids: std::collections::HashSet<NotificationSelectionId>,
     pub contact_details: bool,
     pub demo_contact_shortcuts: Option<DemoContactShortcuts>,
     pub demo_device_shortcut: Option<DemoDeviceShortcut>,
@@ -266,6 +270,7 @@ impl UiModel {
             selected_channel: None,
             selected_neighborhood_member_key: None,
             selected_notification_id: None,
+            dismissed_notification_ids: std::collections::HashSet::new(),
             contact_details: false,
             demo_contact_shortcuts: None,
             demo_device_shortcut: None,
@@ -324,6 +329,19 @@ impl UiModel {
         self.active_modal
             .as_ref()
             .and_then(ActiveModal::create_invitation)
+    }
+
+    #[must_use]
+    pub fn current_invitation_code(&self) -> Option<String> {
+        self.last_invite_code.clone().or_else(|| {
+            self.runtime_events.iter().rev().find_map(|event| {
+                if let RuntimeFact::InvitationCodeReady { code, .. } = &event.fact {
+                    code.clone()
+                } else {
+                    None
+                }
+            })
+        })
     }
 
     modal_state_accessors!(
@@ -644,8 +662,14 @@ impl UiModel {
         notifications: Vec<(NotificationSelectionId, String)>,
     ) {
         let previous = self.selected_notification_id.clone();
-        self.notification_ids = notifications.iter().map(|(id, _)| id.clone()).collect();
-        self.notifications = notifications.into_iter().map(|(_, title)| title).collect();
+        // Filter out dismissed notifications so they stay gone even when
+        // the runtime re-publishes them on signal refresh.
+        let visible: Vec<_> = notifications
+            .into_iter()
+            .filter(|(id, _)| !self.dismissed_notification_ids.contains(id))
+            .collect();
+        self.notification_ids = visible.iter().map(|(id, _)| id.clone()).collect();
+        self.notifications = visible.into_iter().map(|(_, title)| title).collect();
         self.selected_notification_id = previous
             .and_then(|id| {
                 self.notification_ids
@@ -654,6 +678,35 @@ impl UiModel {
                     .cloned()
             })
             .or_else(|| self.notification_ids.first().cloned());
+    }
+
+    /// Dismiss the currently selected notification by adding its ID to
+    /// the dismissed set. Advances selection to the next item (or
+    /// previous if the last item was dismissed). Session-scoped.
+    pub fn dismiss_selected_notification(&mut self) {
+        let Some(id) = self.selected_notification_id.clone() else {
+            return;
+        };
+        let dismissed_index = self
+            .notification_ids
+            .iter()
+            .position(|item| *item == id)
+            .unwrap_or(0);
+
+        self.dismissed_notification_ids.insert(id);
+        self.notification_ids.remove(dismissed_index);
+        if dismissed_index < self.notifications.len() {
+            self.notifications.remove(dismissed_index);
+        }
+
+        // Advance to the next notification, or fall back to the
+        // previous one if we just dismissed the last item.
+        if self.notification_ids.is_empty() {
+            self.selected_notification_id = None;
+        } else {
+            let next = dismissed_index.min(self.notification_ids.len() - 1);
+            self.selected_notification_id = self.notification_ids.get(next).cloned();
+        }
     }
 
     pub fn replace_channels(&mut self, channels: Vec<(String, String, String)>) {
@@ -1061,6 +1114,11 @@ impl UiController {
 
     pub fn set_selected_notification_index(&self, index: usize, count: usize) {
         write_model(&self.model).set_selected_notification_index(index, count);
+        self.request_rerender();
+    }
+
+    pub fn dismiss_selected_notification(&self) {
+        write_model(&self.model).dismiss_selected_notification();
         self.request_rerender();
     }
 

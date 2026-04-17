@@ -438,7 +438,7 @@ pub(super) fn NeighborhoodScreen(
                             }
                             p {
                                 class: "m-0 mt-1 text-xs text-muted-foreground",
-                                "Select a home, then enter it. Aura uses the strongest available access automatically."
+                                "Select a home, then enter.."
                             }
                         }
                         UiCardFooter {

@@ -496,35 +496,6 @@ async fn warm_invited_peer_connectivity(
     false
 }
 
-async fn ensure_invited_peer_channel(
-    runtime: &Arc<dyn RuntimeBridge>,
-    context_id: ContextId,
-    receiver: AuthorityId,
-) -> Result<(), AuraError> {
-    timeout_runtime_call(
-        runtime,
-        "invite_authority_to_channel",
-        "ensure_invited_peer_channel",
-        MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.ensure_peer_channel(context_id, receiver),
-    )
-    .await
-    .map_err(|error| {
-        AuraError::from(crate::workflows::error::runtime_call(
-            "ensure invited peer channel",
-            error,
-        ))
-    })?
-    .map_err(|error| {
-        AuraError::from(crate::workflows::error::runtime_call(
-            "ensure invited peer channel",
-            error,
-        ))
-    })?;
-    converge_runtime(runtime).await;
-    Ok(())
-}
-
 /// Send a direct message to a contact
 ///
 /// **What it does**: Sends a message in a DM channel with the contact
@@ -709,17 +680,30 @@ pub mod handoff {
         app_core: &Arc<RwLock<AppCore>>,
         request: InviteAuthorityToChannelRequest,
     ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationId> {
-        super::invite_authority_to_channel_with_context_terminal_status(
+        let receiver = request.receiver;
+        let channel_id = request.channel_id;
+        let context_id = request.context_id;
+        let outcome = super::invite_authority_to_channel_with_context_terminal_status(
             app_core,
-            request.receiver,
-            request.channel_id,
-            request.context_id,
+            receiver,
+            channel_id,
+            context_id,
             request.channel_name_hint,
             request.operation_instance_id,
             request.message,
             request.ttl_ms,
         )
-        .await
+        .await;
+        if outcome.result.is_ok() {
+            if let Some(context_id) = context_id {
+                let authoritative_channel =
+                    super::authoritative_channel_ref(channel_id, context_id);
+                super::run_post_channel_invite_followups(app_core, receiver, authoritative_channel)
+                    .await;
+                let _ = crate::workflows::system::refresh_account(app_core).await;
+            }
+        }
+        outcome
     }
 }
 
@@ -3356,9 +3340,9 @@ mod tests {
             .find("async fn warm_invited_peer_connectivity(")
             .expect("warm_invited_peer_connectivity definition");
         let warm_end = warm_source[warm_start..]
-            .find("async fn ensure_invited_peer_channel(")
+            .find("/// Send a direct message to a contact")
             .map(|offset| warm_start + offset)
-            .expect("ensure_invited_peer_channel definition");
+            .expect("send_direct_message section");
         let warm_body = &warm_source[warm_start..warm_end];
         assert!(
             invite_body.contains(
@@ -3393,6 +3377,48 @@ mod tests {
             body.contains("owner\n            .publish_success_with(issue_channel_invitation_created_proof(")
                 || body.contains("owner\r\n            .publish_success_with(issue_channel_invitation_created_proof("),
             "authoritative terminal wrapper must publish success before returning terminal status"
+        );
+    }
+
+    #[test]
+    fn invite_authority_with_context_keeps_peer_channel_followup_off_critical_path() {
+        let source = include_str!("messaging/invites.rs");
+        let start = source
+            .find("pub(super) async fn invite_authority_to_channel_with_context(")
+            .expect("invite_authority_to_channel_with_context definition");
+        let end = source[start..]
+            .find("Ok(invitation.invitation_id)")
+            .map(|offset| start + offset)
+            .expect("invite_authority_to_channel_with_context return");
+        let body = &source[start..end];
+        assert!(
+            !body.contains("update_workflow_stage(&stage_tracker, \"ensure_invited_peer_channel\")"),
+            "invite_authority_to_channel_with_context must not block terminal success on best-effort peer-channel warmup"
+        );
+        assert!(
+            !body.contains("ensure_invited_peer_channel(&runtime, context_id, receiver)"),
+            "invite_authority_to_channel_with_context must keep best-effort peer-channel warmup out of the critical path"
+        );
+    }
+
+    #[test]
+    fn invite_authority_handoff_runs_post_success_followups() {
+        let source = include_str!("messaging.rs");
+        let start = source
+            .find("pub async fn invite_authority_to_channel(")
+            .expect("handoff invite_authority_to_channel definition");
+        let end = source[start..]
+            .find("    }\n}\n\n/// Start a direct chat with a contact")
+            .map(|offset| start + offset)
+            .expect("handoff invite_authority_to_channel end");
+        let body = &source[start..end];
+        assert!(
+            body.contains("if outcome.result.is_ok()"),
+            "handoff invite_authority_to_channel must gate post-success propagation on workflow success"
+        );
+        assert!(
+            body.contains("run_post_channel_invite_followups(app_core, receiver, authoritative_channel)"),
+            "handoff invite_authority_to_channel must run post-success propagation for channel invites"
         );
     }
 }

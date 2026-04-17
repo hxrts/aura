@@ -857,15 +857,6 @@ fn submit_simple_modal_action(
             true
         }
         SimpleModalSubmitAction::CreateInvitation => {
-            if current_model
-                .as_ref()
-                .is_some_and(|model| model.last_invite_code.is_some())
-            {
-                controller.close_modal();
-                rerender();
-                return true;
-            }
-
             let Some(create_state) = current_model
                 .as_ref()
                 .and_then(UiModel::create_invitation_modal)
@@ -879,6 +870,7 @@ fn submit_simple_modal_action(
             let ttl_ms = Some(create_state.ttl_hours.max(1).saturating_mul(60 * 60 * 1000));
 
             let app_core = controller.app_core().clone();
+            let rerender_for_create = rerender.clone();
             spawn_ui(async move {
                 tracing::info!("create_invitation submit start");
                 let operation = UiWorkflowHandoffOwner::submit(
@@ -916,12 +908,14 @@ fn submit_simple_modal_action(
                             code: Some(code),
                         });
                         controller.info_toast("Invitation code copied to clipboard");
+                        rerender_for_create();
                         tracing::info!("create_invitation operation succeeded");
                         tracing::info!("create_invitation complete");
                     }
                     Err(SubmittedOperationWorkflowError::Workflow(error)) => {
                         tracing::warn!(error = %error, "create_invitation workflow failed");
                         controller.runtime_error_toast(error.to_string());
+                        rerender_for_create();
                     }
                     Err(
                         SubmittedOperationWorkflowError::Protocol(detail)
@@ -929,9 +923,11 @@ fn submit_simple_modal_action(
                     ) => {
                         tracing::warn!("create_invitation workflow panicked");
                         controller.runtime_error_toast(detail);
+                        rerender_for_create();
                     }
                 }
                 tracing::info!("create_invitation rerender");
+                rerender_for_create();
             });
             true
         }
