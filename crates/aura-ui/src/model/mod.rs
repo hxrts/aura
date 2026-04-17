@@ -1407,14 +1407,18 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveModal, ContactRelationshipState, CreateInvitationModalState, NeighborhoodMode,
-        ScreenId, TextModalState, UiModel,
+        read_model, write_model, ActiveModal, ContactRelationshipState, CreateInvitationModalState,
+        NeighborhoodMode, ScreenId, TextModalState, UiModel,
     };
+    use crate::MemoryClipboard;
+    use crate::UiController;
     use aura_app::ui::contract::{
         OperationId, OperationInstanceId, OperationState, RuntimeEventKind,
     };
     use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
+    use aura_app::{AppConfig, AppCore};
     use aura_core::types::identifiers::AuthorityId;
+    use std::sync::Arc;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
@@ -1531,7 +1535,12 @@ mod tests {
 
     #[test]
     fn open_create_invitation_modal_prefills_profile_nickname() {
-        let controller = UiController::new("local".to_string());
+        let controller = UiController::new(
+            Arc::new(async_lock::RwLock::new(
+                AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+            )),
+            Arc::new(MemoryClipboard::default()),
+        );
         {
             let mut model = write_model(&controller.model);
             model.profile_nickname = "Maple".to_string();

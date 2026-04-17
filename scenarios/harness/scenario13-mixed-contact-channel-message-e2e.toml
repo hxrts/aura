@@ -28,6 +28,14 @@
 # bidirectional shared-channel delivery reaches both frontend bindings.
 # In the current parity surface, Alice renders Bob's inbound shared-channel
 # message as plaintext, so the receive assertion matches the message body.
+#
+# Canonical shared-flow coverage anchor:
+# - navigate contacts
+# - create invitation
+# - accept invitation
+# - navigate chat
+# - join channel
+# - send chat message
 
 id = "scenario13-mixed-contact-channel-message-e2e"
 goal = "Use two actors as distinct users: accept a contact invite and verify shared-channel message delivery on the currently stable harness path."

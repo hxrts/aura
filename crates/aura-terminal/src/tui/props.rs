@@ -482,7 +482,7 @@ pub struct NotificationsViewProps {
 impl Default for NotificationsViewProps {
     fn default() -> Self {
         Self {
-            focus: Default::default(),
+            focus: crate::tui::navigation::TwoPanelFocus::default(),
             selected_index: 0,
             runtime_facts: Vec::new(),
             dismissed_ids: std::collections::HashSet::new(),

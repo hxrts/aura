@@ -1557,7 +1557,7 @@ mod tests {
 
         // Create invitation
         let invite = bridge
-            .create_contact_invitation(receiver, None, Some("Hello!".to_string()), None)
+            .create_contact_invitation(receiver, None, Some("Hello!".to_string()), None, None)
             .await
             .expect("Should create invitation");
 

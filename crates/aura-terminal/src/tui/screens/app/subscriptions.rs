@@ -214,8 +214,7 @@ pub fn use_contacts_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
-        let known_guardians = known_guardians.clone();
-        let update_tx = update_tx.clone();
+        let update_tx = update_tx;
         let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         let mut projection_version = projection_version.clone();
         async move {
@@ -326,7 +325,6 @@ pub fn use_devices_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let devices = shared_devices.clone();
-        let known_devices = known_devices.clone();
         let update_tx = update_tx;
         let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         let mut projection_version = projection_version.clone();

@@ -1243,6 +1243,7 @@ mod tests {
             created_at_ms: 42,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }]);
 
         assert_eq!(
@@ -1591,6 +1592,7 @@ mod tests {
             created_at_ms: 0,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }
     }
 
@@ -2063,6 +2065,7 @@ mod tests {
             created_at_ms: 0,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }]);
         runtime.set_accept_invitation_result(Ok(
             crate::runtime_bridge::InvitationMutationOutcome {
@@ -2885,6 +2888,7 @@ mod tests {
             created_at_ms: 0,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         };
         runtime.set_pending_invitations(vec![invitation]);
 

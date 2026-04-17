@@ -756,6 +756,7 @@ mod tests {
             created_at: 1000,
             expires_at: Some(2000),
             message: None,
+            receiver_nickname: None,
         };
 
         assert!(!inv.is_expired(1500));
@@ -775,6 +776,7 @@ mod tests {
             created_at: 1000,
             expires_at: None,
             message: None,
+            receiver_nickname: None,
         };
 
         // Should never expire if no expiry set

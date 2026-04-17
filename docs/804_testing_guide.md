@@ -165,6 +165,8 @@ Browser harness failures surface explicit publication-state diagnostics through 
 
 `submitSemanticCommand` follows that rule directly. After bounded same-page recovery it must fail closed instead of replaying the semantic request through a fresh browser session. The browser publication owner classifies diagnostics by typed publication status, binding mode, and reliability before serializing them to page globals. Compatibility-sensitive waits keep one canonical publication path instead of ad hoc string assembly.
 
+Browser semantic navigation follows the same separation. Page-owned navigation helpers such as `navigate_screen` and settings-section opening may publish the target `UiSnapshot` before the browser finishes painting the new screen. Harness navigation success must therefore wait for both the target semantic screen and the matching post-render `RenderHeartbeat` or equivalent render-convergence proof before treating the control activation as complete. DOM selectors remain diagnostic corroboration only; they must not replace the semantic-plus-render contract.
+
 Browser-owned semantic snapshot publication should flow through one helper aligned with `UiController::publish_ui_snapshot`. Browser-owned maintenance polling should share one bounded helper for sleep, cancellation, and pause reporting so those paths stay uniform and clearly non-semantic. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
 
 ### Shared-Flow Coverage Anchors

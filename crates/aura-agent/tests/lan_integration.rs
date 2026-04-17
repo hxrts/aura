@@ -500,6 +500,7 @@ async fn setup_lan_group_channel_pair(
         &app_a,
         agent_b.authority_id(),
         None,
+        None,
         Some("lan strong-command coverage".to_string()),
         None,
     )
@@ -702,6 +703,7 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         &app_a,
         agent_b.authority_id(),
         None,
+        None,
         Some("e2e lan invite".to_string()),
         None,
     )
@@ -875,6 +877,7 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
     let invite = invitation_workflow::create_contact_invitation(
         &app_a,
         agent_b.authority_id(),
+        None,
         None,
         Some("e2e lan invite without descriptor wait".to_string()),
         None,

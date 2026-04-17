@@ -976,6 +976,7 @@ mod tests {
             .invite_as_contact(
                 receiver_id,
                 Some("bob".to_string()),
+                None,
                 Some("Hey Bob!".to_string()),
                 None,
             )
@@ -997,6 +998,7 @@ mod tests {
         let result = service
             .invite_as_contact(
                 receiver_id,
+                None,
                 None,
                 Some("Out-of-band invite".to_string()),
                 None,
@@ -1100,11 +1102,17 @@ mod tests {
 
         // Create two invitations
         let inv1 = service
-            .invite_as_contact(receiver_id, None, None, None)
+            .invite_as_contact(receiver_id, None, None, None, None)
             .await
             .unwrap();
         let inv2 = service
-            .invite_as_contact(AuthorityId::new_from_entropy([119u8; 32]), None, None, None)
+            .invite_as_contact(
+                AuthorityId::new_from_entropy([119u8; 32]),
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
 
@@ -1129,7 +1137,7 @@ mod tests {
 
         let receiver_id = AuthorityId::new_from_entropy([121u8; 32]);
         let invitation = service
-            .invite_as_contact(receiver_id, None, None, None)
+            .invite_as_contact(receiver_id, None, None, None, None)
             .await
             .unwrap();
 

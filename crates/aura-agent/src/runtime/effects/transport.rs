@@ -446,7 +446,7 @@ async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(
                     },
                     || async {
                         let message = match wrapped_payload {
-                            Some(ref wrapped) => TungsteniteMessage::Text(wrapped.clone().into()),
+                            Some(ref wrapped) => TungsteniteMessage::Text(wrapped.clone()),
                             None => TungsteniteMessage::Binary(payload),
                         };
                         ws.send(message)
@@ -594,7 +594,7 @@ fn normalize_ws_url(addr: &str) -> String {
     }
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(test)]
 fn harness_browser_transport_ws_url(current_host: &str, harness_mode: bool) -> Option<String> {
     if !harness_mode || current_host.is_empty() {
         return None;

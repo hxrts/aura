@@ -86,12 +86,9 @@ pub(super) fn NotificationsScreen(
                                 UiButton {
                                     label: "Dismiss".to_string(),
                                     variant: ButtonVariant::Secondary,
-                                    onclick: {
-                                        let controller = controller.clone();
-                                        move |_| {
-                                            controller.dismiss_selected_notification();
-                                            render_tick.set(render_tick() + 1);
-                                        }
+                                    onclick: move |_| {
+                                        controller.dismiss_selected_notification();
+                                        render_tick.set(render_tick() + 1);
                                     },
                                 }
                             }

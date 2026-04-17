@@ -3023,6 +3023,7 @@ mod tests {
                     nickname_suggestion: None,
                     bootstrap: None,
                 },
+                None,
                 Some(context_id),
                 None,
                 None,
@@ -3237,6 +3238,7 @@ mod tests {
             status: InvitationStatus::Declined,
             created_at: 456,
             expires_at: shareable.expires_at,
+            receiver_nickname: None,
             message: shareable.message.clone(),
         };
         let stored = InvitationHandler::load_imported_invitation(
@@ -5725,6 +5727,7 @@ mod tests {
             status: InvitationStatus::Pending,
             created_at: 1600000000000,
             expires_at: Some(1700000000000),
+            receiver_nickname: None,
             message: Some("Hi Bob!".to_string()),
         };
 

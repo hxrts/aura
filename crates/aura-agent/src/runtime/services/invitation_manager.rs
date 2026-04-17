@@ -283,6 +283,7 @@ mod tests {
             status: crate::handlers::InvitationStatus::Pending,
             created_at: u64::from(seed),
             expires_at: None,
+            receiver_nickname: None,
             message: None,
         }
     }

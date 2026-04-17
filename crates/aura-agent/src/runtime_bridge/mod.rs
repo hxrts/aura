@@ -374,27 +374,6 @@ fn browser_harness_page_enabled() -> bool {
     harness_page
 }
 
-#[cfg(target_arch = "wasm32")]
-fn is_harness_browser_mailbox_url(url: &str) -> bool {
-    if !browser_harness_page_enabled() {
-        return false;
-    }
-
-    let Some(window) = web_sys::window() else {
-        return false;
-    };
-    let Ok(host) = window.location().host() else {
-        return false;
-    };
-    if host.is_empty() {
-        return false;
-    }
-
-    let ws_host = format!("ws://{host}");
-    let wss_host = format!("wss://{host}");
-    url == ws_host || url == wss_host
-}
-
 /// Wrapper to implement RuntimeBridge for AuraAgent
 ///
 /// This struct wraps an Arc<AuraAgent> to provide the RuntimeBridge implementation.
@@ -4803,11 +4782,11 @@ mod tests {
         let bridge = AgentRuntimeBridge::new(agent);
 
         bridge
-            .create_contact_invitation(authority, None, Some("generic".to_string()), None)
+            .create_contact_invitation(authority, None, Some("generic".to_string()), None, None)
             .await
             .expect("generic contact invitation should succeed");
         bridge
-            .create_contact_invitation(receiver, None, Some("direct".to_string()), None)
+            .create_contact_invitation(receiver, None, Some("direct".to_string()), None, None)
             .await
             .expect("direct contact invitation should succeed");
 

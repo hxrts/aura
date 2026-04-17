@@ -22,9 +22,9 @@ The harness coverage model has two explicit lanes:
 
 | Metric | Count |
 |--------|-------|
-| Harness User Flow Scenarios | 10 |
-| Shared Semantic Scenarios | 5 |
-| Mixed-Runtime Scenarios (TUI + Web distinct keys) | 2 |
+| Harness User Flow Scenarios | 11 |
+| Shared Semantic Scenarios | 6 |
+| Mixed-Runtime Scenarios (TUI + Web distinct keys) | 3 |
 | Frontend-Conformance Scenarios | 5 |
 | Core User Flow Domains | 13 |
 
@@ -49,6 +49,7 @@ This report is a traceability document for those classes. It is not a proof of p
 | TUI Neighborhood Keypaths/Detail | `scenarios/harness/tui-conformance-neighborhood-keypaths-and-detail.toml` | TUI frontend-conformance: neighborhood keypaths, rendered map/detail text, and toast wiring |
 | Scenario 12 | `scenarios/harness/scenario12-mixed-device-enrollment-removal-e2e.toml` | Mixed TUI/Web device enrollment + removal |
 | Scenario 13 | `scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml` | Shared contact invite + channel messaging |
+| Contact Invite Notification Roundtrip | `scenarios/harness/mixed-contact-invite-notification-roundtrip.toml` | Mixed TUI/Web symmetric contact invite acceptance notifications |
 | Shared Settings | `scenarios/harness/shared-settings-parity.toml` | Shared semantic settings parity |
 | Shared Notifications/Authority | `scenarios/harness/shared-notifications-and-authority.toml` | Shared semantic notifications navigation and authority-switch handling |
 | Browser Observation | `scenarios/harness/semantic-observation-browser-smoke.toml` | Browser semantic observation contract smoke |
@@ -64,15 +65,15 @@ The two TUI-only conformance scenarios plus Scenario 13 are retained as frontend
 | Startup and onboarding readiness | `real-runtime-mixed-startup-smoke.toml` | `quint-semantic-observation-smoke.toml` | TUI + Web |
 | Navigate neighborhood | `real-runtime-mixed-startup-smoke.toml` | TUI Neighborhood Keypaths/Detail | TUI + Web |
 | Navigate chat | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
-| Navigate contacts | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Navigate contacts | Scenario 13 | `mixed-contact-invite-notification-roundtrip.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Send friend request | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Accept inbound friend request | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Decline inbound friend request | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Remove friend / revoke outbound friendship | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
-| Navigate notifications | `shared-notifications-and-authority.toml` | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Navigate notifications | `shared-notifications-and-authority.toml` | `mixed-contact-invite-notification-roundtrip.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Navigate settings | `shared-settings-parity.toml` | `shared-notifications-and-authority.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | TUI + Web |
-| Create invitation | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
-| Accept invitation | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Create invitation | Scenario 13 | `mixed-contact-invite-notification-roundtrip.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Accept invitation | Scenario 13 | `mixed-contact-invite-notification-roundtrip.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Create home | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Join channel | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Send chat message | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
@@ -110,6 +111,12 @@ and continue to map to the same canonical coverage anchors:
   current terminal-side change only removes stale modal-local ownership
   assumptions and keeps those flows on the same typed dispatch and shared
   workflow path.
+- Mixed contact-invite acceptance notifications now also have a dedicated
+  symmetric mixed-runtime anchor in
+  `mixed-contact-invite-notification-roundtrip.toml`. That scenario exercises
+  TUI-create/Web-accept and Web-create/TUI-accept flows and verifies the
+  creator-visible acceptance notification on the notifications screen without
+  replacing Scenario 13 as the canonical contacts/chat lifecycle anchor.
 - Pending channel-invitation acceptance now also requires terminal-status
   wrappers and `*_with_instance` entry points to publish a terminal failure for
   the same operation instance if a browser/TUI shared-flow error escapes before
