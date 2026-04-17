@@ -363,6 +363,8 @@ pub mod handoff {
         pub receiver: AuthorityId,
         /// Optional nickname carried in the invitation payload.
         pub nickname: Option<String>,
+        /// Optional sender-local nickname for the invitee.
+        pub receiver_nickname: Option<String>,
         /// Optional invitation message.
         pub message: Option<String>,
         /// Optional invitation TTL in milliseconds.
@@ -376,6 +378,8 @@ pub mod handoff {
     pub struct CreateGenericContactInvitationRequest {
         /// Optional nickname carried in the invitation payload.
         pub nickname: Option<String>,
+        /// Optional sender-local nickname for the invitee.
+        pub receiver_nickname: Option<String>,
         /// Optional invitation message.
         pub message: Option<String>,
         /// Optional invitation TTL in milliseconds.
@@ -433,6 +437,7 @@ pub mod handoff {
             app_core,
             request.receiver,
             request.nickname,
+            request.receiver_nickname,
             request.message,
             request.ttl_ms,
             request.operation_instance_id,
@@ -448,6 +453,7 @@ pub mod handoff {
         super::create_generic_contact_invitation_code_terminal_status(
             app_core,
             request.nickname,
+            request.receiver_nickname,
             request.message,
             request.ttl_ms,
             request.operation_instance_id,

@@ -336,7 +336,7 @@ fn apply_modal_overlay(
                 *center = "Invite Contacts".to_string();
             } else if row_idx == 1 {
                 *center = if model.modal_hint.is_empty() {
-                    "Press Enter to create invitation".to_string()
+                    "Invitation code is created automatically".to_string()
                 } else {
                     model.modal_hint.clone()
                 };

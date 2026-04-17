@@ -515,6 +515,8 @@ mod tests {
             [TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
                 receiver_id,
                 invitation_type: InvitationKind::Contact,
+                nickname: None,
+                receiver_nickname: None,
                 message: None,
                 ttl_secs: None,
             })] if receiver_id.as_ref().is_some_and(|receiver_id| receiver_id.to_string() == authority_id)

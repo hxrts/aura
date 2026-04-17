@@ -15,6 +15,7 @@ pub(super) fn convert_invitation_to_bridge_info(
         created_at_ms: invitation.created_at,
         expires_at_ms: invitation.expires_at,
         message: invitation.message.clone(),
+        receiver_nickname: invitation.receiver_nickname.clone(),
     }
 }
 

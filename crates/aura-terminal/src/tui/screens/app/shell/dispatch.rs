@@ -401,6 +401,8 @@ pub(super) fn execute_harness_followup_command(
         TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
             receiver_id,
             invitation_type,
+            nickname,
+            receiver_nickname,
             message,
             ttl_secs,
         }) => {
@@ -427,6 +429,8 @@ pub(super) fn execute_harness_followup_command(
             (cb.invitations.on_create)(
                 receiver_id,
                 invitation_type.as_str().to_string(),
+                nickname,
+                receiver_nickname,
                 message,
                 ttl_secs,
                 operation,
@@ -1013,7 +1017,14 @@ fn open_observed_convenience_modal(
     match dispatch_cmd {
         DispatchCommand::OpenCreateInvitationModal => {
             let _ = shared_contacts_for_dispatch;
-            let modal_state = crate::tui::state::CreateInvitationModalState::new();
+            let mut modal_state = crate::tui::state::CreateInvitationModalState::new();
+            if let Some(current_authority) = new_state
+                .authorities
+                .get(new_state.current_authority_index)
+                .filter(|authority| !authority.nickname_suggestion.trim().is_empty())
+            {
+                modal_state.nickname = current_authority.nickname_suggestion.trim().to_string();
+            }
             new_state
                 .modal_queue
                 .enqueue(crate::tui::state::QueuedModal::ContactsCreate(modal_state));

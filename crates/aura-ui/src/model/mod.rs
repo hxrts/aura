@@ -228,6 +228,20 @@ macro_rules! modal_state_accessors {
 }
 
 impl UiModel {
+    fn clear_generic_invitation_code_cache(&mut self) {
+        self.last_invite_code = None;
+        self.runtime_events.retain(|event| {
+            !matches!(
+                &event.fact,
+                RuntimeFact::InvitationCodeReady {
+                    receiver_authority_id: None,
+                    source_operation,
+                    ..
+                } if *source_operation == OperationId::invitation_create()
+            )
+        });
+    }
+
     pub fn new(authority_id: String) -> Self {
         Self {
             semantic_revision: next_projection_revision(None),
@@ -332,16 +346,41 @@ impl UiModel {
     }
 
     #[must_use]
-    pub fn current_invitation_code(&self) -> Option<String> {
-        self.last_invite_code.clone().or_else(|| {
-            self.runtime_events.iter().rev().find_map(|event| {
-                if let RuntimeFact::InvitationCodeReady { code, .. } = &event.fact {
-                    code.clone()
-                } else {
-                    None
-                }
-            })
+    pub fn create_invitation_request_signature(&self) -> Option<String> {
+        self.create_invitation_modal().map(|state| {
+            format!(
+                "{}|{}|{}|{}",
+                state.nickname.trim(),
+                state.receiver_nickname.trim(),
+                state.message.trim(),
+                state.ttl_hours.max(1)
+            )
         })
+    }
+
+    #[must_use]
+    pub fn current_invitation_code(&self) -> Option<String> {
+        if matches!(self.modal_state(), Some(ModalState::CreateInvitation)) {
+            return self
+                .create_invitation_modal()
+                .and_then(|state| state.generated_code.clone());
+        }
+        self.create_invitation_modal()
+            .and_then(|state| state.generated_code.clone())
+            .or_else(|| self.last_invite_code.clone())
+            .or_else(|| {
+                self.runtime_events
+                    .iter()
+                    .rev()
+                    .find_map(|event| match &event.fact {
+                        RuntimeFact::InvitationCodeReady {
+                            receiver_authority_id: None,
+                            source_operation,
+                            code,
+                        } if *source_operation == OperationId::invitation_create() => code.clone(),
+                        _ => None,
+                    })
+            })
     }
 
     modal_state_accessors!(
@@ -422,17 +461,33 @@ impl UiModel {
     }
 
     pub fn set_modal_text_value(&mut self, value: impl Into<String>) {
+        let mut clear_invitation_code = false;
         let Some(active_modal) = self.active_modal.as_mut() else {
             return;
         };
         active_modal.set_text_value(value.into());
+        if let Some(state) = active_modal.create_invitation_mut() {
+            state.generated_code = None;
+            clear_invitation_code = true;
+        }
+        if clear_invitation_code {
+            self.clear_generic_invitation_code_cache();
+        }
     }
 
     pub fn set_modal_field_value(&mut self, field_id: FieldId, value: impl Into<String>) {
+        let mut clear_invitation_code = false;
         let Some(active_modal) = self.active_modal.as_mut() else {
             return;
         };
         active_modal.set_field_value(field_id, value.into());
+        if let Some(state) = active_modal.create_invitation_mut() {
+            state.generated_code = None;
+            clear_invitation_code = true;
+        }
+        if clear_invitation_code {
+            self.clear_generic_invitation_code_cache();
+        }
     }
 
     pub fn set_modal_active_field(&mut self, field_id: FieldId) {
@@ -1129,11 +1184,15 @@ impl UiController {
     ) {
         let mut model = write_model(&self.model);
         model.clear_operation(&OperationId::invitation_create());
-        model.last_invite_code = None;
+        model.clear_generic_invitation_code_cache();
+        let profile_nickname = model.profile_nickname.trim().to_string();
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+            nickname: profile_nickname,
+            receiver_nickname: String::new(),
             message: String::new(),
             ttl_hours: 24,
-            active_field: FieldId::InvitationMessage,
+            active_field: FieldId::Nickname,
+            generated_code: None,
         }));
         drop(model);
         self.request_rerender();
@@ -1159,6 +1218,13 @@ impl UiController {
     pub fn remember_invitation_code(&self, code: &str) {
         let mut model = write_model(&self.model);
         model.last_invite_code = Some(code.to_string());
+        if let Some(state) = model
+            .active_modal
+            .as_mut()
+            .and_then(ActiveModal::create_invitation_mut)
+        {
+            state.generated_code = Some(code.to_string());
+        }
         drop(model);
         self.request_rerender();
     }
@@ -1341,7 +1407,8 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveModal, ContactRelationshipState, NeighborhoodMode, ScreenId, TextModalState, UiModel,
+        ActiveModal, ContactRelationshipState, CreateInvitationModalState, NeighborhoodMode,
+        ScreenId, TextModalState, UiModel,
     };
     use aura_app::ui::contract::{
         OperationId, OperationInstanceId, OperationState, RuntimeEventKind,
@@ -1425,6 +1492,59 @@ mod tests {
             panic!("contact should exist");
         };
         assert_eq!(row.invitation_code, Some("aura:v1:NEW".to_string()));
+    }
+
+    #[test]
+    fn current_invitation_code_prefers_modal_owned_code() {
+        let mut model = UiModel::new("local".to_string());
+        model.last_invite_code = Some("INVITE-CACHED".to_string());
+        model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+            generated_code: Some("INVITE-MODAL".to_string()),
+            ..CreateInvitationModalState::default()
+        }));
+
+        assert_eq!(
+            model.current_invitation_code(),
+            Some("INVITE-MODAL".to_string())
+        );
+    }
+
+    #[test]
+    fn current_invitation_code_ignores_receiver_scoped_runtime_events() {
+        let mut model = UiModel::new("local".to_string());
+        model.active_modal = Some(ActiveModal::CreateInvitation(
+            CreateInvitationModalState::default(),
+        ));
+        model
+            .runtime_events
+            .push(aura_app::ui::contract::RuntimeEventSnapshot {
+                id: aura_app::ui::contract::RuntimeEventId("runtime-event-1".to_string()),
+                fact: RuntimeFact::InvitationCodeReady {
+                    receiver_authority_id: Some(test_authority(7).to_string()),
+                    source_operation: OperationId::invitation_create(),
+                    code: Some("INVITE-RECEIVER".to_string()),
+                },
+            });
+
+        assert_eq!(model.current_invitation_code(), None);
+    }
+
+    #[test]
+    fn open_create_invitation_modal_prefills_profile_nickname() {
+        let controller = UiController::new("local".to_string());
+        {
+            let mut model = write_model(&controller.model);
+            model.profile_nickname = "Maple".to_string();
+        }
+
+        controller.open_create_invitation_modal(None, None);
+
+        let model = read_model(&controller.model);
+        let Some(state) = model.create_invitation_modal() else {
+            panic!("create invitation modal should be open");
+        };
+        assert_eq!(state.nickname, "Maple");
+        assert!(state.receiver_nickname.is_empty());
     }
 
     #[test]

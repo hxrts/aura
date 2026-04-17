@@ -46,9 +46,13 @@ web_sources_stale() {
     if [[ ! -f "$build_output" ]]; then
         return 0
     fi
-    local newest_src
-    newest_src="$(find "$repo_root/crates/aura-web/src" "$repo_root/crates/aura-ui/src" "$repo_root/crates/aura-app/src" -name '*.rs' -newer "$build_output" -print -quit 2>/dev/null || true)"
-    [[ -n "$newest_src" ]]
+    local newest_src=""
+    newest_src="$(find "$repo_root/crates" -path '*/src/*' -name '*.rs' -newer "$build_output" -print -quit 2>/dev/null || true)"
+    if [[ -n "$newest_src" ]]; then
+        return 0
+    fi
+    newest_src="$(find "$repo_root/crates" -name 'Cargo.toml' -newer "$build_output" -print -quit 2>/dev/null || true)"
+    [[ -n "$newest_src" || "$repo_root/Cargo.lock" -nt "$build_output" || "$repo_root/Cargo.toml" -nt "$build_output" ]]
 }
 
 for profile in debug release; do

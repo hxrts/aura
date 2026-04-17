@@ -97,8 +97,9 @@ fn test_effect_commands() {
     assert_matches!(cmd, EffectCommand::SendMessage { channel, content } if channel == "general" && content == "Hello!");
 
     let cmd = EffectCommand::CreateInvitation {
-        receiver_id: aura_core::AuthorityId::new_from_entropy([21u8; 32]),
+        receiver_id: Some(aura_core::AuthorityId::new_from_entropy([21u8; 32])),
         invitation_type: "Guardian".to_string(),
+        nickname: Some("Guardian Ops".to_string()),
         message: Some("Be my guardian".to_string()),
         ttl_secs: Some(3600),
         operation_instance_id: None,
@@ -108,12 +109,14 @@ fn test_effect_commands() {
         EffectCommand::CreateInvitation {
             receiver_id,
             invitation_type,
+            nickname,
             message,
             ttl_secs,
             operation_instance_id,
         }
-            if receiver_id == aura_core::AuthorityId::new_from_entropy([21u8; 32])
+            if receiver_id == Some(aura_core::AuthorityId::new_from_entropy([21u8; 32]))
                 && invitation_type == "Guardian"
+                && nickname == Some("Guardian Ops".to_string())
                 && message == Some("Be my guardian".to_string())
                 && ttl_secs == Some(3600)
                 && operation_instance_id.is_none()

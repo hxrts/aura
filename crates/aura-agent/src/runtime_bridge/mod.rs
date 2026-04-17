@@ -3282,6 +3282,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         receiver: AuthorityId,
         nickname: Option<String>,
+        receiver_nickname: Option<String>,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
@@ -3291,7 +3292,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let invitation = invitation_service
-            .invite_as_contact(receiver, nickname, message, ttl_ms)
+            .invite_as_contact(receiver, nickname, receiver_nickname, message, ttl_ms)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to create contact invitation: {}", e))

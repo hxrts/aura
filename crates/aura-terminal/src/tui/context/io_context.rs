@@ -565,6 +565,8 @@ impl IoContext {
         &self,
         receiver_id: Option<AuthorityId>,
         invitation_type: &str,
+        nickname: Option<String>,
+        receiver_nickname: Option<String>,
         message: Option<String>,
         ttl_secs: Option<u64>,
         operation_instance_id: Option<OperationInstanceId>,
@@ -574,6 +576,8 @@ impl IoContext {
             .execute(&EffectCommand::CreateInvitation {
                 receiver_id,
                 invitation_type: invitation_type.to_string(),
+                nickname,
+                receiver_nickname,
                 message,
                 ttl_secs,
                 operation_instance_id,

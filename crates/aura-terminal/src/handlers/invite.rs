@@ -217,7 +217,7 @@ async fn create_invitation(
             .await
             .map_err(|e| TerminalError::Operation(e.to_string())),
         InvitationRoleValue::Contact => service
-            .invite_as_contact(receiver_id, None, None, expires_ms)
+            .invite_as_contact(receiver_id, None, None, None, expires_ms)
             .await
             .map_err(|e| TerminalError::Operation(e.to_string())),
     }

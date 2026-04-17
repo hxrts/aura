@@ -225,6 +225,8 @@ pub struct ContactsImportModalViewProps {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ContactsCreateModalViewProps {
     pub visible: bool,
+    pub nickname: String,
+    pub receiver_nickname: String,
     pub message: String,
     pub ttl_hours: u64,
     pub focused_field: CreateInvitationField,
@@ -311,13 +313,31 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         _ => (false, String::new(), false),
     };
 
-    let (create_visible, create_message, create_ttl, create_focused_field) =
-        match state.modal_queue.current() {
-            Some(QueuedModal::ContactsCreate(s)) => {
-                (true, s.message.clone(), s.ttl_hours, s.focused_field)
-            }
-            _ => (false, String::new(), 24, CreateInvitationField::Message),
-        };
+    let (
+        create_visible,
+        create_nickname,
+        create_receiver_nickname,
+        create_message,
+        create_ttl,
+        create_focused_field,
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::ContactsCreate(s)) => (
+            true,
+            s.nickname.clone(),
+            s.receiver_nickname.clone(),
+            s.message.clone(),
+            s.ttl_hours,
+            s.focused_field,
+        ),
+        _ => (
+            false,
+            String::new(),
+            String::new(),
+            String::new(),
+            24,
+            CreateInvitationField::Nickname,
+        ),
+    };
 
     let (code_visible, code_invitation_id, code_code, code_loading, code_copied) =
         match state.modal_queue.current() {
@@ -405,6 +425,8 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
             },
             create_invitation: ContactsCreateModalViewProps {
                 visible: create_visible,
+                nickname: create_nickname,
+                receiver_nickname: create_receiver_nickname,
                 message: create_message,
                 ttl_hours: create_ttl,
                 focused_field: create_focused_field,

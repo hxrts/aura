@@ -5,9 +5,9 @@
 //! ## Field-Focus Navigation
 //!
 //! The modal uses a simple field-focus model:
-//! - ↑/↓: Navigate between Type, Message, and TTL fields
-//! - ←/→: Change value (Type and TTL fields only)
-//! - Typing: Edit message when Message field is focused
+//! - ↑/↓: Navigate between Nickname, Invitee Nickname, Message, and TTL fields
+//! - ←/→: Change value (TTL field only)
+//! - Typing: Edit text fields when focused
 //! - Enter: Create invitation
 //! - Esc: Cancel
 
@@ -20,7 +20,8 @@ use crate::tui::state::CreateInvitationField;
 use crate::tui::theme::{Borders, Spacing, Theme};
 
 /// Callback type for invitation creation
-pub type CreateInvitationCallback = Arc<dyn Fn(Option<String>, Option<u64>) + Send + Sync>;
+pub type CreateInvitationCallback =
+    Arc<dyn Fn(Option<String>, Option<String>, Option<String>, Option<u64>) + Send + Sync>;
 
 /// Callback type for modal cancellation
 pub type CancelCallback = Arc<dyn Fn() + Send + Sync>;
@@ -38,6 +39,10 @@ pub struct InvitationCreateModalProps {
     pub creating: bool,
     /// Error message if creation failed
     pub error: String,
+    /// Optional nickname for the invitation
+    pub nickname: String,
+    /// Optional sender-local nickname for the invitee
+    pub receiver_nickname: String,
     /// Optional message for the invitation
     pub message: String,
     /// TTL in hours (0 = no expiry)
@@ -60,6 +65,8 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     let creating = props.creating;
     let has_error = !props.error.is_empty();
     let error = props.error.clone();
+    let nickname = props.nickname.clone();
+    let receiver_nickname = props.receiver_nickname.clone();
     let message = props.message.clone();
     let ttl_hours = props.ttl_hours;
     let focused_field = props.focused_field;
@@ -67,10 +74,22 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     let can_submit = !creating;
 
     // Field focus colors
+    let nickname_focused = focused_field == CreateInvitationField::Nickname;
+    let receiver_nickname_focused = focused_field == CreateInvitationField::ReceiverNickname;
     let message_focused = focused_field == CreateInvitationField::Message;
     let ttl_focused = focused_field == CreateInvitationField::Ttl;
 
+    let nickname_border = if nickname_focused {
+        Theme::BORDER_FOCUS
+    } else {
+        Theme::BORDER
+    };
     let message_border = if message_focused {
+        Theme::BORDER_FOCUS
+    } else {
+        Theme::BORDER
+    };
+    let receiver_nickname_border = if receiver_nickname_focused {
         Theme::BORDER_FOCUS
     } else {
         Theme::BORDER
@@ -82,8 +101,62 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     };
 
     // Focus indicator
+    let nickname_pointer = if nickname_focused { "▸ " } else { "  " };
+    let receiver_nickname_pointer = if receiver_nickname_focused {
+        "▸ "
+    } else {
+        "  "
+    };
     let message_pointer = if message_focused { "▸ " } else { "  " };
     let ttl_pointer = if ttl_focused { "▸ " } else { "  " };
+
+    let nickname_display = if nickname_focused {
+        if nickname.is_empty() {
+            "│".to_string()
+        } else if nickname.len() > 15 {
+            format!("{}...│", &nickname[..12])
+        } else {
+            format!("{nickname}│")
+        }
+    } else if nickname.is_empty() {
+        "(optional)".to_string()
+    } else if nickname.len() > 16 {
+        format!("{}...", &nickname[..13])
+    } else {
+        nickname.clone()
+    };
+
+    let nickname_color = if nickname_focused {
+        Theme::TEXT
+    } else if nickname.is_empty() {
+        Theme::TEXT_MUTED
+    } else {
+        Theme::TEXT
+    };
+
+    let receiver_nickname_display = if receiver_nickname_focused {
+        if receiver_nickname.is_empty() {
+            "│".to_string()
+        } else if receiver_nickname.len() > 15 {
+            format!("{}...│", &receiver_nickname[..12])
+        } else {
+            format!("{receiver_nickname}│")
+        }
+    } else if receiver_nickname.is_empty() {
+        "(optional)".to_string()
+    } else if receiver_nickname.len() > 16 {
+        format!("{}...", &receiver_nickname[..13])
+    } else {
+        receiver_nickname.clone()
+    };
+
+    let receiver_nickname_color = if receiver_nickname_focused {
+        Theme::TEXT
+    } else if receiver_nickname.is_empty() {
+        Theme::TEXT_MUTED
+    } else {
+        Theme::TEXT
+    };
 
     // Message display (truncated to fit input width, show cursor when focused)
     let message_display = if message_focused {
@@ -165,6 +238,46 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
+                // Optional nickname
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
+                    View(flex_direction: FlexDirection::Row) {
+                        Text(content: nickname_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                        Text(content: "Nickname", color: if nickname_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                        Text(content: " - ", color: Theme::TEXT_MUTED)
+                        Text(content: "What the recipient should call you", color: Theme::TEXT_MUTED)
+                    }
+                    View(
+                        margin_left: 2,
+                        width: 26,
+                        border_style: Borders::INPUT,
+                        border_color: nickname_border,
+                        padding_left: Spacing::PANEL_PADDING,
+                        padding_right: Spacing::PANEL_PADDING,
+                    ) {
+                        Text(content: nickname_display, color: nickname_color)
+                    }
+                }
+
+                // Optional invitee nickname
+                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
+                    View(flex_direction: FlexDirection::Row) {
+                        Text(content: receiver_nickname_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                        Text(content: "Their Nickname", color: if receiver_nickname_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                        Text(content: " - ", color: Theme::TEXT_MUTED)
+                        Text(content: "How this pending invite should be labeled for you", color: Theme::TEXT_MUTED)
+                    }
+                    View(
+                        margin_left: 2,
+                        width: 26,
+                        border_style: Borders::INPUT,
+                        border_color: receiver_nickname_border,
+                        padding_left: Spacing::PANEL_PADDING,
+                        padding_right: Spacing::PANEL_PADDING,
+                    ) {
+                        Text(content: receiver_nickname_display, color: receiver_nickname_color)
+                    }
+                }
+
                 // Optional message
                 View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
                     View(flex_direction: FlexDirection::Row) {
@@ -227,7 +340,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 }
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "←/→", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Change", color: Theme::TEXT_MUTED)
+                    Text(content: "TTL", color: Theme::TEXT_MUTED)
                 }
                 View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                     Text(content: "Esc", weight: Weight::Bold, color: Theme::SECONDARY)

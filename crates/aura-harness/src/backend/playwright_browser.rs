@@ -11,12 +11,10 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{
-    classify_screen_item_id, list_item_selector, nav_control_id_for_screen,
-    semantic_settings_section_item_id, ControlId, FieldId, ListId, UiSnapshot,
+    classify_screen_item_id, list_item_selector, nav_control_id_for_screen, screen_item_id,
+    semantic_settings_section_item_id, ControlId, FieldId, ListId, ScreenId, UiSnapshot,
 };
-use aura_app::ui::scenarios::{
-    IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
-};
+use aura_app::ui::scenarios::{SemanticCommandRequest, SemanticCommandResponse, SettingsSection};
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_core::{AuthorityId, DeviceId};
 use nix::poll::{poll, PollFd, PollFlags};
@@ -933,35 +931,36 @@ impl RawUiBackend for PlaywrightBrowserBackend {
             }
         }
         let selector = control_selector(control_id)?;
-        let is_navigation_control = matches!(
-            control_id,
-            ControlId::NavNeighborhood
-                | ControlId::NavChat
-                | ControlId::NavContacts
-                | ControlId::NavNotifications
-                | ControlId::NavSettings,
-        );
-        if is_navigation_control {
-            let target_screen = match control_id {
-                ControlId::NavNeighborhood => Some(aura_app::ui::contract::ScreenId::Neighborhood),
-                ControlId::NavChat => Some(aura_app::ui::contract::ScreenId::Chat),
-                ControlId::NavContacts => Some(aura_app::ui::contract::ScreenId::Contacts),
-                ControlId::NavNotifications => {
-                    Some(aura_app::ui::contract::ScreenId::Notifications)
+        let target_screen = navigation_target_screen(control_id);
+        let is_navigation_control = target_screen.is_some();
+        let mut navigation_error = None;
+        if let Some(target_screen) = target_screen {
+            if self.current_screen_is(target_screen) {
+                return Ok(());
+            }
+            if let Some(fallback_key) = control_id.activation_key() {
+                match self.send_control_activation_key(fallback_key) {
+                    Ok(()) => {
+                        if self.current_screen_is(target_screen) {
+                            return Ok(());
+                        }
+                    }
+                    Err(error) => {
+                        navigation_error.get_or_insert_with(|| {
+                            anyhow::anyhow!(
+                                "activation key '{fallback_key}' failed before navigation bridge: {error}"
+                            )
+                        });
+                    }
                 }
-                ControlId::NavSettings => Some(aura_app::ui::contract::ScreenId::Settings),
-                _ => None,
-            };
-            if let Some(target_screen) = target_screen {
-                let navigate_result = self.submit_semantic_command(SemanticCommandRequest::new(
-                    IntentAction::OpenScreen {
-                        screen: target_screen,
-                        channel_id: None,
-                        context_id: None,
-                    },
-                ));
-                if navigate_result.is_ok() {
-                    return Ok(());
+            }
+            match self.navigate_screen(target_screen) {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    if self.current_screen_is(target_screen) {
+                        return Ok(());
+                    }
+                    navigation_error = Some(error);
                 }
             }
         }
@@ -969,10 +968,22 @@ impl RawUiBackend for PlaywrightBrowserBackend {
         if click_result.is_ok() {
             return Ok(());
         }
+        if let Some(target_screen) = target_screen {
+            if self.current_screen_is(target_screen) {
+                return Ok(());
+            }
+        }
         if is_navigation_control && control_id.activation_key().is_none() {
-            return Err(click_result
+            let click_error = click_result
                 .err()
-                .unwrap_or_else(|| anyhow::anyhow!("control click failed")));
+                .unwrap_or_else(|| anyhow::anyhow!("control click failed"));
+            return Err(match navigation_error {
+                Some(navigation_error) => anyhow::anyhow!(
+                    "preferred navigation failed for {control_id:?}: {navigation_error}; \
+                     fallback click via {selector} failed: {click_error}"
+                ),
+                None => click_error,
+            });
         }
         let click_error = click_result
             .err()
@@ -995,11 +1006,22 @@ impl RawUiBackend for PlaywrightBrowserBackend {
                      fallback key '{fallback_key}' failed: {send_error}"
                 )
             })?;
+            if let Some(target_screen) = target_screen {
+                if self.current_screen_is(target_screen) {
+                    return Ok(());
+                }
+            }
             return Ok(());
         }
-        Err(anyhow::anyhow!(
-            "control activation failed for {control_id:?} via {selector}: {click_error}"
-        ))
+        Err(match navigation_error {
+            Some(navigation_error) => anyhow::anyhow!(
+                "control activation failed for {control_id:?}: {navigation_error}; \
+                 fallback click via {selector} failed: {click_error}"
+            ),
+            None => anyhow::anyhow!(
+                "control activation failed for {control_id:?} via {selector}: {click_error}"
+            ),
+        })
     }
 
     fn click_target(&mut self, selector: &str) -> Result<()> {
@@ -1042,6 +1064,41 @@ impl RawUiBackend for PlaywrightBrowserBackend {
 
         let selector = list_item_selector(list_id, item_id);
         self.click_target(&selector)
+    }
+}
+
+impl PlaywrightBrowserBackend {
+    fn send_control_activation_key(&mut self, key: &str) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "send_key",
+                json!({
+                    "instance_id": self.config.id,
+                    "key": key,
+                    "repeat": 1,
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
+    fn navigate_screen(&mut self, screen: ScreenId) -> Result<()> {
+        self.with_session(|session| {
+            session.rpc_call(
+                "navigate_screen",
+                json!({
+                    "instance_id": self.config.id,
+                    "screen": screen_item_id(screen),
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
+    fn current_screen_is(&self, target: ScreenId) -> bool {
+        self.ui_snapshot()
+            .map(|snapshot| snapshot.screen == target)
+            .unwrap_or(false)
     }
 }
 
@@ -1226,6 +1283,17 @@ fn navigation_control_id(item_id: &str) -> Result<ControlId> {
         .ok_or_else(|| anyhow!("item {item_id} not found in list {:?}", ListId::Navigation))
 }
 
+fn navigation_target_screen(control_id: ControlId) -> Option<ScreenId> {
+    match control_id {
+        ControlId::NavNeighborhood => Some(ScreenId::Neighborhood),
+        ControlId::NavChat => Some(ScreenId::Chat),
+        ControlId::NavContacts => Some(ScreenId::Contacts),
+        ControlId::NavNotifications => Some(ScreenId::Notifications),
+        ControlId::NavSettings => Some(ScreenId::Settings),
+        _ => None,
+    }
+}
+
 fn tool_key_name(key: ToolKey) -> &'static str {
     match key {
         ToolKey::Enter => "enter",
@@ -1259,12 +1327,12 @@ fn require_existing_path(path: &Path, label: &str) -> Result<()> {
 mod tests {
     use super::{
         browser_app_url, control_selector, decode_rpc_payload, field_selector,
-        navigation_control_id, parse_bool_setting, parse_u64_setting, tool_key_name,
-        BrowserDiagnosticScreenPayload, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+        navigation_control_id, navigation_target_screen, parse_bool_setting, parse_u64_setting,
+        tool_key_name, BrowserDiagnosticScreenPayload, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
         PLAYWRIGHT_DRIVER_OWNED_MARKER,
     };
     use crate::tool_api::ToolKey;
-    use aura_app::ui::contract::{ControlId, FieldId};
+    use aura_app::ui::contract::{ControlId, FieldId, ScreenId};
 
     #[test]
     fn browser_app_url_prefers_instance_env_override() {
@@ -1414,6 +1482,88 @@ mod tests {
             )
             .unwrap_or_else(|error| panic!("{error}")),
             "#aura-nav-settings"
+        );
+    }
+
+    #[test]
+    fn navigation_target_screen_maps_navigation_controls_only() {
+        assert_eq!(
+            navigation_target_screen(ControlId::NavNeighborhood),
+            Some(ScreenId::Neighborhood)
+        );
+        assert_eq!(
+            navigation_target_screen(ControlId::NavChat),
+            Some(ScreenId::Chat)
+        );
+        assert_eq!(
+            navigation_target_screen(ControlId::NavContacts),
+            Some(ScreenId::Contacts)
+        );
+        assert_eq!(
+            navigation_target_screen(ControlId::NavNotifications),
+            Some(ScreenId::Notifications)
+        );
+        assert_eq!(
+            navigation_target_screen(ControlId::NavSettings),
+            Some(ScreenId::Settings)
+        );
+        assert_eq!(
+            navigation_target_screen(ControlId::ModalConfirmButton),
+            None
+        );
+    }
+
+    #[test]
+    fn browser_navigation_activation_prefers_page_owned_navigation_and_screen_verification() {
+        let source = include_str!("playwright_browser.rs");
+        let (_, tail) = source
+            .split_once("fn activate_control(&mut self, control_id: ControlId) -> Result<()> {")
+            .unwrap_or_else(|| panic!("missing activate_control"));
+        let body = tail
+            .split_once("\n    }\n\n    fn click_target(&mut self, selector: &str) -> Result<()> {")
+            .map(|(body, _)| body)
+            .unwrap_or_else(|| panic!("missing activate_control terminator"));
+        assert!(
+            body.contains("match self.navigate_screen(target_screen)"),
+            "browser raw navigation controls should use the dedicated page-owned navigate_screen bridge before falling back to selector clicks"
+        );
+        assert!(
+            body.contains("if self.current_screen_is(target_screen)"),
+            "browser raw navigation controls should verify the target screen before surfacing transient navigation transport failures"
+        );
+        assert!(
+            !body.contains("IntentAction::OpenScreen"),
+            "browser raw navigation controls should not route through the semantic submit queue"
+        );
+    }
+
+    #[test]
+    fn browser_driver_navigate_screen_waits_for_target_ui_state_and_render_convergence() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap_or_else(|| panic!("workspace root"));
+        let driver_source = std::fs::read_to_string(
+            workspace_root.join("crates/aura-harness/playwright-driver/src/playwright_driver.ts"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read playwright driver source: {error}"));
+        let (_, tail) = driver_source
+            .split_once("async function navigateScreen(params) {")
+            .unwrap_or_else(|| panic!("missing navigateScreen"));
+        let body = tail
+            .split_once("async function openSettingsSection(params) {")
+            .map(|(body, _)| body)
+            .unwrap_or_else(|| panic!("missing navigateScreen terminator"));
+        assert!(
+            body.contains("await waitForTargetScreenUiState(")
+                && body.contains("await waitForRenderedScreenConvergence(")
+                && driver_source.contains("function waitForUiStateVersion("),
+            "browser driver navigate_screen should wait for published target ui_state and post-render convergence before reporting success"
+        );
+        assert!(
+            driver_source.contains("async function openSettingsSection(params) {")
+                && driver_source.contains("await waitForRenderedScreenConvergence("),
+            "browser driver settings navigation should also wait for post-render convergence"
         );
     }
 

@@ -144,6 +144,9 @@ pub enum InvitationFact {
         sent_at: PhysicalTime,
         /// Optional expiration timestamp (uses unified time system)
         expires_at: Option<PhysicalTime>,
+        /// Optional sender-local nickname for the invitee.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        receiver_nickname: Option<String>,
         /// Optional message with the invitation
         message: Option<String>,
     },
@@ -431,6 +434,7 @@ impl InvitationFact {
                 ts_ms,
                 uncertainty: None,
             }),
+            receiver_nickname: None,
             message,
         }
     }

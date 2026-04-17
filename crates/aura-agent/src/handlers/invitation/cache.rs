@@ -208,6 +208,7 @@ impl<'a> InvitationCacheHandler<'a> {
                 status,
                 created_at,
                 expires_at: shareable.expires_at,
+                receiver_nickname: None,
                 message: shareable.message,
             };
             match &best {

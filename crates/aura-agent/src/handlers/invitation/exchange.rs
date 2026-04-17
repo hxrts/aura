@@ -89,6 +89,7 @@ impl InvitationHandler {
                 status,
                 created_at: if created_at == 0 { now_ms } else { created_at },
                 expires_at: shareable.expires_at,
+                receiver_nickname: None,
                 message: shareable.message,
             });
         }

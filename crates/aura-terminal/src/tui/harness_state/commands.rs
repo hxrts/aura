@@ -399,6 +399,8 @@ pub(crate) fn apply_harness_command(
                 DispatchCommand::CreateInvitation {
                     receiver_id: Some(receiver_id),
                     invitation_type: InvitationKind::Contact,
+                    nickname: None,
+                    receiver_nickname: None,
                     message: None,
                     ttl_secs: None,
                 },

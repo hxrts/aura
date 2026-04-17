@@ -184,6 +184,8 @@ impl InvitationsCallbacks {
         Arc::new(
             move |receiver_id: Option<AuthorityId>,
                   invitation_type: String,
+                  nickname: Option<String>,
+                  receiver_nickname: Option<String>,
                   message: Option<String>,
                   ttl_secs: Option<u64>,
                   operation: LocalTerminalOperationOwner| {
@@ -200,6 +202,8 @@ impl InvitationsCallbacks {
                         ctx.create_invitation_code(
                             receiver_id,
                             &invitation_type,
+                            nickname,
+                            receiver_nickname,
                             message,
                             ttl_secs,
                             Some(workflow_instance_id),

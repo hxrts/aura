@@ -1379,6 +1379,8 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::CreateInvitation {
             receiver_id,
             invitation_type,
+            nickname,
+            receiver_nickname,
             message,
             ttl_secs,
         } => {
@@ -1402,6 +1404,8 @@ pub(super) fn handle_dispatch_command_match(
             (cb.invitations.on_create)(
                 receiver_id,
                 invitation_type.as_str().to_owned(),
+                nickname,
+                receiver_nickname,
                 message,
                 ttl_secs,
                 operation,

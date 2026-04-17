@@ -195,6 +195,11 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::OpenCreateInvitationModal,
             ));
         }
+        KeyCode::Char('i') => {
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::OpenCreateInvitationModal,
+            ));
+        }
         KeyCode::Char('f') => {
             commands.push(TuiCommand::Dispatch(
                 DispatchCommand::SendSelectedFriendRequest,
@@ -210,7 +215,7 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::DeclineSelectedFriendRequest,
             ));
         }
-        KeyCode::Char('i') => {
+        KeyCode::Char('I') => {
             commands.push(TuiCommand::Dispatch(
                 DispatchCommand::InviteSelectedContactToChannel,
             ));

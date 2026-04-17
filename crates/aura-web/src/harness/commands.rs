@@ -945,6 +945,7 @@ async fn execute_semantic_intent(
                         nickname,
                         None,
                         None,
+                        None,
                         Some(handle.instance_id().clone()),
                     ),
                 )

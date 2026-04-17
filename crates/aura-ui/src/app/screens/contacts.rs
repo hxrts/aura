@@ -156,6 +156,7 @@ pub(super) fn ContactsScreen(
                                                                     invitation_workflows::handoff::CreateContactInvitationRequest {
                                                                         receiver: authority_id,
                                                                         nickname: None,
+                                                                        receiver_nickname: None,
                                                                         message: None,
                                                                         ttl_ms: None,
                                                                         operation_instance_id: workflow_instance_id,
@@ -298,6 +299,7 @@ pub(super) fn ContactsScreen(
                                                             invitation_workflows::handoff::CreateContactInvitationRequest {
                                                                 receiver: authority_id,
                                                                 nickname: None,
+                                                                receiver_nickname: None,
                                                                 message: None,
                                                                 ttl_ms: None,
                                                                 operation_instance_id: workflow_instance_id,

@@ -16,6 +16,7 @@ Options:
 
 Notes:
   - The launcher owns the web server port and the TUI bind address.
+  - In dual mode, the launcher also owns the local bootstrap broker port.
   - Existing listeners on those configured ports are stopped before startup.
   - Browser-direct WebSocket transport is still runtime-assigned and flows
     through exported invitation or enrollment codes.
@@ -108,7 +109,11 @@ meta_file="$pids_dir/demo-meta.env"
 web_url="http://127.0.0.1:${web_port}/"
 bootstrap_broker_port="43102"
 bootstrap_broker_url="http://127.0.0.1:${bootstrap_broker_port}"
-web_app_url="${web_url}?__aura_demo_surface=web&__aura_bootstrap_broker=${bootstrap_broker_url}"
+active_bootstrap_broker_url=""
+if [[ "$mode" == "dual" || "$mode" == "tui" ]]; then
+  active_bootstrap_broker_url="$bootstrap_broker_url"
+fi
+web_app_url="${web_url}?__aura_demo_surface=web"
 tui_device_id="demo:tui"
 manual_browser_cmd=""
 browser_display_name=""
@@ -151,7 +156,11 @@ stop_port_listener() {
     return 0
   fi
 
-  mapfile -t existing_pids < <(lsof -PiTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)
+  local existing_pids=()
+  local existing_pid=""
+  while IFS= read -r existing_pid; do
+    [[ -n "$existing_pid" ]] && existing_pids+=("$existing_pid")
+  done < <(lsof -PiTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)
   if [[ "${#existing_pids[@]}" -eq 0 ]]; then
     return 0
   fi
@@ -224,7 +233,7 @@ MODE=$mode
 WEB_PORT=$web_port
 WEB_URL=$web_url
 WEB_APP_URL=$web_app_url
-BOOTSTRAP_BROKER_URL=$bootstrap_broker_url
+BOOTSTRAP_BROKER_URL=$active_bootstrap_broker_url
 TUI_BIND_ADDRESS=$tui_bind_address
 TUI_DATA_DIR=$tui_data_dir
 TUI_DEVICE_ID=$tui_device_id
@@ -385,6 +394,7 @@ select_browser() {
 
 launch_browser() {
   : >"$browser_log"
+  set_manual_browser_command
 
   if [[ "$browser" == "none" ]]; then
     echo "[demo] browser auto-launch skipped (--browser none)"
@@ -434,7 +444,7 @@ print_runtime_summary() {
 [demo] web url: $web_url
 [demo] web app url: $web_app_url
 [demo] web port: $web_port
-[demo] bootstrap broker: $bootstrap_broker_url
+[demo] bootstrap broker: ${active_bootstrap_broker_url:-disabled}
 [demo] web log: $web_log
 [demo] launcher log: $launcher_log
 [demo] browser profile: $web_profile_dir
@@ -457,6 +467,8 @@ check_tui_prereqs() {
   if [[ "$tui_port" =~ ^[0-9]+$ ]]; then
     stop_port_listener "$tui_port" "tui"
   fi
+
+  stop_port_listener "$bootstrap_broker_port" "bootstrap broker"
 }
 
 run_tui() {

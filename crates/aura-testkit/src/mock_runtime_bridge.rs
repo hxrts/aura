@@ -1138,6 +1138,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         receiver: AuthorityId,
         _nickname: Option<String>,
+        receiver_nickname: Option<String>,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
@@ -1154,6 +1155,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             created_at_ms: now,
             expires_at_ms,
             message,
+            receiver_nickname,
         };
 
         let mut invitations = self.invitations.write().await;
@@ -1184,6 +1186,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             created_at_ms: now,
             expires_at_ms,
             message,
+            receiver_nickname: None,
         };
 
         let mut invitations = self.invitations.write().await;
@@ -1219,6 +1222,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             created_at_ms: now,
             expires_at_ms,
             message,
+            receiver_nickname: None,
         };
 
         let mut invitations = self.invitations.write().await;
@@ -1446,6 +1450,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             created_at_ms: now,
             expires_at_ms,
             message,
+            receiver_nickname: None,
         };
 
         // Store the imported invitation

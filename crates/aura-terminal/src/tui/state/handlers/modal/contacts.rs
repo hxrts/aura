@@ -220,9 +220,9 @@ pub(super) fn handle_import_invitation_key_queue(
 /// Handle create invitation modal keys (queue-based)
 ///
 /// Field-focus navigation:
-/// - Up/Down: Navigate between Type, Message, and TTL fields
-/// - Left/Right: Change value (Type and TTL fields only)
-/// - Typing: Edit message when Message field is focused
+/// - Up/Down: Navigate between text fields and TTL
+/// - Left/Right: Change value (TTL field only)
+/// - Typing: Edit text fields when focused
 /// - Enter: Create invitation from any field
 /// - Esc: Cancel
 pub(super) fn handle_create_invitation_key_queue(
@@ -244,6 +244,10 @@ pub(super) fn handle_create_invitation_key_queue(
             commands.push(TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
                 receiver_id: None,
                 invitation_type,
+                nickname: (!modal_state.nickname.trim().is_empty())
+                    .then(|| modal_state.nickname.clone()),
+                receiver_nickname: (!modal_state.receiver_nickname.trim().is_empty())
+                    .then(|| modal_state.receiver_nickname.clone()),
                 message: (!modal_state.message.trim().is_empty())
                     .then(|| modal_state.message.clone()),
                 ttl_secs: modal_state.ttl_secs(),
@@ -269,6 +273,9 @@ pub(super) fn handle_create_invitation_key_queue(
         KeyCode::Left => {
             // Change value: cycle backward for TTL field
             match modal_state.focused_field {
+                CreateInvitationField::Nickname => {}
+                CreateInvitationField::ReceiverNickname => {}
+                CreateInvitationField::Message => {}
                 CreateInvitationField::Ttl => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::ContactsCreate(ref mut s) = modal {
@@ -276,12 +283,14 @@ pub(super) fn handle_create_invitation_key_queue(
                         }
                     });
                 }
-                CreateInvitationField::Message => {}
             }
         }
         KeyCode::Right => {
             // Change value: cycle forward for TTL field
             match modal_state.focused_field {
+                CreateInvitationField::Nickname => {}
+                CreateInvitationField::ReceiverNickname => {}
+                CreateInvitationField::Message => {}
                 CreateInvitationField::Ttl => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::ContactsCreate(ref mut s) = modal {
@@ -289,10 +298,23 @@ pub(super) fn handle_create_invitation_key_queue(
                         }
                     });
                 }
-                CreateInvitationField::Message => {}
             }
         }
         KeyCode::Char(c) => match modal_state.focused_field {
+            CreateInvitationField::Nickname => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                        s.nickname.push(c);
+                    }
+                });
+            }
+            CreateInvitationField::ReceiverNickname => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                        s.receiver_nickname.push(c);
+                    }
+                });
+            }
             CreateInvitationField::Message => {
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::ContactsCreate(ref mut s) = modal {
@@ -303,6 +325,20 @@ pub(super) fn handle_create_invitation_key_queue(
             CreateInvitationField::Ttl => {}
         },
         KeyCode::Backspace => match modal_state.focused_field {
+            CreateInvitationField::Nickname => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                        s.nickname.pop();
+                    }
+                });
+            }
+            CreateInvitationField::ReceiverNickname => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::ContactsCreate(ref mut s) = modal {
+                        s.receiver_nickname.pop();
+                    }
+                });
+            }
             CreateInvitationField::Message => {
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::ContactsCreate(ref mut s) = modal {

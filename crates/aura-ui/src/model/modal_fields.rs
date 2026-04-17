@@ -166,36 +166,44 @@ impl CreateInvitationModalState {
 
     fn text_value(&self) -> String {
         match self.active_field {
+            FieldId::Nickname => self.nickname.clone(),
+            FieldId::InvitationReceiverNickname => self.receiver_nickname.clone(),
             FieldId::InvitationMessage => self.message.clone(),
             FieldId::InvitationTtl => self.ttl_hours.to_string(),
-            _ => self.message.clone(),
+            _ => self.nickname.clone(),
         }
     }
 
     fn set_text_value(&mut self, value: String) {
         match self.active_field {
+            FieldId::Nickname => self.nickname = value,
+            FieldId::InvitationReceiverNickname => self.receiver_nickname = value,
             FieldId::InvitationMessage => self.message = value,
             FieldId::InvitationTtl => {
                 self.ttl_hours = value.trim().parse::<u64>().unwrap_or(self.ttl_hours.max(1));
             }
-            _ => self.message = value,
+            _ => self.nickname = value,
         }
     }
 
     fn set_field_value(&mut self, field_id: FieldId, value: String) {
         self.active_field = match field_id {
+            FieldId::Nickname => FieldId::Nickname,
+            FieldId::InvitationReceiverNickname => FieldId::InvitationReceiverNickname,
             FieldId::InvitationMessage => FieldId::InvitationMessage,
             FieldId::InvitationTtl => FieldId::InvitationTtl,
-            _ => FieldId::InvitationMessage,
+            _ => FieldId::Nickname,
         };
         self.set_text_value(value);
     }
 
     fn set_active_field(&mut self, field_id: FieldId) {
         self.active_field = match field_id {
+            FieldId::Nickname => FieldId::Nickname,
+            FieldId::InvitationReceiverNickname => FieldId::InvitationReceiverNickname,
             FieldId::InvitationMessage => FieldId::InvitationMessage,
             FieldId::InvitationTtl => FieldId::InvitationTtl,
-            _ => FieldId::InvitationMessage,
+            _ => FieldId::Nickname,
         };
     }
 }

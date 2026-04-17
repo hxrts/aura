@@ -721,6 +721,7 @@ impl InvitationHandler {
             receiver_id,
             invitation_type,
             None,
+            None,
             message,
             expires_in_ms,
         )
@@ -733,6 +734,7 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         receiver_id: AuthorityId,
         invitation_type: InvitationType,
+        receiver_nickname: Option<String>,
         context_override: Option<ContextId>,
         message: Option<String>,
         expires_in_ms: Option<u64>,
@@ -742,6 +744,7 @@ impl InvitationHandler {
                 effects.clone(),
                 receiver_id,
                 invitation_type,
+                receiver_nickname,
                 context_override,
                 message,
                 expires_in_ms,
@@ -764,6 +767,7 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         receiver_id: AuthorityId,
         invitation_type: InvitationType,
+        receiver_nickname: Option<String>,
         context_override: Option<ContextId>,
         message: Option<String>,
         expires_in_ms: Option<u64>,
@@ -808,6 +812,7 @@ impl InvitationHandler {
             created_at: current_time,
             expires_at,
             message,
+            receiver_nickname,
         };
 
         let deferred_network_effects = if is_generic_contact_invitation(
@@ -829,6 +834,7 @@ impl InvitationHandler {
                     ts_ms,
                     uncertainty: None,
                 }),
+                receiver_nickname: invitation.receiver_nickname.clone(),
                 message: invitation.message.clone(),
             };
             timeout_prepare_invitation_stage(
@@ -1700,6 +1706,7 @@ impl InvitationHandler {
             created_at: now_ms,
             expires_at: shareable.expires_at,
             message: shareable.message,
+            receiver_nickname: None,
         };
 
         // Known limitation: imported invitations are cached eagerly and the
@@ -1714,6 +1721,7 @@ impl InvitationHandler {
             invitation.sender_id,
             invitation.receiver_id,
             &invitation.invitation_type,
+            invitation.receiver_nickname.as_deref(),
             invitation.created_at,
             invitation.expires_at,
             invitation.message.clone(),
@@ -2031,6 +2039,7 @@ impl InvitationHandler {
                     created_at: if created_at == 0 { now_ms } else { created_at },
                     expires_at: shareable.expires_at,
                     message: shareable.message,
+                    receiver_nickname: None,
                 };
 
                 let should_cache =

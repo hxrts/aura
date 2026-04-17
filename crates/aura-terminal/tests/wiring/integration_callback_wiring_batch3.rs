@@ -658,6 +658,7 @@ async fn test_update_contact_nickname() {
         .dispatch(EffectCommand::CreateInvitation {
             receiver_id: Some(AuthorityId::new_from_entropy([1u8; 32])),
             invitation_type: "contact".to_string(),
+            nickname: None,
             message: Some("Test invitation".to_string()),
             ttl_secs: None,
             operation_instance_id: None,
@@ -877,6 +878,7 @@ async fn test_invitation_accept_decline() {
         .dispatch(EffectCommand::CreateInvitation {
             receiver_id: Some(AuthorityId::new_from_entropy([1u8; 32])),
             invitation_type: "contact".to_string(),
+            nickname: None,
             message: Some("Join me!".to_string()),
             ttl_secs: Some(3600),
             operation_instance_id: None,
@@ -1262,6 +1264,7 @@ async fn test_complete_contact_to_guardian_flow() {
         .dispatch(EffectCommand::CreateInvitation {
             receiver_id: Some(AuthorityId::new_from_entropy([1u8; 32])),
             invitation_type: "contact".to_string(),
+            nickname: None,
             message: Some("Let's connect!".to_string()),
             ttl_secs: None,
             operation_instance_id: None,

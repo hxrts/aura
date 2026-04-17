@@ -13,6 +13,90 @@ pub(crate) fn harness_log(line: &str) {
     tracing::info!("{line}");
 }
 
+pub(crate) fn launch_create_invitation_workflow(
+    controller: Arc<UiController>,
+    rerender: Arc<dyn Fn() + Send + Sync>,
+) {
+    let Some(create_state) = controller
+        .ui_model()
+        .as_ref()
+        .and_then(UiModel::create_invitation_modal)
+        .cloned()
+    else {
+        controller.runtime_error_toast("Invitation modal state is unavailable");
+        rerender();
+        return;
+    };
+    let nickname = (!create_state.nickname.trim().is_empty())
+        .then_some(create_state.nickname.trim().to_string());
+    let receiver_nickname = (!create_state.receiver_nickname.trim().is_empty())
+        .then_some(create_state.receiver_nickname.trim().to_string());
+    let message = (!create_state.message.trim().is_empty()).then_some(create_state.message);
+    let ttl_ms = Some(create_state.ttl_hours.max(1).saturating_mul(60 * 60 * 1000));
+    let app_core = controller.app_core().clone();
+    let rerender_for_create = rerender.clone();
+
+    spawn_ui(async move {
+        tracing::info!("create_invitation submit start");
+        let operation = UiWorkflowHandoffOwner::submit(
+            controller.clone(),
+            OperationId::invitation_create(),
+            SemanticOperationKind::CreateContactInvitation,
+        );
+        let workflow_instance_id = operation.workflow_instance_id();
+        let transfer =
+            operation.handoff_to_app_workflow(UiOperationTransferScope::CreateInvitation);
+        match transfer
+            .run_workflow(
+                controller.clone(),
+                "create_generic_contact_invitation",
+                invitation_workflows::handoff::create_generic_contact_invitation(
+                    &app_core,
+                    invitation_workflows::handoff::CreateGenericContactInvitationRequest {
+                        nickname,
+                        receiver_nickname,
+                        message,
+                        ttl_ms,
+                        operation_instance_id: workflow_instance_id,
+                    },
+                ),
+            )
+            .await
+        {
+            Ok(code) => {
+                tracing::info!("create_invitation export_invitation ok");
+                controller.write_clipboard(&code);
+                controller.remember_invitation_code(&code);
+                tracing::info!("create_invitation write_clipboard ok");
+                controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
+                    receiver_authority_id: None,
+                    source_operation: OperationId::invitation_create(),
+                    code: Some(code),
+                });
+                controller.info_toast("Invitation code copied to clipboard");
+                rerender_for_create();
+                tracing::info!("create_invitation operation succeeded");
+                tracing::info!("create_invitation complete");
+            }
+            Err(SubmittedOperationWorkflowError::Workflow(error)) => {
+                tracing::warn!(error = %error, "create_invitation workflow failed");
+                controller.runtime_error_toast(error.to_string());
+                rerender_for_create();
+            }
+            Err(
+                SubmittedOperationWorkflowError::Protocol(detail)
+                | SubmittedOperationWorkflowError::Panicked(detail),
+            ) => {
+                tracing::warn!("create_invitation workflow panicked");
+                controller.runtime_error_toast(detail);
+                rerender_for_create();
+            }
+        }
+        tracing::info!("create_invitation rerender");
+        rerender_for_create();
+    });
+}
+
 fn invitation_command_failure(detail: impl Into<String>) -> SemanticOperationError {
     SemanticOperationError::new(
         SemanticFailureDomain::Command,
@@ -857,78 +941,15 @@ fn submit_simple_modal_action(
             true
         }
         SimpleModalSubmitAction::CreateInvitation => {
-            let Some(create_state) = current_model
+            if current_model
                 .as_ref()
-                .and_then(UiModel::create_invitation_modal)
-                .cloned()
-            else {
-                controller.runtime_error_toast("Invitation modal state is unavailable");
-                rerender();
-                return true;
-            };
-            let message = (!create_state.message.trim().is_empty()).then_some(create_state.message);
-            let ttl_ms = Some(create_state.ttl_hours.max(1).saturating_mul(60 * 60 * 1000));
-
-            let app_core = controller.app_core().clone();
-            let rerender_for_create = rerender.clone();
-            spawn_ui(async move {
-                tracing::info!("create_invitation submit start");
-                let operation = UiWorkflowHandoffOwner::submit(
-                    controller.clone(),
-                    OperationId::invitation_create(),
-                    SemanticOperationKind::CreateContactInvitation,
-                );
-                let workflow_instance_id = operation.workflow_instance_id();
-                let transfer =
-                    operation.handoff_to_app_workflow(UiOperationTransferScope::CreateInvitation);
-                match transfer
-                    .run_workflow(
-                        controller.clone(),
-                        "create_generic_contact_invitation",
-                        invitation_workflows::handoff::create_generic_contact_invitation(
-                            &app_core,
-                            invitation_workflows::handoff::CreateGenericContactInvitationRequest {
-                                nickname: None,
-                                message,
-                                ttl_ms,
-                                operation_instance_id: workflow_instance_id,
-                            },
-                        ),
-                    )
-                    .await
-                {
-                    Ok(code) => {
-                        tracing::info!("create_invitation export_invitation ok");
-                        controller.write_clipboard(&code);
-                        controller.remember_invitation_code(&code);
-                        tracing::info!("create_invitation write_clipboard ok");
-                        controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
-                            receiver_authority_id: None,
-                            source_operation: OperationId::invitation_create(),
-                            code: Some(code),
-                        });
-                        controller.info_toast("Invitation code copied to clipboard");
-                        rerender_for_create();
-                        tracing::info!("create_invitation operation succeeded");
-                        tracing::info!("create_invitation complete");
-                    }
-                    Err(SubmittedOperationWorkflowError::Workflow(error)) => {
-                        tracing::warn!(error = %error, "create_invitation workflow failed");
-                        controller.runtime_error_toast(error.to_string());
-                        rerender_for_create();
-                    }
-                    Err(
-                        SubmittedOperationWorkflowError::Protocol(detail)
-                        | SubmittedOperationWorkflowError::Panicked(detail),
-                    ) => {
-                        tracing::warn!("create_invitation workflow panicked");
-                        controller.runtime_error_toast(detail);
-                        rerender_for_create();
-                    }
-                }
-                tracing::info!("create_invitation rerender");
-                rerender_for_create();
-            });
+                .and_then(UiModel::current_invitation_code)
+                .is_none()
+            {
+                return false;
+            }
+            controller.close_modal();
+            rerender();
             true
         }
         SimpleModalSubmitAction::EditNickname => {

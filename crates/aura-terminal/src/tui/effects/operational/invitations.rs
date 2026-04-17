@@ -83,6 +83,8 @@ pub async fn handle_invitations(
         EffectCommand::CreateInvitation {
             receiver_id,
             invitation_type,
+            nickname,
+            receiver_nickname,
             message,
             ttl_secs,
             operation_instance_id,
@@ -99,7 +101,14 @@ pub async fn handle_invitations(
                     // If no explicit contact nickname is provided, default to the
                     // sender's current nickname suggestion so recipients can render
                     // a friendly display name immediately after import.
-                    let contact_nickname = if let Some(name) = extra.as_ref() {
+                    let contact_nickname = if let Some(name) = nickname.as_ref() {
+                        let name = name.trim();
+                        if name.is_empty() {
+                            None
+                        } else {
+                            Some(name.to_string())
+                        }
+                    } else if let Some(name) = extra.as_ref() {
                         let name = name.trim();
                         if name.is_empty() {
                             None
@@ -120,6 +129,7 @@ pub async fn handle_invitations(
                             app_core,
                             receiver,
                             contact_nickname,
+                            receiver_nickname.clone(),
                             message.clone(),
                             ttl_ms,
                             operation_instance_id.clone(),
@@ -139,6 +149,7 @@ pub async fn handle_invitations(
                             create_generic_contact_invitation_code_terminal_status(
                                 app_core,
                                 contact_nickname,
+                                receiver_nickname.clone(),
                                 message.clone(),
                                 ttl_ms,
                                 operation_instance_id.clone(),

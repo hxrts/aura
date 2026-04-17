@@ -272,6 +272,7 @@ pub(crate) async fn materialize_pending_invitation_signal(
     sender_id: AuthorityId,
     receiver_id: AuthorityId,
     invitation_type: &DomainInvitationType,
+    receiver_nickname: Option<&str>,
     created_at: u64,
     expires_at: Option<u64>,
     message: Option<String>,
@@ -303,8 +304,18 @@ pub(crate) async fn materialize_pending_invitation_signal(
         from_name: "Unknown".to_string(),
         to_id: (direction == InvitationDirection::Sent && !is_generic_sent_contact_invitation)
             .then_some(receiver_id),
-        to_name: (direction == InvitationDirection::Sent && !is_generic_sent_contact_invitation)
-            .then_some("Unknown".to_string()),
+        to_name: if direction == InvitationDirection::Sent {
+            if is_generic_sent_contact_invitation {
+                receiver_nickname
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+            } else {
+                Some("Unknown".to_string())
+            }
+        } else {
+            None
+        },
         created_at,
         expires_at,
         message,
@@ -387,6 +398,7 @@ impl ReactiveView for InvitationsSignalView {
                         invitation_type,
                         sent_at,
                         expires_at,
+                        receiver_nickname,
                         message,
                         ..
                     } => {
@@ -414,9 +426,24 @@ impl ReactiveView for InvitationsSignalView {
                             to_id: (direction == InvitationDirection::Sent
                                 && !is_generic_sent_contact_invitation)
                                 .then_some(receiver_id),
-                            to_name: (direction == InvitationDirection::Sent
-                                && !is_generic_sent_contact_invitation)
-                                .then_some("Unknown".to_string()),
+                            to_name: if direction == InvitationDirection::Sent {
+                                if is_generic_sent_contact_invitation {
+                                    receiver_nickname
+                                        .as_deref()
+                                        .map(str::trim)
+                                        .filter(|value| !value.is_empty())
+                                        .map(ToOwned::to_owned)
+                                        .or_else(|| {
+                                            state
+                                                .invitation(invitation_id.as_str())
+                                                .and_then(|existing| existing.to_name.clone())
+                                        })
+                                } else {
+                                    Some("Unknown".to_string())
+                                }
+                            } else {
+                                None
+                            },
                             created_at: sent_at.ts_ms,
                             expires_at: expires_at.map(|t| t.ts_ms),
                             message,
@@ -1866,6 +1893,7 @@ mod tests {
             &DomainInvitationType::Contact {
                 nickname: Some("friend".to_string()),
             },
+            None,
             1234,
             Some(5678),
             Some("share this code".to_string()),
@@ -1887,6 +1915,41 @@ mod tests {
         );
         assert_eq!(invitation.to_id, None);
         assert_eq!(invitation.to_name, None);
+    }
+
+    #[tokio::test]
+    async fn generic_sent_contact_invitation_preserves_sender_local_receiver_nickname() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+
+        let own_authority = AuthorityId::new_from_entropy([82u8; 32]);
+        materialize_pending_invitation_signal(
+            &reactive,
+            own_authority,
+            "generic-contact-invite-labeled",
+            own_authority,
+            own_authority,
+            &DomainInvitationType::Contact {
+                nickname: Some("friend".to_string()),
+            },
+            Some("Bob from cafe"),
+            1234,
+            Some(5678),
+            Some("share this code".to_string()),
+        )
+        .await
+        .expect("materialize labeled generic sent contact invitation");
+
+        let invitations = reactive
+            .read(&*INVITATIONS_SIGNAL)
+            .await
+            .expect("invitation signal should be registered");
+        let invitation = invitations
+            .invitation("generic-contact-invite-labeled")
+            .expect("generic invitation should be present");
+
+        assert_eq!(invitation.to_id, None);
+        assert_eq!(invitation.to_name.as_deref(), Some("Bob from cafe"));
     }
 
     #[test]

@@ -58,6 +58,8 @@ pub struct ModalView {
     pub values: Vec<ModalValueView>,
     pub values_after_inputs: bool,
     pub selectable_items: Vec<SelectableItem>,
+    pub cancel_label: String,
+    pub show_confirm: bool,
     pub enter_label: String,
     /// Optional shortcut buttons shown in the footer (e.g., demo invitation codes).
     /// Each entry is (label, value) where value is filled into the first input field.
@@ -321,9 +323,20 @@ pub fn UiModal(
                                         class: "m-0 text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
                                         "{value_view.label}"
                                     }
-                                    p {
-                                        class: "m-0 mt-2 break-all font-mono text-sm text-foreground",
-                                        "{value_view.value}"
+                                    if modal.modal_id == ModalId::CreateInvitation
+                                        && value_view.label == "Invite Code"
+                                    {
+                                        div {
+                                            id: "aura-invite-code-value",
+                                            key: "{value_view.value}",
+                                            class: "mt-2 min-h-28 overflow-x-auto break-all rounded-sm border border-border bg-background px-3 py-3 font-mono text-[0.92rem] leading-6 text-foreground shadow-inner",
+                                            code { "{value_view.value}" }
+                                        }
+                                    } else {
+                                        p {
+                                            class: "m-0 mt-2 break-all font-mono text-sm text-foreground",
+                                            "{value_view.value}"
+                                        }
                                     }
                                 }
                             }
@@ -388,9 +401,20 @@ pub fn UiModal(
                                         class: "m-0 text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
                                         "{value_view.label}"
                                     }
-                                    p {
-                                        class: "m-0 mt-2 break-all font-mono text-sm text-foreground",
-                                        "{value_view.value}"
+                                    if modal.modal_id == ModalId::CreateInvitation
+                                        && value_view.label == "Invite Code"
+                                    {
+                                        div {
+                                            id: "aura-invite-code-value",
+                                            key: "{value_view.value}",
+                                            class: "mt-2 min-h-28 overflow-x-auto break-all rounded-sm border border-border bg-background px-3 py-3 font-mono text-[0.92rem] leading-6 text-foreground shadow-inner",
+                                            code { "{value_view.value}" }
+                                        }
+                                    } else {
+                                        p {
+                                            class: "m-0 mt-2 break-all font-mono text-sm text-foreground",
+                                            "{value_view.value}"
+                                        }
                                     }
                                 }
                             }
@@ -473,22 +497,24 @@ pub fn UiModal(
                                     .required_dom_id("ControlId::ModalCancelButton must define a web DOM id")
                                     .to_string(),
                             ),
-                            label: "Cancel".to_string(),
+                            label: modal.cancel_label.clone(),
                             variant: ButtonVariant::Secondary,
                             width_class: None,
                             onclick: move |_| on_cancel.call(()),
                         }
-                        UiButton {
-                            id: Some(
-                                ControlId::ModalConfirmButton
-                                .web_dom_id()
-                                .required_dom_id("ControlId::ModalConfirmButton must define a web DOM id")
-                                    .to_string(),
-                            ),
-                            label: modal.enter_label.clone(),
-                            variant: ButtonVariant::Primary,
-                            width_class: None,
-                            onclick: move |_| on_confirm.call(()),
+                        if modal.show_confirm {
+                            UiButton {
+                                id: Some(
+                                    ControlId::ModalConfirmButton
+                                    .web_dom_id()
+                                    .required_dom_id("ControlId::ModalConfirmButton must define a web DOM id")
+                                        .to_string(),
+                                ),
+                                label: modal.enter_label.clone(),
+                                variant: ButtonVariant::Primary,
+                                width_class: None,
+                                onclick: move |_| on_confirm.call(()),
+                            }
                         }
                 }
             }

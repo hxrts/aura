@@ -238,6 +238,9 @@ pub struct Invitation {
     pub expires_at: Option<u64>,
     /// Optional message
     pub message: Option<String>,
+    /// Optional sender-local nickname for the invitee on sent invitations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_nickname: Option<String>,
 }
 
 impl Invitation {
@@ -395,6 +398,7 @@ impl InvitationService {
                 ts_ms,
                 uncertainty: None,
             }),
+            receiver_nickname: None,
             message,
         };
 
