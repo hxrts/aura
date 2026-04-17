@@ -4562,7 +4562,10 @@ mod tests {
             .expect("channel invitation import should succeed");
 
         handler
-            .notify_channel_invitation_acceptance(receiver_effects.as_ref(), &imported.invitation_id)
+            .notify_channel_invitation_acceptance(
+                receiver_effects.as_ref(),
+                &imported.invitation_id,
+            )
             .await
             .expect("notification should use the materialized channel context");
 
@@ -4572,10 +4575,7 @@ mod tests {
                     .receive_envelope()
                     .await
                     .expect("receiver notification should arrive");
-                if envelope
-                    .metadata
-                    .get("content-type")
-                    .map(String::as_str)
+                if envelope.metadata.get("content-type").map(String::as_str)
                     == Some(CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE)
                 {
                     break envelope;

@@ -73,8 +73,10 @@ impl ClipboardPort for WebClipboardAdapter {
             let navigator = window.navigator();
             let clipboard = navigator.clipboard();
             let text = text.to_string();
+            // Start the browser clipboard write synchronously so user-triggered
+            // copy actions retain the activation required by navigator.clipboard.
+            let promise = clipboard.write_text(&text);
             spawn_local(async move {
-                let promise = clipboard.write_text(&text);
                 if let Err(error) = await_browser_promise_with_timeout(
                     promise,
                     5_000,

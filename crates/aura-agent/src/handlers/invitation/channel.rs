@@ -27,8 +27,7 @@ impl<'a> InvitationChannelHandler<'a> {
 
         let existing_invitation_descriptor = rendezvous_manager
             .get_descriptor(invitation_context, sender_id)
-            .await
-            ;
+            .await;
 
         let local_context_id = self.handler.context.authority.default_context_id();
         let peer_default_context = default_context_id_for_authority(sender_id);
@@ -50,7 +49,10 @@ impl<'a> InvitationChannelHandler<'a> {
                 .map(|peer| peer.descriptor)
         };
 
-        let Some(mut descriptor) = existing_invitation_descriptor.clone().or(source_descriptor.clone()) else {
+        let Some(mut descriptor) = existing_invitation_descriptor
+            .clone()
+            .or(source_descriptor.clone())
+        else {
             return;
         };
 
@@ -900,8 +902,8 @@ mod tests {
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_for_authority(&config, local_authority).unwrap(),
         );
-        let handler = InvitationHandler::new(crate::core::AuthorityContext::new(local_authority))
-            .unwrap();
+        let handler =
+            InvitationHandler::new(crate::core::AuthorityContext::new(local_authority)).unwrap();
         let channel_handler = InvitationChannelHandler::new(&handler);
         let manager = RendezvousManager::new_with_default_udp(
             local_authority,

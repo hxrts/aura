@@ -756,7 +756,9 @@ mod tests {
     #[test]
     fn native_harness_browser_transport_wraps_websocket_targets() {
         assert!(use_native_harness_browser_transport("ws://127.0.0.1:4173"));
-        assert!(use_native_harness_browser_transport("wss://example.test/socket"));
+        assert!(use_native_harness_browser_transport(
+            "wss://example.test/socket"
+        ));
         assert!(!use_native_harness_browser_transport("127.0.0.1:4173"));
     }
 
