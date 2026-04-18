@@ -1,7 +1,7 @@
 //! Console handler adapter
 
 use crate::adapters::collect_ops;
-use crate::adapters::utils::deserialize_operation_params;
+use crate::adapters::utils::{deserialize_operation_params, execution_failed, void_result};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::ConsoleEffects;
@@ -16,6 +16,40 @@ pub struct ConsoleHandlerAdapter {
 impl ConsoleHandlerAdapter {
     pub fn new(handler: RealConsoleHandler) -> Self {
         Self { handler }
+    }
+
+    async fn execute_log_operation(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+    ) -> Result<Vec<u8>, HandlerError> {
+        let message = decode_console_message(effect_type, operation, parameters)?;
+        match operation {
+            "log_info" => self
+                .handler
+                .log_info(&message)
+                .await
+                .map_err(execution_failed)?,
+            "log_warn" => self
+                .handler
+                .log_warn(&message)
+                .await
+                .map_err(execution_failed)?,
+            "log_error" => self
+                .handler
+                .log_error(&message)
+                .await
+                .map_err(execution_failed)?,
+            "log_debug" => self
+                .handler
+                .log_debug(&message)
+                .await
+                .map_err(execution_failed)?,
+            _ => unreachable!("log helper only handles console log operations"),
+        }
+
+        Ok(void_result())
     }
 }
 
@@ -34,41 +68,9 @@ impl RegistrableHandler for ConsoleHandlerAdapter {
         }
 
         match operation {
-            "log_info" => {
-                let message = decode_console_message(effect_type, operation, parameters)?;
-                self.handler.log_info(&message).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                Ok(Vec::new()) // Console operations return void
-            }
-            "log_warn" => {
-                let message = decode_console_message(effect_type, operation, parameters)?;
-                self.handler.log_warn(&message).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                Ok(Vec::new())
-            }
-            "log_error" => {
-                let message = decode_console_message(effect_type, operation, parameters)?;
-                self.handler.log_error(&message).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                Ok(Vec::new())
-            }
-            "log_debug" => {
-                let message = decode_console_message(effect_type, operation, parameters)?;
-                self.handler.log_debug(&message).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                Ok(Vec::new())
+            "log_info" | "log_warn" | "log_error" | "log_debug" => {
+                self.execute_log_operation(effect_type, operation, parameters)
+                    .await
             }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,

@@ -71,6 +71,10 @@ fn any_bounded_string(max_len: usize) -> String {
     s
 }
 
+fn any_entropy() -> [u8; 32] {
+    kani::any::<[u8; 32]>()
+}
+
 fn authority_from_index(idx: u8) -> AuthorityId {
     AuthorityId::new_from_entropy([idx; 32])
 }
@@ -87,6 +91,18 @@ fn any_result_id() -> Hash32 {
     let idx: u8 = kani::any();
     kani::assume(idx >= 1 && idx <= 3);
     Hash32::new([idx; 32])
+}
+
+fn any_consensus_id() -> ConsensusId {
+    ConsensusId(Hash32::new(any_entropy()))
+}
+
+fn any_operation_id() -> OperationId {
+    OperationId::new_from_entropy(any_entropy())
+}
+
+fn any_prestate_hash() -> Hash32 {
+    Hash32::new(any_entropy())
 }
 
 /// Generate a symbolic ShareData
@@ -152,9 +168,9 @@ fn any_valid_consensus_state() -> ConsensusState {
     };
 
     let mut state = ConsensusState::new(
-        ConsensusId(Hash32::new(kani::any::<[u8; 32]>())), // cid
-        OperationId::new_from_entropy(kani::any::<[u8; 32]>()), // operation
-        Hash32::new(kani::any::<[u8; 32]>()),              // prestate_hash
+        any_consensus_id(),
+        any_operation_id(),
+        any_prestate_hash(),
         threshold,
         witnesses.clone(),
         initiator,
@@ -174,6 +190,22 @@ fn any_valid_consensus_state() -> ConsensusState {
     }
 
     state
+}
+
+fn assert_invariants_if_transition_succeeds(result: TransitionResult, message: &'static str) {
+    match result {
+        TransitionResult::Ok(new_state) => {
+            kani::assert(check_invariants(&new_state).is_ok(), message);
+        }
+        TransitionResult::NotEnabled(_) => {}
+    }
+}
+
+fn assert_transition_rejected(result: TransitionResult, message: &'static str) {
+    match result {
+        TransitionResult::Ok(_) => kani::assert(false, message),
+        TransitionResult::NotEnabled(_) => {}
+    }
 }
 
 // =============================================================================
@@ -196,18 +228,10 @@ fn apply_share_preserves_invariants() {
 
     let proposal = any_share_proposal();
 
-    match apply_share(&state, proposal) {
-        TransitionResult::Ok(new_state) => {
-            // Postcondition: new state is well-formed
-            kani::assert(
-                check_invariants(&new_state).is_ok(),
-                "apply_share must preserve invariants",
-            );
-        }
-        TransitionResult::NotEnabled(_) => {
-            // Transition not enabled - no invariant to check
-        }
-    }
+    assert_invariants_if_transition_succeeds(
+        apply_share(&state, proposal),
+        "apply_share must preserve invariants",
+    );
 }
 
 /// Verify that trigger_fallback preserves state invariants.
@@ -218,15 +242,10 @@ fn trigger_fallback_preserves_invariants() {
 
     kani::assume(check_invariants(&state).is_ok());
 
-    match trigger_fallback(&state) {
-        TransitionResult::Ok(new_state) => {
-            kani::assert(
-                check_invariants(&new_state).is_ok(),
-                "trigger_fallback must preserve invariants",
-            );
-        }
-        TransitionResult::NotEnabled(_) => {}
-    }
+    assert_invariants_if_transition_succeeds(
+        trigger_fallback(&state),
+        "trigger_fallback must preserve invariants",
+    );
 }
 
 /// Verify that fail_consensus preserves state invariants.
@@ -237,15 +256,10 @@ fn fail_consensus_preserves_invariants() {
 
     kani::assume(check_invariants(&state).is_ok());
 
-    match fail_consensus(&state) {
-        TransitionResult::Ok(new_state) => {
-            kani::assert(
-                check_invariants(&new_state).is_ok(),
-                "fail_consensus must preserve invariants",
-            );
-        }
-        TransitionResult::NotEnabled(_) => {}
-    }
+    assert_invariants_if_transition_succeeds(
+        fail_consensus(&state),
+        "fail_consensus must preserve invariants",
+    );
 }
 
 // =============================================================================
@@ -353,15 +367,10 @@ fn committed_state_is_terminal() {
 
     let proposal = any_share_proposal();
 
-    match apply_share(&state, proposal) {
-        TransitionResult::Ok(new_state) => {
-            // Should not happen - committed states should reject new shares
-            kani::assert(false, "committed state should not accept new shares");
-        }
-        TransitionResult::NotEnabled(_) => {
-            // Expected: committed state rejects transitions
-        }
-    }
+    assert_transition_rejected(
+        apply_share(&state, proposal),
+        "committed state should not accept new shares",
+    );
 }
 
 /// Verify failed states are terminal.
@@ -374,12 +383,10 @@ fn failed_state_is_terminal() {
 
     let proposal = any_share_proposal();
 
-    match apply_share(&state, proposal) {
-        TransitionResult::Ok(_) => {
-            kani::assert(false, "failed state should not accept new shares");
-        }
-        TransitionResult::NotEnabled(_) => {}
-    }
+    assert_transition_rejected(
+        apply_share(&state, proposal),
+        "failed state should not accept new shares",
+    );
 }
 
 /// Verify phase only advances forward (Pending -> Active -> Terminal).

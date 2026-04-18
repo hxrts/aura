@@ -1,7 +1,9 @@
 //! Transport handler adapter
 
 use crate::adapters::collect_ops;
-use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
+use crate::adapters::utils::{
+    deserialize_operation_params, execution_failed, serialize_operation_result, void_result,
+};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::{NetworkCoreEffects, NetworkExtendedEffects};
@@ -24,30 +26,45 @@ pub struct TransportHandlerAdapter {
 impl TransportHandlerAdapter {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(handler: RealTransportHandler) -> Self {
-        let handler = Arc::new(handler);
-        let core: Arc<dyn NetworkCoreEffects> = handler.clone();
-        let extended: Arc<dyn NetworkExtendedEffects> = handler;
-        Self {
-            core,
-            extended: Some(extended),
-        }
+        Self::from_extended_handler(handler)
     }
 
     pub fn new_core(handler: Arc<dyn NetworkCoreEffects>) -> Self {
-        Self {
-            core: handler,
-            extended: None,
-        }
+        Self::from_parts(handler, None)
     }
 
     pub fn new_extended<T: NetworkExtendedEffects + 'static>(handler: T) -> Self {
+        Self::from_extended_handler(handler)
+    }
+
+    fn from_parts(
+        core: Arc<dyn NetworkCoreEffects>,
+        extended: Option<Arc<dyn NetworkExtendedEffects>>,
+    ) -> Self {
+        Self { core, extended }
+    }
+
+    fn from_extended_handler<T>(handler: T) -> Self
+    where
+        T: NetworkCoreEffects + NetworkExtendedEffects + 'static,
+    {
         let handler = Arc::new(handler);
         let core: Arc<dyn NetworkCoreEffects> = handler.clone();
         let extended: Arc<dyn NetworkExtendedEffects> = handler;
-        Self {
-            core,
-            extended: Some(extended),
-        }
+        Self::from_parts(core, Some(extended))
+    }
+
+    fn extended_handler(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+    ) -> Result<&dyn NetworkExtendedEffects, HandlerError> {
+        self.extended
+            .as_deref()
+            .ok_or_else(|| HandlerError::UnknownOperation {
+                effect_type,
+                operation: operation.to_string(),
+            })
     }
 }
 
@@ -72,10 +89,8 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 self.core
                     .send_to_peer(params.0, params.1)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
-                Ok(Vec::new()) // send returns void
+                    .map_err(execution_failed)?;
+                Ok(void_result()) // send returns void
             }
             "broadcast" => {
                 let message: Vec<u8> =
@@ -83,55 +98,34 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 self.core
                     .broadcast(message)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
-                Ok(Vec::new()) // broadcast returns void
+                    .map_err(execution_failed)?;
+                Ok(void_result()) // broadcast returns void
             }
             "receive" => {
-                let received = NetworkCoreEffects::receive(&self.core).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
+                let received = NetworkCoreEffects::receive(&self.core)
+                    .await
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &received)
             }
             "receive_from" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
+                let handler = self.extended_handler(effect_type, operation)?;
                 let peer_id: uuid::Uuid =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let received = handler.receive_from(peer_id).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
+                let received = handler
+                    .receive_from(peer_id)
+                    .await
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &received)
             }
             "connected_peers" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
-                let peers = handler.connected_peers().await;
+                let peers = self
+                    .extended_handler(effect_type, operation)?
+                    .connected_peers()
+                    .await;
                 serialize_operation_result(effect_type, operation, &peers)
             }
             "is_peer_connected" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
+                let handler = self.extended_handler(effect_type, operation)?;
                 let peer_id: uuid::Uuid =
                     deserialize_operation_params(effect_type, operation, parameters)?;
                 let result = handler.is_peer_connected(peer_id).await;
@@ -141,58 +135,31 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 source: "Peer event streams are not serializable in registry adapters".into(),
             }),
             "open" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
+                let handler = self.extended_handler(effect_type, operation)?;
                 let address: String =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let connection_id =
-                    handler
-                        .open(&address)
-                        .await
-                        .map_err(|e| HandlerError::ExecutionFailed {
-                            source: Box::new(e),
-                        })?;
+                let connection_id = handler.open(&address).await.map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &connection_id)
             }
             "send" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
+                let handler = self.extended_handler(effect_type, operation)?;
                 let (connection_id, data): (String, Vec<u8>) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                handler.send(&connection_id, data).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                Ok(Vec::new())
+                handler
+                    .send(&connection_id, data)
+                    .await
+                    .map_err(execution_failed)?;
+                Ok(void_result())
             }
             "close" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
+                let handler = self.extended_handler(effect_type, operation)?;
                 let connection_id: String =
                     deserialize_operation_params(effect_type, operation, parameters)?;
                 handler
                     .close(&connection_id)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
-                Ok(Vec::new())
+                    .map_err(execution_failed)?;
+                Ok(void_result())
             }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,

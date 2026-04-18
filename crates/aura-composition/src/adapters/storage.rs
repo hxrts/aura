@@ -1,7 +1,9 @@
 //! Storage handler adapter
 
 use crate::adapters::collect_ops;
-use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
+use crate::adapters::utils::{
+    deserialize_operation_params, execution_failed, serialize_operation_result, void_result,
+};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
@@ -17,30 +19,45 @@ pub struct StorageHandlerAdapter {
 
 impl StorageHandlerAdapter {
     pub fn new(handler: FilesystemStorageHandler) -> Self {
-        let handler = Arc::new(handler);
-        let core: Arc<dyn StorageCoreEffects> = handler.clone();
-        let extended: Arc<dyn StorageExtendedEffects> = handler;
-        Self {
-            core,
-            extended: Some(extended),
-        }
+        Self::from_extended_handler(handler)
     }
 
     pub fn new_core(handler: Arc<dyn StorageCoreEffects>) -> Self {
-        Self {
-            core: handler,
-            extended: None,
-        }
+        Self::from_parts(handler, None)
     }
 
     pub fn new_extended<T: StorageExtendedEffects + 'static>(handler: T) -> Self {
+        Self::from_extended_handler(handler)
+    }
+
+    fn from_parts(
+        core: Arc<dyn StorageCoreEffects>,
+        extended: Option<Arc<dyn StorageExtendedEffects>>,
+    ) -> Self {
+        Self { core, extended }
+    }
+
+    fn from_extended_handler<T>(handler: T) -> Self
+    where
+        T: StorageCoreEffects + StorageExtendedEffects + 'static,
+    {
         let handler = Arc::new(handler);
         let core: Arc<dyn StorageCoreEffects> = handler.clone();
         let extended: Arc<dyn StorageExtendedEffects> = handler;
-        Self {
-            core,
-            extended: Some(extended),
-        }
+        Self::from_parts(core, Some(extended))
+    }
+
+    fn extended_handler(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+    ) -> Result<&dyn StorageExtendedEffects, HandlerError> {
+        self.extended
+            .as_deref()
+            .ok_or_else(|| HandlerError::UnknownOperation {
+                effect_type,
+                operation: operation.to_string(),
+            })
     }
 }
 
@@ -62,128 +79,68 @@ impl RegistrableHandler for StorageHandlerAdapter {
             "store" => {
                 let params: (String, Vec<u8>) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                self.core.store(&params.0, params.1).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                Ok(Vec::new()) // store returns void
+                self.core
+                    .store(&params.0, params.1)
+                    .await
+                    .map_err(execution_failed)?;
+                Ok(void_result()) // store returns void
             }
             "retrieve" => {
                 let key: String = deserialize_operation_params(effect_type, operation, parameters)?;
-                let result =
-                    self.core
-                        .retrieve(&key)
-                        .await
-                        .map_err(|e| HandlerError::ExecutionFailed {
-                            source: Box::new(e),
-                        })?;
+                let result = self.core.retrieve(&key).await.map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "remove" => {
                 let key: String = deserialize_operation_params(effect_type, operation, parameters)?;
-                let result =
-                    self.core
-                        .remove(&key)
-                        .await
-                        .map_err(|e| HandlerError::ExecutionFailed {
-                            source: Box::new(e),
-                        })?;
+                let result = self.core.remove(&key).await.map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "list_keys" => {
                 let prefix: Option<String> =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = self.core.list_keys(prefix.as_deref()).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
+                let result = self
+                    .core
+                    .list_keys(prefix.as_deref())
+                    .await
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "exists" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
+                let handler = self.extended_handler(effect_type, operation)?;
                 let key: String = deserialize_operation_params(effect_type, operation, parameters)?;
-                let result =
-                    handler
-                        .exists(&key)
-                        .await
-                        .map_err(|e| HandlerError::ExecutionFailed {
-                            source: Box::new(e),
-                        })?;
+                let result = handler.exists(&key).await.map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "store_batch" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
+                let handler = self.extended_handler(effect_type, operation)?;
                 let pairs: std::collections::HashMap<String, Vec<u8>> =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                handler
-                    .store_batch(pairs)
-                    .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
-                Ok(Vec::new())
+                handler.store_batch(pairs).await.map_err(execution_failed)?;
+                Ok(void_result())
             }
             "retrieve_batch" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
+                let handler = self.extended_handler(effect_type, operation)?;
                 let keys: Vec<String> =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler.retrieve_batch(&keys).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
+                let result = handler
+                    .retrieve_batch(&keys)
+                    .await
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "clear_all" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
-                handler
+                self.extended_handler(effect_type, operation)?
                     .clear_all()
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
-                Ok(Vec::new())
+                    .map_err(execution_failed)?;
+                Ok(void_result())
             }
             "stats" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .stats()
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             _ => Err(HandlerError::UnknownOperation {

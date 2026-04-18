@@ -24,7 +24,7 @@ use aura_guards::GuardEffects;
 use frost_ed25519;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 impl ConsensusProtocol {
     /// Participate as witness in consensus
@@ -46,15 +46,7 @@ impl ConsensusProtocol {
         }
 
         // Merge incoming evidence delta before processing message
-        let evidence_delta = match &message {
-            ConsensusMessage::Execute { evidence_delta, .. } => Some(evidence_delta.clone()),
-            ConsensusMessage::SignShare { evidence_delta, .. } => Some(evidence_delta.clone()),
-            ConsensusMessage::ConsensusResult { evidence_delta, .. } => {
-                Some(evidence_delta.clone())
-            }
-            ConsensusMessage::Conflict { evidence_delta, .. } => Some(evidence_delta.clone()),
-            _ => None,
-        };
+        let evidence_delta = message.evidence_delta().cloned();
 
         if let Some(delta) = evidence_delta {
             if let Ok(new_proofs) = self.evidence_tracker.write().await.merge(delta) {
@@ -180,55 +172,22 @@ impl ConsensusProtocol {
     where
         E: GuardEffects + GuardContextProvider + PhysicalTimeEffects,
     {
-        // Generate FROST nonces and commitment for this witness
-        let seed = random.random_bytes_32().await;
-        let mut rng = rand::rngs::StdRng::from_seed(seed);
-
-        let signing_share = frost_ed25519::keys::SigningShare::deserialize(
-            share
-                .value
-                .clone()
-                .try_into()
-                .map_err(|_| AuraError::crypto("Invalid signing share length"))?,
-        )
-        .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))?;
-
-        let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
-        let commitment = NonceCommitment {
-            signer: share.identifier,
-            commitment: nonces
-                .commitments()
-                .serialize()
-                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {e}")))?,
-        };
+        let (commitment, nonce_token) = self.generate_fresh_nonce_commitment(share, random).await?;
 
         // Cache nonce token for signing when SignRequest arrives
         if let Some(instance) = self.instances.write().await.get_mut(&consensus_id) {
-            instance.nonce_token = Some(NonceToken::from(nonces));
+            instance.nonce_token = Some(nonce_token);
         }
 
         // Evaluate guards before sending NonceCommit to coordinator
         let guard = NonceCommitGuard::new(self.context_id, coordinator);
         let guard_result = guard.evaluate(effects).await?;
-
-        if !guard_result.authorized {
-            warn!(
-                consensus_id = %consensus_id,
-                reason = ?guard_result.denial_reason,
-                "NonceCommit guard denied"
-            );
-            return Err(AuraError::permission_denied(
-                guard_result
-                    .denial_reason
-                    .unwrap_or_else(|| "Guard denied NonceCommit".to_string()),
-            ));
-        }
-
-        debug!(
-            consensus_id = %consensus_id,
-            receipt = ?guard_result.receipt.as_ref().map(|r| r.nonce),
-            "NonceCommit guard authorized"
-        );
+        self.require_send_guard_authorized(
+            consensus_id,
+            "NonceCommit",
+            "Guard denied NonceCommit",
+            guard_result,
+        )?;
 
         Ok(Some(ConsensusMessage::NonceCommit {
             consensus_id,
@@ -261,25 +220,10 @@ impl ConsensusProtocol {
             token
         } else {
             // Fallback: generate a fresh nonce and append its commitment
-            let seed = random.random_bytes_32().await;
-            let mut rng = rand::rngs::StdRng::from_seed(seed);
-            let signing_share = frost_ed25519::keys::SigningShare::deserialize(
-                share
-                    .value
-                    .clone()
-                    .try_into()
-                    .map_err(|_| AuraError::crypto("Invalid signing share length"))?,
-            )
-            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))?;
-            let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
-            let commitment = NonceCommitment {
-                signer: share.identifier,
-                commitment: nonces.commitments().serialize().map_err(|e| {
-                    AuraError::crypto(format!("Failed to serialize commitments: {e}"))
-                })?,
-            };
+            let (commitment, nonce_token) =
+                self.generate_fresh_nonce_commitment(share, random).await?;
             instance.tracker.add_nonce(self.authority_id, commitment);
-            NonceToken::from(nonces)
+            nonce_token
         };
 
         // Sign using FROST with provided aggregated nonces
@@ -315,25 +259,12 @@ impl ConsensusProtocol {
         // Evaluate guards before sending SignShare to coordinator
         let guard = SignShareGuard::new(self.context_id, coordinator);
         let guard_result = guard.evaluate(effects).await?;
-
-        if !guard_result.authorized {
-            warn!(
-                consensus_id = %consensus_id,
-                reason = ?guard_result.denial_reason,
-                "SignShare guard denied"
-            );
-            return Err(AuraError::permission_denied(
-                guard_result
-                    .denial_reason
-                    .unwrap_or_else(|| "Guard denied SignShare".to_string()),
-            ));
-        }
-
-        debug!(
-            consensus_id = %consensus_id,
-            receipt = ?guard_result.receipt.as_ref().map(|r| r.nonce),
-            "SignShare guard authorized"
-        );
+        self.require_send_guard_authorized(
+            consensus_id,
+            "SignShare",
+            "Guard denied SignShare",
+            guard_result,
+        )?;
 
         Ok(Some(ConsensusMessage::SignShare {
             consensus_id,
@@ -343,5 +274,35 @@ impl ConsensusProtocol {
             epoch: self.config.epoch,
             evidence_delta,
         }))
+    }
+
+    fn deserialize_signing_share(share: &Share) -> Result<frost_ed25519::keys::SigningShare> {
+        frost_ed25519::keys::SigningShare::deserialize(
+            share
+                .value
+                .clone()
+                .try_into()
+                .map_err(|_| AuraError::crypto("Invalid signing share length"))?,
+        )
+        .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))
+    }
+
+    async fn generate_fresh_nonce_commitment(
+        &self,
+        share: &Share,
+        random: &(impl RandomEffects + ?Sized),
+    ) -> Result<(NonceCommitment, NonceToken)> {
+        let seed = random.random_bytes_32().await;
+        let mut rng = rand::rngs::StdRng::from_seed(seed);
+        let signing_share = Self::deserialize_signing_share(share)?;
+        let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
+        let commitment = NonceCommitment {
+            signer: share.identifier,
+            commitment: nonces
+                .commitments()
+                .serialize()
+                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {e}")))?,
+        };
+        Ok((commitment, NonceToken::from(nonces)))
     }
 }

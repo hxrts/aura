@@ -1,7 +1,9 @@
 //! Crypto handler adapter
 
 use crate::adapters::collect_ops;
-use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
+use crate::adapters::utils::{
+    deserialize_operation_params, execution_failed, serialize_operation_result,
+};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext, SigningMode};
@@ -18,30 +20,45 @@ pub struct CryptoHandlerAdapter {
 
 impl CryptoHandlerAdapter {
     pub fn new(handler: RealCryptoHandler) -> Self {
-        let handler = Arc::new(handler);
-        let core: Arc<dyn CryptoCoreEffects> = handler.clone();
-        let extended: Arc<dyn CryptoExtendedEffects> = handler;
-        Self {
-            core,
-            extended: Some(extended),
-        }
+        Self::from_extended_handler(handler)
     }
 
     pub fn new_core(handler: Arc<dyn CryptoCoreEffects>) -> Self {
-        Self {
-            core: handler,
-            extended: None,
-        }
+        Self::from_parts(handler, None)
     }
 
     pub fn new_extended<T: CryptoExtendedEffects + 'static>(handler: T) -> Self {
+        Self::from_extended_handler(handler)
+    }
+
+    fn from_parts(
+        core: Arc<dyn CryptoCoreEffects>,
+        extended: Option<Arc<dyn CryptoExtendedEffects>>,
+    ) -> Self {
+        Self { core, extended }
+    }
+
+    fn from_extended_handler<T>(handler: T) -> Self
+    where
+        T: CryptoCoreEffects + CryptoExtendedEffects + 'static,
+    {
         let handler = Arc::new(handler);
         let core: Arc<dyn CryptoCoreEffects> = handler.clone();
         let extended: Arc<dyn CryptoExtendedEffects> = handler;
-        Self {
-            core,
-            extended: Some(extended),
-        }
+        Self::from_parts(core, Some(extended))
+    }
+
+    fn extended_handler(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+    ) -> Result<&dyn CryptoExtendedEffects, HandlerError> {
+        self.extended
+            .as_deref()
+            .ok_or_else(|| HandlerError::UnknownOperation {
+                effect_type,
+                operation: operation.to_string(),
+            })
     }
 }
 
@@ -61,7 +78,6 @@ impl RegistrableHandler for CryptoHandlerAdapter {
 
         match operation {
             "kdf_derive" => {
-                // Parameters would be (ikm, salt, info, length)
                 let params: (Vec<u8>, Option<Vec<u8>>, Vec<u8>, u32) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
                 let salt = params.1.unwrap_or_default();
@@ -69,9 +85,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .core
                     .kdf_derive(&params.0, &salt, &params.2, params.3)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "derive_key" => {
@@ -81,17 +95,15 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .core
                     .derive_key(&params.0, &params.1)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "ed25519_generate_keypair" => {
-                let result = self.core.ed25519_generate_keypair().await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
+                let result = self
+                    .core
+                    .ed25519_generate_keypair()
+                    .await
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "ed25519_sign" => {
@@ -101,9 +113,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .core
                     .ed25519_sign(&params.0, &params.1)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "ed25519_verify" => {
@@ -113,279 +123,157 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .core
                     .ed25519_verify(&params.0, &params.1, &params.2)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "ed25519_public_key" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let private_key: Vec<u8> =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .ed25519_public_key(&private_key)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "generate_signing_keys" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let (threshold, max_signers): (u16, u16) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .generate_signing_keys(threshold, max_signers)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "sign_with_key" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (Vec<u8>, Vec<u8>, SigningMode) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .sign_with_key(&params.0, &params.1, params.2)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "verify_signature" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (Vec<u8>, Vec<u8>, Vec<u8>, SigningMode) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .verify_signature(&params.0, &params.1, &params.2, params.3)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "frost_generate_keys" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let (threshold, max_signers): (u16, u16) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .frost_generate_keys(threshold, max_signers)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "frost_generate_nonces" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let key_package: Vec<u8> =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .frost_generate_nonces(&key_package)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "frost_create_signing_package" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (Vec<u8>, Vec<Vec<u8>>, Vec<u16>, Vec<u8>) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .frost_create_signing_package(&params.0, &params.1, &params.2, &params.3)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "frost_sign_share" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (FrostSigningPackage, Vec<u8>, Vec<u8>) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .frost_sign_share(&params.0, &params.1, &params.2)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "frost_aggregate_signatures" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (FrostSigningPackage, Vec<Vec<u8>>) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .frost_aggregate_signatures(&params.0, &params.1)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "frost_verify" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (Vec<u8>, Vec<u8>, Vec<u8>) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .frost_verify(&params.0, &params.1, &params.2)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "aes_gcm_encrypt" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .aes_gcm_encrypt(&params.0, &params.1, &params.2)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "aes_gcm_decrypt" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .aes_gcm_decrypt(&params.0, &params.1, &params.2)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "chacha20_encrypt" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .chacha20_encrypt(&params.0, &params.1, &params.2)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "chacha20_decrypt" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (Vec<u8>, [u8; 32], [u8; 12]) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .chacha20_decrypt(&params.0, &params.1, &params.2)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "frost_rotate_keys" => {
-                let handler =
-                    self.extended
-                        .as_ref()
-                        .ok_or_else(|| HandlerError::UnknownOperation {
-                            effect_type,
-                            operation: operation.to_string(),
-                        })?;
                 let params: (Vec<Vec<u8>>, u16, u16, u16) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = handler
+                let result = self
+                    .extended_handler(effect_type, operation)?
                     .frost_rotate_keys(&params.0, params.1, params.2, params.3)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             _ => Err(HandlerError::UnknownOperation {

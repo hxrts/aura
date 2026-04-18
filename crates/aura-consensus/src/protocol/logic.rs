@@ -14,7 +14,9 @@ use aura_core::{
     types::Epoch,
     AuraError, AuthorityId, ContextId, Prestate, Result,
 };
+use aura_guards::SendGuardResult;
 use std::collections::HashMap;
+use tracing::{debug, warn};
 
 /// Protocol coordinator that manages consensus execution
 pub struct ConsensusProtocol {
@@ -41,6 +43,34 @@ pub struct ConsensusProtocol {
 }
 
 impl ConsensusProtocol {
+    pub(crate) fn require_send_guard_authorized(
+        &self,
+        consensus_id: ConsensusId,
+        label: &'static str,
+        denied_message: &'static str,
+        guard_result: SendGuardResult,
+    ) -> Result<()> {
+        if !guard_result.authorized {
+            warn!(
+                consensus_id = %consensus_id,
+                reason = ?guard_result.denial_reason,
+                "{label} guard denied"
+            );
+            return Err(AuraError::permission_denied(
+                guard_result
+                    .denial_reason
+                    .unwrap_or_else(|| denied_message.to_string()),
+            ));
+        }
+
+        debug!(
+            consensus_id = %consensus_id,
+            receipt = ?guard_result.receipt.as_ref().map(|r| r.nonce),
+            "{label} guard authorized"
+        );
+        Ok(())
+    }
+
     /// Evict stale protocol instances that have exceeded the configured timeout.
     pub async fn cleanup_stale_instances(&self, now_ms: u64) -> usize {
         let timeout_ms = self.config.timeout_ms.get();
