@@ -713,10 +713,7 @@ mod tests {
     }
 
     fn test_time(millis: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms: millis,
-            uncertainty: None,
-        }
+        PhysicalTime::exact(millis)
     }
 
     // ─────────────────────────────────────────────────────────────────────────

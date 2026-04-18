@@ -171,8 +171,8 @@ impl<T> VersionedMessage<T> {
 
     /// Add metadata to the message
     #[must_use]
-    pub fn with_metadata(mut self, key: String, value: String) -> Self {
-        self.metadata.insert(key, value);
+    pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
         self
     }
 }

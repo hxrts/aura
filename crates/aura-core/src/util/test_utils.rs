@@ -23,6 +23,14 @@ use crate::types::identifiers::DeviceId;
 use crate::{AccountId, SessionId};
 use uuid::Uuid;
 
+fn deterministic_uuid(domain: &str, seed: u64) -> Uuid {
+    let hash_input = format!("{domain}-{seed}");
+    let hash_bytes = hash(hash_input.as_bytes());
+    let mut uuid_bytes = [0u8; 16];
+    uuid_bytes.copy_from_slice(&hash_bytes[..16]);
+    Uuid::from_bytes(uuid_bytes)
+}
+
 /// Create a deterministic DeviceId from a seed
 ///
 /// This produces the same DeviceId for the same seed, enabling reproducible tests.
@@ -36,12 +44,7 @@ use uuid::Uuid;
 /// assert_eq!(device1, device2);
 /// ```
 pub fn test_device_id(seed: u64) -> DeviceId {
-    let hash_input = format!("device-{seed}");
-    let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16]
-        .try_into()
-        .expect("Slice of exactly 16 bytes should convert to [u8; 16]");
-    DeviceId(Uuid::from_bytes(uuid_bytes))
+    DeviceId(deterministic_uuid("device", seed))
 }
 
 /// Create a deterministic AuthorityId from a seed
@@ -57,12 +60,7 @@ pub fn test_device_id(seed: u64) -> DeviceId {
 /// assert_eq!(authority1, authority2);
 /// ```
 pub fn test_authority_id(seed: u64) -> AuthorityId {
-    let hash_input = format!("authority-{seed}");
-    let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16]
-        .try_into()
-        .expect("Slice of exactly 16 bytes should convert to [u8; 16]");
-    AuthorityId(Uuid::from_bytes(uuid_bytes))
+    AuthorityId(deterministic_uuid("authority", seed))
 }
 
 /// Create a deterministic AccountId from a seed
@@ -78,12 +76,7 @@ pub fn test_authority_id(seed: u64) -> AuthorityId {
 /// assert_eq!(account1, account2);
 /// ```
 pub fn test_account_id(seed: u64) -> AccountId {
-    let hash_input = format!("account-{seed}");
-    let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16]
-        .try_into()
-        .expect("Slice of exactly 16 bytes should convert to [u8; 16]");
-    AccountId(Uuid::from_bytes(uuid_bytes))
+    AccountId(deterministic_uuid("account", seed))
 }
 
 /// Create a deterministic SessionId from a seed
@@ -99,12 +92,7 @@ pub fn test_account_id(seed: u64) -> AccountId {
 /// assert_eq!(session1, session2);
 /// ```
 pub fn test_session_id(seed: u64) -> SessionId {
-    let hash_input = format!("session-{seed}");
-    let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16]
-        .try_into()
-        .expect("Slice of exactly 16 bytes should convert to [u8; 16]");
-    SessionId(Uuid::from_bytes(uuid_bytes))
+    SessionId(deterministic_uuid("session", seed))
 }
 
 /// Create a deterministic Ed25519 key pair from a seed

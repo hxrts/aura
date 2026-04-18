@@ -645,10 +645,7 @@ mod tests {
     use std::{collections::VecDeque, sync::Arc};
 
     fn physical_time(ts_ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        }
+        PhysicalTime::exact(ts_ms)
     }
 
     #[derive(Debug, Clone, Copy)]

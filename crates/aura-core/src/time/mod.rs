@@ -25,6 +25,16 @@ pub struct PhysicalTime {
     pub uncertainty: Option<u64>,
 }
 
+impl PhysicalTime {
+    /// Create an exact physical timestamp with no uncertainty sidecar.
+    pub const fn exact(ts_ms: u64) -> Self {
+        Self {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+}
+
 /// Logical clock representation (causal semantics).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogicalTime {

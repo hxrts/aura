@@ -40,6 +40,16 @@
 //! All effect-using code is parameterized by effect traits, enabling:
 //! Deterministic testing, flexible handler composition, runtime mode switching (per docs/103_effect_system.md)
 
+macro_rules! impl_arc_effect {
+    ($trait_name:path { $($methods:item)* }) => {
+        #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+        #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+        impl<T: $trait_name + Send + Sync + ?Sized> $trait_name for std::sync::Arc<T> {
+            $($methods)*
+        }
+    };
+}
+
 // Core effect trait definitions
 pub mod agent;
 pub mod amp;

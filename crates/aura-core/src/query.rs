@@ -33,6 +33,26 @@ use crate::Hash32;
 use crate::ResourceScope;
 use std::collections::BTreeMap;
 
+macro_rules! bytes32_id {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        pub struct $name(pub [u8; 32]);
+
+        impl $name {
+            /// Create a new identifier from bytes.
+            pub fn new(bytes: [u8; 32]) -> Self {
+                Self(bytes)
+            }
+
+            /// Get the underlying bytes.
+            pub fn as_bytes(&self) -> &[u8; 32] {
+                &self.0
+            }
+        }
+    };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Query Isolation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,39 +148,29 @@ impl QueryIsolation {
     }
 }
 
-/// Identifier for a consensus instance.
-///
-/// Used to track and wait for consensus completion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct ConsensusId(pub [u8; 32]);
+bytes32_id!(
+    /// Identifier for a consensus instance.
+    ///
+    /// Used to track and wait for consensus completion.
+    ConsensusId
+);
 
-impl ConsensusId {
-    /// Create a new consensus ID from bytes
-    pub fn new(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    /// Get the underlying bytes
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
+impl PartialOrd for ConsensusId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
-/// Identifier for a fact in the journal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct FactId(pub [u8; 32]);
-
-impl FactId {
-    /// Create a new fact ID from bytes
-    pub fn new(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    /// Get the underlying bytes
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
+impl Ord for ConsensusId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
     }
 }
+
+bytes32_id!(
+    /// Identifier for a fact in the journal.
+    FactId
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mutation Receipt

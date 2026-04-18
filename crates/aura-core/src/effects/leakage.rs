@@ -72,10 +72,7 @@ impl LeakageEvent {
             leakage_amount,
             observer_class,
             operation,
-            timestamp: PhysicalTime {
-                ts_ms: timestamp_ms,
-                uncertainty: None,
-            },
+            timestamp: PhysicalTime::exact(timestamp_ms),
         }
     }
 }
@@ -222,9 +219,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
 // Blanket implementation
 impl<T: LeakageEffects> LeakageChoreographyExt for T {}
 
-/// Blanket implementation for Arc<T> where T: LeakageEffects
-#[async_trait]
-impl<T: LeakageEffects + ?Sized> LeakageEffects for std::sync::Arc<T> {
+impl_arc_effect!(LeakageEffects {
     async fn record_leakage(&self, event: LeakageEvent) -> Result<()> {
         (**self).record_leakage(event).await
     }
@@ -253,7 +248,7 @@ impl<T: LeakageEffects + ?Sized> LeakageEffects for std::sync::Arc<T> {
             .get_leakage_history(context_id, since_timestamp)
             .await
     }
-}
+});
 
 #[cfg(test)]
 mod tests {

@@ -302,6 +302,10 @@ pub enum OwnershipError {
 }
 
 impl OwnershipError {
+    fn into_detail(detail: impl Into<String>) -> String {
+        detail.into()
+    }
+
     pub fn missing_capability(capability: impl Into<String>) -> Self {
         Self::MissingCapability {
             capability: capability.into(),
@@ -310,31 +314,31 @@ impl OwnershipError {
 
     pub fn stale_owner(detail: impl Into<String>) -> Self {
         Self::StaleOwner {
-            detail: detail.into(),
+            detail: Self::into_detail(detail),
         }
     }
 
     pub fn invalid_transfer(detail: impl Into<String>) -> Self {
         Self::InvalidTransfer {
-            detail: detail.into(),
+            detail: Self::into_detail(detail),
         }
     }
 
     pub fn owner_dropped(detail: impl Into<String>) -> Self {
         Self::OwnerDropped {
-            detail: detail.into(),
+            detail: Self::into_detail(detail),
         }
     }
 
     pub fn terminal_regression(detail: impl Into<String>) -> Self {
         Self::TerminalRegression {
-            detail: detail.into(),
+            detail: Self::into_detail(detail),
         }
     }
 
     pub fn timeout(detail: impl Into<String>) -> Self {
         Self::Timeout {
-            detail: detail.into(),
+            detail: Self::into_detail(detail),
         }
     }
 

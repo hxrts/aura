@@ -191,9 +191,7 @@ pub trait ThresholdSigningEffects: Send + Sync {
     ) -> Result<(), ThresholdSigningError>;
 }
 
-/// Blanket implementation for Arc<T> where T: ThresholdSigningEffects
-#[async_trait]
-impl<T: ThresholdSigningEffects + ?Sized> ThresholdSigningEffects for std::sync::Arc<T> {
+impl_arc_effect!(ThresholdSigningEffects {
     async fn bootstrap_authority(
         &self,
         authority: &AuthorityId,
@@ -232,12 +230,7 @@ impl<T: ThresholdSigningEffects + ?Sized> ThresholdSigningEffects for std::sync:
         participants: &[ParticipantIdentity],
     ) -> Result<(u64, Vec<Vec<u8>>, PublicKeyPackage), ThresholdSigningError> {
         (**self)
-            .rotate_keys(
-                authority,
-                new_threshold,
-                new_total_participants,
-                participants,
-            )
+            .rotate_keys(authority, new_threshold, new_total_participants, participants)
             .await
     }
 
@@ -258,7 +251,7 @@ impl<T: ThresholdSigningEffects + ?Sized> ThresholdSigningEffects for std::sync:
             .rollback_key_rotation(authority, failed_epoch)
             .await
     }
-}
+});
 
 #[cfg(test)]
 mod tests {

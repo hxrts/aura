@@ -101,9 +101,7 @@ pub trait FlowBudgetEffects: Send + Sync {
     ) -> AuraResult<Receipt>;
 }
 
-/// Blanket implementation for Arc<T> where T: FlowBudgetEffects
-#[async_trait]
-impl<T: FlowBudgetEffects + ?Sized> FlowBudgetEffects for std::sync::Arc<T> {
+impl_arc_effect!(FlowBudgetEffects {
     async fn charge_flow(
         &self,
         context: &ContextId,
@@ -112,4 +110,4 @@ impl<T: FlowBudgetEffects + ?Sized> FlowBudgetEffects for std::sync::Arc<T> {
     ) -> AuraResult<Receipt> {
         (**self).charge_flow(context, peer, cost).await
     }
-}
+});

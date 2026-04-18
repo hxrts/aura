@@ -58,9 +58,7 @@ pub trait JournalEffects: Send + Sync {
     ) -> Result<FlowBudget, AuraError>;
 }
 
-/// Blanket implementation for Arc<T> where T: JournalEffects
-#[async_trait]
-impl<T: JournalEffects + ?Sized> JournalEffects for std::sync::Arc<T> {
+impl_arc_effect!(JournalEffects {
     async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError> {
         (**self).merge_facts(target, delta).await
     }
@@ -106,4 +104,4 @@ impl<T: JournalEffects + ?Sized> JournalEffects for std::sync::Arc<T> {
     ) -> Result<FlowBudget, AuraError> {
         (**self).charge_flow_budget(context, peer, cost).await
     }
-}
+});
