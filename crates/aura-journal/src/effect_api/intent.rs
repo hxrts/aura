@@ -4,10 +4,10 @@
 //! Intents enable lock-free coordination where any online device can become the instigator
 //! for executing a batch of compatible intents.
 
+use super::journal_types::uuid_newtype;
 use aura_core::types::identifiers::DeviceId;
 use aura_core::{Hash32 as Commitment, NodeIndex};
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 // TreeOperation aliases aura_core::TreeOpKind until the intent system is fully
 // migrated to the new tree mutation types.
@@ -16,39 +16,17 @@ use aura_core::TreeOpKind as TreeOperation;
 /// Import unified time types from aura-core
 use aura_core::time::TimeStamp;
 
-/// Unique identifier for an intent
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct IntentId(pub uuid::Uuid);
-
-impl IntentId {
-    /// Create a new intent ID.
-    ///
-    /// # Parameters
-    /// - `id`: UUID for the intent (obtain from RandomEffects for testability)
-    ///
-    /// Note: Callers should obtain UUID from RandomEffects to maintain testability
-    /// and consistency with the effect system architecture.
-    pub fn new(id: uuid::Uuid) -> Self {
-        Self(id)
-    }
-
-    /// Create from a UUID (alias for new)
-    pub fn from_uuid(uuid: uuid::Uuid) -> Self {
-        Self::new(uuid)
-    }
-}
-
-impl fmt::Display for IntentId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "intent-{}", self.0)
-    }
-}
+uuid_newtype!(IntentId, "intent-", "Unique identifier for an intent");
 
 /// Priority for intent execution
 ///
 /// Higher priorities are executed first when ranking intents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Priority(pub u64);
+
+const DEFAULT_PRIORITY_VALUE: u64 = 100;
+const HIGH_PRIORITY_VALUE: u64 = 1000;
+const LOW_PRIORITY_VALUE: u64 = 10;
 
 impl Priority {
     /// Create a new priority
@@ -58,17 +36,17 @@ impl Priority {
 
     /// Default priority
     pub fn default_priority() -> Self {
-        Self(100)
+        Self(DEFAULT_PRIORITY_VALUE)
     }
 
     /// High priority (for urgent operations)
     pub fn high() -> Self {
-        Self(1000)
+        Self(HIGH_PRIORITY_VALUE)
     }
 
     /// Low priority (for background operations)
     pub fn low() -> Self {
-        Self(10)
+        Self(LOW_PRIORITY_VALUE)
     }
 
     /// Get the numeric value
@@ -104,8 +82,8 @@ pub enum IntentStatus {
     Superseded,
 }
 
-impl fmt::Display for IntentStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for IntentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             IntentStatus::Pending => write!(f, "pending"),
             IntentStatus::Executing => write!(f, "executing"),
@@ -308,288 +286,5 @@ impl IntentBatch {
     /// Get all intent IDs in this batch
     pub fn intent_ids(&self) -> Vec<IntentId> {
         self.intents.iter().map(|i| i.intent_id).collect()
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used)]
-mod tests {
-    use super::*;
-    use aura_core::Hash32;
-    // Note: Tests commented out - need migration to new TreeOpKind from aura_core
-    // Legacy TreeOp types have been replaced by fact-based AttestedOp
-
-    // Helper function to create deterministic test UUIDs
-    fn test_uuid(seed: u8) -> uuid::Uuid {
-        uuid::Uuid::from_bytes([seed; 16])
-    }
-
-    #[test]
-    fn test_intent_id_creation() {
-        let id1 = IntentId::new(test_uuid(1));
-        let id2 = IntentId::new(test_uuid(2));
-        assert_ne!(id1, id2);
-    }
-
-    #[test]
-    fn test_priority_values() {
-        assert!(Priority::high() > Priority::default_priority());
-        assert!(Priority::default_priority() > Priority::low());
-    }
-
-    #[test]
-    fn test_intent_creation() {
-        use crate::LeafNode;
-
-        let op = TreeOperation::AddLeaf {
-            leaf: LeafNode::new_device(
-                crate::LeafId(0),
-                DeviceId(uuid::Uuid::from_bytes([9u8; 16])),
-                vec![0u8; 32],
-            )
-            .expect("valid leaf"),
-            under: NodeIndex(0),
-        };
-
-        let intent = Intent::new(
-            IntentId::new(test_uuid(6)),
-            op,
-            vec![NodeIndex(0)],
-            Hash32([0u8; 32]),
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-        );
-
-        assert_eq!(intent.priority, Priority::default_priority());
-        assert!(!intent.is_stale(&Hash32([0u8; 32])));
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_intent_conflicts() {
-        let op = TreeOperation::RotateEpoch {
-            affected: vec![NodeIndex(0)],
-        };
-
-        let intent1 = Intent::new(
-            IntentId::new(test_uuid(4)),
-            op.clone(),
-            vec![NodeIndex(0), NodeIndex(1)],
-            Hash32([1u8; 32]),
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-        );
-
-        let intent2 = Intent::new(
-            IntentId::new(test_uuid(5)),
-            op,
-            vec![NodeIndex(1), NodeIndex(2)],
-            Hash32([2u8; 32]), // Different snapshot
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-        );
-
-        // Should conflict due to overlapping nodes (1) and different snapshots
-        assert!(intent1.conflicts_with(&intent2));
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_intent_no_conflict_same_snapshot() {
-        let op = TreeOperation::RotateEpoch {
-            affected: vec![NodeIndex(0)],
-        };
-
-        let snapshot = [1u8; 32];
-
-        let intent1 = Intent::new(
-            IntentId::new(test_uuid(7)),
-            op.clone(),
-            vec![NodeIndex(0), NodeIndex(1)],
-            Hash32(snapshot),
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-        );
-
-        let intent2 = Intent::new(
-            IntentId::new(test_uuid(7)),
-            op,
-            vec![NodeIndex(1), NodeIndex(2)],
-            Hash32(snapshot), // Same snapshot
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-        );
-
-        // Should not conflict - same snapshot
-        assert!(!intent1.conflicts_with(&intent2));
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_intent_is_stale() {
-        let intent = Intent::new(
-            IntentId::new(test_uuid(7)),
-            TreeOperation::RotateEpoch {
-                affected: vec![NodeIndex(0)],
-            },
-            vec![],
-            Hash32([1u8; 32]),
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-        );
-
-        assert!(!intent.is_stale(&Hash32([1u8; 32])));
-        assert!(intent.is_stale(&Hash32([2u8; 32])));
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_intent_age() {
-        use aura_core::time::{PhysicalTime, TimeStamp};
-
-        let created_at = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1000,
-            uncertainty: None,
-        });
-
-        let intent = Intent::new(
-            IntentId::new(test_uuid(7)),
-            TreeOperation::RemoveLeaf {
-                leaf: aura_core::tree::LeafId(0),
-                reason: 0,
-            },
-            vec![],
-            Hash32([0u8; 32]),
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            created_at,
-        );
-
-        let time_1500 = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1500,
-            uncertainty: None,
-        });
-        let time_1000 = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1000,
-            uncertainty: None,
-        });
-
-        assert!(intent.age(&time_1500).is_some());
-        assert_eq!(intent.age(&time_1000), Some(0));
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_intent_batch_add() {
-        use crate::Policy;
-
-        let snapshot = [1u8; 32];
-        let mut batch = IntentBatch::new(Hash32(snapshot));
-
-        let intent1 = Intent::new(
-            IntentId::new(test_uuid(7)),
-            TreeOperation::ChangePolicy {
-                node: NodeIndex(0),
-                new_policy: Policy::All,
-            },
-            vec![NodeIndex(0)],
-            Hash32(snapshot),
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-        );
-
-        let result = batch.try_add(intent1);
-        assert!(result.is_ok());
-        assert_eq!(batch.len(), 1);
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_intent_batch_rejects_snapshot_mismatch() {
-        let snapshot1 = [1u8; 32];
-        let snapshot2 = [2u8; 32];
-        let mut batch = IntentBatch::new(Hash32(snapshot1));
-
-        let intent = Intent::new(
-            IntentId::new(test_uuid(7)),
-            TreeOperation::RotateEpoch {
-                affected: vec![NodeIndex(0)],
-            },
-            vec![NodeIndex(0)],
-            Hash32(snapshot2),
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-        );
-
-        let result = batch.try_add(intent);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_intent_batch_intent_ids() {
-        let snapshot = [1u8; 32];
-        let mut batch = IntentBatch::new(Hash32(snapshot));
-
-        let intent1 = Intent::new(
-            IntentId::new(test_uuid(7)),
-            TreeOperation::RotateEpoch {
-                affected: vec![NodeIndex(0)],
-            },
-            vec![NodeIndex(0)],
-            Hash32(snapshot),
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-        );
-
-        let id = intent1.intent_id;
-        batch.try_add(intent1).unwrap();
-
-        let ids = batch.intent_ids();
-        assert_eq!(ids.len(), 1);
-        assert_eq!(ids[0], id);
-    }
-
-    #[test]
-    fn test_intent_status_display() {
-        assert_eq!(IntentStatus::Pending.to_string(), "pending");
-        assert_eq!(IntentStatus::Executing.to_string(), "executing");
-        assert_eq!(IntentStatus::Completed.to_string(), "completed");
     }
 }

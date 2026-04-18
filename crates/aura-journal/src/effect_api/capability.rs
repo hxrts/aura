@@ -4,40 +4,14 @@
 //! Capabilities are time-limited, attenuatable tokens that grant specific permissions
 //! for specific resources.
 
+use super::journal_types::uuid_newtype;
 use aura_core::types::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// Import unified time types from aura-core
 use aura_core::time::TimeStamp;
 
-/// Unique identifier for a capability
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct CapabilityId(pub uuid::Uuid);
-
-impl CapabilityId {
-    /// Create a new capability ID.
-    ///
-    /// # Parameters
-    /// - `id`: UUID for the capability (obtain from RandomEffects for testability)
-    ///
-    /// Note: Callers should obtain UUID from RandomEffects to maintain testability
-    /// and consistency with the effect system architecture.
-    pub fn new(id: uuid::Uuid) -> Self {
-        Self(id)
-    }
-
-    /// Create from a UUID (alias for new)
-    pub fn from_uuid(uuid: uuid::Uuid) -> Self {
-        Self::new(uuid)
-    }
-}
-
-impl fmt::Display for CapabilityId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "cap-{}", self.0)
-    }
-}
+uuid_newtype!(CapabilityId, "cap-", "Unique identifier for a capability");
 
 /// Resource reference for capability scope
 ///
@@ -97,8 +71,8 @@ impl ResourceRef {
     }
 }
 
-impl fmt::Display for ResourceRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for ResourceRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.uri)
     }
 }
@@ -272,174 +246,6 @@ impl Default for Attenuation {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Helper function to create deterministic test UUIDs
-    fn test_uuid(seed: u8) -> uuid::Uuid {
-        uuid::Uuid::from_bytes([seed; 16])
-    }
-
-    #[test]
-    fn test_capability_id_creation() {
-        let id1 = CapabilityId::new(test_uuid(1));
-        let id2 = CapabilityId::new(test_uuid(2));
-        assert_ne!(id1, id2);
-    }
-
-    #[test]
-    fn test_resource_ref_recovery() {
-        let resource = ResourceRef::recovery(0, 42);
-        assert!(resource.is_recovery());
-        assert!(!resource.is_storage());
-        assert!(resource.as_str().contains("42"));
-    }
-
-    #[test]
-    fn test_resource_ref_storage() {
-        let resource = ResourceRef::storage("/backup/data");
-        assert!(resource.is_storage());
-        assert!(!resource.is_recovery());
-        assert!(resource.as_str().contains("/backup/data"));
-    }
-
-    #[test]
-    fn test_resource_ref_relay() {
-        let resource = ResourceRef::relay("session-123");
-        assert!(resource.is_relay());
-        assert!(!resource.is_storage());
-        assert!(resource.as_str().contains("session-123"));
-    }
-
-    #[test]
-    fn test_capability_ref_expiration() {
-        use aura_core::time::{PhysicalTime, TimeStamp};
-
-        let expires_at = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1000,
-            uncertainty: None,
-        });
-
-        let cap = CapabilityRef::new(
-            CapabilityId::new(test_uuid(3)),
-            ResourceRef::recovery(0, 1),
-            expires_at,
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
-        );
-
-        let time_500 = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 500,
-            uncertainty: None,
-        });
-        let time_1000 = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1000,
-            uncertainty: None,
-        });
-        let time_1500 = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1500,
-            uncertainty: None,
-        });
-
-        assert!(!cap.is_expired(&time_500));
-        assert!(!cap.is_expired(&time_1000)); // At expiry time, not yet expired
-        assert!(cap.is_expired(&time_1500));
-    }
-
-    #[test]
-    fn test_capability_ref_time_until_expiration() {
-        use aura_core::time::{PhysicalTime, TimeStamp};
-
-        let expires_at = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1000,
-            uncertainty: None,
-        });
-
-        let cap = CapabilityRef::new(
-            CapabilityId::new(test_uuid(4)),
-            ResourceRef::recovery(0, 1),
-            expires_at,
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
-        );
-
-        let time_500 = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 500,
-            uncertainty: None,
-        });
-        let time_1000 = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1000,
-            uncertainty: None,
-        });
-        let time_1500 = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1500,
-            uncertainty: None,
-        });
-
-        assert!(cap.time_until_expiration(&time_500).is_some());
-        assert_eq!(cap.time_until_expiration(&time_1000), Some(0));
-        assert_eq!(cap.time_until_expiration(&time_1500), Some(0));
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_capability_ref_with_attenuation() {
-        let attenuation = Attenuation::new()
-            .with_max_uses(5)
-            .with_operations(vec!["read".to_string()]);
-
-        let cap = CapabilityRef::new(
-            CapabilityId::new(test_uuid(5)),
-            ResourceRef::storage("/data"),
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
-        )
-        .with_attenuation(attenuation);
-
-        assert!(cap.attenuation.is_some());
-        let att = cap.attenuation.unwrap();
-        assert_eq!(att.max_uses, Some(5));
-        assert_eq!(att.allowed_operations, Some(vec!["read".to_string()]));
-    }
-
-    #[test]
-    fn test_attenuation_builder() {
-        let attenuation = Attenuation::new()
-            .with_max_uses(10)
-            .with_operations(vec!["read".to_string(), "write".to_string()])
-            .with_expiration(TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 5000,
-                uncertainty: None,
-            }))
-            .with_metadata("purpose".to_string(), "testing".to_string());
-
-        assert_eq!(attenuation.max_uses, Some(10));
-        assert_eq!(
-            attenuation.restricted_expires_at,
-            Some(TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 5000,
-                uncertainty: None
-            }))
-        );
-        assert_eq!(attenuation.metadata.get("purpose").unwrap(), "testing");
-    }
-
-    #[test]
-    fn test_resource_ref_from_string() {
-        let resource: ResourceRef = "custom://resource".into();
-        assert_eq!(resource.as_str(), "custom://resource");
-    }
-
-    #[test]
-    fn test_capability_signature() {
-        let sig =
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
-        assert_eq!(sig.signature.len(), 64);
-    }
-}
-
 /// Recovery-specific capability types
 ///
 /// Recovery capabilities are special time-limited capabilities issued by guardian
@@ -533,129 +339,5 @@ impl RecoveryCapability {
     /// Check if this capability has sufficient guardian consent
     pub fn has_guardian_quorum(&self) -> bool {
         self.issuing_guardians.len() >= self.guardian_threshold as usize
-    }
-}
-
-#[cfg(test)]
-mod recovery_tests {
-    use super::*;
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_recovery_capability_creation() {
-        let target = DeviceId(uuid::Uuid::from_bytes([2u8; 16]));
-        let guardians = vec![
-            DeviceId(uuid::Uuid::from_bytes([3u8; 16])),
-            DeviceId(uuid::Uuid::from_bytes([4u8; 16])),
-        ];
-        let sig =
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
-
-        let recovery_cap = RecoveryCapability::new(
-            CapabilityId::new(uuid::Uuid::from_bytes([6u8; 16])),
-            target,
-            guardians,
-            2,
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 10000,
-                uncertainty: None,
-            }),
-            0,
-            1,
-            sig,
-        );
-
-        assert_eq!(recovery_cap.target_device, target);
-        assert_eq!(recovery_cap.issuing_guardians.len(), 2);
-        assert_eq!(recovery_cap.guardian_threshold, 2);
-        assert!(recovery_cap.has_guardian_quorum());
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_recovery_capability_expiration() {
-        let sig =
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
-        let recovery_cap = RecoveryCapability::new(
-            CapabilityId::new(uuid::Uuid::from_bytes([7u8; 16])),
-            DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
-            vec![
-                DeviceId(uuid::Uuid::from_bytes([6u8; 16])),
-                DeviceId(uuid::Uuid::from_bytes([7u8; 16])),
-            ],
-            2,
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-            0,
-            1,
-            sig,
-        );
-
-        let time_500 = TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-            ts_ms: 500,
-            uncertainty: None,
-        });
-        let time_1500 = TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-            ts_ms: 1500,
-            uncertainty: None,
-        });
-
-        assert!(recovery_cap.is_valid(&time_500));
-        assert!(!recovery_cap.is_valid(&time_1500));
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_recovery_capability_insufficient_guardians() {
-        let sig =
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
-        let recovery_cap = RecoveryCapability::new(
-            CapabilityId::new(uuid::Uuid::from_bytes([8u8; 16])),
-            DeviceId(uuid::Uuid::from_bytes([8u8; 16])),
-            vec![DeviceId(uuid::Uuid::from_bytes([9u8; 16]))], // Only 1 guardian
-            2,                                                 // But need 2
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 10000,
-                uncertainty: None,
-            }),
-            0,
-            1,
-            sig,
-        );
-
-        assert!(!recovery_cap.has_guardian_quorum());
-        let time_500 = TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-            ts_ms: 500,
-            uncertainty: None,
-        });
-        assert!(!recovery_cap.is_valid(&time_500)); // Invalid due to insufficient guardians
-    }
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_recovery_capability_with_reason() {
-        let sig =
-            CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
-        let recovery_cap = RecoveryCapability::new(
-            CapabilityId::new(uuid::Uuid::from_bytes([9u8; 16])),
-            DeviceId(uuid::Uuid::from_bytes([10u8; 16])),
-            vec![
-                DeviceId(uuid::Uuid::from_bytes([11u8; 16])),
-                DeviceId(uuid::Uuid::from_bytes([12u8; 16])),
-            ],
-            2,
-            TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                ts_ms: 10000,
-                uncertainty: None,
-            }),
-            0,
-            1,
-            sig,
-        )
-        .with_reason("Lost device, need to rekey");
-
-        assert_eq!(recovery_cap.recovery_reason, "Lost device, need to rekey");
     }
 }

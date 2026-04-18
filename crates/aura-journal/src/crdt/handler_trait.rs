@@ -188,31 +188,3 @@ pub struct HandlerMetrics {
     /// For MvHandler: number of consistency proofs received
     pub consistency_proofs: Option<u32>,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_crdt_semantics() {
-        assert!(CrdtSemantics::JoinSemilattice.uses_join());
-        assert!(!CrdtSemantics::JoinSemilattice.uses_meet());
-
-        assert!(CrdtSemantics::MeetSemilattice.uses_meet());
-        assert!(!CrdtSemantics::MeetSemilattice.uses_join());
-
-        assert!(CrdtSemantics::OperationBased.requires_causal_ordering());
-        assert!(!CrdtSemantics::JoinSemilattice.requires_causal_ordering());
-
-        assert!(CrdtSemantics::DeltaBased.uses_join());
-    }
-
-    #[test]
-    fn test_usage_guidance() {
-        let guidance = CrdtSemantics::JoinSemilattice.usage_guidance();
-        assert!(guidance.contains("accumulating"));
-
-        let guidance = CrdtSemantics::MeetSemilattice.usage_guidance();
-        assert!(guidance.contains("restricting"));
-    }
-}

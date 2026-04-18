@@ -4,6 +4,36 @@ use super::intent::IntentId;
 use aura_core::types::Epoch;
 use serde::{Deserialize, Serialize};
 
+macro_rules! uuid_newtype {
+    ($name:ident, $prefix:literal, $doc:literal) => {
+        #[doc = $doc]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+        )]
+        pub struct $name(pub uuid::Uuid);
+
+        impl $name {
+            /// Create a new identifier from a UUID supplied by the caller.
+            pub fn new(id: uuid::Uuid) -> Self {
+                Self(id)
+            }
+
+            /// Create from a UUID (alias for `new`).
+            pub fn from_uuid(uuid: uuid::Uuid) -> Self {
+                Self::new(uuid)
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, concat!($prefix, "{}"), self.0)
+            }
+        }
+    };
+}
+
+pub(crate) use uuid_newtype;
+
 /// Journal operation errors
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum JournalError {
