@@ -4,7 +4,7 @@
 //! the choreography annotation contract.
 
 #![allow(missing_docs)]
-use aura_core::types::identifiers::{AuthorityId, ContextId};
+use super::support::{test_authority, test_context};
 use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard_op;
 use aura_guards::executor::GuardPlan;
@@ -13,9 +13,9 @@ use aura_guards::GuardOperation;
 
 #[test]
 fn guard_plan_matches_choreography_request() {
-    let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let peer = AuthorityId::new_from_entropy([2u8; 32]);
-    let context = ContextId::new_from_entropy([3u8; 32]);
+    let authority = test_authority(1);
+    let peer = test_authority(2);
+    let context = test_context(3);
 
     let send_guard = create_send_guard_op(GuardOperation::AmpSend, context, peer, FlowCost::new(1));
     let plan = match GuardPlan::from_send_guard(&send_guard, authority) {

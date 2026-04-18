@@ -14,6 +14,31 @@ use aura_core::{
 };
 use std::fmt::Debug;
 
+fn denied(reason: &'static str) -> GuardOutcome {
+    GuardOutcome::denied(reason)
+}
+
+fn authorized(effect: EffectCommand) -> GuardOutcome {
+    GuardOutcome::authorized(vec![effect])
+}
+
+fn operation_journal_entry(snapshot: &GuardSnapshot, request: &GuardRequest) -> JournalEntry {
+    let mut fact = Fact::new();
+    let _ = fact.insert(
+        "operation_executed",
+        aura_core::journal::FactValue::String(format!(
+            "{}:{}",
+            request.authority, request.operation
+        )),
+    );
+
+    JournalEntry {
+        fact,
+        authority: request.authority,
+        timestamp: snapshot.now.clone(),
+    }
+}
+
 /// Request to be evaluated by guards
 #[derive(Debug, Clone)]
 pub struct GuardRequest {
@@ -117,10 +142,10 @@ impl Guard for CapabilityGuard {
             match snapshot.metadata.get(&authz_key) {
                 Some("allow") => {}
                 Some("deny") => {
-                    return GuardOutcome::denied("Authorization denied");
+                    return denied("Authorization denied");
                 }
                 Some(_) | None => {
-                    return GuardOutcome::denied("Missing authorization decision");
+                    return denied("Missing authorization decision");
                 }
             }
         }
@@ -130,7 +155,7 @@ impl Guard for CapabilityGuard {
             || (!snapshot.caps.is_empty() && snapshot.caps == request.capability);
 
         if !capability_ok {
-            return GuardOutcome::denied("Capability check failed");
+            return denied("Capability check failed");
         }
 
         GuardOutcome::authorized(vec![])
@@ -152,16 +177,15 @@ impl Guard for FlowBudgetGuard {
             .budgets
             .has_budget(&request.context, &request.peer, request.cost)
         {
-            return GuardOutcome::denied("Insufficient flow budget");
+            return denied("Insufficient flow budget");
         }
 
-        // Return effect to charge budget
-        GuardOutcome::authorized(vec![EffectCommand::ChargeBudget {
+        authorized(EffectCommand::ChargeBudget {
             context: request.context,
             authority: request.authority,
             peer: request.peer,
             amount: request.cost,
-        }])
+        })
     }
 
     fn name(&self) -> &'static str {
@@ -175,23 +199,9 @@ pub struct JournalCouplingGuard;
 
 impl Guard for JournalCouplingGuard {
     fn evaluate(&self, snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
-        // Create journal entry for this operation
-        let mut fact = Fact::new();
-        let _ = fact.insert(
-            "operation_executed",
-            aura_core::journal::FactValue::String(format!(
-                "{}:{}",
-                request.authority, request.operation
-            )),
-        );
-
-        let entry = JournalEntry {
-            fact,
-            authority: request.authority,
-            timestamp: snapshot.now.clone(),
-        };
-
-        GuardOutcome::authorized(vec![EffectCommand::AppendJournal { entry }])
+        authorized(EffectCommand::AppendJournal {
+            entry: operation_journal_entry(snapshot, request),
+        })
     }
 
     fn name(&self) -> &'static str {
@@ -234,6 +244,12 @@ impl GuardChain {
         Self { guards: Vec::new() }
     }
 
+    /// Add a concrete guard to the chain.
+    pub fn with_guard<G: Guard + 'static>(mut self, guard: G) -> Self {
+        self.guards.push(Box::new(guard));
+        self
+    }
+
     /// Add a guard to the chain
     pub fn with(mut self, guard: Box<dyn Guard>) -> Self {
         self.guards.push(guard);
@@ -243,10 +259,10 @@ impl GuardChain {
     /// Create standard guard chain (Cap → Budget → Journal → Leakage)
     pub fn standard() -> Self {
         Self::new()
-            .with(Box::new(CapabilityGuard))
-            .with(Box::new(FlowBudgetGuard))
-            .with(Box::new(JournalCouplingGuard))
-            .with(Box::new(LeakageTrackingGuard))
+            .with_guard(CapabilityGuard)
+            .with_guard(FlowBudgetGuard)
+            .with_guard(JournalCouplingGuard)
+            .with_guard(LeakageTrackingGuard)
     }
 }
 

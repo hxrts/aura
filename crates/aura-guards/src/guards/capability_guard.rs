@@ -24,28 +24,29 @@ pub struct CapabilityGuard {
 }
 
 impl CapabilityGuard {
+    fn with_optional_context(
+        evaluator: BiscuitGuardEvaluator,
+        context_id: Option<ContextId>,
+    ) -> Self {
+        Self {
+            evaluator,
+            context_id,
+        }
+    }
+
     /// Create a new capability guard
     pub fn new(biscuit_bridge: BiscuitAuthorizationBridge) -> Self {
-        Self {
-            evaluator: BiscuitGuardEvaluator::new(biscuit_bridge),
-            context_id: None,
-        }
+        Self::with_optional_context(BiscuitGuardEvaluator::new(biscuit_bridge), None)
     }
 
     /// Create a capability guard from an existing evaluator
     pub fn from_evaluator(evaluator: BiscuitGuardEvaluator) -> Self {
-        Self {
-            evaluator,
-            context_id: None,
-        }
+        Self::with_optional_context(evaluator, None)
     }
 
     /// Create a capability guard with context
     pub fn with_context(biscuit_bridge: BiscuitAuthorizationBridge, context_id: ContextId) -> Self {
-        Self {
-            evaluator: BiscuitGuardEvaluator::new(biscuit_bridge),
-            context_id: Some(context_id),
-        }
+        Self::with_optional_context(BiscuitGuardEvaluator::new(biscuit_bridge), Some(context_id))
     }
 
     /// Create a capability guard from an existing evaluator with context
@@ -53,10 +54,7 @@ impl CapabilityGuard {
         evaluator: BiscuitGuardEvaluator,
         context_id: ContextId,
     ) -> Self {
-        Self {
-            evaluator,
-            context_id: Some(context_id),
-        }
+        Self::with_optional_context(evaluator, Some(context_id))
     }
 
     /// Get the underlying evaluator for low-level operations
@@ -77,35 +75,14 @@ impl CapabilityGuard {
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
     ) -> Result<bool> {
-        // Create resource scope
         let scope = ResourceScope::Authority {
             authority_id: *authority_id,
             operation: operation.clone(),
         };
-
-        // Determine flow cost based on operation
         let flow_cost = Self::authority_op_flow_cost(operation);
-
-        // If no token provided, deny by default
-        let token = token.ok_or_else(|| {
-            AuraError::permission_denied("No authorization token provided".to_string())
-        })?;
-
-        // Delegate to evaluator for authorization and budget management
         let capability =
             CapabilityId::try_from(operation.as_str()).expect("authority ops use valid names");
-        match self.evaluator.evaluate_guard(
-            token,
-            &capability,
-            &scope,
-            flow_cost,
-            flow_budget,
-            0, // current_time_seconds
-        ) {
-            Ok(_result) => Ok(true),
-            Err(super::GuardError::MissingCapability { .. }) => Ok(false),
-            Err(e) => Err(AuraError::permission_denied(format!("Guard error: {e:?}"))),
-        }
+        self.evaluate_scope_bool(token, capability, scope, flow_cost, flow_budget)
     }
 
     /// Get flow cost for an authority operation
@@ -130,42 +107,14 @@ impl CapabilityGuard {
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
     ) -> Result<(bool, GuardResult)> {
-        // Create resource scope
         let scope = ResourceScope::Authority {
             authority_id: *authority_id,
             operation: operation.clone(),
         };
-
-        // Determine flow cost based on operation
         let flow_cost = Self::authority_op_flow_cost(operation);
-
-        // If no token provided, return default result
-        let token = token.ok_or_else(|| {
-            AuraError::permission_denied("No authorization token provided".to_string())
-        })?;
-
-        // Delegate to evaluator for authorization and budget management
         let capability =
             CapabilityId::try_from(operation.as_str()).expect("authority ops use valid names");
-        match self.evaluator.evaluate_guard(
-            token,
-            &capability,
-            &scope,
-            flow_cost,
-            flow_budget,
-            0, // current_time_seconds
-        ) {
-            Ok(result) => Ok((true, result)),
-            Err(super::GuardError::MissingCapability { .. }) => Ok((
-                false,
-                GuardResult {
-                    authorized: false,
-                    flow_consumed: 0,
-                    delegation_depth: None,
-                },
-            )),
-            Err(e) => Err(AuraError::permission_denied(format!("Guard error: {e:?}"))),
-        }
+        self.evaluate_scope_with_result(token, capability, scope, flow_cost, flow_budget)
     }
 
     /// Evaluate a context operation
@@ -176,35 +125,14 @@ impl CapabilityGuard {
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
     ) -> Result<bool> {
-        // Create resource scope
         let scope = ResourceScope::Context {
             context_id: *context_id,
             operation: operation.clone(),
         };
-
-        // Determine flow cost based on operation
         let flow_cost = Self::context_op_flow_cost(operation);
-
-        // If no token provided, deny by default
-        let token = token.ok_or_else(|| {
-            AuraError::permission_denied("No authorization token provided".to_string())
-        })?;
-
-        // Delegate to evaluator for authorization and budget management
         let capability =
             CapabilityId::try_from(operation.as_str()).expect("context ops use valid names");
-        match self.evaluator.evaluate_guard(
-            token,
-            &capability,
-            &scope,
-            flow_cost,
-            flow_budget,
-            0, // current_time_seconds
-        ) {
-            Ok(_result) => Ok(true),
-            Err(super::GuardError::MissingCapability { .. }) => Ok(false),
-            Err(e) => Err(AuraError::permission_denied(format!("Guard error: {e:?}"))),
-        }
+        self.evaluate_scope_bool(token, capability, scope, flow_cost, flow_budget)
     }
 
     /// Get flow cost for a context operation
@@ -218,6 +146,55 @@ impl CapabilityGuard {
             ContextOp::UpdateGuardianSet => 250,
             ContextOp::EmergencyFreeze => 500,
         })
+    }
+
+    fn denied_result() -> GuardResult {
+        GuardResult {
+            authorized: false,
+            flow_consumed: 0,
+            delegation_depth: None,
+        }
+    }
+
+    fn require_token<'a>(&self, token: Option<&'a Biscuit>) -> Result<&'a Biscuit> {
+        token.ok_or_else(|| {
+            AuraError::permission_denied("No authorization token provided".to_string())
+        })
+    }
+
+    fn map_guard_error(error: super::GuardError) -> AuraError {
+        AuraError::permission_denied(format!("Guard error: {error:?}"))
+    }
+
+    fn evaluate_scope_with_result(
+        &self,
+        token: Option<&Biscuit>,
+        capability: CapabilityId,
+        scope: ResourceScope,
+        flow_cost: FlowCost,
+        flow_budget: &mut FlowBudget,
+    ) -> Result<(bool, GuardResult)> {
+        let token = self.require_token(token)?;
+        match self
+            .evaluator
+            .evaluate_guard(token, &capability, &scope, flow_cost, flow_budget, 0)
+        {
+            Ok(result) => Ok((true, result)),
+            Err(super::GuardError::MissingCapability { .. }) => Ok((false, Self::denied_result())),
+            Err(error) => Err(Self::map_guard_error(error)),
+        }
+    }
+
+    fn evaluate_scope_bool(
+        &self,
+        token: Option<&Biscuit>,
+        capability: CapabilityId,
+        scope: ResourceScope,
+        flow_cost: FlowCost,
+        flow_budget: &mut FlowBudget,
+    ) -> Result<bool> {
+        self.evaluate_scope_with_result(token, capability, scope, flow_cost, flow_budget)
+            .map(|(authorized, _)| authorized)
     }
 }
 
@@ -250,11 +227,7 @@ impl CapabilityGuardExt for CapabilityGuard {
         Ok(if authorized {
             result
         } else {
-            GuardResult {
-                authorized: false,
-                flow_consumed: 0,
-                delegation_depth: None,
-            }
+            CapabilityGuard::denied_result()
         })
     }
 }

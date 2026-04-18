@@ -4,7 +4,7 @@
 //! system using proptest to exercise edge cases and boundary conditions.
 #![allow(missing_docs)]
 
-use aura_core::types::identifiers::AuthorityId;
+use super::support::test_authority;
 use aura_core::types::scope::{AuthorityOp, ResourceScope};
 use aura_core::CapabilityName;
 use aura_guards::authorization::BiscuitAuthorizationBridge;
@@ -98,7 +98,7 @@ fn invalid_cap_char() -> BoxedStrategy<char> {
 
 fn test_scope() -> ResourceScope {
     ResourceScope::Authority {
-        authority_id: AuthorityId::new_from_entropy([99u8; 32]),
+        authority_id: test_authority(99),
         operation: AuthorityOp::UpdateTree,
     }
 }
@@ -115,10 +115,7 @@ fn bridge_with_caps(capabilities: &[&str]) -> (BiscuitAuthorizationBridge, biscu
     let token = builder
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build token: {err:?}"));
-    let bridge = BiscuitAuthorizationBridge::new(
-        keypair.public(),
-        AuthorityId::new_from_entropy([42u8; 32]),
-    );
+    let bridge = BiscuitAuthorizationBridge::new(keypair.public(), test_authority(42));
     (bridge, token)
 }
 
@@ -140,10 +137,7 @@ fn bridge_with_caps_owned(
     let token = builder
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build token: {err:?}"));
-    let bridge = BiscuitAuthorizationBridge::new(
-        keypair.public(),
-        AuthorityId::new_from_entropy([42u8; 32]),
-    );
+    let bridge = BiscuitAuthorizationBridge::new(keypair.public(), test_authority(42));
     (keypair, bridge, token)
 }
 

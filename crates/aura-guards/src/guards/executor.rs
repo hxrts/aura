@@ -38,6 +38,83 @@ use std::{collections::HashMap, sync::Arc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+fn invalid_effect(action: &str, error: impl std::fmt::Display) -> AuraError {
+    AuraError::invalid(format!("Failed to {action}: {error}"))
+}
+
+async fn execute_effect_command_with_effects<E>(
+    effects: &E,
+    cmd: EffectCommand,
+) -> Result<EffectResult>
+where
+    E: crate::guards::GuardEffects
+        + FlowBudgetEffects
+        + PhysicalTimeEffects
+        + RandomEffects
+        + StorageEffects
+        + JournalEffects
+        + LeakageEffects,
+{
+    match cmd {
+        EffectCommand::ChargeBudget {
+            context,
+            authority: _,
+            peer,
+            amount,
+        } => {
+            let receipt = effects.charge_flow(&context, &peer, amount).await?;
+            Ok(EffectResult::Receipt(receipt))
+        }
+        EffectCommand::AppendJournal { entry } => {
+            let current = effects
+                .get_journal()
+                .await
+                .map_err(|error| invalid_effect("get journal", error))?;
+            let delta = Journal::with_facts(entry.fact.clone());
+            let merged = effects
+                .merge_facts(current, delta)
+                .await
+                .map_err(|error| invalid_effect("merge journal", error))?;
+            effects
+                .persist_journal(&merged)
+                .await
+                .map_err(|error| invalid_effect("persist journal", error))?;
+            Ok(EffectResult::Success)
+        }
+        EffectCommand::RecordLeakage { bits } => {
+            let timestamp = effects.physical_time().await?;
+            let event = aura_core::effects::LeakageEvent {
+                source: AuthorityId::new_from_entropy([1u8; 32]),
+                destination: AuthorityId::new_from_entropy([1u8; 32]),
+                context_id: ContextId::new_from_entropy([2u8; 32]),
+                leakage_amount: bits as u64,
+                observer_class: aura_core::effects::ObserverClass::External,
+                operation: "guard_chain".to_string(),
+                timestamp,
+            };
+            effects
+                .record_leakage(event)
+                .await
+                .map_err(|error| invalid_effect("record leakage", error))?;
+            Ok(EffectResult::Success)
+        }
+        EffectCommand::StoreMetadata { key, value } => {
+            effects
+                .store(&key, value.into_bytes())
+                .await
+                .map_err(|error| AuraError::internal(format!("store failed: {error}")))?;
+            Ok(EffectResult::Success)
+        }
+        EffectCommand::SendEnvelope { .. } => Ok(EffectResult::Failure(
+            "SendEnvelope not supported via interpreter".to_string(),
+        )),
+        EffectCommand::GenerateNonce { bytes } => {
+            let nonce = effects.random_bytes(bytes as usize).await;
+            Ok(EffectResult::Nonce(nonce))
+        }
+    }
+}
+
 /// Executor for pure guard chains with effect interpretation
 #[derive(Debug)]
 pub struct GuardChainExecutor<I: EffectInterpreter> {
@@ -425,68 +502,7 @@ where
         + LeakageEffects,
 {
     async fn execute(&self, cmd: EffectCommand) -> Result<EffectResult> {
-        match cmd {
-            EffectCommand::ChargeBudget {
-                context,
-                authority: _,
-                peer,
-                amount,
-            } => {
-                let receipt = self.effects.charge_flow(&context, &peer, amount).await?;
-                Ok(EffectResult::Receipt(receipt))
-            }
-            EffectCommand::AppendJournal { entry } => {
-                let current = self
-                    .effects
-                    .get_journal()
-                    .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to get journal: {e}")))?;
-                // Build a delta journal containing the new fact
-                let delta = Journal::with_facts(entry.fact.clone());
-                let merged = self
-                    .effects
-                    .merge_facts(current, delta)
-                    .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {e}")))?;
-                self.effects
-                    .persist_journal(&merged)
-                    .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to persist journal: {e}")))?;
-                Ok(EffectResult::Success)
-            }
-            EffectCommand::RecordLeakage { bits } => {
-                let timestamp = self.effects.physical_time().await?;
-                let event = aura_core::effects::LeakageEvent {
-                    source: AuthorityId::new_from_entropy([1u8; 32]),
-                    destination: AuthorityId::new_from_entropy([1u8; 32]),
-                    context_id: ContextId::new_from_entropy([2u8; 32]),
-                    leakage_amount: bits as u64,
-                    observer_class: aura_core::effects::ObserverClass::External,
-                    operation: "guard_chain".to_string(),
-                    timestamp,
-                };
-                self.effects
-                    .record_leakage(event)
-                    .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to record leakage: {e}")))?;
-                Ok(EffectResult::Success)
-            }
-            EffectCommand::StoreMetadata { key, value } => {
-                // Simple storage using StorageEffects
-                self.effects
-                    .store(&key, value.into_bytes())
-                    .await
-                    .map_err(|e| AuraError::internal(format!("store failed: {e}")))?;
-                Ok(EffectResult::Success)
-            }
-            EffectCommand::SendEnvelope { .. } => Ok(EffectResult::Failure(
-                "SendEnvelope not supported via interpreter".to_string(),
-            )),
-            EffectCommand::GenerateNonce { bytes } => {
-                let nonce = self.effects.random_bytes(bytes as usize).await;
-                Ok(EffectResult::Nonce(nonce))
-            }
-        }
+        execute_effect_command_with_effects(self.effects.as_ref(), cmd).await
     }
 
     fn interpreter_type(&self) -> &'static str {
@@ -507,66 +523,7 @@ where
         + LeakageEffects,
 {
     async fn execute(&self, cmd: EffectCommand) -> Result<EffectResult> {
-        match cmd {
-            EffectCommand::ChargeBudget {
-                context,
-                authority: _,
-                peer,
-                amount,
-            } => {
-                let receipt = self.effects.charge_flow(&context, &peer, amount).await?;
-                Ok(EffectResult::Receipt(receipt))
-            }
-            EffectCommand::AppendJournal { entry } => {
-                let current = self
-                    .effects
-                    .get_journal()
-                    .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to get journal: {e}")))?;
-                let delta = Journal::with_facts(entry.fact.clone());
-                let merged = self
-                    .effects
-                    .merge_facts(current, delta)
-                    .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {e}")))?;
-                self.effects
-                    .persist_journal(&merged)
-                    .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to persist journal: {e}")))?;
-                Ok(EffectResult::Success)
-            }
-            EffectCommand::RecordLeakage { bits } => {
-                let timestamp = self.effects.physical_time().await?;
-                let event = aura_core::effects::LeakageEvent {
-                    source: AuthorityId::new_from_entropy([1u8; 32]),
-                    destination: AuthorityId::new_from_entropy([1u8; 32]),
-                    context_id: ContextId::new_from_entropy([2u8; 32]),
-                    leakage_amount: bits as u64,
-                    observer_class: aura_core::effects::ObserverClass::External,
-                    operation: "guard_chain".to_string(),
-                    timestamp,
-                };
-                self.effects
-                    .record_leakage(event)
-                    .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to record leakage: {e}")))?;
-                Ok(EffectResult::Success)
-            }
-            EffectCommand::StoreMetadata { key, value } => {
-                self.effects
-                    .store(&key, value.into_bytes())
-                    .await
-                    .map_err(|e| AuraError::internal(format!("store failed: {e}")))?;
-                Ok(EffectResult::Success)
-            }
-            EffectCommand::SendEnvelope { .. } => Ok(EffectResult::Failure(
-                "SendEnvelope not supported via interpreter".to_string(),
-            )),
-            EffectCommand::GenerateNonce { bytes } => {
-                let nonce = self.effects.random_bytes(bytes as usize).await;
-                Ok(EffectResult::Nonce(nonce))
-            }
-        }
+        execute_effect_command_with_effects(self.effects, cmd).await
     }
 
     fn interpreter_type(&self) -> &'static str {
