@@ -5,6 +5,7 @@
 //! - encoded as `RelationalFact::Generic { binding_type: "guardian_request", .. }`
 //! - reduced via an optional `FactReducer` for query/view indexing
 
+use crate::reducer_support::{parse_typed_envelope, reduce_typed_envelope};
 use aura_core::relational::GuardianParameters;
 use aura_core::types::identifiers::ContextId;
 use aura_core::{hash, AuthorityId, Hash32, TimeStamp};
@@ -53,17 +54,11 @@ pub enum GuardianRequestFact {
 
 impl GuardianRequestFact {
     pub fn requested(context_id: ContextId, payload: GuardianRequestPayload) -> Self {
-        Self::Requested {
-            context_id,
-            payload,
-        }
+        Self::with_payload(context_id, payload, false)
     }
 
     pub fn cancelled(context_id: ContextId, payload: GuardianRequestPayload) -> Self {
-        Self::Cancelled {
-            context_id,
-            payload,
-        }
+        Self::with_payload(context_id, payload, true)
     }
 
     pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
@@ -78,6 +73,24 @@ impl GuardianRequestFact {
         GuardianRequestFactKey {
             sub_type,
             data: hash::hash(&self.to_envelope().payload).to_vec(),
+        }
+    }
+
+    fn with_payload(
+        context_id: ContextId,
+        payload: GuardianRequestPayload,
+        cancelled: bool,
+    ) -> Self {
+        if cancelled {
+            Self::Cancelled {
+                context_id,
+                payload,
+            }
+        } else {
+            Self::Requested {
+                context_id,
+                payload,
+            }
         }
     }
 }
@@ -95,22 +108,20 @@ impl FactReducer for GuardianRequestFactReducer {
         context_id: ContextId,
         envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != GUARDIAN_REQUEST_FACT_TYPE_ID {
-            return None;
-        }
-
-        let fact = GuardianRequestFact::from_envelope(envelope)?;
-        if !fact.validate_for_reduction(context_id) {
-            return None;
-        }
-
-        let key = fact.binding_key();
-
-        Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
+        reduce_typed_envelope::<GuardianRequestFact>(
             context_id,
-            data: key.data,
-        })
+            envelope,
+            GUARDIAN_REQUEST_FACT_TYPE_ID,
+            |fact| fact.validate_for_reduction(context_id),
+            |fact| {
+                let key = fact.binding_key();
+                RelationalBinding {
+                    binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
+                    context_id,
+                    data: key.data,
+                }
+            },
+        )
     }
 }
 
@@ -118,17 +129,13 @@ impl FactReducer for GuardianRequestFactReducer {
 pub fn parse_guardian_request(
     envelope: &aura_core::types::facts::FactEnvelope,
 ) -> Option<GuardianRequestFact> {
-    if envelope.type_id.as_str() != GUARDIAN_REQUEST_FACT_TYPE_ID {
-        return None;
-    }
-    GuardianRequestFact::from_envelope(envelope)
+    parse_typed_envelope::<GuardianRequestFact>(envelope, GUARDIAN_REQUEST_FACT_TYPE_ID)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_core::relational::GuardianParameters;
-    use aura_core::time::PhysicalTime;
 
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])
@@ -144,10 +151,7 @@ mod tests {
             guardian_commitment: Hash32::from_bytes(&hash::hash(b"guardian")),
             requester: test_authority(1),
             parameters: GuardianParameters::default(),
-            requested_at: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            }),
+            requested_at: TimeStamp::PhysicalClock(crate::reducer_support::physical_time_ms(0)),
             expires_at: None,
         }
     }

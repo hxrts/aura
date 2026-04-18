@@ -35,41 +35,34 @@ impl GuardianService {
     fn context(&self) -> Result<Arc<RelationalContext>> {
         (self.ctx_provider)()
     }
+
+    fn guardian_request_payload(input: &GuardianRequestInput) -> GuardianRequestPayload {
+        GuardianRequestPayload {
+            account_commitment: input.account_commitment,
+            guardian_commitment: input.guardian_commitment,
+            requester: input.account,
+            parameters: input.parameters.clone(),
+            requested_at: aura_core::time::TimeStamp::PhysicalClock(input.requested_at.clone()),
+            expires_at: input
+                .expires_at
+                .clone()
+                .map(aura_core::time::TimeStamp::PhysicalClock),
+        }
+    }
 }
 
 #[async_trait]
 impl GuardianEffects for GuardianService {
     async fn request_guardian(&self, input: GuardianRequestInput) -> Result<()> {
         let ctx = self.context()?;
-
-        let payload = GuardianRequestPayload {
-            account_commitment: input.account_commitment,
-            guardian_commitment: input.guardian_commitment,
-            requester: input.account,
-            parameters: input.parameters.clone(),
-            requested_at: aura_core::time::TimeStamp::PhysicalClock(input.requested_at),
-            expires_at: input
-                .expires_at
-                .map(aura_core::time::TimeStamp::PhysicalClock),
-        };
-
+        let payload = Self::guardian_request_payload(&input);
         let fact = GuardianRequestFact::requested(ctx.context_id, payload);
         ctx.add_domain_fact(&fact)
     }
 
     async fn cancel_guardian_request(&self, input: GuardianRequestInput) -> Result<()> {
         let ctx = self.context()?;
-        let payload = GuardianRequestPayload {
-            account_commitment: input.account_commitment,
-            guardian_commitment: input.guardian_commitment,
-            requester: input.account,
-            parameters: input.parameters.clone(),
-            requested_at: aura_core::time::TimeStamp::PhysicalClock(input.requested_at),
-            expires_at: input
-                .expires_at
-                .map(aura_core::time::TimeStamp::PhysicalClock),
-        };
-
+        let payload = Self::guardian_request_payload(&input);
         let fact = GuardianRequestFact::cancelled(ctx.context_id, payload);
         ctx.add_domain_fact(&fact)
     }

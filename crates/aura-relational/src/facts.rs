@@ -33,6 +33,7 @@
 //! registry.register::<ContactFact>("contact", Box::new(ContactFactReducer));
 //! ```
 
+use crate::reducer_support::{hashed_generic_binding, physical_time_ms, reduce_typed_envelope};
 use aura_core::relational::{GuardianBinding, RecoveryGrant};
 use aura_core::time::PhysicalTime;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
@@ -219,10 +220,7 @@ impl ContactFact {
             owner_id,
             contact_id,
             nickname,
-            added_at: PhysicalTime {
-                ts_ms: added_at_ms,
-                uncertainty: None,
-            },
+            added_at: physical_time_ms(added_at_ms),
             invitation_code: None,
         }
     }
@@ -238,10 +236,7 @@ impl ContactFact {
             context_id,
             owner_id,
             contact_id,
-            removed_at: PhysicalTime {
-                ts_ms: removed_at_ms,
-                uncertainty: None,
-            },
+            removed_at: physical_time_ms(removed_at_ms),
         }
     }
 
@@ -258,10 +253,7 @@ impl ContactFact {
             owner_id,
             contact_id,
             new_nickname,
-            renamed_at: PhysicalTime {
-                ts_ms: renamed_at_ms,
-                uncertainty: None,
-            },
+            renamed_at: physical_time_ms(renamed_at_ms),
         }
     }
 
@@ -278,10 +270,7 @@ impl ContactFact {
             owner_id,
             contact_id,
             policy,
-            updated_at: PhysicalTime {
-                ts_ms: updated_at_ms,
-                uncertainty: None,
-            },
+            updated_at: physical_time_ms(updated_at_ms),
         }
     }
 }
@@ -328,22 +317,20 @@ impl FactReducer for ContactFactReducer {
         context_id: ContextId,
         envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
-            return None;
-        }
-
-        let fact = ContactFact::from_envelope(envelope)?;
-        if !fact.validate_for_reduction(context_id) {
-            return None;
-        }
-
-        let key = fact.binding_key();
-
-        Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
+        reduce_typed_envelope::<ContactFact>(
             context_id,
-            data: key.data,
-        })
+            envelope,
+            CONTACT_FACT_TYPE_ID,
+            |fact| fact.validate_for_reduction(context_id),
+            |fact| {
+                let key = fact.binding_key();
+                RelationalBinding {
+                    binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
+                    context_id,
+                    data: key.data,
+                }
+            },
+        )
     }
 }
 
@@ -402,20 +389,13 @@ impl FactReducer for GuardianBindingDetailsFactReducer {
         context_id: ContextId,
         envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID {
-            return None;
-        }
-
-        let fact = GuardianBindingDetailsFact::from_envelope(envelope)?;
-        if !fact.validate_for_reduction(context_id) {
-            return None;
-        }
-
-        Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic("guardian-binding-details".to_string()),
+        reduce_typed_envelope::<GuardianBindingDetailsFact>(
             context_id,
-            data: hash::hash(&envelope.payload).to_vec(),
-        })
+            envelope,
+            GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
+            |fact| fact.validate_for_reduction(context_id),
+            |_| hashed_generic_binding("guardian-binding-details", context_id, &envelope.payload),
+        )
     }
 }
 
@@ -467,20 +447,13 @@ impl FactReducer for RecoveryGrantDetailsFactReducer {
         context_id: ContextId,
         envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != RECOVERY_GRANT_DETAILS_FACT_TYPE_ID {
-            return None;
-        }
-
-        let fact = RecoveryGrantDetailsFact::from_envelope(envelope)?;
-        if !fact.validate_for_reduction(context_id) {
-            return None;
-        }
-
-        Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic("recovery-grant-details".to_string()),
+        reduce_typed_envelope::<RecoveryGrantDetailsFact>(
             context_id,
-            data: hash::hash(&envelope.payload).to_vec(),
-        })
+            envelope,
+            RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
+            |fact| fact.validate_for_reduction(context_id),
+            |_| hashed_generic_binding("recovery-grant-details", context_id, &envelope.payload),
+        )
     }
 }
 
@@ -541,10 +514,7 @@ mod tests {
             owner_id: test_authority_id(1),
             contact_id: test_authority_id(2),
             nickname: "Alice".to_string(),
-            added_at: PhysicalTime {
-                ts_ms: 1234567890,
-                uncertainty: None,
-            },
+            added_at: physical_time_ms(1234567890),
             invitation_code: Some("aura:v1:ABC123".to_string()),
         };
 

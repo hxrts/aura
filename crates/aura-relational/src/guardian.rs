@@ -147,22 +147,24 @@ impl GuardianBindingBuilder {
         self
     }
 
-    /// Set the recovery delay
-    pub fn recovery_delay(mut self, delay: Duration) -> Self {
-        self.parameters.recovery_delay = delay;
+    fn map_parameters(mut self, update: impl FnOnce(&mut GuardianParameters)) -> Self {
+        update(&mut self.parameters);
         self
+    }
+
+    /// Set the recovery delay
+    pub fn recovery_delay(self, delay: Duration) -> Self {
+        self.map_parameters(|parameters| parameters.recovery_delay = delay)
     }
 
     /// Set notification requirement
-    pub fn notification_required(mut self, required: bool) -> Self {
-        self.parameters.notification_required = required;
-        self
+    pub fn notification_required(self, required: bool) -> Self {
+        self.map_parameters(|parameters| parameters.notification_required = required)
     }
 
     /// Set expiration time (using unified time system)
-    pub fn expires_at(mut self, expiration: TimeStamp) -> Self {
-        self.parameters.expiration = Some(expiration);
-        self
+    pub fn expires_at(self, expiration: TimeStamp) -> Self {
+        self.map_parameters(|parameters| parameters.expiration = Some(expiration))
     }
 
     /// Build the guardian binding

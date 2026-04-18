@@ -5,6 +5,7 @@
 //! fan-out metadata. Runtime selection stays out of this crate; this module only
 //! exposes pure evidence derivation.
 
+use crate::reducer_support::{reduce_typed_envelope, stable_authority_pair_bytes};
 use aura_core::service::{BootstrapIntroductionHint, LinkEndpoint, ProviderEvidence};
 use aura_core::time::PhysicalTime;
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
@@ -83,16 +84,9 @@ impl FriendshipFact {
 
     pub fn binding_key(&self) -> FriendshipFactKey {
         let (requester, accepter) = self.participants();
-        let mut a = requester.to_bytes();
-        let mut b = accepter.to_bytes();
-        if a > b {
-            std::mem::swap(&mut a, &mut b);
-        }
-        let mut data = a.to_vec();
-        data.extend_from_slice(&b);
         FriendshipFactKey {
             sub_type: "friendship-edge",
-            data,
+            data: stable_authority_pair_bytes(requester, accepter),
         }
     }
 }
@@ -109,19 +103,20 @@ impl FactReducer for FriendshipFactReducer {
         context_id: ContextId,
         envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != FRIENDSHIP_FACT_TYPE_ID {
-            return None;
-        }
-        let fact = FriendshipFact::from_envelope(envelope)?;
-        if fact.context_id() != context_id {
-            return None;
-        }
-        let key = fact.binding_key();
-        Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
+        reduce_typed_envelope::<FriendshipFact>(
             context_id,
-            data: key.data,
-        })
+            envelope,
+            FRIENDSHIP_FACT_TYPE_ID,
+            |fact| fact.context_id() == context_id,
+            |fact| {
+                let key = fact.binding_key();
+                RelationalBinding {
+                    binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
+                    context_id,
+                    data: key.data,
+                }
+            },
+        )
     }
 }
 
@@ -218,19 +213,20 @@ impl FactReducer for TrustIntroductionFactReducer {
         context_id: ContextId,
         envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != TRUST_INTRODUCTION_FACT_TYPE_ID {
-            return None;
-        }
-        let fact = TrustIntroductionFact::from_envelope(envelope)?;
-        if fact.context_id() != context_id {
-            return None;
-        }
-        let key = fact.binding_key();
-        Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
+        reduce_typed_envelope::<TrustIntroductionFact>(
             context_id,
-            data: key.data,
-        })
+            envelope,
+            TRUST_INTRODUCTION_FACT_TYPE_ID,
+            |fact| fact.context_id() == context_id,
+            |fact| {
+                let key = fact.binding_key();
+                RelationalBinding {
+                    binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
+                    context_id,
+                    data: key.data,
+                }
+            },
+        )
     }
 }
 
@@ -387,10 +383,7 @@ mod tests {
     }
 
     fn time(ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms: ms,
-            uncertainty: None,
-        }
+        crate::reducer_support::physical_time_ms(ms)
     }
 
     #[test]
