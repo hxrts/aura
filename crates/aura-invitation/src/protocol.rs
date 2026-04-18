@@ -199,54 +199,34 @@ pub struct DeviceEnrollmentConfirm {
 
 /// Guard annotations module for flow costs and capabilities
 pub mod guards {
-    use crate::capabilities::InvitationCapability;
+    use aura_core::FlowCost;
 
     /// Flow cost for sending an invitation
-    pub const INVITATION_SEND_COST: u32 = 1;
+    pub const INVITATION_SEND_COST: FlowCost = crate::guards::costs::INVITATION_SEND_COST;
 
     /// Flow cost for responding to an invitation
-    pub const INVITATION_RESPOND_COST: u32 = 1;
+    pub const INVITATION_RESPOND_COST: FlowCost = crate::guards::costs::INVITATION_ACCEPT_COST;
 
     /// Flow cost for acknowledgment
-    pub const INVITATION_ACK_COST: u32 = 1;
+    pub const INVITATION_ACK_COST: FlowCost = crate::guards::costs::INVITATION_ACCEPT_COST;
 
     /// Flow cost for guardian request
-    pub const GUARDIAN_REQUEST_COST: u32 = 2;
+    pub const GUARDIAN_REQUEST_COST: FlowCost = FlowCost::new(2);
 
     /// Flow cost for guardian response
-    pub const GUARDIAN_RESPOND_COST: u32 = 2;
+    pub const GUARDIAN_RESPOND_COST: FlowCost = FlowCost::new(2);
 
     /// Flow cost for guardian confirmation
-    pub const GUARDIAN_CONFIRM_COST: u32 = 1;
+    pub const GUARDIAN_CONFIRM_COST: FlowCost = FlowCost::new(1);
 
     /// Flow cost for device enrollment request
-    pub const DEVICE_ENROLL_REQUEST_COST: u32 = 2;
+    pub const DEVICE_ENROLL_REQUEST_COST: FlowCost = FlowCost::new(2);
 
     /// Flow cost for device enrollment response
-    pub const DEVICE_ENROLL_RESPOND_COST: u32 = 2;
+    pub const DEVICE_ENROLL_RESPOND_COST: FlowCost = FlowCost::new(2);
 
     /// Flow cost for device enrollment confirmation
-    pub const DEVICE_ENROLL_CONFIRM_COST: u32 = 1;
-
-    pub fn invitation_send_capability() -> aura_core::CapabilityName {
-        InvitationCapability::Send.as_name()
-    }
-
-    pub fn guardian_invite_capability() -> aura_core::CapabilityName {
-        InvitationCapability::Guardian.as_name()
-    }
-
-    pub fn guardian_accept_capability() -> aura_core::CapabilityName {
-        InvitationCapability::GuardianAccept.as_name()
-    }
-
-    pub fn device_enroll_capability() -> aura_core::CapabilityName {
-        InvitationCapability::DeviceEnroll.as_name()
-    }
-
-    pub fn device_accept_capability() -> aura_core::CapabilityName {
-        InvitationCapability::DeviceAccept.as_name()
-    }
+    pub const DEVICE_ENROLL_CONFIRM_COST: FlowCost = FlowCost::new(1);
 }
 
 // =============================================================================
@@ -607,14 +587,18 @@ mod tests {
 
     #[test]
     fn test_guard_constants() {
-        assert_eq!(guards::INVITATION_SEND_COST, 1);
-        assert_eq!(guards::GUARDIAN_REQUEST_COST, 2);
+        assert_eq!(guards::INVITATION_SEND_COST.value(), 1);
+        assert_eq!(guards::GUARDIAN_REQUEST_COST.value(), 2);
         assert_eq!(
-            guards::invitation_send_capability().as_str(),
+            crate::capabilities::InvitationCapability::Send
+                .as_name()
+                .as_str(),
             "invitation:send"
         );
         assert_eq!(
-            guards::guardian_invite_capability().as_str(),
+            crate::capabilities::InvitationCapability::Guardian
+                .as_name()
+                .as_str(),
             "invitation:guardian"
         );
     }

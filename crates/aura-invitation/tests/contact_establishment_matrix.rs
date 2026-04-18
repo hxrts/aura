@@ -5,8 +5,10 @@
 
 #![allow(missing_docs)]
 
+#[path = "support/mod.rs"]
+mod support;
+
 use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
-use aura_core::FlowCost;
 use aura_invitation::{
     capabilities::InvitationCapability, guards::GuardSnapshot, InvitationConfig, InvitationService,
     InvitationType,
@@ -45,12 +47,11 @@ fn authority_id(class: AuthorityClass, offset: u8) -> AuthorityId {
 }
 
 fn snapshot_with_send_cap(auth: AuthorityId, ctx: ContextId) -> GuardSnapshot {
-    GuardSnapshot::new(
+    support::snapshot_with_caps(
         auth,
         ctx,
-        FlowCost::new(50),
-        vec![InvitationCapability::Send.as_name()],
-        0,
+        &[InvitationCapability::Send],
+        50,
         1_700_000_000_000,
     )
 }
@@ -69,7 +70,7 @@ fn contact_establishment_matrix_allows_supported_authority_pairs() {
         (AuthorityClass::Neighborhood, AuthorityClass::Neighborhood),
     ];
 
-    let context = ContextId::new_from_entropy([9u8; 32]);
+    let context = support::test_context(9);
 
     for (idx, (sender_class, receiver_class)) in pairs.iter().copied().enumerate() {
         let sender = authority_id(sender_class, idx as u8 + 1);

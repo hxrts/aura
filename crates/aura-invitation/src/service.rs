@@ -281,6 +281,60 @@ pub struct InvitationService {
 }
 
 impl InvitationService {
+    fn exact_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
+    fn maybe_required_type_capability(
+        invitation_type: &InvitationType,
+        policy: &InvitationPolicy,
+    ) -> Option<CapabilityName> {
+        let require_check = match invitation_type {
+            InvitationType::Guardian { .. } => policy.require_guardian_capability,
+            InvitationType::Channel { .. } => policy.require_channel_capability,
+            InvitationType::Contact { .. } => false,
+            InvitationType::DeviceEnrollment { .. } => policy.require_device_capability,
+        };
+
+        require_check
+            .then(|| invitation_type.required_capability())
+            .flatten()
+    }
+
+    fn compute_expires_at_ms(
+        now_ms: u64,
+        expires_in_ms: Option<u64>,
+    ) -> Result<Option<u64>, InvitationGuardError> {
+        match expires_in_ms {
+            Some(ms) => {
+                now_ms
+                    .checked_add(ms)
+                    .map(Some)
+                    .ok_or(InvitationGuardError::ExpirationOverflow {
+                        now_ms,
+                        expires_in_ms: ms,
+                    })
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn prepare_lifecycle_transition(
+        &self,
+        snapshot: &GuardSnapshot,
+        required_capability: &CapabilityName,
+        fact: InvitationFact,
+    ) -> GuardOutcome {
+        if let Some(outcome) = check_capability(snapshot, required_capability) {
+            return outcome;
+        }
+
+        GuardOutcome::allowed(vec![EffectCommand::JournalAppend { fact }])
+    }
+
     /// Create a new invitation service
     pub fn new(authority_id: AuthorityId, config: InvitationConfig) -> Self {
         Self {
@@ -322,19 +376,11 @@ impl InvitationService {
         }
 
         // Check type-specific capability if required
-        if let Some(type_cap) = invitation_type.required_capability() {
-            let require_check = match &invitation_type {
-                InvitationType::Guardian { .. } => policy.require_guardian_capability,
-                InvitationType::Channel { .. } => policy.require_channel_capability,
-                InvitationType::Contact { .. } => false,
-                InvitationType::DeviceEnrollment { .. } => policy.require_device_capability,
-            };
-
-            if require_check {
-                let type_capability = type_cap;
-                if let Some(outcome) = check_capability(snapshot, &type_capability) {
-                    return outcome;
-                }
+        if let Some(type_capability) =
+            Self::maybe_required_type_capability(&invitation_type, &policy)
+        {
+            if let Some(outcome) = check_capability(snapshot, &type_capability) {
+                return outcome;
             }
         }
 
@@ -367,20 +413,13 @@ impl InvitationService {
         }
 
         // Calculate expiration
-        let expires_at_ms = match expires_in_ms {
-            Some(ms) => match snapshot.now_ms.checked_add(ms) {
-                Some(expires_at) => Some(expires_at),
-                None => {
-                    return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
-                        InvitationGuardError::ExpirationOverflow {
-                            now_ms: snapshot.now_ms,
-                            expires_in_ms: ms,
-                        }
-                        .to_string(),
-                    ));
-                }
-            },
-            None => None,
+        let expires_at_ms = match Self::compute_expires_at_ms(snapshot.now_ms, expires_in_ms) {
+            Ok(expires_at_ms) => expires_at_ms,
+            Err(error) => {
+                return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
+                    error.to_string(),
+                ));
+            }
         };
 
         // Create the invitation fact
@@ -390,14 +429,8 @@ impl InvitationService {
             sender_id: snapshot.authority_id,
             receiver_id,
             invitation_type,
-            sent_at: PhysicalTime {
-                ts_ms: snapshot.now_ms,
-                uncertainty: None,
-            },
-            expires_at: expires_at_ms.map(|ts_ms| PhysicalTime {
-                ts_ms,
-                uncertainty: None,
-            }),
+            sent_at: Self::exact_time(snapshot.now_ms),
+            expires_at: expires_at_ms.map(Self::exact_time),
             receiver_nickname: None,
             message,
         };
@@ -433,26 +466,16 @@ impl InvitationService {
         snapshot: &GuardSnapshot,
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
-        // Check capability
-        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Accept.as_name()) {
-            return outcome;
-        }
-
-        // Create acceptance fact
-        let fact = InvitationFact::Accepted {
-            context_id: Some(snapshot.context_id),
-            invitation_id: invitation_id.clone(),
-            acceptor_id: snapshot.authority_id,
-            accepted_at: PhysicalTime {
-                ts_ms: snapshot.now_ms,
-                uncertainty: None,
+        self.prepare_lifecycle_transition(
+            snapshot,
+            &InvitationCapability::Accept.as_name(),
+            InvitationFact::Accepted {
+                context_id: Some(snapshot.context_id),
+                invitation_id: invitation_id.clone(),
+                acceptor_id: snapshot.authority_id,
+                accepted_at: Self::exact_time(snapshot.now_ms),
             },
-        };
-
-        // Construct effect commands
-        let effects = vec![EffectCommand::JournalAppend { fact }];
-
-        GuardOutcome::allowed(effects)
+        )
     }
 
     // =========================================================================
@@ -467,27 +490,16 @@ impl InvitationService {
         snapshot: &GuardSnapshot,
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
-        // Check capability
-        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Decline.as_name())
-        {
-            return outcome;
-        }
-
-        // Create decline fact
-        let fact = InvitationFact::Declined {
-            context_id: Some(snapshot.context_id),
-            invitation_id: invitation_id.clone(),
-            decliner_id: snapshot.authority_id,
-            declined_at: PhysicalTime {
-                ts_ms: snapshot.now_ms,
-                uncertainty: None,
+        self.prepare_lifecycle_transition(
+            snapshot,
+            &InvitationCapability::Decline.as_name(),
+            InvitationFact::Declined {
+                context_id: Some(snapshot.context_id),
+                invitation_id: invitation_id.clone(),
+                decliner_id: snapshot.authority_id,
+                declined_at: Self::exact_time(snapshot.now_ms),
             },
-        };
-
-        // Construct effect commands
-        let effects = vec![EffectCommand::JournalAppend { fact }];
-
-        GuardOutcome::allowed(effects)
+        )
     }
 
     // =========================================================================
@@ -502,26 +514,16 @@ impl InvitationService {
         snapshot: &GuardSnapshot,
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
-        // Check capability
-        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Cancel.as_name()) {
-            return outcome;
-        }
-
-        // Create cancellation fact
-        let fact = InvitationFact::Cancelled {
-            context_id: Some(snapshot.context_id),
-            invitation_id: invitation_id.clone(),
-            canceller_id: snapshot.authority_id,
-            cancelled_at: PhysicalTime {
-                ts_ms: snapshot.now_ms,
-                uncertainty: None,
+        self.prepare_lifecycle_transition(
+            snapshot,
+            &InvitationCapability::Cancel.as_name(),
+            InvitationFact::Cancelled {
+                context_id: Some(snapshot.context_id),
+                invitation_id: invitation_id.clone(),
+                canceller_id: snapshot.authority_id,
+                cancelled_at: Self::exact_time(snapshot.now_ms),
             },
-        };
-
-        // Construct effect commands
-        let effects = vec![EffectCommand::JournalAppend { fact }];
-
-        GuardOutcome::allowed(effects)
+        )
     }
 }
 

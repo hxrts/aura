@@ -323,6 +323,25 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         invitation_ceremony_publication_capability()
     }
 
+    async fn current_time_ms(&self) -> AuraResult<u64> {
+        self.effects
+            .physical_time()
+            .await
+            .map(|time| time.ts_ms)
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))
+    }
+
+    async fn apply_publication_commands(
+        &self,
+        commands: Vec<InvitationCeremonyCommand>,
+    ) -> AuraResult<()> {
+        for command in commands {
+            self.apply_command(Self::invitation_ceremony_publication_capability(), command)
+                .await?;
+        }
+        Ok(())
+    }
+
     fn insert_ceremony(
         &mut self,
         _capability: &ActorIngressMutationCapability,
@@ -394,12 +413,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         expected_acceptor: Option<AuthorityId>,
     ) -> AuraResult<InvitationCeremonyId> {
         let prestate_hash = self.compute_prestate_hash().await?;
-        let now_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let now_ms = self.current_time_ms().await?;
 
         let (ceremony_id, commands) = self.plan_initiate_ceremony(
             prestate_hash,
@@ -409,10 +423,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             expected_acceptor,
         )?;
 
-        for command in commands {
-            self.apply_command(Self::invitation_ceremony_publication_capability(), command)
-                .await?;
-        }
+        self.apply_publication_commands(commands).await?;
 
         Ok(ceremony_id)
     }
@@ -426,20 +437,12 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         proposal: AcceptanceProposal,
     ) -> AuraResult<bool> {
         let current_prestate = self.compute_prestate_hash().await?;
-        let now_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let now_ms = self.current_time_ms().await?;
 
         let (accepted, commands) =
             self.plan_process_acceptance(ceremony_id, proposal, current_prestate, now_ms)?;
 
-        for command in commands {
-            self.apply_command(Self::invitation_ceremony_publication_capability(), command)
-                .await?;
-        }
+        self.apply_publication_commands(commands).await?;
 
         Ok(accepted)
     }
@@ -514,18 +517,10 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         &mut self,
         ceremony_id: InvitationCeremonyId,
     ) -> AuraResult<CeremonyRelationshipId> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let timestamp_ms = self.current_time_ms().await?;
 
         let (relationship_id, commands) = self.plan_commit_ceremony(ceremony_id, timestamp_ms)?;
-        for command in commands {
-            self.apply_command(Self::invitation_ceremony_publication_capability(), command)
-                .await?;
-        }
+        self.apply_publication_commands(commands).await?;
 
         // Remove terminal ceremony state to prevent unbounded growth.
         self.remove_ceremony(
@@ -544,18 +539,10 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         ceremony_id: InvitationCeremonyId,
         reason: &str,
     ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let timestamp_ms = self.current_time_ms().await?;
 
         let commands = self.plan_abort_ceremony(ceremony_id, reason, timestamp_ms)?;
-        for command in commands {
-            self.apply_command(Self::invitation_ceremony_publication_capability(), command)
-                .await?;
-        }
+        self.apply_publication_commands(commands).await?;
 
         // Remove terminal ceremony state to prevent unbounded growth.
         self.remove_ceremony(
@@ -742,6 +729,25 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         hex::encode(ceremony_id.0.as_bytes())
     }
 
+    fn ceremony_fact_id(ceremony_id_hex: &str) -> CeremonyId {
+        CeremonyId::new(ceremony_id_hex.to_string())
+    }
+
+    fn ceremony_trace_id(ceremony_id_hex: &str) -> Option<String> {
+        Some(ceremony_id_hex.to_string())
+    }
+
+    fn ceremony_journal_append(
+        kind: CeremonyJournalKeyKind,
+        ceremony_id_hex: &str,
+        fact: InvitationFact,
+    ) -> InvitationCeremonyCommand {
+        InvitationCeremonyCommand::JournalAppend {
+            key: CeremonyJournalKey::for_ceremony(kind, ceremony_id_hex),
+            fact,
+        }
+    }
+
     fn build_ceremony_initiated_command(
         ceremony_id: InvitationCeremonyId,
         sender: AuthorityId,
@@ -750,19 +756,13 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyInitiated {
             context_id: None,
-            ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
+            ceremony_id: Self::ceremony_fact_id(&ceremony_id_hex),
             sender,
             agreement_mode: None,
-            trace_id: Some(ceremony_id_hex.clone()),
+            trace_id: Self::ceremony_trace_id(&ceremony_id_hex),
             timestamp_ms,
         };
-        InvitationCeremonyCommand::JournalAppend {
-            key: CeremonyJournalKey::for_ceremony(
-                CeremonyJournalKeyKind::Initiated,
-                &ceremony_id_hex,
-            ),
-            fact,
-        }
+        Self::ceremony_journal_append(CeremonyJournalKeyKind::Initiated, &ceremony_id_hex, fact)
     }
 
     fn build_acceptance_received_command(
@@ -772,18 +772,12 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyAcceptanceReceived {
             context_id: None,
-            ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
+            ceremony_id: Self::ceremony_fact_id(&ceremony_id_hex),
             agreement_mode: None,
-            trace_id: Some(ceremony_id_hex.clone()),
+            trace_id: Self::ceremony_trace_id(&ceremony_id_hex),
             timestamp_ms,
         };
-        InvitationCeremonyCommand::JournalAppend {
-            key: CeremonyJournalKey::for_ceremony(
-                CeremonyJournalKeyKind::Accepted,
-                &ceremony_id_hex,
-            ),
-            fact,
-        }
+        Self::ceremony_journal_append(CeremonyJournalKeyKind::Accepted, &ceremony_id_hex, fact)
     }
 
     fn build_ceremony_committed_command(
@@ -794,19 +788,13 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyCommitted {
             context_id: None,
-            ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
+            ceremony_id: Self::ceremony_fact_id(&ceremony_id_hex),
             relationship_id: relationship_id.clone(),
             agreement_mode: Some(AgreementMode::ConsensusFinalized),
-            trace_id: Some(ceremony_id_hex.clone()),
+            trace_id: Self::ceremony_trace_id(&ceremony_id_hex),
             timestamp_ms,
         };
-        InvitationCeremonyCommand::JournalAppend {
-            key: CeremonyJournalKey::for_ceremony(
-                CeremonyJournalKeyKind::Committed,
-                &ceremony_id_hex,
-            ),
-            fact,
-        }
+        Self::ceremony_journal_append(CeremonyJournalKeyKind::Committed, &ceremony_id_hex, fact)
     }
 
     fn build_ceremony_aborted_command(
@@ -817,18 +805,12 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyAborted {
             context_id: None,
-            ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
+            ceremony_id: Self::ceremony_fact_id(&ceremony_id_hex),
             reason: reason.to_string(),
-            trace_id: Some(ceremony_id_hex.clone()),
+            trace_id: Self::ceremony_trace_id(&ceremony_id_hex),
             timestamp_ms,
         };
-        InvitationCeremonyCommand::JournalAppend {
-            key: CeremonyJournalKey::for_ceremony(
-                CeremonyJournalKeyKind::Aborted,
-                &ceremony_id_hex,
-            ),
-            fact,
-        }
+        Self::ceremony_journal_append(CeremonyJournalKeyKind::Aborted, &ceremony_id_hex, fact)
     }
 
     async fn apply_command(

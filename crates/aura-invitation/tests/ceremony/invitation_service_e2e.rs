@@ -5,9 +5,11 @@
 
 #![allow(missing_docs)]
 
+#[path = "../support/mod.rs"]
+mod support;
+
 use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::util::test_utils::test_authority_id;
-use aura_core::FlowCost;
 use aura_invitation::{
     capabilities::InvitationCapability, guards::GuardSnapshot, InvitationConfig, InvitationService,
     InvitationType,
@@ -18,21 +20,14 @@ fn snapshot_with_caps(
     ctx: ContextId,
     caps: &[InvitationCapability],
 ) -> GuardSnapshot {
-    GuardSnapshot::new(
-        auth,
-        ctx,
-        FlowCost::new(10), // flow budget
-        caps.iter().map(InvitationCapability::as_name).collect(),
-        0,     // epoch
-        1_000, // now_ms
-    )
+    support::snapshot_with_caps(auth, ctx, caps, 10, 1_000)
 }
 
 #[test]
 fn invitation_send_and_accept_end_to_end() {
     let sender = test_authority_id(1);
     let receiver = test_authority_id(2);
-    let ctx = ContextId::new_from_entropy([1u8; 32]);
+    let ctx = support::test_context(1);
 
     let sender_service = InvitationService::new(sender, InvitationConfig::default());
     let receiver_service = InvitationService::new(receiver, InvitationConfig::default());
@@ -66,7 +61,7 @@ fn invitation_send_and_accept_end_to_end() {
 fn invitation_decline_flow_marks_status() {
     let _sender = test_authority_id(3);
     let receiver = test_authority_id(4);
-    let ctx = ContextId::new_from_entropy([2u8; 32]);
+    let ctx = support::test_context(2);
 
     let svc = InvitationService::new(receiver, InvitationConfig::default());
     let invitation_id = InvitationId::new("inv-decline");
