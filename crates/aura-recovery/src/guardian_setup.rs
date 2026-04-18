@@ -14,17 +14,21 @@
 use crate::{
     coordinator::{BaseCoordinator, BaseCoordinatorAccess, RecoveryCoordinator},
     effects::RecoveryEffects,
-    facts::{RecoveryFact, RecoveryFactEmitter},
+    facts::RecoveryFact,
     types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
-    utils::EvidenceBuilder,
+    utils::{
+        workflow::{
+            context_id_from_operation_id, current_physical_time_or_zero, exact_physical_time,
+            persist_recovery_fact, trace_id,
+        },
+        EvidenceBuilder,
+    },
     RecoveryResult,
 };
 use async_trait::async_trait;
-use aura_core::effects::{JournalEffects, PhysicalTimeEffects, SecureStorageLocation};
-use aura_core::hash;
-use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_journal::DomainFact;
+use aura_core::effects::{PhysicalTimeEffects, SecureStorageLocation};
+use aura_core::time::TimeStamp;
+use aura_core::types::identifiers::AuthorityId;
 use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -202,23 +206,30 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
 
     /// Emit a recovery fact to the journal.
     async fn emit_fact(&self, fact: RecoveryFact) -> RecoveryResult<()> {
-        let timestamp = self
-            .effect_system()
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0);
+        persist_recovery_fact(self.effect_system().as_ref(), &fact).await
+    }
 
-        let mut journal = self.effect_system().get_journal().await?;
-        journal.facts.insert_with_context(
-            RecoveryFactEmitter::fact_key(&fact),
-            aura_core::FactValue::Bytes(DomainFact::to_bytes(&fact)),
-            aura_core::ActorId::synthetic(&fact.context_id().to_string()),
-            aura_core::FactTimestamp::new(timestamp),
-            None,
-        )?;
-        self.effect_system().persist_journal(&journal).await?;
-        Ok(())
+    fn setup_id(account_id: &AuthorityId, now_ms: u64) -> String {
+        format!("setup_{account_id}_{now_ms}")
+    }
+
+    fn setup_context_id(setup_id: &str) -> aura_core::types::identifiers::ContextId {
+        context_id_from_operation_id(setup_id)
+    }
+
+    async fn emit_failed_setup(
+        &self,
+        context_id: aura_core::types::identifiers::ContextId,
+        setup_id: &str,
+        reason: impl Into<String>,
+    ) -> RecoveryResult<()> {
+        let failed_fact = RecoveryFact::GuardianSetupFailed {
+            context_id,
+            reason: reason.into(),
+            trace_id: trace_id(setup_id),
+            failed_at: current_physical_time_or_zero(self.effect_system().as_ref()).await,
+        };
+        self.emit_fact(failed_fact).await
     }
 
     /// Execute guardian setup ceremony.
@@ -235,8 +246,8 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             .unwrap_or(0);
 
         // Create context ID for this setup ceremony using hash of account + timestamp
-        let setup_id = format!("setup_{}_{}", request.account_id, now_ms);
-        let context_id = ContextId::new_from_entropy(hash::hash(setup_id.as_bytes()));
+        let setup_id = Self::setup_id(&request.account_id, now_ms);
+        let context_id = Self::setup_context_id(&setup_id);
 
         // Emit GuardianSetupInitiated fact
         let guardian_ids: Vec<AuthorityId> =
@@ -245,28 +256,18 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         let initiated_fact = RecoveryFact::GuardianSetupInitiated {
             context_id,
             initiator_id: request.initiator_id,
-            trace_id: Some(setup_id.clone()),
+            trace_id: trace_id(&setup_id),
             guardian_ids: guardian_ids.clone(),
             threshold: request.threshold,
-            initiated_at: PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            },
+            initiated_at: exact_physical_time(now_ms),
         };
         self.emit_fact(initiated_fact).await?;
 
         // Validate that we have guardians
         if request.guardians.is_empty() {
-            let failed_fact = RecoveryFact::GuardianSetupFailed {
-                context_id,
-                reason: "No guardians specified".to_string(),
-                trace_id: Some(setup_id.clone()),
-                failed_at: PhysicalTime {
-                    ts_ms: now_ms,
-                    uncertainty: None,
-                },
-            };
-            let _ = self.emit_fact(failed_fact).await;
+            let _ = self
+                .emit_failed_setup(context_id, &setup_id, "No guardians specified")
+                .await;
             return Ok(RecoveryResponse::error("No guardians specified"));
         }
 
@@ -276,10 +277,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             account_id: request.account_id,
             target_guardians: guardian_ids.clone(),
             threshold: request.threshold,
-            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            }),
+            timestamp: TimeStamp::PhysicalClock(exact_physical_time(now_ms)),
         };
 
         // Execute the choreographic protocol using the runtime adapter.
@@ -287,24 +285,14 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
 
         // Check if we have enough acceptances
         if acceptances.len() < request.threshold as usize {
-            let failed_fact = RecoveryFact::GuardianSetupFailed {
-                context_id,
-                reason: format!(
-                    "Insufficient guardian acceptances: got {}, need {}",
-                    acceptances.len(),
-                    request.threshold
-                ),
-                trace_id: Some(setup_id.clone()),
-                failed_at: self
-                    .effect_system()
-                    .physical_time()
-                    .await
-                    .unwrap_or(PhysicalTime {
-                        ts_ms: 0,
-                        uncertainty: None,
-                    }),
-            };
-            let _ = self.emit_fact(failed_fact).await;
+            let reason = format!(
+                "Insufficient guardian acceptances: got {}, need {}",
+                acceptances.len(),
+                request.threshold
+            );
+            let _ = self
+                .emit_failed_setup(context_id, &setup_id, reason.clone())
+                .await;
 
             return Ok(RecoveryResponse::error(format!(
                 "Insufficient guardian acceptances: got {}, need {}",
@@ -422,16 +410,9 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         let completed_fact = RecoveryFact::GuardianSetupCompleted {
             context_id,
             guardian_ids: shares.iter().map(|s| s.guardian_id).collect(),
-            trace_id: Some(setup_id.clone()),
+            trace_id: trace_id(&setup_id),
             threshold: request.threshold,
-            completed_at: self
-                .effect_system()
-                .physical_time()
-                .await
-                .unwrap_or(PhysicalTime {
-                    ts_ms: 0,
-                    uncertainty: None,
-                }),
+            completed_at: current_physical_time_or_zero(self.effect_system().as_ref()).await,
         };
         self.emit_fact(completed_fact).await?;
 
@@ -459,14 +440,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         invitation: GuardianInvitation,
         guardian_id: AuthorityId,
     ) -> RecoveryResult<GuardianAcceptance> {
-        let physical_time = self
-            .effect_system()
-            .physical_time()
-            .await
-            .unwrap_or(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            });
+        let physical_time = current_physical_time_or_zero(self.effect_system().as_ref()).await;
 
         // Generate Ed25519 keypair for key agreement
         let (private_key, public_key) = self
@@ -498,11 +472,11 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             })?;
 
         // Emit GuardianAccepted fact
-        let context_id = ContextId::new_from_entropy(hash::hash(invitation.setup_id.as_bytes()));
+        let context_id = Self::setup_context_id(&invitation.setup_id);
         let accepted_fact = RecoveryFact::GuardianAccepted {
             context_id,
             guardian_id,
-            trace_id: Some(invitation.setup_id.clone()),
+            trace_id: trace_id(&invitation.setup_id),
             accepted_at: physical_time.clone(),
         };
         self.emit_fact(accepted_fact).await?;
@@ -668,6 +642,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
 mod tests {
     use super::*;
     use crate::types::GuardianProfile;
+    use aura_core::time::PhysicalTime;
     use aura_testkit::MockEffects;
     use std::sync::Arc;
 

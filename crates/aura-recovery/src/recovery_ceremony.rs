@@ -211,14 +211,21 @@ pub struct RecoveryCeremonyState {
 }
 
 impl RecoveryCeremonyState {
+    fn approval_count_by(&self, approved: bool) -> usize {
+        self.approvals
+            .values()
+            .filter(|approval| approval.approved == approved)
+            .count()
+    }
+
     /// Count approved guardians.
     pub fn approved_count(&self) -> usize {
-        self.approvals.values().filter(|a| a.approved).count()
+        self.approval_count_by(true)
     }
 
     /// Count rejected guardians.
     pub fn rejected_count(&self) -> usize {
-        self.approvals.values().filter(|a| !a.approved).count()
+        self.approval_count_by(false)
     }
 
     /// Check if quorum threshold is met.
@@ -228,7 +235,7 @@ impl RecoveryCeremonyState {
 
     /// Check if any guardian has rejected.
     pub fn has_rejection(&self) -> bool {
-        self.approvals.values().any(|a| !a.approved)
+        self.rejected_count() > 0
     }
 
     /// Get approved guardians.
@@ -418,6 +425,46 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         recovery_ceremony_publication_capability()
     }
 
+    fn ceremony_hex(ceremony_id: RecoveryCeremonyId) -> String {
+        hex::encode(ceremony_id.0.as_bytes())
+    }
+
+    fn fact_key(kind: &str, ceremony_id: RecoveryCeremonyId) -> String {
+        format!("recovery:{kind}:{}", Self::ceremony_hex(ceremony_id))
+    }
+
+    async fn current_timestamp_ms(&self) -> AuraResult<u64> {
+        self.effects
+            .physical_time()
+            .await
+            .map(|time| time.ts_ms)
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))
+    }
+
+    async fn persist_fact(&self, key: String, fact: &RecoveryCeremonyFact) -> AuraResult<()> {
+        let mut journal = self.effects.get_journal().await?;
+        let fact_bytes =
+            serde_json::to_vec(fact).map_err(|e| AuraError::serialization(e.to_string()))?;
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
+        self.effects.persist_journal(&journal).await?;
+        Ok(())
+    }
+
+    fn evidence_hash(
+        ceremony_id: RecoveryCeremonyId,
+        approved_guardians: &[AuthorityId],
+    ) -> Hash32 {
+        let mut evidence_input = ceremony_id.0.as_bytes().to_vec();
+        for guardian in approved_guardians {
+            evidence_input.extend_from_slice(guardian.uuid().as_bytes());
+        }
+        Hash32::from_bytes(&evidence_input)
+    }
+
+    fn set_aborted(ceremony: &mut RecoveryCeremonyState, reason: RecoveryCeremonyAbortReason) {
+        ceremony.status = RecoveryCeremonyStatus::Aborted { reason };
+    }
+
     fn insert_ceremony(
         &mut self,
         _capability: &ActorIngressMutationCapability,
@@ -463,12 +510,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         let request_hash = request.compute_hash();
 
         // Generate nonce from current time
-        let nonce = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let nonce = self.current_timestamp_ms().await?;
 
         // Create ceremony ID
         let ceremony_id = RecoveryCeremonyId::new(&current_prestate, &request_hash, nonce);
@@ -560,9 +602,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
 
             // Check timeout
             if now > ceremony.started_at_ms + ceremony.timeout_ms {
-                ceremony.status = RecoveryCeremonyStatus::Aborted {
-                    reason: RecoveryCeremonyAbortReason::TimedOut,
-                };
+                Self::set_aborted(ceremony, RecoveryCeremonyAbortReason::TimedOut);
                 return Ok(false);
             }
 
@@ -687,9 +727,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         let abort_reason = RecoveryCeremonyAbortReason::Manual {
             reason: reason.to_string(),
         };
-        ceremony.status = RecoveryCeremonyStatus::Aborted {
-            reason: abort_reason.clone(),
-        };
+        Self::set_aborted(ceremony, abort_reason.clone());
 
         // Emit aborted fact
         self.emit_ceremony_aborted_fact(
@@ -715,12 +753,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         rejection_reason: Option<String>,
     ) -> AuraResult<RecoveryApproval> {
         let prestate_hash = self.compute_prestate_hash().await?;
-        let approved_at_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let approved_at_ms = self.current_timestamp_ms().await?;
 
         // Create signature (placeholder)
         let signature = ThresholdSignature::single_signer(
@@ -761,14 +794,9 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         guardians: &[AuthorityId],
         threshold: u16,
     ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let timestamp_ms = self.current_timestamp_ms().await?;
         let fact = RecoveryCeremonyFact::CeremonyInitiated {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: Self::ceremony_hex(ceremony_id),
             account_authority: request.account_authority.to_string(),
             operation_type: RecoveryCeremonyFact::operation_type_string(&request.operation),
             justification: request.justification.clone(),
@@ -776,18 +804,8 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             threshold,
             timestamp_ms,
         };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!(
-            "recovery:initiated:{}",
-            hex::encode(ceremony_id.0.as_bytes())
-        );
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
+        self.persist_fact(Self::fact_key("initiated", ceremony_id), &fact)
+            .await
     }
 
     /// Emit approval received fact.
@@ -797,32 +815,23 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         ceremony_id: RecoveryCeremonyId,
         approval: &RecoveryApproval,
     ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let timestamp_ms = self.current_timestamp_ms().await?;
         let fact = RecoveryCeremonyFact::ApprovalReceived {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: Self::ceremony_hex(ceremony_id),
             guardian: approval.guardian.to_string(),
             approved: approval.approved,
             rejection_reason: approval.rejection_reason.clone(),
             timestamp_ms,
         };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!(
-            "recovery:approval:{}:{}",
-            hex::encode(ceremony_id.0.as_bytes()),
-            approval.guardian
-        );
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
+        self.persist_fact(
+            format!(
+                "recovery:approval:{}:{}",
+                Self::ceremony_hex(ceremony_id),
+                approval.guardian
+            ),
+            &fact,
+        )
+        .await
     }
 
     /// Emit quorum reached fact.
@@ -831,12 +840,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         _capability: &LifecyclePublicationCapability,
         ceremony_id: RecoveryCeremonyId,
     ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let timestamp_ms = self.current_timestamp_ms().await?;
 
         let (approved_count, approved_guardians) = {
             let ceremony = self
@@ -854,20 +858,13 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         };
 
         let fact = RecoveryCeremonyFact::QuorumReached {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: Self::ceremony_hex(ceremony_id),
             approved_count,
             approved_guardians,
             timestamp_ms,
         };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!("recovery:quorum:{}", hex::encode(ceremony_id.0.as_bytes()));
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
+        self.persist_fact(Self::fact_key("quorum", ceremony_id), &fact)
+            .await
     }
 
     /// Emit ceremony committed fact.
@@ -879,40 +876,19 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         operation_type: &CeremonyRecoveryOperation,
         approved_guardians: &[AuthorityId],
     ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
-
-        // Create evidence hash from ceremony + guardians
-        let mut evidence_input = ceremony_id.0.as_bytes().to_vec();
-        for g in approved_guardians {
-            evidence_input.extend_from_slice(g.uuid().as_bytes());
-        }
-        let evidence_hash = Hash32::from_bytes(&evidence_input);
+        let timestamp_ms = self.current_timestamp_ms().await?;
+        let evidence_hash = Self::evidence_hash(ceremony_id, approved_guardians);
 
         let fact = RecoveryCeremonyFact::CeremonyCommitted {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: Self::ceremony_hex(ceremony_id),
             account_authority: account_authority.to_string(),
             operation_type: RecoveryCeremonyFact::operation_type_string(operation_type),
             approved_guardians: approved_guardians.iter().map(|g| g.to_string()).collect(),
             evidence_hash: hex::encode(evidence_hash.as_bytes()),
             timestamp_ms,
         };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!(
-            "recovery:committed:{}",
-            hex::encode(ceremony_id.0.as_bytes())
-        );
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
+        self.persist_fact(Self::fact_key("committed", ceremony_id), &fact)
+            .await
     }
 
     /// Emit ceremony aborted fact.
@@ -922,26 +898,14 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         ceremony_id: RecoveryCeremonyId,
         reason: &str,
     ) -> AuraResult<()> {
-        let timestamp_ms = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
-            .ts_ms;
+        let timestamp_ms = self.current_timestamp_ms().await?;
         let fact = RecoveryCeremonyFact::CeremonyAborted {
-            ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
+            ceremony_id: Self::ceremony_hex(ceremony_id),
             reason: reason.to_string(),
             timestamp_ms,
         };
-
-        let mut journal = self.effects.get_journal().await?;
-        let key = format!("recovery:aborted:{}", hex::encode(ceremony_id.0.as_bytes()));
-        let fact_bytes =
-            serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
-        self.effects.persist_journal(&journal).await?;
-
-        Ok(())
+        self.persist_fact(Self::fact_key("aborted", ceremony_id), &fact)
+            .await
     }
 
     /// Get ceremony state.

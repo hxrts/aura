@@ -556,6 +556,73 @@ pub enum MaintenanceFact {
 }
 
 impl MaintenanceFact {
+    fn descriptor(&self) -> (&'static str, crate::MaintenanceOperation) {
+        match self {
+            MaintenanceFact::SnapshotProposed(_) => (
+                "snapshot-proposed",
+                crate::MaintenanceOperation::SnapshotProposed,
+            ),
+            MaintenanceFact::SnapshotCompleted(_) => (
+                "snapshot-completed",
+                crate::MaintenanceOperation::SnapshotCompleted,
+            ),
+            MaintenanceFact::CacheInvalidated(_) => (
+                "cache-invalidated",
+                crate::MaintenanceOperation::CacheInvalidated,
+            ),
+            MaintenanceFact::UpgradeActivated(_) => (
+                "upgrade-activated",
+                crate::MaintenanceOperation::UpgradeActivated,
+            ),
+            MaintenanceFact::ReleaseDistribution(_) => (
+                "release-distribution",
+                crate::MaintenanceOperation::ReleaseDistribution,
+            ),
+            MaintenanceFact::ReleasePolicy(_) => {
+                ("release-policy", crate::MaintenanceOperation::ReleasePolicy)
+            }
+            MaintenanceFact::UpgradeExecution(_) => (
+                "upgrade-execution",
+                crate::MaintenanceOperation::UpgradeExecution,
+            ),
+            MaintenanceFact::AdminReplacement(_) => (
+                "admin-replacement",
+                crate::MaintenanceOperation::AdminReplacement,
+            ),
+        }
+    }
+
+    fn binding_key_data<T: Serialize>(value: &T) -> Vec<u8> {
+        aura_core::util::serialization::to_vec(value).unwrap_or_default()
+    }
+
+    fn scope_release_binding_key<Scope: Serialize>(
+        scope: &Scope,
+        release_id: &AuraReleaseId,
+    ) -> Vec<u8> {
+        Self::binding_key_data(&(scope, release_id))
+    }
+
+    fn authority_summary(prefix: &str, authority_id: AuthorityId) -> String {
+        format!("{prefix}:{authority_id}")
+    }
+
+    fn authority_display_summary<T: std::fmt::Display>(
+        prefix: &str,
+        authority_id: AuthorityId,
+        value: T,
+    ) -> String {
+        format!("{prefix}:{authority_id}:{value}")
+    }
+
+    fn authority_debug_summary<T: std::fmt::Debug>(
+        prefix: &str,
+        authority_id: AuthorityId,
+        value: &T,
+    ) -> String {
+        format!("{prefix}:{authority_id}:{value:?}")
+    }
+
     /// Authority associated with this fact.
     pub fn authority_id(&self) -> AuthorityId {
         match self {
@@ -578,16 +645,7 @@ impl MaintenanceFact {
 
     /// Sub-type identifier for reducer keys.
     pub fn fact_type(&self) -> &'static str {
-        match self {
-            MaintenanceFact::SnapshotProposed(_) => "snapshot-proposed",
-            MaintenanceFact::SnapshotCompleted(_) => "snapshot-completed",
-            MaintenanceFact::CacheInvalidated(_) => "cache-invalidated",
-            MaintenanceFact::UpgradeActivated(_) => "upgrade-activated",
-            MaintenanceFact::ReleaseDistribution(_) => "release-distribution",
-            MaintenanceFact::ReleasePolicy(_) => "release-policy",
-            MaintenanceFact::UpgradeExecution(_) => "upgrade-execution",
-            MaintenanceFact::AdminReplacement(_) => "admin-replacement",
-        }
+        self.descriptor().0
     }
 
     /// Get the typed operation for this fact.
@@ -595,18 +653,7 @@ impl MaintenanceFact {
     /// This enables compile-time exhaustive category lookups via
     /// `fact.operation().category()`.
     pub fn operation(&self) -> crate::MaintenanceOperation {
-        match self {
-            MaintenanceFact::SnapshotProposed(_) => crate::MaintenanceOperation::SnapshotProposed,
-            MaintenanceFact::SnapshotCompleted(_) => crate::MaintenanceOperation::SnapshotCompleted,
-            MaintenanceFact::CacheInvalidated(_) => crate::MaintenanceOperation::CacheInvalidated,
-            MaintenanceFact::UpgradeActivated(_) => crate::MaintenanceOperation::UpgradeActivated,
-            MaintenanceFact::ReleaseDistribution(_) => {
-                crate::MaintenanceOperation::ReleaseDistribution
-            }
-            MaintenanceFact::ReleasePolicy(_) => crate::MaintenanceOperation::ReleasePolicy,
-            MaintenanceFact::UpgradeExecution(_) => crate::MaintenanceOperation::UpgradeExecution,
-            MaintenanceFact::AdminReplacement(_) => crate::MaintenanceOperation::AdminReplacement,
-        }
+        self.descriptor().1
     }
 
     /// Get the operation category for this fact.
@@ -621,43 +668,39 @@ impl MaintenanceFact {
         let (sub_type, data) = match self {
             MaintenanceFact::SnapshotProposed(fact) => (
                 "snapshot-proposed",
-                aura_core::util::serialization::to_vec(&fact.proposal_id).unwrap_or_default(),
+                Self::binding_key_data(&fact.proposal_id),
             ),
             MaintenanceFact::SnapshotCompleted(fact) => (
                 "snapshot-completed",
-                aura_core::util::serialization::to_vec(&fact.proposal_id).unwrap_or_default(),
+                Self::binding_key_data(&fact.proposal_id),
             ),
             MaintenanceFact::CacheInvalidated(_) => ("cache-invalidated", Vec::new()),
             MaintenanceFact::UpgradeActivated(fact) => (
                 "upgrade-activated",
-                aura_core::util::serialization::to_vec(&fact.package_id).unwrap_or_default(),
+                Self::binding_key_data(&fact.package_id),
             ),
             MaintenanceFact::ReleaseDistribution(fact) => match fact {
-                ReleaseDistributionFact::SeriesDeclared { series_id, .. } => (
-                    "release-distribution",
-                    aura_core::util::serialization::to_vec(series_id).unwrap_or_default(),
-                ),
+                ReleaseDistributionFact::SeriesDeclared { series_id, .. } => {
+                    ("release-distribution", Self::binding_key_data(series_id))
+                }
                 ReleaseDistributionFact::ReleaseDeclared { release_id, .. }
                 | ReleaseDistributionFact::BuildCertified { release_id, .. }
                 | ReleaseDistributionFact::ArtifactAvailable { release_id, .. }
-                | ReleaseDistributionFact::UpgradeOfferPublished { release_id, .. } => (
-                    "release-distribution",
-                    aura_core::util::serialization::to_vec(release_id).unwrap_or_default(),
-                ),
+                | ReleaseDistributionFact::UpgradeOfferPublished { release_id, .. } => {
+                    ("release-distribution", Self::binding_key_data(release_id))
+                }
             },
             MaintenanceFact::ReleasePolicy(fact) => match fact {
                 ReleasePolicyFact::DiscoveryPolicyPublished { scope, .. }
                 | ReleasePolicyFact::SharingPolicyPublished { scope, .. }
-                | ReleasePolicyFact::ActivationPolicyPublished { scope, .. } => (
-                    "release-policy",
-                    aura_core::util::serialization::to_vec(scope).unwrap_or_default(),
-                ),
+                | ReleasePolicyFact::ActivationPolicyPublished { scope, .. } => {
+                    ("release-policy", Self::binding_key_data(scope))
+                }
                 ReleasePolicyFact::RecommendationPublished {
                     scope, release_id, ..
                 } => (
                     "release-policy",
-                    aura_core::util::serialization::to_vec(&(scope, release_id))
-                        .unwrap_or_default(),
+                    Self::scope_release_binding_key(scope, release_id),
                 ),
             },
             MaintenanceFact::UpgradeExecution(fact) => match fact {
@@ -677,8 +720,7 @@ impl MaintenanceFact {
                     ..
                 } => (
                     "upgrade-execution",
-                    aura_core::util::serialization::to_vec(&(scope, to_release_id))
-                        .unwrap_or_default(),
+                    Self::scope_release_binding_key(scope, to_release_id),
                 ),
                 UpgradeExecutionFact::ScopeEntered {
                     scope, release_id, ..
@@ -693,8 +735,7 @@ impl MaintenanceFact {
                     scope, release_id, ..
                 } => (
                     "upgrade-execution",
-                    aura_core::util::serialization::to_vec(&(scope, release_id))
-                        .unwrap_or_default(),
+                    Self::scope_release_binding_key(scope, release_id),
                 ),
                 UpgradeExecutionFact::CutoverCompleted {
                     scope,
@@ -702,14 +743,12 @@ impl MaintenanceFact {
                     ..
                 } => (
                     "upgrade-execution",
-                    aura_core::util::serialization::to_vec(&(scope, to_release_id))
-                        .unwrap_or_default(),
+                    Self::scope_release_binding_key(scope, to_release_id),
                 ),
             },
-            MaintenanceFact::AdminReplacement(fact) => (
-                "admin-replacement",
-                aura_core::util::serialization::to_vec(&fact.new_admin).unwrap_or_default(),
-            ),
+            MaintenanceFact::AdminReplacement(fact) => {
+                ("admin-replacement", Self::binding_key_data(&fact.new_admin))
+            }
         };
         MaintenanceFactKey { sub_type, data }
     }
@@ -776,92 +815,101 @@ impl MaintenanceFact {
     /// Produce a human-readable summary for logs.
     pub fn summary(&self) -> String {
         match self {
-            MaintenanceFact::SnapshotProposed(fact) => format!(
-                "snapshot_proposed:{}:{}",
-                fact.authority_id, fact.target_epoch
+            MaintenanceFact::SnapshotProposed(fact) => Self::authority_display_summary(
+                "snapshot_proposed",
+                fact.authority_id,
+                fact.target_epoch,
             ),
-            MaintenanceFact::SnapshotCompleted(fact) => format!(
-                "snapshot_completed:{}:{}",
-                fact.authority_id, fact.snapshot.epoch
+            MaintenanceFact::SnapshotCompleted(fact) => Self::authority_display_summary(
+                "snapshot_completed",
+                fact.authority_id,
+                fact.snapshot.epoch,
             ),
-            MaintenanceFact::CacheInvalidated(fact) => format!(
-                "cache_invalidated:{}:{}",
-                fact.authority_id, fact.epoch_floor
+            MaintenanceFact::CacheInvalidated(fact) => Self::authority_display_summary(
+                "cache_invalidated",
+                fact.authority_id,
+                fact.epoch_floor,
             ),
-            MaintenanceFact::UpgradeActivated(fact) => format!(
-                "upgrade_activated:{}:{}",
-                fact.authority_id, fact.activation_fence.epoch
+            MaintenanceFact::UpgradeActivated(fact) => Self::authority_display_summary(
+                "upgrade_activated",
+                fact.authority_id,
+                fact.activation_fence.epoch,
             ),
             MaintenanceFact::ReleaseDistribution(fact) => match fact {
                 ReleaseDistributionFact::SeriesDeclared { authority_id, .. } => {
-                    format!("release_series_declared:{authority_id}")
+                    Self::authority_summary("release_series_declared", *authority_id)
                 }
                 ReleaseDistributionFact::ReleaseDeclared {
                     authority_id,
                     release_id,
                     ..
-                } => format!("release_declared:{authority_id}:{release_id:?}"),
+                } => Self::authority_debug_summary("release_declared", *authority_id, release_id),
                 ReleaseDistributionFact::BuildCertified {
                     authority_id,
                     release_id,
                     ..
-                } => format!("build_certified:{authority_id}:{release_id:?}"),
+                } => Self::authority_debug_summary("build_certified", *authority_id, release_id),
                 ReleaseDistributionFact::ArtifactAvailable {
                     authority_id,
                     release_id,
                     ..
-                } => format!("artifact_available:{authority_id}:{release_id:?}"),
+                } => Self::authority_debug_summary("artifact_available", *authority_id, release_id),
                 ReleaseDistributionFact::UpgradeOfferPublished {
                     authority_id,
                     release_id,
                     ..
-                } => format!("upgrade_offer:{authority_id}:{release_id:?}"),
+                } => Self::authority_debug_summary("upgrade_offer", *authority_id, release_id),
             },
             MaintenanceFact::ReleasePolicy(fact) => match fact {
                 ReleasePolicyFact::DiscoveryPolicyPublished { authority_id, .. } => {
-                    format!("discovery_policy:{authority_id}")
+                    Self::authority_summary("discovery_policy", *authority_id)
                 }
                 ReleasePolicyFact::SharingPolicyPublished { authority_id, .. } => {
-                    format!("sharing_policy:{authority_id}")
+                    Self::authority_summary("sharing_policy", *authority_id)
                 }
                 ReleasePolicyFact::ActivationPolicyPublished { authority_id, .. } => {
-                    format!("activation_policy:{authority_id}")
+                    Self::authority_summary("activation_policy", *authority_id)
                 }
                 ReleasePolicyFact::RecommendationPublished {
                     authority_id,
                     release_id,
                     ..
-                } => format!("release_recommendation:{authority_id}:{release_id:?}"),
+                } => Self::authority_debug_summary(
+                    "release_recommendation",
+                    *authority_id,
+                    release_id,
+                ),
             },
             MaintenanceFact::UpgradeExecution(fact) => match fact {
                 UpgradeExecutionFact::ReleaseStaged { authority_id, .. } => {
-                    format!("release_staged:{authority_id}")
+                    Self::authority_summary("release_staged", *authority_id)
                 }
                 UpgradeExecutionFact::ScopeEntered { authority_id, .. } => {
-                    format!("scope_entered:{authority_id}")
+                    Self::authority_summary("scope_entered", *authority_id)
                 }
                 UpgradeExecutionFact::ReleaseResidencyChanged { authority_id, .. } => {
-                    format!("residency_changed:{authority_id}")
+                    Self::authority_summary("residency_changed", *authority_id)
                 }
                 UpgradeExecutionFact::ReleaseTransitionChanged { authority_id, .. } => {
-                    format!("transition_changed:{authority_id}")
+                    Self::authority_summary("transition_changed", *authority_id)
                 }
                 UpgradeExecutionFact::CutoverApproved { authority_id, .. } => {
-                    format!("cutover_approved:{authority_id}")
+                    Self::authority_summary("cutover_approved", *authority_id)
                 }
                 UpgradeExecutionFact::CutoverCompleted { authority_id, .. } => {
-                    format!("cutover_completed:{authority_id}")
+                    Self::authority_summary("cutover_completed", *authority_id)
                 }
                 UpgradeExecutionFact::RollbackExecuted { authority_id, .. } => {
-                    format!("rollback_executed:{authority_id}")
+                    Self::authority_summary("rollback_executed", *authority_id)
                 }
                 UpgradeExecutionFact::PartitionObserved { authority_id, .. } => {
-                    format!("partition_observed:{authority_id}")
+                    Self::authority_summary("partition_observed", *authority_id)
                 }
             },
-            MaintenanceFact::AdminReplacement(fact) => format!(
-                "admin_replacement:{}:{}",
-                fact.old_admin, fact.activation_epoch
+            MaintenanceFact::AdminReplacement(fact) => Self::authority_display_summary(
+                "admin_replacement",
+                fact.old_admin,
+                fact.activation_epoch,
             ),
         }
     }
@@ -957,8 +1005,16 @@ mod tests {
         AuthorityId::new_from_entropy([seed; 32])
     }
 
+    fn hash(seed: u8) -> Hash32 {
+        Hash32([seed; 32])
+    }
+
+    fn uuid(seed: u128) -> Uuid {
+        Uuid::from_bytes(seed.to_be_bytes())
+    }
+
     fn release_id(seed: u8) -> AuraReleaseId {
-        AuraReleaseId::new(Hash32([seed; 32]))
+        AuraReleaseId::new(hash(seed))
     }
 
     fn ts(ms: u64) -> TimeStamp {
@@ -1002,9 +1058,9 @@ mod tests {
         let reducer = MaintenanceFactReducer;
         let fact = MaintenanceFact::SnapshotProposed(SnapshotProposed::new(
             authority(2),
-            Uuid::from_bytes(1u128.to_be_bytes()),
+            uuid(1),
             Epoch::new(1),
-            Hash32([3u8; 32]),
+            hash(3),
         ));
         let delta = reducer.apply(&fact);
         assert_eq!(delta.snapshot_proposals, 1);

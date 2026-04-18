@@ -24,9 +24,41 @@
 use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReducer};
 use aura_core::types::identifiers::AuthorityId;
 use aura_journal::DomainFact;
-use hex;
 
 use crate::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
+
+fn apply_if_newer(timestamp_ms: &mut u64, incoming_timestamp_ms: u64, apply: impl FnOnce()) {
+    if incoming_timestamp_ms >= *timestamp_ms {
+        *timestamp_ms = incoming_timestamp_ms;
+        apply();
+    }
+}
+
+fn format_authority_id(id: &AuthorityId) -> String {
+    let bytes = id.to_bytes();
+    format!(
+        "{:02x}{:02x}..{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[14], bytes[15]
+    )
+}
+
+fn format_hash(hash: &aura_core::Hash32) -> String {
+    hex::encode(hash.0)
+}
+
+fn membership_change_description(change_type: &crate::facts::MembershipChangeType) -> String {
+    match change_type {
+        crate::facts::MembershipChangeType::AddGuardian { guardian_id } => {
+            format!("Add guardian {}", format_authority_id(guardian_id))
+        }
+        crate::facts::MembershipChangeType::RemoveGuardian { guardian_id } => {
+            format!("Remove guardian {}", format_authority_id(guardian_id))
+        }
+        crate::facts::MembershipChangeType::UpdateThreshold { new_threshold } => {
+            format!("Update threshold to {new_threshold}")
+        }
+    }
+}
 
 /// Delta type for recovery view updates.
 ///
@@ -256,11 +288,10 @@ impl ComposableDelta for RecoveryDelta {
                     threshold,
                 },
             ) => {
-                if other_ts >= *started_at {
-                    *started_at = other_ts;
+                apply_if_newer(started_at, other_ts, || {
                     *count = guardian_count;
                     *thresh = threshold;
-                }
+                });
                 true
             }
             (
@@ -275,11 +306,10 @@ impl ComposableDelta for RecoveryDelta {
                     accepted,
                 },
             ) => {
-                if other_ts >= *responded_at {
-                    *responded_at = other_ts;
+                apply_if_newer(responded_at, other_ts, || {
                     *id = guardian_id;
                     *acc = accepted;
-                }
+                });
                 true
             }
             (
@@ -311,11 +341,10 @@ impl ComposableDelta for RecoveryDelta {
                     threshold,
                 },
             ) => {
-                if other_ts >= *completed_at {
-                    *completed_at = other_ts;
+                apply_if_newer(completed_at, other_ts, || {
                     *ids = guardian_ids;
                     *thresh = threshold;
-                }
+                });
                 true
             }
             (
@@ -328,10 +357,9 @@ impl ComposableDelta for RecoveryDelta {
                     reason,
                 },
             ) => {
-                if other_ts >= *failed_at {
-                    *failed_at = other_ts;
+                apply_if_newer(failed_at, other_ts, || {
                     *r = reason;
-                }
+                });
                 true
             }
             (
@@ -346,11 +374,10 @@ impl ComposableDelta for RecoveryDelta {
                     change_description,
                 },
             ) => {
-                if other_ts >= *proposed_at {
-                    *proposed_at = other_ts;
+                apply_if_newer(proposed_at, other_ts, || {
                     *hash = proposal_hash;
                     *desc = change_description;
-                }
+                });
                 true
             }
             (
@@ -408,11 +435,10 @@ impl ComposableDelta for RecoveryDelta {
                     reason,
                 },
             ) => {
-                if other_ts >= *rejected_at {
-                    *rejected_at = other_ts;
+                apply_if_newer(rejected_at, other_ts, || {
                     *hash = proposal_hash;
                     *r = reason;
-                }
+                });
                 true
             }
             (
@@ -427,11 +453,10 @@ impl ComposableDelta for RecoveryDelta {
                     shares_needed,
                 },
             ) => {
-                if other_ts >= *started_at {
-                    *started_at = other_ts;
+                apply_if_newer(started_at, other_ts, || {
                     *id = account_id;
                     *shares = shares_needed;
-                }
+                });
                 true
             }
             (
@@ -461,10 +486,9 @@ impl ComposableDelta for RecoveryDelta {
                     account_id,
                 },
             ) => {
-                if other_ts >= *approved_at {
-                    *approved_at = other_ts;
+                apply_if_newer(approved_at, other_ts, || {
                     *id = account_id;
-                }
+                });
                 true
             }
             (
@@ -477,10 +501,9 @@ impl ComposableDelta for RecoveryDelta {
                     disputes_filed,
                 },
             ) => {
-                if other_end >= *dispute_end_ms {
-                    *dispute_end_ms = other_end;
+                apply_if_newer(dispute_end_ms, other_end, || {
                     *filed = disputes_filed;
-                }
+                });
                 true
             }
             (
@@ -493,10 +516,9 @@ impl ComposableDelta for RecoveryDelta {
                     account_id,
                 },
             ) => {
-                if other_ts >= *completed_at {
-                    *completed_at = other_ts;
+                apply_if_newer(completed_at, other_ts, || {
                     *id = account_id;
-                }
+                });
                 true
             }
             (
@@ -511,27 +533,15 @@ impl ComposableDelta for RecoveryDelta {
                     reason,
                 },
             ) => {
-                if other_ts >= *failed_at {
-                    *failed_at = other_ts;
+                apply_if_newer(failed_at, other_ts, || {
                     *id = account_id;
                     *r = reason;
-                }
+                });
                 true
             }
             _ => false,
         }
     }
-}
-
-/// Helper to format an AuthorityId for display
-fn format_authority_id(id: &AuthorityId) -> String {
-    // Use a shortened hex representation for display
-    // AuthorityId is 16 bytes (UUID), so use indices 0,1 and 14,15
-    let bytes = id.to_bytes();
-    format!(
-        "{:02x}{:02x}..{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[14], bytes[15]
-    )
 }
 
 /// View reducer for recovery facts.
@@ -620,24 +630,11 @@ impl ViewDeltaReducer for RecoveryViewReducer {
                 proposal_hash,
                 proposed_at,
                 ..
-            } => {
-                let change_description = match change_type {
-                    crate::facts::MembershipChangeType::AddGuardian { guardian_id } => {
-                        format!("Add guardian {}", format_authority_id(&guardian_id))
-                    }
-                    crate::facts::MembershipChangeType::RemoveGuardian { guardian_id } => {
-                        format!("Remove guardian {}", format_authority_id(&guardian_id))
-                    }
-                    crate::facts::MembershipChangeType::UpdateThreshold { new_threshold } => {
-                        format!("Update threshold to {new_threshold}")
-                    }
-                };
-                Some(RecoveryDelta::MembershipProposalCreated {
-                    proposal_hash: hex::encode(proposal_hash.0),
-                    change_description,
-                    proposed_at: proposed_at.ts_ms,
-                })
-            }
+            } => Some(RecoveryDelta::MembershipProposalCreated {
+                proposal_hash: format_hash(&proposal_hash),
+                change_description: membership_change_description(&change_type),
+                proposed_at: proposed_at.ts_ms,
+            }),
 
             RecoveryFact::MembershipVoteCast {
                 voter_id,
@@ -645,7 +642,7 @@ impl ViewDeltaReducer for RecoveryViewReducer {
                 approved,
                 ..
             } => Some(RecoveryDelta::MembershipVoteReceived {
-                proposal_hash: hex::encode(proposal_hash.0),
+                proposal_hash: format_hash(&proposal_hash),
                 voter_id: format_authority_id(&voter_id),
                 approved,
                 // Note: vote counts would need to be derived from accumulated facts
@@ -660,7 +657,7 @@ impl ViewDeltaReducer for RecoveryViewReducer {
                 completed_at,
                 ..
             } => Some(RecoveryDelta::MembershipChangeApplied {
-                proposal_hash: hex::encode(proposal_hash.0),
+                proposal_hash: format_hash(&proposal_hash),
                 new_guardian_count: new_guardian_ids.len(),
                 new_threshold,
                 applied_at: completed_at.ts_ms,
@@ -672,7 +669,7 @@ impl ViewDeltaReducer for RecoveryViewReducer {
                 rejected_at,
                 ..
             } => Some(RecoveryDelta::MembershipChangeRejected {
-                proposal_hash: hex::encode(proposal_hash.0),
+                proposal_hash: format_hash(&proposal_hash),
                 reason,
                 rejected_at: rejected_at.ts_ms,
             }),

@@ -2,4 +2,5 @@
 
 mod ceremony {
     mod recovery_protocol_tests;
+    mod support;
 }

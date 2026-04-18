@@ -25,25 +25,28 @@ pub struct GuardianProfile {
 }
 
 impl GuardianProfile {
-    /// Create a new guardian profile with default settings.
-    pub fn new(authority_id: AuthorityId) -> Self {
+    fn with_defaults(authority_id: AuthorityId, label: Option<String>) -> Self {
         Self {
             authority_id,
-            label: None,
-            trust_level: TrustLevel::High,
-            cooldown_secs: 900, // 15 minutes default
-        }
-    }
-
-    /// Create a guardian profile with a label.
-    pub fn with_label(authority_id: AuthorityId, label: impl Into<String>) -> Self {
-        Self {
-            authority_id,
-            label: Some(label.into()),
+            label,
             trust_level: TrustLevel::High,
             cooldown_secs: 900,
         }
     }
+
+    /// Create a new guardian profile with default settings.
+    pub fn new(authority_id: AuthorityId) -> Self {
+        Self::with_defaults(authority_id, None)
+    }
+
+    /// Create a guardian profile with a label.
+    pub fn with_label(authority_id: AuthorityId, label: impl Into<String>) -> Self {
+        Self::with_defaults(authority_id, Some(label.into()))
+    }
+}
+
+fn empty_threshold_signature() -> ThresholdSignature {
+    ThresholdSignature::new(vec![0u8; 64], 0, Vec::new(), Vec::new(), 0)
 }
 
 /// Collection of guardian profiles.
@@ -189,6 +192,24 @@ pub struct RecoveryResponse {
 }
 
 impl RecoveryResponse {
+    fn build(
+        success: bool,
+        error: Option<String>,
+        key_material: Option<Vec<u8>>,
+        guardian_shares: Vec<RecoveryShare>,
+        evidence: RecoveryEvidence,
+        signature: ThresholdSignature,
+    ) -> Self {
+        Self {
+            success,
+            error,
+            key_material,
+            guardian_shares,
+            evidence,
+            signature,
+        }
+    }
+
     /// Create a success response.
     pub fn success(
         key_material: Option<Vec<u8>>,
@@ -196,26 +217,18 @@ impl RecoveryResponse {
         evidence: RecoveryEvidence,
         signature: ThresholdSignature,
     ) -> Self {
-        Self {
-            success: true,
-            error: None,
-            key_material,
-            guardian_shares: shares,
-            evidence,
-            signature,
-        }
+        Self::build(true, None, key_material, shares, evidence, signature)
     }
 
     /// Create an error response.
     pub fn error(message: impl Into<String>) -> Self {
-        Self {
-            success: false,
-            error: Some(message.into()),
-            key_material: None,
-            guardian_shares: Vec::new(),
-            evidence: RecoveryEvidence::default(),
-            // Empty signature for error case
-            signature: ThresholdSignature::new(vec![0u8; 64], 0, Vec::new(), Vec::new(), 0),
-        }
+        Self::build(
+            false,
+            Some(message.into()),
+            None,
+            Vec::new(),
+            RecoveryEvidence::default(),
+            empty_threshold_signature(),
+        )
     }
 }

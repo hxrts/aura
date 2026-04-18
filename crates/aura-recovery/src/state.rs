@@ -37,6 +37,23 @@ use aura_core::Hash32;
 use aura_journal::DomainFact;
 use std::collections::HashMap;
 
+fn push_unique_authority(target: &mut Vec<AuthorityId>, authority_id: AuthorityId) -> bool {
+    if target.contains(&authority_id) {
+        false
+    } else {
+        target.push(authority_id);
+        true
+    }
+}
+
+fn threshold_satisfied(count: usize, threshold: u16) -> bool {
+    count >= threshold as usize
+}
+
+fn remaining_guardians(total: usize, declined: usize) -> usize {
+    total.saturating_sub(declined)
+}
+
 /// Recovery state derived from journal facts.
 ///
 /// This struct represents the current state of recovery operations,
@@ -117,11 +134,8 @@ impl RecoveryState {
                 ..
             } => {
                 if let Some(setup) = self.setups.get_mut(context_id) {
-                    if !setup.accepted.contains(guardian_id) {
-                        setup.accepted.push(*guardian_id);
-                    }
-                    // Check if threshold is met
-                    if setup.accepted.len() >= setup.threshold as usize {
+                    push_unique_authority(&mut setup.accepted, *guardian_id);
+                    if threshold_satisfied(setup.accepted.len(), setup.threshold) {
                         setup.status = SetupStatus::ThresholdMet;
                     }
                 }
@@ -133,12 +147,10 @@ impl RecoveryState {
                 ..
             } => {
                 if let Some(setup) = self.setups.get_mut(context_id) {
-                    if !setup.declined.contains(guardian_id) {
-                        setup.declined.push(*guardian_id);
-                    }
-                    // Check if setup has failed (not enough guardians left)
-                    let remaining = setup.target_guardians.len() - setup.declined.len();
-                    if remaining < setup.threshold as usize {
+                    push_unique_authority(&mut setup.declined, *guardian_id);
+                    let remaining =
+                        remaining_guardians(setup.target_guardians.len(), setup.declined.len());
+                    if !threshold_satisfied(remaining, setup.threshold) {
                         setup.status = SetupStatus::Failed(SetupFailure::ThresholdUnsatisfied);
                     }
                 }
@@ -192,11 +204,9 @@ impl RecoveryState {
             } => {
                 if let Some(proposal) = self.proposals.get_mut(context_id) {
                     if *approved {
-                        if !proposal.votes_for.contains(voter_id) {
-                            proposal.votes_for.push(*voter_id);
-                        }
-                    } else if !proposal.votes_against.contains(voter_id) {
-                        proposal.votes_against.push(*voter_id);
+                        push_unique_authority(&mut proposal.votes_for, *voter_id);
+                    } else {
+                        push_unique_authority(&mut proposal.votes_against, *voter_id);
                     }
                 }
             }
@@ -245,9 +255,7 @@ impl RecoveryState {
                 ..
             } => {
                 if let Some(recovery) = self.recoveries.get_mut(context_id) {
-                    if !recovery.shares_submitted.contains(guardian_id) {
-                        recovery.shares_submitted.push(*guardian_id);
-                    }
+                    push_unique_authority(&mut recovery.shares_submitted, *guardian_id);
                 }
             }
 
@@ -263,9 +271,7 @@ impl RecoveryState {
                 ..
             } => {
                 if let Some(recovery) = self.recoveries.get_mut(context_id) {
-                    if !recovery.disputes.contains(disputer_id) {
-                        recovery.disputes.push(*disputer_id);
-                    }
+                    push_unique_authority(&mut recovery.disputes, *disputer_id);
                     if let RecoveryFact::RecoveryDisputeFiled { reason, .. } = fact {
                         recovery.status = RecoveryStatus::Disputed(RecoveryDispute {
                             disputer_id: *disputer_id,

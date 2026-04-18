@@ -353,29 +353,53 @@ pub enum MembershipChangeType {
     },
 }
 
+fn exact_physical_time(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
+    }
+}
+
+fn authority_key_data(authority_id: &AuthorityId) -> Vec<u8> {
+    authority_id.to_bytes().to_vec()
+}
+
+fn hash_key_data(hash: &Hash32) -> Vec<u8> {
+    hash.0.to_vec()
+}
+
+fn authority_then_hash_key_data(authority_id: &AuthorityId, hash: &Hash32) -> Vec<u8> {
+    let mut data = authority_key_data(authority_id);
+    data.extend_from_slice(&hash.0);
+    data
+}
+
+fn hash_then_authority_key_data(hash: &Hash32, authority_id: &AuthorityId) -> Vec<u8> {
+    let mut data = hash_key_data(hash);
+    data.extend_from_slice(&authority_id.to_bytes());
+    data
+}
+
 impl RecoveryFact {
     /// Extract the context_id from any variant
     pub fn get_context_id(&self) -> ContextId {
         match self {
-            // Guardian setup
-            RecoveryFact::GuardianSetupInitiated { context_id, .. } => *context_id,
-            RecoveryFact::GuardianInvitationSent { context_id, .. } => *context_id,
-            RecoveryFact::GuardianAccepted { context_id, .. } => *context_id,
-            RecoveryFact::GuardianDeclined { context_id, .. } => *context_id,
-            RecoveryFact::GuardianSetupCompleted { context_id, .. } => *context_id,
-            RecoveryFact::GuardianSetupFailed { context_id, .. } => *context_id,
-            // Membership change
-            RecoveryFact::MembershipChangeProposed { context_id, .. } => *context_id,
-            RecoveryFact::MembershipVoteCast { context_id, .. } => *context_id,
-            RecoveryFact::MembershipChangeCompleted { context_id, .. } => *context_id,
-            RecoveryFact::MembershipChangeRejected { context_id, .. } => *context_id,
-            // Key recovery
-            RecoveryFact::RecoveryInitiated { context_id, .. } => *context_id,
-            RecoveryFact::RecoveryShareSubmitted { context_id, .. } => *context_id,
-            RecoveryFact::RecoveryApproved { context_id, .. } => *context_id,
-            RecoveryFact::RecoveryDisputeFiled { context_id, .. } => *context_id,
-            RecoveryFact::RecoveryCompleted { context_id, .. } => *context_id,
-            RecoveryFact::RecoveryFailed { context_id, .. } => *context_id,
+            RecoveryFact::GuardianSetupInitiated { context_id, .. }
+            | RecoveryFact::GuardianInvitationSent { context_id, .. }
+            | RecoveryFact::GuardianAccepted { context_id, .. }
+            | RecoveryFact::GuardianDeclined { context_id, .. }
+            | RecoveryFact::GuardianSetupCompleted { context_id, .. }
+            | RecoveryFact::GuardianSetupFailed { context_id, .. }
+            | RecoveryFact::MembershipChangeProposed { context_id, .. }
+            | RecoveryFact::MembershipVoteCast { context_id, .. }
+            | RecoveryFact::MembershipChangeCompleted { context_id, .. }
+            | RecoveryFact::MembershipChangeRejected { context_id, .. }
+            | RecoveryFact::RecoveryInitiated { context_id, .. }
+            | RecoveryFact::RecoveryShareSubmitted { context_id, .. }
+            | RecoveryFact::RecoveryApproved { context_id, .. }
+            | RecoveryFact::RecoveryDisputeFiled { context_id, .. }
+            | RecoveryFact::RecoveryCompleted { context_id, .. }
+            | RecoveryFact::RecoveryFailed { context_id, .. } => *context_id,
         }
     }
 
@@ -410,73 +434,53 @@ impl RecoveryFact {
     pub fn binding_key(&self) -> RecoveryFactKey {
         let data = match self {
             RecoveryFact::GuardianSetupInitiated { initiator_id, .. } => {
-                initiator_id.to_bytes().to_vec()
+                authority_key_data(initiator_id)
             }
             RecoveryFact::GuardianInvitationSent { guardian_id, .. } => {
-                guardian_id.to_bytes().to_vec()
+                authority_key_data(guardian_id)
             }
-            RecoveryFact::GuardianAccepted { guardian_id, .. } => guardian_id.to_bytes().to_vec(),
-            RecoveryFact::GuardianDeclined { guardian_id, .. } => guardian_id.to_bytes().to_vec(),
+            RecoveryFact::GuardianAccepted { guardian_id, .. } => authority_key_data(guardian_id),
+            RecoveryFact::GuardianDeclined { guardian_id, .. } => authority_key_data(guardian_id),
             RecoveryFact::GuardianSetupCompleted { .. } => Vec::new(),
             RecoveryFact::GuardianSetupFailed { .. } => Vec::new(),
             RecoveryFact::MembershipChangeProposed { proposal_hash, .. } => {
-                proposal_hash.0.to_vec()
+                hash_key_data(proposal_hash)
             }
             RecoveryFact::MembershipVoteCast {
                 proposal_hash,
                 voter_id,
                 ..
-            } => {
-                let mut data = proposal_hash.0.to_vec();
-                data.extend_from_slice(&voter_id.to_bytes());
-                data
-            }
+            } => hash_then_authority_key_data(proposal_hash, voter_id),
             RecoveryFact::MembershipChangeCompleted { proposal_hash, .. } => {
-                proposal_hash.0.to_vec()
+                hash_key_data(proposal_hash)
             }
             RecoveryFact::MembershipChangeRejected { proposal_hash, .. } => {
-                proposal_hash.0.to_vec()
+                hash_key_data(proposal_hash)
             }
             RecoveryFact::RecoveryInitiated {
                 account_id,
                 request_hash,
                 ..
-            } => {
-                let mut data = account_id.to_bytes().to_vec();
-                data.extend_from_slice(&request_hash.0);
-                data
-            }
+            } => authority_then_hash_key_data(account_id, request_hash),
             RecoveryFact::RecoveryShareSubmitted {
                 guardian_id,
                 share_hash,
                 ..
-            } => {
-                let mut data = guardian_id.to_bytes().to_vec();
-                data.extend_from_slice(&share_hash.0);
-                data
-            }
+            } => authority_then_hash_key_data(guardian_id, share_hash),
             RecoveryFact::RecoveryApproved {
                 account_id,
                 approvals_hash,
                 ..
-            } => {
-                let mut data = account_id.to_bytes().to_vec();
-                data.extend_from_slice(&approvals_hash.0);
-                data
-            }
+            } => authority_then_hash_key_data(account_id, approvals_hash),
             RecoveryFact::RecoveryDisputeFiled { disputer_id, .. } => {
-                disputer_id.to_bytes().to_vec()
+                authority_key_data(disputer_id)
             }
             RecoveryFact::RecoveryCompleted {
                 account_id,
                 evidence_hash,
                 ..
-            } => {
-                let mut data = account_id.to_bytes().to_vec();
-                data.extend_from_slice(&evidence_hash.0);
-                data
-            }
-            RecoveryFact::RecoveryFailed { account_id, .. } => account_id.to_bytes().to_vec(),
+            } => authority_then_hash_key_data(account_id, evidence_hash),
+            RecoveryFact::RecoveryFailed { account_id, .. } => authority_key_data(account_id),
         };
 
         RecoveryFactKey {
@@ -487,26 +491,30 @@ impl RecoveryFact {
 
     /// Get the timestamp for this fact in milliseconds (backward compatibility)
     pub fn timestamp_ms(&self) -> u64 {
+        self.timestamp().ts_ms
+    }
+
+    fn timestamp(&self) -> &PhysicalTime {
         match self {
             // Guardian setup
-            RecoveryFact::GuardianSetupInitiated { initiated_at, .. } => initiated_at.ts_ms,
-            RecoveryFact::GuardianInvitationSent { sent_at, .. } => sent_at.ts_ms,
-            RecoveryFact::GuardianAccepted { accepted_at, .. } => accepted_at.ts_ms,
-            RecoveryFact::GuardianDeclined { declined_at, .. } => declined_at.ts_ms,
-            RecoveryFact::GuardianSetupCompleted { completed_at, .. } => completed_at.ts_ms,
-            RecoveryFact::GuardianSetupFailed { failed_at, .. } => failed_at.ts_ms,
+            RecoveryFact::GuardianSetupInitiated { initiated_at, .. } => initiated_at,
+            RecoveryFact::GuardianInvitationSent { sent_at, .. } => sent_at,
+            RecoveryFact::GuardianAccepted { accepted_at, .. } => accepted_at,
+            RecoveryFact::GuardianDeclined { declined_at, .. } => declined_at,
+            RecoveryFact::GuardianSetupCompleted { completed_at, .. } => completed_at,
+            RecoveryFact::GuardianSetupFailed { failed_at, .. } => failed_at,
             // Membership change
-            RecoveryFact::MembershipChangeProposed { proposed_at, .. } => proposed_at.ts_ms,
-            RecoveryFact::MembershipVoteCast { voted_at, .. } => voted_at.ts_ms,
-            RecoveryFact::MembershipChangeCompleted { completed_at, .. } => completed_at.ts_ms,
-            RecoveryFact::MembershipChangeRejected { rejected_at, .. } => rejected_at.ts_ms,
+            RecoveryFact::MembershipChangeProposed { proposed_at, .. } => proposed_at,
+            RecoveryFact::MembershipVoteCast { voted_at, .. } => voted_at,
+            RecoveryFact::MembershipChangeCompleted { completed_at, .. } => completed_at,
+            RecoveryFact::MembershipChangeRejected { rejected_at, .. } => rejected_at,
             // Key recovery
-            RecoveryFact::RecoveryInitiated { initiated_at, .. } => initiated_at.ts_ms,
-            RecoveryFact::RecoveryShareSubmitted { submitted_at, .. } => submitted_at.ts_ms,
-            RecoveryFact::RecoveryApproved { approved_at, .. } => approved_at.ts_ms,
-            RecoveryFact::RecoveryDisputeFiled { filed_at, .. } => filed_at.ts_ms,
-            RecoveryFact::RecoveryCompleted { completed_at, .. } => completed_at.ts_ms,
-            RecoveryFact::RecoveryFailed { failed_at, .. } => failed_at.ts_ms,
+            RecoveryFact::RecoveryInitiated { initiated_at, .. } => initiated_at,
+            RecoveryFact::RecoveryShareSubmitted { submitted_at, .. } => submitted_at,
+            RecoveryFact::RecoveryApproved { approved_at, .. } => approved_at,
+            RecoveryFact::RecoveryDisputeFiled { filed_at, .. } => filed_at,
+            RecoveryFact::RecoveryCompleted { completed_at, .. } => completed_at,
+            RecoveryFact::RecoveryFailed { failed_at, .. } => failed_at,
         }
     }
 
@@ -528,10 +536,7 @@ impl RecoveryFact {
             trace_id: None,
             guardian_ids,
             threshold,
-            initiated_at: PhysicalTime {
-                ts_ms: initiated_at_ms,
-                uncertainty: None,
-            },
+            initiated_at: exact_physical_time(initiated_at_ms),
         }
     }
 
@@ -547,10 +552,7 @@ impl RecoveryFact {
             guardian_id,
             trace_id: None,
             invitation_hash,
-            sent_at: PhysicalTime {
-                ts_ms: sent_at_ms,
-                uncertainty: None,
-            },
+            sent_at: exact_physical_time(sent_at_ms),
         }
     }
 
@@ -564,10 +566,7 @@ impl RecoveryFact {
             context_id,
             guardian_id,
             trace_id: None,
-            accepted_at: PhysicalTime {
-                ts_ms: accepted_at_ms,
-                uncertainty: None,
-            },
+            accepted_at: exact_physical_time(accepted_at_ms),
         }
     }
 
@@ -581,10 +580,7 @@ impl RecoveryFact {
             context_id,
             guardian_id,
             trace_id: None,
-            declined_at: PhysicalTime {
-                ts_ms: declined_at_ms,
-                uncertainty: None,
-            },
+            declined_at: exact_physical_time(declined_at_ms),
         }
     }
 
@@ -600,10 +596,7 @@ impl RecoveryFact {
             guardian_ids,
             trace_id: None,
             threshold,
-            completed_at: PhysicalTime {
-                ts_ms: completed_at_ms,
-                uncertainty: None,
-            },
+            completed_at: exact_physical_time(completed_at_ms),
         }
     }
 
@@ -617,10 +610,7 @@ impl RecoveryFact {
             context_id,
             reason,
             trace_id: None,
-            failed_at: PhysicalTime {
-                ts_ms: failed_at_ms,
-                uncertainty: None,
-            },
+            failed_at: exact_physical_time(failed_at_ms),
         }
     }
 
@@ -638,10 +628,7 @@ impl RecoveryFact {
             trace_id: None,
             change_type,
             proposal_hash,
-            proposed_at: PhysicalTime {
-                ts_ms: proposed_at_ms,
-                uncertainty: None,
-            },
+            proposed_at: exact_physical_time(proposed_at_ms),
         }
     }
 
@@ -659,10 +646,7 @@ impl RecoveryFact {
             trace_id: None,
             proposal_hash,
             approved,
-            voted_at: PhysicalTime {
-                ts_ms: voted_at_ms,
-                uncertainty: None,
-            },
+            voted_at: exact_physical_time(voted_at_ms),
         }
     }
 
@@ -680,10 +664,7 @@ impl RecoveryFact {
             trace_id: None,
             new_guardian_ids,
             new_threshold,
-            completed_at: PhysicalTime {
-                ts_ms: completed_at_ms,
-                uncertainty: None,
-            },
+            completed_at: exact_physical_time(completed_at_ms),
         }
     }
 
@@ -699,10 +680,7 @@ impl RecoveryFact {
             proposal_hash,
             trace_id: None,
             reason,
-            rejected_at: PhysicalTime {
-                ts_ms: rejected_at_ms,
-                uncertainty: None,
-            },
+            rejected_at: exact_physical_time(rejected_at_ms),
         }
     }
 
@@ -718,10 +696,7 @@ impl RecoveryFact {
             account_id,
             trace_id: None,
             request_hash,
-            initiated_at: PhysicalTime {
-                ts_ms: initiated_at_ms,
-                uncertainty: None,
-            },
+            initiated_at: exact_physical_time(initiated_at_ms),
         }
     }
 
@@ -737,10 +712,7 @@ impl RecoveryFact {
             guardian_id,
             trace_id: None,
             share_hash,
-            submitted_at: PhysicalTime {
-                ts_ms: submitted_at_ms,
-                uncertainty: None,
-            },
+            submitted_at: exact_physical_time(submitted_at_ms),
         }
     }
 
@@ -756,10 +728,7 @@ impl RecoveryFact {
             account_id,
             trace_id: None,
             approvals_hash,
-            approved_at: PhysicalTime {
-                ts_ms: approved_at_ms,
-                uncertainty: None,
-            },
+            approved_at: exact_physical_time(approved_at_ms),
         }
     }
 
@@ -775,10 +744,7 @@ impl RecoveryFact {
             disputer_id,
             trace_id: None,
             reason,
-            filed_at: PhysicalTime {
-                ts_ms: filed_at_ms,
-                uncertainty: None,
-            },
+            filed_at: exact_physical_time(filed_at_ms),
         }
     }
 
@@ -794,10 +760,7 @@ impl RecoveryFact {
             account_id,
             trace_id: None,
             evidence_hash,
-            completed_at: PhysicalTime {
-                ts_ms: completed_at_ms,
-                uncertainty: None,
-            },
+            completed_at: exact_physical_time(completed_at_ms),
         }
     }
 
@@ -813,10 +776,7 @@ impl RecoveryFact {
             account_id,
             trace_id: None,
             reason,
-            failed_at: PhysicalTime {
-                ts_ms: failed_at_ms,
-                uncertainty: None,
-            },
+            failed_at: exact_physical_time(failed_at_ms),
         }
     }
 }

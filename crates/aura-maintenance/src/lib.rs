@@ -85,7 +85,64 @@ pub enum MaintenanceOperation {
     UpgradeExecution,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct MaintenanceOperationDescriptor {
+    operation: MaintenanceOperation,
+    category: OperationCategory,
+    name: &'static str,
+}
+
+const MAINTENANCE_OPERATION_DESCRIPTORS: &[MaintenanceOperationDescriptor] = &[
+    MaintenanceOperationDescriptor {
+        operation: MaintenanceOperation::SnapshotProposed,
+        category: OperationCategory::B,
+        name: "maintenance:snapshot-proposed",
+    },
+    MaintenanceOperationDescriptor {
+        operation: MaintenanceOperation::SnapshotCompleted,
+        category: OperationCategory::B,
+        name: "maintenance:snapshot-completed",
+    },
+    MaintenanceOperationDescriptor {
+        operation: MaintenanceOperation::CacheInvalidated,
+        category: OperationCategory::A,
+        name: "maintenance:cache-invalidated",
+    },
+    MaintenanceOperationDescriptor {
+        operation: MaintenanceOperation::UpgradeActivated,
+        category: OperationCategory::C,
+        name: "maintenance:upgrade-activated",
+    },
+    MaintenanceOperationDescriptor {
+        operation: MaintenanceOperation::AdminReplacement,
+        category: OperationCategory::C,
+        name: "maintenance:admin-replacement",
+    },
+    MaintenanceOperationDescriptor {
+        operation: MaintenanceOperation::ReleaseDistribution,
+        category: OperationCategory::B,
+        name: "maintenance:release-distribution",
+    },
+    MaintenanceOperationDescriptor {
+        operation: MaintenanceOperation::ReleasePolicy,
+        category: OperationCategory::C,
+        name: "maintenance:release-policy",
+    },
+    MaintenanceOperationDescriptor {
+        operation: MaintenanceOperation::UpgradeExecution,
+        category: OperationCategory::C,
+        name: "maintenance:upgrade-execution",
+    },
+];
+
 impl MaintenanceOperation {
+    fn descriptor(self) -> &'static MaintenanceOperationDescriptor {
+        MAINTENANCE_OPERATION_DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.operation == self)
+            .expect("maintenance operation descriptor must exist")
+    }
+
     /// Get the operation category (compile-time exhaustive).
     ///
     /// Category assignments:
@@ -94,61 +151,28 @@ impl MaintenanceOperation {
     /// - C: Upgrades and admin replacement (high-risk)
     #[must_use]
     pub fn category(&self) -> OperationCategory {
-        match self {
-            MaintenanceOperation::SnapshotProposed => OperationCategory::B,
-            MaintenanceOperation::SnapshotCompleted => OperationCategory::B,
-            MaintenanceOperation::CacheInvalidated => OperationCategory::A,
-            MaintenanceOperation::UpgradeActivated => OperationCategory::C,
-            MaintenanceOperation::AdminReplacement => OperationCategory::C,
-            MaintenanceOperation::ReleaseDistribution => OperationCategory::B,
-            MaintenanceOperation::ReleasePolicy => OperationCategory::C,
-            MaintenanceOperation::UpgradeExecution => OperationCategory::C,
-        }
+        self.descriptor().category
     }
 
     /// Get the operation name as a string.
     pub fn as_str(&self) -> &'static str {
-        match self {
-            MaintenanceOperation::SnapshotProposed => "maintenance:snapshot-proposed",
-            MaintenanceOperation::SnapshotCompleted => "maintenance:snapshot-completed",
-            MaintenanceOperation::CacheInvalidated => "maintenance:cache-invalidated",
-            MaintenanceOperation::UpgradeActivated => "maintenance:upgrade-activated",
-            MaintenanceOperation::AdminReplacement => "maintenance:admin-replacement",
-            MaintenanceOperation::ReleaseDistribution => "maintenance:release-distribution",
-            MaintenanceOperation::ReleasePolicy => "maintenance:release-policy",
-            MaintenanceOperation::UpgradeExecution => "maintenance:upgrade-execution",
-        }
+        self.descriptor().name
     }
 
     /// Parse an operation from its string name.
     #[allow(clippy::should_implement_trait)] // Returns Option, not Result
     pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "maintenance:snapshot-proposed" => Some(MaintenanceOperation::SnapshotProposed),
-            "maintenance:snapshot-completed" => Some(MaintenanceOperation::SnapshotCompleted),
-            "maintenance:cache-invalidated" => Some(MaintenanceOperation::CacheInvalidated),
-            "maintenance:upgrade-activated" => Some(MaintenanceOperation::UpgradeActivated),
-            "maintenance:admin-replacement" => Some(MaintenanceOperation::AdminReplacement),
-            "maintenance:release-distribution" => Some(MaintenanceOperation::ReleaseDistribution),
-            "maintenance:release-policy" => Some(MaintenanceOperation::ReleasePolicy),
-            "maintenance:upgrade-execution" => Some(MaintenanceOperation::UpgradeExecution),
-            _ => None,
-        }
+        MAINTENANCE_OPERATION_DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.name == s)
+            .map(|descriptor| descriptor.operation)
     }
 
     /// Iterator over all maintenance operations.
     pub fn all() -> impl Iterator<Item = MaintenanceOperation> {
-        [
-            MaintenanceOperation::SnapshotProposed,
-            MaintenanceOperation::SnapshotCompleted,
-            MaintenanceOperation::CacheInvalidated,
-            MaintenanceOperation::UpgradeActivated,
-            MaintenanceOperation::AdminReplacement,
-            MaintenanceOperation::ReleaseDistribution,
-            MaintenanceOperation::ReleasePolicy,
-            MaintenanceOperation::UpgradeExecution,
-        ]
-        .into_iter()
+        MAINTENANCE_OPERATION_DESCRIPTORS
+            .iter()
+            .map(|descriptor| descriptor.operation)
     }
 }
 

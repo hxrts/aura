@@ -91,6 +91,31 @@ struct BuildCertificateSignaturePreimage {
     signing_key: Ed25519VerifyingKey,
 }
 
+fn canonical_signature_payload<T: Serialize>(preimage: &T) -> Result<Vec<u8>, SerializationError> {
+    to_vec(preimage)
+}
+
+fn canonical_signature_payload_hash<T: Serialize>(
+    preimage: &T,
+) -> Result<Hash32, SerializationError> {
+    Hash32::from_value(preimage)
+}
+
+fn verify_canonical_signature<T: Serialize>(
+    release_id_matches_provenance: bool,
+    mismatch_message: &'static str,
+    preimage: &T,
+    signing_key: &Ed25519VerifyingKey,
+    signature: &Ed25519Signature,
+) -> Result<(), AuraError> {
+    if !release_id_matches_provenance {
+        return Err(AuraError::invalid(mismatch_message));
+    }
+
+    let payload = canonical_signature_payload(preimage)?;
+    signing_key.verify(&payload, signature)
+}
+
 fn manifest_signature_preimage(manifest: &AuraReleaseManifest) -> ReleaseManifestSignaturePreimage {
     ReleaseManifestSignaturePreimage {
         domain: "aura.release.manifest.signature.v1",
@@ -502,24 +527,26 @@ impl AuraReleaseManifest {
 
     /// Canonical serialized payload that the manifest signature covers.
     pub fn signature_payload(&self) -> Result<Vec<u8>, SerializationError> {
-        to_vec(&manifest_signature_preimage(self))
+        let preimage = manifest_signature_preimage(self);
+        canonical_signature_payload(&preimage)
     }
 
     /// Canonical hash of the payload covered by the manifest signature.
     pub fn signature_payload_hash(&self) -> Result<Hash32, SerializationError> {
-        Hash32::from_value(&manifest_signature_preimage(self))
+        let preimage = manifest_signature_preimage(self);
+        canonical_signature_payload_hash(&preimage)
     }
 
     /// Verify the embedded signature against the canonical manifest payload.
     pub fn verify_signature(&self) -> Result<(), AuraError> {
-        if !self.release_id_matches_provenance()? {
-            return Err(AuraError::invalid(
-                "release manifest does not match canonical provenance-derived release id",
-            ));
-        }
-
-        let payload = self.signature_payload()?;
-        self.signing_key.verify(&payload, &self.signature)
+        let preimage = manifest_signature_preimage(self);
+        verify_canonical_signature(
+            self.release_id_matches_provenance()?,
+            "release manifest does not match canonical provenance-derived release id",
+            &preimage,
+            &self.signing_key,
+            &self.signature,
+        )
     }
 }
 
@@ -585,24 +612,26 @@ impl AuraDeterministicBuildCertificate {
 
     /// Canonical serialized payload that the builder signature covers.
     pub fn signature_payload(&self) -> Result<Vec<u8>, SerializationError> {
-        to_vec(&build_certificate_signature_preimage(self))
+        let preimage = build_certificate_signature_preimage(self);
+        canonical_signature_payload(&preimage)
     }
 
     /// Canonical hash of the payload covered by the builder signature.
     pub fn signature_payload_hash(&self) -> Result<Hash32, SerializationError> {
-        Hash32::from_value(&build_certificate_signature_preimage(self))
+        let preimage = build_certificate_signature_preimage(self);
+        canonical_signature_payload_hash(&preimage)
     }
 
     /// Verify the embedded signature against the canonical certificate payload.
     pub fn verify_signature(&self) -> Result<(), AuraError> {
-        if !self.release_id_matches_provenance()? {
-            return Err(AuraError::invalid(
-                "build certificate does not match canonical provenance-derived release id",
-            ));
-        }
-
-        let payload = self.signature_payload()?;
-        self.signing_key.verify(&payload, &self.signature)
+        let preimage = build_certificate_signature_preimage(self);
+        verify_canonical_signature(
+            self.release_id_matches_provenance()?,
+            "build certificate does not match canonical provenance-derived release id",
+            &preimage,
+            &self.signing_key,
+            &self.signature,
+        )
     }
 }
 
@@ -615,6 +644,21 @@ mod tests {
 
     fn hash(byte: u8) -> Hash32 {
         Hash32([byte; 32])
+    }
+
+    fn authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn series_id(seed: u8) -> AuraReleaseSeriesId {
+        AuraReleaseSeriesId::new(hash(seed))
+    }
+
+    fn physical_timestamp(seed: u8) -> TimeStamp {
+        TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1_700_000_000_000 + seed as u64,
+            uncertainty: Some(25),
+        })
     }
 
     fn provenance(seed: u8) -> AuraReleaseProvenance {
@@ -638,9 +682,9 @@ mod tests {
     fn manifest_fixture(seed: u8) -> AuraReleaseManifest {
         let (signing_key, verifying_key, placeholder_signature) = signing_material(seed);
         let mut manifest = AuraReleaseManifest::new(
-            AuraReleaseSeriesId::new(hash(seed.wrapping_add(1))),
+            series_id(seed.wrapping_add(1)),
             SemanticVersion::new(1, 2, 3),
-            AuthorityId::new_from_entropy([seed.wrapping_add(2); 32]),
+            authority(seed.wrapping_add(2)),
             provenance(seed.wrapping_add(3)),
             vec![AuraArtifactDescriptor::new(
                 AuraArtifactKind::Binary,
@@ -683,14 +727,11 @@ mod tests {
     fn certificate_fixture(seed: u8) -> AuraDeterministicBuildCertificate {
         let (signing_key, verifying_key, placeholder_signature) = signing_material(seed);
         let mut cert = AuraDeterministicBuildCertificate::new(
-            AuraReleaseSeriesId::new(hash(seed.wrapping_add(1))),
-            AuthorityId::new_from_entropy([seed.wrapping_add(2); 32]),
+            series_id(seed.wrapping_add(1)),
+            authority(seed.wrapping_add(2)),
             provenance(seed.wrapping_add(3)),
             hash(seed.wrapping_add(4)),
-            TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 1_700_000_000_000 + seed as u64,
-                uncertainty: Some(25),
-            }),
+            physical_timestamp(seed),
             Some(AuraTeeAttestation {
                 attestor_device: DeviceId::new_from_entropy([seed.wrapping_add(5); 32]),
                 measurement_hash: hash(seed.wrapping_add(6)),
@@ -707,7 +748,7 @@ mod tests {
 
     #[test]
     fn release_id_derivation_is_stable() {
-        let series_id = AuraReleaseSeriesId::new(hash(10));
+        let series_id = series_id(10);
         let provenance = provenance(20);
 
         let first = AuraReleaseId::derive(series_id, &provenance).unwrap();
@@ -718,7 +759,7 @@ mod tests {
 
     #[test]
     fn release_id_changes_when_provenance_changes() {
-        let series_id = AuraReleaseSeriesId::new(hash(10));
+        let series_id = series_id(10);
 
         let first = AuraReleaseId::derive(series_id, &provenance(20)).unwrap();
         let second = AuraReleaseId::derive(series_id, &provenance(21)).unwrap();
