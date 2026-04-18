@@ -1,9 +1,10 @@
 //! Biscuit bridge contracts — token creation, fact extraction, and
 //! basic authorization flow through the BiscuitAuthorizationBridge.
 
-use aura_authorization::biscuit_authorization::BiscuitAuthorizationBridge;
+use super::common;
+use aura_authorization::biscuit_evaluator::BiscuitAuthorizationBridge;
+use aura_core::capability_name;
 use aura_core::types::scope::{AuthorityOp, AuthorizationOp, ResourceScope};
-use aura_core::{capability_name, types::identifiers::AuthorityId};
 use biscuit_auth::macros::*;
 
 /// Token with read capability passes authorization — the happy path
@@ -19,10 +20,9 @@ fn biscuit_bridge_authorizes_basic_token() {
     let token = builder
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build read-capability token: {err:?}"));
-    let bridge =
-        BiscuitAuthorizationBridge::new(keypair.public(), AuthorityId::new_from_entropy([1u8; 32]));
+    let bridge = BiscuitAuthorizationBridge::new(keypair.public(), common::authority_id(1));
     let scope = ResourceScope::Authority {
-        authority_id: AuthorityId::new_from_entropy([70u8; 32]),
+        authority_id: common::authority_id(70),
         operation: AuthorityOp::UpdateTree,
     };
 
@@ -41,8 +41,7 @@ fn biscuit_bridge_extracts_token_facts() {
     let token = builder
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build empty biscuit token: {err:?}"));
-    let bridge =
-        BiscuitAuthorizationBridge::new(keypair.public(), AuthorityId::new_from_entropy([2u8; 32]));
+    let bridge = BiscuitAuthorizationBridge::new(keypair.public(), common::authority_id(2));
 
     let facts = bridge.extract_token_facts_from_blocks(&token);
     assert!(!facts.is_empty());
@@ -52,8 +51,7 @@ fn biscuit_bridge_extracts_token_facts() {
 /// Namespaced capabilities with `:` remain valid Biscuit capability tokens.
 #[test]
 fn biscuit_bridge_accepts_namespaced_capability_tokens() {
-    let authority =
-        aura_authorization::TokenAuthority::new(AuthorityId::new_from_entropy([3u8; 32]));
+    let authority = common::token_authority(3);
     let recipient = authority.authority_id();
     let token = authority
         .create_token(recipient, vec![capability_name!("invitation:decline")])
@@ -69,8 +67,7 @@ fn biscuit_bridge_accepts_namespaced_capability_tokens() {
 /// Default member tokens must authorize runtime guard-chain send operations.
 #[test]
 fn biscuit_bridge_default_member_token_carries_guard_chain_send_capabilities() {
-    let authority =
-        aura_authorization::TokenAuthority::new(AuthorityId::new_from_entropy([4u8; 32]));
+    let authority = common::token_authority(4);
     let recipient = authority.authority_id();
     let token = authority
         .create_token(

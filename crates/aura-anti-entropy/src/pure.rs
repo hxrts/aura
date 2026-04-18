@@ -37,29 +37,7 @@ pub fn compute_cids_to_pull(local: &BloomDigest, remote: &BloomDigest) -> BTreeS
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{tree::TreeOpKind, Epoch, TreeOp};
-    use aura_journal::{LeafId, LeafNode, NodeIndex};
-
-    fn create_test_op(commitment: Hash32) -> AttestedOp {
-        AttestedOp {
-            op: TreeOp {
-                parent_commitment: commitment.0,
-                parent_epoch: Epoch::new(1),
-                op: TreeOpKind::AddLeaf {
-                    leaf: LeafNode::new_device(
-                        LeafId(1),
-                        aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]),
-                        vec![1, 2, 3],
-                    )
-                    .expect("valid leaf"),
-                    under: NodeIndex(0),
-                },
-                version: 1,
-            },
-            agg_sig: vec![],
-            signer_count: 1,
-        }
-    }
+    use crate::test_support::{create_test_op, digest_from_hashes};
 
     #[test]
     fn compute_ops_to_push_only_missing_remote() {
@@ -67,12 +45,8 @@ mod tests {
         let op2 = create_test_op(Hash32([2u8; 32]));
         let oplog = vec![op1, op2];
 
-        let local = BloomDigest {
-            cids: [Hash32([1u8; 32]), Hash32([2u8; 32])].into_iter().collect(),
-        };
-        let remote = BloomDigest {
-            cids: [Hash32([2u8; 32])].into_iter().collect(),
-        };
+        let local = digest_from_hashes([Hash32([1u8; 32]), Hash32([2u8; 32])]);
+        let remote = digest_from_hashes([Hash32([2u8; 32])]);
 
         let result = compute_ops_to_push(&oplog, &local, &remote).unwrap();
         assert_eq!(result.len(), 1);
@@ -81,12 +55,8 @@ mod tests {
 
     #[test]
     fn compute_cids_to_pull_only_missing_local() {
-        let local = BloomDigest {
-            cids: [Hash32([1u8; 32])].into_iter().collect(),
-        };
-        let remote = BloomDigest {
-            cids: [Hash32([1u8; 32]), Hash32([2u8; 32])].into_iter().collect(),
-        };
+        let local = digest_from_hashes([Hash32([1u8; 32])]);
+        let remote = digest_from_hashes([Hash32([1u8; 32]), Hash32([2u8; 32])]);
 
         let result = compute_cids_to_pull(&local, &remote);
         assert_eq!(result.len(), 1);
@@ -103,14 +73,8 @@ mod tests {
         let op3 = create_test_op(Hash32([3u8; 32]));
         let oplog = vec![op1, op2, op3];
 
-        let local = BloomDigest {
-            cids: [Hash32([1u8; 32]), Hash32([2u8; 32]), Hash32([3u8; 32])]
-                .into_iter()
-                .collect(),
-        };
-        let remote = BloomDigest {
-            cids: [Hash32([2u8; 32])].into_iter().collect(),
-        };
+        let local = digest_from_hashes([Hash32([1u8; 32]), Hash32([2u8; 32]), Hash32([3u8; 32])]);
+        let remote = digest_from_hashes([Hash32([2u8; 32])]);
 
         let push_a = compute_ops_to_push(&oplog, &local, &remote).unwrap();
         let push_b = compute_ops_to_push(&oplog, &local, &remote).unwrap();
@@ -128,12 +92,8 @@ mod tests {
     /// identify the same missing CIDs (just from different perspectives).
     #[test]
     fn reconciliation_is_symmetric() {
-        let local = BloomDigest {
-            cids: [Hash32([1u8; 32]), Hash32([2u8; 32])].into_iter().collect(),
-        };
-        let remote = BloomDigest {
-            cids: [Hash32([2u8; 32]), Hash32([3u8; 32])].into_iter().collect(),
-        };
+        let local = digest_from_hashes([Hash32([1u8; 32]), Hash32([2u8; 32])]);
+        let remote = digest_from_hashes([Hash32([2u8; 32]), Hash32([3u8; 32])]);
 
         // A pushes to B: ops that A has but B doesn't
         let op1 = create_test_op(Hash32([1u8; 32]));

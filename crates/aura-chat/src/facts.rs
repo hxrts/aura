@@ -262,6 +262,27 @@ impl ChannelContextIndex {
 }
 
 impl ChatFact {
+    fn physical_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
+    fn channel_binding_key(sub_type: &'static str, channel_id: &ChannelId) -> ChatFactKey {
+        ChatFactKey {
+            sub_type,
+            data: channel_id.to_string().into_bytes(),
+        }
+    }
+
+    fn message_binding_key(sub_type: &'static str, message_id: &str) -> ChatFactKey {
+        ChatFactKey {
+            sub_type,
+            data: message_id.as_bytes().to_vec(),
+        }
+    }
+
     /// Get the timestamp in milliseconds (backward compatibility)
     pub fn timestamp_ms(&self) -> u64 {
         match self {
@@ -284,38 +305,30 @@ impl ChatFact {
     /// Derive the relational binding subtype and key data for this fact.
     pub fn binding_key(&self) -> ChatFactKey {
         match self {
-            ChatFact::ChannelCreated { channel_id, .. } => ChatFactKey {
-                sub_type: "channel-created",
-                data: channel_id.to_string().into_bytes(),
-            },
-            ChatFact::ChannelClosed { channel_id, .. } => ChatFactKey {
-                sub_type: "channel-closed",
-                data: channel_id.to_string().into_bytes(),
-            },
-            ChatFact::ChannelUpdated { channel_id, .. } => ChatFactKey {
-                sub_type: "channel-updated",
-                data: channel_id.to_string().into_bytes(),
-            },
-            ChatFact::MessageSentSealed { message_id, .. } => ChatFactKey {
-                sub_type: "message-sent",
-                data: message_id.as_bytes().to_vec(),
-            },
-            ChatFact::MessageRead { message_id, .. } => ChatFactKey {
-                sub_type: "message-read",
-                data: message_id.as_bytes().to_vec(),
-            },
-            ChatFact::MessageEdited { message_id, .. } => ChatFactKey {
-                sub_type: "message-edited",
-                data: message_id.as_bytes().to_vec(),
-            },
-            ChatFact::MessageDeliveryUpdated { message_id, .. } => ChatFactKey {
-                sub_type: "message-delivery-updated",
-                data: message_id.as_bytes().to_vec(),
-            },
-            ChatFact::MessageDeleted { message_id, .. } => ChatFactKey {
-                sub_type: "message-deleted",
-                data: message_id.as_bytes().to_vec(),
-            },
+            ChatFact::ChannelCreated { channel_id, .. } => {
+                Self::channel_binding_key("channel-created", channel_id)
+            }
+            ChatFact::ChannelClosed { channel_id, .. } => {
+                Self::channel_binding_key("channel-closed", channel_id)
+            }
+            ChatFact::ChannelUpdated { channel_id, .. } => {
+                Self::channel_binding_key("channel-updated", channel_id)
+            }
+            ChatFact::MessageSentSealed { message_id, .. } => {
+                Self::message_binding_key("message-sent", message_id)
+            }
+            ChatFact::MessageRead { message_id, .. } => {
+                Self::message_binding_key("message-read", message_id)
+            }
+            ChatFact::MessageEdited { message_id, .. } => {
+                Self::message_binding_key("message-edited", message_id)
+            }
+            ChatFact::MessageDeliveryUpdated { message_id, .. } => {
+                Self::message_binding_key("message-delivery-updated", message_id)
+            }
+            ChatFact::MessageDeleted { message_id, .. } => {
+                Self::message_binding_key("message-deleted", message_id)
+            }
         }
     }
 
@@ -335,10 +348,7 @@ impl ChatFact {
             name,
             topic,
             is_dm,
-            created_at: PhysicalTime {
-                ts_ms: created_at_ms,
-                uncertainty: None,
-            },
+            created_at: Self::physical_time(created_at_ms),
             creator_id,
         }
     }
@@ -353,10 +363,7 @@ impl ChatFact {
         Self::ChannelClosed {
             context_id,
             channel_id,
-            closed_at: PhysicalTime {
-                ts_ms: closed_at_ms,
-                uncertainty: None,
-            },
+            closed_at: Self::physical_time(closed_at_ms),
             actor_id,
         }
     }
@@ -379,10 +386,7 @@ impl ChatFact {
             topic,
             member_count,
             member_ids,
-            updated_at: PhysicalTime {
-                ts_ms: updated_at_ms,
-                uncertainty: None,
-            },
+            updated_at: Self::physical_time(updated_at_ms),
             actor_id,
         }
     }
@@ -407,10 +411,7 @@ impl ChatFact {
             sender_id,
             sender_name,
             payload,
-            sent_at: PhysicalTime {
-                ts_ms: sent_at_ms,
-                uncertainty: None,
-            },
+            sent_at: Self::physical_time(sent_at_ms),
             reply_to,
             epoch_hint,
         }
@@ -429,10 +430,7 @@ impl ChatFact {
             channel_id,
             message_id,
             reader_id,
-            read_at: PhysicalTime {
-                ts_ms: read_at_ms,
-                uncertainty: None,
-            },
+            read_at: Self::physical_time(read_at_ms),
         }
     }
 
@@ -453,10 +451,7 @@ impl ChatFact {
             message_id,
             editor_id,
             new_payload,
-            edited_at: PhysicalTime {
-                ts_ms: edited_at_ms,
-                uncertainty: None,
-            },
+            edited_at: Self::physical_time(edited_at_ms),
         }
     }
 
@@ -474,10 +469,7 @@ impl ChatFact {
             channel_id,
             message_id,
             delivery_status,
-            updated_at: PhysicalTime {
-                ts_ms: updated_at_ms,
-                uncertainty: None,
-            },
+            updated_at: Self::physical_time(updated_at_ms),
             actor_id,
         }
     }
@@ -497,10 +489,7 @@ impl ChatFact {
             channel_id,
             message_id,
             deleter_id,
-            deleted_at: PhysicalTime {
-                ts_ms: deleted_at_ms,
-                uncertainty: None,
-            },
+            deleted_at: Self::physical_time(deleted_at_ms),
         }
     }
 }
@@ -543,29 +532,18 @@ impl FactReducer for ChatFactReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_context_id() -> ContextId {
-        ContextId::new_from_entropy([42u8; 32])
-    }
-
-    fn test_channel_id() -> ChannelId {
-        ChannelId::from_bytes([1u8; 32])
-    }
-
-    fn test_authority_id() -> AuthorityId {
-        AuthorityId::new_from_entropy([2u8; 32])
-    }
+    use crate::test_support::{test_authority_id, test_channel_id, test_context_id};
 
     #[test]
     fn test_chat_fact_serialization() {
         let fact = ChatFact::channel_created_ms(
-            test_context_id(),
-            test_channel_id(),
+            test_context_id(42),
+            test_channel_id(1),
             "general".to_string(),
             Some("General discussion".to_string()),
             false,
             1234567890,
-            test_authority_id(),
+            test_authority_id(2),
         );
 
         let bytes = fact.to_bytes();
@@ -580,17 +558,17 @@ mod tests {
     fn reducer_rejects_context_mismatch() {
         let reducer = ChatFactReducer;
         let fact = ChatFact::channel_created_ms(
-            test_context_id(),
-            test_channel_id(),
+            test_context_id(42),
+            test_channel_id(1),
             "general".to_string(),
             None,
             false,
             123,
-            test_authority_id(),
+            test_authority_id(2),
         );
 
         // Reduce under a different context id should be rejected.
-        let other_context = ContextId::new_from_entropy([43u8; 32]);
+        let other_context = test_context_id(43);
         let binding = reducer.reduce_envelope(other_context, &fact.to_envelope());
         assert!(binding.is_none());
     }
@@ -598,10 +576,10 @@ mod tests {
     #[test]
     fn test_chat_fact_to_generic() {
         let fact = ChatFact::message_sent_sealed_ms(
-            test_context_id(),
-            test_channel_id(),
+            test_context_id(42),
+            test_channel_id(1),
             "msg-123".to_string(),
-            test_authority_id(),
+            test_authority_id(2),
             "Alice".to_string(),
             b"Hello, world!".to_vec(),
             1234567890,
@@ -626,17 +604,17 @@ mod tests {
         assert_eq!(reducer.handles_type(), CHAT_FACT_TYPE_ID);
 
         let fact = ChatFact::channel_created_ms(
-            test_context_id(),
-            test_channel_id(),
+            test_context_id(42),
+            test_channel_id(1),
             "test".to_string(),
             None,
             false,
             0,
-            test_authority_id(),
+            test_authority_id(2),
         );
 
         let envelope = fact.to_envelope();
-        let binding = reducer.reduce_envelope(test_context_id(), &envelope);
+        let binding = reducer.reduce_envelope(test_context_id(42), &envelope);
 
         assert!(binding.is_some());
         let binding = binding.unwrap();
@@ -650,25 +628,25 @@ mod tests {
     fn test_type_id_consistency() {
         let facts = vec![
             ChatFact::channel_created_ms(
-                test_context_id(),
-                test_channel_id(),
+                test_context_id(42),
+                test_channel_id(1),
                 "test".to_string(),
                 None,
                 false,
                 0,
-                test_authority_id(),
+                test_authority_id(2),
             ),
             ChatFact::channel_closed_ms(
-                test_context_id(),
-                test_channel_id(),
+                test_context_id(42),
+                test_channel_id(1),
                 0,
-                test_authority_id(),
+                test_authority_id(2),
             ),
             ChatFact::message_sent_sealed_ms(
-                test_context_id(),
-                test_channel_id(),
+                test_context_id(42),
+                test_channel_id(1),
                 "msg".to_string(),
-                test_authority_id(),
+                test_authority_id(2),
                 "Test".to_string(),
                 b"Hello".to_vec(),
                 0,
@@ -676,10 +654,10 @@ mod tests {
                 None, // epoch_hint
             ),
             ChatFact::message_read_ms(
-                test_context_id(),
-                test_channel_id(),
+                test_context_id(42),
+                test_channel_id(1),
                 "msg".to_string(),
-                test_authority_id(),
+                test_authority_id(2),
                 0,
             ),
         ];
@@ -694,15 +672,15 @@ mod tests {
     #[test]
     fn test_reducer_idempotence() {
         let reducer = ChatFactReducer;
-        let context_id = test_context_id();
+        let context_id = test_context_id(42);
         let fact = ChatFact::channel_created_ms(
             context_id,
-            test_channel_id(),
+            test_channel_id(1),
             "general".to_string(),
             None,
             false,
             0,
-            test_authority_id(),
+            test_authority_id(2),
         );
 
         let envelope = fact.to_envelope();
@@ -720,11 +698,11 @@ mod tests {
     #[test]
     fn test_message_lifecycle_facts() {
         // Test the message lifecycle: Sent -> Read
-        let context = test_context_id();
-        let channel = test_channel_id();
+        let context = test_context_id(42);
+        let channel = test_channel_id(1);
         let message_id = "lifecycle-msg-001".to_string();
-        let sender = test_authority_id();
-        let reader = AuthorityId::new_from_entropy([3u8; 32]);
+        let sender = test_authority_id(2);
+        let reader = test_authority_id(3);
 
         // 1. Message sent
         let sent = ChatFact::message_sent_sealed_ms(
@@ -751,9 +729,9 @@ mod tests {
 
     #[test]
     fn channel_context_index_tracks_created_channels() {
-        let context = test_context_id();
-        let channel = test_channel_id();
-        let creator = test_authority_id();
+        let context = test_context_id(42);
+        let channel = test_channel_id(1);
+        let creator = test_authority_id(2);
         let mut index = ChannelContextIndex::new();
 
         index.apply_fact(&ChatFact::channel_created_ms(

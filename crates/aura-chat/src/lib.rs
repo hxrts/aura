@@ -80,6 +80,8 @@ pub mod fact_service;
 pub mod facts;
 pub mod group;
 pub mod guards;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod types;
 pub mod view;
 

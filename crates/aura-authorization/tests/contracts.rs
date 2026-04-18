@@ -7,6 +7,9 @@
 #[path = "contracts/token_attenuation.rs"]
 mod token_attenuation;
 
+#[path = "contracts/common.rs"]
+mod common;
+
 #[path = "contracts/biscuit_bridge.rs"]
 mod biscuit_bridge;
 

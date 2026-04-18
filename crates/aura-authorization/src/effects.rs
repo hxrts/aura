@@ -5,7 +5,7 @@
 //! Layer 2 pattern where application effects are implemented in domain crates
 //! using business logic combined with infrastructure effect composition.
 
-use crate::biscuit_authorization::BiscuitAuthorizationBridge;
+use crate::biscuit_evaluator::BiscuitAuthorizationBridge;
 use async_trait::async_trait;
 use aura_core::effects::{AuthorizationEffects, AuthorizationError, CryptoEffects};
 use aura_core::types::scope::{AuthorizationOp, ResourceScope};
@@ -32,24 +32,26 @@ pub struct WotAuthorizationHandler<C: CryptoEffects> {
 }
 
 impl<C: CryptoEffects> WotAuthorizationHandler<C> {
-    /// Create a new WoT authorization handler with infrastructure effect dependencies
-    pub fn new(crypto: C, root_public_key: PublicKey, authority_id: AuthorityId) -> Self {
+    fn with_bridge(crypto: C, biscuit_bridge: BiscuitAuthorizationBridge) -> Self {
         Self {
             crypto,
-            biscuit_bridge: BiscuitAuthorizationBridge::new(root_public_key, authority_id),
+            biscuit_bridge,
             time_provider: None,
             _phantom: PhantomData,
         }
     }
 
+    /// Create a new WoT authorization handler with infrastructure effect dependencies
+    pub fn new(crypto: C, root_public_key: PublicKey, authority_id: AuthorityId) -> Self {
+        Self::with_bridge(
+            crypto,
+            BiscuitAuthorizationBridge::new(root_public_key, authority_id),
+        )
+    }
+
     /// Create a mock handler for testing and development
     pub fn new_mock(crypto: C) -> Self {
-        Self {
-            crypto,
-            biscuit_bridge: BiscuitAuthorizationBridge::new_mock(),
-            time_provider: None,
-            _phantom: PhantomData,
-        }
+        Self::with_bridge(crypto, BiscuitAuthorizationBridge::new_mock())
     }
 
     /// Provide a time source for Biscuit authorization checks.

@@ -50,19 +50,24 @@ pub enum DkdCapability {
     Finalize,
 }
 
-pub fn evaluation_candidates_for_auth_guard() -> &'static [AuthenticationCapability] {
-    AuthenticationCapability::declared_names()
+macro_rules! declared_candidates_fn {
+    ($fn_name:ident, $capability:ty) => {
+        pub fn $fn_name() -> &'static [$capability] {
+            <$capability>::declared_names()
+        }
+    };
 }
 
-pub fn evaluation_candidates_for_guardian_auth_protocol() -> &'static [GuardianAuthCapability] {
-    GuardianAuthCapability::declared_names()
-}
-
-pub fn evaluation_candidates_for_recovery_authorization(
-) -> &'static [RecoveryAuthorizationCapability] {
-    RecoveryAuthorizationCapability::declared_names()
-}
-
-pub fn evaluation_candidates_for_dkd_protocol() -> &'static [DkdCapability] {
-    DkdCapability::declared_names()
-}
+declared_candidates_fn!(
+    evaluation_candidates_for_auth_guard,
+    AuthenticationCapability
+);
+declared_candidates_fn!(
+    evaluation_candidates_for_guardian_auth_protocol,
+    GuardianAuthCapability
+);
+declared_candidates_fn!(
+    evaluation_candidates_for_recovery_authorization,
+    RecoveryAuthorizationCapability
+);
+declared_candidates_fn!(evaluation_candidates_for_dkd_protocol, DkdCapability);

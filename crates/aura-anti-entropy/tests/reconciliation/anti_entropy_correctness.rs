@@ -5,8 +5,11 @@
 
 #![allow(clippy::expect_used, clippy::clone_on_copy)]
 
-use aura_anti_entropy::{AntiEntropyConfig, BloomDigest, SyncError};
-use aura_core::{types::identifiers::DeviceId, Hash32, ProtocolErrorCode};
+use aura_anti_entropy::{
+    test_support::{digest_from_hashes, test_device},
+    AntiEntropyConfig, BloomDigest, SyncError,
+};
+use aura_core::{Hash32, ProtocolErrorCode};
 use std::collections::BTreeSet;
 
 // ============================================================================
@@ -96,7 +99,7 @@ fn digest_differs_with_different_cids() {
 
 #[test]
 fn sync_error_codes_are_unique() {
-    let device = DeviceId::new_from_entropy([0u8; 32]);
+    let device = test_device(0);
     let errors = vec![
         SyncError::PeerUnreachable(device.clone()),
         SyncError::VerificationFailed {
@@ -143,7 +146,7 @@ fn sync_error_display_is_meaningful() {
 
 #[test]
 fn peer_unreachable_error_message() {
-    let device = DeviceId::new_from_entropy([1u8; 32]);
+    let device = test_device(1);
     let err = SyncError::PeerUnreachable(device);
     let msg = format!("{err}");
 
@@ -223,12 +226,8 @@ fn digest_set_operations() {
     let cid2 = Hash32([2u8; 32]);
     let cid3 = Hash32([3u8; 32]);
 
-    let digest1 = BloomDigest {
-        cids: [cid1, cid2].into_iter().collect(),
-    };
-    let digest2 = BloomDigest {
-        cids: [cid2, cid3].into_iter().collect(),
-    };
+    let digest1 = digest_from_hashes([cid1, cid2]);
+    let digest2 = digest_from_hashes([cid2, cid3]);
 
     // Union operation
     let union: BTreeSet<Hash32> = digest1.cids.union(&digest2.cids).copied().collect();

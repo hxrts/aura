@@ -4,13 +4,10 @@
 //! must be rejected, policy rules must deny unauthorized scopes, and
 //! budget exhaustion must be enforced.
 
-use aura_authorization::biscuit_authorization::BiscuitAuthorizationBridge;
-use aura_authorization::{BiscuitTokenManager, ContextOp, ResourceScope, TokenAuthority};
+use super::common;
+use aura_authorization::biscuit_evaluator::BiscuitAuthorizationBridge;
+use aura_authorization::{BiscuitTokenManager, TokenAuthority};
 use aura_core::types::scope::AuthorizationOp;
-use aura_core::{
-    capability_name,
-    types::identifiers::{AuthorityId, ContextId},
-};
 
 // ============================================================================
 // Cross-authority isolation
@@ -23,25 +20,19 @@ use aura_core::{
 /// trust roots.
 #[test]
 fn cross_authority_token_rejected() {
-    let authority_a = TokenAuthority::new(AuthorityId::new_from_entropy([1u8; 32]));
-    let authority_b = TokenAuthority::new(AuthorityId::new_from_entropy([2u8; 32]));
-    let recipient = AuthorityId::new_from_entropy([3u8; 32]);
+    let authority_a = common::token_authority(1);
+    let authority_b = common::token_authority(2);
+    let recipient = common::authority_id(3);
 
     let token = authority_a
-        .create_token(recipient, vec![capability_name!("read")])
+        .create_token(recipient, common::read_capability())
         .unwrap_or_else(|err| panic!("token creation failed: {err:?}"));
 
     // Evaluated by B's bridge (different root key)
-    let bridge_b = BiscuitAuthorizationBridge::new(
-        authority_b.root_public_key(),
-        AuthorityId::new_from_entropy([2u8; 32]),
-    );
+    let bridge_b =
+        BiscuitAuthorizationBridge::new(authority_b.root_public_key(), common::authority_id(2));
 
-    let context = ContextId::new_from_entropy([10u8; 32]);
-    let scope = ResourceScope::Context {
-        context_id: context,
-        operation: ContextOp::AddBinding,
-    };
+    let scope = common::context_scope(10);
 
     // Authorization must fail — token signed by A's key, verified against B's key
     let result = bridge_b.authorize(&token, AuthorizationOp::Read, &scope);
@@ -61,7 +52,7 @@ fn cross_authority_token_rejected() {
 #[test]
 fn token_without_capability_denied() {
     let keypair = biscuit_auth::KeyPair::new();
-    let authority_id = AuthorityId::new_from_entropy([5u8; 32]);
+    let authority_id = common::authority_id(5);
 
     // Build a token with NO capabilities — only basic facts
     let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
@@ -73,10 +64,7 @@ fn token_without_capability_denied() {
         .unwrap_or_else(|err| panic!("failed to build capability-less token: {err:?}"));
 
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
-    let scope = ResourceScope::Context {
-        context_id: ContextId::new_from_entropy([6u8; 32]),
-        operation: ContextOp::AddBinding,
-    };
+    let scope = common::context_scope(6);
 
     // Write requires capability("write") — token doesn't have it
     let result = bridge
@@ -93,7 +81,7 @@ fn token_without_capability_denied() {
 #[test]
 fn read_capability_does_not_imply_write() {
     let keypair = biscuit_auth::KeyPair::new();
-    let authority_id = AuthorityId::new_from_entropy([7u8; 32]);
+    let authority_id = common::authority_id(7);
 
     let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
     builder
@@ -104,10 +92,7 @@ fn read_capability_does_not_imply_write() {
         .unwrap_or_else(|err| panic!("failed to build read-capability token: {err:?}"));
 
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
-    let scope = ResourceScope::Context {
-        context_id: ContextId::new_from_entropy([8u8; 32]),
-        operation: ContextOp::AddBinding,
-    };
+    let scope = common::context_scope(8);
 
     let read_result = bridge
         .authorize(&token, AuthorizationOp::Read, &scope)
@@ -131,15 +116,12 @@ fn read_capability_does_not_imply_write() {
 /// first attenuation. Attenuation is monotonically restrictive.
 #[test]
 fn double_attenuation_cannot_restore_capabilities() {
-    let issuer = AuthorityId::new_from_entropy([20u8; 32]);
-    let recipient = AuthorityId::new_from_entropy([21u8; 32]);
+    let issuer = common::authority_id(20);
+    let recipient = common::authority_id(21);
 
     let authority = TokenAuthority::new(issuer);
     let token = authority
-        .create_token(
-            recipient,
-            vec![capability_name!("read"), capability_name!("write")],
-        )
+        .create_token(recipient, common::read_write_capabilities())
         .unwrap_or_else(|err| panic!("failed to create base token: {err:?}"));
 
     // First attenuation: restrict to read only
@@ -150,10 +132,7 @@ fn double_attenuation_cannot_restore_capabilities() {
 
     // Verify write is blocked
     let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
-    let scope = ResourceScope::Context {
-        context_id: ContextId::new_from_entropy([22u8; 32]),
-        operation: ContextOp::AddBinding,
-    };
+    let scope = common::context_scope(22);
 
     let write_check = bridge
         .authorize(&read_only, AuthorizationOp::Write, &scope)

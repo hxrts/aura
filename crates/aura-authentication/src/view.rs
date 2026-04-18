@@ -163,29 +163,144 @@ impl AuthView {
 
     /// Get expired sessions that should be cleaned up
     pub fn get_expired_sessions(&self, now_ms: u64) -> Vec<String> {
-        self.active_sessions
-            .iter()
-            .filter(|(_, s)| s.expires_at_ms <= now_ms)
-            .map(|(id, _)| id.clone())
-            .collect()
+        collect_expired_ids(&self.active_sessions, now_ms, |session| {
+            session.expires_at_ms
+        })
     }
 
     /// Get expired challenges that should be cleaned up
     pub fn get_expired_challenges(&self, now_ms: u64) -> Vec<String> {
-        self.pending_challenges
-            .iter()
-            .filter(|(_, c)| c.expires_at_ms <= now_ms)
-            .map(|(id, _)| id.clone())
-            .collect()
+        collect_expired_ids(&self.pending_challenges, now_ms, |challenge| {
+            challenge.expires_at_ms
+        })
     }
 
     /// Get expired recovery requests that should be cleaned up
     pub fn get_expired_recoveries(&self, now_ms: u64) -> Vec<String> {
-        self.pending_recoveries
-            .iter()
-            .filter(|(_, r)| r.expires_at_ms <= now_ms)
-            .map(|(id, _)| id.clone())
-            .collect()
+        collect_expired_ids(&self.pending_recoveries, now_ms, |recovery| {
+            recovery.expires_at_ms
+        })
+    }
+}
+
+fn collect_expired_ids<T>(
+    entries: &HashMap<String, T>,
+    now_ms: u64,
+    expires_at_ms: impl Fn(&T) -> u64,
+) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|(_, entry)| expires_at_ms(entry) <= now_ms)
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
+fn add_pending_challenge(
+    view: &mut AuthView,
+    session_id: String,
+    authority_id: AuthorityId,
+    expires_at_ms: u64,
+) {
+    view.pending_challenges.insert(
+        session_id.clone(),
+        ChallengeInfo {
+            session_id,
+            authority_id,
+            expires_at_ms,
+        },
+    );
+}
+
+fn activate_session(
+    view: &mut AuthView,
+    session_id: String,
+    authority_id: AuthorityId,
+    scope: SessionScope,
+    issued_at_ms: u64,
+    expires_at_ms: u64,
+) {
+    view.pending_challenges.remove(&session_id);
+    view.active_sessions.insert(
+        session_id.clone(),
+        SessionInfo {
+            session_id,
+            authority_id,
+            scope,
+            issued_at_ms,
+            expires_at_ms,
+        },
+    );
+}
+
+fn insert_pending_recovery(
+    view: &mut AuthView,
+    request_id: String,
+    account_id: AuthorityId,
+    requester_id: AuthorityId,
+    operation_type: RecoveryOperationType,
+    required_guardians: u32,
+    is_emergency: bool,
+    expires_at_ms: u64,
+) {
+    view.pending_recoveries.insert(
+        request_id.clone(),
+        RecoveryInfo {
+            request_id,
+            account_id,
+            requester_id,
+            operation_type,
+            required_guardians,
+            approval_count: 0,
+            approvers: vec![],
+            is_emergency,
+            expires_at_ms,
+        },
+    );
+}
+
+fn add_guardian_approval(view: &mut AuthView, request_id: String, guardian_id: AuthorityId) {
+    if let Some(recovery) = view.pending_recoveries.get_mut(&request_id) {
+        if !recovery.approvers.contains(&guardian_id) {
+            recovery.approvers.push(guardian_id);
+            recovery.approval_count += 1;
+        }
+    }
+
+    view.guardian_approvals
+        .entry(request_id)
+        .or_default()
+        .push(guardian_id);
+}
+
+fn record_recovery_failure(view: &mut AuthView, request_id: String, reason: RecoveryFailureReason) {
+    let account_id = view
+        .pending_recoveries
+        .get(&request_id)
+        .map(|r| r.account_id);
+    view.recent_recovery_failures.push(RecoveryFailureRecord {
+        request_id: request_id.clone(),
+        account_id,
+        reason,
+    });
+    view.pending_recoveries.remove(&request_id);
+}
+
+fn record_auth_failure(
+    view: &mut AuthView,
+    session_id: String,
+    authority_id: AuthorityId,
+    reason: String,
+    failed_at_ms: u64,
+) {
+    view.recent_failures.push(FailureRecord {
+        session_id,
+        authority_id,
+        reason: AuthFailureReason::VerificationFailed { reason },
+        failed_at_ms,
+    });
+
+    if view.recent_failures.len() > 100 {
+        view.recent_failures.remove(0);
     }
 }
 
@@ -225,14 +340,7 @@ impl AuthViewReducer {
                 authority_id,
                 expires_at_ms,
             } => {
-                view.pending_challenges.insert(
-                    session_id.clone(),
-                    ChallengeInfo {
-                        session_id,
-                        authority_id,
-                        expires_at_ms,
-                    },
-                );
+                add_pending_challenge(view, session_id, authority_id, expires_at_ms);
             }
 
             AuthFactDelta::ActiveSession {
@@ -241,22 +349,14 @@ impl AuthViewReducer {
                 scope,
                 expires_at_ms,
             } => {
-                // Remove from pending challenges
-                view.pending_challenges.remove(&session_id);
-
-                // Get issued_at from the fact
                 let issued_at_ms = fact.timestamp_ms();
-
-                // Add to active sessions
-                view.active_sessions.insert(
-                    session_id.clone(),
-                    SessionInfo {
-                        session_id,
-                        authority_id,
-                        scope,
-                        issued_at_ms,
-                        expires_at_ms,
-                    },
+                activate_session(
+                    view,
+                    session_id,
+                    authority_id,
+                    scope,
+                    issued_at_ms,
+                    expires_at_ms,
                 );
             }
 
@@ -289,19 +389,15 @@ impl AuthViewReducer {
                         )
                     };
 
-                view.pending_recoveries.insert(
-                    request_id.clone(),
-                    RecoveryInfo {
-                        request_id,
-                        account_id,
-                        requester_id,
-                        operation_type,
-                        required_guardians,
-                        approval_count: 0,
-                        approvers: vec![],
-                        is_emergency,
-                        expires_at_ms,
-                    },
+                insert_pending_recovery(
+                    view,
+                    request_id,
+                    account_id,
+                    requester_id,
+                    operation_type,
+                    required_guardians,
+                    is_emergency,
+                    expires_at_ms,
                 );
             }
 
@@ -309,19 +405,7 @@ impl AuthViewReducer {
                 request_id,
                 guardian_id,
             } => {
-                // Update approval count in pending recovery
-                if let Some(recovery) = view.pending_recoveries.get_mut(&request_id) {
-                    if !recovery.approvers.contains(&guardian_id) {
-                        recovery.approvers.push(guardian_id);
-                        recovery.approval_count += 1;
-                    }
-                }
-
-                // Also track in guardian_approvals map
-                view.guardian_approvals
-                    .entry(request_id)
-                    .or_default()
-                    .push(guardian_id);
+                add_guardian_approval(view, request_id, guardian_id);
             }
 
             AuthFactDelta::RecoveryCompleted { request_id } => {
@@ -329,16 +413,7 @@ impl AuthViewReducer {
             }
 
             AuthFactDelta::RecoveryFailed { request_id, reason } => {
-                let account_id = view
-                    .pending_recoveries
-                    .get(&request_id)
-                    .map(|r| r.account_id);
-                view.recent_recovery_failures.push(RecoveryFailureRecord {
-                    request_id: request_id.clone(),
-                    account_id,
-                    reason,
-                });
-                view.pending_recoveries.remove(&request_id);
+                record_recovery_failure(view, request_id, reason);
             }
         }
 
@@ -351,19 +426,13 @@ impl AuthViewReducer {
             ..
         } = fact
         {
-            view.recent_failures.push(FailureRecord {
-                session_id: session_id.clone(),
-                authority_id: *authority_id,
-                reason: AuthFailureReason::VerificationFailed {
-                    reason: reason.clone(),
-                },
-                failed_at_ms: *failed_at_ms,
-            });
-
-            // Keep only last 100 failures
-            if view.recent_failures.len() > 100 {
-                view.recent_failures.remove(0);
-            }
+            record_auth_failure(
+                view,
+                session_id.clone(),
+                *authority_id,
+                reason.clone(),
+                *failed_at_ms,
+            );
         }
     }
 
@@ -384,20 +453,7 @@ impl AuthViewReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::ContextId;
-    use aura_signature::session::SessionScope;
-
-    fn test_authority() -> AuthorityId {
-        AuthorityId::new_from_entropy([1u8; 32])
-    }
-
-    fn test_authority_2() -> AuthorityId {
-        AuthorityId::new_from_entropy([2u8; 32])
-    }
-
-    fn test_context_id() -> ContextId {
-        ContextId::new_from_entropy([9u8; 32])
-    }
+    use crate::test_support::{authority, context, protocol_scope};
 
     #[test]
     fn test_auth_view_new() {
@@ -416,13 +472,11 @@ mod tests {
 
         // Issue a session
         let fact = AuthFact::SessionIssued {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_123".to_string(),
-            authority_id: test_authority(),
+            authority_id: authority(1),
             device_id: None,
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            scope: protocol_scope("test"),
             issued_at_ms: 1000,
             expires_at_ms: 2000,
         };
@@ -434,9 +488,9 @@ mod tests {
 
         // Revoke the session
         let revoke_fact = AuthFact::SessionRevoked {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_123".to_string(),
-            revoked_by: test_authority(),
+            revoked_by: authority(1),
             reason: "User requested".to_string(),
             revoked_at_ms: 1500,
         };
@@ -452,10 +506,10 @@ mod tests {
 
         // Request guardian approval
         let request_fact = AuthFact::GuardianApprovalRequested {
-            context_id: test_context_id(),
+            context_id: context(9),
             request_id: "recovery_123".to_string(),
-            account_id: test_authority(),
-            requester_id: test_authority(),
+            account_id: authority(1),
+            requester_id: authority(1),
             operation_type: RecoveryOperationType::DeviceKeyRecovery,
             required_guardians: 2,
             is_emergency: false,
@@ -470,9 +524,9 @@ mod tests {
 
         // First guardian approves
         let approve1 = AuthFact::GuardianApproved {
-            context_id: test_context_id(),
+            context_id: context(9),
             request_id: "recovery_123".to_string(),
-            guardian_id: test_authority(),
+            guardian_id: authority(1),
             signature: vec![0u8; 64],
             justification: "Approved".to_string(),
             approved_at_ms: 2000,
@@ -489,9 +543,9 @@ mod tests {
 
         // Second guardian approves
         let approve2 = AuthFact::GuardianApproved {
-            context_id: test_context_id(),
+            context_id: context(9),
             request_id: "recovery_123".to_string(),
-            guardian_id: test_authority_2(),
+            guardian_id: authority(2),
             signature: vec![0u8; 64],
             justification: "Approved".to_string(),
             approved_at_ms: 3000,
@@ -513,9 +567,9 @@ mod tests {
         let mut view = AuthView::new();
 
         let fail_fact = AuthFact::AuthFailed {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_456".to_string(),
-            authority_id: test_authority(),
+            authority_id: authority(1),
             reason: "Invalid signature".to_string(),
             failed_at_ms: 1000,
         };
@@ -537,10 +591,10 @@ mod tests {
         let mut view = AuthView::new();
 
         let request_fact = AuthFact::GuardianApprovalRequested {
-            context_id: test_context_id(),
+            context_id: context(9),
             request_id: "recovery_789".to_string(),
-            account_id: test_authority(),
-            requester_id: test_authority_2(),
+            account_id: authority(1),
+            requester_id: authority(2),
             operation_type: RecoveryOperationType::AccountAccessRecovery,
             required_guardians: 2,
             is_emergency: false,
@@ -551,9 +605,9 @@ mod tests {
         reducer.apply(&mut view, &request_fact);
 
         let fail_fact = AuthFact::GuardianDenied {
-            context_id: test_context_id(),
+            context_id: context(9),
             request_id: "recovery_789".to_string(),
-            guardian_id: test_authority_2(),
+            guardian_id: authority(2),
             reason: "guardian denied".to_string(),
             denied_at_ms: 1500,
         };
@@ -580,10 +634,8 @@ mod tests {
                     "session_old".to_string(),
                     SessionInfo {
                         session_id: "session_old".to_string(),
-                        authority_id: test_authority(),
-                        scope: SessionScope::Protocol {
-                            protocol_type: "test".to_string(),
-                        },
+                        authority_id: authority(1),
+                        scope: protocol_scope("test"),
                         issued_at_ms: 0,
                         expires_at_ms: 1000,
                     },
@@ -592,10 +644,8 @@ mod tests {
                     "session_new".to_string(),
                     SessionInfo {
                         session_id: "session_new".to_string(),
-                        authority_id: test_authority(),
-                        scope: SessionScope::Protocol {
-                            protocol_type: "test".to_string(),
-                        },
+                        authority_id: authority(1),
+                        scope: protocol_scope("test"),
                         issued_at_ms: 500,
                         expires_at_ms: 2000,
                     },
@@ -619,10 +669,8 @@ mod tests {
                     "session_1".to_string(),
                     SessionInfo {
                         session_id: "session_1".to_string(),
-                        authority_id: test_authority(),
-                        scope: SessionScope::Protocol {
-                            protocol_type: "test".to_string(),
-                        },
+                        authority_id: authority(1),
+                        scope: protocol_scope("test"),
                         issued_at_ms: 0,
                         expires_at_ms: 2000,
                     },
@@ -631,10 +679,8 @@ mod tests {
                     "session_2".to_string(),
                     SessionInfo {
                         session_id: "session_2".to_string(),
-                        authority_id: test_authority_2(),
-                        scope: SessionScope::Protocol {
-                            protocol_type: "test".to_string(),
-                        },
+                        authority_id: authority(2),
+                        scope: protocol_scope("test"),
                         issued_at_ms: 0,
                         expires_at_ms: 2000,
                     },
@@ -644,7 +690,7 @@ mod tests {
             ..Default::default()
         };
 
-        let sessions = view.sessions_for_authority(test_authority());
+        let sessions = view.sessions_for_authority(authority(1));
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "session_1");
     }
@@ -655,24 +701,20 @@ mod tests {
 
         let facts = vec![
             AuthFact::SessionIssued {
-                context_id: test_context_id(),
+                context_id: context(9),
                 session_id: "session_1".to_string(),
-                authority_id: test_authority(),
+                authority_id: authority(1),
                 device_id: None,
-                scope: SessionScope::Protocol {
-                    protocol_type: "test".to_string(),
-                },
+                scope: protocol_scope("test"),
                 issued_at_ms: 1000,
                 expires_at_ms: 2000,
             },
             AuthFact::SessionIssued {
-                context_id: test_context_id(),
+                context_id: context(9),
                 session_id: "session_2".to_string(),
-                authority_id: test_authority_2(),
+                authority_id: authority(2),
                 device_id: None,
-                scope: SessionScope::Protocol {
-                    protocol_type: "test".to_string(),
-                },
+                scope: protocol_scope("test"),
                 issued_at_ms: 1500,
                 expires_at_ms: 2500,
             },
@@ -688,24 +730,20 @@ mod tests {
     fn test_reduce_all_commutes_for_disjoint_sessions() {
         let reducer = AuthViewReducer::new();
         let fact_a = AuthFact::SessionIssued {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_a".to_string(),
-            authority_id: test_authority(),
+            authority_id: authority(1),
             device_id: None,
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            scope: protocol_scope("test"),
             issued_at_ms: 1000,
             expires_at_ms: 2000,
         };
         let fact_b = AuthFact::SessionIssued {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_b".to_string(),
-            authority_id: test_authority_2(),
+            authority_id: authority(2),
             device_id: None,
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            scope: protocol_scope("test"),
             issued_at_ms: 1000,
             expires_at_ms: 2000,
         };

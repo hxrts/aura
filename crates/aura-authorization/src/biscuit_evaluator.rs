@@ -1,4 +1,4 @@
-//! Layer 2: Biscuit Cryptographic Authorization
+//! Layer 2: Biscuit Cryptographic Authorization Evaluation
 //!
 //! Cryptographic authorization infrastructure for Aura's Web of Trust system using Biscuit tokens.
 //! Biscuit provides attenuated, cryptographically-verifiable capabilities with Datalog policy evaluation.
@@ -41,9 +41,7 @@ impl BiscuitAuthorizationBridge {
         }
     }
 
-    /// Create a mock bridge for testing with a generated keypair
-    #[cfg(test)]
-    pub fn new_mock() -> Self {
+    fn test_bridge() -> Self {
         use biscuit_auth::KeyPair;
         let keypair = KeyPair::new();
         Self {
@@ -52,15 +50,16 @@ impl BiscuitAuthorizationBridge {
         }
     }
 
+    /// Create a mock bridge for testing with a generated keypair
+    #[cfg(test)]
+    pub fn new_mock() -> Self {
+        Self::test_bridge()
+    }
+
     /// Create a mock bridge for testing (non-test builds for integration)
     #[cfg(not(test))]
     pub fn new_mock() -> Self {
-        use biscuit_auth::KeyPair;
-        let keypair = KeyPair::new();
-        Self {
-            root_public_key: keypair.public(),
-            authority_id: AuthorityId::new_from_entropy(hash(&keypair.public().to_bytes())),
-        }
+        Self::test_bridge()
     }
 
     /// Production Biscuit authorization with cryptographic verification and Datalog policy evaluation
@@ -95,115 +94,17 @@ impl BiscuitAuthorizationBridge {
         let operation_name =
             CapabilityName::parse(operation.as_str()).map_err(invalid_capability_error)?;
         let operation_str = operation_name.as_str();
-        authorizer
-            .add_fact(fact!("operation({operation_str})"))
-            .map_err(BiscuitError::BiscuitLib)?;
-
-        let authority = self.authority_id.to_string();
-        authorizer
-            .add_fact(fact!("authority({authority})"))
-            .map_err(BiscuitError::BiscuitLib)?;
-
-        let time = current_time_seconds.map(|t| t as i64).unwrap_or(0);
-        authorizer
-            .add_fact(fact!("time({time})"))
-            .map_err(BiscuitError::BiscuitLib)?;
+        self.add_operation_authority_time_facts(
+            &mut authorizer,
+            operation_str,
+            current_time_seconds,
+        )?;
 
         // Add resource-specific facts based on ResourceScope
-        let resource_pattern = resource.resource_pattern();
-        authorizer
-            .add_fact(fact!("resource({resource_pattern})"))
-            .map_err(BiscuitError::BiscuitLib)?;
-
-        // Add resource type facts for more granular checks
-        match resource {
-            ResourceScope::Authority {
-                authority_id,
-                operation,
-            } => {
-                authorizer
-                    .add_fact(fact!("resource_type(\"authority\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                let auth_id = authority_id.to_string();
-                authorizer
-                    .add_fact(fact!("authority_id({auth_id})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                let op_str = operation.as_str();
-                authorizer
-                    .add_fact(fact!("authority_operation({op_str})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-            ResourceScope::Context {
-                context_id,
-                operation,
-            } => {
-                authorizer
-                    .add_fact(fact!("resource_type(\"context\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                let ctx_id = context_id.to_string();
-                authorizer
-                    .add_fact(fact!("context_id({ctx_id})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                let op_str = operation.as_str();
-                authorizer
-                    .add_fact(fact!("context_operation({op_str})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-            ResourceScope::Storage { authority_id, path } => {
-                authorizer
-                    .add_fact(fact!("resource_type(\"storage\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                let auth_id = authority_id.to_string();
-                authorizer
-                    .add_fact(fact!("authority_id({auth_id})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                let path_str = path.as_str();
-                authorizer
-                    .add_fact(fact!("storage_path({path_str})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-        }
+        self.add_resource_facts(&mut authorizer, resource)?;
 
         // Phase 3: Add authorization policies for specific operations
-        match operation {
-            AuthorizationOp::Read | AuthorizationOp::List => {
-                authorizer
-                    .add_policy(policy!("allow if capability(\"read\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-            AuthorizationOp::Write | AuthorizationOp::Update | AuthorizationOp::Append => {
-                authorizer
-                    .add_policy(policy!("allow if capability(\"write\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-            AuthorizationOp::Execute => {
-                authorizer
-                    .add_policy(policy!("allow if capability(\"execute\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-            AuthorizationOp::Admin => {
-                authorizer
-                    .add_policy(policy!("allow if capability(\"admin\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                authorizer
-                    .add_policy(policy!("allow if role(\"member\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                authorizer
-                    .add_policy(policy!("allow if role(\"moderator\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-            AuthorizationOp::Delegate => {
-                authorizer
-                    .add_policy(policy!("allow if capability(\"delegate\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-            _ => {
-                // For unknown operations, require explicit capability
-                authorizer
-                    .add_policy(policy!("allow if capability({operation_str})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-        }
+        self.add_operation_policies(&mut authorizer, operation, operation_str)?;
 
         // Phase 4: Run Datalog evaluation
         let authorization_result = authorizer.authorize_with_limits(AURA_BISCUIT_LIMITS);
@@ -240,20 +141,13 @@ impl BiscuitAuthorizationBridge {
         let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
 
         // Add ambient facts for capability check
-        let authority = self.authority_id.to_string();
-        authorizer
-            .add_fact(fact!("authority({authority})"))
-            .map_err(BiscuitError::BiscuitLib)?;
-
-        let time = current_time_seconds.map(|t| t as i64).unwrap_or(0);
-        authorizer
-            .add_fact(fact!("time({time})"))
-            .map_err(BiscuitError::BiscuitLib)?;
+        self.add_authority_and_time_facts(&mut authorizer, current_time_seconds)?;
 
         // Add a policy to allow if the token contains the requested capability
-        authorizer
-            .add_policy(policy!("allow if capability({capability})"))
-            .map_err(BiscuitError::BiscuitLib)?;
+        Self::add_policy(
+            &mut authorizer,
+            policy!("allow if capability({capability})"),
+        )?;
 
         // Run Datalog evaluation
         let result = authorizer.authorize();
@@ -317,6 +211,113 @@ impl BiscuitAuthorizationBridge {
 
     pub fn root_public_key(&self) -> PublicKey {
         self.root_public_key
+    }
+
+    fn add_operation_authority_time_facts(
+        &self,
+        authorizer: &mut biscuit_auth::Authorizer,
+        operation_str: &str,
+        current_time_seconds: Option<u64>,
+    ) -> Result<(), BiscuitError> {
+        Self::add_fact(authorizer, fact!("operation({operation_str})"))?;
+        self.add_authority_and_time_facts(authorizer, current_time_seconds)
+    }
+
+    fn add_authority_and_time_facts(
+        &self,
+        authorizer: &mut biscuit_auth::Authorizer,
+        current_time_seconds: Option<u64>,
+    ) -> Result<(), BiscuitError> {
+        let authority = self.authority_id.to_string();
+        let time = current_time_seconds.map(|t| t as i64).unwrap_or(0);
+        Self::add_fact(authorizer, fact!("authority({authority})"))?;
+        Self::add_fact(authorizer, fact!("time({time})"))
+    }
+
+    fn add_resource_facts(
+        &self,
+        authorizer: &mut biscuit_auth::Authorizer,
+        resource: &ResourceScope,
+    ) -> Result<(), BiscuitError> {
+        let resource_pattern = resource.resource_pattern();
+        Self::add_fact(authorizer, fact!("resource({resource_pattern})"))?;
+
+        match resource {
+            ResourceScope::Authority {
+                authority_id,
+                operation,
+            } => {
+                let auth_id = authority_id.to_string();
+                let op_str = operation.as_str();
+                Self::add_fact(authorizer, fact!("resource_type(\"authority\")"))?;
+                Self::add_fact(authorizer, fact!("authority_id({auth_id})"))?;
+                Self::add_fact(authorizer, fact!("authority_operation({op_str})"))
+            }
+            ResourceScope::Context {
+                context_id,
+                operation,
+            } => {
+                let ctx_id = context_id.to_string();
+                let op_str = operation.as_str();
+                Self::add_fact(authorizer, fact!("resource_type(\"context\")"))?;
+                Self::add_fact(authorizer, fact!("context_id({ctx_id})"))?;
+                Self::add_fact(authorizer, fact!("context_operation({op_str})"))
+            }
+            ResourceScope::Storage { authority_id, path } => {
+                let auth_id = authority_id.to_string();
+                let path_str = path.as_str();
+                Self::add_fact(authorizer, fact!("resource_type(\"storage\")"))?;
+                Self::add_fact(authorizer, fact!("authority_id({auth_id})"))?;
+                Self::add_fact(authorizer, fact!("storage_path({path_str})"))
+            }
+        }
+    }
+
+    fn add_operation_policies(
+        &self,
+        authorizer: &mut biscuit_auth::Authorizer,
+        operation: AuthorizationOp,
+        operation_str: &str,
+    ) -> Result<(), BiscuitError> {
+        match operation {
+            AuthorizationOp::Read | AuthorizationOp::List => {
+                Self::add_policy(authorizer, policy!("allow if capability(\"read\")"))
+            }
+            AuthorizationOp::Write | AuthorizationOp::Update | AuthorizationOp::Append => {
+                Self::add_policy(authorizer, policy!("allow if capability(\"write\")"))
+            }
+            AuthorizationOp::Execute => {
+                Self::add_policy(authorizer, policy!("allow if capability(\"execute\")"))
+            }
+            AuthorizationOp::Admin => {
+                Self::add_policy(authorizer, policy!("allow if capability(\"admin\")"))?;
+                Self::add_policy(authorizer, policy!("allow if role(\"member\")"))?;
+                Self::add_policy(authorizer, policy!("allow if role(\"moderator\")"))
+            }
+            AuthorizationOp::Delegate => {
+                Self::add_policy(authorizer, policy!("allow if capability(\"delegate\")"))
+            }
+            _ => {
+                // For unknown operations, require explicit capability.
+                Self::add_policy(authorizer, policy!("allow if capability({operation_str})"))
+            }
+        }
+    }
+
+    fn add_fact(
+        authorizer: &mut biscuit_auth::Authorizer,
+        fact: biscuit_auth::builder::Fact,
+    ) -> Result<(), BiscuitError> {
+        authorizer.add_fact(fact).map_err(BiscuitError::BiscuitLib)
+    }
+
+    fn add_policy(
+        authorizer: &mut biscuit_auth::Authorizer,
+        policy: biscuit_auth::builder::Policy,
+    ) -> Result<(), BiscuitError> {
+        authorizer
+            .add_policy(policy)
+            .map_err(BiscuitError::BiscuitLib)
     }
 }
 

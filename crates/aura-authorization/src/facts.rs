@@ -124,6 +124,17 @@ pub enum WotFact {
 }
 
 impl WotFact {
+    fn timestamp(&self) -> &PhysicalTime {
+        match self {
+            WotFact::FlowBudgetCharged { charged_at, .. } => charged_at,
+            WotFact::FlowBudgetEpochRotated { rotated_at, .. } => rotated_at,
+            WotFact::CapabilityDelegated { delegated_at, .. } => delegated_at,
+            WotFact::CapabilityRevoked { revoked_at, .. } => revoked_at,
+            WotFact::TokenIssued { issued_at, .. } => issued_at,
+            WotFact::TokenAttenuated { attenuated_at, .. } => attenuated_at,
+        }
+    }
+
     /// Get the primary authority ID associated with this fact
     pub fn authority_id(&self) -> AuthorityId {
         match self {
@@ -147,14 +158,7 @@ impl WotFact {
 
     /// Get the timestamp for this fact in milliseconds (backward compatibility)
     pub fn timestamp_ms(&self) -> u64 {
-        match self {
-            WotFact::FlowBudgetCharged { charged_at, .. } => charged_at.ts_ms,
-            WotFact::FlowBudgetEpochRotated { rotated_at, .. } => rotated_at.ts_ms,
-            WotFact::CapabilityDelegated { delegated_at, .. } => delegated_at.ts_ms,
-            WotFact::CapabilityRevoked { revoked_at, .. } => revoked_at.ts_ms,
-            WotFact::TokenIssued { issued_at, .. } => issued_at.ts_ms,
-            WotFact::TokenAttenuated { attenuated_at, .. } => attenuated_at.ts_ms,
-        }
+        self.timestamp().ts_ms
     }
 
     /// Get the epoch for this fact if applicable
@@ -332,7 +336,24 @@ impl FactDeltaReducer<WotFact, WotFactDelta> for WotFactReducer {
 mod tests {
     use super::*;
     use aura_core::types::facts::FactDeltaReducer;
-    use aura_core::types::scope::ContextOp;
+
+    fn test_authority_id(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_context_id(seed: u8) -> ContextId {
+        ContextId::new_from_entropy([seed; 32])
+    }
+
+    fn test_context_scope(
+        seed: u8,
+        operation: aura_core::types::scope::ContextOp,
+    ) -> ResourceScope {
+        ResourceScope::Context {
+            context_id: test_context_id(seed),
+            operation,
+        }
+    }
 
     fn pt(ts_ms: u64) -> PhysicalTime {
         PhysicalTime {
@@ -343,9 +364,9 @@ mod tests {
 
     #[test]
     fn test_flow_budget_charged_fact() {
-        let context_id = ContextId::new_from_entropy([1u8; 32]);
-        let sender = AuthorityId::new_from_entropy([2u8; 32]);
-        let recipient = AuthorityId::new_from_entropy([3u8; 32]);
+        let context_id = test_context_id(1);
+        let sender = test_authority_id(2);
+        let recipient = test_authority_id(3);
 
         let fact = WotFact::FlowBudgetCharged {
             context_id,
@@ -367,9 +388,9 @@ mod tests {
     #[test]
     fn test_wot_fact_reducer() {
         let reducer = WotFactReducer::new();
-        let context_id = ContextId::new_from_entropy([1u8; 32]);
-        let sender = AuthorityId::new_from_entropy([2u8; 32]);
-        let recipient = AuthorityId::new_from_entropy([3u8; 32]);
+        let context_id = test_context_id(1);
+        let sender = test_authority_id(2);
+        let recipient = test_authority_id(3);
 
         let fact = WotFact::FlowBudgetCharged {
             context_id,
@@ -387,13 +408,9 @@ mod tests {
 
     #[test]
     fn test_capability_delegated_fact() {
-        let grantor = AuthorityId::new_from_entropy([1u8; 32]);
-        let grantee = AuthorityId::new_from_entropy([2u8; 32]);
-        let context_id = ContextId::new_from_entropy([9u8; 32]);
-        let scope = ResourceScope::Context {
-            context_id,
-            operation: ContextOp::AddBinding,
-        };
+        let grantor = test_authority_id(1);
+        let grantee = test_authority_id(2);
+        let scope = test_context_scope(9, aura_core::types::scope::ContextOp::AddBinding);
         let capabilities = Cap::new();
 
         let fact = WotFact::CapabilityDelegated {
@@ -417,8 +434,8 @@ mod tests {
 
     #[test]
     fn test_token_issued_fact() {
-        let issuer = AuthorityId::new_from_entropy([1u8; 32]);
-        let recipient = AuthorityId::new_from_entropy([2u8; 32]);
+        let issuer = test_authority_id(1);
+        let recipient = test_authority_id(2);
 
         let fact = WotFact::TokenIssued {
             issuer,
@@ -440,8 +457,8 @@ mod tests {
 
     #[test]
     fn test_capability_revoked_fact() {
-        let revoker = AuthorityId::new_from_entropy([4u8; 32]);
-        let revokee = AuthorityId::new_from_entropy([5u8; 32]);
+        let revoker = test_authority_id(4);
+        let revokee = test_authority_id(5);
 
         let fact = WotFact::CapabilityRevoked {
             revoker,
@@ -463,7 +480,7 @@ mod tests {
 
     #[test]
     fn test_token_attenuated_fact() {
-        let attenuator = AuthorityId::new_from_entropy([6u8; 32]);
+        let attenuator = test_authority_id(6);
 
         let fact = WotFact::TokenAttenuated {
             attenuator,

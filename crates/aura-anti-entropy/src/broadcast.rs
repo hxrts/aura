@@ -70,6 +70,50 @@ struct BroadcasterState {
     rate_limits: BTreeMap<DeviceId, usize>,
 }
 
+impl BroadcasterState {
+    fn insert_op_bounded(&mut self, op: AttestedOp, max_oplog_entries: usize) {
+        let cid = Hash32::from(op.op.parent_commitment);
+        if !self.oplog.contains_key(&cid) {
+            self.oplog_order.push_back(cid);
+        }
+        self.oplog.insert(cid, op);
+        self.trim_oplog(max_oplog_entries);
+    }
+
+    fn merge_op_bounded(&mut self, op: AttestedOp, max_oplog_entries: usize) {
+        let cid = Hash32::from(op.op.parent_commitment);
+        if !self.oplog.contains_key(&cid) {
+            self.oplog_order.push_back(cid);
+        }
+        self.oplog.entry(cid).or_insert(op);
+        self.trim_oplog(max_oplog_entries);
+    }
+
+    fn trim_oplog(&mut self, max_oplog_entries: usize) {
+        while self.oplog_order.len() > max_oplog_entries {
+            if let Some(oldest) = self.oplog_order.pop_front() {
+                self.oplog.remove(&oldest);
+            }
+        }
+    }
+
+    fn has_back_pressure(&self, max_pending_announcements: usize) -> bool {
+        self.pending_announcements.len() >= max_pending_announcements
+    }
+
+    fn eligible_peers(&mut self, peers: Vec<DeviceId>, max_ops_per_peer: usize) -> Vec<DeviceId> {
+        let mut eligible_peers = Vec::new();
+        for peer in peers {
+            let count = self.rate_limits.entry(peer).or_insert(0);
+            if *count < max_ops_per_peer {
+                eligible_peers.push(peer);
+                *count += 1;
+            }
+        }
+        eligible_peers
+    }
+}
+
 impl BroadcasterHandler {
     pub fn new(config: BroadcastConfig, context_id: ContextId) -> Self {
         Self {
@@ -104,11 +148,11 @@ impl BroadcasterHandler {
         }
 
         // Check back pressure
-        let pending_count = {
+        let has_back_pressure = {
             let state = self.state.read().await;
-            state.pending_announcements.len()
+            state.has_back_pressure(self.config.max_pending_announcements)
         };
-        if pending_count >= self.config.max_pending_announcements {
+        if has_back_pressure {
             return Err(SyncError::BackPressure);
         }
 
@@ -116,17 +160,10 @@ impl BroadcasterHandler {
         let cid = Hash32::from(op.op.parent_commitment);
 
         // Apply rate limiting per peer
-        let mut eligible_peers = Vec::new();
-        {
+        let eligible_peers = {
             let mut state = self.state.write().await;
-            for peer in peers {
-                let count = state.rate_limits.entry(peer).or_insert(0);
-                if *count < self.config.max_ops_per_peer {
-                    eligible_peers.push(peer);
-                    *count += 1;
-                }
-            }
-        }
+            state.eligible_peers(peers, self.config.max_ops_per_peer)
+        };
 
         if !eligible_peers.is_empty() {
             self.push_op_to_peers(op, eligible_peers).await?;
@@ -159,17 +196,8 @@ impl BroadcasterHandler {
 
     /// Add operation to local store
     pub async fn add_op(&self, op: AttestedOp) {
-        let cid = Hash32::from(op.op.parent_commitment);
         let mut state = self.state.write().await;
-        if !state.oplog.contains_key(&cid) {
-            state.oplog_order.push_back(cid);
-        }
-        state.oplog.insert(cid, op);
-        while state.oplog_order.len() > self.config.max_oplog_entries {
-            if let Some(oldest) = state.oplog_order.pop_front() {
-                state.oplog.remove(&oldest);
-            }
-        }
+        state.insert_op_bounded(op, self.config.max_oplog_entries);
     }
 
     /// Add peer to known peer set
@@ -193,7 +221,7 @@ impl BroadcasterHandler {
     /// Check if back pressure is active
     pub async fn has_back_pressure(&self) -> bool {
         let state = self.state.read().await;
-        state.pending_announcements.len() >= self.config.max_pending_announcements
+        state.has_back_pressure(self.config.max_pending_announcements)
     }
 }
 
@@ -249,17 +277,7 @@ impl SyncEffects for BroadcasterHandler {
         let mut state = self.state.write().await;
 
         for op in ops {
-            let cid = Hash32::from(op.op.parent_commitment);
-            // Deduplicate - only insert if not already present
-            if !state.oplog.contains_key(&cid) {
-                state.oplog_order.push_back(cid);
-            }
-            state.oplog.entry(cid).or_insert(op);
-        }
-        while state.oplog_order.len() > self.config.max_oplog_entries {
-            if let Some(oldest) = state.oplog_order.pop_front() {
-                state.oplog.remove(&oldest);
-            }
+            state.merge_op_bounded(op, self.config.max_oplog_entries);
         }
 
         Ok(())
@@ -269,7 +287,7 @@ impl SyncEffects for BroadcasterHandler {
         // Check for back pressure
         let op = {
             let state = self.state.read().await;
-            if state.pending_announcements.len() >= self.config.max_pending_announcements {
+            if state.has_back_pressure(self.config.max_pending_announcements) {
                 return Err(SyncError::BackPressure);
             }
             state
@@ -353,29 +371,7 @@ impl SyncEffects for BroadcasterHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{Epoch, TreeOp, TreeOpKind};
-    use aura_journal::{LeafId, LeafNode, NodeIndex};
-
-    fn create_test_op(commitment: Hash32) -> AttestedOp {
-        AttestedOp {
-            op: TreeOp {
-                parent_commitment: commitment.0,
-                parent_epoch: Epoch::new(1),
-                op: TreeOpKind::AddLeaf {
-                    leaf: LeafNode::new_device(
-                        LeafId(1),
-                        aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]),
-                        vec![1, 2, 3],
-                    )
-                    .expect("valid leaf"),
-                    under: NodeIndex(0),
-                },
-                version: 1,
-            },
-            agg_sig: vec![],
-            signer_count: 1,
-        }
-    }
+    use crate::test_support::{create_test_op, test_context, test_device};
 
     #[tokio::test]
     async fn test_eager_push_enabled() {
@@ -383,10 +379,10 @@ mod tests {
             eager_push_enabled: true,
             ..Default::default()
         };
-        let context_id = ContextId::new_from_entropy([1u8; 32]);
+        let context_id = test_context(1);
         let handler = BroadcasterHandler::new(config, context_id);
 
-        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer1 = test_device(1);
         handler.add_peer(peer1).await;
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -402,7 +398,7 @@ mod tests {
             eager_push_enabled: false,
             ..Default::default()
         };
-        let context_id = ContextId::new_from_entropy([2u8; 32]);
+        let context_id = test_context(2);
         let handler = BroadcasterHandler::new(config, context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -417,10 +413,10 @@ mod tests {
             eager_push_enabled: true,
             ..Default::default()
         };
-        let context_id = ContextId::new_from_entropy([3u8; 32]);
+        let context_id = test_context(3);
         let handler = BroadcasterHandler::new(config, context_id);
 
-        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer1 = test_device(1);
         handler.add_peer(peer1).await;
 
         // Push 3 ops - third should be queued due to rate limit
@@ -442,7 +438,7 @@ mod tests {
             eager_push_enabled: true,
             ..Default::default()
         };
-        let context_id = ContextId::new_from_entropy([4u8; 32]);
+        let context_id = test_context(4);
         let handler = BroadcasterHandler::new(config, context_id);
 
         // Fill pending queue to capacity
@@ -465,13 +461,13 @@ mod tests {
             lazy_pull_enabled: true,
             ..Default::default()
         };
-        let context_id = ContextId::new_from_entropy([5u8; 32]);
+        let context_id = test_context(5);
         let handler = BroadcasterHandler::new(config, context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
 
-        let peer_id = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer_id = test_device(1);
         let retrieved = handler
             .lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32]))
             .await;
@@ -489,13 +485,13 @@ mod tests {
             lazy_pull_enabled: false,
             ..Default::default()
         };
-        let context_id = ContextId::new_from_entropy([6u8; 32]);
+        let context_id = test_context(6);
         let handler = BroadcasterHandler::new(config, context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op).await;
 
-        let peer_id = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer_id = test_device(1);
         let result = handler
             .lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32]))
             .await;
@@ -505,10 +501,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_announce_new_op() {
-        let context_id = ContextId::new_from_entropy([7u8; 32]);
+        let context_id = test_context(7);
         let handler = BroadcasterHandler::new(BroadcastConfig::default(), context_id);
 
-        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer1 = test_device(1);
         handler.add_peer(peer1).await;
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -520,7 +516,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_deduplication() {
-        let context_id = ContextId::new_from_entropy([8u8; 32]);
+        let context_id = test_context(8);
         let handler = BroadcasterHandler::new(BroadcastConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -542,10 +538,10 @@ mod tests {
             max_ops_per_peer: 1,
             ..Default::default()
         };
-        let context_id = ContextId::new_from_entropy([9u8; 32]);
+        let context_id = test_context(9);
         let handler = BroadcasterHandler::new(config, context_id);
 
-        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer1 = test_device(1);
         handler.add_peer(peer1).await;
 
         // Hit rate limit

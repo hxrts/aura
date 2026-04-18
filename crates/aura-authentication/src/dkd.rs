@@ -33,7 +33,7 @@ use aura_core::{
     hash, AuraError, AuraResult, DeviceId, Hash32,
 };
 use aura_macros::tell;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
 use thiserror::Error;
 
@@ -220,6 +220,17 @@ impl DkdProtocol {
             active_sessions: HashMap::new(),
             agreement_mode: policy_for(CeremonyFlow::DkdCeremony).initial_mode(),
         }
+    }
+
+    fn session_context(
+        &self,
+        session_id: &DkdSessionId,
+    ) -> Result<&KeyDerivationContext, DkdError> {
+        self.active_sessions
+            .get(session_id)
+            .ok_or_else(|| DkdError::SessionNotFound {
+                session_id: session_id.clone(),
+            })
     }
 
     /// Initiate a new DKD session
@@ -420,19 +431,16 @@ impl DkdProtocol {
         signature_data.extend_from_slice(session_id.0.as_bytes());
 
         // Generate Ed25519 keypair for signing (in production, use device's persistent key)
-        let (_public_key, private_key) = effects.ed25519_generate_keypair().await.map_err(|e| {
-            DkdError::CryptographicFailure {
-                reason: e.to_string(),
-            }
-        })?;
+        let (_public_key, private_key) = effects
+            .ed25519_generate_keypair()
+            .await
+            .map_err(crypto_failure)?;
 
         // Sign the commitment
         let signature = effects
             .ed25519_sign(&signature_data, &private_key)
             .await
-            .map_err(|e| DkdError::CryptographicFailure {
-                reason: e.to_string(),
-            })?;
+            .map_err(crypto_failure)?;
 
         let contribution = ParticipantContribution {
             device_id,
@@ -464,47 +472,28 @@ impl DkdProtocol {
     {
         tracing::debug!(session_id = ?session_id, "Exchanging commitments");
 
-        let context =
-            self.active_sessions
-                .get(session_id)
-                .ok_or_else(|| DkdError::SessionNotFound {
-                    session_id: session_id.clone(),
-                })?;
+        let context = self.session_context(session_id)?;
 
         let mut commitments = vec![local_contribution];
 
         // Send commitment to all other participants
-        let commitment_message =
-            serde_json::to_vec(&commitments[0]).map_err(|e| DkdError::NetworkFailure {
-                reason: e.to_string(),
-            })?;
+        let commitment_message = serialize_network(&commitments[0])?;
 
         for participant in &context.participants {
             if *participant != commitments[0].device_id {
                 effects
                     .send_to_peer(participant.0, commitment_message.clone())
                     .await
-                    .map_err(|e| DkdError::NetworkFailure {
-                        reason: e.to_string(),
-                    })?;
+                    .map_err(network_failure)?;
             }
         }
 
         // Receive commitments from other participants
         let expected_commitments = context.participants.len() - 1; // Exclude ourselves
         for _ in 0..expected_commitments {
-            let (_sender_id, commitment_data) =
-                effects
-                    .receive()
-                    .await
-                    .map_err(|e| DkdError::NetworkFailure {
-                        reason: e.to_string(),
-                    })?;
+            let (_sender_id, commitment_data) = effects.receive().await.map_err(network_failure)?;
 
-            let contribution: ParticipantContribution = serde_json::from_slice(&commitment_data)
-                .map_err(|e| DkdError::NetworkFailure {
-                    reason: e.to_string(),
-                })?;
+            let contribution: ParticipantContribution = deserialize_network(&commitment_data)?;
 
             // Validate contribution
             self.validate_contribution(&contribution)?;
@@ -533,12 +522,7 @@ impl DkdProtocol {
         tracing::debug!(session_id = ?session_id, "Exchanging reveals");
 
         // Broadcast our commitment+randomness and receive the same from peers
-        let context =
-            self.active_sessions
-                .get(session_id)
-                .ok_or_else(|| DkdError::SessionNotFound {
-                    session_id: session_id.clone(),
-                })?;
+        let context = self.session_context(session_id)?;
 
         let local = commitments
             .first()
@@ -547,18 +531,14 @@ impl DkdProtocol {
             })?
             .clone();
 
-        let reveal_bytes = serde_json::to_vec(&local).map_err(|e| DkdError::NetworkFailure {
-            reason: e.to_string(),
-        })?;
+        let reveal_bytes = serialize_network(&local)?;
 
         for participant in &context.participants {
             if *participant != local.device_id {
                 effects
                     .send_to_peer(participant.0, reveal_bytes.clone())
                     .await
-                    .map_err(|e| DkdError::NetworkFailure {
-                        reason: e.to_string(),
-                    })?;
+                    .map_err(network_failure)?;
             }
         }
 
@@ -566,16 +546,8 @@ impl DkdProtocol {
 
         // Receive reveals from peers and validate commitments
         for _ in 0..(context.participants.len().saturating_sub(1)) {
-            let (_peer, bytes) = effects
-                .receive()
-                .await
-                .map_err(|e| DkdError::NetworkFailure {
-                    reason: e.to_string(),
-                })?;
-            let contribution: ParticipantContribution =
-                serde_json::from_slice(&bytes).map_err(|e| DkdError::NetworkFailure {
-                    reason: e.to_string(),
-                })?;
+            let (_peer, bytes) = effects.receive().await.map_err(network_failure)?;
+            let contribution: ParticipantContribution = deserialize_network(&bytes)?;
 
             let expected_commitment = hash::hash(&contribution.randomness);
             if Hash32::new(expected_commitment) != contribution.commitment {
@@ -607,12 +579,7 @@ impl DkdProtocol {
     {
         tracing::debug!(session_id = ?session_id, "Deriving key from contributions");
 
-        let context =
-            self.active_sessions
-                .get(session_id)
-                .ok_or_else(|| DkdError::SessionNotFound {
-                    session_id: session_id.clone(),
-                })?;
+        let context = self.session_context(session_id)?;
 
         // Check threshold
         if contributions.len() < self.config.threshold as usize {
@@ -646,9 +613,7 @@ impl DkdProtocol {
         let derived_bytes = effects
             .kdf_derive(&combined_input, &salt, info.as_bytes(), 32)
             .await
-            .map_err(|e| DkdError::CryptographicFailure {
-                reason: e.to_string(),
-            })?;
+            .map_err(crypto_failure)?;
 
         // Convert to fixed-size array
         let mut derived_key = [0u8; 32];
@@ -711,9 +676,7 @@ impl DkdProtocol {
                 32,
             )
             .await
-            .map_err(|e| DkdError::CryptographicFailure {
-                reason: format!("KDF verification failed: {e}"),
-            })?;
+            .map_err(|e| crypto_failure(format!("KDF verification failed: {e}")))?;
 
         tracing::debug!(
             session_id = ?session_id,
@@ -781,13 +744,10 @@ impl DkdProtocol {
         };
 
         // Sign using threshold signing service
-        let signature =
-            effects
-                .sign(signing_context)
-                .await
-                .map_err(|e| DkdError::CryptographicFailure {
-                    reason: format!("Threshold signing failed: {e}"),
-                })?;
+        let signature = effects
+            .sign(signing_context)
+            .await
+            .map_err(|e| crypto_failure(format!("Threshold signing failed: {e}")))?;
 
         tracing::info!(
             session_id = ?session_id,
@@ -852,12 +812,7 @@ impl DkdProtocol {
         E: JournalEffects + Send + Sync,
     {
         // Create journal entry for the DKD event
-        let mut journal = effects
-            .get_journal()
-            .await
-            .map_err(|e| DkdError::JournalFailure {
-                reason: e.to_string(),
-            })?;
+        let mut journal = effects.get_journal().await.map_err(journal_failure)?;
 
         // Add fact about the DKD event
         let fact_key = format!("dkd_{}_{}", session_id.0, event_type);
@@ -865,17 +820,13 @@ impl DkdProtocol {
         journal
             .facts
             .insert(fact_key, fact_value)
-            .map_err(|e| DkdError::JournalFailure {
-                reason: e.to_string(),
-            })?;
+            .map_err(journal_failure)?;
 
         // Update journal
         effects
             .persist_journal(&journal)
             .await
-            .map_err(|e| DkdError::JournalFailure {
-                reason: e.to_string(),
-            })?;
+            .map_err(journal_failure)?;
 
         Ok(())
     }
@@ -894,6 +845,32 @@ impl DkdProtocol {
     pub fn is_session_active(&self, session_id: &DkdSessionId) -> bool {
         self.active_sessions.contains_key(session_id)
     }
+}
+
+fn crypto_failure(reason: impl ToString) -> DkdError {
+    DkdError::CryptographicFailure {
+        reason: reason.to_string(),
+    }
+}
+
+fn network_failure(reason: impl ToString) -> DkdError {
+    DkdError::NetworkFailure {
+        reason: reason.to_string(),
+    }
+}
+
+fn journal_failure(reason: impl ToString) -> DkdError {
+    DkdError::JournalFailure {
+        reason: reason.to_string(),
+    }
+}
+
+fn serialize_network<T: Serialize>(value: &T) -> Result<Vec<u8>, DkdError> {
+    serde_json::to_vec(value).map_err(network_failure)
+}
+
+fn deserialize_network<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, DkdError> {
+    serde_json::from_slice(bytes).map_err(network_failure)
 }
 
 // =============================================================================
@@ -970,12 +947,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use crate::test_support::device;
     use aura_testkit::TestEffectsBuilder;
-
-    fn device(seed: u8) -> DeviceId {
-        DeviceId::new_from_entropy([seed; 32])
-    }
 
     #[tokio::test]
     async fn test_dkd_session_creation() {

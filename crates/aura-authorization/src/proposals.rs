@@ -164,6 +164,13 @@ pub enum ProposalFailureReason {
 }
 
 impl ProposalFact {
+    fn physical_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     /// Extract the proposal_id from any variant
     pub fn proposal_id(&self) -> &str {
         match self {
@@ -240,14 +247,8 @@ impl ProposalFact {
             operation_type,
             operation_data,
             approval_requirement,
-            created_at: PhysicalTime {
-                ts_ms: created_at_ms,
-                uncertainty: None,
-            },
-            expires_at: expires_at_ms.map(|ts_ms| PhysicalTime {
-                ts_ms,
-                uncertainty: None,
-            }),
+            created_at: Self::physical_time(created_at_ms),
+            expires_at: expires_at_ms.map(Self::physical_time),
             description,
         }
     }
@@ -262,10 +263,7 @@ impl ProposalFact {
         Self::Approved {
             proposal_id,
             approver_id,
-            approved_at: PhysicalTime {
-                ts_ms: approved_at_ms,
-                uncertainty: None,
-            },
+            approved_at: Self::physical_time(approved_at_ms),
             comment,
         }
     }
@@ -280,10 +278,7 @@ impl ProposalFact {
         Self::Rejected {
             proposal_id,
             rejector_id,
-            rejected_at: PhysicalTime {
-                ts_ms: rejected_at_ms,
-                uncertainty: None,
-            },
+            rejected_at: Self::physical_time(rejected_at_ms),
             reason,
         }
     }
@@ -298,10 +293,7 @@ impl ProposalFact {
         Self::Withdrawn {
             proposal_id,
             withdrawer_id,
-            withdrawn_at: PhysicalTime {
-                ts_ms: withdrawn_at_ms,
-                uncertainty: None,
-            },
+            withdrawn_at: Self::physical_time(withdrawn_at_ms),
             reason,
         }
     }
@@ -315,10 +307,7 @@ impl ProposalFact {
     ) -> Self {
         Self::Completed {
             proposal_id,
-            completed_at: PhysicalTime {
-                ts_ms: completed_at_ms,
-                uncertainty: None,
-            },
+            completed_at: Self::physical_time(completed_at_ms),
             approvers,
             result_data,
         }
@@ -332,10 +321,7 @@ impl ProposalFact {
     ) -> Self {
         Self::Failed {
             proposal_id,
-            failed_at: PhysicalTime {
-                ts_ms: failed_at_ms,
-                uncertainty: None,
-            },
+            failed_at: Self::physical_time(failed_at_ms),
             failure_reason,
         }
     }
@@ -420,7 +406,7 @@ impl ProposalState {
                 proposal_id: proposal_id.clone(),
                 context_id: *context_id,
                 proposer_id: *proposer_id,
-                operation_type: operation_type.clone(),
+                operation_type: *operation_type,
                 operation_data: operation_data.clone(),
                 approval_requirement: approval_requirement.clone(),
                 created_at: created_at.clone(),

@@ -132,25 +132,27 @@ impl BiscuitTokenManager {
     /// Attenuate the token to only allow read operations on resources
     /// matching the given prefix.
     pub fn attenuate_read(&self, resource_prefix: &str) -> Result<Biscuit, BiscuitError> {
-        let prefix = resource_prefix.to_string();
-        let attenuated = self.current_token.append(block!(
-            r#"
-            check if operation("read");
-            check if resource($res), $res.starts_with({prefix});
-        "#
-        ))?;
-        Ok(attenuated)
+        self.attenuate_operation("read", resource_prefix)
     }
 
     /// Attenuate the token to only allow write operations on resources
     /// matching the given prefix.
     pub fn attenuate_write(&self, resource_prefix: &str) -> Result<Biscuit, BiscuitError> {
+        self.attenuate_operation("write", resource_prefix)
+    }
+
+    fn attenuate_operation(
+        &self,
+        operation: &str,
+        resource_prefix: &str,
+    ) -> Result<Biscuit, BiscuitError> {
         let prefix = resource_prefix.to_string();
         let attenuated = self.current_token.append(block!(
             r#"
-            check if operation("write");
+            check if operation({operation});
             check if resource($res), $res.starts_with({prefix});
-        "#
+        "#,
+            operation = operation,
         ))?;
         Ok(attenuated)
     }

@@ -156,23 +156,15 @@ where
         &self,
         params: ChannelJoinParams,
     ) -> std::result::Result<(), AmpChannelError> {
-        // Verify the channel exists by getting its state
-        let _state = get_channel_state(&self.effects, params.context, params.channel)
-            .await
-            .map_err(map_err)?;
-
-        let timestamp = ChannelMembershipFact::random_timestamp(&self.effects).await;
-        let membership = ChannelMembershipFact::new(
+        persist_channel_membership_event(
+            &self.effects,
             params.context,
             params.channel,
             params.participant,
             ChannelParticipantEvent::Joined,
-            timestamp,
-        );
-        self.effects
-            .insert_relational_fact(membership.to_generic())
-            .await
-            .map_err(map_err)?;
+        )
+        .await
+        .map_err(map_err)?;
 
         tracing::debug!(
             "Participant {:?} joined channel {:?} in context {:?}",
@@ -188,23 +180,15 @@ where
         &self,
         params: ChannelLeaveParams,
     ) -> std::result::Result<(), AmpChannelError> {
-        // Verify the channel exists by getting its state
-        let _state = get_channel_state(&self.effects, params.context, params.channel)
-            .await
-            .map_err(map_err)?;
-
-        let timestamp = ChannelMembershipFact::random_timestamp(&self.effects).await;
-        let membership = ChannelMembershipFact::new(
+        persist_channel_membership_event(
+            &self.effects,
             params.context,
             params.channel,
             params.participant,
             ChannelParticipantEvent::Left,
-            timestamp,
-        );
-        self.effects
-            .insert_relational_fact(membership.to_generic())
-            .await
-            .map_err(map_err)?;
+        )
+        .await
+        .map_err(map_err)?;
 
         tracing::debug!(
             "Participant {:?} left channel {:?} in context {:?}",
@@ -334,6 +318,21 @@ fn map_err(e: aura_core::AuraError) -> AmpChannelError {
         aura_core::AuraError::Crypto { message } => AmpChannelError::Crypto(message),
         other => AmpChannelError::Internal(other.to_string()),
     }
+}
+
+async fn persist_channel_membership_event<E: AmpJournalEffects>(
+    effects: &E,
+    context: ContextId,
+    channel: ChannelId,
+    participant: AuthorityId,
+    event: ChannelParticipantEvent,
+) -> aura_core::Result<()> {
+    let _state = get_channel_state(effects, context, channel).await?;
+    let timestamp = ChannelMembershipFact::random_timestamp(effects).await;
+    let membership = ChannelMembershipFact::new(context, channel, participant, event, timestamp);
+    effects
+        .insert_relational_fact(membership.to_generic())
+        .await
 }
 
 // ============================================================================

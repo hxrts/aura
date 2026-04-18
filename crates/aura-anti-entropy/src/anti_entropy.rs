@@ -16,6 +16,7 @@ use aura_guards::traits::GuardContextProvider;
 use aura_guards::GuardEffects;
 use aura_guards::{GuardOperation, GuardOperationId};
 use std::collections::BTreeSet;
+use std::fmt;
 
 /// Composite trait bound for guard chain operations
 pub trait GuardChainEffects: GuardEffects + GuardContextProvider + PhysicalTimeEffects {}
@@ -74,46 +75,15 @@ impl AntiEntropyHandler {
         peer_id: DeviceId,
         effect_system: &E,
     ) -> Result<BloomDigest, SyncError> {
-        let peer_authority = AuthorityId::from(peer_id.0);
-        let cost = self.runtime.digest_cost;
-
-        // Create and evaluate guard chain for digest request
-        let guard_chain = create_send_guard_op(
+        self.approve_fail_closed_request(
+            peer_id,
+            effect_system,
             GuardOperation::SyncRequestDigest,
-            self.context_id,
-            peer_authority,
-            cost,
+            GuardOperationId::SyncRequestDigest { peer: peer_id.0 },
+            self.runtime.digest_cost,
+            RequestGuardLog::Digest,
         )
-        .with_operation_id(GuardOperationId::SyncRequestDigest { peer: peer_id.0 });
-
-        // Evaluate guard chain - this enforces authorization and flow budget
-        let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
-            tracing::error!(peer = ?peer_id, error = %e, "Guard chain evaluation failed");
-            SyncError::GuardChainFailure {
-                operation: "digest_request",
-                detail: format!("guard evaluation failed: {e}"),
-            }
-        })?;
-
-        if !guard_result.authorized {
-            tracing::warn!(
-                peer = ?peer_id,
-                reason = ?guard_result.denial_reason,
-                "Digest request denied by guard chain"
-            );
-            return Err(SyncError::GuardChainFailure {
-                operation: "digest_request",
-                detail: guard_result
-                    .denial_reason
-                    .unwrap_or_else(|| "Authorization denied".to_string()),
-            });
-        }
-
-        tracing::debug!(
-            peer = ?peer_id,
-            receipt_nonce = ?guard_result.receipt.as_ref().map(|r| r.nonce),
-            "Guard chain approved digest request"
-        );
+        .await?;
 
         // In real implementation, transport would send digest request using the receipt
         // Return empty digest - actual network request pending transport layer integration
@@ -240,50 +210,20 @@ impl AntiEntropyHandler {
         cids: Vec<Hash32>,
         effect_system: &E,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        let peer_authority = AuthorityId::from(peer_id.0);
-        let cost = FlowCost::new(cids.len() as u32 * self.runtime.request_cost_per_cid.value());
-
-        let guard_chain = create_send_guard_op(
+        self.approve_fail_closed_request(
+            peer_id,
+            effect_system,
             GuardOperation::SyncRequestOps,
-            self.context_id,
-            peer_authority,
-            cost,
+            GuardOperationId::SyncRequestOps {
+                peer: peer_id.0,
+                count: cids.len() as u32,
+            },
+            FlowCost::new(cids.len() as u32 * self.runtime.request_cost_per_cid.value()),
+            RequestGuardLog::Ops {
+                cids_count: cids.len(),
+            },
         )
-        .with_operation_id(GuardOperationId::SyncRequestOps {
-            peer: peer_id.0,
-            count: cids.len() as u32,
-        });
-
-        // Evaluate guard chain
-        let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
-            tracing::error!(peer = ?peer_id, error = %e, "Guard chain evaluation failed for ops request");
-            SyncError::GuardChainFailure {
-                operation: "ops_request",
-                detail: format!("guard evaluation failed: {e}"),
-            }
-        })?;
-
-        if !guard_result.authorized {
-            tracing::warn!(
-                peer = ?peer_id,
-                cids_count = cids.len(),
-                reason = ?guard_result.denial_reason,
-                "Ops request denied by guard chain"
-            );
-            return Err(SyncError::GuardChainFailure {
-                operation: "ops_request",
-                detail: guard_result
-                    .denial_reason
-                    .unwrap_or_else(|| "Authorization denied".to_string()),
-            });
-        }
-
-        tracing::debug!(
-            peer = ?peer_id,
-            cids_count = cids.len(),
-            receipt_nonce = ?guard_result.receipt.as_ref().map(|r| r.nonce),
-            "Guard chain approved ops request"
-        );
+        .await?;
 
         // In real implementation, transport would send request using the receipt
         // Local oplog lookup - network request pending transport layer integration
@@ -314,48 +254,21 @@ impl AntiEntropyHandler {
         let mut failed_peers = Vec::new();
 
         for peer_id in peers.iter().copied() {
-            let peer_authority = AuthorityId::from(peer_id.0);
-
-            let guard_chain = create_send_guard_op(
-                GuardOperation::SyncAnnounceOp,
-                self.context_id,
-                peer_authority,
-                self.runtime.announce_cost,
-            )
-            .with_operation_id(GuardOperationId::SyncAnnounceOp {
-                peer: peer_id.0,
-                cid,
-            });
-
-            // Evaluate guard chain for this peer
-            match guard_chain.evaluate(effect_system).await {
-                Ok(result) if result.authorized => {
-                    tracing::debug!(
-                        cid = ?cid,
-                        peer = ?peer_id,
-                        receipt_nonce = ?result.receipt.as_ref().map(|r| r.nonce),
-                        "Guard chain approved announcement to peer"
-                    );
-                    // In real implementation, transport would send announcement using the receipt
-                }
-                Ok(result) => {
-                    tracing::warn!(
-                        cid = ?cid,
-                        peer = ?peer_id,
-                        reason = ?result.denial_reason,
-                        "Announcement to peer denied by guard chain"
-                    );
-                    failed_peers.push(peer_id);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        cid = ?cid,
-                        peer = ?peer_id,
-                        error = %e,
-                        "Guard chain evaluation failed for announcement"
-                    );
-                    failed_peers.push(peer_id);
-                }
+            if !self
+                .approve_best_effort_peer_send(
+                    peer_id,
+                    effect_system,
+                    GuardOperation::SyncAnnounceOp,
+                    GuardOperationId::SyncAnnounceOp {
+                        peer: peer_id.0,
+                        cid,
+                    },
+                    self.runtime.announce_cost,
+                    BestEffortGuardLog::Announcement { cid },
+                )
+                .await
+            {
+                failed_peers.push(peer_id);
             }
         }
 
@@ -385,49 +298,21 @@ impl AntiEntropyHandler {
         let mut failed_peers = Vec::new();
 
         for peer_id in &peers {
-            let peer_authority = AuthorityId::from(peer_id.0);
-            let cost = self.runtime.push_cost;
-
-            let guard_chain = create_send_guard_op(
-                GuardOperation::SyncPushOp,
-                self.context_id,
-                peer_authority,
-                cost,
-            )
-            .with_operation_id(GuardOperationId::SyncPushOp {
-                peer: peer_id.0,
-                cid,
-            });
-
-            // Evaluate guard chain for this peer
-            match guard_chain.evaluate(effect_system).await {
-                Ok(result) if result.authorized => {
-                    tracing::debug!(
-                        cid = ?cid,
-                        peer = ?peer_id,
-                        receipt_nonce = ?result.receipt.as_ref().map(|r| r.nonce),
-                        "Guard chain approved op push to peer"
-                    );
-                    // In real implementation, transport would send op using the receipt
-                }
-                Ok(result) => {
-                    tracing::warn!(
-                        cid = ?cid,
-                        peer = ?peer_id,
-                        reason = ?result.denial_reason,
-                        "Op push to peer denied by guard chain"
-                    );
-                    failed_peers.push(*peer_id);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        cid = ?cid,
-                        peer = ?peer_id,
-                        error = %e,
-                        "Guard chain evaluation failed for op push"
-                    );
-                    failed_peers.push(*peer_id);
-                }
+            if !self
+                .approve_best_effort_peer_send(
+                    *peer_id,
+                    effect_system,
+                    GuardOperation::SyncPushOp,
+                    GuardOperationId::SyncPushOp {
+                        peer: peer_id.0,
+                        cid,
+                    },
+                    self.runtime.push_cost,
+                    BestEffortGuardLog::Push { cid },
+                )
+                .await
+            {
+                failed_peers.push(*peer_id);
             }
         }
 
@@ -486,38 +371,234 @@ impl AntiEntropyHandler {
 
         Ok(())
     }
+
+    async fn approve_fail_closed_request<E: AntiEntropyProtocolEffects>(
+        &self,
+        peer_id: DeviceId,
+        effect_system: &E,
+        operation: GuardOperation,
+        operation_id: GuardOperationId,
+        cost: FlowCost,
+        log: RequestGuardLog,
+    ) -> Result<(), SyncError> {
+        let peer_authority = AuthorityId::from(peer_id.0);
+        let guard_chain = create_send_guard_op(operation, self.context_id, peer_authority, cost)
+            .with_operation_id(operation_id);
+        let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
+            log.log_eval_error(peer_id, &e);
+            SyncError::GuardChainFailure {
+                operation: log.error_operation(),
+                detail: format!("guard evaluation failed: {e}"),
+            }
+        })?;
+
+        if !guard_result.authorized {
+            let denial_reason = guard_result
+                .denial_reason
+                .unwrap_or_else(|| "Authorization denied".to_string());
+            log.log_denied(peer_id, &denial_reason);
+            return Err(SyncError::GuardChainFailure {
+                operation: log.error_operation(),
+                detail: denial_reason,
+            });
+        }
+
+        log.log_approved(
+            peer_id,
+            guard_result.receipt.as_ref().map(|receipt| receipt.nonce),
+        );
+        Ok(())
+    }
+
+    async fn approve_best_effort_peer_send<E: AntiEntropyProtocolEffects>(
+        &self,
+        peer_id: DeviceId,
+        effect_system: &E,
+        operation: GuardOperation,
+        operation_id: GuardOperationId,
+        cost: FlowCost,
+        log: BestEffortGuardLog,
+    ) -> bool {
+        let peer_authority = AuthorityId::from(peer_id.0);
+        let guard_chain = create_send_guard_op(operation, self.context_id, peer_authority, cost)
+            .with_operation_id(operation_id);
+
+        match guard_chain.evaluate(effect_system).await {
+            Ok(result) if result.authorized => {
+                log.log_approved(
+                    peer_id,
+                    result.receipt.as_ref().map(|receipt| receipt.nonce),
+                );
+                true
+            }
+            Ok(result) => {
+                log.log_denied(
+                    peer_id,
+                    result
+                        .denial_reason
+                        .as_deref()
+                        .unwrap_or("Authorization denied"),
+                );
+                false
+            }
+            Err(error) => {
+                log.log_eval_error(peer_id, &error);
+                false
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RequestGuardLog {
+    Digest,
+    Ops { cids_count: usize },
+}
+
+impl RequestGuardLog {
+    fn error_operation(self) -> &'static str {
+        match self {
+            Self::Digest => "digest_request",
+            Self::Ops { .. } => "ops_request",
+        }
+    }
+
+    fn log_eval_error(self, peer_id: DeviceId, error: &impl fmt::Display) {
+        match self {
+            Self::Digest => {
+                tracing::error!(peer = ?peer_id, error = %error, "Guard chain evaluation failed");
+            }
+            Self::Ops { cids_count } => {
+                tracing::error!(
+                    peer = ?peer_id,
+                    cids_count,
+                    error = %error,
+                    "Guard chain evaluation failed for ops request"
+                );
+            }
+        }
+    }
+
+    fn log_denied(self, peer_id: DeviceId, denial_reason: &str) {
+        match self {
+            Self::Digest => {
+                tracing::warn!(
+                    peer = ?peer_id,
+                    reason = denial_reason,
+                    "Digest request denied by guard chain"
+                );
+            }
+            Self::Ops { cids_count } => {
+                tracing::warn!(
+                    peer = ?peer_id,
+                    cids_count,
+                    reason = denial_reason,
+                    "Ops request denied by guard chain"
+                );
+            }
+        }
+    }
+
+    fn log_approved(self, peer_id: DeviceId, receipt_nonce: Option<aura_core::FlowNonce>) {
+        match self {
+            Self::Digest => {
+                tracing::debug!(
+                    peer = ?peer_id,
+                    receipt_nonce = ?receipt_nonce,
+                    "Guard chain approved digest request"
+                );
+            }
+            Self::Ops { cids_count } => {
+                tracing::debug!(
+                    peer = ?peer_id,
+                    cids_count,
+                    receipt_nonce = ?receipt_nonce,
+                    "Guard chain approved ops request"
+                );
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BestEffortGuardLog {
+    Announcement { cid: Hash32 },
+    Push { cid: Hash32 },
+}
+
+impl BestEffortGuardLog {
+    fn log_approved(self, peer_id: DeviceId, receipt_nonce: Option<aura_core::FlowNonce>) {
+        match self {
+            Self::Announcement { cid } => {
+                tracing::debug!(
+                    cid = ?cid,
+                    peer = ?peer_id,
+                    receipt_nonce = ?receipt_nonce,
+                    "Guard chain approved announcement to peer"
+                );
+            }
+            Self::Push { cid } => {
+                tracing::debug!(
+                    cid = ?cid,
+                    peer = ?peer_id,
+                    receipt_nonce = ?receipt_nonce,
+                    "Guard chain approved op push to peer"
+                );
+            }
+        }
+    }
+
+    fn log_denied(self, peer_id: DeviceId, denial_reason: &str) {
+        match self {
+            Self::Announcement { cid } => {
+                tracing::warn!(
+                    cid = ?cid,
+                    peer = ?peer_id,
+                    reason = denial_reason,
+                    "Announcement to peer denied by guard chain"
+                );
+            }
+            Self::Push { cid } => {
+                tracing::warn!(
+                    cid = ?cid,
+                    peer = ?peer_id,
+                    reason = denial_reason,
+                    "Op push to peer denied by guard chain"
+                );
+            }
+        }
+    }
+
+    fn log_eval_error(self, peer_id: DeviceId, error: &impl fmt::Display) {
+        match self {
+            Self::Announcement { cid } => {
+                tracing::error!(
+                    cid = ?cid,
+                    peer = ?peer_id,
+                    error = %error,
+                    "Guard chain evaluation failed for announcement"
+                );
+            }
+            Self::Push { cid } => {
+                tracing::error!(
+                    cid = ?cid,
+                    peer = ?peer_id,
+                    error = %error,
+                    "Guard chain evaluation failed for op push"
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{Epoch, TreeOp, TreeOpKind};
-    use aura_journal::{LeafId, LeafNode, NodeIndex};
-
-    fn create_test_op(commitment: Hash32) -> AttestedOp {
-        AttestedOp {
-            op: TreeOp {
-                parent_commitment: commitment.0,
-                parent_epoch: Epoch::new(1),
-                op: TreeOpKind::AddLeaf {
-                    leaf: LeafNode::new_device(
-                        LeafId(1),
-                        aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]),
-                        vec![1, 2, 3],
-                    )
-                    .expect("valid leaf"),
-                    under: NodeIndex(0),
-                },
-                version: 1,
-            },
-            agg_sig: vec![],
-            signer_count: 1,
-        }
-    }
+    use crate::test_support::{create_test_op, digest_from_hashes, test_context, test_device};
 
     #[tokio::test]
     async fn test_empty_digest() {
-        let context_id = ContextId::new_from_entropy([1u8; 32]);
+        let context_id = test_context(1);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
         let digest = handler.get_oplog_digest().await.unwrap();
         assert!(digest.cids.is_empty());
@@ -525,7 +606,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_digest_with_ops() {
-        let context_id = ContextId::new_from_entropy([2u8; 32]);
+        let context_id = test_context(2);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -542,16 +623,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_compute_ops_to_push() {
-        let context_id = ContextId::new_from_entropy([3u8; 32]);
+        let context_id = test_context(3);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op1.clone()).await;
 
         let local_digest = handler.get_oplog_digest().await.unwrap();
-        let remote_digest = BloomDigest {
-            cids: BTreeSet::new(), // Remote has no ops
-        };
+        let remote_digest = BloomDigest::empty(); // Remote has no ops
 
         let to_push = handler
             .compute_ops_to_push(&local_digest, &remote_digest)
@@ -567,18 +646,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_compute_cids_to_pull() {
-        let context_id = ContextId::new_from_entropy([4u8; 32]);
+        let context_id = test_context(4);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
-        let local_digest = BloomDigest {
-            cids: BTreeSet::new(), // We have no ops
-        };
-
-        let mut remote_cids = BTreeSet::new();
-        remote_cids.insert(aura_core::Hash32([1u8; 32]));
-        remote_cids.insert(aura_core::Hash32([2u8; 32]));
-
-        let remote_digest = BloomDigest { cids: remote_cids };
+        let local_digest = BloomDigest::empty(); // We have no ops
+        let remote_digest =
+            digest_from_hashes([aura_core::Hash32([1u8; 32]), aura_core::Hash32([2u8; 32])]);
 
         let to_pull = handler.compute_cids_to_pull(&local_digest, &remote_digest);
 
@@ -589,7 +662,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_remote_ops() {
-        let context_id = ContextId::new_from_entropy([5u8; 32]);
+        let context_id = test_context(5);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -603,11 +676,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_peer_management() {
-        let context_id = ContextId::new_from_entropy([6u8; 32]);
+        let context_id = test_context(6);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
-        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
-        let peer2 = DeviceId::from_uuid(uuid::Uuid::from_u128(2));
+        let peer1 = test_device(1);
+        let peer2 = test_device(2);
 
         handler.add_peer(peer1).await;
         handler.add_peer(peer2).await;
@@ -620,13 +693,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_op() {
-        let context_id = ContextId::new_from_entropy([7u8; 32]);
+        let context_id = test_context(7);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
 
-        let peer_id = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer_id = test_device(1);
         let retrieved = handler
             .request_op(peer_id, aura_core::Hash32([1u8; 32]))
             .await
@@ -640,10 +713,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_missing_op() {
-        let context_id = ContextId::new_from_entropy([8u8; 32]);
+        let context_id = test_context(8);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
-        let peer_id = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer_id = test_device(1);
         let result = handler
             .request_op(peer_id, aura_core::Hash32([99u8; 32]))
             .await;

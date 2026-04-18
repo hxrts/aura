@@ -25,10 +25,13 @@ impl AmpMessage {
 }
 
 pub fn serialize_message(msg: &AmpMessage) -> Result<Vec<u8>, AuraError> {
-    aura_core::util::serialization::to_vec(msg).map_err(|e| AuraError::serialization(e.to_string()))
+    aura_core::util::serialization::to_vec(msg).map_err(map_wire_serialization_error)
 }
 
 pub fn deserialize_message(bytes: &[u8]) -> Result<AmpMessage, AuraError> {
-    aura_core::util::serialization::from_slice(bytes)
-        .map_err(|e| AuraError::serialization(e.to_string()))
+    aura_core::util::serialization::from_slice(bytes).map_err(map_wire_serialization_error)
+}
+
+fn map_wire_serialization_error(error: impl ToString) -> AuraError {
+    AuraError::serialization(error.to_string())
 }

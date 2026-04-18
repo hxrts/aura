@@ -1,6 +1,6 @@
 use aura_amp::capabilities::AmpCapability;
 use aura_authorization::biscuit_token::TokenGrantProfile;
-use aura_authorization::capabilities::GenericCapability;
+use aura_authorization::GenericCapability;
 use aura_chat::capabilities::ChatCapability;
 use aura_core::CapabilityName;
 use aura_invitation::capabilities::InvitationCapability;

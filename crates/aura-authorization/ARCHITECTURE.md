@@ -64,7 +64,7 @@ Contract alignment:
 
 | Surface | Category | Notes |
 |---------|----------|-------|
-| `src/capabilities.rs`, `src/facts.rs`, `src/flow_budget.rs`, `src/view.rs` | `Pure` | Capability semantics, fact reduction, and derived authorization state. |
+| `src/effect_policy.rs`, `src/facts.rs`, `src/flow_budget.rs`, `src/view.rs` | `Pure` | Generic capability families, effect timing semantics, fact reduction, and derived authorization state. |
 | `src/storage_authorization.rs` | `Pure`, `MoveOwned` | Storage-token and budget handling remain synchronous and typed; no async owner state or runtime locks. |
 | `src/effects.rs` | `Pure` | Authorization effect contracts and pure capability-facing adapters. |
 | Actor-owned runtime state | none | Layer 2 authorization must not accumulate background owner tasks. |

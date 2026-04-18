@@ -40,12 +40,13 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use aura_core::ContextId;
+use aura_macros::capability_family;
 
 /// High-level operation types for effect policy classification
 ///
 /// These are distinct from `ResourceScope` operations - they represent
 /// user-facing actions rather than authorization primitives.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OperationType {
     // === Message Operations ===
     /// Send a message within a channel
@@ -130,42 +131,56 @@ pub enum OperationType {
     ProposeBlockOneHopLink,
 }
 
+macro_rules! for_each_operation_type {
+    ($macro:ident) => {
+        $macro! {
+            SendMessage => "send_message",
+            EditMessage => "edit_message",
+            DeleteMessage => "delete_message",
+            ReactToMessage => "react_to_message",
+            CreateChannel => "create_channel",
+            UpdateChannelTopic => "update_channel_topic",
+            ArchiveChannel => "archive_channel",
+            DeleteChannel => "delete_channel",
+            PinMessage => "pin_message",
+            AddChannelMember => "add_channel_member",
+            RemoveChannelMember => "remove_channel_member",
+            ChangeChannelPermissions => "change_channel_permissions",
+            TransferChannelOwnership => "transfer_channel_ownership",
+            AddContact => "add_contact",
+            BlockContact => "block_contact",
+            UnblockContact => "unblock_contact",
+            SetContactNickname => "set_contact_nickname",
+            CreateGroup => "create_group",
+            AddGroupMember => "add_group_member",
+            RemoveGroupMember => "remove_group_member",
+            UpdateProfile => "update_profile",
+            UpdatePreferences => "update_preferences",
+            RotateGuardians => "rotate_guardians",
+            ExecuteRecovery => "execute_recovery",
+            ApproveRecovery => "approve_recovery",
+            AddDevice => "add_device",
+            RevokeDevice => "revoke_device",
+            ProposeOTAUpdate => "propose_ota_update",
+            ActivateOTA => "activate_ota",
+            JoinSocialBlock => "join_social_block",
+            ProposeBlockOneHopLink => "propose_block_one_hop_link"
+        }
+    };
+}
+
 impl OperationType {
     /// Get the string identifier for this operation type
     pub fn as_str(&self) -> &'static str {
-        match self {
-            OperationType::SendMessage => "send_message",
-            OperationType::EditMessage => "edit_message",
-            OperationType::DeleteMessage => "delete_message",
-            OperationType::ReactToMessage => "react_to_message",
-            OperationType::CreateChannel => "create_channel",
-            OperationType::UpdateChannelTopic => "update_channel_topic",
-            OperationType::ArchiveChannel => "archive_channel",
-            OperationType::DeleteChannel => "delete_channel",
-            OperationType::PinMessage => "pin_message",
-            OperationType::AddChannelMember => "add_channel_member",
-            OperationType::RemoveChannelMember => "remove_channel_member",
-            OperationType::ChangeChannelPermissions => "change_channel_permissions",
-            OperationType::TransferChannelOwnership => "transfer_channel_ownership",
-            OperationType::AddContact => "add_contact",
-            OperationType::BlockContact => "block_contact",
-            OperationType::UnblockContact => "unblock_contact",
-            OperationType::SetContactNickname => "set_contact_nickname",
-            OperationType::CreateGroup => "create_group",
-            OperationType::AddGroupMember => "add_group_member",
-            OperationType::RemoveGroupMember => "remove_group_member",
-            OperationType::UpdateProfile => "update_profile",
-            OperationType::UpdatePreferences => "update_preferences",
-            OperationType::RotateGuardians => "rotate_guardians",
-            OperationType::ExecuteRecovery => "execute_recovery",
-            OperationType::ApproveRecovery => "approve_recovery",
-            OperationType::AddDevice => "add_device",
-            OperationType::RevokeDevice => "revoke_device",
-            OperationType::ProposeOTAUpdate => "propose_ota_update",
-            OperationType::ActivateOTA => "activate_ota",
-            OperationType::JoinSocialBlock => "join_social_block",
-            OperationType::ProposeBlockOneHopLink => "propose_block_one_hop_link",
+        macro_rules! operation_to_str {
+            ($($variant:ident => $value:literal),+ $(,)?) => {
+                match self {
+                    $(OperationType::$variant => $value,)+
+                }
+            };
         }
+
+        for_each_operation_type!(operation_to_str)
     }
 
     /// Get the default security level for this operation
@@ -213,44 +228,41 @@ impl OperationType {
     }
 }
 
+#[capability_family(namespace = "")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GenericCapability {
+    #[capability("read")]
+    Read,
+    #[capability("write")]
+    Write,
+    #[capability("execute")]
+    Execute,
+    #[capability("delegate")]
+    Delegate,
+    #[capability("moderator")]
+    Moderator,
+    #[capability("flow_charge")]
+    FlowCharge,
+}
+
+pub fn evaluation_candidates_for_generic_policy() -> &'static [GenericCapability] {
+    GenericCapability::declared_names()
+}
+
 impl FromStr for OperationType {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "send_message" => Ok(OperationType::SendMessage),
-            "edit_message" => Ok(OperationType::EditMessage),
-            "delete_message" => Ok(OperationType::DeleteMessage),
-            "react_to_message" => Ok(OperationType::ReactToMessage),
-            "create_channel" => Ok(OperationType::CreateChannel),
-            "update_channel_topic" => Ok(OperationType::UpdateChannelTopic),
-            "archive_channel" => Ok(OperationType::ArchiveChannel),
-            "delete_channel" => Ok(OperationType::DeleteChannel),
-            "pin_message" => Ok(OperationType::PinMessage),
-            "add_channel_member" => Ok(OperationType::AddChannelMember),
-            "remove_channel_member" => Ok(OperationType::RemoveChannelMember),
-            "change_channel_permissions" => Ok(OperationType::ChangeChannelPermissions),
-            "transfer_channel_ownership" => Ok(OperationType::TransferChannelOwnership),
-            "add_contact" => Ok(OperationType::AddContact),
-            "block_contact" => Ok(OperationType::BlockContact),
-            "unblock_contact" => Ok(OperationType::UnblockContact),
-            "set_contact_nickname" => Ok(OperationType::SetContactNickname),
-            "create_group" => Ok(OperationType::CreateGroup),
-            "add_group_member" => Ok(OperationType::AddGroupMember),
-            "remove_group_member" => Ok(OperationType::RemoveGroupMember),
-            "update_profile" => Ok(OperationType::UpdateProfile),
-            "update_preferences" => Ok(OperationType::UpdatePreferences),
-            "rotate_guardians" => Ok(OperationType::RotateGuardians),
-            "execute_recovery" => Ok(OperationType::ExecuteRecovery),
-            "approve_recovery" => Ok(OperationType::ApproveRecovery),
-            "add_device" => Ok(OperationType::AddDevice),
-            "revoke_device" => Ok(OperationType::RevokeDevice),
-            "propose_ota_update" => Ok(OperationType::ProposeOTAUpdate),
-            "activate_ota" => Ok(OperationType::ActivateOTA),
-            "join_social_block" => Ok(OperationType::JoinSocialBlock),
-            "propose_block_one_hop_link" => Ok(OperationType::ProposeBlockOneHopLink),
-            _ => Err(format!("Unknown operation type: {}", s)),
+        macro_rules! str_to_operation {
+            ($($variant:ident => $value:literal),+ $(,)?) => {
+                match s {
+                    $($value => Ok(OperationType::$variant),)+
+                    _ => Err(format!("Unknown operation type: {}", s)),
+                }
+            };
         }
+
+        for_each_operation_type!(str_to_operation)
     }
 }
 
@@ -503,7 +515,7 @@ impl EffectPolicyRegistry {
     pub fn remove_override(&mut self, context_id: &ContextId, operation: &OperationType) {
         let key = PolicyKey {
             context_id: Some(*context_id),
-            operation: operation.clone(),
+            operation: *operation,
         };
         self.overrides.remove(&key);
     }
@@ -523,7 +535,7 @@ impl EffectPolicyRegistry {
         if let Some(ctx_id) = context_id {
             let key = PolicyKey {
                 context_id: Some(*ctx_id),
-                operation: operation.clone(),
+                operation: *operation,
             };
             if let Some(timing) = self.overrides.get(&key) {
                 return timing.clone();
@@ -547,7 +559,7 @@ impl EffectPolicyRegistry {
     ) -> EffectPolicy {
         let timing = self.get_timing(operation, context_id);
         EffectPolicy {
-            operation: operation.clone(),
+            operation: *operation,
             timing,
             security_level: operation.default_security_level(),
         }
@@ -581,52 +593,47 @@ impl Default for EffectPolicyRegistry {
 
         // === LOW RISK: Immediate ===
         // Within-context operations that are safe to apply optimistically
-        registry.set_default(OperationType::SendMessage, EffectTiming::Immediate);
-        registry.set_default(OperationType::EditMessage, EffectTiming::Immediate);
-        registry.set_default(OperationType::DeleteMessage, EffectTiming::Immediate);
-        registry.set_default(OperationType::ReactToMessage, EffectTiming::Immediate);
-        registry.set_default(OperationType::CreateChannel, EffectTiming::Immediate);
-        registry.set_default(OperationType::UpdateChannelTopic, EffectTiming::Immediate);
-        registry.set_default(OperationType::PinMessage, EffectTiming::Immediate);
-        registry.set_default(OperationType::BlockContact, EffectTiming::Immediate);
-        registry.set_default(OperationType::UnblockContact, EffectTiming::Immediate);
-        registry.set_default(OperationType::SetContactNickname, EffectTiming::Immediate);
-        registry.set_default(OperationType::UpdateProfile, EffectTiming::Immediate);
-        registry.set_default(OperationType::UpdatePreferences, EffectTiming::Immediate);
+        for operation in [
+            OperationType::SendMessage,
+            OperationType::EditMessage,
+            OperationType::DeleteMessage,
+            OperationType::ReactToMessage,
+            OperationType::CreateChannel,
+            OperationType::UpdateChannelTopic,
+            OperationType::PinMessage,
+            OperationType::BlockContact,
+            OperationType::UnblockContact,
+            OperationType::SetContactNickname,
+            OperationType::UpdateProfile,
+            OperationType::UpdatePreferences,
+        ] {
+            registry.set_default(operation, EffectTiming::Immediate);
+        }
 
         // === MEDIUM RISK: Deferred with single admin approval ===
         // Affects others but is reversible
-        registry.set_default(
-            OperationType::ArchiveChannel,
-            EffectTiming::deferred_single_admin(24),
-        );
-        registry.set_default(
-            OperationType::AddChannelMember,
-            EffectTiming::deferred_single_admin(24),
-        );
-        registry.set_default(
-            OperationType::RemoveChannelMember,
-            EffectTiming::deferred_single_admin(24),
-        );
-        registry.set_default(
-            OperationType::ChangeChannelPermissions,
-            EffectTiming::deferred_single_admin(24),
-        );
-        registry.set_default(
-            OperationType::JoinSocialBlock,
-            EffectTiming::deferred_single_admin(48),
-        );
-        registry.set_default(
-            OperationType::ProposeBlockOneHopLink,
-            EffectTiming::deferred_single_admin(48),
-        );
+        for (operation, timeout_hours) in [
+            (OperationType::ArchiveChannel, 24),
+            (OperationType::AddChannelMember, 24),
+            (OperationType::RemoveChannelMember, 24),
+            (OperationType::ChangeChannelPermissions, 24),
+            (OperationType::JoinSocialBlock, 48),
+            (OperationType::ProposeBlockOneHopLink, 48),
+        ] {
+            registry.set_default(
+                operation,
+                EffectTiming::deferred_single_admin(timeout_hours),
+            );
+        }
 
         // === HIGH RISK: Deferred with unanimous admin approval ===
         // Irreversible or significant security impact
-        registry.set_default(
+        for operation in [
             OperationType::DeleteChannel,
-            EffectTiming::deferred_unanimous_admin(24),
-        );
+            OperationType::RemoveGroupMember,
+        ] {
+            registry.set_default(operation, EffectTiming::deferred_unanimous_admin(24));
+        }
         registry.set_default(
             OperationType::TransferChannelOwnership,
             EffectTiming::Deferred {
@@ -635,53 +642,26 @@ impl Default for EffectPolicyRegistry {
                 threshold: ApprovalThreshold::Unanimous,
             },
         );
-        registry.set_default(
-            OperationType::RemoveGroupMember,
-            EffectTiming::deferred_unanimous_admin(24),
-        );
 
         // === CRITICAL: Blocking with ceremony ===
         // Establishes or modifies cryptographic relationships
-        registry.set_default(
-            OperationType::AddContact,
-            EffectTiming::blocking(CeremonyType::Invitation),
-        );
-        registry.set_default(
-            OperationType::CreateGroup,
-            EffectTiming::blocking(CeremonyType::GroupMembership),
-        );
-        registry.set_default(
-            OperationType::AddGroupMember,
-            EffectTiming::blocking(CeremonyType::GroupMembership),
-        );
-        registry.set_default(
-            OperationType::RotateGuardians,
-            EffectTiming::blocking(CeremonyType::GuardianRotation),
-        );
-        registry.set_default(
-            OperationType::ExecuteRecovery,
-            EffectTiming::blocking(CeremonyType::Recovery),
-        );
-        registry.set_default(
-            OperationType::ApproveRecovery,
-            EffectTiming::blocking(CeremonyType::Recovery),
-        );
-        registry.set_default(
-            OperationType::AddDevice,
-            EffectTiming::blocking(CeremonyType::Invitation),
-        );
-        registry.set_default(
-            OperationType::RevokeDevice,
-            EffectTiming::blocking(CeremonyType::GuardianRotation),
-        );
-        registry.set_default(
-            OperationType::ProposeOTAUpdate,
-            EffectTiming::blocking(CeremonyType::OTAActivation),
-        );
-        registry.set_default(
-            OperationType::ActivateOTA,
-            EffectTiming::blocking(CeremonyType::OTAActivation),
-        );
+        for (operation, ceremony) in [
+            (OperationType::AddContact, CeremonyType::Invitation),
+            (OperationType::CreateGroup, CeremonyType::GroupMembership),
+            (OperationType::AddGroupMember, CeremonyType::GroupMembership),
+            (
+                OperationType::RotateGuardians,
+                CeremonyType::GuardianRotation,
+            ),
+            (OperationType::ExecuteRecovery, CeremonyType::Recovery),
+            (OperationType::ApproveRecovery, CeremonyType::Recovery),
+            (OperationType::AddDevice, CeremonyType::Invitation),
+            (OperationType::RevokeDevice, CeremonyType::GuardianRotation),
+            (OperationType::ProposeOTAUpdate, CeremonyType::OTAActivation),
+            (OperationType::ActivateOTA, CeremonyType::OTAActivation),
+        ] {
+            registry.set_default(operation, EffectTiming::blocking(ceremony));
+        }
 
         registry
     }
@@ -729,6 +709,10 @@ impl From<EffectTiming> for EffectDecision {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_context_id(seed: u8) -> ContextId {
+        ContextId::new_from_entropy([seed; 32])
+    }
 
     #[test]
     fn test_operation_type_roundtrip() {
@@ -811,7 +795,7 @@ mod tests {
     #[test]
     fn test_registry_override() {
         let mut registry = EffectPolicyRegistry::default();
-        let context_id = ContextId::new_from_entropy([42u8; 32]);
+        let context_id = test_context_id(42);
 
         // Default for RemoveChannelMember is deferred
         let timing = registry.get_timing(&OperationType::RemoveChannelMember, None);

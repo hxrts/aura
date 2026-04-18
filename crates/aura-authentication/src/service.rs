@@ -23,13 +23,12 @@
 //! `SessionCreationCoordinator`, `GuardianAuthCoordinator`) with a unified
 //! service that uses the guard chain pattern.
 
-use crate::capabilities::{
-    AuthenticationCapability, GuardianAuthCapability, RecoveryAuthorizationCapability,
-};
+use crate::capabilities::{AuthenticationCapability, GuardianAuthCapability};
 use crate::facts::AuthFact;
 use crate::guards::{
-    check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
-    RecoveryContext, RecoveryOperationType,
+    check_capability, check_capability_and_flow_budget, check_recovery_operation,
+    check_session_duration, costs, EffectCommand, GuardOutcome, GuardSnapshot, RecoveryContext,
+    RecoveryOperationType,
 };
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
@@ -102,6 +101,52 @@ fn derive_auth_context_id(snapshot: &GuardSnapshot) -> ContextId {
         .unwrap_or_else(|| ContextId::new_from_entropy(hash(&snapshot.authority_id.to_bytes())))
 }
 
+fn check_capability_and_budget(
+    snapshot: &GuardSnapshot,
+    capability: &aura_guards::types::CapabilityId,
+    cost: aura_core::FlowCost,
+) -> Option<GuardOutcome> {
+    check_capability_and_flow_budget(snapshot, capability, cost)
+}
+
+fn charge_flow_budget(cost: aura_core::FlowCost) -> EffectCommand {
+    EffectCommand::ChargeFlowBudget { cost }
+}
+
+fn append_auth_fact(fact: AuthFact) -> EffectCommand {
+    EffectCommand::JournalAppend {
+        fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
+        fact_data: fact.to_bytes(),
+    }
+}
+
+fn deny_auth_guard(error: AuthGuardError) -> GuardOutcome {
+    GuardOutcome::denied(aura_guards::types::GuardViolation::other(error.to_string()))
+}
+
+fn validate_recovery_context(
+    snapshot: &GuardSnapshot,
+    context: &RecoveryContext,
+    policy: &AuthPolicy,
+) -> Option<GuardOutcome> {
+    check_recovery_operation(
+        snapshot,
+        &context.operation_type,
+        context.is_emergency,
+        policy.require_recovery_capability,
+    )?;
+
+    match context.operation_type {
+        RecoveryOperationType::GuardianSetModification => Some(deny_auth_guard(
+            AuthGuardError::GuardianSetRequiresApproveCapability,
+        )),
+        RecoveryOperationType::EmergencyFreeze if !context.is_emergency => Some(deny_auth_guard(
+            AuthGuardError::EmergencyFreezeRequiresInitiateCapability,
+        )),
+        _ => None,
+    }
+}
+
 // =============================================================================
 // Authentication Service
 // =============================================================================
@@ -137,24 +182,19 @@ impl AuthService {
     /// Returns a `GuardOutcome` containing effect commands to generate
     /// the challenge if allowed.
     pub fn request_challenge(&self, snapshot: &GuardSnapshot, scope: SessionScope) -> GuardOutcome {
-        // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &AuthenticationCapability::Request.as_name())
-        {
-            return outcome;
-        }
-
-        // Check budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::CHALLENGE_REQUEST_COST) {
+        if let Some(outcome) = check_capability_and_budget(
+            snapshot,
+            &AuthenticationCapability::Request.as_name(),
+            costs::CHALLENGE_REQUEST_COST,
+        ) {
             return outcome;
         }
 
         let session_id = generate_session_id(snapshot);
         let expires_at_ms = snapshot.now_ms + self.config.challenge_expiration_ms;
 
-        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::ChallengeGenerated {
-            context_id,
+            context_id: derive_auth_context_id(snapshot),
             session_id: session_id.clone(),
             authority_id: snapshot.authority_id,
             device_id: snapshot.device_id,
@@ -162,20 +202,13 @@ impl AuthService {
             expires_at_ms,
             created_at_ms: snapshot.now_ms,
         };
-        let fact_data = fact.to_bytes();
-
         GuardOutcome::allowed(vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::CHALLENGE_REQUEST_COST,
-            },
+            charge_flow_budget(costs::CHALLENGE_REQUEST_COST),
             EffectCommand::GenerateChallenge {
                 session_id,
                 expires_at_ms,
             },
-            EffectCommand::JournalAppend {
-                fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data,
-            },
+            append_auth_fact(fact),
         ])
     }
 
@@ -193,36 +226,25 @@ impl AuthService {
         session_id: String,
         proof_hash: [u8; 32],
     ) -> GuardOutcome {
-        // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &AuthenticationCapability::SubmitProof.as_name())
-        {
+        if let Some(outcome) = check_capability_and_budget(
+            snapshot,
+            &AuthenticationCapability::SubmitProof.as_name(),
+            costs::PROOF_SUBMISSION_COST,
+        ) {
             return outcome;
         }
 
-        // Check budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::PROOF_SUBMISSION_COST) {
-            return outcome;
-        }
-
-        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::ProofSubmitted {
-            context_id,
+            context_id: derive_auth_context_id(snapshot),
             session_id: session_id.clone(),
             authority_id: snapshot.authority_id,
             proof_hash,
             submitted_at_ms: snapshot.now_ms,
         };
-        let fact_data = fact.to_bytes();
 
         GuardOutcome::allowed(vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::PROOF_SUBMISSION_COST,
-            },
-            EffectCommand::JournalAppend {
-                fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data,
-            },
+            charge_flow_budget(costs::PROOF_SUBMISSION_COST),
+            append_auth_fact(fact),
             EffectCommand::RecordReceipt {
                 operation: format!("proof_submission:{session_id}"),
                 peer: None,
@@ -246,35 +268,26 @@ impl AuthService {
         duration_seconds: u64,
     ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
-        // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &AuthenticationCapability::CreateSession.as_name())
-        {
+        if let Some(outcome) = check_capability_and_budget(
+            snapshot,
+            &AuthenticationCapability::CreateSession.as_name(),
+            costs::SESSION_CREATION_COST,
+        ) {
             return outcome;
         }
 
-        // Check budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::SESSION_CREATION_COST) {
-            return outcome;
-        }
-
-        // Check duration
-        if duration_seconds > policy.max_session_duration_secs {
-            return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
-                AuthGuardError::SessionDurationTooLong {
-                    requested: duration_seconds,
-                    max: policy.max_session_duration_secs,
-                }
-                .to_string(),
-            ));
+        if check_session_duration(duration_seconds, policy.max_session_duration_secs).is_some() {
+            return deny_auth_guard(AuthGuardError::SessionDurationTooLong {
+                requested: duration_seconds,
+                max: policy.max_session_duration_secs,
+            });
         }
 
         let session_id = generate_session_id(snapshot);
         let expires_at_ms = snapshot.now_ms + (duration_seconds * 1000);
 
-        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::SessionIssued {
-            context_id,
+            context_id: derive_auth_context_id(snapshot),
             session_id: session_id.clone(),
             authority_id: snapshot.authority_id,
             device_id: snapshot.device_id,
@@ -282,21 +295,14 @@ impl AuthService {
             issued_at_ms: snapshot.now_ms,
             expires_at_ms,
         };
-        let fact_data = fact.to_bytes();
-
         GuardOutcome::allowed(vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::SESSION_CREATION_COST,
-            },
+            charge_flow_budget(costs::SESSION_CREATION_COST),
             EffectCommand::IssueSessionTicket {
                 session_id,
                 scope,
                 expires_at_ms,
             },
-            EffectCommand::JournalAppend {
-                fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data,
-            },
+            append_auth_fact(fact),
         ])
     }
 
@@ -316,48 +322,23 @@ impl AuthService {
         required_guardians: u32,
     ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
-        // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &GuardianAuthCapability::RequestApproval.as_name())
-        {
+        if let Some(outcome) = check_capability_and_budget(
+            snapshot,
+            &GuardianAuthCapability::RequestApproval.as_name(),
+            costs::GUARDIAN_APPROVAL_REQUEST_COST,
+        ) {
             return outcome;
         }
 
-        // Check budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::GUARDIAN_APPROVAL_REQUEST_COST) {
+        if let Some(outcome) = validate_recovery_context(snapshot, &context, &policy) {
             return outcome;
-        }
-
-        // Check recovery operation type constraints
-        if policy.require_recovery_capability {
-            match context.operation_type {
-                RecoveryOperationType::GuardianSetModification => {
-                    if !snapshot.has_capability(&RecoveryAuthorizationCapability::Approve.as_name())
-                    {
-                        return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
-                            AuthGuardError::GuardianSetRequiresApproveCapability.to_string(),
-                        ));
-                    }
-                }
-                RecoveryOperationType::EmergencyFreeze if !context.is_emergency => {
-                    if !snapshot
-                        .has_capability(&RecoveryAuthorizationCapability::Initiate.as_name())
-                    {
-                        return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
-                            AuthGuardError::EmergencyFreezeRequiresInitiateCapability.to_string(),
-                        ));
-                    }
-                }
-                _ => {}
-            }
         }
 
         let request_id = generate_request_id(snapshot);
         let expires_at_ms = snapshot.now_ms + self.config.guardian_approval_expiration_ms;
 
-        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::GuardianApprovalRequested {
-            context_id,
+            context_id: derive_auth_context_id(snapshot),
             request_id: request_id.clone(),
             account_id,
             requester_id: snapshot.authority_id,
@@ -368,16 +349,9 @@ impl AuthService {
             requested_at_ms: snapshot.now_ms,
             expires_at_ms,
         };
-        let fact_data = fact.to_bytes();
-
         GuardOutcome::allowed(vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::GUARDIAN_APPROVAL_REQUEST_COST,
-            },
-            EffectCommand::JournalAppend {
-                fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data,
-            },
+            charge_flow_budget(costs::GUARDIAN_APPROVAL_REQUEST_COST),
+            append_auth_fact(fact),
             EffectCommand::AggregateGuardianApprovals {
                 request_id: request_id.clone(),
                 threshold: required_guardians,
@@ -402,21 +376,17 @@ impl AuthService {
         justification: String,
         signature: Vec<u8>,
     ) -> GuardOutcome {
-        // Check capability
-        if let Some(outcome) = check_capability(snapshot, &GuardianAuthCapability::Verify.as_name())
-        {
+        if let Some(outcome) = check_capability_and_budget(
+            snapshot,
+            &GuardianAuthCapability::Verify.as_name(),
+            costs::GUARDIAN_APPROVAL_DECISION_COST,
+        ) {
             return outcome;
         }
 
-        // Check budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::GUARDIAN_APPROVAL_DECISION_COST) {
-            return outcome;
-        }
-
-        let context_id = derive_auth_context_id(snapshot);
         let fact = if approved {
             AuthFact::GuardianApproved {
-                context_id,
+                context_id: derive_auth_context_id(snapshot),
                 request_id: request_id.clone(),
                 guardian_id: snapshot.authority_id,
                 signature,
@@ -425,23 +395,17 @@ impl AuthService {
             }
         } else {
             AuthFact::GuardianDenied {
-                context_id,
+                context_id: derive_auth_context_id(snapshot),
                 request_id: request_id.clone(),
                 guardian_id: snapshot.authority_id,
                 reason: justification,
                 denied_at_ms: snapshot.now_ms,
             }
         };
-        let fact_data = fact.to_bytes();
 
         GuardOutcome::allowed(vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::GUARDIAN_APPROVAL_DECISION_COST,
-            },
-            EffectCommand::JournalAppend {
-                fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data,
-            },
+            charge_flow_budget(costs::GUARDIAN_APPROVAL_DECISION_COST),
+            append_auth_fact(fact),
             EffectCommand::RecordReceipt {
                 operation: format!("guardian_decision:{request_id}:{approved}"),
                 peer: Some(snapshot.authority_id),
@@ -471,21 +435,16 @@ impl AuthService {
             return outcome;
         }
 
-        let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::SessionRevoked {
-            context_id,
+            context_id: derive_auth_context_id(snapshot),
             session_id: session_id.clone(),
             revoked_by: snapshot.authority_id,
             reason,
             revoked_at_ms: snapshot.now_ms,
         };
-        let fact_data = fact.to_bytes();
 
         GuardOutcome::allowed(vec![
-            EffectCommand::JournalAppend {
-                fact_type: crate::facts::AUTH_FACT_TYPE_ID.to_string(),
-                fact_data,
-            },
+            append_auth_fact(fact),
             EffectCommand::RecordReceipt {
                 operation: format!("session_revocation:{session_id}"),
                 peer: None,
@@ -590,29 +549,9 @@ pub struct GuardianApprovalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::FlowCost;
-
-    fn test_authority() -> AuthorityId {
-        AuthorityId::new_from_entropy([1u8; 32])
-    }
-
-    fn test_snapshot() -> GuardSnapshot {
-        GuardSnapshot::new(
-            test_authority(),
-            None,
-            None,
-            FlowCost::new(100),
-            vec![
-                AuthenticationCapability::Request.as_name(),
-                AuthenticationCapability::SubmitProof.as_name(),
-                AuthenticationCapability::CreateSession.as_name(),
-                GuardianAuthCapability::RequestApproval.as_name(),
-                GuardianAuthCapability::Verify.as_name(),
-            ],
-            1,
-            1000,
-        )
-    }
+    use crate::test_support::{
+        authority, protocol_scope, snapshot_with_capabilities, standard_service_snapshot,
+    };
 
     #[test]
     fn test_service_creation() {
@@ -623,10 +562,8 @@ mod tests {
     #[test]
     fn test_request_challenge_allowed() {
         let service = AuthService::new();
-        let snapshot = test_snapshot();
-        let scope = SessionScope::Protocol {
-            protocol_type: "test".to_string(),
-        };
+        let snapshot = standard_service_snapshot();
+        let scope = protocol_scope("test");
 
         let outcome = service.request_challenge(&snapshot, scope);
         assert!(outcome.is_allowed());
@@ -636,18 +573,8 @@ mod tests {
     #[test]
     fn test_request_challenge_missing_capability() {
         let service = AuthService::new();
-        let snapshot = GuardSnapshot::new(
-            test_authority(),
-            None,
-            None,
-            FlowCost::new(100),
-            vec![], // No capabilities
-            1,
-            1000,
-        );
-        let scope = SessionScope::Protocol {
-            protocol_type: "test".to_string(),
-        };
+        let snapshot = snapshot_with_capabilities(1, vec![]);
+        let scope = protocol_scope("test");
 
         let outcome = service.request_challenge(&snapshot, scope);
         assert!(outcome.is_denied());
@@ -656,10 +583,8 @@ mod tests {
     #[test]
     fn test_create_session_duration_exceeded() {
         let service = AuthService::new();
-        let snapshot = test_snapshot();
-        let scope = SessionScope::Protocol {
-            protocol_type: "test".to_string(),
-        };
+        let snapshot = standard_service_snapshot();
+        let scope = protocol_scope("test");
 
         let outcome = service.create_session(&snapshot, scope, 100_000); // > 24 hours
         assert!(outcome.is_denied());
@@ -668,10 +593,8 @@ mod tests {
     #[test]
     fn test_create_session_allowed() {
         let service = AuthService::new();
-        let snapshot = test_snapshot();
-        let scope = SessionScope::Protocol {
-            protocol_type: "test".to_string(),
-        };
+        let snapshot = standard_service_snapshot();
+        let scope = protocol_scope("test");
 
         let outcome = service.create_session(&snapshot, scope, 3600); // 1 hour
         assert!(outcome.is_allowed());
@@ -680,7 +603,7 @@ mod tests {
     #[test]
     fn test_submit_proof_allowed() {
         let service = AuthService::new();
-        let snapshot = test_snapshot();
+        let snapshot = standard_service_snapshot();
 
         let outcome = service.submit_proof(&snapshot, "session_123".to_string(), [0u8; 32]);
         assert!(outcome.is_allowed());
@@ -689,21 +612,21 @@ mod tests {
     #[test]
     fn test_guardian_approval_request() {
         let service = AuthService::new();
-        let snapshot = test_snapshot();
+        let snapshot = standard_service_snapshot();
         let context = RecoveryContext::new(
             RecoveryOperationType::DeviceKeyRecovery,
             "Lost device",
             1000,
         );
 
-        let outcome = service.request_guardian_approval(&snapshot, test_authority(), context, 2);
+        let outcome = service.request_guardian_approval(&snapshot, authority(1), context, 2);
         assert!(outcome.is_allowed());
     }
 
     #[test]
     fn test_guardian_decision_approved() {
         let service = AuthService::new();
-        let snapshot = test_snapshot();
+        let snapshot = standard_service_snapshot();
 
         let outcome = service.submit_guardian_decision(
             &snapshot,
@@ -718,7 +641,7 @@ mod tests {
     #[test]
     fn test_guardian_decision_denied() {
         let service = AuthService::new();
-        let snapshot = test_snapshot();
+        let snapshot = standard_service_snapshot();
 
         let outcome = service.submit_guardian_decision(
             &snapshot,
@@ -733,7 +656,7 @@ mod tests {
     #[test]
     fn test_revoke_session() {
         let service = AuthService::new();
-        let snapshot = test_snapshot();
+        let snapshot = standard_service_snapshot();
 
         let outcome = service.revoke_session(
             &snapshot,

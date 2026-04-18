@@ -53,23 +53,7 @@ impl<E: JournalEffects + OrderClockEffects> AmpJournalEffects for E {
     }
 
     async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
-        let context = fact_context(&fact)?;
-        let order = self
-            .order_time()
-            .await
-            .map_err(|e| AuraError::internal(e.to_string()))?;
-        let content = FactContent::Relational(fact);
-        let bytes =
-            serde_json::to_vec(&content).map_err(|e| AuraError::serialization(e.to_string()))?;
-        let key = format!("relational:{}:{}", context, hex::encode(order.0));
-
-        let mut delta = Journal::new();
-        delta.facts.insert(key, FactValue::Bytes(bytes))?;
-
-        let current = self.get_journal().await?;
-        let merged = self.merge_facts(current, delta).await?;
-        self.persist_journal(&merged).await?;
-        Ok(())
+        insert_context_relational_fact(self, fact).await
     }
 }
 
@@ -95,24 +79,7 @@ impl<'a, E: ?Sized + JournalEffects + OrderClockEffects> AmpContextStore<'a, E> 
 
     /// Insert a relational fact into the journal.
     pub async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
-        let context = fact_context(&fact)?;
-        let order = self
-            .effects
-            .order_time()
-            .await
-            .map_err(|e| AuraError::internal(e.to_string()))?;
-        let content = FactContent::Relational(fact);
-        let bytes =
-            serde_json::to_vec(&content).map_err(|e| AuraError::serialization(e.to_string()))?;
-        let key = format!("relational:{}:{}", context, hex::encode(order.0));
-
-        let mut delta = Journal::new();
-        delta.facts.insert(key, FactValue::Bytes(bytes))?;
-
-        let current = self.effects.get_journal().await?;
-        let merged = self.effects.merge_facts(current, delta).await?;
-        self.effects.persist_journal(&merged).await?;
-        Ok(())
+        insert_context_relational_fact(self.effects, fact).await
     }
 }
 
@@ -196,6 +163,29 @@ pub(crate) fn fact_context(fact: &RelationalFact) -> Result<ContextId> {
         } if envelope.type_id.as_str().starts_with("amp-") => Ok(*context_id),
         _ => Err(AuraError::invalid("fact not AMP-context scoped")),
     }
+}
+
+async fn insert_context_relational_fact<E: ?Sized + JournalEffects + OrderClockEffects>(
+    effects: &E,
+    fact: RelationalFact,
+) -> Result<()> {
+    let context = fact_context(&fact)?;
+    let order = effects
+        .order_time()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    let content = FactContent::Relational(fact);
+    let bytes =
+        serde_json::to_vec(&content).map_err(|e| AuraError::serialization(e.to_string()))?;
+    let key = format!("relational:{}:{}", context, hex::encode(order.0));
+
+    let mut delta = Journal::new();
+    delta.facts.insert(key, FactValue::Bytes(bytes))?;
+
+    let current = effects.get_journal().await?;
+    let merged = effects.merge_facts(current, delta).await?;
+    effects.persist_journal(&merged).await?;
+    Ok(())
 }
 
 /// Extract fact contents from a core journal.

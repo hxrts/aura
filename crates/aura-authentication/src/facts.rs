@@ -291,29 +291,30 @@ impl AuthFact {
         }
     }
 
+    fn binding_ids(&self) -> (Option<&str>, Option<&str>) {
+        match self {
+            AuthFact::ChallengeGenerated { session_id, .. }
+            | AuthFact::ProofSubmitted { session_id, .. }
+            | AuthFact::AuthVerified { session_id, .. }
+            | AuthFact::AuthFailed { session_id, .. }
+            | AuthFact::SessionIssued { session_id, .. }
+            | AuthFact::SessionRevoked { session_id, .. } => (Some(session_id), None),
+            AuthFact::GuardianApprovalRequested { request_id, .. }
+            | AuthFact::GuardianApproved { request_id, .. }
+            | AuthFact::GuardianDenied { request_id, .. }
+            | AuthFact::RecoveryCompleted { request_id, .. }
+            | AuthFact::RecoveryFailed { request_id, .. } => (None, Some(request_id)),
+        }
+    }
+
     /// Get the session ID if this fact is session-related
     pub fn session_id(&self) -> Option<&str> {
-        match self {
-            AuthFact::ChallengeGenerated { session_id, .. } => Some(session_id),
-            AuthFact::ProofSubmitted { session_id, .. } => Some(session_id),
-            AuthFact::AuthVerified { session_id, .. } => Some(session_id),
-            AuthFact::AuthFailed { session_id, .. } => Some(session_id),
-            AuthFact::SessionIssued { session_id, .. } => Some(session_id),
-            AuthFact::SessionRevoked { session_id, .. } => Some(session_id),
-            _ => None,
-        }
+        self.binding_ids().0
     }
 
     /// Get the request ID if this fact is recovery-related
     pub fn request_id(&self) -> Option<&str> {
-        match self {
-            AuthFact::GuardianApprovalRequested { request_id, .. } => Some(request_id),
-            AuthFact::GuardianApproved { request_id, .. } => Some(request_id),
-            AuthFact::GuardianDenied { request_id, .. } => Some(request_id),
-            AuthFact::RecoveryCompleted { request_id, .. } => Some(request_id),
-            AuthFact::RecoveryFailed { request_id, .. } => Some(request_id),
-            _ => None,
-        }
+        self.binding_ids().1
     }
 
     /// Check if this fact indicates success
@@ -601,36 +602,22 @@ pub enum RecoveryFailureReason {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_signature::session::SessionScope;
-
-    fn test_authority() -> AuthorityId {
-        AuthorityId::new_from_entropy([1u8; 32])
-    }
-
-    fn test_device() -> DeviceId {
-        DeviceId::from_bytes([2u8; 32])
-    }
-
-    fn test_context_id() -> ContextId {
-        ContextId::new_from_entropy([9u8; 32])
-    }
+    use crate::test_support::{authority, context, device, protocol_scope};
 
     #[test]
     fn test_challenge_generated_fact() {
         let fact = AuthFact::ChallengeGenerated {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_123".to_string(),
-            authority_id: test_authority(),
-            device_id: Some(test_device()),
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            authority_id: authority(1),
+            device_id: Some(device(2)),
+            scope: protocol_scope("test"),
             expires_at_ms: 2000,
             created_at_ms: 1000,
         };
 
         assert_eq!(fact.type_id(), AUTH_FACT_TYPE_ID);
-        assert_eq!(fact.primary_authority(), test_authority());
+        assert_eq!(fact.primary_authority(), authority(1));
         assert_eq!(fact.timestamp_ms(), 1000);
         assert_eq!(fact.session_id(), Some("session_123"));
         assert!(!fact.is_success());
@@ -640,10 +627,10 @@ mod tests {
     #[test]
     fn test_auth_verified_fact() {
         let fact = AuthFact::AuthVerified {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_123".to_string(),
-            authority_id: test_authority(),
-            device_id: Some(test_device()),
+            authority_id: authority(1),
+            device_id: Some(device(2)),
             verified_at_ms: 1500,
             message_hash: [0u8; 32],
         };
@@ -655,9 +642,9 @@ mod tests {
     #[test]
     fn test_auth_failed_fact() {
         let fact = AuthFact::AuthFailed {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_123".to_string(),
-            authority_id: test_authority(),
+            authority_id: authority(1),
             reason: "Invalid signature".to_string(),
             failed_at_ms: 1500,
         };
@@ -669,10 +656,10 @@ mod tests {
     #[test]
     fn test_guardian_approval_requested_fact() {
         let fact = AuthFact::GuardianApprovalRequested {
-            context_id: test_context_id(),
+            context_id: context(9),
             request_id: "recovery_123".to_string(),
-            account_id: test_authority(),
-            requester_id: test_authority(),
+            account_id: authority(1),
+            requester_id: authority(1),
             operation_type: RecoveryOperationType::DeviceKeyRecovery,
             required_guardians: 2,
             is_emergency: false,
@@ -690,13 +677,11 @@ mod tests {
         let reducer = AuthFactReducer::new();
 
         let fact = AuthFact::SessionIssued {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_123".to_string(),
-            authority_id: test_authority(),
-            device_id: Some(test_device()),
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            authority_id: authority(1),
+            device_id: Some(device(2)),
+            scope: protocol_scope("test"),
             issued_at_ms: 1000,
             expires_at_ms: 2000,
         };
@@ -718,13 +703,11 @@ mod tests {
     #[test]
     fn test_fact_serialization() {
         let fact = AuthFact::ChallengeGenerated {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_123".to_string(),
-            authority_id: test_authority(),
+            authority_id: authority(1),
             device_id: None,
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            scope: protocol_scope("test"),
             expires_at_ms: 2000,
             created_at_ms: 1000,
         };
@@ -742,13 +725,11 @@ mod tests {
     fn test_reducer_rejects_context_mismatch() {
         let reducer = AuthFactReducer::new();
         let fact = AuthFact::SessionIssued {
-            context_id: test_context_id(),
+            context_id: context(9),
             session_id: "session_456".to_string(),
-            authority_id: test_authority(),
-            device_id: Some(test_device()),
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            authority_id: authority(1),
+            device_id: Some(device(2)),
+            scope: protocol_scope("test"),
             issued_at_ms: 1000,
             expires_at_ms: 2000,
         };
@@ -762,9 +743,9 @@ mod tests {
     #[test]
     fn test_binding_key_derivation() {
         let fact = AuthFact::GuardianApproved {
-            context_id: test_context_id(),
+            context_id: context(9),
             request_id: "req-123".to_string(),
-            guardian_id: test_authority(),
+            guardian_id: authority(1),
             signature: vec![0u8; 64],
             justification: "Approved".to_string(),
             approved_at_ms: 1234,
@@ -780,15 +761,13 @@ mod tests {
     #[test]
     fn test_reducer_idempotence() {
         let reducer = AuthFactReducer::new();
-        let context_id = test_context_id();
+        let context_id = context(9);
         let fact = AuthFact::SessionIssued {
             context_id,
             session_id: "session_123".to_string(),
-            authority_id: test_authority(),
-            device_id: Some(test_device()),
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            authority_id: authority(1),
+            device_id: Some(device(2)),
+            scope: protocol_scope("test"),
             issued_at_ms: 1000,
             expires_at_ms: 2000,
         };

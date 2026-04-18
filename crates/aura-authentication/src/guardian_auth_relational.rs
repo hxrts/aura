@@ -70,6 +70,35 @@ pub struct GuardianAuthResponse {
     pub error: Option<String>,
 }
 
+fn denied_response(message: impl Into<String>) -> GuardianAuthResponse {
+    GuardianAuthResponse {
+        success: false,
+        authorized: false,
+        error: Some(message.into()),
+    }
+}
+
+fn authorized_response() -> GuardianAuthResponse {
+    GuardianAuthResponse {
+        success: true,
+        authorized: true,
+        error: None,
+    }
+}
+
+fn serialize_operation(operation: &GuardianOperation) -> Result<Vec<u8>> {
+    aura_core::util::serialization::to_vec(operation)
+        .map_err(|e| AuraError::serialization(e.to_string()))
+}
+
+async fn current_time_ms<T: aura_core::effects::PhysicalTimeEffects>(time_effects: &T) -> u64 {
+    time_effects
+        .physical_time()
+        .await
+        .map(|t| t.ts_ms)
+        .unwrap_or(0)
+}
+
 /// Authenticate a guardian through relational context
 pub async fn authenticate_guardian<T: aura_core::effects::PhysicalTimeEffects>(
     context: &RelationalContext,
@@ -91,8 +120,7 @@ pub async fn authenticate_guardian<T: aura_core::effects::PhysicalTimeEffects>(
         .ok_or_else(|| AuraError::not_found("Guardian binding not found"))?;
 
     // Sign the operation
-    let operation_bytes = aura_core::util::serialization::to_vec(&request.operation)
-        .map_err(|e| AuraError::serialization(e.to_string()))?;
+    let operation_bytes = serialize_operation(&request.operation)?;
 
     let signature = guardian_authority.sign_operation(&operation_bytes).await?;
 
@@ -101,11 +129,7 @@ pub async fn authenticate_guardian<T: aura_core::effects::PhysicalTimeEffects>(
         guardian_id: guardian_authority.authority_id(),
         binding_proof: binding.consensus_proof.clone(),
         operation_signature: signature.to_bytes().to_vec(),
-        issued_at: time_effects
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0),
+        issued_at: current_time_ms(time_effects).await,
     })
 }
 
@@ -118,20 +142,12 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
 ) -> Result<GuardianAuthResponse> {
     // Verify context ID matches
     if context.context_id != proof.context_id {
-        return Ok(GuardianAuthResponse {
-            success: false,
-            authorized: false,
-            error: Some("Context ID mismatch".to_string()),
-        });
+        return Ok(denied_response("Context ID mismatch"));
     }
 
     // Verify guardian ID matches
     if request.guardian_id != proof.guardian_id {
-        return Ok(GuardianAuthResponse {
-            success: false,
-            authorized: false,
-            error: Some("Guardian ID mismatch".to_string()),
-        });
+        return Ok(denied_response("Guardian ID mismatch"));
     }
 
     // Get guardian binding
@@ -140,32 +156,20 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
         .ok_or_else(|| AuraError::not_found("Guardian binding not found"))?;
 
     // Basic freshness check (10 minutes)
-    let now = time_effects
-        .physical_time()
-        .await
-        .map(|t| t.ts_ms)
-        .unwrap_or(0);
+    let now = current_time_ms(time_effects).await;
     if now.saturating_sub(proof.issued_at) > 600 {
-        return Ok(GuardianAuthResponse {
-            success: false,
-            authorized: false,
-            error: Some("Guardian proof expired".to_string()),
-        });
+        return Ok(denied_response("Guardian proof expired"));
     }
 
     // Verify consensus proof if present
     if let Some(consensus_proof) = &binding.consensus_proof {
         if !verify_consensus_proof(consensus_proof, &binding) {
-            return Ok(GuardianAuthResponse {
-                success: false,
-                authorized: false,
-                error: Some("Invalid consensus proof".to_string()),
-            });
+            return Ok(denied_response("Invalid consensus proof"));
         }
     }
 
     // Serialize the operation and verify the guardian's signature
-    let operation_bytes = aura_core::util::serialization::to_vec(&request.operation)
+    let operation_bytes = serialize_operation(&request.operation)
         .map_err(|e| AuraError::serialization(format!("Failed to serialize operation: {e}")))?;
 
     // Ensure signature length is valid
@@ -186,18 +190,12 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
     // Verify signature
     let signature = Ed25519Signature::try_from_slice(&sig_bytes)?;
     if let Err(err) = verifying_key.verify(&operation_bytes, &signature) {
-        return Ok(GuardianAuthResponse {
-            success: false,
-            authorized: false,
-            error: Some(format!("Invalid guardian signature: {err}")),
-        });
+        return Ok(denied_response(format!(
+            "Invalid guardian signature: {err}"
+        )));
     }
 
-    Ok(GuardianAuthResponse {
-        success: true,
-        authorized: true,
-        error: None,
-    })
+    Ok(authorized_response())
 }
 
 /// Verify consensus proof for guardian binding
@@ -255,6 +253,31 @@ struct RecoveryRequestRecord {
     operation: GuardianOperation,
 }
 
+fn record_recovery_request(
+    context: &RelationalContext,
+    guardian_id: AuthorityId,
+    account_id: AuthorityId,
+    operation: GuardianOperation,
+    requested_at: u64,
+) {
+    let record = RecoveryRequestRecord {
+        guardian_id,
+        account_id,
+        requested_at,
+        operation,
+    };
+
+    if let Ok(binding_bytes) = serde_json::to_vec(&record) {
+        let envelope = aura_core::types::facts::FactEnvelope {
+            type_id: aura_core::types::facts::FactTypeId::from("recovery_request"),
+            schema_version: 1,
+            encoding: aura_core::types::facts::FactEncoding::Json,
+            payload: binding_bytes,
+        };
+        let _ = context.add_generic_fact_envelope(envelope);
+    }
+}
+
 impl GuardianAuthHandler {
     /// Create a new guardian authentication handler
     pub fn new(context: Arc<RelationalContext>) -> Self {
@@ -276,26 +299,13 @@ impl GuardianAuthHandler {
         let verified = verify_guardian_proof(&self.context, &request, &proof, time_effects).await?;
 
         // Record request for delay enforcement
-        let record = RecoveryRequestRecord {
-            guardian_id: guardian.authority_id(),
-            account_id: request.account_id,
-            requested_at: time_effects
-                .physical_time()
-                .await
-                .map(|t| t.ts_ms)
-                .unwrap_or(0),
-            operation: request.operation.clone(),
-        };
-
-        if let Ok(binding_bytes) = serde_json::to_vec(&record) {
-            let envelope = aura_core::types::facts::FactEnvelope {
-                type_id: aura_core::types::facts::FactTypeId::from("recovery_request"),
-                schema_version: 1,
-                encoding: aura_core::types::facts::FactEncoding::Json,
-                payload: binding_bytes,
-            };
-            let _ = self.context.add_generic_fact_envelope(envelope);
-        }
+        record_recovery_request(
+            &self.context,
+            guardian.authority_id(),
+            request.account_id,
+            request.operation.clone(),
+            current_time_ms(time_effects).await,
+        );
 
         Ok(verified)
     }

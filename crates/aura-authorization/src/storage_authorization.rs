@@ -1,7 +1,7 @@
 //! Storage-specific authorization logic using Biscuit tokens
 //!
-//! This module provides the storage authorization evaluator that was moved from aura-store
-//! to eliminate improper domain coupling. Storage access control is fundamentally an
+//! This module provides the storage authorization evaluator. It is not in aura-store
+//! to avoid improper domain coupling. Storage access control is fundamentally an
 //! authorization concern and belongs in the authorization domain (aura-authorization).
 
 use aura_core::types::scope::{ResourceScope, StoragePath};
@@ -116,11 +116,8 @@ impl BiscuitStorageEvaluator {
         permission: &StoragePermission,
         budget: &mut FlowBudget,
     ) -> Result<AccessDecision, BiscuitStorageError> {
-        // Convert storage resource to ResourceScope pattern
-        let resource_scope = self.storage_resource_to_scope(resource)?;
-
-        // Get required operation from permission
-        let operation = self.permission_mappings.permission_to_operation(permission);
+        let (resource_scope, operation) =
+            self.prepare_authorization_request(resource, permission)?;
 
         // Calculate flow cost for operation
         let flow_cost = self.calculate_flow_cost(resource, permission);
@@ -138,7 +135,7 @@ impl BiscuitStorageEvaluator {
         }
 
         // Check authorization using Biscuit authorizer
-        let auth_result = self.check_biscuit_authorization(token, &resource_scope, &operation)?;
+        let auth_result = self.check_biscuit_authorization(token, &resource_scope, operation)?;
 
         if auth_result {
             // Charge budget on successful authorization
@@ -164,14 +161,21 @@ impl BiscuitStorageEvaluator {
         resource: &StorageResource,
         permission: &StoragePermission,
     ) -> Result<bool, BiscuitStorageError> {
-        // Convert storage resource to ResourceScope pattern
-        let resource_scope = self.storage_resource_to_scope(resource)?;
-
-        // Get required operation from permission
-        let operation = self.permission_mappings.permission_to_operation(permission);
+        let (resource_scope, operation) =
+            self.prepare_authorization_request(resource, permission)?;
 
         // Check authorization
-        self.check_biscuit_authorization(token, &resource_scope, &operation)
+        self.check_biscuit_authorization(token, &resource_scope, operation)
+    }
+
+    fn prepare_authorization_request(
+        &self,
+        resource: &StorageResource,
+        permission: &StoragePermission,
+    ) -> Result<(ResourceScope, &'static str), BiscuitStorageError> {
+        let resource_scope = self.storage_resource_to_scope(resource)?;
+        let operation = self.permission_mappings.permission_to_operation(permission);
+        Ok((resource_scope, operation))
     }
 
     /// Convert StorageResource to ResourceScope for Biscuit patterns
@@ -179,51 +183,27 @@ impl BiscuitStorageEvaluator {
         &self,
         resource: &StorageResource,
     ) -> Result<ResourceScope, BiscuitStorageError> {
-        match resource {
-            StorageResource::Content(content_id) => {
-                // Use authority ID and content ID as path
-                let path = StoragePath::parse(&format!("content/{content_id}"))
-                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
-                Ok(ResourceScope::Storage {
-                    authority_id: self.authority_id,
-                    path,
-                })
-            }
-            StorageResource::Namespace(namespace) => {
-                // Use authority ID and namespace as path
-                let path = StoragePath::parse(&format!("namespace/{namespace}/*"))
-                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
-                Ok(ResourceScope::Storage {
-                    authority_id: self.authority_id,
-                    path,
-                })
-            }
-            StorageResource::Global => {
-                // Global storage scoped to this authority
-                let path = StoragePath::parse("global/*")
-                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
-                Ok(ResourceScope::Storage {
-                    authority_id: self.authority_id,
-                    path,
-                })
-            }
-            StorageResource::SearchIndex => {
-                let path = StoragePath::parse("search_index")
-                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
-                Ok(ResourceScope::Storage {
-                    authority_id: self.authority_id,
-                    path,
-                })
-            }
-            StorageResource::GarbageCollection => {
-                let path = StoragePath::parse("gc")
-                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
-                Ok(ResourceScope::Storage {
-                    authority_id: self.authority_id,
-                    path,
-                })
-            }
-        }
+        let path = self.storage_resource_path(resource)?;
+        Ok(ResourceScope::Storage {
+            authority_id: self.authority_id,
+            path,
+        })
+    }
+
+    fn storage_resource_path(
+        &self,
+        resource: &StorageResource,
+    ) -> Result<StoragePath, BiscuitStorageError> {
+        let raw_path = match resource {
+            StorageResource::Content(content_id) => format!("content/{content_id}"),
+            StorageResource::Namespace(namespace) => format!("namespace/{namespace}/*"),
+            StorageResource::Global => "global/*".to_string(),
+            StorageResource::SearchIndex => "search_index".to_string(),
+            StorageResource::GarbageCollection => "gc".to_string(),
+        };
+
+        StoragePath::parse(&raw_path)
+            .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))
     }
 
     /// Check Biscuit token authorization using Authorizer
@@ -236,49 +216,16 @@ impl BiscuitStorageEvaluator {
         // Token signature verification happens when Biscuit is constructed from bytes.
         // Here we enforce scope, capability, and authority binding using Datalog rules
         // that mirror the authority-centric model in docs/106_authorization.md.
-        let mut authorizer = Authorizer::new();
-        authorizer.add_token(token).map_err(|e| {
-            BiscuitStorageError::TokenVerification(format!("Failed to add token: {}", e))
-        })?;
+        let mut authorizer = self.authorizer_with_token(token)?;
 
         // Add environment facts for the requested operation and resource path.
-        for fact in self.resource_facts(resource_scope, operation)? {
-            authorizer
-                .add_fact(fact)
-                .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
-        }
+        self.add_authorization_facts(&mut authorizer, resource_scope, operation)?;
 
         // Policy 1: bind token to the authority that owns the storage namespace.
         // Accept either an explicit authority_id(<uuid>) fact in the token or an
         // account(<uuid>) fact that matches the authority UUID. This matches the
         // account-issued device tokens produced by AccountAuthority.
-        authorizer
-            .add_policy(policy!(
-                "allow if authority_id($auth), expected_authority($expected), $auth == $expected;"
-            ))
-            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
-
-        // Policy 2: accept account(<uuid>) facts for backward compatibility with
-        // existing device tokens issued by AccountAuthority.
-        authorizer
-            .add_policy(policy!(
-                "allow if account($acct), expected_authority($expected), $acct == $expected;"
-            ))
-            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
-
-        // Policy 3: enforce capability + operation + resource coherence. Any token
-        // checks (e.g., resource prefix) embedded in the Biscuit must also succeed
-        // because Authorizer evaluates all token checks alongside these facts.
-        authorizer
-            .add_policy(policy!(
-                "allow if capability($op), operation($op), resource($res);"
-            ))
-            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
-
-        // Default deny keeps evaluation strict.
-        authorizer
-            .add_policy(policy!("deny if true;"))
-            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
+        self.add_authorization_policies(&mut authorizer)?;
 
         Ok(authorizer.authorize().is_ok())
     }
@@ -366,6 +313,78 @@ impl BiscuitStorageEvaluator {
         ])
     }
 
+    fn authorizer_with_token(&self, token: &Biscuit) -> Result<Authorizer, BiscuitStorageError> {
+        let mut authorizer = Authorizer::new();
+        authorizer.add_token(token).map_err(|e| {
+            BiscuitStorageError::TokenVerification(format!("Failed to add token: {}", e))
+        })?;
+        Ok(authorizer)
+    }
+
+    fn add_authorization_facts(
+        &self,
+        authorizer: &mut Authorizer,
+        resource_scope: &ResourceScope,
+        operation: &str,
+    ) -> Result<(), BiscuitStorageError> {
+        for fact in self.resource_facts(resource_scope, operation)? {
+            Self::add_fact(authorizer, fact)?;
+        }
+        Ok(())
+    }
+
+    fn add_authorization_policies(
+        &self,
+        authorizer: &mut Authorizer,
+    ) -> Result<(), BiscuitStorageError> {
+        // Policy 1: bind token to the authority that owns the storage namespace.
+        // Accept either an explicit authority_id(<uuid>) fact in the token or an
+        // account(<uuid>) fact that matches the authority UUID. This matches the
+        // account-issued device tokens produced by AccountAuthority.
+        Self::add_policy(
+            authorizer,
+            policy!(
+                "allow if authority_id($auth), expected_authority($expected), $auth == $expected;"
+            ),
+        )?;
+
+        // Policy 2: accept account(<uuid>) facts for backward compatibility with
+        // existing device tokens issued by AccountAuthority.
+        Self::add_policy(
+            authorizer,
+            policy!("allow if account($acct), expected_authority($expected), $acct == $expected;"),
+        )?;
+
+        // Policy 3: enforce capability + operation + resource coherence. Any token
+        // checks (e.g., resource prefix) embedded in the Biscuit must also succeed
+        // because Authorizer evaluates all token checks alongside these facts.
+        Self::add_policy(
+            authorizer,
+            policy!("allow if capability($op), operation($op), resource($res);"),
+        )?;
+
+        // Default deny keeps evaluation strict.
+        Self::add_policy(authorizer, policy!("deny if true;"))
+    }
+
+    fn add_fact(
+        authorizer: &mut Authorizer,
+        fact: biscuit_auth::builder::Fact,
+    ) -> Result<(), BiscuitStorageError> {
+        authorizer
+            .add_fact(fact)
+            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))
+    }
+
+    fn add_policy(
+        authorizer: &mut Authorizer,
+        policy: biscuit_auth::builder::Policy,
+    ) -> Result<(), BiscuitStorageError> {
+        authorizer
+            .add_policy(policy)
+            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))
+    }
+
     /// Calculate flow cost for storage operation
     fn calculate_flow_cost(
         &self,
@@ -393,28 +412,22 @@ impl BiscuitStorageEvaluator {
 }
 
 /// Permission mappings for storage operations
-#[derive(Debug, Default)]
-pub struct PermissionMappings {
-    mappings: HashMap<StoragePermission, String>,
-}
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PermissionMappings;
 
 impl PermissionMappings {
     /// Create default permission mappings
-    pub fn new() -> Self {
-        let mut mappings = HashMap::new();
-        mappings.insert(StoragePermission::Read, "read".to_string());
-        mappings.insert(StoragePermission::Write, "write".to_string());
-        mappings.insert(StoragePermission::Admin, "admin".to_string());
-
-        Self { mappings }
+    pub const fn new() -> Self {
+        Self
     }
 
     /// Get operation string for permission
-    pub fn permission_to_operation(&self, permission: &StoragePermission) -> String {
-        self.mappings
-            .get(permission)
-            .cloned()
-            .unwrap_or_else(|| "unknown".to_string())
+    pub const fn permission_to_operation(&self, permission: &StoragePermission) -> &'static str {
+        match permission {
+            StoragePermission::Read => "read",
+            StoragePermission::Write => "write",
+            StoragePermission::Admin => "admin",
+        }
     }
 }
 
@@ -720,19 +733,31 @@ mod tests {
     use crate::TokenAuthority;
     use aura_core::{capability_name, CapabilityName};
 
+    fn test_authority_id(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_token_authority(seed: u8) -> TokenAuthority {
+        TokenAuthority::new(test_authority_id(seed))
+    }
+
+    fn storage_test_capabilities() -> Vec<CapabilityName> {
+        vec![capability_name!("read"), capability_name!("write")]
+    }
+
+    fn test_content_resource(path: &str) -> StorageResource {
+        StorageResource::content(path)
+    }
+
     fn setup_test_authority() -> (TokenAuthority, AuthorityId) {
-        let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
-        let authority = TokenAuthority::new(authority_id);
+        let authority_id = test_authority_id(9);
+        let authority = test_token_authority(9);
         (authority, authority_id)
     }
 
     fn setup_test_evaluator() -> BiscuitStorageEvaluator {
         let (authority, authority_id) = setup_test_authority();
         BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id)
-    }
-
-    fn storage_test_capabilities() -> Vec<CapabilityName> {
-        vec![capability_name!("read"), capability_name!("write")]
     }
 
     /// Content resource converts to Storage scope with the evaluator's authority
@@ -743,7 +768,7 @@ mod tests {
         let _authority_id = AuthorityId::new_from_entropy([69u8; 32]);
 
         // Test content resource scope conversion
-        let content_resource = StorageResource::content("personal/user123/doc");
+        let content_resource = test_content_resource("personal/user123/doc");
         let scope_result = evaluator.storage_resource_to_scope(&content_resource);
         assert!(scope_result.is_ok());
 
@@ -810,7 +835,7 @@ mod tests {
     fn test_flow_cost_calculation() {
         let evaluator = setup_test_evaluator();
 
-        let content_resource = StorageResource::content("personal/user123/doc");
+        let content_resource = test_content_resource("personal/user123/doc");
         let read_cost = evaluator.calculate_flow_cost(&content_resource, &StoragePermission::Read);
         let write_cost =
             evaluator.calculate_flow_cost(&content_resource, &StoragePermission::Write);

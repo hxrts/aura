@@ -32,23 +32,26 @@ pub struct ChatGroup {
 }
 
 impl ChatGroup {
+    fn member_by_authority_id(&self, authority_id: &AuthorityId) -> Option<&ChatMember> {
+        self.members
+            .iter()
+            .find(|member| &member.authority_id == authority_id)
+    }
+
     /// Check if an authority is a member of this group
     pub fn is_member(&self, authority_id: &AuthorityId) -> bool {
-        self.members.iter().any(|m| &m.authority_id == authority_id)
+        self.member_by_authority_id(authority_id).is_some()
     }
 
     /// Get a member by authority ID
     pub fn get_member(&self, authority_id: &AuthorityId) -> Option<&ChatMember> {
-        self.members
-            .iter()
-            .find(|m| &m.authority_id == authority_id)
+        self.member_by_authority_id(authority_id)
     }
 
     /// Check if an authority has admin role
     pub fn is_admin(&self, authority_id: &AuthorityId) -> bool {
-        self.members
-            .iter()
-            .any(|m| &m.authority_id == authority_id && matches!(m.role, ChatRole::Admin))
+        self.member_by_authority_id(authority_id)
+            .is_some_and(|member| matches!(member.role, ChatRole::Admin))
     }
 
     /// Get all admin members
@@ -83,17 +86,12 @@ impl ChatGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::time::PhysicalTime;
-    use uuid::Uuid;
+    use crate::test_support::{test_authority_id, test_group_id, test_timestamp_ms};
 
     fn create_test_group() -> ChatGroup {
-        let group_id = ChatGroupId::from_uuid(Uuid::from_bytes([1u8; 16]));
-        let creator_id = AuthorityId::new_from_entropy([64u8; 32]);
-        // Use deterministic time for tests instead of system time
-        let now = TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1000,
-            uncertainty: None,
-        });
+        let group_id = test_group_id(1);
+        let creator_id = test_authority_id(64);
+        let now = test_timestamp_ms(1000);
 
         ChatGroup {
             id: group_id,
@@ -115,7 +113,7 @@ mod tests {
     fn test_group_membership() {
         let group = create_test_group();
         let creator_id = &group.created_by;
-        let non_member_id = AuthorityId::new_from_entropy([65u8; 32]);
+        let non_member_id = test_authority_id(65);
 
         assert!(group.is_member(creator_id));
         assert!(!group.is_member(&non_member_id));
@@ -125,7 +123,7 @@ mod tests {
     fn test_admin_permissions() {
         let group = create_test_group();
         let creator_id = &group.created_by;
-        let non_member_id = AuthorityId::new_from_entropy([66u8; 32]);
+        let non_member_id = test_authority_id(66);
 
         assert!(group.is_admin(creator_id));
         assert!(!group.is_admin(&non_member_id));

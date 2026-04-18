@@ -110,59 +110,22 @@ impl AmpTelemetry {
     ) {
         let category = categorize_error(error);
 
-        match (header, window_validation) {
-            (Some(h), Some(v)) => {
-                error!(
-                    operation = "amp_recv",
-                    status = "failure",
-                    context = %context,
-                    channel = %h.channel,
-                    epoch = h.chan_epoch,
-                    generation = h.ratchet_gen,
-                    epoch_valid = v.epoch_valid,
-                    generation_valid = v.generation_valid,
-                    window_min = v.window_bounds.0,
-                    window_max = v.window_bounds.1,
-                    rejection_reason = v.rejection_reason.as_deref().unwrap_or("none"),
-                    error_category = ?category,
-                    error_message = %error,
-                    "AMP receive failed"
+        match header {
+            Some(header) => {
+                self.log_receive_failure_with_header(
+                    context,
+                    header,
+                    window_validation,
+                    category,
+                    error,
                 );
             }
-            (Some(h), None) => {
-                error!(
-                    operation = "amp_recv",
-                    status = "failure",
-                    context = %context,
-                    channel = %h.channel,
-                    epoch = h.chan_epoch,
-                    generation = h.ratchet_gen,
-                    error_category = ?category,
-                    error_message = %error,
-                    "AMP receive failed"
-                );
-            }
-            (None, Some(v)) => {
-                error!(
-                    operation = "amp_recv",
-                    status = "failure",
-                    context = %context,
-                    epoch_valid = v.epoch_valid,
-                    generation_valid = v.generation_valid,
-                    rejection_reason = v.rejection_reason.as_deref().unwrap_or("none"),
-                    error_category = ?category,
-                    error_message = %error,
-                    "AMP receive failed"
-                );
-            }
-            (None, None) => {
-                error!(
-                    operation = "amp_recv",
-                    status = "failure",
-                    context = %context,
-                    error_category = ?category,
-                    error_message = %error,
-                    "AMP receive failed"
+            None => {
+                self.log_receive_failure_without_header(
+                    context,
+                    window_validation,
+                    category,
+                    error,
                 );
             }
         }
@@ -187,7 +150,7 @@ impl AmpTelemetry {
             generation_valid = validation.generation_valid,
             window_min = validation.window_bounds.0,
             window_max = validation.window_bounds.1,
-            rejection_reason = validation.rejection_reason.as_deref().unwrap_or("unknown"),
+            rejection_reason = rejection_reason(validation),
             amp_error = %amp_error,
             "AMP window validation failed"
         );
@@ -212,6 +175,83 @@ impl AmpTelemetry {
             "Flow budget charged"
         );
     }
+
+    fn log_receive_failure_with_header(
+        &self,
+        context: ContextId,
+        header: &AmpHeader,
+        window_validation: Option<&WindowValidationResult>,
+        category: AmpErrorCategory,
+        error: &AuraError,
+    ) {
+        match window_validation {
+            Some(validation) => {
+                error!(
+                    operation = "amp_recv",
+                    status = "failure",
+                    context = %context,
+                    channel = %header.channel,
+                    epoch = header.chan_epoch,
+                    generation = header.ratchet_gen,
+                    epoch_valid = validation.epoch_valid,
+                    generation_valid = validation.generation_valid,
+                    window_min = validation.window_bounds.0,
+                    window_max = validation.window_bounds.1,
+                    rejection_reason = rejection_reason(validation),
+                    error_category = ?category,
+                    error_message = %error,
+                    "AMP receive failed"
+                );
+            }
+            None => {
+                error!(
+                    operation = "amp_recv",
+                    status = "failure",
+                    context = %context,
+                    channel = %header.channel,
+                    epoch = header.chan_epoch,
+                    generation = header.ratchet_gen,
+                    error_category = ?category,
+                    error_message = %error,
+                    "AMP receive failed"
+                );
+            }
+        }
+    }
+
+    fn log_receive_failure_without_header(
+        &self,
+        context: ContextId,
+        window_validation: Option<&WindowValidationResult>,
+        category: AmpErrorCategory,
+        error: &AuraError,
+    ) {
+        match window_validation {
+            Some(validation) => {
+                error!(
+                    operation = "amp_recv",
+                    status = "failure",
+                    context = %context,
+                    epoch_valid = validation.epoch_valid,
+                    generation_valid = validation.generation_valid,
+                    rejection_reason = rejection_reason(validation),
+                    error_category = ?category,
+                    error_message = %error,
+                    "AMP receive failed"
+                );
+            }
+            None => {
+                error!(
+                    operation = "amp_recv",
+                    status = "failure",
+                    context = %context,
+                    error_category = ?category,
+                    error_message = %error,
+                    "AMP receive failed"
+                );
+            }
+        }
+    }
 }
 
 /// Categorize error for observability using typed AuraError variants.
@@ -223,6 +263,10 @@ fn categorize_error(error: &AuraError) -> AmpErrorCategory {
         AuraError::Serialization { .. } => AmpErrorCategory::Serialization,
         _ => AmpErrorCategory::Protocol,
     }
+}
+
+fn rejection_reason(validation: &WindowValidationResult) -> &str {
+    validation.rejection_reason.as_deref().unwrap_or("none")
 }
 
 /// Helper to create window validation result

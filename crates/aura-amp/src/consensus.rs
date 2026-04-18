@@ -16,6 +16,7 @@ use aura_core::types::Epoch;
 use aura_core::{AuthorityId, Hash32, Prestate, Result};
 use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};
 use std::collections::HashMap;
+use std::future::Future;
 
 /// Derive a witness set and threshold from a prestate.
 ///
@@ -25,6 +26,15 @@ fn default_witness_policy(prestate: &Prestate) -> (Vec<AuthorityId>, u16) {
 
     let threshold = ((witnesses.len() as u16) / 2).saturating_add(1).max(1);
     (witnesses, threshold)
+}
+
+async fn with_default_witness_policy<T, F, Fut>(prestate: &Prestate, f: F) -> Result<T>
+where
+    F: FnOnce(Vec<AuthorityId>, u16) -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    let (witnesses, threshold) = default_witness_policy(prestate);
+    f(witnesses, threshold).await
 }
 
 /// Run consensus for a channel epoch bump proposal and materialize the committed fact.
@@ -78,19 +88,21 @@ pub async fn run_amp_channel_epoch_bump_default(
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
-    let (witnesses, threshold) = default_witness_policy(prestate);
-    run_amp_channel_epoch_bump(
-        prestate,
-        proposal,
-        witnesses,
-        threshold,
-        key_packages,
-        group_public_key,
-        epoch,
-        transcript_ref,
-        random,
-        time,
-    )
+    with_default_witness_policy(prestate, |witnesses, threshold| async move {
+        run_amp_channel_epoch_bump(
+            prestate,
+            proposal,
+            witnesses,
+            threshold,
+            key_packages,
+            group_public_key,
+            epoch,
+            transcript_ref,
+            random,
+            time,
+        )
+        .await
+    })
     .await
 }
 
@@ -160,19 +172,21 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects + AmpEv
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<CommittedChannelEpochBump> {
-    let (witnesses, threshold) = default_witness_policy(prestate);
-    finalize_amp_bump_with_journal(
-        journal,
-        prestate,
-        proposal,
-        witnesses,
-        threshold,
-        key_packages,
-        group_public_key,
-        epoch,
-        transcript_ref,
-        random,
-        time,
-    )
+    with_default_witness_policy(prestate, |witnesses, threshold| async move {
+        finalize_amp_bump_with_journal(
+            journal,
+            prestate,
+            proposal,
+            witnesses,
+            threshold,
+            key_packages,
+            group_public_key,
+            epoch,
+            transcript_ref,
+            random,
+            time,
+        )
+        .await
+    })
     .await
 }
