@@ -12,6 +12,20 @@ use aura_core::{
 /// Domain separator for relay selection hashing.
 const RELAY_DOMAIN: &[u8] = b"AURA_RELAY_SELECT_v1";
 
+fn digest_index(digest: &[u8; 32], len: usize) -> usize {
+    let mut index_bytes = [0u8; 8];
+    index_bytes.copy_from_slice(&digest[..8]);
+    u64::from_le_bytes(index_bytes) as usize % len
+}
+
+pub(crate) fn derive_index(seed: &[u8; 32], discriminator: &[u8], len: usize) -> usize {
+    let mut hasher = hasher();
+    hasher.update(seed);
+    hasher.update(discriminator);
+    let digest = hasher.finalize();
+    digest_index(&digest, len)
+}
+
 /// Hash inputs to produce a deterministic seed for relay selection.
 ///
 /// Uses BLAKE3 to combine domain separator, context_id, epoch, and nonce
@@ -95,24 +109,7 @@ pub fn select_one_from_tier(
     }
 
     // Derive a tier-specific seed to avoid correlation between tiers
-    let mut hasher = hasher();
-    hasher.update(seed);
-    hasher.update(&[tier_index]);
-    let tier_seed = hasher.finalize();
-
-    // Use first 8 bytes as index source
-    // Hash output is always 32 bytes, so we can safely extract first 8 bytes
-    let index_bytes: [u8; 8] = [
-        tier_seed[0],
-        tier_seed[1],
-        tier_seed[2],
-        tier_seed[3],
-        tier_seed[4],
-        tier_seed[5],
-        tier_seed[6],
-        tier_seed[7],
-    ];
-    let index = u64::from_le_bytes(index_bytes) as usize % tier.len();
+    let index = derive_index(seed, &[tier_index], tier.len());
 
     Some(tier[index].authority_id)
 }
@@ -182,24 +179,7 @@ fn select_multiple_from_tier(
         }
 
         // Derive a round-specific seed
-        let mut hasher = hasher();
-        hasher.update(seed);
-        hasher.update(&[tier_index, selection_round as u8]);
-        let round_seed = hasher.finalize();
-
-        // Use first 8 bytes as index
-        // Hash output is always 32 bytes, so we can safely extract first 8 bytes
-        let index_bytes: [u8; 8] = [
-            round_seed[0],
-            round_seed[1],
-            round_seed[2],
-            round_seed[3],
-            round_seed[4],
-            round_seed[5],
-            round_seed[6],
-            round_seed[7],
-        ];
-        let index = u64::from_le_bytes(index_bytes) as usize % remaining.len();
+        let index = derive_index(seed, &[tier_index, selection_round as u8], remaining.len());
 
         result.push(remaining[index].authority_id);
         remaining.remove(index);
@@ -210,34 +190,11 @@ fn select_multiple_from_tier(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::{
+        block_candidate, guardian_candidate, neighborhood_candidate, test_authority, test_context,
+    };
     use super::*;
     use aura_core::types::identifiers::ContextId;
-
-    fn test_authority(seed: u8) -> AuthorityId {
-        AuthorityId::new_from_entropy([seed; 32])
-    }
-
-    fn test_context() -> RelayContext {
-        RelayContext::new(
-            ContextId::new_from_entropy([1u8; 32]),
-            test_authority(1),
-            test_authority(2),
-            1,
-            [0u8; 32],
-        )
-    }
-
-    fn block_candidate(seed: u8) -> RelayCandidate {
-        RelayCandidate::block_peer(test_authority(seed), [seed; 32])
-    }
-
-    fn neighborhood_candidate(seed: u8) -> RelayCandidate {
-        RelayCandidate::neighborhood_hop_member(test_authority(seed), [seed; 32])
-    }
-
-    fn guardian_candidate(seed: u8) -> RelayCandidate {
-        RelayCandidate::guardian(test_authority(seed))
-    }
 
     #[test]
     fn test_hash_relay_seed_deterministic() {

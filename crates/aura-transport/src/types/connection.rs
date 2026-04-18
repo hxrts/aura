@@ -22,6 +22,10 @@ fn order_from_bytes(seed: &[u8]) -> OrderTime {
     OrderTime(core_hash(seed))
 }
 
+fn order_timestamp(seed: &[u8]) -> TimeStamp {
+    TimeStamp::OrderClock(order_from_bytes(seed))
+}
+
 /// Simple identifier with privacy-preserving properties
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConnectionId(Uuid);
@@ -201,12 +205,33 @@ impl ScopedConnectionId {
 }
 
 impl ConnectionInfo {
+    fn new_internal(
+        peer_authority: AuthorityId,
+        context_id: Option<ContextId>,
+        privacy_level: PrivacyLevel,
+        started_at: TimeStamp,
+    ) -> Self {
+        let state = ConnectionState::Connecting {
+            started_at: started_at.clone(),
+            privacy_level,
+        };
+
+        Self {
+            connection_id: ConnectionId::new(),
+            state,
+            peer_authority,
+            context_id,
+            capabilities: HashMap::new(),
+            metrics: ConnectionMetrics::new_with_timestamp(started_at),
+        }
+    }
+
     /// Create new connection info for peer authority
     pub fn new(peer_authority: AuthorityId, privacy_level: PrivacyLevel) -> Self {
         Self::new_with_timestamp(
             peer_authority,
             privacy_level,
-            TimeStamp::OrderClock(OrderTime(core_hash(peer_authority.0.as_bytes()))),
+            order_timestamp(peer_authority.0.as_bytes()),
         )
     }
 
@@ -216,20 +241,7 @@ impl ConnectionInfo {
         privacy_level: PrivacyLevel,
         started_at: TimeStamp,
     ) -> Self {
-        let connection_id = ConnectionId::new();
-        let state = ConnectionState::Connecting {
-            started_at: started_at.clone(),
-            privacy_level,
-        };
-
-        Self {
-            connection_id,
-            state,
-            peer_authority,
-            context_id: None,
-            capabilities: HashMap::new(),
-            metrics: ConnectionMetrics::new_with_timestamp(started_at),
-        }
+        Self::new_internal(peer_authority, None, privacy_level, started_at)
     }
 
     /// Create context-scoped connection
@@ -249,9 +261,7 @@ impl ConnectionInfo {
         privacy_level: PrivacyLevel,
         started_at: TimeStamp,
     ) -> Self {
-        let mut info = Self::new_with_timestamp(peer_authority, privacy_level, started_at);
-        info.context_id = Some(context_id);
-        info
+        Self::new_internal(peer_authority, Some(context_id), privacy_level, started_at)
     }
 
     /// Mark connection as established
@@ -318,9 +328,20 @@ impl ConnectionInfo {
 }
 
 impl ConnectionMetrics {
+    fn record_activity(&mut self, bytes: u64, current_time: TimeStamp, sent: bool) {
+        if sent {
+            self.bytes_sent += bytes;
+            self.messages_sent += 1;
+        } else {
+            self.bytes_received += bytes;
+            self.messages_received += 1;
+        }
+        self.last_activity = current_time;
+    }
+
     /// Create new metrics
     pub fn new() -> Self {
-        Self::new_with_timestamp(TimeStamp::OrderClock(order_from_bytes(&[1u8; 1])))
+        Self::new_with_timestamp(order_timestamp(&[1u8; 1]))
     }
 
     /// Create new metrics with specific timestamp
@@ -336,32 +357,22 @@ impl ConnectionMetrics {
 
     /// Record sent message
     pub fn record_sent(&mut self, bytes: u64) {
-        self.record_sent_with_timestamp(
-            bytes,
-            TimeStamp::OrderClock(order_from_bytes(&bytes.to_le_bytes())),
-        );
+        self.record_sent_with_timestamp(bytes, order_timestamp(&bytes.to_le_bytes()));
     }
 
     /// Record sent message with specific timestamp
     pub fn record_sent_with_timestamp(&mut self, bytes: u64, current_time: TimeStamp) {
-        self.bytes_sent += bytes;
-        self.messages_sent += 1;
-        self.last_activity = current_time;
+        self.record_activity(bytes, current_time, true);
     }
 
     /// Record received message
     pub fn record_received(&mut self, bytes: u64) {
-        self.record_received_with_timestamp(
-            bytes,
-            TimeStamp::OrderClock(order_from_bytes(&bytes.to_le_bytes())),
-        );
+        self.record_received_with_timestamp(bytes, order_timestamp(&bytes.to_le_bytes()));
     }
 
     /// Record received message with specific timestamp
     pub fn record_received_with_timestamp(&mut self, bytes: u64, current_time: TimeStamp) {
-        self.bytes_received += bytes;
-        self.messages_received += 1;
-        self.last_activity = current_time;
+        self.record_activity(bytes, current_time, false);
     }
 }
 

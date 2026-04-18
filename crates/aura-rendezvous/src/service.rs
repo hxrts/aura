@@ -156,6 +156,58 @@ pub struct RendezvousService {
 }
 
 impl RendezvousService {
+    fn check_capability_and_budget(
+        snapshot: &GuardSnapshot,
+        capability: RendezvousCapability,
+        required_cost: FlowCost,
+    ) -> Option<GuardOutcome> {
+        if let Some(outcome) = types::check_capability(snapshot, &capability.as_name()) {
+            return Some(outcome);
+        }
+
+        types::check_flow_budget(snapshot, required_cost)
+    }
+
+    fn record_receipt(operation: &str, peer: AuthorityId) -> EffectCommand {
+        EffectCommand::RecordReceipt {
+            operation: operation.to_string(),
+            peer,
+        }
+    }
+
+    fn is_charge_effect(command: &EffectCommand) -> bool {
+        matches!(command, EffectCommand::ChargeFlowBudget { .. })
+    }
+
+    fn is_send_effect(command: &EffectCommand) -> bool {
+        matches!(
+            command,
+            EffectCommand::SendHandshake { .. } | EffectCommand::SendHandshakeResponse { .. }
+        )
+    }
+
+    fn finalize_effects_with_charge(
+        required_cost: FlowCost,
+        mut effects: Vec<EffectCommand>,
+    ) -> GuardOutcome {
+        effects.insert(
+            0,
+            EffectCommand::ChargeFlowBudget {
+                cost: required_cost,
+            },
+        );
+
+        if let Err(reason) = types::validate_charge_before_send(
+            &effects,
+            Self::is_charge_effect,
+            Self::is_send_effect,
+        ) {
+            return GuardOutcome::denied(reason);
+        }
+
+        GuardOutcome::allowed(effects)
+    }
+
     /// Create a new rendezvous service
     pub fn new(authority_id: AuthorityId, config: RendezvousConfig) -> Self {
         let descriptor_builder = DescriptorBuilder::new(
@@ -195,53 +247,25 @@ impl RendezvousService {
         public_key: [u8; 32],
         now_ms: u64,
     ) -> GuardOutcome {
-        // Check capability
-        if let Some(outcome) =
-            types::check_capability(snapshot, &RendezvousCapability::Publish.as_name())
-        {
+        if let Some(outcome) = Self::check_capability_and_budget(
+            snapshot,
+            RendezvousCapability::Publish,
+            guards::DESCRIPTOR_PUBLISH_COST,
+        ) {
             return outcome;
         }
 
-        // Check flow budget
-        if let Some(outcome) = types::check_flow_budget(snapshot, guards::DESCRIPTOR_PUBLISH_COST) {
-            return outcome;
-        }
-
-        // Build descriptor
         let descriptor =
             self.descriptor_builder
                 .build(context_id, transport_hints, public_key, now_ms);
-
-        // Create fact
         let fact = RendezvousFact::Descriptor(descriptor);
 
-        // Construct effect commands
         let effects = vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: guards::DESCRIPTOR_PUBLISH_COST,
-            },
             EffectCommand::JournalAppend { fact },
-            EffectCommand::RecordReceipt {
-                operation: "publish_descriptor".to_string(),
-                peer: self.authority_id, // Self-operation
-            },
+            Self::record_receipt("publish_descriptor", self.authority_id),
         ];
 
-        if let Err(reason) = types::validate_charge_before_send(
-            &effects,
-            |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
-            |c| {
-                matches!(
-                    c,
-                    EffectCommand::SendHandshake { .. }
-                        | EffectCommand::SendHandshakeResponse { .. }
-                )
-            },
-        ) {
-            return GuardOutcome::denied(reason);
-        }
-
-        GuardOutcome::allowed(effects)
+        Self::finalize_effects_with_charge(guards::DESCRIPTOR_PUBLISH_COST, effects)
     }
 
     /// Prepare to refresh an existing descriptor.
@@ -275,15 +299,11 @@ impl RendezvousService {
         peer_descriptor: &RendezvousDescriptor,
         effects: &E,
     ) -> AuraResult<GuardOutcome> {
-        // Check capability
-        if let Some(outcome) =
-            types::check_capability(snapshot, &RendezvousCapability::Connect.as_name())
-        {
-            return Ok(outcome);
-        }
-
-        // Check flow budget
-        if let Some(outcome) = types::check_flow_budget(snapshot, guards::CONNECT_DIRECT_COST) {
+        if let Some(outcome) = Self::check_capability_and_budget(
+            snapshot,
+            RendezvousCapability::Connect,
+            guards::CONNECT_DIRECT_COST,
+        ) {
             return Ok(outcome);
         }
 
@@ -345,36 +365,18 @@ impl RendezvousService {
 
         let init = HandshakeInit { handshake };
 
-        // Construct effect commands
         let effects = vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: guards::CONNECT_DIRECT_COST,
-            },
             EffectCommand::SendHandshake {
                 peer,
                 message: init,
             },
-            EffectCommand::RecordReceipt {
-                operation: "establish_channel".to_string(),
-                peer,
-            },
+            Self::record_receipt("establish_channel", peer),
         ];
 
-        if let Err(reason) = types::validate_charge_before_send(
-            &effects,
-            |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
-            |c| {
-                matches!(
-                    c,
-                    EffectCommand::SendHandshake { .. }
-                        | EffectCommand::SendHandshakeResponse { .. }
-                )
-            },
-        ) {
-            return Ok(GuardOutcome::denied(reason));
-        }
-
-        Ok(GuardOutcome::allowed(effects))
+        Ok(Self::finalize_effects_with_charge(
+            guards::CONNECT_DIRECT_COST,
+            effects,
+        ))
     }
 
     // =========================================================================
@@ -393,19 +395,14 @@ impl RendezvousService {
         local_private_key: &[u8], // Ed25519 seed
         effects: &E,
     ) -> AuraResult<(GuardOutcome, Option<SecureChannel>)> {
-        // Check capability
-        if let Some(outcome) =
-            types::check_capability(snapshot, &RendezvousCapability::Connect.as_name())
-        {
+        if let Some(outcome) = Self::check_capability_and_budget(
+            snapshot,
+            RendezvousCapability::Connect,
+            guards::CONNECT_DIRECT_COST,
+        ) {
             return Ok((outcome, None));
         }
 
-        // Check flow budget
-        if let Some(outcome) = types::check_flow_budget(snapshot, guards::CONNECT_DIRECT_COST) {
-            return Ok((outcome, None));
-        }
-
-        // Verify PSK commitment
         let expected_commitment = compute_psk_commitment(psk);
         if init_message.psk_commitment != expected_commitment {
             return Ok((
@@ -462,37 +459,19 @@ impl RendezvousService {
             epoch: snapshot.epoch,
         };
 
-        // Construct effect commands
         let effects = vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: guards::CONNECT_DIRECT_COST,
-            },
             EffectCommand::JournalAppend { fact },
             EffectCommand::SendHandshakeResponse {
                 peer: initiator,
                 message: complete,
             },
-            EffectCommand::RecordReceipt {
-                operation: "handle_handshake".to_string(),
-                peer: initiator,
-            },
+            Self::record_receipt("handle_handshake", initiator),
         ];
 
-        if let Err(reason) = types::validate_charge_before_send(
-            &effects,
-            |c| matches!(c, EffectCommand::ChargeFlowBudget { .. }),
-            |c| {
-                matches!(
-                    c,
-                    EffectCommand::SendHandshake { .. }
-                        | EffectCommand::SendHandshakeResponse { .. }
-                )
-            },
-        ) {
-            return Ok((GuardOutcome::denied(reason), None));
-        }
-
-        Ok((GuardOutcome::allowed(effects), Some(channel)))
+        Ok((
+            Self::finalize_effects_with_charge(guards::CONNECT_DIRECT_COST, effects),
+            Some(channel),
+        ))
     }
 
     /// Prepare to handle handshake completion (Initiator side).

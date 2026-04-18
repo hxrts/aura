@@ -117,6 +117,26 @@ pub enum HolePunchInstruction {
 }
 
 impl HolePunchMessage {
+    fn derived_punch_timestamp(session_id: Uuid, sequence: SequenceNumber) -> TimeStamp {
+        let mut bytes = [0u8; 32];
+        bytes[..16].copy_from_slice(session_id.as_bytes());
+        let seq_hash = core_hash(&sequence.value().to_le_bytes());
+        bytes[16..].copy_from_slice(&seq_hash[..16]);
+        TimeStamp::OrderClock(OrderTime(bytes))
+    }
+
+    fn coordination_response(
+        session_id: Uuid,
+        result: CoordinationResult,
+        instructions: Vec<HolePunchInstruction>,
+    ) -> Self {
+        Self::CoordinationResponse {
+            session_id,
+            result,
+            instructions,
+        }
+    }
+
     /// Create new coordination request
     pub fn coordination_request(
         initiator: AuthorityId,
@@ -166,13 +186,13 @@ impl HolePunchMessage {
         target: AuthorityId,
         sequence: SequenceNumber,
     ) -> Self {
-        Self::punch_packet_at_time(session_id, source, target, sequence, {
-            let mut bytes = [0u8; 32];
-            bytes[..16].copy_from_slice(session_id.as_bytes());
-            let seq_hash = core_hash(&sequence.value().to_le_bytes());
-            bytes[16..].copy_from_slice(&seq_hash[..16]);
-            TimeStamp::OrderClock(OrderTime(bytes))
-        })
+        Self::punch_packet_at_time(
+            session_id,
+            source,
+            target,
+            sequence,
+            Self::derived_punch_timestamp(session_id, sequence),
+        )
     }
 
     /// Create punch packet with specific timestamp
@@ -211,20 +231,16 @@ impl HolePunchMessage {
 
     /// Create successful coordination response
     pub fn success_response(session_id: Uuid, instructions: Vec<HolePunchInstruction>) -> Self {
-        Self::CoordinationResponse {
-            session_id,
-            result: CoordinationResult::Success,
-            instructions,
-        }
+        Self::coordination_response(session_id, CoordinationResult::Success, instructions)
     }
 
     /// Create failed coordination response
     pub fn failed_response(session_id: Uuid, reason: String) -> Self {
-        Self::CoordinationResponse {
+        Self::coordination_response(
             session_id,
-            result: CoordinationResult::Failed { reason },
-            instructions: Vec::new(),
-        }
+            CoordinationResult::Failed { reason },
+            Vec::new(),
+        )
     }
 
     /// Get session ID from any message

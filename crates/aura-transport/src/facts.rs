@@ -15,6 +15,13 @@ use crate::context_transport::TransportProtocol;
 
 aura_core::define_fact_type_id!(transport, "transport/v1", 1);
 
+fn physical_time_ms(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
+    }
+}
+
 /// Transport domain facts for state changes.
 ///
 /// These facts capture transport layer events and are used by the
@@ -195,10 +202,7 @@ impl TransportFact {
             local_authority,
             remote_authority,
             protocol,
-            established_at: PhysicalTime {
-                ts_ms: established_at_ms,
-                uncertainty: None,
-            },
+            established_at: physical_time_ms(established_at_ms),
         }
     }
 
@@ -213,10 +217,7 @@ impl TransportFact {
             session_id,
             context_id,
             reason,
-            closed_at: PhysicalTime {
-                ts_ms: closed_at_ms,
-                uncertainty: None,
-            },
+            closed_at: physical_time_ms(closed_at_ms),
         }
     }
 
@@ -235,10 +236,7 @@ impl TransportFact {
             message_hash,
             size_bytes,
             flow_cost,
-            sent_at: PhysicalTime {
-                ts_ms: sent_at_ms,
-                uncertainty: None,
-            },
+            sent_at: physical_time_ms(sent_at_ms),
         }
     }
 
@@ -257,10 +255,7 @@ impl TransportFact {
             message_hash,
             size_bytes,
             sender,
-            received_at: PhysicalTime {
-                ts_ms: received_at_ms,
-                uncertainty: None,
-            },
+            received_at: physical_time_ms(received_at_ms),
         }
     }
 
@@ -275,10 +270,7 @@ impl TransportFact {
             context_id,
             authority_id,
             protocols,
-            discovered_at: PhysicalTime {
-                ts_ms: discovered_at_ms,
-                uncertainty: None,
-            },
+            discovered_at: physical_time_ms(discovered_at_ms),
         }
     }
 
@@ -293,10 +285,7 @@ impl TransportFact {
             context_id,
             target_authority,
             reason,
-            failed_at: PhysicalTime {
-                ts_ms: failed_at_ms,
-                uncertainty: None,
-            },
+            failed_at: physical_time_ms(failed_at_ms),
         }
     }
 
@@ -313,10 +302,7 @@ impl TransportFact {
             authority_id,
             amount,
             spent_after,
-            charged_at: PhysicalTime {
-                ts_ms: charged_at_ms,
-                uncertainty: None,
-            },
+            charged_at: physical_time_ms(charged_at_ms),
         }
     }
 
@@ -335,10 +321,7 @@ impl TransportFact {
             local_authority,
             remote_authority,
             success,
-            completed_at: PhysicalTime {
-                ts_ms: completed_at_ms,
-                uncertainty: None,
-            },
+            completed_at: physical_time_ms(completed_at_ms),
         }
     }
 
@@ -353,10 +336,7 @@ impl TransportFact {
             context_id,
             fact_id,
             acknowledger,
-            acked_at: PhysicalTime {
-                ts_ms: acked_at_ms,
-                uncertainty: None,
-            },
+            acked_at: physical_time_ms(acked_at_ms),
         }
     }
 

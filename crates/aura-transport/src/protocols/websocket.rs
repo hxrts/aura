@@ -102,6 +102,26 @@ pub enum FrameType {
 }
 
 impl WebSocketMessage {
+    fn handshake_response(
+        session_id: Uuid,
+        result: HandshakeResult,
+        accepted_capabilities: Vec<String>,
+    ) -> Self {
+        Self::HandshakeResponse {
+            session_id,
+            result,
+            accepted_capabilities,
+        }
+    }
+
+    fn derived_frame_timestamp(session_id: Uuid, payload: &[u8]) -> TimeStamp {
+        let mut order_bytes = [0u8; 32];
+        order_bytes[..16].copy_from_slice(session_id.as_bytes());
+        let payload_digest = core_hash(payload);
+        order_bytes[16..].copy_from_slice(&payload_digest[..16]);
+        TimeStamp::OrderClock(OrderTime(order_bytes))
+    }
+
     /// Create handshake request
     pub fn handshake_request(initiator: AuthorityId, capabilities: Vec<String>) -> Self {
         Self::handshake_request_with_id(
@@ -139,35 +159,18 @@ impl WebSocketMessage {
 
     /// Create successful handshake response
     pub fn handshake_success(session_id: Uuid, accepted_capabilities: Vec<String>) -> Self {
-        Self::HandshakeResponse {
-            session_id,
-            result: HandshakeResult::Success,
-            accepted_capabilities,
-        }
+        Self::handshake_response(session_id, HandshakeResult::Success, accepted_capabilities)
     }
 
     /// Create failed handshake response
     pub fn handshake_failed(session_id: Uuid, reason: String) -> Self {
-        Self::HandshakeResponse {
-            session_id,
-            result: HandshakeResult::Failed { reason },
-            accepted_capabilities: Vec::new(),
-        }
+        Self::handshake_response(session_id, HandshakeResult::Failed { reason }, Vec::new())
     }
 
     /// Create data frame with deterministic order-only timestamp
     pub fn data_frame(session_id: Uuid, payload: Vec<u8>, frame_type: FrameType) -> Self {
-        let mut order_bytes = [0u8; 32];
-        order_bytes[..16].copy_from_slice(session_id.as_bytes());
-        let payload_digest = core_hash(&payload);
-        order_bytes[16..].copy_from_slice(&payload_digest[..16]);
-
-        Self::data_frame_with_timestamp(
-            session_id,
-            payload,
-            frame_type,
-            TimeStamp::OrderClock(OrderTime(order_bytes)),
-        )
+        let timestamp = Self::derived_frame_timestamp(session_id, &payload);
+        Self::data_frame_with_timestamp(session_id, payload, frame_type, timestamp)
     }
 
     /// Create data frame with specific timestamp

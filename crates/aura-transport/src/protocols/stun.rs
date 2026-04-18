@@ -112,6 +112,21 @@ pub enum StunAttribute {
 }
 
 impl StunMessage {
+    fn binding_message(
+        class: StunClass,
+        transaction_id: Uuid,
+        attributes: Vec<StunAttribute>,
+    ) -> Self {
+        Self {
+            message_type: StunMessageType {
+                method: StunMethod::Binding,
+                class,
+            },
+            transaction_id,
+            attributes,
+        }
+    }
+
     /// Create new STUN binding request
     pub fn binding_request() -> Self {
         Self::binding_request_with_id(Self::generate_transaction_id())
@@ -119,14 +134,7 @@ impl StunMessage {
 
     /// Create STUN binding request with specific transaction ID
     pub fn binding_request_with_id(transaction_id: Uuid) -> Self {
-        Self {
-            message_type: StunMessageType {
-                method: StunMethod::Binding,
-                class: StunClass::Request,
-            },
-            transaction_id,
-            attributes: Vec::new(),
-        }
+        Self::binding_message(StunClass::Request, transaction_id, Vec::new())
     }
 
     /// Generate deterministic transaction ID
@@ -143,29 +151,23 @@ impl StunMessage {
 
     /// Create STUN binding success response
     pub fn binding_response(transaction_id: Uuid, mapped_addr: EndpointAddress) -> Self {
-        Self {
-            message_type: StunMessageType {
-                method: StunMethod::Binding,
-                class: StunClass::SuccessResponse,
-            },
+        Self::binding_message(
+            StunClass::SuccessResponse,
             transaction_id,
-            attributes: vec![StunAttribute::XorMappedAddress(mapped_addr)],
-        }
+            vec![StunAttribute::XorMappedAddress(mapped_addr)],
+        )
     }
 
     /// Create STUN error response
     pub fn error_response(transaction_id: Uuid, error_code: u16, reason: String) -> Self {
-        Self {
-            message_type: StunMessageType {
-                method: StunMethod::Binding,
-                class: StunClass::ErrorResponse,
-            },
+        Self::binding_message(
+            StunClass::ErrorResponse,
             transaction_id,
-            attributes: vec![StunAttribute::ErrorCode {
+            vec![StunAttribute::ErrorCode {
                 code: error_code,
                 reason,
             }],
-        }
+        )
     }
 
     /// Add attribute to message

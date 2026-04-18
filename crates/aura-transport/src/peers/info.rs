@@ -12,6 +12,13 @@ use std::collections::{HashMap, HashSet};
 
 use crate::PrivacyLevel;
 
+fn zero_physical_time() -> TimeStamp {
+    TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 0,
+        uncertainty: None,
+    })
+}
+
 /// Essential peer information with built-in capability blinding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerInfo {
@@ -109,13 +116,7 @@ pub enum ReliabilityLevel {
 impl PeerInfo {
     /// Create new peer info with minimal capabilities
     pub fn new(authority_id: AuthorityId) -> Self {
-        Self::new_with_timestamp(
-            authority_id,
-            TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            }),
-        )
+        Self::new_with_timestamp(authority_id, zero_physical_time())
     }
 
     /// Create new peer info with specific timestamp
@@ -155,13 +156,7 @@ impl PeerInfo {
 
     /// Update peer status
     pub fn update_status(&mut self, status: PeerStatus) {
-        self.update_status_with_timestamp(
-            status,
-            TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            }),
-        );
+        self.update_status_with_timestamp(status, zero_physical_time());
     }
 
     /// Update peer status with specific timestamp
@@ -172,12 +167,19 @@ impl PeerInfo {
 }
 
 impl BlindedPeerCapabilities {
+    fn blind_capability_value(value: &str) -> String {
+        format!(
+            "cap_{}",
+            value
+                .chars()
+                .map(|c| (c as u8).wrapping_add(42))
+                .fold(0u64, |acc, x| acc.wrapping_mul(31).wrapping_add(x as u64))
+        )
+    }
+
     /// Create new blinded capabilities
     pub fn new() -> Self {
-        Self::new_with_timestamp(TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 0,
-            uncertainty: None,
-        }))
+        Self::new_with_timestamp(zero_physical_time())
     }
 
     /// Create new blinded capabilities with specific timestamp
@@ -192,42 +194,20 @@ impl BlindedPeerCapabilities {
 
     /// Add blinded capability
     pub fn add_capability(&mut self, capability: String) {
-        self.add_capability_with_timestamp(
-            capability,
-            TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            }),
-        );
+        self.add_capability_with_timestamp(capability, zero_physical_time());
     }
 
     /// Add blinded capability with specific timestamp
     pub fn add_capability_with_timestamp(&mut self, capability: String, current_time: TimeStamp) {
-        // Blind the capability using a simple hash-based approach
-        let blinded_cap = format!(
-            "cap_{}",
-            capability
-                .chars()
-                .map(|c| (c as u8).wrapping_add(42))
-                .fold(0u64, |acc, x| acc.wrapping_mul(31).wrapping_add(x as u64))
-        );
-
-        self.blinded_capabilities.insert(blinded_cap);
+        self.blinded_capabilities
+            .insert(Self::blind_capability_value(&capability));
         self.last_updated = current_time;
     }
 
     /// Check if has blinded capability (privacy-preserving lookup)
     pub fn has_capability_like(&self, pattern: &str) -> bool {
-        // Simple privacy-preserving capability matching
-        let blinded_pattern = format!(
-            "cap_{}",
-            pattern
-                .chars()
-                .map(|c| (c as u8).wrapping_add(42))
-                .fold(0u64, |acc, x| acc.wrapping_mul(31).wrapping_add(x as u64))
-        );
-
-        self.blinded_capabilities.contains(&blinded_pattern)
+        self.blinded_capabilities
+            .contains(&Self::blind_capability_value(pattern))
     }
 
     /// Get capability count (privacy-preserving)

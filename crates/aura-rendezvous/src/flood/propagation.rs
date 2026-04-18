@@ -159,6 +159,45 @@ where
     C: CryptoEffects,
     N: NetworkEffects,
 {
+    fn serialize_packet(packet: &RendezvousPacket) -> Result<Vec<u8>, FloodError> {
+        aura_core::util::serialization::to_vec(packet)
+            .map_err(|e| FloodError::NetworkError(e.to_string()))
+    }
+
+    async fn fanout_serialized_packet(
+        &self,
+        targets: Vec<AuthorityId>,
+        serialized: Vec<u8>,
+        failure_context: &'static str,
+    ) -> Result<(), FloodError> {
+        if targets.is_empty() {
+            return Err(FloodError::NoTargets);
+        }
+
+        for target in targets {
+            if let Err(e) = self
+                .network
+                .send_to_peer(target.uuid(), serialized.clone())
+                .await
+            {
+                warn!(?target, error = %e, failure_context, "Failed to transmit flood packet");
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn fanout_packet(
+        &self,
+        packet: &RendezvousPacket,
+        targets: Vec<AuthorityId>,
+        failure_context: &'static str,
+    ) -> Result<(), FloodError> {
+        let serialized = Self::serialize_packet(packet)?;
+        self.fanout_serialized_packet(targets, serialized, failure_context)
+            .await
+    }
+
     /// Create a new flood propagation coordinator.
     pub fn new(
         local_authority: AuthorityId,
@@ -219,31 +258,11 @@ where
         let targets = self.flood_targets().await;
         let targets: Vec<_> = targets.into_iter().filter(|t| t != exclude).collect();
 
-        if targets.is_empty() {
-            return Err(FloodError::NoTargets);
-        }
-
         // Decrement TTL for forwarding
         let forwarded = packet
             .decrement_ttl()
             .ok_or(FloodError::ForwardBudgetExhausted)?;
-
-        let serialized = aura_core::util::serialization::to_vec(&forwarded)
-            .map_err(|e| FloodError::NetworkError(e.to_string()))?;
-
-        // Send to each target (using AuthorityId's inner UUID)
-        for target in targets {
-            if let Err(e) = self
-                .network
-                .send_to_peer(target.uuid(), serialized.clone())
-                .await
-            {
-                warn!(?target, error = %e, "Failed to forward flood packet");
-                // Continue with other targets
-            }
-        }
-
-        Ok(())
+        self.fanout_packet(&forwarded, targets, "forward").await
     }
 }
 
@@ -269,32 +288,13 @@ where
 
         let targets = self.flood_targets().await;
 
-        if targets.is_empty() {
-            return Err(FloodError::NoTargets);
-        }
-
         trace!(
             target_count = targets.len(),
             ttl = packet.ttl,
             "Flooding packet to targets"
         );
 
-        let serialized = aura_core::util::serialization::to_vec(&packet)
-            .map_err(|e| FloodError::NetworkError(e.to_string()))?;
-
-        // Send to each target (using AuthorityId's inner UUID)
-        for target in targets {
-            if let Err(e) = self
-                .network
-                .send_to_peer(target.uuid(), serialized.clone())
-                .await
-            {
-                warn!(?target, error = %e, "Failed to send flood packet");
-                // Continue with other targets
-            }
-        }
-
-        Ok(())
+        self.fanout_packet(&packet, targets, "originate").await
     }
 
     async fn receive(&self, packet: RendezvousPacket, from: AuthorityId) -> FloodAction {

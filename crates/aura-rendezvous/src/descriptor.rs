@@ -4,16 +4,12 @@
 //! discovery. Final establish-path selection is runtime-owned and lives in
 //! `aura-agent`.
 
+use crate::authority_hash::authority_hash_bytes;
 use crate::facts::{RendezvousDescriptor, TransportAddress, TransportHint};
 use aura_core::hash;
 use aura_core::service::{LinkEndpoint, LinkProtocol};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
-
-/// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
-fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
-    hash::hash(&authority.to_bytes())
-}
 
 // =============================================================================
 // Descriptor Builder
@@ -31,6 +27,19 @@ pub struct DescriptorBuilder {
 }
 
 impl DescriptorBuilder {
+    fn direct_hints_from_local_addresses(
+        &self,
+        local_addresses: &[String],
+    ) -> AuraResult<Vec<TransportHint>> {
+        local_addresses
+            .iter()
+            .map(|addr_str| {
+                TransportHint::tcp_direct(addr_str)
+                    .map_err(|e| AuraError::invalid(format!("Invalid transport address: {e}")))
+            })
+            .collect()
+    }
+
     /// Create a new descriptor builder
     pub fn new(authority_id: AuthorityId, validity_ms: u64, stun_server: Option<String>) -> Self {
         Self {
@@ -84,14 +93,7 @@ impl DescriptorBuilder {
         now_ms: u64,
         prober: &TransportProber,
     ) -> AuraResult<RendezvousDescriptor> {
-        let mut hints = Vec::new();
-
-        // Add direct hints for each local address (validated)
-        for addr_str in &local_addresses {
-            let hint = TransportHint::tcp_direct(addr_str)
-                .map_err(|e| AuraError::invalid(format!("Invalid transport address: {e}")))?;
-            hints.push(hint);
-        }
+        let mut hints = self.direct_hints_from_local_addresses(&local_addresses)?;
 
         // Try to discover reflexive address via STUN
         if let Some(stun_server) = &self.stun_server {

@@ -3,7 +3,7 @@
 //! Implements relay selection using deterministic randomness derived from
 //! the relay context. This ensures reproducible behavior in tests and simulation.
 
-use super::helpers::{hash_relay_seed, select_by_tiers};
+use super::helpers::{derive_index, hash_relay_seed, select_by_tiers};
 use aura_core::{
     effects::relay::{RelayCandidate, RelayContext, RelaySelector},
     types::identifiers::AuthorityId,
@@ -102,24 +102,7 @@ impl DeterministicRandomSelector {
                 break;
             }
 
-            // Derive round-specific seed
-            let mut hasher = aura_core::hash::hasher();
-            hasher.update(&seed);
-            hasher.update(&[round as u8]);
-            let round_seed = hasher.finalize();
-
-            // Hash output is always 32 bytes, so we can safely extract first 8 bytes
-            let index_bytes: [u8; 8] = [
-                round_seed[0],
-                round_seed[1],
-                round_seed[2],
-                round_seed[3],
-                round_seed[4],
-                round_seed[5],
-                round_seed[6],
-                round_seed[7],
-            ];
-            let index = u64::from_le_bytes(index_bytes) as usize % remaining.len();
+            let index = derive_index(&seed, &[round as u8], remaining.len());
 
             result.push(remaining[index].authority_id);
             remaining.remove(index);
@@ -152,34 +135,10 @@ impl RelaySelector for DeterministicRandomSelector {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::{
+        block_candidate, guardian_candidate, neighborhood_candidate, test_authority, test_context,
+    };
     use super::*;
-    use aura_core::types::identifiers::ContextId;
-
-    fn test_authority(seed: u8) -> AuthorityId {
-        AuthorityId::new_from_entropy([seed; 32])
-    }
-
-    fn test_context() -> RelayContext {
-        RelayContext::new(
-            ContextId::new_from_entropy([1u8; 32]),
-            test_authority(1),
-            test_authority(2),
-            1,
-            [0u8; 32],
-        )
-    }
-
-    fn block_candidate(seed: u8) -> RelayCandidate {
-        RelayCandidate::block_peer(test_authority(seed), [seed; 32])
-    }
-
-    fn neighborhood_candidate(seed: u8) -> RelayCandidate {
-        RelayCandidate::neighborhood_hop_member(test_authority(seed), [seed; 32])
-    }
-
-    fn guardian_candidate(seed: u8) -> RelayCandidate {
-        RelayCandidate::guardian(test_authority(seed))
-    }
 
     #[test]
     fn test_deterministic_selection() {

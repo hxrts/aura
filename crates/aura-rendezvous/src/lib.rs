@@ -41,6 +41,8 @@
 // MODULES
 // =============================================================================
 
+mod authority_hash;
+
 /// Domain fact types for rendezvous (stored in journal, propagated via sync)
 pub mod facts;
 
