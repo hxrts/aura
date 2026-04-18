@@ -117,6 +117,46 @@ pub enum TransportDescriptor {
 }
 
 impl TransportDescriptor {
+    fn direct_address_set(local_addr: String, reflexive_addr: Option<String>) -> AddressSet {
+        let mut addresses = AddressSet::new(vec![local_addr], Vec::new());
+        if let Some(reflexive_addr) = reflexive_addr {
+            addresses.add_reflexive_address(reflexive_addr);
+        }
+        addresses
+    }
+
+    fn address_set(&self) -> Option<&AddressSet> {
+        match self {
+            TransportDescriptor::Quic(descriptor) => Some(&descriptor.addresses),
+            TransportDescriptor::WebSocket(descriptor) => Some(&descriptor.addresses),
+            _ => None,
+        }
+    }
+
+    fn address_set_mut(&mut self) -> Option<&mut AddressSet> {
+        match self {
+            TransportDescriptor::Quic(descriptor) => Some(&mut descriptor.addresses),
+            TransportDescriptor::WebSocket(descriptor) => Some(&mut descriptor.addresses),
+            _ => None,
+        }
+    }
+
+    fn projected_addresses(&self, prioritize_reflexive: bool) -> Vec<String> {
+        if let Some(addresses) = self.address_set() {
+            return if prioritize_reflexive {
+                addresses.priority_addresses()
+            } else {
+                addresses.all_addresses()
+            };
+        }
+
+        match self {
+            TransportDescriptor::Tor(descriptor) => vec![descriptor.onion.clone()],
+            TransportDescriptor::Ble(_) | TransportDescriptor::WebRtc(_) => Vec::new(),
+            TransportDescriptor::Quic(_) | TransportDescriptor::WebSocket(_) => Vec::new(),
+        }
+    }
+
     /// Return the transport kind for this descriptor.
     pub fn kind(&self) -> TransportKind {
         match self {
@@ -132,7 +172,7 @@ impl TransportDescriptor {
     pub fn quic(local_addr: String, alpn: String) -> Self {
         Self::Quic(QuicTransportDescriptor {
             alpn,
-            addresses: AddressSet::new(vec![local_addr], vec![]),
+            addresses: Self::direct_address_set(local_addr, None),
         })
     }
 
@@ -140,14 +180,14 @@ impl TransportDescriptor {
     pub fn quic_with_stun(local_addr: String, reflexive_addr: String, alpn: String) -> Self {
         Self::Quic(QuicTransportDescriptor {
             alpn,
-            addresses: AddressSet::new(vec![local_addr], vec![reflexive_addr]),
+            addresses: Self::direct_address_set(local_addr, Some(reflexive_addr)),
         })
     }
 
     /// Create a WebSocket transport descriptor with endpoint address
     pub fn websocket(local_addr: String) -> Self {
         Self::WebSocket(WebSocketTransportDescriptor {
-            addresses: AddressSet::new(vec![local_addr], vec![]),
+            addresses: Self::direct_address_set(local_addr, None),
         })
     }
 
@@ -172,37 +212,19 @@ impl TransportDescriptor {
 
     /// Add a reflexive address discovered via STUN
     pub fn add_reflexive_address(&mut self, reflexive_addr: String) {
-        match self {
-            TransportDescriptor::Quic(descriptor) => {
-                descriptor.addresses.add_reflexive_address(reflexive_addr);
-            }
-            TransportDescriptor::WebSocket(descriptor) => {
-                descriptor.addresses.add_reflexive_address(reflexive_addr);
-            }
-            _ => {}
+        if let Some(addresses) = self.address_set_mut() {
+            addresses.add_reflexive_address(reflexive_addr);
         }
     }
 
     /// Get all available addresses (local + reflexive) for connection attempts
     pub fn get_all_addresses(&self) -> Vec<String> {
-        match self {
-            TransportDescriptor::Quic(descriptor) => descriptor.addresses.all_addresses(),
-            TransportDescriptor::WebSocket(descriptor) => descriptor.addresses.all_addresses(),
-            TransportDescriptor::Tor(descriptor) => vec![descriptor.onion.clone()],
-            TransportDescriptor::Ble(_) => Vec::new(),
-            TransportDescriptor::WebRtc(_) => Vec::new(),
-        }
+        self.projected_addresses(false)
     }
 
     /// Get priority-ordered addresses (reflexive first, then local)
     pub fn get_priority_addresses(&self) -> Vec<String> {
-        match self {
-            TransportDescriptor::Quic(descriptor) => descriptor.addresses.priority_addresses(),
-            TransportDescriptor::WebSocket(descriptor) => descriptor.addresses.priority_addresses(),
-            TransportDescriptor::Tor(descriptor) => vec![descriptor.onion.clone()],
-            TransportDescriptor::Ble(_) => Vec::new(),
-            TransportDescriptor::WebRtc(_) => Vec::new(),
-        }
+        self.projected_addresses(true)
     }
 }
 
@@ -299,19 +321,29 @@ pub struct TransportOfferPayload {
 }
 
 impl TransportOfferPayload {
+    fn new(
+        transports: Vec<TransportDescriptor>,
+        selected_transport: Option<u8>,
+        required_permissions: Vec<String>,
+        storage_announcement: Option<StorageCapabilityAnnouncement>,
+        punch_nonce: Option<[u8; 32]>,
+    ) -> Self {
+        Self {
+            transports,
+            selected_transport,
+            required_permissions,
+            capability_proof: None,
+            storage_announcement,
+            punch_nonce,
+        }
+    }
+
     /// Create a basic transport offer without storage announcement
     pub fn new_offer(
         transports: Vec<TransportDescriptor>,
         required_permissions: Vec<String>,
     ) -> Self {
-        Self {
-            transports,
-            selected_transport: None,
-            required_permissions,
-            capability_proof: None,
-            storage_announcement: None,
-            punch_nonce: None,
-        }
+        Self::new(transports, None, required_permissions, None, None)
     }
 
     /// Create a transport offer with storage capability announcement
@@ -320,26 +352,24 @@ impl TransportOfferPayload {
         required_permissions: Vec<String>,
         storage_announcement: StorageCapabilityAnnouncement,
     ) -> Self {
-        Self {
+        Self::new(
             transports,
-            selected_transport: None,
+            None,
             required_permissions,
-            capability_proof: None,
-            storage_announcement: Some(storage_announcement),
-            punch_nonce: None,
-        }
+            Some(storage_announcement),
+            None,
+        )
     }
 
     /// Create a transport answer selecting one of the offered transports
     pub fn new_answer(original_transports: Vec<TransportDescriptor>, selected_index: u8) -> Self {
-        Self {
-            transports: original_transports,
-            selected_transport: Some(selected_index),
-            required_permissions: vec![],
-            capability_proof: None,
-            storage_announcement: None,
-            punch_nonce: None,
-        }
+        Self::new(
+            original_transports,
+            Some(selected_index),
+            vec![],
+            None,
+            None,
+        )
     }
 
     /// Create a transport answer with storage capability announcement
@@ -348,14 +378,13 @@ impl TransportOfferPayload {
         selected_index: u8,
         storage_announcement: StorageCapabilityAnnouncement,
     ) -> Self {
-        Self {
-            transports: original_transports,
-            selected_transport: Some(selected_index),
-            required_permissions: vec![],
-            capability_proof: None,
-            storage_announcement: Some(storage_announcement),
-            punch_nonce: None,
-        }
+        Self::new(
+            original_transports,
+            Some(selected_index),
+            vec![],
+            Some(storage_announcement),
+            None,
+        )
     }
 
     /// Create offer with punch nonce for hole-punching coordination
@@ -364,14 +393,13 @@ impl TransportOfferPayload {
         required_permissions: Vec<String>,
         punch_nonce: [u8; 32],
     ) -> Self {
-        Self {
+        Self::new(
             transports,
-            selected_transport: None,
+            None,
             required_permissions,
-            capability_proof: None,
-            storage_announcement: None,
-            punch_nonce: Some(punch_nonce),
-        }
+            None,
+            Some(punch_nonce),
+        )
     }
 
     /// Create answer with punch nonce for coordinated hole-punching
@@ -380,14 +408,13 @@ impl TransportOfferPayload {
         selected_index: u8,
         punch_nonce: [u8; 32],
     ) -> Self {
-        Self {
-            transports: original_transports,
-            selected_transport: Some(selected_index),
-            required_permissions: vec![],
-            capability_proof: None,
-            storage_announcement: None,
-            punch_nonce: Some(punch_nonce),
-        }
+        Self::new(
+            original_transports,
+            Some(selected_index),
+            vec![],
+            None,
+            Some(punch_nonce),
+        )
     }
 
     /// Set punch nonce for existing payload

@@ -86,6 +86,12 @@ pub enum TransportCoordinationError {
 
 impl aura_core::ProtocolErrorCode for TransportCoordinationError {
     fn code(&self) -> &'static str {
+        self.protocol_code()
+    }
+}
+
+impl TransportCoordinationError {
+    fn protocol_code(&self) -> &'static str {
         match self {
             TransportCoordinationError::ConnectionLimitExceeded { .. } => {
                 "transport_connection_limit_exceeded"

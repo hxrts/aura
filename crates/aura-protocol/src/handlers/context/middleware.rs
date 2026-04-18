@@ -91,15 +91,11 @@ impl MiddlewareContext {
             AuraHandlerError::context_error(format!("Failed to serialize custom data: {e}"))
         })?;
 
-        let mut new_data = (*self.custom_data).clone();
-        new_data.insert(key.to_string(), serialized);
-
-        Ok(Self {
-            tracing: self.tracing.clone(),
-            metrics: self.metrics.clone(),
-            retry: self.retry.clone(),
-            custom_data: Arc::new(new_data),
-        })
+        Ok(self.updated(|next| {
+            next.custom_data = self.map_custom_data(|data| {
+                data.insert(key.to_string(), serialized);
+            });
+        }))
     }
 
     /// Get custom middleware data
@@ -122,45 +118,59 @@ impl MiddlewareContext {
 
     /// Create context with tracing enabled
     pub fn with_tracing(&self, trace_id: String, span_id: String) -> Self {
-        Self {
-            tracing: TracingContext {
+        self.updated(|next| {
+            next.tracing = TracingContext {
                 enabled: true,
                 trace_id: Some(trace_id),
                 span_id: Some(span_id),
-            },
-            metrics: self.metrics.clone(),
-            retry: self.retry.clone(),
-            custom_data: self.custom_data.clone(),
-        }
+            };
+        })
     }
 
     /// Create context with metrics enabled
     pub fn with_metrics(&self) -> Self {
-        Self {
-            tracing: self.tracing.clone(),
-            metrics: MetricsContext {
+        self.updated(|next| {
+            next.metrics = MetricsContext {
                 enabled: true,
                 labels: self.metrics.labels.clone(),
-            },
-            retry: self.retry.clone(),
-            custom_data: self.custom_data.clone(),
-        }
+            };
+        })
     }
 
     /// Add metrics label
     pub fn with_metrics_label(&self, key: &str, value: &str) -> Self {
-        let mut new_labels = (*self.metrics.labels).clone();
-        new_labels.insert(key.to_string(), value.to_string());
-
-        Self {
-            tracing: self.tracing.clone(),
-            metrics: MetricsContext {
+        self.updated(|next| {
+            next.metrics = MetricsContext {
                 enabled: self.metrics.enabled,
-                labels: Arc::new(new_labels),
-            },
-            retry: self.retry.clone(),
-            custom_data: self.custom_data.clone(),
-        }
+                labels: self.map_metric_labels(|labels| {
+                    labels.insert(key.to_string(), value.to_string());
+                }),
+            };
+        })
+    }
+
+    fn updated(&self, update: impl FnOnce(&mut Self)) -> Self {
+        let mut next = self.clone();
+        update(&mut next);
+        next
+    }
+
+    fn map_custom_data(
+        &self,
+        update: impl FnOnce(&mut HashMap<String, Vec<u8>>),
+    ) -> Arc<HashMap<String, Vec<u8>>> {
+        let mut data = (*self.custom_data).clone();
+        update(&mut data);
+        Arc::new(data)
+    }
+
+    fn map_metric_labels(
+        &self,
+        update: impl FnOnce(&mut HashMap<String, String>),
+    ) -> Arc<HashMap<String, String>> {
+        let mut labels = (*self.metrics.labels).clone();
+        update(&mut labels);
+        Arc::new(labels)
     }
 }
 

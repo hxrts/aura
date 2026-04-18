@@ -408,6 +408,12 @@ impl From<aura_mpst::upstream::runtime::ChoreographyError> for ChoreographyError
 
 impl aura_core::ProtocolErrorCode for ChoreographyError {
     fn code(&self) -> &'static str {
+        self.protocol_code()
+    }
+}
+
+impl ChoreographyError {
+    fn protocol_code(&self) -> &'static str {
         match self {
             ChoreographyError::RoleNotFound { .. } => "choreography_role_not_found",
             ChoreographyError::CommunicationTimeout { .. } => "choreography_timeout",

@@ -21,7 +21,7 @@ pub struct RandomBytesParams {
 }
 
 /// Parameters for generating 32 random bytes
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RandomBytes32Params;
 
 /// Parameters for generating random number in range
@@ -93,21 +93,24 @@ impl StorageKey {
     }
 }
 
-impl From<String> for StorageKey {
-    fn from(value: String) -> Self {
-        Self(value)
+impl<T> From<T> for StorageKey
+where
+    T: Into<String>,
+{
+    fn from(value: T) -> Self {
+        Self(value.into())
     }
 }
 
-impl From<&str> for StorageKey {
-    fn from(value: &str) -> Self {
-        Self(value.to_string())
+impl AsRef<str> for StorageKey {
+    fn as_ref(&self) -> &str {
+        self.as_str()
     }
 }
 
 impl std::fmt::Display for StorageKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        f.write_str(self.as_str())
     }
 }
 
@@ -249,7 +252,7 @@ pub enum ConsoleEvent {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Parameters for generating a random u64
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RandomU64Params;
 
 /// Parameters for generating a random u64 in a range

@@ -33,6 +33,12 @@ impl From<CrdtCoordinatorError> for AuraError {
 
 impl aura_core::ProtocolErrorCode for CrdtCoordinatorError {
     fn code(&self) -> &'static str {
+        self.protocol_code()
+    }
+}
+
+impl CrdtCoordinatorError {
+    fn protocol_code(&self) -> &'static str {
         match self {
             CrdtCoordinatorError::SerializationFailed { .. } => "crdt_serialization",
             CrdtCoordinatorError::DeserializationFailed { .. } => "crdt_deserialization",

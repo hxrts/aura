@@ -116,15 +116,22 @@ pub trait AuraHandlerFactory {
         config: AuraHandlerConfig,
     ) -> Result<super::erased::BoxedHandler, FactoryError>;
 
+    /// Create a handler from an already-selected execution-mode configuration.
+    fn create_for_mode(
+        config: AuraHandlerConfig,
+    ) -> Result<super::erased::BoxedHandler, FactoryError> {
+        Self::create_handler(config)
+    }
+
     /// Create a testing handler with minimal configuration
     fn for_testing(device_id: DeviceId) -> Result<super::erased::BoxedHandler, FactoryError> {
-        Self::create_handler(AuraHandlerConfig::for_testing(device_id))
+        Self::create_for_mode(AuraHandlerConfig::for_testing(device_id))
     }
 
     /// Create a production handler with full capabilities
     fn for_production(device_id: DeviceId) -> Result<super::erased::BoxedHandler, FactoryError> {
         // Production handler assembly is owned by aura-agent.
-        Self::create_handler(AuraHandlerConfig::for_production(device_id))
+        Self::create_for_mode(AuraHandlerConfig::for_production(device_id))
     }
 
     /// Create a simulation handler with deterministic behavior
@@ -132,7 +139,7 @@ pub trait AuraHandlerFactory {
         device_id: DeviceId,
         seed: u64,
     ) -> Result<super::erased::BoxedHandler, FactoryError> {
-        Self::create_handler(AuraHandlerConfig::for_simulation(device_id, seed))
+        Self::create_for_mode(AuraHandlerConfig::for_simulation(device_id, seed))
     }
 
     /// Get the supported effect types for this factory
