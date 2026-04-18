@@ -1,6 +1,15 @@
 //! Strongly typed storage identifiers and size wrappers.
 
+use aura_core::time::PhysicalTime;
 use serde::{Deserialize, Serialize};
+
+/// Construct a `PhysicalTime` from milliseconds with no uncertainty.
+pub(crate) const fn physical_time_ms(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
+    }
+}
 
 /// Identifier for a storage node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

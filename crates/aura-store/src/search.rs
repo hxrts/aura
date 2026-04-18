@@ -5,11 +5,16 @@
 //!
 //! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
+use crate::types::physical_time_ms;
 use crate::StorageCapability;
 use aura_core::time::PhysicalTime;
 use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+fn insert_metadata(metadata: &mut BTreeMap<String, String>, key: String, value: String) {
+    metadata.insert(key, value);
+}
 
 /// Search scope for limiting search domains
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,7 +89,7 @@ impl SearchQuery {
 
     /// Add metadata
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
-        self.metadata.insert(key, value);
+        insert_metadata(&mut self.metadata, key, value);
         self
     }
 
@@ -133,7 +138,7 @@ impl SearchResultItem {
 
     /// Add metadata to result
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
-        self.metadata.insert(key, value);
+        insert_metadata(&mut self.metadata, key, value);
         self
     }
 
@@ -178,7 +183,7 @@ impl SearchResults {
     /// Add metadata
     #[must_use]
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
-        self.metadata.insert(key, value);
+        insert_metadata(&mut self.metadata, key, value);
         self
     }
 
@@ -242,10 +247,7 @@ impl SearchIndexEntry {
             content_id,
             terms,
             required_capabilities,
-            PhysicalTime {
-                ts_ms: timestamp_ms,
-                uncertainty: None,
-            },
+            physical_time_ms(timestamp_ms),
         )
     }
 
@@ -330,10 +332,7 @@ pub fn build_search_index_from_ms(
                 id.clone(),
                 content.clone(),
                 caps.clone(),
-                PhysicalTime {
-                    ts_ms: *ts_ms,
-                    uncertainty: None,
-                },
+                physical_time_ms(*ts_ms),
             )
         })
         .collect();
@@ -346,14 +345,8 @@ pub fn build_search_index_from_ms(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::physical_time_ms;
     use crate::StorageResource;
-
-    fn test_time(ts_ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        }
-    }
 
     #[test]
     fn test_search_scope() {
@@ -370,7 +363,12 @@ mod tests {
             .collect();
         let caps = vec![StorageCapability::read(StorageResource::Global)];
 
-        let entry = SearchIndexEntry::new("test_content".to_string(), terms, caps, test_time(42));
+        let entry = SearchIndexEntry::new(
+            "test_content".to_string(),
+            terms,
+            caps,
+            physical_time_ms(42),
+        );
 
         assert!(entry.matches_terms("hello world"));
         assert!(entry.matches_terms("test"));
@@ -384,7 +382,7 @@ mod tests {
             .map(|&s| s.to_string())
             .collect();
         let caps = vec![];
-        let entry = SearchIndexEntry::new("test".to_string(), terms, caps, test_time(100));
+        let entry = SearchIndexEntry::new("test".to_string(), terms, caps, physical_time_ms(100));
 
         let score1 = entry.calculate_score("hello world");
         let score2 = entry.calculate_score("hello");
@@ -404,13 +402,13 @@ mod tests {
                 "doc1".to_string(),
                 "Hello world! This is a test document.".to_string(),
                 vec![StorageCapability::read(StorageResource::Global)],
-                test_time(1),
+                physical_time_ms(1),
             ),
             (
                 "doc2".to_string(),
                 "Another document with different content.".to_string(),
                 vec![],
-                test_time(2),
+                physical_time_ms(2),
             ),
         ];
 

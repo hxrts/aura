@@ -2,19 +2,23 @@
 //! idempotent. If any law fails, replicas with the same content entries
 //! derive different storage indices depending on merge order.
 
-use aura_core::time::PhysicalTime;
+use super::support::test_time;
 use aura_core::{AuthorityId, ContentId, JoinSemilattice};
 use aura_store::{SearchIndexEntry, StorageState};
 use proptest::prelude::*;
 use std::collections::BTreeSet;
 
-fn entry_for_seed(seed: [u8; 32]) -> (ContentId, SearchIndexEntry, AuthorityId, PhysicalTime) {
+fn entry_for_seed(
+    seed: [u8; 32],
+) -> (
+    ContentId,
+    SearchIndexEntry,
+    AuthorityId,
+    aura_core::time::PhysicalTime,
+) {
     let content_id = ContentId::from_bytes(&seed);
     let authority = AuthorityId::new_from_entropy(seed);
-    let timestamp = PhysicalTime {
-        ts_ms: seed[0] as u64,
-        uncertainty: None,
-    };
+    let timestamp = test_time(seed[0] as u64);
     let terms: BTreeSet<String> = [format!("term-{}", seed[1])].into_iter().collect();
     let entry = SearchIndexEntry::new(content_id.to_string(), terms, Vec::new(), timestamp.clone());
     (content_id, entry, authority, timestamp)

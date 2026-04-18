@@ -141,14 +141,14 @@ impl StorageFact {
     /// Get the authority associated with this fact
     pub fn authority_id(&self) -> AuthorityId {
         match self {
-            Self::ContentAdded { authority_id, .. } => *authority_id,
-            Self::ContentRemoved { authority_id, .. } => *authority_id,
-            Self::ChunkStored { authority_id, .. } => *authority_id,
-            Self::ChunkReplicated { authority_id, .. } => *authority_id,
-            Self::ChunkCollected { authority_id, .. } => *authority_id,
-            Self::IndexUpdated { authority_id, .. } => *authority_id,
-            Self::IndexEntryRemoved { authority_id, .. } => *authority_id,
-            Self::QuotaUpdated { authority_id, .. } => *authority_id,
+            Self::ContentAdded { authority_id, .. }
+            | Self::ContentRemoved { authority_id, .. }
+            | Self::ChunkStored { authority_id, .. }
+            | Self::ChunkReplicated { authority_id, .. }
+            | Self::ChunkCollected { authority_id, .. }
+            | Self::IndexUpdated { authority_id, .. }
+            | Self::IndexEntryRemoved { authority_id, .. }
+            | Self::QuotaUpdated { authority_id, .. } => *authority_id,
         }
     }
 
@@ -157,14 +157,38 @@ impl StorageFact {
     /// **Time System**: Returns `PhysicalTime` per the unified time architecture.
     pub fn timestamp(&self) -> PhysicalTime {
         match self {
-            Self::ContentAdded { added_at, .. } => added_at.clone(),
-            Self::ContentRemoved { removed_at, .. } => removed_at.clone(),
-            Self::ChunkStored { stored_at, .. } => stored_at.clone(),
-            Self::ChunkReplicated { replicated_at, .. } => replicated_at.clone(),
-            Self::ChunkCollected { collected_at, .. } => collected_at.clone(),
-            Self::IndexUpdated { updated_at, .. } => updated_at.clone(),
-            Self::IndexEntryRemoved { removed_at, .. } => removed_at.clone(),
-            Self::QuotaUpdated { updated_at, .. } => updated_at.clone(),
+            Self::ContentAdded {
+                added_at: timestamp,
+                ..
+            }
+            | Self::ContentRemoved {
+                removed_at: timestamp,
+                ..
+            }
+            | Self::ChunkStored {
+                stored_at: timestamp,
+                ..
+            }
+            | Self::ChunkReplicated {
+                replicated_at: timestamp,
+                ..
+            }
+            | Self::ChunkCollected {
+                collected_at: timestamp,
+                ..
+            }
+            | Self::IndexUpdated {
+                updated_at: timestamp,
+                ..
+            }
+            | Self::IndexEntryRemoved {
+                removed_at: timestamp,
+                ..
+            }
+            | Self::QuotaUpdated {
+                updated_at: timestamp,
+                ..
+            } => timestamp.clone(),
         }
     }
 
@@ -252,6 +276,8 @@ impl StorageFact {
 
     /// Encode this fact with proper error handling.
     ///
+    /// Backward-compatibility alias for [`Self::try_encode`].
+    ///
     /// # Errors
     ///
     /// Returns `FactError` if serialization fails.
@@ -260,6 +286,8 @@ impl StorageFact {
     }
 
     /// Decode a fact with proper error handling.
+    ///
+    /// Backward-compatibility alias for [`Self::try_decode`].
     ///
     /// # Errors
     ///
@@ -375,50 +403,40 @@ impl FactDeltaReducer<StorageFact, StorageFactDelta> for StorageFactReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::physical_time_ms;
     use aura_core::types::facts::FactDeltaReducer;
-
-    fn test_authority(seed: u8) -> AuthorityId {
-        AuthorityId::new_from_entropy([seed; 32])
-    }
-
-    fn test_time(ts_ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        }
-    }
 
     #[test]
     fn test_content_added_fact() {
         let fact = StorageFact::ContentAdded {
-            authority_id: test_authority(1),
+            authority_id: AuthorityId::new_from_entropy([1; 32]),
             content_id: ContentId::from_bytes(b"test-content"),
             size_bytes: ByteSize::new(1024),
             chunk_count: ChunkCount::new(2),
             context_id: None,
-            added_at: test_time(1000),
+            added_at: physical_time_ms(1000),
         };
 
-        assert_eq!(fact.authority_id(), test_authority(1));
+        assert_eq!(fact.authority_id(), AuthorityId::new_from_entropy([1; 32]));
         assert_eq!(fact.timestamp_ms(), 1000);
-        assert_eq!(fact.timestamp(), test_time(1000));
+        assert_eq!(fact.timestamp(), physical_time_ms(1000));
     }
 
     #[test]
     fn test_chunk_stored_fact() {
         let fact = StorageFact::ChunkStored {
-            authority_id: test_authority(2),
+            authority_id: AuthorityId::new_from_entropy([2; 32]),
             chunk_id: ChunkId::from_bytes(b"chunk1"),
             content_id: ContentId::from_bytes(b"content1"),
             size_bytes: ByteSize::new(512),
             chunk_index: ChunkIndex::new(0),
             is_parity: false,
-            stored_at: test_time(2000),
+            stored_at: physical_time_ms(2000),
         };
 
-        assert_eq!(fact.authority_id(), test_authority(2));
+        assert_eq!(fact.authority_id(), AuthorityId::new_from_entropy([2; 32]));
         assert_eq!(fact.timestamp_ms(), 2000);
-        assert_eq!(fact.timestamp(), test_time(2000));
+        assert_eq!(fact.timestamp(), physical_time_ms(2000));
     }
 
     #[test]
@@ -426,22 +444,22 @@ mod tests {
         let mut delta = StorageFactDelta::new();
 
         let fact1 = StorageFact::ContentAdded {
-            authority_id: test_authority(1),
+            authority_id: AuthorityId::new_from_entropy([1; 32]),
             content_id: ContentId::from_bytes(b"content1"),
             size_bytes: ByteSize::new(1000),
             chunk_count: ChunkCount::new(1),
             context_id: None,
-            added_at: test_time(1000),
+            added_at: physical_time_ms(1000),
         };
 
         let fact2 = StorageFact::ChunkStored {
-            authority_id: test_authority(1),
+            authority_id: AuthorityId::new_from_entropy([1; 32]),
             chunk_id: ChunkId::from_bytes(b"chunk1"),
             content_id: ContentId::from_bytes(b"content1"),
             size_bytes: ByteSize::new(500),
             chunk_index: ChunkIndex::new(0),
             is_parity: false,
-            stored_at: test_time(1001),
+            stored_at: physical_time_ms(1001),
         };
 
         delta.apply(&fact1);
@@ -458,20 +476,20 @@ mod tests {
 
         let facts = vec![
             StorageFact::ContentAdded {
-                authority_id: test_authority(1),
+                authority_id: AuthorityId::new_from_entropy([1; 32]),
                 content_id: ContentId::from_bytes(b"content1"),
                 size_bytes: ByteSize::new(1000),
                 chunk_count: ChunkCount::new(2),
                 context_id: None,
-                added_at: test_time(1000),
+                added_at: physical_time_ms(1000),
             },
             StorageFact::ContentAdded {
-                authority_id: test_authority(2),
+                authority_id: AuthorityId::new_from_entropy([2; 32]),
                 content_id: ContentId::from_bytes(b"content2"),
                 size_bytes: ByteSize::new(2000),
                 chunk_count: ChunkCount::new(4),
                 context_id: None,
-                added_at: test_time(2000),
+                added_at: physical_time_ms(2000),
             },
         ];
 

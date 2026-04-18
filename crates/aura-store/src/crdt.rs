@@ -3,12 +3,40 @@
 //! This module defines CRDT types for storage state management,
 //! implementing join and meet semilattice operations for convergence.
 
-use crate::types::NodeId;
+use crate::types::{physical_time_ms, NodeId};
 use crate::SearchIndexEntry;
 use aura_core::time::PhysicalTime;
 use aura_core::{AuthorityId, ChunkId, ContentId, JoinSemilattice};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+fn insert_if_newer_index_entry(
+    entries: &mut BTreeMap<ContentId, SearchIndexEntry>,
+    content_id: &ContentId,
+    candidate: &SearchIndexEntry,
+) {
+    match entries.get(content_id) {
+        Some(existing) if candidate.timestamp <= existing.timestamp => {}
+        _ => {
+            entries.insert(content_id.clone(), candidate.clone());
+        }
+    }
+}
+
+fn insert_if_newer_node_timestamp(
+    timestamps: &mut BTreeMap<NodeId, PhysicalTime>,
+    node_id: &NodeId,
+    candidate: &PhysicalTime,
+) {
+    timestamps
+        .entry(node_id.clone())
+        .and_modify(|current| {
+            if candidate.ts_ms > current.ts_ms {
+                *current = candidate.clone();
+            }
+        })
+        .or_insert_with(|| candidate.clone());
+}
 
 /// Storage index CRDT for tracking content and search terms
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,16 +110,7 @@ impl JoinSemilattice for StorageIndex {
 
         // Merge entries, taking the one with the latest timestamp for conflicts
         for (content_id, other_entry) in &other.entries {
-            match merged_entries.get(content_id) {
-                Some(existing_entry) => {
-                    if other_entry.timestamp > existing_entry.timestamp {
-                        merged_entries.insert(content_id.clone(), other_entry.clone());
-                    }
-                }
-                None => {
-                    merged_entries.insert(content_id.clone(), other_entry.clone());
-                }
-            }
+            insert_if_newer_index_entry(&mut merged_entries, content_id, other_entry);
         }
 
         Self {
@@ -226,15 +245,7 @@ impl StorageOperation {
         authority: AuthorityId,
         timestamp_ms: u64,
     ) -> Self {
-        Self::new(
-            op_type,
-            counter,
-            authority,
-            PhysicalTime {
-                ts_ms: timestamp_ms,
-                uncertainty: None,
-            },
-        )
+        Self::new(op_type, counter, authority, physical_time_ms(timestamp_ms))
     }
 
     /// Get the timestamp in milliseconds for backward compatibility
@@ -330,18 +341,11 @@ impl StorageState {
         authority: AuthorityId,
         timestamp: PhysicalTime,
     ) {
-        let op = StorageOperation::new(
-            StorageOpType::AddContent {
-                content_id: content_id.clone(),
-                entry: entry.clone(),
-            },
-            self.op_log.counter + 1,
+        self.apply_operation(
+            StorageOpType::AddContent { content_id, entry },
             authority,
             timestamp,
         );
-
-        self.op_log.add_operation(op);
-        self.index.add_entry(content_id, entry);
     }
 
     /// Remove content from the storage state
@@ -356,17 +360,23 @@ impl StorageState {
         authority: AuthorityId,
         timestamp: PhysicalTime,
     ) {
-        let op = StorageOperation::new(
-            StorageOpType::RemoveContent {
-                content_id: content_id.clone(),
-            },
-            self.op_log.counter + 1,
+        self.apply_operation(
+            StorageOpType::RemoveContent { content_id },
             authority,
             timestamp,
         );
+    }
 
-        self.op_log.add_operation(op);
-        self.index.remove_entry(&content_id);
+    fn apply_operation(
+        &mut self,
+        op_type: StorageOpType,
+        authority: AuthorityId,
+        timestamp: PhysicalTime,
+    ) {
+        let op = StorageOperation::new(op_type, self.op_log.counter + 1, authority, timestamp);
+
+        self.op_log.add_operation(op.clone());
+        op.apply_to_index(&mut self.index);
     }
 
     // Removed: refine_capabilities method - authorization now handled by Biscuit tokens
@@ -424,14 +434,7 @@ impl ChunkAvailability {
     ///
     /// Convenience method for backward compatibility.
     pub fn add_chunk_ms(&mut self, chunk_id: ChunkId, node_id: NodeId, timestamp_ms: u64) {
-        self.add_chunk(
-            chunk_id,
-            node_id,
-            PhysicalTime {
-                ts_ms: timestamp_ms,
-                uncertainty: None,
-            },
-        );
+        self.add_chunk(chunk_id, node_id, physical_time_ms(timestamp_ms));
     }
 
     /// Remove chunk from a node
@@ -480,14 +483,7 @@ impl JoinSemilattice for ChunkAvailability {
         // Merge node timestamps (take latest by ts_ms)
         let mut merged_timestamps = self.node_timestamps.clone();
         for (node_id, other_timestamp) in &other.node_timestamps {
-            merged_timestamps
-                .entry(node_id.clone())
-                .and_modify(|timestamp| {
-                    if other_timestamp.ts_ms > timestamp.ts_ms {
-                        *timestamp = other_timestamp.clone();
-                    }
-                })
-                .or_insert(other_timestamp.clone());
+            insert_if_newer_node_timestamp(&mut merged_timestamps, node_id, other_timestamp);
         }
 
         Self {
@@ -501,17 +497,6 @@ impl JoinSemilattice for ChunkAvailability {
 mod tests {
     use super::*;
 
-    fn test_authority(seed: u8) -> AuthorityId {
-        AuthorityId::new_from_entropy([seed; 32])
-    }
-
-    fn test_time(ts_ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        }
-    }
-
     #[test]
     fn test_storage_index_join() {
         let mut index1 = StorageIndex::new();
@@ -524,14 +509,14 @@ mod tests {
             "content1".to_string(),
             ["term1"].iter().map(|&s| s.to_string()).collect(),
             vec![],
-            test_time(1000),
+            physical_time_ms(1000),
         );
 
         let entry2 = SearchIndexEntry::new(
             "content2".to_string(),
             ["term2"].iter().map(|&s| s.to_string()).collect(),
             vec![],
-            test_time(2000),
+            physical_time_ms(2000),
         );
 
         index1.add_entry(content_id1.clone(), entry1);
@@ -556,12 +541,12 @@ mod tests {
                     "content1".to_string(),
                     BTreeSet::new(),
                     vec![],
-                    test_time(1000),
+                    physical_time_ms(1000),
                 ),
             },
             1,
-            test_authority(1),
-            test_time(1000),
+            AuthorityId::new_from_entropy([1; 32]),
+            physical_time_ms(1000),
         );
 
         let op2 = StorageOperation::new(
@@ -571,12 +556,12 @@ mod tests {
                     "content2".to_string(),
                     BTreeSet::new(),
                     vec![],
-                    test_time(2000),
+                    physical_time_ms(2000),
                 ),
             },
             2,
-            test_authority(2),
-            test_time(2000),
+            AuthorityId::new_from_entropy([2; 32]),
+            physical_time_ms(2000),
         );
 
         log1.add_operation(op1);
@@ -598,8 +583,8 @@ mod tests {
         let node1 = NodeId::new("node1");
         let node2 = NodeId::new("node2");
 
-        avail1.add_chunk(chunk_id.clone(), node1.clone(), test_time(10));
-        avail2.add_chunk(chunk_id.clone(), node2.clone(), test_time(20));
+        avail1.add_chunk(chunk_id.clone(), node1.clone(), physical_time_ms(10));
+        avail2.add_chunk(chunk_id.clone(), node2.clone(), physical_time_ms(20));
 
         let merged = avail1.join(&avail2);
 

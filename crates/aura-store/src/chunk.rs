@@ -5,13 +5,17 @@
 //!
 //! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
+use crate::types::physical_time_ms;
+use crate::StorageCapability;
 use aura_core::time::PhysicalTime;
+use aura_core::AuraError;
 use aura_core::{ChunkId, ContentId, ContentSize};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::StorageCapability;
-use aura_core::AuraError;
+fn insert_metadata(metadata: &mut BTreeMap<String, String>, key: String, value: String) {
+    metadata.insert(key, value);
+}
 
 /// Configuration for erasure coding
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -159,10 +163,7 @@ impl ChunkManifest {
             chunk_id,
             size,
             required_capabilities,
-            PhysicalTime {
-                ts_ms: created_at_ms,
-                uncertainty: None,
-            },
+            physical_time_ms(created_at_ms),
         )
     }
 
@@ -173,7 +174,7 @@ impl ChunkManifest {
 
     /// Add metadata to the manifest
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
-        self.metadata.insert(key, value);
+        insert_metadata(&mut self.metadata, key, value);
         self
     }
 
@@ -249,10 +250,7 @@ impl ContentManifest {
             content_id,
             layout,
             chunk_manifests,
-            PhysicalTime {
-                ts_ms: created_at_ms,
-                uncertainty: None,
-            },
+            physical_time_ms(created_at_ms),
         )
     }
 
@@ -263,7 +261,7 @@ impl ContentManifest {
 
     /// Add metadata to the content manifest
     pub fn with_metadata(mut self, key: String, value: String) -> Self {
-        self.metadata.insert(key, value);
+        insert_metadata(&mut self.metadata, key, value);
         self
     }
 
@@ -400,13 +398,7 @@ pub fn compute_chunk_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_time(ts_ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        }
-    }
+    use crate::types::physical_time_ms;
 
     #[test]
     fn test_erasure_config() {
@@ -446,8 +438,8 @@ mod tests {
     #[test]
     fn test_manifests_require_created_at() {
         let chunk_id = ChunkId::from_bytes(b"chunk1");
-        let manifest = ChunkManifest::new(chunk_id, 10, vec![], test_time(123));
-        assert_eq!(manifest.created_at, test_time(123));
+        let manifest = ChunkManifest::new(chunk_id, 10, vec![], physical_time_ms(123));
+        assert_eq!(manifest.created_at, physical_time_ms(123));
 
         let layout = ChunkLayout::new(
             vec![manifest.chunk_id.clone()],
@@ -460,9 +452,9 @@ mod tests {
             ContentId::from_bytes(b"content1"),
             layout,
             vec![manifest],
-            test_time(456),
+            physical_time_ms(456),
         )
         .unwrap();
-        assert_eq!(content_manifest.created_at, test_time(456));
+        assert_eq!(content_manifest.created_at, physical_time_ms(456));
     }
 }
