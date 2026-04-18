@@ -13,6 +13,48 @@ use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use std::collections::HashMap;
 
+fn moderation_fact<T: DomainFact>(
+    fact: &Fact,
+    context_id: &ContextId,
+    type_id: &'static str,
+) -> Option<T> {
+    match &fact.content {
+        FactContent::Relational(RelationalFact::Generic {
+            context_id: fact_context,
+            envelope,
+        }) if fact_context == context_id && envelope.type_id.as_str() == type_id => {
+            T::from_envelope(envelope)
+        }
+        _ => None,
+    }
+}
+
+fn remove_if_newer<T>(
+    active: &mut HashMap<AuthorityId, T>,
+    authority: &AuthorityId,
+    reversal_at_ms: u64,
+    active_at_ms: impl Fn(&T) -> u64,
+) {
+    if let Some(status) = active.get(authority) {
+        if reversal_at_ms >= active_at_ms(status) {
+            active.remove(authority);
+        }
+    }
+}
+
+fn status_applies_to_channel<T>(
+    statuses: &HashMap<AuthorityId, T>,
+    authority: &AuthorityId,
+    channel_id: Option<&ChannelId>,
+    applies_to_channel: impl Fn(&T, &ChannelId) -> bool,
+) -> bool {
+    statuses.get(authority).is_some_and(|status| {
+        channel_id
+            .map(|channel| applies_to_channel(status, channel))
+            .unwrap_or(true)
+    })
+}
+
 /// Query current bans in a context
 ///
 /// Processes HomeBan and HomeUnban facts in order to derive the current set
@@ -33,47 +75,26 @@ pub fn query_current_bans(
     let mut bans: HashMap<AuthorityId, BanStatus> = HashMap::new();
 
     for fact in facts {
-        match &fact.content {
-            FactContent::Relational(RelationalFact::Generic {
-                context_id: fact_context,
-                envelope,
-            }) if fact_context == context_id
-                && envelope.type_id.as_str() == HOME_BAN_FACT_TYPE_ID =>
-            {
-                if let Some(home_ban) = HomeBanFact::from_envelope(envelope) {
-                    let banned_at_ms = home_ban.banned_at_ms();
-                    let expires_at_ms = home_ban.expires_at_ms();
-                    let ban = BanStatus {
-                        banned_authority: home_ban.banned_authority,
-                        actor_authority: home_ban.actor_authority,
-                        reason: home_ban.reason,
-                        banned_at_ms,
-                        expires_at_ms,
-                        channel_id: home_ban.channel_id,
-                    };
-                    bans.insert(ban.banned_authority, ban);
-                }
-            }
-            FactContent::Relational(RelationalFact::Generic {
-                context_id: fact_context,
-                envelope,
-            }) if fact_context == context_id
-                && envelope.type_id.as_str() == HOME_UNBAN_FACT_TYPE_ID =>
-            {
-                if let Some(home_unban) = HomeUnbanFact::from_envelope(envelope) {
-                    // Remove ban if unban happened after the ban
-                    if let Some(ban) = bans.get(&home_unban.unbanned_authority) {
-                        if home_unban.unbanned_at_ms() >= ban.banned_at_ms {
-                            bans.remove(&home_unban.unbanned_authority);
-                        }
-                    }
-                }
-            }
-            _ => {}
+        if let Some(home_ban) =
+            moderation_fact::<HomeBanFact>(fact, context_id, HOME_BAN_FACT_TYPE_ID)
+        {
+            let ban = BanStatus::from_fact(&home_ban);
+            bans.insert(ban.banned_authority, ban);
+            continue;
+        }
+
+        if let Some(home_unban) =
+            moderation_fact::<HomeUnbanFact>(fact, context_id, HOME_UNBAN_FACT_TYPE_ID)
+        {
+            remove_if_newer(
+                &mut bans,
+                &home_unban.unbanned_authority,
+                home_unban.unbanned_at_ms(),
+                |ban| ban.banned_at_ms,
+            );
         }
     }
 
-    // Filter out expired bans
     bans.retain(|_, ban| !ban.is_expired(current_time_ms));
 
     bans
@@ -100,47 +121,26 @@ pub fn query_current_mutes(
     let mut mutes: HashMap<AuthorityId, MuteStatus> = HashMap::new();
 
     for fact in facts {
-        match &fact.content {
-            FactContent::Relational(RelationalFact::Generic {
-                context_id: fact_context,
-                envelope,
-            }) if fact_context == context_id
-                && envelope.type_id.as_str() == HOME_MUTE_FACT_TYPE_ID =>
-            {
-                if let Some(home_mute) = HomeMuteFact::from_envelope(envelope) {
-                    let mute = MuteStatus {
-                        muted_authority: home_mute.muted_authority,
-                        actor_authority: home_mute.actor_authority,
-                        duration_secs: home_mute.duration_secs,
-                        muted_at_ms: home_mute.muted_at_ms(),
-                        expires_at_ms: home_mute.expires_at_ms(),
-                        channel_id: home_mute.channel_id,
-                    };
-                    mutes.insert(mute.muted_authority, mute);
-                }
-            }
-            FactContent::Relational(RelationalFact::Generic {
-                context_id: fact_context,
-                envelope,
-            }) if fact_context == context_id
-                && envelope.type_id.as_str() == HOME_UNMUTE_FACT_TYPE_ID =>
-            {
-                if let Some(home_unmute) = HomeUnmuteFact::from_envelope(envelope) {
-                    let unmuted_authority = home_unmute.unmuted_authority;
-                    let unmuted_at_ms = home_unmute.unmuted_at_ms();
-                    // Remove mute if unmute happened after the mute
-                    if let Some(mute) = mutes.get(&unmuted_authority) {
-                        if unmuted_at_ms >= mute.muted_at_ms {
-                            mutes.remove(&unmuted_authority);
-                        }
-                    }
-                }
-            }
-            _ => {}
+        if let Some(home_mute) =
+            moderation_fact::<HomeMuteFact>(fact, context_id, HOME_MUTE_FACT_TYPE_ID)
+        {
+            let mute = MuteStatus::from_fact(&home_mute);
+            mutes.insert(mute.muted_authority, mute);
+            continue;
+        }
+
+        if let Some(home_unmute) =
+            moderation_fact::<HomeUnmuteFact>(fact, context_id, HOME_UNMUTE_FACT_TYPE_ID)
+        {
+            remove_if_newer(
+                &mut mutes,
+                &home_unmute.unmuted_authority,
+                home_unmute.unmuted_at_ms(),
+                |mute| mute.muted_at_ms,
+            );
         }
     }
 
-    // Filter out expired mutes
     mutes.retain(|_, mute| !mute.is_expired(current_time_ms));
 
     mutes
@@ -161,23 +161,10 @@ pub fn query_kick_history(facts: &[Fact], context_id: &ContextId) -> Vec<KickRec
     let mut kicks = Vec::new();
 
     for fact in facts {
-        if let FactContent::Relational(RelationalFact::Generic {
-            context_id: fact_context,
-            envelope,
-        }) = &fact.content
+        if let Some(home_kick) =
+            moderation_fact::<HomeKickFact>(fact, context_id, HOME_KICK_FACT_TYPE_ID)
         {
-            if fact_context == context_id && envelope.type_id.as_str() == HOME_KICK_FACT_TYPE_ID {
-                if let Some(home_kick) = HomeKickFact::from_envelope(envelope) {
-                    let kicked_at_ms = home_kick.kicked_at_ms();
-                    kicks.push(KickRecord {
-                        kicked_authority: home_kick.kicked_authority,
-                        actor_authority: home_kick.actor_authority,
-                        channel_id: home_kick.channel_id,
-                        reason: home_kick.reason,
-                        kicked_at_ms,
-                    });
-                }
-            }
+            kicks.push(KickRecord::from_fact(&home_kick));
         }
     }
 
@@ -206,16 +193,7 @@ pub fn is_user_banned(
     channel_id: Option<&ChannelId>,
 ) -> bool {
     let bans = query_current_bans(facts, context_id, current_time_ms);
-
-    if let Some(ban) = bans.get(authority) {
-        if let Some(channel) = channel_id {
-            ban.applies_to_channel(channel)
-        } else {
-            true // If no channel specified, check home-wide ban
-        }
-    } else {
-        false
-    }
+    status_applies_to_channel(&bans, authority, channel_id, BanStatus::applies_to_channel)
 }
 
 /// Check if a user is currently muted in a context
@@ -240,16 +218,12 @@ pub fn is_user_muted(
     channel_id: Option<&ChannelId>,
 ) -> bool {
     let mutes = query_current_mutes(facts, context_id, current_time_ms);
-
-    if let Some(mute) = mutes.get(authority) {
-        if let Some(channel) = channel_id {
-            mute.applies_to_channel(channel)
-        } else {
-            true // If no channel specified, check home-wide mute
-        }
-    } else {
-        false
-    }
+    status_applies_to_channel(
+        &mutes,
+        authority,
+        channel_id,
+        MuteStatus::applies_to_channel,
+    )
 }
 
 #[cfg(test)]

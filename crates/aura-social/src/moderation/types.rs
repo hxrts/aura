@@ -1,5 +1,6 @@
 //! Types for moderation query results
 
+use super::facts::{HomeBanFact, HomeKickFact, HomeMuteFact};
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +54,18 @@ pub struct KickRecord {
 }
 
 impl BanStatus {
+    /// Build a current ban status from a journal fact.
+    pub fn from_fact(fact: &HomeBanFact) -> Self {
+        Self {
+            banned_authority: fact.banned_authority,
+            actor_authority: fact.actor_authority,
+            reason: fact.reason.clone(),
+            banned_at_ms: fact.banned_at_ms(),
+            expires_at_ms: fact.expires_at_ms(),
+            channel_id: fact.channel_id,
+        }
+    }
+
     /// Check if this ban is expired at the given timestamp
     pub fn is_expired(&self, current_time_ms: u64) -> bool {
         self.expires_at_ms
@@ -70,6 +83,18 @@ impl BanStatus {
 }
 
 impl MuteStatus {
+    /// Build a current mute status from a journal fact.
+    pub fn from_fact(fact: &HomeMuteFact) -> Self {
+        Self {
+            muted_authority: fact.muted_authority,
+            actor_authority: fact.actor_authority,
+            duration_secs: fact.duration_secs,
+            muted_at_ms: fact.muted_at_ms(),
+            expires_at_ms: fact.expires_at_ms(),
+            channel_id: fact.channel_id,
+        }
+    }
+
     /// Check if this mute is expired at the given timestamp
     pub fn is_expired(&self, current_time_ms: u64) -> bool {
         self.expires_at_ms
@@ -83,5 +108,18 @@ impl MuteStatus {
             .as_ref()
             .map(|ch| ch == channel)
             .unwrap_or(true) // Home-wide mutes apply to all channels
+    }
+}
+
+impl KickRecord {
+    /// Build an audit-log kick record from a journal fact.
+    pub fn from_fact(fact: &HomeKickFact) -> Self {
+        Self {
+            kicked_authority: fact.kicked_authority,
+            actor_authority: fact.actor_authority,
+            channel_id: fact.channel_id,
+            reason: fact.reason.clone(),
+            kicked_at_ms: fact.kicked_at_ms(),
+        }
     }
 }

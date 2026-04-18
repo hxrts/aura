@@ -5,6 +5,17 @@ use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
+fn physical_time(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
+    }
+}
+
+fn optional_physical_time(ts_ms: Option<u64>) -> Option<PhysicalTime> {
+    ts_ms.map(physical_time)
+}
+
 /// Fact representing a home-wide mute or channel-specific mute.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
@@ -56,14 +67,8 @@ impl HomeMuteFact {
             muted_authority,
             actor_authority,
             duration_secs,
-            muted_at: PhysicalTime {
-                ts_ms: muted_at_ms,
-                uncertainty: None,
-            },
-            expires_at: expires_at_ms.map(|ts_ms| PhysicalTime {
-                ts_ms,
-                uncertainty: None,
-            }),
+            muted_at: physical_time(muted_at_ms),
+            expires_at: optional_physical_time(expires_at_ms),
         }
     }
 }
@@ -107,10 +112,7 @@ impl HomeUnmuteFact {
             channel_id,
             unmuted_authority,
             actor_authority,
-            unmuted_at: PhysicalTime {
-                ts_ms: unmuted_at_ms,
-                uncertainty: None,
-            },
+            unmuted_at: physical_time(unmuted_at_ms),
         }
     }
 }
@@ -166,14 +168,8 @@ impl HomeBanFact {
             banned_authority,
             actor_authority,
             reason,
-            banned_at: PhysicalTime {
-                ts_ms: banned_at_ms,
-                uncertainty: None,
-            },
-            expires_at: expires_at_ms.map(|ts_ms| PhysicalTime {
-                ts_ms,
-                uncertainty: None,
-            }),
+            banned_at: physical_time(banned_at_ms),
+            expires_at: optional_physical_time(expires_at_ms),
         }
     }
 }
@@ -217,10 +213,7 @@ impl HomeUnbanFact {
             channel_id,
             unbanned_authority,
             actor_authority,
-            unbanned_at: PhysicalTime {
-                ts_ms: unbanned_at_ms,
-                uncertainty: None,
-            },
+            unbanned_at: physical_time(unbanned_at_ms),
         }
     }
 }
@@ -268,10 +261,7 @@ impl HomeKickFact {
             kicked_authority,
             actor_authority,
             reason,
-            kicked_at: PhysicalTime {
-                ts_ms: kicked_at_ms,
-                uncertainty: None,
-            },
+            kicked_at: physical_time(kicked_at_ms),
         }
     }
 }
@@ -310,10 +300,7 @@ impl HomePinFact {
             channel_id,
             message_id,
             actor_authority,
-            pinned_at: PhysicalTime {
-                ts_ms: pinned_at_ms,
-                uncertainty: None,
-            },
+            pinned_at: physical_time(pinned_at_ms),
         }
     }
 }
@@ -352,10 +339,7 @@ impl HomeUnpinFact {
             channel_id,
             message_id,
             actor_authority,
-            unpinned_at: PhysicalTime {
-                ts_ms: unpinned_at_ms,
-                uncertainty: None,
-            },
+            unpinned_at: physical_time(unpinned_at_ms),
         }
     }
 }
@@ -395,10 +379,7 @@ impl HomeGrantModeratorFact {
             context_id,
             target_authority,
             actor_authority,
-            granted_at: PhysicalTime {
-                ts_ms: granted_at_ms,
-                uncertainty: None,
-            },
+            granted_at: physical_time(granted_at_ms),
         }
     }
 }
@@ -438,10 +419,7 @@ impl HomeRevokeModeratorFact {
             context_id,
             target_authority,
             actor_authority,
-            revoked_at: PhysicalTime {
-                ts_ms: revoked_at_ms,
-                uncertainty: None,
-            },
+            revoked_at: physical_time(revoked_at_ms),
         }
     }
 }

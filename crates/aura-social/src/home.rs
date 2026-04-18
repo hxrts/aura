@@ -35,6 +35,21 @@ pub struct Home {
 }
 
 impl Home {
+    fn moderator_designation(&self, authority: &AuthorityId) -> Option<&ModeratorDesignation> {
+        self.moderator_designations
+            .iter()
+            .find(|designation| designation.authority_id == *authority)
+    }
+
+    fn moderator_designation_mut(
+        &mut self,
+        authority: &AuthorityId,
+    ) -> Option<&mut ModeratorDesignation> {
+        self.moderator_designations
+            .iter_mut()
+            .find(|designation| designation.authority_id == *authority)
+    }
+
     /// Build a Home view from journal facts.
     ///
     /// # Arguments
@@ -114,9 +129,7 @@ impl Home {
 
     /// Check if an authority is a moderator of this home.
     pub fn is_moderator(&self, authority: &AuthorityId) -> bool {
-        self.moderator_designations
-            .iter()
-            .any(|designation| designation.authority_id == *authority)
+        self.moderator_designation(authority).is_some()
     }
 
     /// Get moderator capabilities for an authority, if they are a moderator.
@@ -124,9 +137,7 @@ impl Home {
         &self,
         authority: &AuthorityId,
     ) -> Option<&ModeratorCapabilities> {
-        self.moderator_designations
-            .iter()
-            .find(|designation| designation.authority_id == *authority)
+        self.moderator_designation(authority)
             .map(|designation| &designation.capabilities)
     }
 
@@ -154,11 +165,7 @@ impl Home {
             return Err(SocialError::not_member(self.home_id));
         }
 
-        if let Some(designation) = self
-            .moderator_designations
-            .iter_mut()
-            .find(|designation| designation.authority_id == authority)
-        {
+        if let Some(designation) = self.moderator_designation_mut(&authority) {
             designation.capabilities = capabilities;
             designation.designated_at = designated_at;
             return Ok(());

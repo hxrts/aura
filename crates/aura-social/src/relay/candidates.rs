@@ -54,9 +54,7 @@ impl RelayCandidateBuilder {
 
     /// Create from a topology reference.
     pub fn from_topology(social: SocialTopology) -> Self {
-        Self {
-            social: Arc::new(social),
-        }
+        Self::new(Arc::new(social))
     }
 
     /// Build relay candidates for a context.
