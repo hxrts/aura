@@ -21,6 +21,7 @@ Synchronization protocol providing fact exchange, merkle verification, anti-entr
 | Incoming | aura-core | Effect traits, identifiers, session types |
 | Incoming | aura-journal | Fact infrastructure, commitment trees |
 | Incoming | lower-layer protocols | Transport coordination |
+| Incoming | aura-macros | Test harness and choreography macros |
 | Outgoing | — | `SyncCore` types for synchronization state |
 | Outgoing | — | `SyncProtocol`, `FactSyncProtocol`, `AuthorityJournalSync` for sync flows |
 | Outgoing | — | `MerkleVerifier`, `MerkleComparison`, `VerificationResult` for integrity checks |

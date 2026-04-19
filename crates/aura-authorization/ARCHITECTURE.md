@@ -23,6 +23,7 @@ profiles, and evaluated capability frontiers.
 | Direction | Crate | What |
 |-----------|-------|------|
 | Inbound | `aura-core` | Domain types, effect traits, resource scopes |
+| Inbound | `aura-macros` | Error type macros |
 
 ## Invariants
 

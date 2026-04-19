@@ -19,6 +19,7 @@ Relational-context domain logic for cross-authority relationships including unil
 | Incoming | aura-core | Effect traits, identifiers, relational types |
 | Incoming | aura-journal | Fact infrastructure, reduction |
 | Incoming | aura-consensus | Cross-authority agreement |
+| Incoming | aura-macros | Domain fact derive macros |
 | Outgoing | — | `ContactFact`, `ContactFactReducer` for contact relationship facts |
 | Outgoing | — | `FriendshipFact`, `TrustIntroductionFact`, `WebOfTrustIndex` for web-of-trust evidence |
 | Outgoing | — | `GuardianRequest`, `GuardianRequestState` for guardian binding requests |

@@ -21,6 +21,7 @@ Define P2P communication abstractions and transport semantics with privacy-by-de
 | Direction | Crate | What |
 |-----------|-------|------|
 | Inbound | `aura-core` | Domain types, effect traits, identifiers |
+| Inbound | `aura-macros` | Error type macros |
 
 ## Invariants
 

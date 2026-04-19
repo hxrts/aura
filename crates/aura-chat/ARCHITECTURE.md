@@ -19,6 +19,7 @@ Secure messaging domain providing channel management, message facts, and chat st
 |-----------|-------|------|
 | Incoming | aura-core | Effect traits, identifiers (`ChannelId`, `ContextId`) |
 | Incoming | aura-journal | Fact infrastructure, reduction pipeline |
+| Incoming | aura-macros | Capability boundary and derive macros |
 | Outgoing | — | `ChatFact`, `ChatFactReducer`, `ChatDelta` for journal integration |
 | Outgoing | — | `ChatFactService` for message and channel operations |
 | Outgoing | — | `ChatGroup` for group membership management |

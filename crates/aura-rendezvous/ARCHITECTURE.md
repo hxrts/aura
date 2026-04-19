@@ -21,6 +21,7 @@ Peer discovery and channel establishment protocol including descriptor exchange,
 |-----------|-------|------|
 | Incoming | aura-core | Effect traits, identifiers, capability types |
 | Incoming | aura-journal | Fact infrastructure, capability refs |
+| Incoming | aura-macros | Service surface and derive macros |
 | Outgoing | — | `RendezvousFact`, `RendezvousFactReducer` for descriptor facts |
 | Outgoing | — | `RendezvousProtocol` for discovery message exchange |
 | Outgoing | — | `RendezvousService` for descriptor lifecycle management |

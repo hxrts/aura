@@ -20,6 +20,7 @@ Define storage domain types and fact-based state management for content-addresse
 | Direction | Crate | What |
 |-----------|-------|------|
 | Inbound | `aura-core` | Domain types, effect traits, content addressing |
+| Inbound | `aura-macros` | Error type macros |
 
 ## Invariants
 

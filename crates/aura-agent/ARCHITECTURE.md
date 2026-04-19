@@ -25,6 +25,7 @@ Production runtime composition and effect system assembly for authority-based id
 | Consumes | `aura-protocol` (L4) | Protocol coordination |
 | Consumes | L2 domain crates | Journal, authorization, transport, etc. |
 | Consumes | L5 feature crates | End-to-end protocols |
+| Consumes | `aura-macros` (L2) | Ownership and service declaration macros |
 | Produces | `AgentBuilder`, `AuraAgent` | Runtime entry points |
 | Produces | `EffectContext`, `EffectRegistry` | Effect composition |
 | Produces | `AuraEffectSystem` | Subsystems: Crypto, Transport, Journal |
