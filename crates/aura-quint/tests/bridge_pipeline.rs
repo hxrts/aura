@@ -11,26 +11,16 @@ use std::path::PathBuf;
 
 use aura_quint::{
     export_quint_to_telltale_bundle, generate_quint_invariant_module, parse_telltale_properties,
-    run_cross_validation, BridgeBundleV1, QuintModelCheckExecutor, StaticQuintExecutor,
+    run_cross_validation, QuintModelCheckExecutor, StaticQuintExecutor,
 };
 use serde_json::Value as JsonValue;
 
-fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("bridge")
-        .join(name)
-}
+mod support;
 
-fn load_bundle_fixture(name: &str) -> BridgeBundleV1 {
-    let payload = std::fs::read(fixture_path(name)).expect("read fixture");
-    serde_json::from_slice(&payload).expect("decode bridge bundle fixture")
-}
+use support::{load_bundle_fixture, load_fixture};
 
 fn load_ir_fixture(name: &str) -> JsonValue {
-    let payload = std::fs::read(fixture_path(name)).expect("read fixture");
-    serde_json::from_slice(&payload).expect("decode quint ir fixture")
+    load_fixture(name)
 }
 
 #[test]

@@ -8,14 +8,33 @@
 //! - Performance optimization and caching strategies
 //! - Comprehensive error handling and diagnostics
 
+#[path = "runner/cache.rs"]
+mod cache;
+#[path = "runner/classification.rs"]
+mod classification;
+#[path = "runner/counterexample.rs"]
+mod counterexample;
+#[path = "runner/diagnostics.rs"]
+mod diagnostics;
+
 use crate::evaluator::QuintEvaluator;
 use crate::{AuraResult, PropertySpec, VerificationResult};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::AuraError;
+use cache::PropertyCache;
+use classification::{
+    extract_capability_properties, extract_privacy_properties, CapabilityProperty,
+    CapabilityPropertyType, PrivacyProperty,
+};
+use counterexample::CounterexampleGenerator;
+use diagnostics::{
+    cache_hit_rate, CacheInfo, HealthCheck, HealthStatus, SystemCapabilities, SystemDiagnostics,
+    SystemHealth, VerificationStatistics,
+};
 use futures::pin_mut;
 use futures::{future, Future};
 use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,151 +52,10 @@ pub struct QuintRunner {
     stats: VerificationStatistics,
     /// Counterexample generator
     counterexample_generator: CounterexampleGenerator,
-    /// Trace analyzer for optimization
-    trace_analyzer: TraceAnalyzer,
     /// Storage provider for reading specs (filesystem-backed by default)
     storage: Arc<dyn aura_core::effects::StorageEffects>,
     /// Time effects for deterministic simulation support
     time: Arc<dyn PhysicalTimeEffects>,
-}
-
-/// Cache for property verification results with LRU and TTL eviction
-#[derive(Debug)]
-struct PropertyCache {
-    /// Cached results by property hash and state hash
-    cache: HashMap<u64, CachedResult>,
-    /// LRU ordering for eviction
-    access_order: VecDeque<u64>,
-    /// Maximum cache size
-    max_size: usize,
-    /// Time-to-live for cache entries in logical time units (0 = no TTL)
-    ttl: u64,
-}
-
-/// Cached verification result
-#[derive(Debug, Clone)]
-struct CachedResult {
-    /// The verification result
-    result: VerificationResult,
-    /// Access count for LRU
-    access_count: u64,
-    /// Cache timestamp for TTL-based eviction (logical time units)
-    cached_at_ms: u64,
-}
-
-/// Verification statistics tracking
-#[derive(Debug, Clone, Default)]
-pub struct VerificationStatistics {
-    /// Total properties verified
-    pub total_properties: u64,
-    /// Cache hits
-    pub cache_hits: u64,
-    /// Cache misses
-    pub cache_misses: u64,
-    /// Total verification time
-    pub total_time: Duration,
-    /// Number of counterexamples found
-    pub counterexamples_found: u64,
-    /// Number of successful verifications
-    pub successful_verifications: u64,
-}
-
-/// Counterexample generation engine using bounded depth-first search
-#[derive(Debug)]
-struct CounterexampleGenerator {
-    /// Maximum search depth for bounded DFS exploration
-    max_depth: usize,
-    /// Random seed for deterministic shrinking during counterexample minimization
-    random_seed: Option<u64>,
-}
-
-/// System diagnostics information
-#[derive(Debug, Clone)]
-pub struct SystemDiagnostics {
-    /// Runner version
-    pub runner_version: String,
-    /// Cache information
-    pub cache_info: CacheInfo,
-    /// System capabilities
-    pub capabilities: SystemCapabilities,
-}
-
-/// Cache information
-#[derive(Debug, Clone)]
-pub struct CacheInfo {
-    /// Current cache size
-    pub size: usize,
-    /// Maximum cache size
-    pub max_size: usize,
-    /// Cache hit rate
-    pub hit_rate: f64,
-}
-
-/// System capabilities
-#[derive(Debug, Clone)]
-pub struct SystemCapabilities {
-    /// Counterexample generation enabled
-    pub counterexample_generation: bool,
-    /// Trace optimization enabled
-    pub trace_optimization: bool,
-    /// Parallel execution enabled
-    pub parallel_execution: bool,
-    /// Caching enabled
-    pub caching: bool,
-    /// Aura integration enabled
-    pub aura_integration: bool,
-}
-
-/// System health check result
-#[derive(Debug, Clone)]
-pub struct SystemHealth {
-    /// Overall health status
-    pub overall_status: HealthStatus,
-    /// Individual health checks
-    pub checks: Vec<HealthCheck>,
-    /// Recommendations for improvement
-    pub recommendations: Vec<String>,
-    /// Check timestamp
-    pub timestamp: u64,
-}
-
-/// Individual health check
-#[derive(Debug, Clone)]
-pub struct HealthCheck {
-    /// Check name
-    pub name: String,
-    /// Check status
-    pub status: HealthStatus,
-    /// Status message
-    pub message: String,
-}
-
-/// Health status
-#[derive(Debug, Clone, PartialEq)]
-pub enum HealthStatus {
-    Ok,
-    Warning,
-    Error,
-}
-
-/// Trace analysis and optimization engine
-#[derive(Debug)]
-struct TraceAnalyzer {
-    /// Enable optimization
-    optimize_enabled: bool,
-    /// Trace compression algorithms
-    compression_algorithms: Vec<TraceCompression>,
-}
-
-/// Trace compression algorithm
-#[derive(Debug, Clone)]
-enum TraceCompression {
-    /// Remove redundant steps
-    RemoveRedundant,
-    /// Minimize state representation
-    MinimizeState,
-    /// Compress temporal patterns
-    CompressTemporalPatterns,
 }
 
 /// Advanced configuration for the Quint runner
@@ -269,414 +147,8 @@ where
     }
 }
 
-impl PropertyCache {
-    fn current_time_ms() -> u64 {
-        // Deterministic monotonic clock for cache timestamps
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn new(max_size: usize) -> Self {
-        Self::new_with_ttl(max_size, 0) // Default: no TTL
-    }
-
-    fn new_with_ttl(max_size: usize, ttl: u64) -> Self {
-        Self {
-            cache: HashMap::new(),
-            access_order: VecDeque::new(),
-            max_size,
-            ttl,
-        }
-    }
-
-    /// Check if a cached entry has expired based on TTL
-    fn is_expired(&self, cached_at: u64) -> bool {
-        if self.ttl == 0 {
-            return false; // No TTL configured
-        }
-        let current_time = Self::current_time_ms();
-        current_time.saturating_sub(cached_at) > self.ttl
-    }
-
-    fn get(&mut self, key: u64) -> Option<&CachedResult> {
-        // First check if entry exists and is not expired
-        let is_stale = self
-            .cache
-            .get(&key)
-            .map(|r| self.is_expired(r.cached_at_ms))
-            .unwrap_or(false);
-
-        if is_stale {
-            // Remove expired entry
-            self.cache.remove(&key);
-            if let Some(pos) = self.access_order.iter().position(|&x| x == key) {
-                self.access_order.remove(pos);
-            }
-            debug!("Cache entry {} expired (TTL: {})", key, self.ttl);
-            return None;
-        }
-
-        if let Some(result) = self.cache.get_mut(&key) {
-            result.access_count += 1;
-            // Move to end of LRU queue
-            if let Some(pos) = self.access_order.iter().position(|&x| x == key) {
-                self.access_order.remove(pos);
-            }
-            self.access_order.push_back(key);
-            Some(result)
-        } else {
-            None
-        }
-    }
-
-    fn insert(&mut self, key: u64, result: VerificationResult) {
-        // First, evict any expired entries
-        self.evict_expired();
-
-        // Evict oldest if at capacity (LRU eviction)
-        while self.cache.len() >= self.max_size {
-            if let Some(oldest_key) = self.access_order.pop_front() {
-                self.cache.remove(&oldest_key);
-            }
-        }
-
-        let cached_result = CachedResult {
-            result,
-            cached_at_ms: Self::current_time_ms(),
-            access_count: 1,
-        };
-
-        self.cache.insert(key, cached_result);
-        self.access_order.push_back(key);
-    }
-
-    /// Evict all entries that have exceeded their TTL
-    fn evict_expired(&mut self) {
-        if self.ttl == 0 {
-            return; // No TTL configured
-        }
-
-        let expired_keys: Vec<u64> = self
-            .cache
-            .iter()
-            .filter(|(_, v)| self.is_expired(v.cached_at_ms))
-            .map(|(k, _)| *k)
-            .collect();
-
-        for key in expired_keys {
-            self.cache.remove(&key);
-            if let Some(pos) = self.access_order.iter().position(|&x| x == key) {
-                self.access_order.remove(pos);
-            }
-        }
-    }
-
-    fn get_statistics(&self) -> serde_json::Value {
-        let total_accesses = self.cache.values().map(|r| r.access_count).sum::<u64>();
-        let hit_rate = if total_accesses > 0 {
-            self.cache.len() as f64 / total_accesses as f64
-        } else {
-            0.0
-        };
-
-        serde_json::json!({
-            "entries": self.cache.len(),
-            "hit_rate": hit_rate,
-            "max_size": self.max_size,
-            "ttl": self.ttl,
-        })
-    }
-}
-
-impl CounterexampleGenerator {
-    fn new(max_depth: usize, random_seed: Option<u64>) -> Self {
-        Self {
-            max_depth,
-            random_seed,
-        }
-    }
-
-    /// Generate a counterexample using bounded depth-first search
-    ///
-    /// Uses `max_depth` to limit exploration depth and `random_seed` for
-    /// deterministic shrinking when multiple counterexamples are possible.
-    async fn generate_counterexample(
-        &self,
-        property_spec: &PropertySpec,
-        evaluator: &QuintEvaluator,
-    ) -> AuraResult<Option<Value>> {
-        debug!(
-            "Generating counterexample for property: {} (max_depth: {}, seed: {:?})",
-            property_spec.spec_file, self.max_depth, self.random_seed
-        );
-
-        // Generate counterexample using Quint's built-in capabilities
-        let json_ir = evaluator.parse_file(&property_spec.spec_file).await?;
-
-        // Prepare enhanced simulation config with bounded search parameters
-        let enhanced_ir = self.prepare_bounded_search_config(&json_ir)?;
-
-        // Run simulation with counterexample search enabled
-        let result = evaluator.simulate_via_evaluator(&enhanced_ir).await?;
-
-        // Parse result to extract counterexample
-        let parsed_result: Value = serde_json::from_str(&result)
-            .map_err(|e| AuraError::invalid(format!("Failed to parse simulation result: {}", e)))?;
-
-        // Extract counterexample and apply shrinking if available
-        if let Some(counterexample) = parsed_result.get("counterexample") {
-            let shrunk = self
-                .shrink_counterexample(counterexample, property_spec, evaluator)
-                .await?;
-            debug!(
-                "Counterexample found and shrunk: {} steps -> {} steps",
-                counterexample.as_array().map(|a| a.len()).unwrap_or(0),
-                shrunk.as_array().map(|a| a.len()).unwrap_or(0)
-            );
-            Ok(Some(shrunk))
-        } else {
-            debug!(
-                "No counterexample found within depth bound {}",
-                self.max_depth
-            );
-            Ok(None)
-        }
-    }
-
-    /// Prepare simulation config with bounded search parameters
-    fn prepare_bounded_search_config(&self, json_ir: &str) -> AuraResult<String> {
-        let mut ir_value: Value = serde_json::from_str(json_ir)
-            .map_err(|e| AuraError::invalid(format!("Failed to parse JSON IR: {}", e)))?;
-
-        // Add bounded search configuration
-        let search_config = serde_json::json!({
-            "maxDepth": self.max_depth,
-            "randomSeed": self.random_seed,
-            "searchStrategy": "bounded_dfs",
-            "enableShrinking": true,
-            "maxShrinkIterations": 100
-        });
-
-        if let Some(ir_obj) = ir_value.as_object_mut() {
-            // Merge with existing simulation config or create new
-            if let Some(existing_config) = ir_obj.get_mut("simulationConfig") {
-                if let Some(config_obj) = existing_config.as_object_mut() {
-                    config_obj.insert("searchConfig".to_string(), search_config);
-                }
-            } else {
-                ir_obj.insert(
-                    "simulationConfig".to_string(),
-                    serde_json::json!({ "searchConfig": search_config }),
-                );
-            }
-        }
-
-        serde_json::to_string(&ir_value).map_err(|e| {
-            AuraError::invalid(format!("Failed to serialize bounded search config: {}", e))
-        })
-    }
-
-    /// Shrink a counterexample to find a minimal reproduction
-    ///
-    /// Uses delta debugging with deterministic random selection (if seed provided)
-    /// to find the smallest trace that still demonstrates the property violation.
-    /// Re-verifies the property on each candidate shrunk trace to ensure it
-    /// still demonstrates the violation.
-    async fn shrink_counterexample(
-        &self,
-        counterexample: &Value,
-        property_spec: &PropertySpec,
-        evaluator: &QuintEvaluator,
-    ) -> AuraResult<Value> {
-        // If counterexample is an array (trace), try to shrink it
-        if let Some(trace) = counterexample.as_array() {
-            if trace.len() <= 1 || trace.len() <= self.max_depth / 10 {
-                // Already small enough or within shrink threshold
-                return Ok(counterexample.clone());
-            }
-
-            // Create deterministic RNG for shrinking if seed provided
-            let mut rng_state = self.random_seed.unwrap_or(0);
-
-            // Simple delta debugging: try removing steps
-            let mut shrunk_trace = trace.clone();
-            let mut step_size = shrunk_trace.len() / 2;
-            let mut shrink_attempts = 0;
-            const MAX_SHRINK_ATTEMPTS: usize = 100;
-
-            while step_size >= 1 && shrunk_trace.len() > 1 && shrink_attempts < MAX_SHRINK_ATTEMPTS
-            {
-                shrink_attempts += 1;
-
-                // Deterministic pseudo-random index selection
-                rng_state = rng_state.wrapping_mul(1103515245).wrapping_add(12345);
-                let start_idx = (rng_state as usize) % shrunk_trace.len().max(1);
-
-                // Try removing `step_size` steps starting from start_idx
-                let end_idx = (start_idx + step_size).min(shrunk_trace.len());
-                let candidate: Vec<Value> = shrunk_trace
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i < start_idx || *i >= end_idx)
-                    .map(|(_, v)| v.clone())
-                    .collect();
-
-                if !candidate.is_empty() {
-                    // Re-verify property on shrunk trace before accepting
-                    let candidate_value = Value::Array(candidate.clone());
-                    match self
-                        .verify_trace_violates_property(&candidate_value, property_spec, evaluator)
-                        .await
-                    {
-                        Ok(true) => {
-                            // Candidate still violates property, accept it
-                            debug!(
-                                "Shrink attempt {}: accepted trace of {} steps (still violates property)",
-                                shrink_attempts,
-                                candidate.len()
-                            );
-                            shrunk_trace = candidate;
-                        }
-                        Ok(false) => {
-                            // Candidate no longer violates property, reject it
-                            debug!(
-                                "Shrink attempt {}: rejected trace of {} steps (no longer violates property)",
-                                shrink_attempts,
-                                candidate.len()
-                            );
-                        }
-                        Err(e) => {
-                            // Verification failed, log and skip this candidate
-                            warn!(
-                                "Shrink attempt {}: verification failed, skipping candidate: {}",
-                                shrink_attempts, e
-                            );
-                        }
-                    }
-                }
-
-                step_size /= 2;
-            }
-
-            debug!(
-                "Shrunk counterexample from {} to {} steps ({} attempts)",
-                trace.len(),
-                shrunk_trace.len(),
-                shrink_attempts
-            );
-            Ok(Value::Array(shrunk_trace))
-        } else {
-            // Not a trace, return as-is
-            Ok(counterexample.clone())
-        }
-    }
-
-    /// Verify that a trace still violates the property
-    ///
-    /// Returns true if the trace demonstrates a property violation,
-    /// false if the property holds on this trace.
-    async fn verify_trace_violates_property(
-        &self,
-        trace: &Value,
-        property_spec: &PropertySpec,
-        evaluator: &QuintEvaluator,
-    ) -> AuraResult<bool> {
-        // Parse the spec file to get the IR
-        let json_ir = evaluator.parse_file(&property_spec.spec_file).await?;
-
-        // Create a verification config that replays the specific trace
-        let mut ir_value: Value = serde_json::from_str(&json_ir)
-            .map_err(|e| AuraError::invalid(format!("Failed to parse JSON IR: {}", e)))?;
-
-        // Inject the trace into the IR for replay verification
-        if let Some(ir_obj) = ir_value.as_object_mut() {
-            ir_obj.insert(
-                "replayConfig".to_string(),
-                serde_json::json!({
-                    "mode": "replay",
-                    "trace": trace,
-                    "checkProperty": property_spec.name,
-                }),
-            );
-        }
-
-        let enhanced_ir = serde_json::to_string(&ir_value)
-            .map_err(|e| AuraError::invalid(format!("Failed to serialize replay config: {}", e)))?;
-
-        // Run the replayed trace through the evaluator
-        let result = evaluator.simulate_via_evaluator(&enhanced_ir).await?;
-
-        // Parse result to check if property was violated
-        let parsed_result: Value = serde_json::from_str(&result)
-            .map_err(|e| AuraError::invalid(format!("Failed to parse replay result: {}", e)))?;
-
-        // Check if the result indicates property violation
-        // A trace violates the property if the evaluator returns a counterexample
-        // or indicates the property failed
-        let violates = parsed_result
-            .get("propertyViolated")
-            .and_then(|v| v.as_bool())
-            .unwrap_or_else(|| {
-                // Fallback: check if there's a counterexample in the result
-                parsed_result.get("counterexample").is_some()
-            });
-
-        Ok(violates)
-    }
-}
-
-impl TraceAnalyzer {
-    fn new(optimize_enabled: bool) -> Self {
-        Self {
-            optimize_enabled,
-            compression_algorithms: vec![
-                TraceCompression::RemoveRedundant,
-                TraceCompression::MinimizeState,
-                TraceCompression::CompressTemporalPatterns,
-            ],
-        }
-    }
-
-    fn optimize_trace(&self, trace: &Value) -> AuraResult<Value> {
-        if !self.optimize_enabled {
-            return Ok(trace.clone());
-        }
-
-        let mut optimized_trace = trace.clone();
-
-        for algorithm in &self.compression_algorithms {
-            optimized_trace = self.apply_compression_algorithm(&optimized_trace, algorithm)?;
-        }
-
-        Ok(optimized_trace)
-    }
-
-    fn apply_compression_algorithm(
-        &self,
-        trace: &Value,
-        algorithm: &TraceCompression,
-    ) -> AuraResult<Value> {
-        match algorithm {
-            TraceCompression::RemoveRedundant => self.remove_redundant_steps(trace),
-            TraceCompression::MinimizeState => self.minimize_state_representation(trace),
-            TraceCompression::CompressTemporalPatterns => self.compress_temporal_patterns(trace),
-        }
-    }
-
-    fn remove_redundant_steps(&self, trace: &Value) -> AuraResult<Value> {
-        // No-op compression keeps trace steps intact for deterministic debugging
-        Ok(trace.clone())
-    }
-
-    fn minimize_state_representation(&self, trace: &Value) -> AuraResult<Value> {
-        // No-op minimization retains full state for inspection
-        Ok(trace.clone())
-    }
-
-    fn compress_temporal_patterns(&self, trace: &Value) -> AuraResult<Value> {
-        // No-op compression preserves temporal detail for analysis
-        Ok(trace.clone())
-    }
+fn normalize_trace_artifact(trace: &Value) -> Value {
+    trace.clone()
 }
 
 impl QuintRunner {
@@ -687,11 +159,8 @@ impl QuintRunner {
 
     /// Create a new Quint runner with custom configuration
     pub fn with_config(config: RunnerConfig) -> AuraResult<Self> {
-        let evaluator = QuintEvaluator::new(config.quint_path.clone());
-        let property_cache = PropertyCache::new_with_ttl(config.cache_size_limit, config.cache_ttl);
-        let counterexample_generator =
-            CounterexampleGenerator::new(config.max_counterexample_depth, config.random_seed);
-        let trace_analyzer = TraceAnalyzer::new(config.optimize_traces);
+        let (evaluator, property_cache, counterexample_generator) =
+            Self::build_runtime_components(&config);
 
         Ok(Self {
             evaluator,
@@ -699,7 +168,6 @@ impl QuintRunner {
             property_cache,
             stats: VerificationStatistics::default(),
             counterexample_generator,
-            trace_analyzer,
             storage: Arc::new(aura_effects::storage::FilesystemStorageHandler::with_default_path()),
             time: Arc::new(aura_effects::time::PhysicalTimeHandler::new()),
         })
@@ -723,11 +191,8 @@ impl QuintRunner {
         storage: Arc<dyn aura_core::effects::StorageEffects>,
         time: Arc<dyn PhysicalTimeEffects>,
     ) -> AuraResult<Self> {
-        let evaluator = QuintEvaluator::new(config.quint_path.clone());
-        let property_cache = PropertyCache::new_with_ttl(config.cache_size_limit, config.cache_ttl);
-        let counterexample_generator =
-            CounterexampleGenerator::new(config.max_counterexample_depth, config.random_seed);
-        let trace_analyzer = TraceAnalyzer::new(config.optimize_traces);
+        let (evaluator, property_cache, counterexample_generator) =
+            Self::build_runtime_components(&config);
 
         Ok(Self {
             evaluator,
@@ -735,10 +200,27 @@ impl QuintRunner {
             property_cache,
             stats: VerificationStatistics::default(),
             counterexample_generator,
-            trace_analyzer,
             storage,
             time,
         })
+    }
+
+    fn build_runtime_components(
+        config: &RunnerConfig,
+    ) -> (QuintEvaluator, PropertyCache, CounterexampleGenerator) {
+        (
+            QuintEvaluator::new(config.quint_path.clone()),
+            PropertyCache::new_with_ttl(config.cache_size_limit, config.cache_ttl),
+            CounterexampleGenerator::new(config.max_counterexample_depth, config.random_seed),
+        )
+    }
+
+    fn rebuild_runtime_components(&mut self) {
+        let (evaluator, property_cache, counterexample_generator) =
+            Self::build_runtime_components(&self.config);
+        self.evaluator = evaluator;
+        self.property_cache = property_cache;
+        self.counterexample_generator = counterexample_generator;
     }
 
     /// Verify a property specification with enhanced verification pipeline
@@ -1051,25 +533,24 @@ impl QuintRunner {
         &self,
         mut verification_result: VerificationResult,
     ) -> AuraResult<VerificationResult> {
-        debug!("Optimizing verification traces");
+        debug!("Normalizing verification trace artifacts");
 
         // Optimize counterexample trace if present
         if let Some(ref counterexample) = verification_result.counterexample {
-            let optimized_trace = self.trace_analyzer.optimize_trace(counterexample)?;
-            verification_result.counterexample = Some(optimized_trace);
+            verification_result.counterexample = Some(normalize_trace_artifact(counterexample));
         }
 
         // Optimize individual property traces
         for (_property_name, property_result) in verification_result.properties.iter_mut() {
-            if let Some(trace) = property_result.get("trace") {
-                let optimized_trace = self.trace_analyzer.optimize_trace(trace)?;
-                if let Some(result_obj) = property_result.as_object_mut() {
-                    result_obj.insert("trace".to_string(), optimized_trace);
-                }
+            let normalized_trace = property_result.get("trace").map(normalize_trace_artifact);
+            if let (Some(trace), Some(result_obj)) =
+                (normalized_trace, property_result.as_object_mut())
+            {
+                result_obj.insert("trace".to_string(), trace);
             }
         }
 
-        debug!("Trace optimization completed");
+        debug!("Trace normalization completed");
         Ok(verification_result)
     }
 
@@ -1306,7 +787,7 @@ impl QuintRunner {
         // Check if the specification involves capability operations
         if self.involves_capability_operations(spec).await? {
             // Extract capability-related properties for verification
-            let capability_properties = self.extract_capability_properties(spec)?;
+            let capability_properties = extract_capability_properties(spec);
 
             // Verify each capability property
             for cap_property in capability_properties {
@@ -1339,7 +820,7 @@ impl QuintRunner {
         // Check if the specification involves privacy-sensitive operations
         if self.involves_privacy_operations(spec).await? {
             // Extract privacy-related properties for verification
-            let privacy_properties = self.extract_privacy_properties(spec)?;
+            let privacy_properties = extract_privacy_properties(spec);
 
             // Verify each privacy property
             for privacy_property in privacy_properties {
@@ -1423,43 +904,6 @@ impl QuintRunner {
         Ok(privacy_patterns
             .iter()
             .any(|pattern| spec_content.contains(pattern)))
-    }
-
-    /// Extract capability-related properties from specification
-    fn extract_capability_properties(
-        &self,
-        spec: &PropertySpec,
-    ) -> AuraResult<Vec<CapabilityProperty>> {
-        let mut capability_properties = Vec::new();
-
-        // Extract properties that relate to capability soundness
-        for property_name in &spec.properties {
-            if self.is_capability_property(property_name) {
-                capability_properties.push(CapabilityProperty {
-                    name: property_name.clone(),
-                    property_type: self.determine_capability_property_type(property_name),
-                })
-            }
-        }
-
-        Ok(capability_properties)
-    }
-
-    /// Extract privacy-related properties from specification
-    fn extract_privacy_properties(&self, spec: &PropertySpec) -> AuraResult<Vec<PrivacyProperty>> {
-        let mut privacy_properties = Vec::new();
-
-        // Extract properties that relate to privacy contracts
-        for property_name in &spec.properties {
-            if self.is_privacy_property(property_name) {
-                privacy_properties.push(PrivacyProperty {
-                    name: property_name.clone(),
-                    property_type: self.determine_privacy_property_type(property_name),
-                })
-            }
-        }
-
-        Ok(privacy_properties)
     }
 
     /// Verify capability soundness for a specific property
@@ -1739,117 +1183,6 @@ impl QuintRunner {
         }))
     }
 
-    /// Helper methods for property classification
-    fn is_capability_property(&self, property_name: &str) -> bool {
-        let capability_keywords = [
-            "cap",
-            "capability",
-            "permission",
-            "auth",
-            "grant",
-            "restrict",
-            "soundness",
-            "monotonic",
-            "interference",
-        ];
-
-        capability_keywords
-            .iter()
-            .any(|keyword| property_name.to_lowercase().contains(keyword))
-    }
-
-    fn is_privacy_property(&self, property_name: &str) -> bool {
-        let privacy_keywords = [
-            "privacy",
-            "leakage",
-            "unlinkable",
-            "anonymous",
-            "isolated",
-            "context",
-            "observer",
-            "bound",
-        ];
-
-        privacy_keywords
-            .iter()
-            .any(|keyword| property_name.to_lowercase().contains(keyword))
-    }
-
-    fn determine_capability_property_type(&self, property_name: &str) -> CapabilityPropertyType {
-        let name_lower = property_name.to_lowercase();
-
-        // Check specific patterns before broader matches
-        // Monotonicity properties
-        if name_lower.contains("monotonic") {
-            CapabilityPropertyType::Monotonicity
-        }
-        // Non-interference properties
-        else if name_lower.contains("interference") {
-            CapabilityPropertyType::NonInterference
-        }
-        // Temporal consistency properties
-        else if name_lower.contains("temporal") {
-            CapabilityPropertyType::TemporalConsistency
-        }
-        // Context isolation properties
-        else if name_lower.contains("isolation") {
-            CapabilityPropertyType::ContextIsolation
-        }
-        // Authorization soundness (check before broader "authorization" match)
-        else if name_lower.contains("soundness") {
-            CapabilityPropertyType::AuthorizationSoundness
-        }
-        // Authorization properties: guard chain, capability grants, permissions
-        else if name_lower.contains("grant")
-            || name_lower.contains("permit")
-            || name_lower.contains("restrict")
-            || name_lower.contains("guard")
-            || name_lower.contains("capguard")
-            || name_lower.contains("authorization")
-        {
-            CapabilityPropertyType::Authorization
-        }
-        // Budget properties: flow budget, charge-before-send, receipts
-        else if name_lower.contains("budget")
-            || name_lower.contains("charge")
-            || name_lower.contains("spent")
-            || name_lower.contains("limit")
-            || name_lower.contains("flowguard")
-            || name_lower.contains("receipt")
-            || name_lower.contains("epoch")
-        {
-            CapabilityPropertyType::Budget
-        }
-        // Integrity properties: attenuation, signatures, hash chains
-        else if name_lower.contains("integrity")
-            || name_lower.contains("attenuat")
-            || name_lower.contains("forgea")
-            || name_lower.contains("signature")
-            || name_lower.contains("biscuit")
-            || name_lower.contains("chain")
-        {
-            CapabilityPropertyType::Integrity
-        } else {
-            CapabilityPropertyType::General
-        }
-    }
-
-    fn determine_privacy_property_type(&self, property_name: &str) -> PrivacyPropertyType {
-        let name_lower = property_name.to_lowercase();
-
-        if name_lower.contains("leakage") {
-            PrivacyPropertyType::LeakageBounds
-        } else if name_lower.contains("unlinkable") {
-            PrivacyPropertyType::Unlinkability
-        } else if name_lower.contains("isolation") {
-            PrivacyPropertyType::ContextIsolation
-        } else if name_lower.contains("observer") {
-            PrivacyPropertyType::ObserverSimulation
-        } else {
-            PrivacyPropertyType::General
-        }
-    }
-
     /// Get comprehensive verification statistics
     pub fn get_verification_statistics(&self) -> VerificationStatistics {
         self.stats.clone()
@@ -1862,7 +1195,8 @@ impl QuintRunner {
 
     /// Clear property cache
     pub fn clear_cache(&mut self) {
-        self.property_cache = PropertyCache::new(self.config.cache_size_limit);
+        self.property_cache =
+            PropertyCache::new_with_ttl(self.config.cache_size_limit, self.config.cache_ttl);
         info!("Property cache cleared");
     }
 
@@ -1871,11 +1205,8 @@ impl QuintRunner {
         serde_json::json!({
             "cache_size": self.property_cache.cache.len(),
             "max_size": self.property_cache.max_size,
-            "hit_rate": if self.stats.cache_hits + self.stats.cache_misses > 0 {
-                self.stats.cache_hits as f64 / (self.stats.cache_hits + self.stats.cache_misses) as f64
-            } else {
-                0.0
-            },
+            "ttl": self.property_cache.ttl(),
+            "hit_rate": cache_hit_rate(self.stats.cache_hits, self.stats.cache_misses),
             "total_hits": self.stats.cache_hits,
             "total_misses": self.stats.cache_misses
         })
@@ -1884,15 +1215,7 @@ impl QuintRunner {
     /// Update the runner configuration
     pub fn update_config(&mut self, config: RunnerConfig) {
         self.config = config;
-        self.evaluator = QuintEvaluator::new(self.config.quint_path.clone());
-
-        // Recreate components with new config
-        self.property_cache = PropertyCache::new(self.config.cache_size_limit);
-        self.counterexample_generator = CounterexampleGenerator::new(
-            self.config.max_counterexample_depth,
-            self.config.random_seed,
-        );
-        self.trace_analyzer = TraceAnalyzer::new(self.config.optimize_traces);
+        self.rebuild_runtime_components();
 
         info!("Runner configuration updated");
     }
@@ -1911,16 +1234,9 @@ impl QuintRunner {
             cache_info: CacheInfo {
                 size: cache_stats["entries"].as_u64().unwrap_or(0) as usize,
                 max_size: self.config.cache_size_limit,
-                hit_rate: cache_stats["hit_rate"].as_f64().unwrap_or(0.0),
+                hit_rate: cache_hit_rate(self.stats.cache_hits, self.stats.cache_misses),
             },
-            capabilities: SystemCapabilities {
-                counterexample_generation: self.config.generate_counterexamples,
-                trace_optimization: self.config.optimize_traces,
-                parallel_execution: self.config.enable_parallel,
-                caching: self.config.enable_caching,
-                aura_integration: self.config.verify_capability_soundness
-                    || self.config.verify_privacy_contracts,
-            },
+            capabilities: SystemCapabilities::from_config(&self.config),
         }
     }
 
@@ -1981,56 +1297,6 @@ impl QuintRunner {
             timestamp: 0, // Fixed timestamp for deterministic testing
         })
     }
-}
-
-/// Capability property for soundness verification
-#[derive(Debug, Clone)]
-struct CapabilityProperty {
-    name: String,
-    property_type: CapabilityPropertyType,
-}
-
-/// Privacy property for contract verification
-#[derive(Debug, Clone)]
-struct PrivacyProperty {
-    name: String,
-    property_type: PrivacyPropertyType,
-}
-
-/// Types of capability properties for Aura-specific soundness verification
-///
-/// Used by `determine_capability_property_type()` and `verify_capability_soundness()`
-/// to classify and verify capability-related properties in Quint specifications.
-#[derive(Debug, Clone)]
-enum CapabilityPropertyType {
-    /// Authorization-related properties (grant, restrict, permit)
-    Authorization,
-    /// Flow budget properties (charge-before-send, receipts)
-    Budget,
-    /// Integrity properties (attenuation, non-forgeability)
-    Integrity,
-    /// Non-interference between contexts
-    NonInterference,
-    /// Capability monotonicity (attenuation only decreases)
-    Monotonicity,
-    /// Temporal consistency of capabilities
-    TemporalConsistency,
-    /// Context isolation properties
-    ContextIsolation,
-    /// Authorization soundness (complete mediation)
-    AuthorizationSoundness,
-    /// General capability properties
-    General,
-}
-
-/// Types of privacy properties
-#[derive(Debug, Clone)]
-enum PrivacyPropertyType {
-    LeakageBounds,
-    Unlinkability,
-    ContextIsolation,
-    ObserverSimulation,
-    General,
 }
 
 #[cfg(test)]
@@ -2162,99 +1428,91 @@ module TestModule {{
     #[test]
     fn test_counterexample_generator() {
         let generator = CounterexampleGenerator::new(100, Some(42));
-        assert_eq!(generator.max_depth, 100);
-        assert_eq!(generator.random_seed, Some(42));
+        assert_eq!(generator.max_depth(), 100);
+        assert_eq!(generator.random_seed(), Some(42));
     }
 
     #[test]
-    fn test_trace_analyzer() {
-        let analyzer = TraceAnalyzer::new(true);
-        assert!(analyzer.optimize_enabled);
-        assert_eq!(analyzer.compression_algorithms.len(), 3);
-
-        // Test optimization with dummy trace
+    fn test_trace_normalization() {
         let dummy_trace = serde_json::json!({
             "steps": [1, 2, 3],
             "states": ["s1", "s2", "s3"]
         });
 
-        let optimized = analyzer.optimize_trace(&dummy_trace).unwrap();
-        // With optimization disabled the trace remains unchanged
-        assert_eq!(optimized, dummy_trace);
+        let normalized = normalize_trace_artifact(&dummy_trace);
+        assert_eq!(normalized, dummy_trace);
     }
 
     #[test]
     fn test_property_classification() {
-        let runner = QuintRunner::new().unwrap();
-
         // Test capability property classification
-        assert!(runner.is_capability_property("capability_soundness"));
-        assert!(runner.is_capability_property("auth_check"));
-        assert!(runner.is_capability_property("grant_permission"));
-        assert!(runner.is_capability_property("monotonic_restriction"));
-        assert!(!runner.is_capability_property("simple_counter"));
+        assert!(classification::is_capability_property(
+            "capability_soundness"
+        ));
+        assert!(classification::is_capability_property("auth_check"));
+        assert!(classification::is_capability_property("grant_permission"));
+        assert!(classification::is_capability_property(
+            "monotonic_restriction"
+        ));
+        assert!(!classification::is_capability_property("simple_counter"));
 
         // Test privacy property classification
-        assert!(runner.is_privacy_property("privacy_leakage"));
-        assert!(runner.is_privacy_property("unlinkable_messages"));
-        assert!(runner.is_privacy_property("context_isolation"));
-        assert!(runner.is_privacy_property("observer_resistance"));
-        assert!(!runner.is_privacy_property("simple_counter"));
+        assert!(classification::is_privacy_property("privacy_leakage"));
+        assert!(classification::is_privacy_property("unlinkable_messages"));
+        assert!(classification::is_privacy_property("context_isolation"));
+        assert!(classification::is_privacy_property("observer_resistance"));
+        assert!(!classification::is_privacy_property("simple_counter"));
     }
 
     #[test]
     fn test_capability_property_type_determination() {
-        let runner = QuintRunner::new().unwrap();
-
         assert!(matches!(
-            runner.determine_capability_property_type("monotonic_capability"),
-            CapabilityPropertyType::Monotonicity
+            classification::determine_capability_property_type("monotonic_capability"),
+            classification::CapabilityPropertyType::Monotonicity
         ));
         assert!(matches!(
-            runner.determine_capability_property_type("non_interference_check"),
-            CapabilityPropertyType::NonInterference
+            classification::determine_capability_property_type("non_interference_check"),
+            classification::CapabilityPropertyType::NonInterference
         ));
         assert!(matches!(
-            runner.determine_capability_property_type("temporal_consistency"),
-            CapabilityPropertyType::TemporalConsistency
+            classification::determine_capability_property_type("temporal_consistency"),
+            classification::CapabilityPropertyType::TemporalConsistency
         ));
         assert!(matches!(
-            runner.determine_capability_property_type("context_isolation"),
-            CapabilityPropertyType::ContextIsolation
+            classification::determine_capability_property_type("context_isolation"),
+            classification::CapabilityPropertyType::ContextIsolation
         ));
         assert!(matches!(
-            runner.determine_capability_property_type("authorization_soundness"),
-            CapabilityPropertyType::AuthorizationSoundness
+            classification::determine_capability_property_type("authorization_soundness"),
+            classification::CapabilityPropertyType::AuthorizationSoundness
         ));
         assert!(matches!(
-            runner.determine_capability_property_type("general_property"),
-            CapabilityPropertyType::General
+            classification::determine_capability_property_type("general_property"),
+            classification::CapabilityPropertyType::General
         ));
     }
 
     #[test]
     fn test_privacy_property_type_determination() {
-        let runner = QuintRunner::new().unwrap();
-
         assert!(matches!(
-            runner.determine_privacy_property_type("leakage_bounds"),
-            PrivacyPropertyType::LeakageBounds
+            classification::determine_privacy_property_type("leakage_bounds"),
+            classification::PrivacyPropertyType::LeakageBounds
         ));
         assert!(matches!(
-            runner.determine_privacy_property_type("unlinkable_protocol"),
-            PrivacyPropertyType::Unlinkability
+            classification::determine_privacy_property_type("unlinkable_protocol"),
+            classification::PrivacyPropertyType::Unlinkability
         ));
         assert!(matches!(
-            runner.determine_privacy_property_type("context_isolation"),
-            PrivacyPropertyType::ContextIsolation
+            classification::determine_privacy_property_type("context_isolation"),
+            classification::PrivacyPropertyType::ContextIsolation
         ));
         assert!(matches!(
-            runner.determine_privacy_property_type("observer_simulation"),
-            PrivacyPropertyType::ObserverSimulation
+            classification::determine_privacy_property_type("observer_simulation"),
+            classification::PrivacyPropertyType::ObserverSimulation
         ));
         assert!(matches!(
-            runner.determine_privacy_property_type("general_privacy"),
-            PrivacyPropertyType::General
+            classification::determine_privacy_property_type("general_privacy"),
+            classification::PrivacyPropertyType::General
         ));
     }
 

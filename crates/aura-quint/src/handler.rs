@@ -60,6 +60,17 @@ impl QuintEffectHandler {
         static COUNTER: AtomicU64 = AtomicU64::new(1);
         COUNTER.fetch_add(1, Ordering::Relaxed)
     }
+
+    fn evaluator(&self) -> crate::evaluator::QuintEvaluator {
+        crate::evaluator::QuintEvaluator::new(None)
+    }
+
+    async fn load_spec_from_source(&self, spec_source: &str) -> Result<PropertySpec> {
+        let evaluator = self.evaluator();
+        let json_ir = evaluator.parse_file(spec_source).await?;
+        let context = serde_json::from_str(&json_ir)?;
+        Ok(PropertySpec::new(spec_source.to_string()).with_context(context))
+    }
 }
 
 impl Default for QuintEffectHandler {
@@ -75,14 +86,7 @@ impl QuintEvaluationEffects for QuintEffectHandler {
             tracing::debug!("Loading property spec from source");
         }
 
-        // Parse the Quint specification using the native evaluator binary via aura-quint evaluator
-        let evaluator = crate::evaluator::QuintEvaluator::new(None);
-        let json_ir = evaluator.parse_file(spec_source).await?;
-        let spec = PropertySpec::new(spec_source).with_context(serde_json::from_str(&json_ir)?);
-
-        // Timing measured by downstream statistics; parsing is fast relative to evaluation.
-
-        Ok(spec)
+        self.load_spec_from_source(spec_source).await
     }
 
     async fn evaluate_property(
@@ -312,12 +316,7 @@ impl QuintVerificationEffects for QuintEffectHandler {
             tracing::debug!("Loading specification from file: {}", spec_path);
         }
 
-        let evaluator = crate::evaluator::QuintEvaluator::new(None);
-        let json_ir = evaluator.parse_file(spec_path).await?;
-        let spec =
-            PropertySpec::new(spec_path.to_string()).with_context(serde_json::from_str(&json_ir)?);
-
-        Ok(spec)
+        self.load_spec_from_source(spec_path).await
     }
 
     async fn run_model_checking(
@@ -353,8 +352,7 @@ impl QuintVerificationEffects for QuintEffectHandler {
             tracing::debug!("Validating Quint specification");
         }
 
-        let evaluator = crate::evaluator::QuintEvaluator::new(None);
-        match evaluator.parse_file(_spec_source).await {
+        match self.evaluator().parse_file(_spec_source).await {
             Ok(_) => Ok(Vec::new()),
             Err(e) => Ok(vec![format!("Validation failed: {}", e)]),
         }

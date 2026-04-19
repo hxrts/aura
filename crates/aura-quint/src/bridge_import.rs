@@ -29,6 +29,35 @@ pub fn parse_telltale_properties(bundle: &BridgeBundleV1) -> Vec<PropertyInterch
         .collect()
 }
 
+fn normalized_module_name(module_name: &str) -> String {
+    module_name.replace(' ', "_")
+}
+
+fn normalized_property_ident(property_id: &str) -> String {
+    property_id.replace(['-', '.'], "_")
+}
+
+fn import_expression(property: &PropertyInterchangeV1) -> Result<&str, BridgeImportError> {
+    if property.id.trim().is_empty() {
+        return Err(BridgeImportError::InvalidProperty {
+            message: "property id must not be empty".to_string(),
+        });
+    }
+
+    let expression = property
+        .target_expr
+        .as_deref()
+        .unwrap_or(property.source_expr.as_str())
+        .trim();
+    if expression.is_empty() {
+        return Err(BridgeImportError::InvalidProperty {
+            message: format!("property {} has empty expression", property.id),
+        });
+    }
+
+    Ok(expression)
+}
+
 /// Generate a Quint module containing imported invariants/properties.
 ///
 /// # Errors
@@ -38,28 +67,12 @@ pub fn generate_quint_invariant_module(
     module_name: &str,
     properties: &[PropertyInterchangeV1],
 ) -> Result<String, BridgeImportError> {
-    let normalized_module = module_name.replace(' ', "_");
+    let normalized_module = normalized_module_name(module_name);
     let mut out = format!("module {} {{\n", normalized_module);
 
     for property in properties {
-        if property.id.trim().is_empty() {
-            return Err(BridgeImportError::InvalidProperty {
-                message: "property id must not be empty".to_string(),
-            });
-        }
-        let expression = property
-            .target_expr
-            .as_deref()
-            .or(Some(property.source_expr.as_str()))
-            .unwrap_or("true")
-            .trim();
-        if expression.is_empty() {
-            return Err(BridgeImportError::InvalidProperty {
-                message: format!("property {} has empty expression", property.id),
-            });
-        }
-
-        let ident = property.id.replace(['-', '.'], "_");
+        let expression = import_expression(property)?;
+        let ident = normalized_property_ident(&property.id);
         out.push_str(&format!("  // imported from {}\n", property.source_backend));
         out.push_str(&format!("  val {} = {}\n", ident, expression));
     }

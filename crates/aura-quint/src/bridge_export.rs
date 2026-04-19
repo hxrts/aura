@@ -107,54 +107,9 @@ pub fn export_quint_to_telltale_bundle(
         .insert("source".to_string(), source_label.to_string());
 
     for module in modules {
-        // Deterministic synthetic role extraction:
-        // - explicit role_<name> definition prefixes become roles
-        // - otherwise fallback to one module role
-        let mut roles: Vec<String> = module
-            .definitions
-            .iter()
-            .filter_map(|definition| definition.strip_prefix("role_").map(ToString::to_string))
-            .collect();
-        if roles.is_empty() {
-            roles.push(format!("{}_role", module.name));
-        }
-        roles.sort();
-        roles.dedup();
-
-        let mut nodes = Vec::new();
-        let mut edges = Vec::new();
-        let mut previous_node_id: Option<String> = None;
-        let steps = if module.definitions.is_empty() {
-            vec!["end".to_string()]
-        } else {
-            module.definitions.clone()
-        };
-
-        for (index, definition) in steps.iter().enumerate() {
-            let node_id = format!("{}_n{}", module.name, index);
-            let role = roles[index % roles.len()].clone();
-            let kind = if index + 1 == steps.len() {
-                SessionNodeKindV1::End
-            } else {
-                SessionNodeKindV1::Send
-            };
-            nodes.push(SessionNodeV1 {
-                id: node_id.clone(),
-                role,
-                kind,
-                label: Some(definition.clone()),
-                annotations: BTreeMap::new(),
-            });
-            if let Some(previous) = previous_node_id {
-                edges.push(SessionEdgeV1 {
-                    from: previous,
-                    to: node_id.clone(),
-                    guard: None,
-                    message: Some(definition.clone()),
-                });
-            }
-            previous_node_id = Some(node_id);
-        }
+        let roles = infer_roles(&module);
+        let steps = definition_steps(&module);
+        let (nodes, edges) = build_session_graph(&module.name, &roles, &steps);
 
         let session_id = hex::encode(hash::hash(module.name.as_bytes()));
         bundle.session_types.push(SessionTypeInterchangeV1 {
@@ -169,6 +124,66 @@ pub fn export_quint_to_telltale_bundle(
 
     validate_export_bundle(&bundle)?;
     Ok(bundle)
+}
+
+fn infer_roles(module: &QuintModuleSummary) -> Vec<String> {
+    let mut roles: Vec<String> = module
+        .definitions
+        .iter()
+        .filter_map(|definition| definition.strip_prefix("role_").map(ToString::to_string))
+        .collect();
+    if roles.is_empty() {
+        roles.push(format!("{}_role", module.name));
+    }
+    roles.sort();
+    roles.dedup();
+    roles
+}
+
+fn definition_steps(module: &QuintModuleSummary) -> Vec<String> {
+    if module.definitions.is_empty() {
+        vec!["end".to_string()]
+    } else {
+        module.definitions.clone()
+    }
+}
+
+fn build_session_graph(
+    module_name: &str,
+    roles: &[String],
+    steps: &[String],
+) -> (Vec<SessionNodeV1>, Vec<SessionEdgeV1>) {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut previous_node_id: Option<String> = None;
+
+    for (index, definition) in steps.iter().enumerate() {
+        let node_id = format!("{}_n{}", module_name, index);
+        let role = roles[index % roles.len()].clone();
+        let kind = if index + 1 == steps.len() {
+            SessionNodeKindV1::End
+        } else {
+            SessionNodeKindV1::Send
+        };
+        nodes.push(SessionNodeV1 {
+            id: node_id.clone(),
+            role,
+            kind,
+            label: Some(definition.clone()),
+            annotations: BTreeMap::new(),
+        });
+        if let Some(previous) = previous_node_id {
+            edges.push(SessionEdgeV1 {
+                from: previous,
+                to: node_id.clone(),
+                guard: None,
+                message: Some(definition.clone()),
+            });
+        }
+        previous_node_id = Some(node_id);
+    }
+
+    (nodes, edges)
 }
 
 /// Validate exported bundle translation invariants.

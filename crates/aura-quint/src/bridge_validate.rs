@@ -84,10 +84,7 @@ pub fn run_cross_validation<E: QuintModelCheckExecutor>(
 ) -> Result<CrossValidationReport, String> {
     let mut quint_results = BTreeMap::new();
     for property in &bundle.properties {
-        let expression = property
-            .target_expr
-            .as_deref()
-            .unwrap_or(property.source_expr.as_str());
+        let expression = bridge_expression(property);
         let holds = executor
             .check(&property.id, expression)
             .map_err(|err| format!("quint check failed for {}: {err}", property.id))?;
@@ -102,12 +99,7 @@ pub fn run_cross_validation<E: QuintModelCheckExecutor>(
         };
         compared = compared.saturating_add(1);
         if quint_holds != certificate.verified {
-            discrepancies.push(CrossValidationDiscrepancy {
-                property_id: certificate.property_id.clone(),
-                quint_holds,
-                certificate_holds: certificate.verified,
-                backend: certificate.backend,
-            });
+            discrepancies.push(discrepancy_for(certificate, quint_holds));
         }
     }
 
@@ -116,6 +108,25 @@ pub fn run_cross_validation<E: QuintModelCheckExecutor>(
         certificates_compared: compared,
         discrepancies,
     })
+}
+
+fn bridge_expression(property: &crate::bridge_format::PropertyInterchangeV1) -> &str {
+    property
+        .target_expr
+        .as_deref()
+        .unwrap_or(property.source_expr.as_str())
+}
+
+fn discrepancy_for(
+    certificate: &crate::bridge_format::ProofCertificateV1,
+    quint_holds: bool,
+) -> CrossValidationDiscrepancy {
+    CrossValidationDiscrepancy {
+        property_id: certificate.property_id.clone(),
+        quint_holds,
+        certificate_holds: certificate.verified,
+        backend: certificate.backend,
+    }
 }
 
 #[cfg(test)]

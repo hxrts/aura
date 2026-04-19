@@ -3,6 +3,7 @@
 //! This module provides a high-level interface to the Quint Rust evaluator,
 //! handling JSON IR input and simulation output processing.
 
+use std::process::Output;
 use std::process::Stdio;
 
 use async_process::Command;
@@ -58,31 +59,52 @@ impl QuintEvaluator {
         Self { quint_path }
     }
 
-    /// Parse a Quint file via subprocess using the configured quint binary
-    pub async fn parse_file(&self, file_path: &str) -> AuraResult<String> {
-        let quint_cmd = self.quint_path.as_deref().unwrap_or("quint");
+    fn quint_command(&self) -> &str {
+        self.quint_path.as_deref().unwrap_or("quint")
+    }
 
-        // Use quint parse command to get JSON IR
-        let output = Command::new(quint_cmd)
-            .args(["parse", "--output=json", file_path])
+    async fn run_quint_command<S>(&self, args: &[S], context: &str) -> AuraResult<Output>
+    where
+        S: AsRef<str>,
+    {
+        let mut command = Command::new(self.quint_command());
+        for arg in args {
+            command.arg(arg.as_ref());
+        }
+        command
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
             .await
-            .map_err(|e| AuraError::invalid(format!("Failed to execute quint: {}", e)))?;
+            .map_err(|e| AuraError::invalid(format!("Failed to execute {context}: {e}")))
+    }
 
+    fn decode_command_output(
+        output: Output,
+        failure_context: &str,
+    ) -> AuraResult<(String, String)> {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AuraError::invalid(format!(
-                "Quint parsing failed: {}",
-                stderr
-            )));
+            return Err(AuraError::invalid(format!("{failure_context}: {stderr}")));
         }
 
-        let json_output = String::from_utf8(output.stdout)
-            .map_err(|e| AuraError::invalid(format!("Invalid UTF-8 in quint output: {}", e)))?;
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|e| AuraError::invalid(format!("Invalid UTF-8 in stdout: {e}")))?;
+        let stderr = String::from_utf8(output.stderr)
+            .map_err(|e| AuraError::invalid(format!("Invalid UTF-8 in stderr: {e}")))?;
+        Ok((stdout, stderr))
+    }
 
-        Ok(json_output)
+    /// Parse a Quint file via subprocess using the configured quint binary
+    pub async fn parse_file(&self, file_path: &str) -> AuraResult<String> {
+        let output = self
+            .run_quint_command(
+                &["parse", "--output=json", file_path],
+                &format!("quint parse for '{file_path}'"),
+            )
+            .await?;
+        let (stdout, _) = Self::decode_command_output(output, "Quint parsing failed")?;
+        Ok(stdout)
     }
 
     /// Verify an invariant property using Quint model checking
@@ -94,48 +116,36 @@ impl QuintEvaluator {
         spec_path: &str,
         invariant_name: &str,
     ) -> AuraResult<InvariantVerificationResult> {
-        let quint_cmd = self.quint_path.as_deref().unwrap_or("quint");
-
-        let output = Command::new(quint_cmd)
-            .args([
-                "verify",
-                &format!("--invariant={}", invariant_name),
-                spec_path,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .map_err(|e| {
-                AuraError::invalid(format!(
-                    "Failed to execute quint verify for invariant '{}': {}",
-                    invariant_name, e
-                ))
-            })?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-
-        // Quint verify returns exit code 0 if property holds, non-zero if violated
+        let output = self
+            .run_quint_command(
+                &[
+                    "verify",
+                    &format!("--invariant={invariant_name}"),
+                    spec_path,
+                ],
+                &format!("quint verify invariant '{invariant_name}'"),
+            )
+            .await?;
         let holds = output.status.success();
-
-        // Parse counterexample from output if verification failed
-        let counterexample = if !holds {
-            // Try to extract counterexample trace from output
-            Self::extract_counterexample(&stdout, &stderr)
-        } else {
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|e| AuraError::invalid(format!("Invalid UTF-8 in stdout: {e}")))?;
+        let stderr = String::from_utf8(output.stderr)
+            .map_err(|e| AuraError::invalid(format!("Invalid UTF-8 in stderr: {e}")))?;
+        let counterexample = if holds {
             None
+        } else {
+            Self::extract_counterexample(&stdout, &stderr)
         };
 
         Ok(InvariantVerificationResult {
             invariant_name: invariant_name.to_string(),
             holds,
             counterexample,
-            output: stdout.to_string(),
+            output: stdout,
             error_output: if stderr.is_empty() {
                 None
             } else {
-                Some(stderr.to_string())
+                Some(stderr)
             },
         })
     }
@@ -153,19 +163,13 @@ impl QuintEvaluator {
         spec_path: &str,
         property_name: &str,
     ) -> AuraResult<TemporalVerificationResult> {
-        let quint_cmd = self.quint_path.as_deref().unwrap_or("quint");
-
         // Try temporal flag first; if that fails, fall back to invariant check
         // since some temporal properties can be expressed as safety invariants
-        let output = Command::new(quint_cmd)
-            .args([
-                "verify",
-                &format!("--temporal={}", property_name),
-                spec_path,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
+        let output = self
+            .run_quint_command(
+                &["verify", &format!("--temporal={property_name}"), spec_path],
+                &format!("quint verify temporal '{property_name}'"),
+            )
             .await;
 
         let (output, used_fallback) = match output {
@@ -174,22 +178,12 @@ impl QuintEvaluator {
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 if stderr.contains("Unknown option") || stderr.contains("unknown option") {
                     // Fall back to invariant-style check
-                    let fallback_output = Command::new(quint_cmd)
-                        .args([
-                            "verify",
-                            &format!("--invariant={}", property_name),
-                            spec_path,
-                        ])
-                        .stdout(Stdio::piped())
-                        .stderr(Stdio::piped())
-                        .output()
-                        .await
-                        .map_err(|e| {
-                            AuraError::invalid(format!(
-                                "Failed to execute quint verify for temporal property '{}': {}",
-                                property_name, e
-                            ))
-                        })?;
+                    let fallback_output = self
+                        .run_quint_command(
+                            &["verify", &format!("--invariant={property_name}"), spec_path],
+                            &format!("quint verify temporal fallback '{property_name}'"),
+                        )
+                        .await?;
                     (fallback_output, true)
                 } else {
                     (out, false)
@@ -203,15 +197,15 @@ impl QuintEvaluator {
             }
         };
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-
         let holds = output.status.success();
-
-        let counterexample = if !holds {
-            Self::extract_counterexample(&stdout, &stderr)
-        } else {
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|e| AuraError::invalid(format!("Invalid UTF-8 in stdout: {e}")))?;
+        let stderr = String::from_utf8(output.stderr)
+            .map_err(|e| AuraError::invalid(format!("Invalid UTF-8 in stderr: {e}")))?;
+        let counterexample = if holds {
             None
+        } else {
+            Self::extract_counterexample(&stdout, &stderr)
         };
 
         Ok(TemporalVerificationResult {
@@ -219,11 +213,11 @@ impl QuintEvaluator {
             holds,
             used_invariant_fallback: used_fallback,
             counterexample,
-            output: stdout.to_string(),
+            output: stdout,
             error_output: if stderr.is_empty() {
                 None
             } else {
-                Some(stderr.to_string())
+                Some(stderr)
             },
         })
     }
