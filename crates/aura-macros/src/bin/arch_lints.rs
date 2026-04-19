@@ -1,9 +1,11 @@
 use std::env;
-use std::ffi::OsStr;
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
+#[allow(dead_code)]
+#[path = "../lint_support.rs"]
+mod lint_support;
+
+use lint_support::{collect_rust_files, collect_tracked_rust_files, load_parsed_rust_files};
 use proc_macro2::Span;
 use quote::ToTokens;
 use syn::spanned::Spanned;
@@ -124,12 +126,13 @@ fn run() -> Result<(), String> {
     rust_files.dedup();
 
     let mut violations = Vec::new();
-    for file in &rust_files {
-        let source = fs::read_to_string(file)
-            .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
-        let syntax = syn::parse_file(&source)
-            .map_err(|error| format!("failed to parse {}: {error}", file.display()))?;
-        violations.extend(scan_file(mode, file, &source, &syntax));
+    for parsed_file in load_parsed_rust_files(&rust_files)? {
+        violations.extend(scan_file(
+            mode,
+            &parsed_file.path,
+            &parsed_file.source,
+            &parsed_file.syntax,
+        ));
     }
 
     if !violations.is_empty() {
@@ -142,61 +145,6 @@ fn run() -> Result<(), String> {
     println!("{}: clean", mode.display_name());
     Ok(())
 }
-
-fn collect_tracked_rust_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
-    let mut command = Command::new("git");
-    command.arg("ls-files").arg("--cached").arg("--");
-    for path in paths {
-        command.arg(path);
-    }
-
-    let output = match command.output() {
-        Ok(output) => output,
-        Err(_) => return Ok(Vec::new()),
-    };
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|error| format!("git ls-files output was not valid utf-8: {error}"))?;
-
-    Ok(stdout
-        .lines()
-        .map(PathBuf::from)
-        .filter(|path| path.extension() == Some(OsStr::new("rs")))
-        .filter(|path| path.exists())
-        .collect())
-}
-
-fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    if path.is_file() {
-        if path.extension() == Some(OsStr::new("rs")) {
-            files.push(path.to_path_buf());
-        }
-        return Ok(());
-    }
-    if !path.is_dir() {
-        return Err(format!("path does not exist: {}", path.display()));
-    }
-
-    for entry in fs::read_dir(path)
-        .map_err(|error| format!("failed to read directory {}: {error}", path.display()))?
-    {
-        let entry = entry.map_err(|error| {
-            format!("failed to read directory entry {}: {error}", path.display())
-        })?;
-        let entry_path = entry.path();
-        if entry_path.is_dir() {
-            collect_rust_files(&entry_path, files)?;
-        } else if entry_path.extension() == Some(OsStr::new("rs")) {
-            files.push(entry_path);
-        }
-    }
-
-    Ok(())
-}
-
 fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<String> {
     match mode {
         LintMode::LayerPolicy => scan_layer_policy(file, syntax),

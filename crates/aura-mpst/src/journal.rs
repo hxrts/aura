@@ -55,31 +55,27 @@ pub struct JournalAnnotation {
 }
 
 impl JournalAnnotation {
-    /// Create a new fact addition annotation
-    pub fn add_facts(description: impl Into<String>) -> Self {
+    fn described(op_type: JournalOpType, description: impl Into<String>) -> Self {
         Self {
-            op_type: JournalOpType::AddFacts,
+            op_type,
             description: Some(description.into()),
             delta: None,
         }
+    }
+
+    /// Create a new fact addition annotation
+    pub fn add_facts(description: impl Into<String>) -> Self {
+        Self::described(JournalOpType::AddFacts, description)
     }
 
     /// Create a capability refinement annotation
     pub fn refine_caps(description: impl Into<String>) -> Self {
-        Self {
-            op_type: JournalOpType::RefineCaps,
-            description: Some(description.into()),
-            delta: None,
-        }
+        Self::described(JournalOpType::RefineCaps, description)
     }
 
     /// Create a merge annotation
     pub fn merge(description: impl Into<String>) -> Self {
-        Self {
-            op_type: JournalOpType::Merge,
-            description: Some(description.into()),
-            delta: None,
-        }
+        Self::described(JournalOpType::Merge, description)
     }
 
     /// Create annotation with specific delta
@@ -117,9 +113,7 @@ impl JournalAnnotation {
             }
             JournalOpType::Merge => {
                 if let Some(delta) = &self.delta {
-                    // General merge - apply both facts and caps
-                    let with_facts = effects.merge_facts(target, delta.clone()).await?;
-                    effects.refine_caps(with_facts, delta.clone()).await
+                    apply_delta_merge(effects, target, delta).await
                 } else {
                     Ok(target)
                 }
@@ -135,17 +129,14 @@ impl JournalAnnotation {
 /// Parse a journal fact from a string representation
 pub fn parse_journal_fact(fact_str: &str) -> AuraResult<Fact> {
     // Parse different fact formats
-    if fact_str.starts_with("operation:") {
-        let operation_type = fact_str.strip_prefix("operation:").unwrap_or("");
+    if let Some(operation_type) = fact_str.strip_prefix("operation:") {
         Fact::with_value(
             "operation_type",
             FactValue::String(operation_type.to_string()),
         )
-    } else if fact_str.starts_with("message:") {
-        let message_type = fact_str.strip_prefix("message:").unwrap_or("");
+    } else if let Some(message_type) = fact_str.strip_prefix("message:") {
         Fact::with_value("message_type", FactValue::String(message_type.to_string()))
-    } else if fact_str.starts_with("event:") {
-        let event_type = fact_str.strip_prefix("event:").unwrap_or("");
+    } else if let Some(event_type) = fact_str.strip_prefix("event:") {
         Fact::with_value("event", FactValue::String(event_type.to_string()))
     } else {
         // Default: treat as a general fact
@@ -179,10 +170,17 @@ impl DeltaAnnotation {
         effects: &impl JournalEffects,
         target: Journal,
     ) -> AuraResult<Journal> {
-        // Apply as a general merge operation
-        let with_facts = effects.merge_facts(target, self.delta.clone()).await?;
-        effects.refine_caps(with_facts, self.delta.clone()).await
+        apply_delta_merge(effects, target, &self.delta).await
     }
+}
+
+async fn apply_delta_merge(
+    effects: &impl JournalEffects,
+    target: Journal,
+    delta: &Journal,
+) -> AuraResult<Journal> {
+    let with_facts = effects.merge_facts(target, delta.clone()).await?;
+    effects.refine_caps(with_facts, delta.clone()).await
 }
 
 /// Protocol with journal coupling
@@ -331,5 +329,17 @@ mod tests {
         let journal = Journal::new();
         let delta = DeltaAnnotation::new(journal, "Test delta");
         assert_eq!(delta.description, "Test delta");
+    }
+
+    #[test]
+    fn test_parse_journal_fact_prefixes() {
+        let operation = parse_journal_fact("operation:send_message").unwrap();
+        assert!(operation.get("operation_type").is_some());
+
+        let message = parse_journal_fact("message:payload").unwrap();
+        assert!(message.get("message_type").is_some());
+
+        let event = parse_journal_fact("event:joined").unwrap();
+        assert!(event.get("event").is_some());
     }
 }

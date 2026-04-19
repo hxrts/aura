@@ -4,6 +4,8 @@
 
 use aura_core::{capability_name, types::identifiers::DeviceId, ContextId};
 
+use crate::support::guard_chain_composite;
+
 /// Core identity types accessible through aura-mpst re-exports.
 #[test]
 fn test_core_types_available() {
@@ -41,10 +43,7 @@ fn test_extension_types() {
     assert_eq!(journal_fact.fact, "message_sent");
 
     // Test composite extension
-    let composite = CompositeExtension::new(RoleId::new("Alice"), "complex_op".to_string())
-        .with_capability_guard(capability_name!("chat:message:send"))
-        .with_flow_cost(200)
-        .with_journal_fact("operation_logged".to_string());
+    let composite = guard_chain_composite("Alice", "complex_op", 200, "operation_logged");
 
     assert_eq!(composite.extensions.len(), 3);
 }
@@ -55,12 +54,8 @@ fn test_extension_types() {
 #[test]
 fn composite_extension_preserves_guard_chain_order() {
     use aura_mpst::extensions::*;
-    use aura_mpst::RoleId;
 
-    let composite = CompositeExtension::new(RoleId::new("Alice"), "guarded_send".to_string())
-        .with_capability_guard(capability_name!("chat:message:send"))
-        .with_flow_cost(50)
-        .with_journal_fact("message_sent".to_string());
+    let composite = guard_chain_composite("Alice", "guarded_send", 50, "message_sent");
 
     assert_eq!(composite.extensions.len(), 3);
 
