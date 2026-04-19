@@ -9,6 +9,11 @@
 //! device-enrollment/removal remains bound to Scenario 12. Pending channel
 //! acceptance entry points must settle the same operation instance even when an
 //! early shared-flow error escapes before the owned accept path does.
+//! Current traceability updates also keep notifications and authority
+//! navigation anchored to `shared-notifications-and-authority.toml`, keep the
+//! settings/device flows anchored to `shared-settings-parity.toml` plus
+//! Scenario 12, and keep browser harness compatibility plus harness-mode
+//! timing allowances synchronized through this facade and the testing docs.
 
 #![allow(missing_docs)] // Shared contract surface - refined incrementally during migration.
 

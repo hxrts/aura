@@ -278,10 +278,10 @@ impl UiController {
             let device_name = state.device_name.clone();
             if is_complete {
                 let should_set_name =
-                    model.secondary_device_name.is_none() && !device_name.trim().is_empty();
-                model.has_secondary_device = true;
+                    model.demo.secondary_device_name.is_none() && !device_name.trim().is_empty();
+                model.demo.has_secondary_device = true;
                 if should_set_name {
-                    model.secondary_device_name = Some(device_name);
+                    model.demo.secondary_device_name = Some(device_name);
                 }
             }
         }

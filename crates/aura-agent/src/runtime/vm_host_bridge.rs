@@ -186,7 +186,6 @@ impl AuraQueuedVmBridgeHandler {
         self.bridge_effects.drain_pending_sends()
     }
 
-    #[allow(dead_code)]
     pub fn push_choice_label(&self, label: impl Into<String>) {
         self.bridge_effects.enqueue_branch_choice(label.into());
     }
@@ -195,7 +194,6 @@ impl AuraQueuedVmBridgeHandler {
         Value::Str(hex::encode(payload))
     }
 
-    #[allow(dead_code)]
     pub fn set_scheduler_signals(&self, signals: AuraVmSchedulerSignals) {
         self.bridge_effects.set_scheduler_signals(signals);
     }

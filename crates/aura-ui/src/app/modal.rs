@@ -254,8 +254,10 @@ pub(in crate::app) fn modal_view(
                         details.push(
                             "Press Enter to generate an out-of-band enrollment code.".to_string(),
                         );
-                        if !state.name_input.trim().is_empty() {
-                            details.push(format!("Draft name: {}", state.name_input));
+                        if let Some(draft_name) =
+                            state.draft_name().filter(|name| !name.trim().is_empty())
+                        {
+                            details.push(format!("Draft name: {draft_name}"));
                         }
                         inputs.push(ModalInputView {
                             label: "Device Name".to_string(),
@@ -558,7 +560,7 @@ pub(in crate::app) fn modal_view(
             .mfa_setup_modal()
             .filter(|state| matches!(state.step, ThresholdWizardStep::Selection))
             .map(|state| {
-                let devices: Vec<String> = if model.has_secondary_device {
+                let devices: Vec<String> = if model.has_secondary_device() {
                     vec![
                         "This Device".to_string(),
                         model
@@ -697,7 +699,7 @@ mod tests {
     #[test]
     fn create_invitation_modal_prefers_modal_owned_code_over_shared_cache() {
         let mut model = UiModel::new("authority-local".to_string());
-        model.last_invite_code = Some("INVITE-OLD".to_string());
+        model.demo.last_invite_code = Some("INVITE-OLD".to_string());
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
             generated_code: Some("INVITE-MODAL".to_string()),
             ..CreateInvitationModalState::default()

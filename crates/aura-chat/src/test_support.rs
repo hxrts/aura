@@ -1,21 +1,21 @@
 use crate::guards::GuardSnapshot;
 use crate::types::ChatGroupId;
-use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::time::TimeStamp;
 use aura_core::FlowCost;
 use aura_guards::types::CapabilityId;
+use aura_testkit::test_builders;
 use uuid::Uuid;
 
-pub(crate) fn test_context_id(seed: u8) -> ContextId {
-    ContextId::new_from_entropy([seed; 32])
+pub(crate) fn test_context_id(seed: u8) -> aura_core::types::identifiers::ContextId {
+    test_builders::context_id(seed)
 }
 
-pub(crate) fn test_channel_id(seed: u8) -> ChannelId {
-    ChannelId::from_bytes([seed; 32])
+pub(crate) fn test_channel_id(seed: u8) -> aura_core::types::identifiers::ChannelId {
+    test_builders::channel_id(seed)
 }
 
-pub(crate) fn test_authority_id(seed: u8) -> AuthorityId {
-    AuthorityId::new_from_entropy([seed; 32])
+pub(crate) fn test_authority_id(seed: u8) -> aura_core::types::identifiers::AuthorityId {
+    test_builders::authority_id(seed)
 }
 
 pub(crate) fn test_group_id(seed: u8) -> ChatGroupId {
@@ -23,10 +23,7 @@ pub(crate) fn test_group_id(seed: u8) -> ChatGroupId {
 }
 
 pub(crate) fn test_timestamp_ms(ts_ms: u64) -> TimeStamp {
-    TimeStamp::PhysicalClock(PhysicalTime {
-        ts_ms,
-        uncertainty: None,
-    })
+    test_builders::timestamp_ms(ts_ms)
 }
 
 pub(crate) fn test_guard_snapshot(

@@ -304,24 +304,18 @@ fn parse_clipboard_mode(value: Option<&str>) -> ClipboardMode {
 }
 
 fn clipboard_mode_from_env() -> ClipboardMode {
-    let mode = std::env::var("AURA_CLIPBOARD_MODE").ok();
+    let mode = crate::env::clipboard_mode_override();
     parse_clipboard_mode(mode.as_deref())
 }
 
 fn write_clipboard_capture_file(text: &str) -> Result<bool, String> {
     use std::fs;
-    use std::path::Path;
 
-    let Some(path) = std::env::var("AURA_CLIPBOARD_FILE")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    else {
+    let Some(path) = crate::env::clipboard_capture_file() else {
         return Ok(false);
     };
 
-    let p = Path::new(path.trim());
-    if let Some(parent) = p.parent() {
+    if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
             format!(
                 "Failed to create clipboard capture directory {}: {err}",
@@ -329,10 +323,10 @@ fn write_clipboard_capture_file(text: &str) -> Result<bool, String> {
             )
         })?;
     }
-    fs::write(p, text).map(|()| true).map_err(|err| {
+    fs::write(&path, text).map(|()| true).map_err(|err| {
         format!(
             "Failed to write clipboard capture file {}: {err}",
-            p.display()
+            path.display()
         )
     })
 }

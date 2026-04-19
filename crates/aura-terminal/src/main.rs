@@ -231,7 +231,11 @@ async fn main() -> Result<(), AuraError> {
             .handle_authority(&command)
             .await
             .map_err(|e| AuraError::agent(format!("{e}")))?,
-        Commands::Replay(_) => unreachable!("replay command is handled before runtime boot"),
+        Commands::Replay(_) => {
+            return Err(AuraError::internal(
+                "replay command reached runtime boot despite pre-boot routing".to_string(),
+            ));
+        }
         Commands::Context { action } => cli_handler
             .handle_context(&action)
             .await
@@ -258,8 +262,16 @@ async fn main() -> Result<(), AuraError> {
                 .map_err(|e| AuraError::agent(format!("{e}")))?;
         }
         #[cfg(feature = "terminal")]
-        Commands::Tui(_) => unreachable!("tui command is handled before runtime boot"),
-        Commands::Version => unreachable!("version command is handled before runtime boot"),
+        Commands::Tui(_) => {
+            return Err(AuraError::internal(
+                "tui command reached runtime boot despite pre-boot routing".to_string(),
+            ));
+        }
+        Commands::Version => {
+            return Err(AuraError::internal(
+                "version command reached runtime boot despite pre-boot routing".to_string(),
+            ));
+        }
     }
 
     Ok(())

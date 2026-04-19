@@ -354,7 +354,17 @@ pub(in crate::workflows) async fn accept_imported_invitation_owned(
             owner.publish_success_with(membership_proof).await?;
         }
         #[cfg(not(feature = "signals"))]
-        Some(_) => unreachable!("channel membership proofs are only issued with signals"),
+        Some(_) => {
+            debug_assert!(
+                false,
+                "channel membership proofs are only issued when the `signals` feature is enabled"
+            );
+            owner
+                .publish_success_with(issue_invitation_accepted_or_materialized_proof(
+                    invitation.invitation_id.clone(),
+                ))
+                .await?;
+        }
         None => {
             owner
                 .publish_success_with(issue_invitation_accepted_or_materialized_proof(
@@ -554,7 +564,12 @@ pub(in crate::workflows) async fn accept_imported_invitation_inner(
             }
         }
         crate::runtime_bridge::InvitationBridgeType::Guardian { .. } => {}
-        crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => unreachable!(),
+        crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => {
+            debug_assert!(
+                false,
+                "device enrollment invitations should have failed before invitation acceptance dispatch"
+            );
+        }
     }
 
     Ok(None)
@@ -998,7 +1013,10 @@ pub(in crate::workflows) async fn fail_pending_invitation_accept_unowned<T>(
     Err(error.into())
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+#[allow(dead_code)]
+// Channel acceptance reconciliation threads this metadata through
+// target-dependent follow-up stages that strict all-target dead-code analysis
+// does not model consistently.
 struct AcceptedChannelInvitationTarget {
     channel_id: ChannelId,
     context_hint: Option<ContextId>,

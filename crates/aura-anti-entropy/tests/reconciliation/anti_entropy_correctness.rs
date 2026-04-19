@@ -5,12 +5,22 @@
 
 #![allow(clippy::expect_used, clippy::clone_on_copy)]
 
-use aura_anti_entropy::{
-    test_support::{digest_from_hashes, test_device},
-    AntiEntropyConfig, BloomDigest, SyncError,
-};
-use aura_core::{Hash32, ProtocolErrorCode};
+use aura_anti_entropy::{AntiEntropyConfig, BloomDigest, SyncError};
+use aura_core::{DeviceId, Hash32, ProtocolErrorCode};
 use std::collections::BTreeSet;
+
+fn test_device(seed: u8) -> DeviceId {
+    DeviceId::new_from_entropy([seed; 32])
+}
+
+fn digest_from_hashes<I>(cids: I) -> BloomDigest
+where
+    I: IntoIterator<Item = Hash32>,
+{
+    BloomDigest {
+        cids: cids.into_iter().collect::<BTreeSet<_>>(),
+    }
+}
 
 // ============================================================================
 // BloomDigest Tests

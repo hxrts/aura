@@ -226,13 +226,13 @@ mod tests {
     };
     use aura_core::AuraError;
 
-    struct StubSigningService {
+    struct TestSigningService {
         state: Option<ThresholdState>,
         public_key_package: Option<Vec<u8>>,
     }
 
     #[async_trait]
-    impl aura_core::effects::ThresholdSigningEffects for StubSigningService {
+    impl aura_core::effects::ThresholdSigningEffects for TestSigningService {
         async fn bootstrap_authority(
             &self,
             _authority: &AuthorityId,
@@ -320,7 +320,7 @@ mod tests {
     #[tokio::test]
     async fn consensus_required_for_authority_skips_single_signer_authorities() {
         let authority = AuthorityId::new_from_entropy([7u8; 32]);
-        let signing_service = StubSigningService {
+        let signing_service = TestSigningService {
             state: Some(ThresholdState {
                 epoch: 0,
                 threshold: 1,
@@ -338,7 +338,7 @@ mod tests {
     async fn consensus_required_for_authority_keeps_threshold_authorities() {
         let authority = AuthorityId::new_from_entropy([8u8; 32]);
         let guardian = AuthorityId::new_from_entropy([9u8; 32]);
-        let signing_service = StubSigningService {
+        let signing_service = TestSigningService {
             state: Some(ThresholdState {
                 epoch: 3,
                 threshold: 2,
@@ -358,7 +358,7 @@ mod tests {
     #[tokio::test]
     async fn consensus_required_for_authority_skips_single_signer_public_key_packages() {
         let authority = AuthorityId::new_from_entropy([10u8; 32]);
-        let signing_service = StubSigningService {
+        let signing_service = TestSigningService {
             state: None,
             public_key_package: Some(
                 SingleSignerPublicKeyPackage::new(vec![11u8; 32])
@@ -373,7 +373,7 @@ mod tests {
     #[tokio::test]
     async fn consensus_required_for_authority_skips_missing_signing_metadata() {
         let authority = AuthorityId::new_from_entropy([12u8; 32]);
-        let signing_service = StubSigningService {
+        let signing_service = TestSigningService {
             state: None,
             public_key_package: None,
         };

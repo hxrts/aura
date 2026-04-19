@@ -98,9 +98,11 @@ struct NetworkConfig {
     default_port: u16,
     /// Parsed but not yet used - reserved for future network timeout configuration
     #[allow(dead_code)]
+    /* TODO(2026-07): delete if network timeout stays config-only and never reaches status output. */
     timeout: u64,
     /// Parsed but not yet used - reserved for future retry configuration
     #[allow(dead_code)]
+    /* TODO(2026-07): delete if retry tuning stays config-only and never reaches status output. */
     max_retries: u32,
 }
 

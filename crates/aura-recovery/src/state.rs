@@ -17,6 +17,24 @@
 //! - Simplifies testing (no hidden mutable state)
 //! - Enables time-travel debugging (replay facts to any point)
 //!
+//! # State transitions
+//!
+//! Guardian setup:
+//! `AwaitingResponses -> ThresholdMet -> Completed`
+//! `AwaitingResponses -> Failed(ThresholdUnsatisfied|Explicit)`
+//! `ThresholdMet -> Completed`
+//! `ThresholdMet -> Failed(Explicit)`
+//!
+//! Membership proposal:
+//! `Pending -> Approved`
+//! `Pending -> Rejected`
+//!
+//! Recovery:
+//! `AwaitingShares -> Approved -> Completed`
+//! `AwaitingShares -> Disputed`
+//! `Approved -> Failed`
+//! `Disputed -> Failed`
+//!
 //! # Usage
 //!
 //! ```ignore
@@ -134,9 +152,28 @@ impl RecoveryState {
                 ..
             } => {
                 if let Some(setup) = self.setups.get_mut(context_id) {
+                    debug_assert!(
+                        !matches!(
+                            setup.status,
+                            SetupStatus::Completed | SetupStatus::Failed(_)
+                        ),
+                        "guardian acceptance arrived after setup reached terminal state"
+                    );
                     push_unique_authority(&mut setup.accepted, *guardian_id);
-                    if threshold_satisfied(setup.accepted.len(), setup.threshold) {
-                        setup.status = SetupStatus::ThresholdMet;
+                    if !matches!(
+                        setup.status,
+                        SetupStatus::Completed | SetupStatus::Failed(_)
+                    ) {
+                        match setup.quorum_progress() {
+                            SetupQuorumProgress::ThresholdMet { .. } => {
+                                setup.status = SetupStatus::ThresholdMet;
+                            }
+                            SetupQuorumProgress::ThresholdImpossible { .. } => {
+                                setup.status =
+                                    SetupStatus::Failed(SetupFailure::ThresholdUnsatisfied);
+                            }
+                            SetupQuorumProgress::AwaitingResponses { .. } => {}
+                        }
                     }
                 }
             }
@@ -147,23 +184,48 @@ impl RecoveryState {
                 ..
             } => {
                 if let Some(setup) = self.setups.get_mut(context_id) {
+                    debug_assert!(
+                        !matches!(
+                            setup.status,
+                            SetupStatus::Completed | SetupStatus::Failed(_)
+                        ),
+                        "guardian decline arrived after setup reached terminal state"
+                    );
                     push_unique_authority(&mut setup.declined, *guardian_id);
-                    let remaining =
-                        remaining_guardians(setup.target_guardians.len(), setup.declined.len());
-                    if !threshold_satisfied(remaining, setup.threshold) {
-                        setup.status = SetupStatus::Failed(SetupFailure::ThresholdUnsatisfied);
+                    if !matches!(
+                        setup.status,
+                        SetupStatus::Completed | SetupStatus::Failed(_)
+                    ) {
+                        match setup.quorum_progress() {
+                            SetupQuorumProgress::ThresholdMet { .. } => {
+                                setup.status = SetupStatus::ThresholdMet;
+                            }
+                            SetupQuorumProgress::ThresholdImpossible { .. } => {
+                                setup.status =
+                                    SetupStatus::Failed(SetupFailure::ThresholdUnsatisfied);
+                            }
+                            SetupQuorumProgress::AwaitingResponses { .. } => {}
+                        }
                     }
                 }
             }
 
             RecoveryFact::GuardianSetupCompleted { context_id, .. } => {
                 if let Some(setup) = self.setups.get_mut(context_id) {
+                    debug_assert!(
+                        !matches!(setup.status, SetupStatus::Failed(_)),
+                        "setup completion cannot follow a failed setup"
+                    );
                     setup.status = SetupStatus::Completed;
                 }
             }
 
             RecoveryFact::GuardianSetupFailed { context_id, .. } => {
                 if let Some(setup) = self.setups.get_mut(context_id) {
+                    debug_assert!(
+                        !matches!(setup.status, SetupStatus::Completed),
+                        "setup failure cannot follow a completed setup"
+                    );
                     if let RecoveryFact::GuardianSetupFailed { reason, .. } = fact {
                         setup.status = SetupStatus::Failed(SetupFailure::Explicit {
                             reason: reason.clone(),
@@ -261,6 +323,13 @@ impl RecoveryState {
 
             RecoveryFact::RecoveryApproved { context_id, .. } => {
                 if let Some(recovery) = self.recoveries.get_mut(context_id) {
+                    debug_assert!(
+                        !matches!(
+                            recovery.status,
+                            RecoveryStatus::Completed | RecoveryStatus::Failed(_)
+                        ),
+                        "recovery approval cannot follow a terminal recovery state"
+                    );
                     recovery.status = RecoveryStatus::Approved;
                 }
             }
@@ -271,6 +340,13 @@ impl RecoveryState {
                 ..
             } => {
                 if let Some(recovery) = self.recoveries.get_mut(context_id) {
+                    debug_assert!(
+                        !matches!(
+                            recovery.status,
+                            RecoveryStatus::Completed | RecoveryStatus::Failed(_)
+                        ),
+                        "recovery dispute cannot follow a terminal recovery state"
+                    );
                     push_unique_authority(&mut recovery.disputes, *disputer_id);
                     if let RecoveryFact::RecoveryDisputeFiled { reason, .. } = fact {
                         recovery.status = RecoveryStatus::Disputed(RecoveryDispute {
@@ -283,12 +359,20 @@ impl RecoveryState {
 
             RecoveryFact::RecoveryCompleted { context_id, .. } => {
                 if let Some(recovery) = self.recoveries.get_mut(context_id) {
+                    debug_assert!(
+                        !matches!(recovery.status, RecoveryStatus::Failed(_)),
+                        "recovery completion cannot follow a failed recovery"
+                    );
                     recovery.status = RecoveryStatus::Completed;
                 }
             }
 
             RecoveryFact::RecoveryFailed { context_id, .. } => {
                 if let Some(recovery) = self.recoveries.get_mut(context_id) {
+                    debug_assert!(
+                        !matches!(recovery.status, RecoveryStatus::Completed),
+                        "recovery failure cannot follow a completed recovery"
+                    );
                     if let RecoveryFact::RecoveryFailed { reason, .. } = fact {
                         recovery.status = RecoveryStatus::Failed(RecoveryFailure {
                             reason: reason.clone(),
@@ -389,10 +473,38 @@ pub struct SetupState {
 }
 
 impl SetupState {
+    /// Classify whether the guardian setup can still reach quorum.
+    pub fn quorum_progress(&self) -> SetupQuorumProgress {
+        let accepted = self.accepted.len();
+        if threshold_satisfied(accepted, self.threshold) {
+            return SetupQuorumProgress::ThresholdMet {
+                accepted,
+                threshold: self.threshold,
+            };
+        }
+
+        let remaining = remaining_guardians(self.target_guardians.len(), self.declined.len());
+        if !threshold_satisfied(remaining, self.threshold) {
+            return SetupQuorumProgress::ThresholdImpossible {
+                remaining,
+                threshold: self.threshold,
+            };
+        }
+
+        SetupQuorumProgress::AwaitingResponses {
+            accepted,
+            declined: self.declined.len(),
+            remaining,
+            threshold: self.threshold,
+        }
+    }
+
     /// Check if setup can still succeed (enough guardians remaining).
     pub fn can_succeed(&self) -> bool {
-        let remaining = self.target_guardians.len() - self.declined.len();
-        remaining >= self.threshold as usize
+        !matches!(
+            self.quorum_progress(),
+            SetupQuorumProgress::ThresholdImpossible { .. }
+        )
     }
 
     /// Get guardians who haven't responded yet.
@@ -402,6 +514,25 @@ impl SetupState {
             .filter(|g| !self.accepted.contains(g) && !self.declined.contains(g))
             .collect()
     }
+}
+
+/// Explicit quorum progress for guardian setup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupQuorumProgress {
+    AwaitingResponses {
+        accepted: usize,
+        declined: usize,
+        remaining: usize,
+        threshold: u16,
+    },
+    ThresholdMet {
+        accepted: usize,
+        threshold: u16,
+    },
+    ThresholdImpossible {
+        remaining: usize,
+        threshold: u16,
+    },
 }
 
 /// Status of a guardian setup operation.
@@ -487,10 +618,36 @@ pub struct RecoveryOperationState {
 }
 
 impl RecoveryOperationState {
+    /// Classify whether enough guardian shares have been submitted.
+    pub fn share_progress(&self, threshold: usize) -> RecoveryShareProgress {
+        let submitted = self.shares_submitted.len();
+        if submitted >= threshold {
+            RecoveryShareProgress::ThresholdMet {
+                submitted,
+                threshold,
+            }
+        } else {
+            RecoveryShareProgress::AwaitingThreshold {
+                submitted,
+                threshold,
+            }
+        }
+    }
+
     /// Check if threshold shares have been submitted.
     pub fn has_threshold_shares(&self, threshold: usize) -> bool {
-        self.shares_submitted.len() >= threshold
+        matches!(
+            self.share_progress(threshold),
+            RecoveryShareProgress::ThresholdMet { .. }
+        )
     }
+}
+
+/// Explicit share-progress classification for recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryShareProgress {
+    AwaitingThreshold { submitted: usize, threshold: usize },
+    ThresholdMet { submitted: usize, threshold: usize },
 }
 
 /// Status of a key recovery operation.
@@ -900,6 +1057,55 @@ mod tests {
             1,
             "Duplicate share from same guardian must be deduplicated"
         );
+    }
+
+    #[test]
+    fn test_setup_quorum_progress_classifies_threshold_impossible() {
+        let setup = SetupState {
+            context_id: test_context_id(),
+            initiator_id: test_authority_id(1),
+            initiated_at: 1000,
+            target_guardians: vec![
+                test_authority_id(2),
+                test_authority_id(3),
+                test_authority_id(4),
+            ],
+            accepted: vec![test_authority_id(2)],
+            declined: vec![test_authority_id(3), test_authority_id(4)],
+            threshold: 2,
+            status: SetupStatus::AwaitingResponses,
+        };
+
+        assert_eq!(
+            setup.quorum_progress(),
+            SetupQuorumProgress::ThresholdImpossible {
+                remaining: 1,
+                threshold: 2,
+            }
+        );
+        assert!(!setup.can_succeed());
+    }
+
+    #[test]
+    fn test_recovery_share_progress_classifies_threshold_met() {
+        let recovery = RecoveryOperationState {
+            context_id: test_context_id(),
+            account_id: test_authority_id(1),
+            request_hash: test_hash(9),
+            initiated_at: 1000,
+            shares_submitted: vec![test_authority_id(2), test_authority_id(3)],
+            disputes: Vec::new(),
+            status: RecoveryStatus::AwaitingShares,
+        };
+
+        assert_eq!(
+            recovery.share_progress(2),
+            RecoveryShareProgress::ThresholdMet {
+                submitted: 2,
+                threshold: 2,
+            }
+        );
+        assert!(recovery.has_threshold_shares(2));
     }
 
     #[test]

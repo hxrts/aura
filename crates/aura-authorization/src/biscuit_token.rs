@@ -29,6 +29,11 @@ impl TokenGrantProfile for Vec<CapabilityName> {
 /// with the authority-centric identity model where authorities are the
 /// cryptographic actors that issue and manage tokens.
 ///
+/// **Revocation Model**: Aura revokes Biscuit material at the authority epoch /
+/// root-key boundary, not via a crate-local per-token revocation list. Rotating
+/// the authority root key invalidates previously issued tokens for that
+/// authority because verification is anchored to the current public key.
+///
 /// This replaces the legacy `AccountAuthority` pattern that used `AccountId`.
 pub struct TokenAuthority {
     authority_id: AuthorityId,
@@ -114,6 +119,10 @@ impl TokenAuthority {
 /// **Authority Model**: Tokens are managed per-authority, not per-device.
 /// This aligns with the authority-centric identity model where authorities
 /// are the cryptographic actors that hold and manage tokens.
+///
+/// **Revocation Assumption**: `BiscuitTokenManager` tracks the locally active
+/// token only. It does not maintain a revocation list; authority-wide epoch/root-key
+/// rotation is the invalidation mechanism for previously issued tokens.
 #[derive(Clone)]
 pub struct BiscuitTokenManager {
     authority_id: AuthorityId,
@@ -273,4 +282,7 @@ pub enum BiscuitError {
 
     #[error("Invalid capability: {0}")]
     InvalidCapability(String),
+
+    #[error("Current time is required for Biscuit evaluation")]
+    TimeRequired,
 }

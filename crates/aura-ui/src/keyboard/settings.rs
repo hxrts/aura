@@ -28,7 +28,7 @@ pub(super) fn handle_settings_char(model: &mut UiModel, ch: char) {
             ));
         }
         'r' if matches!(model.settings_section, SettingsSection::Devices) => {
-            if model.has_secondary_device {
+            if model.has_secondary_device() {
                 open_remove_device_selection(model);
             } else {
                 set_toast(model, 'ℹ', "Cannot remove the current device");

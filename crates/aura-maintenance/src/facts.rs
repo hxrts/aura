@@ -775,6 +775,7 @@ impl MaintenanceFact {
         aura_core::types::facts::try_decode_fact(
             maintenance_fact_type_id(),
             MAINTENANCE_FACT_SCHEMA_VERSION,
+            MAINTENANCE_FACT_SCHEMA_VERSION,
             bytes,
         )
     }

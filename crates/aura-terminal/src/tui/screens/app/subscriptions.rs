@@ -23,6 +23,7 @@ use aura_app::ui::signals::{
     DISCOVERED_PEERS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
     NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
 };
+use aura_app::ui::types::EffectiveName;
 use aura_app::ui::workflows::time as time_workflows;
 use aura_app::ui_contract::{
     bridged_operation_statuses, AuthoritativeSemanticFact, RuntimeEventKind, RuntimeFact,
@@ -59,17 +60,7 @@ fn bump_projection_version(version: &mut State<usize>) {
 }
 
 fn display_contact_name(contact: &Contact) -> String {
-    if !contact.nickname.trim().is_empty() {
-        return contact.nickname.clone();
-    }
-    if let Some(suggestion) = contact
-        .nickname_suggestion
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        return suggestion.clone();
-    }
-    contact.id.chars().take(8).collect()
+    contact.effective_name()
 }
 
 fn authoritative_runtime_replace_kinds() -> Vec<RuntimeEventKind> {

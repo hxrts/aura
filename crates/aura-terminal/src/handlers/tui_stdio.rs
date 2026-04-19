@@ -12,6 +12,7 @@ use std::fmt;
 use std::future::Future;
 use std::rc::Rc;
 
+use crate::env::tui_allows_stdio;
 use crate::tui::fullscreen_stdio::FullscreenStdioGuard;
 
 pub struct PreFullscreenStdio {
@@ -88,7 +89,7 @@ where
     // to avoid scroll artifacts (e.g., a "duplicated" nav bar).
     //
     // `AURA_TUI_ALLOW_STDIO=1` disables redirection for debugging.
-    let _stdio_guard = if std::env::var("AURA_TUI_ALLOW_STDIO").ok().as_deref() == Some("1") {
+    let _stdio_guard = if tui_allows_stdio() {
         None
     } else {
         FullscreenStdioGuard::redirect_stderr_to_null().ok()

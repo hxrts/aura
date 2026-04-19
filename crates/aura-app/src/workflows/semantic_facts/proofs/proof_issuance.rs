@@ -1,11 +1,14 @@
 #![allow(missing_docs)]
+#![allow(dead_code)]
+// Typed proof surfaces are referenced through proc-macro contracts and
+// target-specific workflow/test paths that strict dead-code analysis does not
+// model consistently.
 
 use super::super::semantic_postcondition_proof_capability;
 use aura_core::{ChannelId, SemanticOwnerPostcondition, SemanticSuccessProof};
 
 macro_rules! semantic_success_proof {
     ($vis:vis struct $name:ident => $postcondition:literal) => {
-        #[allow(dead_code)]
         #[derive(Debug, Clone, PartialEq, Eq)]
         $vis struct $name;
 
@@ -16,7 +19,6 @@ macro_rules! semantic_success_proof {
         }
     };
     ($vis:vis struct $name:ident { $field:ident : $ty:ty } => $postcondition:literal) => {
-        #[allow(dead_code)]
         #[derive(Debug, Clone, PartialEq, Eq)]
         $vis struct $name {
             $field: $ty,
@@ -106,7 +108,6 @@ impl AccountCreatedProof {
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[allow(dead_code)]
 pub(in crate::workflows) fn issue_home_created_proof(home_id: ChannelId) -> HomeCreatedProof {
     let _ = semantic_postcondition_proof_capability();
     HomeCreatedProof { home_id }
@@ -118,7 +119,6 @@ pub(in crate::workflows) fn issue_home_created_proof(home_id: ChannelId) -> Home
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[allow(dead_code)]
 pub(in crate::workflows) fn issue_account_created_proof() -> AccountCreatedProof {
     let _ = semantic_postcondition_proof_capability();
     AccountCreatedProof::new()
@@ -130,7 +130,6 @@ pub(in crate::workflows) fn issue_account_created_proof() -> AccountCreatedProof
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[allow(dead_code)]
 pub(in crate::workflows) fn issue_channel_membership_ready_proof(
     channel_id: ChannelId,
 ) -> ChannelMembershipReadyProof {
@@ -144,7 +143,6 @@ pub(in crate::workflows) fn issue_channel_membership_ready_proof(
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[allow(dead_code)]
 pub(in crate::workflows) fn issue_invitation_created_proof(
     invitation_id: aura_core::InvitationId,
 ) -> InvitationCreatedProof {
@@ -158,7 +156,6 @@ pub(in crate::workflows) fn issue_invitation_created_proof(
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[allow(dead_code)]
 pub(in crate::workflows) fn issue_invitation_exported_proof(
     invitation_id: aura_core::InvitationId,
 ) -> InvitationExportedProof {
@@ -172,7 +169,6 @@ pub(in crate::workflows) fn issue_invitation_exported_proof(
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[allow(dead_code)]
 pub(in crate::workflows) fn issue_channel_invitation_created_proof(
     invitation_id: aura_core::InvitationId,
 ) -> ChannelInvitationCreatedProof {
@@ -199,7 +195,6 @@ pub(in crate::workflows) fn issue_invitation_accepted_or_materialized_proof(
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[allow(dead_code)]
 pub(in crate::workflows) fn issue_pending_invitation_consumed_proof(
     invitation_id: aura_core::InvitationId,
 ) -> PendingInvitationConsumedProof {
@@ -213,7 +208,6 @@ pub(in crate::workflows) fn issue_pending_invitation_consumed_proof(
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[allow(dead_code)]
 pub(in crate::workflows) fn issue_invitation_declined_proof(
     invitation_id: aura_core::InvitationId,
 ) -> InvitationDeclinedProof {
@@ -227,7 +221,6 @@ pub(in crate::workflows) fn issue_invitation_declined_proof(
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[allow(dead_code)]
 pub(in crate::workflows) fn issue_invitation_revoked_proof(
     invitation_id: aura_core::InvitationId,
 ) -> InvitationRevokedProof {
@@ -254,7 +247,6 @@ pub(in crate::workflows) fn issue_device_enrollment_started_proof(
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub(in crate::workflows) fn issue_message_committed_proof(
     message_id: impl Into<String>,
 ) -> MessageCommittedProof {

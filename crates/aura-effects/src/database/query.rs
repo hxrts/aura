@@ -59,9 +59,7 @@ pub enum QueryError {
 
 impl From<QueryError> for AuraError {
     fn from(err: QueryError) -> Self {
-        AuraError::Internal {
-            message: err.to_string(),
-        }
+        AuraError::internal(err.to_string())
     }
 }
 

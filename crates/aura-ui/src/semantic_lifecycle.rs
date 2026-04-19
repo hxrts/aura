@@ -1,9 +1,9 @@
 use crate::UiController;
 use async_trait::async_trait;
 use aura_app::frontend_primitives::{
-    dropped_owner_error, CeremonyMonitorHandoffSubmission, LocalTerminalSubmission,
-    SubmittedOperationPublisher, SubmittedOperationWorkflowError, WorkflowHandoffRelease,
-    WorkflowHandoffSubmission,
+    dropped_owner_error, run_frontend_sync_boundary, CeremonyMonitorHandoffSubmission,
+    LocalTerminalSubmission, SubmittedOperationPublisher, SubmittedOperationWorkflowError,
+    WorkflowHandoffRelease, WorkflowHandoffSubmission,
 };
 use aura_app::ui::scenarios::UiOperationHandle;
 use aura_app::ui_contract::{
@@ -12,7 +12,6 @@ use aura_app::ui_contract::{
     SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalOutcome,
     WorkflowTerminalStatus,
 };
-use futures::executor::block_on;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -207,12 +206,15 @@ impl SubmittedUiLocalOwner {
         kind: SemanticOperationKind,
         instance_id: OperationInstanceId,
     ) -> Self {
-        Self(block_on(LocalTerminalSubmission::submit_with_instance(
-            UiSubmittedOperationPublisher { controller },
-            operation_id,
-            kind,
-            instance_id,
-        )))
+        Self(run_frontend_sync_boundary(
+            "UiLocalOperationOwner::submit_with_instance",
+            LocalTerminalSubmission::submit_with_instance(
+                UiSubmittedOperationPublisher { controller },
+                operation_id,
+                kind,
+                instance_id,
+            ),
+        ))
     }
 
     fn operation_handle(&self) -> UiOperationHandle {
@@ -220,11 +222,11 @@ impl SubmittedUiLocalOwner {
     }
 
     fn succeed(self, causality: Option<SemanticOperationCausality>) {
-        block_on(self.0.succeed(causality));
+        run_frontend_sync_boundary("UiLocalOperationOwner::succeed", self.0.succeed(causality));
     }
 
     fn fail(self, error: SemanticOperationError) {
-        block_on(self.0.fail(error));
+        run_frontend_sync_boundary("UiLocalOperationOwner::fail", self.0.fail(error));
     }
 }
 
@@ -244,12 +246,15 @@ impl SubmittedUiHandoffOwner {
         kind: SemanticOperationKind,
         instance_id: OperationInstanceId,
     ) -> Self {
-        Self(block_on(WorkflowHandoffSubmission::submit_with_instance(
-            UiSubmittedOperationPublisher { controller },
-            operation_id,
-            kind,
-            instance_id,
-        )))
+        Self(run_frontend_sync_boundary(
+            "UiWorkflowHandoffOwner::submit_with_instance",
+            WorkflowHandoffSubmission::submit_with_instance(
+                UiSubmittedOperationPublisher { controller },
+                operation_id,
+                kind,
+                instance_id,
+            ),
+        ))
     }
 
     fn operation_handle(&self) -> UiOperationHandle {
@@ -257,7 +262,7 @@ impl SubmittedUiHandoffOwner {
     }
 
     fn fail(self, error: SemanticOperationError) {
-        block_on(self.0.fail(error));
+        run_frontend_sync_boundary("UiWorkflowHandoffOwner::fail", self.0.fail(error));
     }
 
     fn handoff_to_app_workflow(self, scope: UiOperationTransferScope) -> UiOperationTransfer {
@@ -385,7 +390,8 @@ impl SubmittedUiCeremonyOwner {
         kind: SemanticOperationKind,
         instance_id: OperationInstanceId,
     ) -> Self {
-        Self(block_on(
+        Self(run_frontend_sync_boundary(
+            "UiCeremonySubmissionOwner::submit_with_instance",
             CeremonyMonitorHandoffSubmission::submit_with_instance(
                 UiSubmittedOperationPublisher { controller },
                 operation_id,
@@ -400,15 +406,18 @@ impl SubmittedUiCeremonyOwner {
     }
 
     fn fail(self, error: SemanticOperationError) {
-        block_on(self.0.fail(error));
+        run_frontend_sync_boundary("UiCeremonySubmissionOwner::fail", self.0.fail(error));
     }
 
     fn monitor_started(self) {
-        let _ = block_on(self.0.monitor_started(None));
+        let _ = run_frontend_sync_boundary(
+            "UiCeremonySubmissionOwner::monitor_started",
+            self.0.monitor_started(None),
+        );
     }
 
     fn cancel(self) {
-        let _ = block_on(self.0.cancel());
+        let _ = run_frontend_sync_boundary("UiCeremonySubmissionOwner::cancel", self.0.cancel());
     }
 }
 

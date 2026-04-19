@@ -17,7 +17,7 @@ const HARNESS_INSTANCE_ID_KEY: &str = "AURA_HARNESS_INSTANCE_ID";
 const HARNESS_TIME_BASE_MS: u64 = 1_700_000_000_000;
 
 static HARNESS_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-#[allow(dead_code)]
+#[allow(dead_code)] // Native non-harness builds still need a deterministic fallback nonce source.
 static NON_HARNESS_NONCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +26,10 @@ struct HarnessContext {
     instance_id: String,
 }
 
-#[cfg_attr(not(all(target_arch = "wasm32", feature = "wasm")), allow(dead_code))]
+#[cfg_attr(
+    not(all(target_arch = "wasm32", feature = "wasm")),
+    allow(dead_code) // The wasm query parser is only exercised on harness/browser builds.
+)]
 fn parse_seed(raw: &str) -> Option<u64> {
     raw.parse::<u64>().ok()
 }
@@ -116,7 +119,7 @@ pub async fn parity_timestamp_ms(
     current_time_ms(app_core).await.map_err(Into::into)
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Nonce generation shares the harness determinism path before all callsites are wired through it.
 pub fn parity_generated_nonce(scope: &str, components: &[&str]) -> u64 {
     if let Some(context) = harness_context() {
         let sequence = next_sequence();

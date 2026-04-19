@@ -21,6 +21,9 @@ use aura_core::{
     TimeoutRunError,
 };
 
+// Harness-only convergence tuning for observed workflow stabilization. These
+// are intentionally env-tunable because they affect test/debug pacing rather
+// than production protocol semantics.
 const DEFAULT_HARNESS_CONVERGENCE_ROUNDS: usize = 8;
 const DEFAULT_HARNESS_CONVERGENCE_BACKOFF_MS: u64 = 150;
 const DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 1_000;
@@ -63,6 +66,30 @@ fn harness_convergence_step_timeout_ms() -> u64 {
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|timeout_ms| *timeout_ms > 0)
         .unwrap_or(DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS)
+}
+
+/// Resolve an observed-shell poll interval without letting UI crates branch on
+/// harness mode directly.
+pub fn harness_observed_poll_interval(env_key: &str, default_ms: u64) -> Duration {
+    harness_observed_poll_interval_for_mode(harness_mode_enabled(), env_key, default_ms)
+}
+
+/// Resolve an observed-shell poll interval for an explicit execution lane.
+pub fn harness_observed_poll_interval_for_mode(
+    harness_mode: bool,
+    env_key: &str,
+    default_ms: u64,
+) -> Duration {
+    if harness_mode {
+        let poll_ms = std::env::var(env_key)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|poll_ms| *poll_ms > 0)
+            .unwrap_or(default_ms);
+        Duration::from_millis(poll_ms)
+    } else {
+        Duration::from_millis(default_ms)
+    }
 }
 
 /// Shared timeout scaling profile for workflow-owned local deadlines.

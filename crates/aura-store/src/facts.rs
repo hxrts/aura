@@ -12,7 +12,8 @@
 use crate::types::{ByteSize, ChunkCount, ChunkIndex, NodeId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
-    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactSchemaCompatibility,
+    MAX_FACT_PAYLOAD_BYTES,
 };
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
@@ -20,6 +21,8 @@ use aura_core::{ChunkId, ContentId, ContextId};
 use serde::{Deserialize, Serialize};
 
 aura_core::define_fact_type_id!(storage, "aura.store.v1", 1);
+/// Oldest storage fact schema version this decoder still accepts.
+pub const STORAGE_FACT_MIN_SUPPORTED_SCHEMA_VERSION: u16 = STORAGE_FACT_SCHEMA_VERSION;
 
 /// Storage domain facts for journal integration
 ///
@@ -254,12 +257,11 @@ impl StorageFact {
             });
         }
 
-        if envelope.schema_version != STORAGE_FACT_SCHEMA_VERSION {
-            return Err(FactError::VersionMismatch {
-                expected: STORAGE_FACT_SCHEMA_VERSION,
-                actual: envelope.schema_version,
-            });
-        }
+        FactSchemaCompatibility::range(
+            STORAGE_FACT_MIN_SUPPORTED_SCHEMA_VERSION,
+            STORAGE_FACT_SCHEMA_VERSION,
+        )
+        .ensure_supported(envelope.schema_version)?;
 
         let fact = match envelope.encoding {
             FactEncoding::DagCbor => from_slice::<Self>(&envelope.payload)?,

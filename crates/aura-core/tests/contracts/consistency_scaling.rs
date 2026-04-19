@@ -58,7 +58,7 @@ fn create_acknowledgment_for_peers(num_peers: u16) -> Acknowledgment {
 ///
 /// Target: < 100ms for construction, < 10ms for lookups
 #[test]
-#[ignore]
+#[ignore = "performance characterization; re-enable when updating consistency metadata perf budgets or adding a dedicated perf CI lane"]
 fn test_ack_storage_at_scale() {
     const NUM_MESSAGES: usize = 10_000;
     const NUM_PEERS: u16 = 100;
@@ -156,7 +156,7 @@ fn test_ack_storage_at_scale() {
 ///
 /// Target: < 100ms for construction, < 1ms for 1000 lookups
 #[test]
-#[ignore]
+#[ignore = "performance characterization; re-enable when updating consistency map perf budgets or adding a dedicated perf CI lane"]
 fn test_consistency_map_query_performance() {
     const NUM_ENTRIES: usize = 10_000;
     const NUM_LOOKUPS: usize = 1_000;
@@ -272,7 +272,7 @@ fn test_consistency_map_query_performance() {
 ///
 /// Target: < 50ms to process 10k messages for GC eligibility
 #[test]
-#[ignore]
+#[ignore = "performance characterization; re-enable when updating GC eligibility perf budgets or adding a dedicated perf CI lane"]
 fn test_gc_performance_under_load() {
     const NUM_MESSAGES: usize = 10_000;
     const NUM_PEERS: u16 = 20;

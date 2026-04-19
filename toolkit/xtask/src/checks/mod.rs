@@ -64,6 +64,7 @@ pub fn run(name: &str, args: &[String]) -> Result<()> {
         "ownership-capability-audit" => policy::run_ownership_capability_audit(),
         "ownership-policy" => policy::run_ownership_policy(),
         "ownership-workflow-tag-ratchet" => policy::run_ownership_workflow_tag_ratchet(),
+        "ignored-test-count-ratchet" => policy::run_ignored_test_count_ratchet(),
         "privacy-tuning-gate" => policy::run_privacy_tuning_gate(),
         "privacy-legacy-sweep" => policy::run_privacy_legacy_sweep(),
         "privacy-runtime-locality" => policy::run_privacy_runtime_locality(),

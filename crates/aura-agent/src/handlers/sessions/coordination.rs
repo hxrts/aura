@@ -16,7 +16,6 @@ use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
     RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects, TransportError,
 };
-use aura_core::hash;
 use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
 use aura_core::util::serialization::to_vec;
 use aura_core::FlowCost;
@@ -89,22 +88,6 @@ struct SessionCreatedFact {
     session_type: SessionType,
     participants: Vec<DeviceId>,
     initiator: DeviceId,
-}
-
-#[derive(Debug, Serialize)]
-#[allow(dead_code)]
-struct SessionParticipantsFact {
-    #[serde(with = "session_id_serde")]
-    session_id: SessionId,
-    participants: Vec<DeviceId>,
-}
-
-#[derive(Debug, Serialize)]
-#[allow(dead_code)]
-struct SessionMetadataFact {
-    #[serde(with = "session_id_serde")]
-    session_id: SessionId,
-    metadata: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -191,26 +174,6 @@ impl SessionOperations {
             .store(&key, bytes)
             .await
             .map_err(|e| AgentError::effects(format!("store session: {e}")))
-    }
-
-    #[allow(dead_code)]
-    pub(super) async fn load_session_handle(
-        &self,
-        session_key: &str,
-    ) -> AgentResult<Option<SessionHandle>> {
-        let key = format!("session/{}", session_key);
-        let maybe = self
-            .effects
-            .retrieve(&key)
-            .await
-            .map_err(|e| AgentError::effects(format!("retrieve session: {e}")))?;
-        if let Some(bytes) = maybe {
-            let handle: SessionHandle = serde_json::from_slice(&bytes)
-                .map_err(|e| AgentError::effects(format!("deserialize session: {e}")))?;
-            Ok(Some(handle))
-        } else {
-            Ok(None)
-        }
     }
 
     pub(super) async fn persist_participants(
@@ -865,7 +828,7 @@ fn coordination_role(authority_id: AuthorityId, role_index: u16) -> Choreographi
 
 /// Internal type for tracking participant responses
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[allow(dead_code)] /* Cleanup target (2026-07): remove after coordination response aggregation emits all fields or this type is replaced. */
 struct ParticipantResponse {
     participant_id: DeviceId,
     accepted: bool,
@@ -911,43 +874,6 @@ impl SessionOperations {
     }
 
     // Private implementation methods
-
-    /// Create session via effects system
-    #[allow(dead_code)]
-    async fn create_session_via_effects(
-        &self,
-        _effects: &AuraEffectSystem,
-        session_type: &SessionType,
-    ) -> AgentResult<String> {
-        use aura_core::types::identifiers::SessionId;
-
-        let current_time = self.effects.current_timestamp().await.unwrap_or(0);
-        let device_id = self.device_id();
-        let mut material = Vec::with_capacity(64);
-        material.extend_from_slice(b"aura-session");
-        material.extend_from_slice(device_id.0.as_bytes());
-        material.extend_from_slice(&current_time.to_le_bytes());
-        match session_type {
-            SessionType::Coordination => material.push(0),
-            SessionType::ThresholdOperation => material.push(1),
-            SessionType::Recovery => material.push(2),
-            SessionType::KeyRotation => material.push(3),
-            SessionType::Invitation => material.push(4),
-            SessionType::Rendezvous => material.push(5),
-            SessionType::Sync => material.push(6),
-            SessionType::Backup => material.push(8),
-            SessionType::Custom(label) => {
-                material.push(7);
-                material.extend_from_slice(label.as_bytes());
-            }
-        }
-        let session_id = SessionId::new_from_entropy(hash::hash(&material));
-        let session_id_string = session_id.to_string();
-
-        // Session created successfully (logging removed for simplicity)
-
-        Ok(session_id_string)
-    }
 
     /// Get session status via effects system
     async fn get_session_status_via_effects(

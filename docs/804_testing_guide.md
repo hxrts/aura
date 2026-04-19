@@ -169,6 +169,8 @@ Browser semantic navigation follows the same separation. Page-owned navigation h
 
 Browser-owned semantic snapshot publication should flow through one helper aligned with `UiController::publish_ui_snapshot`. Browser-owned maintenance polling should share one bounded helper for sleep, cancellation, and pause reporting so those paths stay uniform and clearly non-semantic. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
 
+Browser-owned async account/bootstrap flows must also fail closed on shell-state publication. If a Dioxus signal write collides with an unmounting or busy component, the browser shell may retry on the next browser tick for the active generation, but it must not silently drop the state transition.
+
 ### Shared-Flow Coverage Anchors
 
 The canonical shared-flow coverage anchors for the current parity-critical user flows are listed below.
@@ -186,6 +188,8 @@ metadata should point at the owner modules that now carry those flows:
 invitation acceptance, and `workflows/messaging/{channel_refs,channels,send}.rs`
 for chat navigation, join, and message-send paths. The `aura-app::ui_contract`
 facade remains the canonical export surface for that coverage metadata.
+
+Harness-mode timing exceptions remain narrowly allowlisted. The current shared allowlist includes the browser maintenance cadence plus the runtime and workflow instrumentation hooks that feed observed-shell timing helpers; those branches may tune observation cadence only and must not change business-flow semantics.
 
 Shared pending-invitation acceptance has an additional invariant now:
 `SemanticOperationKind::AcceptPendingChannelInvitation` entry points must not

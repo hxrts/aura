@@ -1,7 +1,7 @@
 //! Runtime-owned local health observer.
 //!
 //! Derives smoothed local-only health snapshots for adaptive privacy policy.
-#![allow(dead_code)]
+#![allow(dead_code)] // Cleanup target (2026-07): remove after adaptive privacy health observation is wired into selection orchestration.
 
 use super::config_profiles::impl_service_config_profiles;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[allow(dead_code, clippy::enum_variant_names)]
+// Cleanup target (2026-07): drop after actor ingress replaces direct method calls in production wiring.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LocalHealthObserverCommand {
     ObserveProviderSet,

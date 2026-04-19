@@ -382,10 +382,11 @@ impl CryptoExtendedEffects for RealCryptoHandler {
             tracing::debug!(threshold, max_signers, "Generating FROST threshold keys");
 
             let frost_result = self.frost_generate_keys(threshold, max_signers).await?;
+            let (key_packages, public_key_package) = frost_result.into_parts();
 
             Ok(SigningKeyGenResult {
-                key_packages: frost_result.key_packages,
-                public_key_package: frost_result.public_key_package,
+                key_packages,
+                public_key_package,
                 mode: SigningMode::Threshold,
             })
         } else {

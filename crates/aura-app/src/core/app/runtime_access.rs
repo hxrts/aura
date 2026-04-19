@@ -11,8 +11,8 @@ use crate::views::ViewState;
 use crate::workflows::runtime::timeout_runtime_call as timeout_runtime_call_bounded;
 use crate::ReactiveHandler;
 use aura_core::tree::{AttestedOp, TreeOp};
-use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId};
-use aura_core::types::{Epoch, FrostThreshold};
+use aura_core::types::identifiers::{CeremonyId, ChannelId};
+use aura_core::types::Epoch;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -90,7 +90,6 @@ impl AppCore {
     }
 
     /// Get mutable access to view state (for internal updates).
-    #[allow(dead_code)]
     pub(crate) fn views_mut(&mut self) -> &mut ViewState {
         &mut self.views
     }
@@ -314,46 +313,6 @@ impl AppCore {
             "rollback_guardian_key_rotation",
             APP_RUNTIME_OPERATION_TIMEOUT,
             |runtime| async move { runtime.rollback_guardian_key_rotation(failed_epoch).await },
-        )
-        .await?
-    }
-
-    pub(crate) async fn initiate_guardian_ceremony(
-        &self,
-        threshold_k: FrostThreshold,
-        total_n: u16,
-        guardian_ids: &[AuthorityId],
-    ) -> Result<CeremonyId, IntentError> {
-        self.with_runtime_timeout(
-            "initiate_guardian_ceremony requires a runtime",
-            "initiate_guardian_ceremony",
-            "initiate_guardian_ceremony",
-            APP_RUNTIME_OPERATION_TIMEOUT,
-            |runtime| async move {
-                runtime
-                    .initiate_guardian_ceremony(threshold_k, total_n, guardian_ids)
-                    .await
-            },
-        )
-        .await?
-    }
-
-    pub(crate) async fn initiate_device_threshold_ceremony(
-        &self,
-        threshold_k: FrostThreshold,
-        total_n: u16,
-        device_ids: &[String],
-    ) -> Result<CeremonyId, IntentError> {
-        self.with_runtime_timeout(
-            "initiate_device_threshold_ceremony requires a runtime",
-            "initiate_device_threshold_ceremony",
-            "initiate_device_threshold_ceremony",
-            APP_RUNTIME_OPERATION_TIMEOUT,
-            |runtime| async move {
-                runtime
-                    .initiate_device_threshold_ceremony(threshold_k, total_n, device_ids)
-                    .await
-            },
         )
         .await?
     }

@@ -147,6 +147,47 @@ impl Default for AddDeviceModalState {
     }
 }
 
+impl AddDeviceModalState {
+    #[must_use]
+    pub const fn accepts_name_input(&self) -> bool {
+        matches!(self.step, AddDeviceWizardStep::Name)
+    }
+
+    #[must_use]
+    pub fn draft_name(&self) -> Option<&str> {
+        self.accepts_name_input()
+            .then_some(self.name_input.as_str())
+    }
+
+    pub fn set_draft_name(&mut self, value: String) {
+        if self.accepts_name_input() {
+            self.name_input = value;
+        }
+    }
+
+    pub fn push_draft_name_char(&mut self, ch: char) {
+        if self.accepts_name_input() {
+            self.name_input.push(ch);
+        }
+    }
+
+    #[must_use]
+    pub fn commit_draft_name(&mut self) -> Option<String> {
+        if !self.accepts_name_input() {
+            return None;
+        }
+
+        let name = self.name_input.trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+
+        self.device_name = name.clone();
+        self.name_input.clear();
+        Some(name)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ThresholdWizardModalState {
     pub step: ThresholdWizardStep,

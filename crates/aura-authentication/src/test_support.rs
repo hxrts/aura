@@ -1,19 +1,19 @@
 use crate::capabilities::{AuthenticationCapability, GuardianAuthCapability};
 use crate::guards::GuardSnapshot;
-use aura_core::types::identifiers::AuthorityId;
 use aura_core::{DeviceId, FlowCost};
 use aura_signature::session::SessionScope;
+use aura_testkit::test_builders;
 
-pub(crate) fn authority(seed: u8) -> AuthorityId {
-    AuthorityId::new_from_entropy([seed; 32])
+pub(crate) fn authority(seed: u8) -> aura_core::types::identifiers::AuthorityId {
+    test_builders::authority_id(seed)
 }
 
 pub(crate) fn device(seed: u8) -> DeviceId {
-    DeviceId::new_from_entropy([seed; 32])
+    test_builders::device_id(seed)
 }
 
 pub(crate) fn context(seed: u8) -> aura_core::types::identifiers::ContextId {
-    aura_core::types::identifiers::ContextId::new_from_entropy([seed; 32])
+    test_builders::context_id(seed)
 }
 
 pub(crate) fn protocol_scope(protocol_type: &str) -> SessionScope {

@@ -30,7 +30,6 @@ pub struct AuthorityContext {
     account_id: AccountId,
 
     /// Internal device identifier (derived from authority, not exposed publicly)
-    #[allow(dead_code)]
     pub(crate) device_id: aura_core::types::identifiers::DeviceId,
 }
 
@@ -101,7 +100,6 @@ impl AuthorityContext {
     }
 
     /// Internal access to device ID (crate-private)
-    #[allow(dead_code)]
     pub(crate) fn device_id(&self) -> aura_core::types::identifiers::DeviceId {
         self.device_id
     }

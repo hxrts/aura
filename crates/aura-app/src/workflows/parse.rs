@@ -1,4 +1,7 @@
 //! Common parsing helpers for workflow inputs.
+#![allow(dead_code)]
+// Parsing helpers are shared across workflow modules and target-specific test
+// builds; strict all-target dead-code analysis does not see every call path.
 
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
@@ -11,7 +14,6 @@ pub fn parse_authority_id(input: &str) -> Result<AuthorityId, AuraError> {
 }
 
 /// Parse a ContextId from user input.
-#[allow(dead_code)]
 pub fn parse_context_id(input: &str) -> Result<ContextId, AuraError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {

@@ -259,7 +259,7 @@ impl Default for ChoreographySessionState {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Cleanup target (2026-07): remove after every choreography-state helper is either runtime-owned or test-only.
 impl ChoreographyState {
     #[allow(clippy::disallowed_methods)] // Fallback for tests/sync callers outside a Tokio task.
     fn current_binding_key() -> ExecutionBindingKey {

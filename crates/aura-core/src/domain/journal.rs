@@ -18,6 +18,7 @@ use crate::{hash, AuraError};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Maximum number of entries in the LWW map per journal.
 pub const MAX_LWW_MAP_ENTRIES_COUNT: u32 = 65_536;
@@ -868,10 +869,13 @@ impl Default for Fact {
 ///
 /// This follows the meet-semilattice laws where adding blocks strictly reduces authority.
 /// See docs/106_authorization.md for the formal specification.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Cap {
-    /// Serialized Biscuit token (empty if no capabilities)
+    /// Security-sensitive serialized Biscuit bearer token bytes. Zeroized on drop.
     token_bytes: Vec<u8>,
+    /// Verification key material stored alongside the token and cleared with it
+    /// on drop to avoid leaving capability context in memory.
+    ///
     /// Root public key bytes (32 bytes for Ed25519, empty if unknown)
     /// Required for proper meet semantics and token verification
     #[serde(default)]

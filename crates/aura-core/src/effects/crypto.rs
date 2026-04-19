@@ -19,6 +19,7 @@ use crate::types::identifiers::DeviceId;
 use crate::{AccountId, AuraError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const MAX_KEY_PACKAGE_BYTES: usize = 65_536;
 pub const MAX_PUBLIC_KEY_PACKAGE_BYTES: usize = 65_536;
@@ -44,12 +45,24 @@ pub struct KeyDerivationContext {
 }
 
 /// FROST key generation result containing both individual key packages and the group public key
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct FrostKeyGenResult {
-    /// Individual key packages for each participant
+    /// Security-sensitive key packages for each participant. Zeroized on drop.
     pub key_packages: Vec<Vec<u8>>,
     /// Group public key package needed for signature aggregation and verification
     pub public_key_package: Vec<u8>,
+}
+
+impl FrostKeyGenResult {
+    /// Extract the generated packages while preserving zeroize-on-drop for any
+    /// remaining buffers left in the container.
+    #[must_use]
+    pub fn into_parts(mut self) -> (Vec<Vec<u8>>, Vec<u8>) {
+        (
+            std::mem::take(&mut self.key_packages),
+            std::mem::take(&mut self.public_key_package),
+        )
+    }
 }
 
 /// FROST signing package for threshold signatures
@@ -72,9 +85,9 @@ pub use crate::crypto::single_signer::SigningMode;
 ///
 /// This type is returned by `generate_signing_keys()` and contains everything
 /// needed to store and use the generated keys.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SigningKeyGenResult {
-    /// Key packages (one per participant).
+    /// Security-sensitive key packages (one per participant). Zeroized on drop.
     ///
     /// For single-signer: contains one `SingleSignerKeyPackage` serialized.
     /// For threshold: contains FROST `KeyPackage` for each participant.
@@ -89,7 +102,21 @@ pub struct SigningKeyGenResult {
     /// Which signing mode was used.
     ///
     /// This determines which signing/verification algorithm to use.
+    #[zeroize(skip)]
     pub mode: SigningMode,
+}
+
+impl SigningKeyGenResult {
+    /// Extract the generated packages and mode while preserving zeroize-on-drop
+    /// for any remaining secret buffers left in the container.
+    #[must_use]
+    pub fn into_parts(mut self) -> (Vec<Vec<u8>>, Vec<u8>, SigningMode) {
+        (
+            std::mem::take(&mut self.key_packages),
+            std::mem::take(&mut self.public_key_package),
+            self.mode,
+        )
+    }
 }
 
 /// Supported key generation methods for threshold signing.

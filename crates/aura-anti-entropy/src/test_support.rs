@@ -1,7 +1,8 @@
 //! Shared test fixtures for anti-entropy tests.
 
 use crate::BloomDigest;
-use aura_core::types::identifiers::{ContextId, DeviceId};
+use aura_core::types::identifiers::ContextId;
+use aura_core::DeviceId;
 use aura_core::{tree::AttestedOp, Epoch, Hash32, TreeOp, TreeOpKind};
 use aura_journal::{LeafId, LeafNode, NodeIndex};
 use std::collections::BTreeSet;
@@ -41,5 +42,7 @@ pub fn test_context(seed: u8) -> ContextId {
 }
 
 pub fn test_device(id: u128) -> DeviceId {
-    DeviceId::from_uuid(uuid::Uuid::from_u128(id))
+    DeviceId::new_from_entropy(
+        [u8::try_from(id).expect("anti-entropy test seed should fit in u8"); 32],
+    )
 }

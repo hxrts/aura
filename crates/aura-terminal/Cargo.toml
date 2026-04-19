@@ -70,7 +70,7 @@ aura-testkit = { path = "../aura-testkit", optional = true, features = ["full-ef
 
 async-trait = { workspace = true }
 iocraft = "0.7.16"
-futures-signals = "0.3"
+futures-signals = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
 hex = { workspace = true }

@@ -8,7 +8,8 @@
 
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
-    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactSchemaCompatibility,
+    MAX_FACT_PAYLOAD_BYTES,
 };
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::types::scope::{AuthorizationOp, ResourceScope};
@@ -18,6 +19,8 @@ use aura_core::Cap;
 use serde::{Deserialize, Serialize};
 
 aura_core::define_fact_type_id!(wot, "wot/v1", 1);
+/// Oldest Web-of-Trust fact schema version this decoder still accepts.
+pub const WOT_FACT_MIN_SUPPORTED_SCHEMA_VERSION: u16 = WOT_FACT_SCHEMA_VERSION;
 
 /// Web of Trust domain facts for authorization state changes.
 ///
@@ -227,12 +230,11 @@ impl WotFact {
             });
         }
 
-        if envelope.schema_version != WOT_FACT_SCHEMA_VERSION {
-            return Err(FactError::VersionMismatch {
-                expected: WOT_FACT_SCHEMA_VERSION,
-                actual: envelope.schema_version,
-            });
-        }
+        FactSchemaCompatibility::range(
+            WOT_FACT_MIN_SUPPORTED_SCHEMA_VERSION,
+            WOT_FACT_SCHEMA_VERSION,
+        )
+        .ensure_supported(envelope.schema_version)?;
 
         let fact = match envelope.encoding {
             FactEncoding::DagCbor => from_slice(&envelope.payload)?,

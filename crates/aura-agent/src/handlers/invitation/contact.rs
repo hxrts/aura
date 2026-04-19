@@ -579,40 +579,40 @@ impl<'a> InvitationContactHandler<'a> {
                         )
                         .await?;
                         self.handler.invitation_cache.cache_invitation(updated.clone()).await;
-                        match &updated.invitation_type {
-                            InvitationType::Channel {
-                                home_id,
-                                nickname_suggestion,
-                                ..
-                            } => {
-                                let home_name = require_channel_invitation_name(
-                                    *home_id,
-                                    nickname_suggestion.clone(),
-                                )?;
-                                self.publish_channel_acceptance_chat_projection(
-                                    effects.as_ref(),
-                                    updated.context_id,
-                                    *home_id,
-                                    &home_name,
-                                    updated.sender_id,
-                                    updated.receiver_id,
-                                )
-                                .await?;
-                                crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
-                                    &reactive,
-                                    *home_id,
-                                    &home_name,
-                                    updated.sender_id,
-                                    updated.receiver_id,
-                                    updated.context_id,
-                                    now_ms,
-                                )
-                                .await
-                                .map_err(AgentError::runtime)?;
-                                home_name
-                            }
-                            _ => unreachable!("non-channel invitation filtered above"),
-                        }
+                        let InvitationType::Channel {
+                            home_id,
+                            nickname_suggestion,
+                            ..
+                        } = &updated.invitation_type
+                        else {
+                            return Err(AgentError::internal(
+                                "channel invitation acceptance persisted a non-channel invitation"
+                                    .to_string(),
+                            ));
+                        };
+                        let home_name =
+                            require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
+                        self.publish_channel_acceptance_chat_projection(
+                            effects.as_ref(),
+                            updated.context_id,
+                            *home_id,
+                            &home_name,
+                            updated.sender_id,
+                            updated.receiver_id,
+                        )
+                        .await?;
+                        crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                            &reactive,
+                            *home_id,
+                            &home_name,
+                            updated.sender_id,
+                            updated.receiver_id,
+                            updated.context_id,
+                            now_ms,
+                        )
+                        .await
+                        .map_err(AgentError::runtime)?;
+                        home_name
                     } else {
                         let resolved_home_name = acceptance
                             .channel_name

@@ -27,6 +27,7 @@ cfg_if! {
         pub use real::RealTransportHandler;
         pub use utils::{AddressResolver, BufferUtils, ConnectionMetrics, TimeoutHelper, UrlValidator};
     } else {
+        mod env;
         pub mod framing;
         pub mod real;
         pub mod tcp;
@@ -333,23 +334,38 @@ impl TransportMetadata {
 pub struct TransportConfig {
     /// Connection timeout
     pub connect_timeout: NonZeroDuration,
+    /// DNS lookup timeout for hostname-based transports
+    pub dns_timeout: NonZeroDuration,
     /// Read timeout
     pub read_timeout: NonZeroDuration,
     /// Write timeout
     pub write_timeout: NonZeroDuration,
+    /// Bounded number of connect attempts for transient network failures
+    pub connect_retry_attempts: NonZeroUsize,
+    /// Base delay for exponential connect backoff
+    pub connect_retry_base_delay: NonZeroDuration,
+    /// Maximum delay for exponential connect backoff
+    pub connect_retry_max_delay: NonZeroDuration,
     /// Buffer size
     pub buffer_size: NonZeroUsize,
 }
 
-#[allow(clippy::expect_used)] // Constants (30, 60, 64*1024) are always non-zero
+#[allow(clippy::expect_used)] // Default transport constants are compile-time non-zero values.
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
             connect_timeout: NonZeroDuration::from_secs(30)
                 .expect("connect timeout should be non-zero"),
+            dns_timeout: NonZeroDuration::from_secs(5).expect("dns timeout should be non-zero"),
             read_timeout: NonZeroDuration::from_secs(60).expect("read timeout should be non-zero"),
             write_timeout: NonZeroDuration::from_secs(30)
                 .expect("write timeout should be non-zero"),
+            connect_retry_attempts: NonZeroUsize::new(3)
+                .expect("connect retry attempts should be non-zero"),
+            connect_retry_base_delay: NonZeroDuration::from_millis(250)
+                .expect("connect retry base delay should be non-zero"),
+            connect_retry_max_delay: NonZeroDuration::from_secs(2)
+                .expect("connect retry max delay should be non-zero"),
             buffer_size: NonZeroUsize::new(64 * 1024).expect("buffer size should be non-zero"),
         }
     }

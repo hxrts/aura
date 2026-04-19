@@ -4,6 +4,7 @@ use aura_app::ui::contract::ConfirmationState;
 use aura_app::ui::signals::{CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL};
 use aura_app::ui::types::{ContactRelationshipState, ContactsState};
 use aura_app::ui_contract::RuntimeFact;
+use aura_app::views::EffectiveName;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::AuthorityId;
 use std::collections::HashSet;
@@ -41,17 +42,7 @@ pub(in crate::app) struct ContactsRuntimeView {
 }
 
 fn display_contact_name(contact: &aura_app::ui::types::Contact) -> String {
-    if !contact.nickname.trim().is_empty() {
-        return contact.nickname.clone();
-    }
-    if let Some(suggestion) = contact
-        .nickname_suggestion
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        return suggestion.clone();
-    }
-    contact.id.to_string().chars().take(8).collect()
+    contact.effective_name()
 }
 
 fn build_contacts_runtime_view(
@@ -285,6 +276,58 @@ mod tests {
                 .find(|contact| contact.authority_id == dave)
                 .map(|contact| (contact.relationship_state, contact.is_guardian)),
             Some((ContactRelationshipState::Friend, true))
+        );
+    }
+
+    #[test]
+    fn build_contacts_runtime_view_uses_shared_effective_name_fallback() {
+        let suggestion_only = AuthorityId::new_from_entropy([7u8; 32]);
+        let fallback_only = AuthorityId::new_from_entropy([8u8; 32]);
+        let fallback_name = aura_app::views::truncate_id_for_display(&fallback_only.to_string());
+        let contacts = ContactsState::from_contacts([
+            Contact {
+                id: suggestion_only,
+                nickname: String::new(),
+                nickname_suggestion: Some("Suggested".to_string()),
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: true,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::Contact,
+                invitation_code: None,
+            },
+            Contact {
+                id: fallback_only,
+                nickname: String::new(),
+                nickname_suggestion: None,
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: false,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::Contact,
+                invitation_code: None,
+            },
+        ]);
+
+        let runtime = build_contacts_runtime_view(contacts, DiscoveredPeersState::default());
+
+        assert_eq!(
+            runtime
+                .contacts
+                .iter()
+                .find(|contact| contact.authority_id == suggestion_only)
+                .map(|contact| contact.name.as_str()),
+            Some("Suggested")
+        );
+        assert_eq!(
+            runtime
+                .contacts
+                .iter()
+                .find(|contact| contact.authority_id == fallback_only)
+                .map(|contact| contact.name.as_str()),
+            Some(fallback_name.as_str())
         );
     }
 }

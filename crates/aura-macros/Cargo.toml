@@ -18,22 +18,23 @@ default = ["proc-macro"]
 proc-macro = []
 
 [dependencies]
-proc-macro2 = { version = "1.0", features = ["span-locations"] }
-quote = "1.0"
-syn = { version = "2.0", features = ["full", "extra-traits", "visit"] }
+proc-macro2 = { workspace = true, features = ["span-locations"] }
+quote = { workspace = true }
+syn = { workspace = true, features = ["full", "extra-traits", "visit"] }
 telltale = { workspace = true }
 telltale-language = { workspace = true }
 telltale-theory = { workspace = true }
-futures = "0.3"
-thiserror = "1.0"
+futures = { workspace = true }
+thiserror = { workspace = true }
 serde_json = { workspace = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
 aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.2.0" }
 aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.2.0" }
 
 [dev-dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-futures = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
 aura-core = { package = "hxrts-aura-core", version = "=0.2.0", path = "../aura-core" }
-trybuild = "1.0"
+aura-journal = { package = "hxrts-aura-journal", version = "=0.2.0", path = "../aura-journal" }
+trybuild = { workspace = true }

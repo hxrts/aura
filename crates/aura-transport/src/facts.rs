@@ -5,7 +5,8 @@
 
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
-    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactSchemaCompatibility,
+    MAX_FACT_PAYLOAD_BYTES,
 };
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
@@ -14,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use crate::context_transport::TransportProtocol;
 
 aura_core::define_fact_type_id!(transport, "transport/v1", 1);
+/// Oldest transport fact schema version this decoder still accepts.
+pub const TRANSPORT_FACT_MIN_SUPPORTED_SCHEMA_VERSION: u16 = TRANSPORT_FACT_SCHEMA_VERSION;
 
 fn physical_time_ms(ts_ms: u64) -> PhysicalTime {
     PhysicalTime {
@@ -393,12 +396,11 @@ impl TransportFact {
             });
         }
 
-        if envelope.schema_version != TRANSPORT_FACT_SCHEMA_VERSION {
-            return Err(FactError::VersionMismatch {
-                expected: TRANSPORT_FACT_SCHEMA_VERSION,
-                actual: envelope.schema_version,
-            });
-        }
+        FactSchemaCompatibility::range(
+            TRANSPORT_FACT_MIN_SUPPORTED_SCHEMA_VERSION,
+            TRANSPORT_FACT_SCHEMA_VERSION,
+        )
+        .ensure_supported(envelope.schema_version)?;
 
         let fact = match envelope.encoding {
             FactEncoding::DagCbor => from_slice(&envelope.payload)?,

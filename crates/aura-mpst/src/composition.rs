@@ -432,7 +432,7 @@ pub struct CompositionDelegationConstraint {
 /// Resolve canonical startup defaults from a generated choreography qualified name.
 #[must_use]
 pub fn startup_defaults_for_qualified_name(qualified_name: &str) -> CompositionStartupDefaults {
-    let custom = match qualified_name {
+    match qualified_name {
         "aura_consensus.AuraConsensus" => CompositionStartupDefaults {
             protocol_id: Some("aura.consensus"),
             required_capabilities: &["byzantine_envelope"],
@@ -468,15 +468,13 @@ pub fn startup_defaults_for_qualified_name(qualified_name: &str) -> CompositionS
                 return CompositionStartupDefaults::production_default(protocol_id);
             }
 
-            return CompositionStartupDefaults {
+            CompositionStartupDefaults {
                 protocol_id: None,
                 required_capabilities: &[],
                 determinism_policy_ref: DEFAULT_DETERMINISM_POLICY_REF,
-            };
+            }
         }
-    };
-
-    custom
+    }
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+use super::error_boundary::{bridge_internal, bridge_storage};
 use super::AgentRuntimeBridge;
 use aura_app::ui::workflows::authority::{
     authority_storage_key, serialize_authority, AuthorityRecord,
@@ -38,11 +39,7 @@ impl AgentRuntimeBridge {
         let created_at = effects
             .physical_time()
             .await
-            .map_err(|error| {
-                IntentError::internal_error(format!(
-                    "Failed to determine account creation time: {error}"
-                ))
-            })?
+            .map_err(|error| bridge_internal("Determine account creation time failed", error))?
             .ts_ms;
 
         let (key, mut config) = self
@@ -72,9 +69,7 @@ impl AgentRuntimeBridge {
             .retrieve(&key)
             .await
             .map_err(|error| {
-                IntentError::storage_error(format!(
-                    "Failed to read authority record {key}: {error}"
-                ))
+                bridge_storage("Read authority record failed", format!("{key}: {error}"))
             })?
             .is_some()
         {
@@ -82,9 +77,9 @@ impl AgentRuntimeBridge {
         }
 
         let bytes = serialize_authority(&AuthorityRecord::new(authority_id, 1, created_at))
-            .map_err(IntentError::internal_error)?;
+            .map_err(|error| bridge_internal("Serialize authority record failed", error))?;
         effects.store(&key, bytes).await.map_err(|error| {
-            IntentError::storage_error(format!("Failed to persist authority record {key}: {error}"))
+            bridge_storage("Persist authority record failed", format!("{key}: {error}"))
         })?;
         Ok(())
     }
@@ -95,17 +90,17 @@ impl AgentRuntimeBridge {
         let effects = self.agent.runtime().effects();
 
         for key in ACCOUNT_CONFIG_KEYS {
-            let bytes = effects
-                .retrieve(key)
-                .await
-                .map_err(|e| IntentError::storage_error(format!("Failed to read {key}: {e}")))?;
+            let bytes = effects.retrieve(key).await.map_err(|error| {
+                bridge_storage("Read account config failed", format!("{key}: {error}"))
+            })?;
 
             let Some(bytes) = bytes else {
                 continue;
             };
 
-            let config: StoredAccountConfig = serde_json::from_slice(&bytes)
-                .map_err(|e| IntentError::internal_error(format!("Failed to parse {key}: {e}")))?;
+            let config: StoredAccountConfig = serde_json::from_slice(&bytes).map_err(|error| {
+                bridge_internal("Parse account config failed", format!("{key}: {error}"))
+            })?;
 
             return Ok(Some((key.to_string(), config)));
         }
@@ -132,13 +127,13 @@ impl AgentRuntimeBridge {
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
 
-        let bytes = serde_json::to_vec(config)
-            .map_err(|e| IntentError::internal_error(format!("Failed to serialize {key}: {e}")))?;
+        let bytes = serde_json::to_vec(config).map_err(|error| {
+            bridge_internal("Serialize account config failed", format!("{key}: {error}"))
+        })?;
 
-        effects
-            .store(key, bytes)
-            .await
-            .map_err(|e| IntentError::storage_error(format!("Failed to write {key}: {e}")))?;
+        effects.store(key, bytes).await.map_err(|error| {
+            bridge_storage("Write account config failed", format!("{key}: {error}"))
+        })?;
 
         Ok(())
     }

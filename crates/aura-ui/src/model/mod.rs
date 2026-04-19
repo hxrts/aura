@@ -149,6 +149,13 @@ pub struct ToastState {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct AccountSetupState {
+    pub ready: bool,
+    pub name: String,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedHome {
     pub id: String,
@@ -162,11 +169,32 @@ pub struct NotificationSelectionId(pub String);
 pub struct NeighborhoodMemberSelectionKey(pub String);
 
 #[derive(Debug, Clone)]
+pub struct DemoState {
+    pub last_invite_code: Option<String>,
+    pub last_scan: String,
+    pub has_secondary_device: bool,
+    pub secondary_device_name: Option<String>,
+    pub contact_shortcuts: Option<DemoContactShortcuts>,
+    pub device_shortcut: Option<DemoDeviceShortcut>,
+}
+
+impl Default for DemoState {
+    fn default() -> Self {
+        Self {
+            last_invite_code: None,
+            last_scan: "never".to_string(),
+            has_secondary_device: false,
+            secondary_device_name: None,
+            contact_shortcuts: None,
+            device_shortcut: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct UiModel {
     pub semantic_revision: ProjectionRevision,
-    pub account_ready: bool,
-    pub account_setup_name: String,
-    pub account_setup_error: Option<String>,
+    pub account_setup: AccountSetupState,
     pub screen: ScreenId,
     pub settings_section: SettingsSection,
     pub channels: Vec<ChannelRow>,
@@ -194,10 +222,7 @@ pub struct UiModel {
     pub authority_id: String,
     pub profile_nickname: String,
     pub invite_counter: u64,
-    pub last_invite_code: Option<String>,
-    pub last_scan: String,
-    pub has_secondary_device: bool,
-    pub secondary_device_name: Option<String>,
+    pub demo: DemoState,
     pub selected_contact_id: Option<AuthorityId>,
     pub selected_authority_id: Option<AuthorityId>,
     pub selected_channel: Option<String>,
@@ -208,8 +233,6 @@ pub struct UiModel {
     /// `sync_runtime_notifications`. Cleared on session restart.
     pub dismissed_notification_ids: std::collections::HashSet<NotificationSelectionId>,
     pub contact_details: bool,
-    pub demo_contact_shortcuts: Option<DemoContactShortcuts>,
-    pub demo_device_shortcut: Option<DemoDeviceShortcut>,
 }
 
 macro_rules! modal_state_accessors {
@@ -229,7 +252,7 @@ macro_rules! modal_state_accessors {
 
 impl UiModel {
     fn clear_generic_invitation_code_cache(&mut self) {
-        self.last_invite_code = None;
+        self.demo.last_invite_code = None;
         self.runtime_events.retain(|event| {
             !matches!(
                 &event.fact,
@@ -242,12 +265,25 @@ impl UiModel {
         });
     }
 
+    pub(crate) fn clear_current_invitation_code(&mut self) {
+        self.clear_generic_invitation_code_cache();
+        if let Some(state) = self
+            .active_modal
+            .as_mut()
+            .and_then(ActiveModal::create_invitation_mut)
+        {
+            state.generated_code = None;
+        }
+    }
+
     pub fn new(authority_id: String) -> Self {
         Self {
             semantic_revision: next_projection_revision(None),
-            account_ready: true,
-            account_setup_name: String::new(),
-            account_setup_error: None,
+            account_setup: AccountSetupState {
+                ready: true,
+                name: String::new(),
+                error: None,
+            },
             screen: ScreenId::Neighborhood,
             settings_section: SettingsSection::Profile,
             channels: Vec::new(),
@@ -275,10 +311,7 @@ impl UiModel {
             authority_id,
             profile_nickname: "Ops".to_string(),
             invite_counter: 0,
-            last_invite_code: None,
-            last_scan: "never".to_string(),
-            has_secondary_device: false,
-            secondary_device_name: None,
+            demo: DemoState::default(),
             selected_contact_id: None,
             selected_authority_id: None,
             selected_channel: None,
@@ -286,8 +319,6 @@ impl UiModel {
             selected_notification_id: None,
             dismissed_notification_ids: std::collections::HashSet::new(),
             contact_details: false,
-            demo_contact_shortcuts: None,
-            demo_device_shortcut: None,
         }
     }
 
@@ -303,6 +334,18 @@ impl UiModel {
             .map(|row| row.name.as_str())
     }
 
+    pub fn account_ready(&self) -> bool {
+        self.account_setup.ready
+    }
+
+    pub fn account_setup_name(&self) -> &str {
+        &self.account_setup.name
+    }
+
+    pub fn account_setup_error(&self) -> Option<&str> {
+        self.account_setup.error.as_deref()
+    }
+
     pub fn selected_channel_id(&self) -> Option<&str> {
         self.selected_channel.as_deref()
     }
@@ -315,7 +358,7 @@ impl UiModel {
     }
 
     pub fn set_screen(&mut self, screen: ScreenId) {
-        let screen = if self.account_ready {
+        let screen = if self.account_setup.ready {
             Self::canonical_ready_screen(screen)
         } else {
             screen
@@ -367,7 +410,7 @@ impl UiModel {
         }
         self.create_invitation_modal()
             .and_then(|state| state.generated_code.clone())
-            .or_else(|| self.last_invite_code.clone())
+            .or_else(|| self.demo.last_invite_code.clone())
             .or_else(|| {
                 self.runtime_events
                     .iter()
@@ -889,8 +932,8 @@ impl UiModel {
 
     pub fn sync_devices(&mut self, devices: Vec<(String, bool)>) {
         let secondary = devices.into_iter().find(|(_, is_current)| !*is_current);
-        self.has_secondary_device = secondary.is_some();
-        self.secondary_device_name = secondary.map(|(name, _)| name);
+        self.demo.has_secondary_device = secondary.is_some();
+        self.demo.secondary_device_name = secondary.map(|(name, _)| name);
     }
 
     pub fn selected_channel_topic(&self) -> &str {
@@ -932,15 +975,23 @@ impl UiModel {
     }
 
     pub fn secondary_device_name(&self) -> Option<&str> {
-        self.secondary_device_name.as_deref()
+        self.demo.secondary_device_name.as_deref()
+    }
+
+    pub fn has_secondary_device(&self) -> bool {
+        self.demo.has_secondary_device
+    }
+
+    pub fn last_scan(&self) -> &str {
+        &self.demo.last_scan
     }
 
     pub fn demo_contact_shortcuts(&self) -> Option<&DemoContactShortcuts> {
-        self.demo_contact_shortcuts.as_ref()
+        self.demo.contact_shortcuts.as_ref()
     }
 
     pub fn demo_device_shortcut(&self) -> Option<&DemoDeviceShortcut> {
-        self.demo_device_shortcut.as_ref()
+        self.demo.device_shortcut.as_ref()
     }
 
     pub fn configure_demo_contact_shortcuts(
@@ -948,7 +999,7 @@ impl UiModel {
         alice_invite_code: impl Into<String>,
         carol_invite_code: impl Into<String>,
     ) {
-        self.demo_contact_shortcuts = Some(DemoContactShortcuts {
+        self.demo.contact_shortcuts = Some(DemoContactShortcuts {
             alice_invite_code: alice_invite_code.into(),
             carol_invite_code: carol_invite_code.into(),
         });
@@ -959,14 +1010,14 @@ impl UiModel {
         name: impl Into<String>,
         invitee_authority_id: AuthorityId,
     ) {
-        self.demo_device_shortcut = Some(DemoDeviceShortcut {
+        self.demo.device_shortcut = Some(DemoDeviceShortcut {
             name: name.into(),
             invitee_authority_id,
         });
     }
 
     pub fn demo_device_invitee_authority_id(&self, device_name: &str) -> Option<AuthorityId> {
-        self.demo_device_shortcut.as_ref().and_then(|shortcut| {
+        self.demo.device_shortcut.as_ref().and_then(|shortcut| {
             shortcut
                 .name
                 .eq_ignore_ascii_case(device_name)
@@ -975,7 +1026,7 @@ impl UiModel {
     }
 
     pub fn set_secondary_device_name(&mut self, value: Option<String>) {
-        self.secondary_device_name = value;
+        self.demo.secondary_device_name = value;
     }
 }
 
@@ -1217,7 +1268,7 @@ impl UiController {
 
     pub fn remember_invitation_code(&self, code: &str) {
         let mut model = write_model(&self.model);
-        model.last_invite_code = Some(code.to_string());
+        model.demo.last_invite_code = Some(code.to_string());
         if let Some(state) = model
             .active_modal
             .as_mut()
@@ -1341,12 +1392,12 @@ impl UiController {
         account_setup_error: Option<String>,
     ) {
         let mut model = write_model(&self.model);
-        model.account_ready = account_ready;
+        model.account_setup.ready = account_ready;
         if account_ready && model.screen == ScreenId::Onboarding {
             model.set_screen(ScreenId::Neighborhood);
         }
-        model.account_setup_name = account_setup_name.into();
-        model.account_setup_error = account_setup_error;
+        model.account_setup.name = account_setup_name.into();
+        model.account_setup.error = account_setup_error;
         let snapshot = model.semantic_snapshot();
         drop(model);
         self.publish_ui_snapshot(snapshot);
@@ -1355,9 +1406,9 @@ impl UiController {
 
     pub fn finalize_account_setup(&self, screen: ScreenId) {
         let mut model = write_model(&self.model);
-        model.account_ready = true;
-        model.account_setup_name.clear();
-        model.account_setup_error = None;
+        model.account_setup.ready = true;
+        model.account_setup.name.clear();
+        model.account_setup.error = None;
         model.set_screen(screen);
         let snapshot = model.semantic_snapshot();
         drop(model);
@@ -1501,7 +1552,7 @@ mod tests {
     #[test]
     fn current_invitation_code_prefers_modal_owned_code() {
         let mut model = UiModel::new("local".to_string());
-        model.last_invite_code = Some("INVITE-CACHED".to_string());
+        model.demo.last_invite_code = Some("INVITE-CACHED".to_string());
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
             generated_code: Some("INVITE-MODAL".to_string()),
             ..CreateInvitationModalState::default()
@@ -1656,7 +1707,7 @@ mod tests {
     #[test]
     fn ready_models_canonicalize_onboarding_screen() {
         let mut model = UiModel::new("authority-local".to_string());
-        model.account_ready = true;
+        model.account_setup.ready = true;
 
         model.set_screen(ScreenId::Onboarding);
 

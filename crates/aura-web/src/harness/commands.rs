@@ -482,15 +482,14 @@ async fn start_and_monitor_runtime_device_removal(
         let controller = controller.clone();
         let app_core = app_core.clone();
         async move {
+            let policy = ceremony_workflows::CeremonyPollPolicy::for_kind(
+                status_handle.kind(),
+                std::time::Duration::from_millis(250),
+            );
             let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
                 &app_core,
                 &status_handle,
-                ceremony_workflows::CeremonyPollPolicy {
-                    interval: std::time::Duration::from_millis(250),
-                    max_attempts: 160,
-                    rollback_on_failure: true,
-                    refresh_settings_on_complete: true,
-                },
+                policy,
                 |_| {
                     controller.request_rerender();
                 },

@@ -92,7 +92,7 @@ This isolation keeps the guard chain deterministic and side-channel free.
 
 ## Biscuit Token Workflow
 
-Biscuit tokens guarantee cryptographically verifiable, attenuated delegation chains. Each token carries a signature chain that prevents forgery and supports offline verification without contacting the issuer. Attenuation is monotone: each delegation step can only reduce authority, never widen it. Epoch rotation provides revocation by invalidating old tokens.
+Biscuit tokens guarantee cryptographically verifiable, attenuated delegation chains. Each token carries a signature chain that prevents forgery and supports offline verification without contacting the issuer. Attenuation is monotone: each delegation step can only reduce authority, never widen it. Epoch rotation provides revocation by invalidating old tokens. Aura does not maintain a separate per-token revocation list in `aura-authorization`; revocation is authority-wide and anchored to the currently trusted root key for that authority.
 
 Issuance is explicit. The runtime selects a reviewed token grant profile and
 materializes a concrete `Vec<CapabilityName>` at the issuance boundary. That

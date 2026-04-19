@@ -27,20 +27,29 @@ use aura_sync::protocols::{
 };
 use std::collections::BTreeMap;
 use uuid::Uuid;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const PROTOCOL_ID: &str = "aura.sync.device_epoch_rotation";
 const COMMIT_STORAGE_NAMESPACE: &str = "device_epoch_rotation_commit";
 const COMMIT_STATUS_POLL_MS: u64 = 100;
 const COMMIT_STATUS_TIMEOUT_MS: u64 = 10_000;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct DeviceEpochRotationInitRequest {
+    #[zeroize(skip)]
     pub ceremony_id: CeremonyId,
+    #[zeroize(skip)]
     pub kind: DeviceEpochRotationKind,
+    #[zeroize(skip)]
     pub pending_epoch: u64,
+    #[zeroize(skip)]
     pub participant_device_id: DeviceId,
+    /// Security-sensitive serialized key package. Zeroized on drop.
     pub key_package: Vec<u8>,
+    /// Security-sensitive serialized threshold configuration. Zeroized on drop.
     pub threshold_config: Vec<u8>,
+    /// Device-epoch public key package retained with the secret material and
+    /// cleared on drop with the rest of the ceremony payload.
     pub public_key_package: Vec<u8>,
 }
 

@@ -6,6 +6,7 @@ use iocraft::prelude::*;
 
 use aura_app::ui::signals::{CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::ui::types::invitations::{InvitationDirection, InvitationStatus, InvitationType};
+use aura_app::ui::types::{truncate_id_for_display, EffectiveName};
 use aura_app::ui_contract::{InvitationFactKind, OperationState, RuntimeFact};
 
 use crate::tui::components::{DetailPanel, KeyValue, ListPanel};
@@ -75,17 +76,7 @@ struct NotificationItem {
 }
 
 fn display_contact_name(contact: &aura_app::ui::types::Contact) -> String {
-    if !contact.nickname.trim().is_empty() {
-        return contact.nickname.clone();
-    }
-    if let Some(suggestion) = contact
-        .nickname_suggestion
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        return suggestion.clone();
-    }
-    contact.id.to_string().chars().take(8).collect()
+    contact.effective_name()
 }
 
 fn runtime_event_timestamp(total_events: usize, index: usize) -> u64 {
@@ -106,7 +97,7 @@ fn runtime_notification_item(
             let name = contact_names
                 .get(authority_id)
                 .cloned()
-                .unwrap_or_else(|| authority_id.chars().take(8).collect());
+                .unwrap_or_else(|| truncate_id_for_display(authority_id));
             Some(NotificationItem {
                 id: format!("contact-accepted:{authority_id}"),
                 title: format!("{name} is now a contact"),

@@ -101,10 +101,12 @@ pub enum MoveManagerError {
 #[derive(Debug, Clone)]
 struct MoveQueueEntry {
     #[allow(dead_code)]
+    /* TODO(2026-07): remove once replay-marker diagnostics or persistence consume the marker. */
     marker: [u8; 32],
     envelope: TransportEnvelope,
     route: Route,
     #[allow(dead_code)]
+    /* TODO(2026-07): remove once queue-age scheduling consumes the timestamp or the field is deleted. */
     queued_at_ms: u64,
 }
 

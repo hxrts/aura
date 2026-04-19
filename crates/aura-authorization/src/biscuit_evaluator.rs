@@ -63,6 +63,8 @@ impl BiscuitAuthorizationBridge {
     }
 
     /// Production Biscuit authorization with cryptographic verification and Datalog policy evaluation
+    ///
+    /// Callers must supply time via `authorize_with_time`; omitting it fails closed.
     pub fn authorize(
         &self,
         token: &Biscuit,
@@ -72,7 +74,7 @@ impl BiscuitAuthorizationBridge {
         self.authorize_with_time(token, operation, resource, None)
     }
 
-    /// Production Biscuit authorization with explicit time for deterministic testing
+    /// Production Biscuit authorization with explicit time for deterministic testing and expiry checks.
     pub fn authorize_with_time(
         &self,
         token: &Biscuit,
@@ -80,6 +82,7 @@ impl BiscuitAuthorizationBridge {
         resource: &ResourceScope,
         current_time_seconds: Option<u64>,
     ) -> Result<AuthorizationResult, BiscuitError> {
+        let current_time_seconds = require_time(current_time_seconds)?;
         // Phase 1: Verify token signature against our root public key.
         // Re-serialize and re-verify to ensure the token was issued by the
         // trusted root, not by a different authority with a different key.
@@ -123,6 +126,8 @@ impl BiscuitAuthorizationBridge {
     }
 
     /// Check if token has specific capability through Datalog evaluation
+    ///
+    /// Callers must supply time via `has_capability_with_time`; omitting it fails closed.
     pub fn has_capability(&self, token: &Biscuit, capability: &str) -> Result<bool, BiscuitError> {
         self.has_capability_with_time(token, capability, None)
     }
@@ -134,6 +139,7 @@ impl BiscuitAuthorizationBridge {
         capability: &str,
         current_time_seconds: Option<u64>,
     ) -> Result<bool, BiscuitError> {
+        let current_time_seconds = require_time(current_time_seconds)?;
         let capability_name =
             CapabilityName::parse(capability).map_err(invalid_capability_error)?;
         let capability = capability_name.as_str();
@@ -217,7 +223,7 @@ impl BiscuitAuthorizationBridge {
         &self,
         authorizer: &mut biscuit_auth::Authorizer,
         operation_str: &str,
-        current_time_seconds: Option<u64>,
+        current_time_seconds: u64,
     ) -> Result<(), BiscuitError> {
         Self::add_fact(authorizer, fact!("operation({operation_str})"))?;
         self.add_authority_and_time_facts(authorizer, current_time_seconds)
@@ -226,10 +232,10 @@ impl BiscuitAuthorizationBridge {
     fn add_authority_and_time_facts(
         &self,
         authorizer: &mut biscuit_auth::Authorizer,
-        current_time_seconds: Option<u64>,
+        current_time_seconds: u64,
     ) -> Result<(), BiscuitError> {
         let authority = self.authority_id.to_string();
-        let time = current_time_seconds.map(|t| t as i64).unwrap_or(0);
+        let time = current_time_seconds as i64;
         Self::add_fact(authorizer, fact!("authority({authority})"))?;
         Self::add_fact(authorizer, fact!("time({time})"))
     }
@@ -323,6 +329,10 @@ impl BiscuitAuthorizationBridge {
 
 fn invalid_capability_error(error: CapabilityNameError) -> BiscuitError {
     BiscuitError::InvalidCapability(error.to_string())
+}
+
+fn require_time(current_time_seconds: Option<u64>) -> Result<u64, BiscuitError> {
+    current_time_seconds.ok_or(BiscuitError::TimeRequired)
 }
 
 // ============================================================================

@@ -165,6 +165,11 @@ Converted semantic-owner paths also follow two stricter publication rules:
   explicit degraded outcomes such as runtime-unavailable and timed-out; app or
   frontend code may not encode those states as string-parsed `AuraError`
   payloads
+- runtime bridge composition is the outbound error-classification boundary:
+  runtime-facing implementations may keep local error styles internally, but
+  anything surfaced through `RuntimeBridge` must arrive as typed
+  `IntentError` categories with stable semantic meaning rather than ad hoc
+  formatted strings for Layer 7 to interpret
 - runtime-backed hook installation must fail explicitly when the required task
   spawner is unavailable; Layer 6 may not report hook installation success and
   then silently skip authoritative refresh ownership

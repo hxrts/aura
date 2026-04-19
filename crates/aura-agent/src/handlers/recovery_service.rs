@@ -28,9 +28,7 @@ use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::TimeEffects;
 use aura_journal::fact::{ProtocolRelationalFact, RelationalFact};
 use aura_protocol::effects::{ChoreographicRole, RoleIndex, TreeEffects};
-use aura_recovery::ceremony_runners::{
-    AbortCeremony, CommitCeremony, GuardianCeremonyRole, ProposeRotation,
-};
+use aura_recovery::ceremony_runners::{AbortCeremony, CommitCeremony, ProposeRotation};
 // Note: RespondCeremony is a received message type (Guardian -> Initiator) so we don't need
 // to construct it - we only match on the type name suffix when processing received messages.
 use aura_recovery::guardian_ceremony::{
@@ -44,21 +42,22 @@ use aura_recovery::guardian_setup::{
     build_setup_completion, validate_setup_inputs, GuardianAcceptance, GuardianInvitation,
     SetupCompletion,
 };
-use aura_recovery::membership_runners::GuardianMembershipChangeRole;
 use aura_recovery::recovery_protocol::{
     GuardianApproval as ProtocolGuardianApproval, RecoveryOperation as ProtocolRecoveryOperation,
     RecoveryOutcome, RecoveryRequest as ProtocolRecoveryRequest,
 };
-use aura_recovery::setup_runners::GuardianSetupRole;
 use aura_recovery::types::{GuardianProfile, GuardianSet};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration as StdDuration;
 use telltale_machine::StepResult;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 const CHOREO_START_RETRY_DELAY_MS: u64 = 50;
 const CHOREO_START_RETRY_LIMIT: usize = 40;
+const RECOVERY_CLEANUP_INTERVAL: StdDuration = StdDuration::from_secs(5);
+const RECOVERY_TIMEOUT_REASON: &str = "Recovery timed out";
 
 /// Recovery service API
 ///
@@ -94,6 +93,25 @@ impl RecoveryServiceApi {
         let handler = RecoveryHandler::new(authority_context)?;
         let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
         let ceremony_runner = CeremonyRunner::new(CeremonyTracker::new(time_effects));
+        let service = Self {
+            handler,
+            effects,
+            ceremony_runner,
+            reconfiguration: ReconfigurationManager::new(),
+            tasks: Arc::new(TaskSupervisor::new()),
+        };
+        service.spawn_cleanup_task();
+        Ok(service)
+    }
+
+    #[cfg(test)]
+    fn new_for_test(
+        effects: Arc<AuraEffectSystem>,
+        authority_context: AuthorityContext,
+    ) -> AgentResult<Self> {
+        let handler = RecoveryHandler::new(authority_context)?;
+        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let ceremony_runner = CeremonyRunner::new(CeremonyTracker::new(time_effects));
         Ok(Self {
             handler,
             effects,
@@ -112,13 +130,79 @@ impl RecoveryServiceApi {
         tasks: Arc<TaskSupervisor>,
     ) -> AgentResult<Self> {
         let handler = RecoveryHandler::new(authority_context)?;
-        Ok(Self {
+        let service = Self {
             handler,
             effects,
             ceremony_runner,
             reconfiguration,
             tasks,
-        })
+        };
+        service.spawn_cleanup_task();
+        Ok(service)
+    }
+
+    fn spawn_cleanup_task(&self) {
+        let service = self.clone();
+        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+            Arc::new(self.effects.time_effects().clone());
+        let cleanup_tasks = self.tasks.group("recovery_service.cleanup");
+        let _cleanup_task_handle = cleanup_tasks.spawn_local_interval_until_named(
+            "expired_recoveries",
+            time_effects,
+            RECOVERY_CLEANUP_INTERVAL,
+            move || {
+                let service = service.clone();
+                async move {
+                    let removed = service.cleanup_expired_recoveries_once().await;
+                    if removed > 0 {
+                        tracing::warn!(
+                            event = "recovery_service.cleanup.expired",
+                            removed,
+                            "Cancelled expired recovery ceremonies"
+                        );
+                    }
+                    true
+                }
+            },
+        );
+    }
+
+    async fn cleanup_expired_recoveries_once(&self) -> usize {
+        let now_ms = match self.effects.physical_time().await {
+            Ok(now) => now.ts_ms,
+            Err(error) => {
+                tracing::warn!(
+                    event = "recovery_service.cleanup.time_unavailable",
+                    error = %error,
+                    "Skipping expired recovery cleanup because time is unavailable"
+                );
+                return 0;
+            }
+        };
+
+        let expired_ids = self.handler.expired_recovery_ids(now_ms).await;
+        let mut removed = 0;
+
+        for recovery_id in expired_ids {
+            match self
+                .cancel(&recovery_id, RECOVERY_TIMEOUT_REASON.to_string())
+                .await
+            {
+                Ok(_) => {
+                    removed += 1;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        event = "recovery_service.cleanup.cancel_failed",
+                        recovery_id = %recovery_id,
+                        error = %error,
+                        "Failed to cancel expired recovery ceremony"
+                    );
+                }
+            }
+        }
+
+        removed
     }
 
     async fn register_recovery_ceremony(
@@ -1141,9 +1225,9 @@ impl RecoveryServiceApi {
         let authority_id = self.handler.authority_context().authority_id();
 
         // Determine which guardian role this peer plays
-        let guardian_role = match role_index {
-            0 => GuardianCeremonyRole::Guardian1,
-            1 => GuardianCeremonyRole::Guardian2,
+        let active_role_name = match role_index {
+            0 => "Guardian1",
+            1 => "Guardian2",
             _ => {
                 return Err(AgentError::invalid(format!(
                     "Invalid guardian role index: {} (must be 0 or 1)",
@@ -1159,11 +1243,6 @@ impl RecoveryServiceApi {
             signature: Vec::new(),
         };
         let session_id = Self::ceremony_session_id(ceremony_id);
-        let active_role_name = match guardian_role {
-            GuardianCeremonyRole::Guardian1 => "Guardian1",
-            GuardianCeremonyRole::Guardian2 => "Guardian2",
-            GuardianCeremonyRole::Initiator => unreachable!(),
-        };
         let roles = vec![Self::role(initiator_id, 0), Self::role(authority_id, 0)];
         let manifest = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest();
         let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
@@ -1434,10 +1513,10 @@ impl RecoveryServiceApi {
                 AgentError::invalid("Guardian not listed in setup invitation".to_string())
             })?;
 
-        let guardian_role = match guardian_index {
-            0 => GuardianSetupRole::Guardian1,
-            1 => GuardianSetupRole::Guardian2,
-            2 => GuardianSetupRole::Guardian3,
+        let active_role_name = match guardian_index {
+            0 => "Guardian1",
+            1 => "Guardian2",
+            2 => "Guardian3",
             _ => {
                 return Err(AgentError::invalid(
                     "Guardian setup requires exactly three guardians".to_string(),
@@ -1460,12 +1539,6 @@ impl RecoveryServiceApi {
             timestamp,
         };
         let session_id = guardian_setup_session_id(&setup_id);
-        let active_role_name = match guardian_role {
-            GuardianSetupRole::Guardian1 => "Guardian1",
-            GuardianSetupRole::Guardian2 => "Guardian2",
-            GuardianSetupRole::Guardian3 => "Guardian3",
-            GuardianSetupRole::SetupInitiator => unreachable!(),
-        };
         let roles = vec![
             Self::role(invitation.account_id, 0),
             Self::role(authority_id, 0),
@@ -1801,10 +1874,10 @@ impl RecoveryServiceApi {
     ) -> AgentResult<GuardianVote> {
         let authority_id = self.handler.authority_context().authority_id();
 
-        let guardian_role = match guardian_index {
-            0 => GuardianMembershipChangeRole::Guardian1,
-            1 => GuardianMembershipChangeRole::Guardian2,
-            2 => GuardianMembershipChangeRole::Guardian3,
+        let active_role_name = match guardian_index {
+            0 => "Guardian1",
+            1 => "Guardian2",
+            2 => "Guardian3",
             _ => {
                 return Err(AgentError::invalid(
                     "Guardian index must be 0, 1, or 2".to_string(),
@@ -1839,12 +1912,6 @@ impl RecoveryServiceApi {
         };
 
         let session_id = membership_session_id(&proposal.change_id);
-        let active_role_name = match guardian_role {
-            GuardianMembershipChangeRole::Guardian1 => "Guardian1",
-            GuardianMembershipChangeRole::Guardian2 => "Guardian2",
-            GuardianMembershipChangeRole::Guardian3 => "Guardian3",
-            GuardianMembershipChangeRole::ChangeInitiator => unreachable!(),
-        };
         let roles = vec![Self::role(initiator_id, 0), Self::role(authority_id, 0)];
         let peer_roles =
             BTreeMap::from([("ChangeInitiator".to_string(), Self::role(initiator_id, 0))]);
@@ -2199,7 +2266,7 @@ mod tests {
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
 
-        let service = RecoveryServiceApi::new(effects, authority_context);
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context);
         assert!(service.is_ok());
     }
 
@@ -2208,7 +2275,7 @@ mod tests {
         let authority_context = create_test_authority(151);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
         let guardians = vec![
             AuthorityId::new_from_entropy([152u8; 32]),
@@ -2235,7 +2302,7 @@ mod tests {
         let authority_context = create_test_authority(154);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([155u8; 32])];
 
@@ -2252,7 +2319,7 @@ mod tests {
         let authority_context = create_test_authority(156);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
         let guardians = vec![
             AuthorityId::new_from_entropy([157u8; 32]),
@@ -2280,7 +2347,7 @@ mod tests {
         let authority_context = create_test_authority(160);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
         let current_guardians = vec![AuthorityId::new_from_entropy([161u8; 32])];
         let new_guardians = vec![
@@ -2308,7 +2375,7 @@ mod tests {
         let authority_context = create_test_authority(164);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([165u8; 32])];
 
@@ -2347,7 +2414,7 @@ mod tests {
         let authority_context = create_test_authority(166);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
         // Initially empty
         let active = service.list_active().await;
@@ -2381,11 +2448,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_expired_recovery_cleanup_cancels_and_marks_ceremony_failed() {
+        let authority_context = create_test_authority(169);
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
+
+        let guardians = vec![AuthorityId::new_from_entropy([170u8; 32])];
+        let request = service
+            .add_device(
+                vec![0u8; 32],
+                guardians,
+                1,
+                "Expiring recovery".to_string(),
+                Some(0),
+            )
+            .await
+            .unwrap();
+
+        let removed = service.cleanup_expired_recoveries_once().await;
+        assert_eq!(removed, 1);
+        assert!(service.get_state(&request.recovery_id).await.is_none());
+
+        let ceremony_status = service
+            .ceremony_runner
+            .status(&CeremonyId::new(request.recovery_id.to_string()))
+            .await
+            .unwrap();
+        assert!(ceremony_status.is_aborted());
+        match ceremony_status.state {
+            aura_core::domain::CeremonyState::Aborted { reason, .. } => {
+                assert_eq!(reason, RECOVERY_TIMEOUT_REASON);
+            }
+            state => panic!("expected aborted ceremony state, got {state:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_membership_change_requires_three_guardians() {
         let authority_context = create_test_authority(170);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
         // Two guardians should fail
         let guardians = vec![
@@ -2416,7 +2520,7 @@ mod tests {
         let authority_context = create_test_authority(174);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
         let proposal = MembershipProposal {
             change_id: "test-change-123".to_string(),
@@ -2472,7 +2576,7 @@ mod tests {
             AuraEffectSystem::simulation_for_test_for_authority(&config, account_authority)
                 .unwrap(),
         );
-        let service = RecoveryServiceApi::new(effects.clone(), authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
 
         let previous_guardian = AuthorityId::new_from_entropy([180u8; 32]);
         let replacement_guardian = AuthorityId::new_from_entropy([181u8; 32]);

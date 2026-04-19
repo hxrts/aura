@@ -5,10 +5,8 @@
 pub(crate) struct MerkleNode {
     pub(crate) hash: [u8; 32],
     /// Left child (used for Merkle proof generation)
-    #[allow(dead_code)]
     _left: Option<Box<MerkleNode>>,
     /// Right child (used for Merkle proof generation)
-    #[allow(dead_code)]
     _right: Option<Box<MerkleNode>>,
 }
 

@@ -276,29 +276,41 @@ pub fn UiModal(
     #[props(default)] on_toggle_selection: Option<EventHandler<usize>>,
     #[props(default)] on_footer_action: Option<EventHandler<usize>>,
 ) -> Element {
+    let mut open = use_signal(|| Some(true));
+    let modal_dom_id = modal.modal_id.web_dom_id().to_string();
+    let description_id = format!("{modal_dom_id}-description");
+
     rsx! {
-        div {
-            id: modal.modal_id.web_dom_id().to_string(),
-            class: "fixed inset-0 z-40 flex items-center justify-center bg-background/95 px-4 backdrop-blur-sm",
-            onclick: move |_| on_cancel.call(()),
-            div {
-                id: "aura-modal-content",
-                role: "dialog",
-                aria_modal: "true",
-                aria_labelledby: "aura-modal-title",
-                class: "aura-modal-fade w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl",
-                onclick: move |evt| evt.stop_propagation(),
+        LbDialogRoot {
+            id: Some(modal_dom_id),
+            open,
+            on_open_change: move |is_open| {
+                open.set(Some(is_open));
+                if !is_open {
+                    on_cancel.call(());
+                }
+            },
+            LbDialogOverlay {
+                class: Some("bg-background/95 backdrop-blur-sm".to_string()),
+            }
+            LbDialogContent {
+                id: Some("aura-modal-content".to_string()),
+                aria_describedby: description_id.clone(),
+                class: Some("aura-modal-fade w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl".to_string()),
                 div {
                     class: "bg-card px-4 py-3 border-b border-border flex items-center justify-between gap-3",
-                    h2 {
+                    LbDialogTitle {
                         id: "aura-modal-title",
-                        class: "m-0 text-sm font-sans font-semibold text-card-foreground",
+                        class: Some("m-0 text-sm font-sans font-semibold text-card-foreground".to_string()),
                         "{modal.title}"
                     }
                     button {
                         r#type: "button",
                         class: "inline-flex h-8 w-8 items-center justify-center rounded-sm text-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
-                        onclick: move |_| on_cancel.call(()),
+                        onclick: move |_| {
+                            open.set(Some(false));
+                            on_cancel.call(());
+                        },
                         aria_label: "Close",
                         "×"
                     }
@@ -306,7 +318,7 @@ pub fn UiModal(
                 div {
                     class: "bg-card px-4 pt-4 pb-6 space-y-4 text-sm text-card-foreground",
                     p {
-                        id: "aura-modal-description",
+                        id: "{description_id}",
                         class: "sr-only",
                         "Aura modal dialog"
                     }
@@ -363,7 +375,7 @@ pub fn UiModal(
                     if !modal.inputs.is_empty() {
                         div {
                             class: "pt-2 space-y-3",
-                            for input_view in modal.inputs.clone() {
+                            for (input_index, input_view) in modal.inputs.clone().into_iter().enumerate() {
                                 div {
                                     class: "space-y-2",
                                     label {
@@ -375,6 +387,7 @@ pub fn UiModal(
                                         id: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).required_dom_id(\"modal input field identifier must be defined\")}",
                                         class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring",
                                         autocomplete: "off",
+                                        autofocus: input_index == 0,
                                         value: "{input_view.value}",
                                         onfocus: {
                                             let field_id = input_view.field_id;
@@ -428,6 +441,7 @@ pub fn UiModal(
                                 for item in modal.selectable_items.clone() {
                                     button {
                                         r#type: "button",
+                                        aria_pressed: Some(item.selected),
                                         class: if item.selected {
                                             "flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-foreground bg-accent/60 transition-colors hover:bg-accent"
                                         } else {
@@ -510,7 +524,7 @@ pub fn UiModal(
                                     .required_dom_id("ControlId::ModalConfirmButton must define a web DOM id")
                                         .to_string(),
                                 ),
-                                label: modal.enter_label.clone(),
+                                label: modal.enter_label,
                                 variant: ButtonVariant::Primary,
                                 width_class: None,
                                 onclick: move |_| on_confirm.call(()),

@@ -306,6 +306,27 @@ mod tests {
     }
 
     #[test]
+    fn web_shell_retries_async_signal_writes_instead_of_silently_dropping_them() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app_path = repo_root.join("crates/aura-web/src/shell/app.rs");
+        let source = std::fs::read_to_string(&app_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
+
+        assert!(source.contains("fn write_signal_with_retry<T>("));
+        assert!(source.contains("schedule_browser_task_next_tick(move ||"));
+        assert!(source.contains("write_signal_with_retry("));
+        assert!(source.contains("\"clear importing_code after device enrollment import\""));
+        assert!(source.contains("\"publish device enrollment import error\""));
+        assert!(source.contains("\"publish device enrollment scheduling error\""));
+        assert!(source.contains("\"clear creating_account after account creation\""));
+        assert!(source.contains("\"publish account creation error\""));
+        assert!(!source.contains("let _ = importing_code.try_write().map"));
+        assert!(!source.contains("let _ = creating_account.try_write().map"));
+        assert!(!source.contains("let _ = import_error.try_write().map"));
+        assert!(!source.contains("let _ = account_error.try_write().map"));
+    }
+
+    #[test]
     fn web_harness_selection_helpers_use_canonical_snapshot_selections_only() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let selection_path = repo_root.join("crates/aura-web/src/harness/channel_selection.rs");

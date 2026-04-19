@@ -10,6 +10,11 @@
 //! Key types: `GuardianInvitation`, `GuardianAcceptance`, `SetupCompletion`,
 //! `EncryptedKeyShare`. Capability-gated helpers `validate_setup_inputs` and
 //! `build_setup_completion` enforce parameter shape at the feature boundary.
+//!
+//! Guardian setup transition sketch:
+//! `Initiated -> InvitationsIssued -> AcceptancesCollected -> SharesGenerated -> Completed`
+//! `Initiated -> InvitationsIssued -> AcceptancesCollected -> Failed(InsufficientAcceptances)`
+//! `Initiated -> Failed(NoGuardiansSpecified)`
 
 use crate::{
     coordinator::{BaseCoordinator, BaseCoordinatorAccess, RecoveryCoordinator},
@@ -78,6 +83,24 @@ pub struct GuardianAcceptance {
     pub timestamp: TimeStamp,
 }
 
+/// Explicit guardian decision for setup participation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuardianDecision {
+    Accepted,
+    Declined,
+}
+
+impl GuardianAcceptance {
+    /// Return the explicit decision encoded by this acceptance payload.
+    pub fn decision(&self) -> GuardianDecision {
+        if self.accepted {
+            GuardianDecision::Accepted
+        } else {
+            GuardianDecision::Declined
+        }
+    }
+}
+
 /// Setup completion notification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetupCompletion {
@@ -95,8 +118,46 @@ pub struct SetupCompletion {
     pub public_key_package: Vec<u8>,
 }
 
+/// Explicit outcome for a guardian setup completion payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupCompletionOutcome {
+    Succeeded,
+    Failed,
+}
+
+impl SetupCompletion {
+    /// Return the explicit outcome encoded by this completion payload.
+    pub fn outcome(&self) -> SetupCompletionOutcome {
+        if self.success {
+            SetupCompletionOutcome::Succeeded
+        } else {
+            SetupCompletionOutcome::Failed
+        }
+    }
+}
+
 const GUARDIAN_SETUP_INPUT_VALIDATION_CAPABILITY: &str = "guardian_setup_input_validation";
 const GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY: &str = "guardian_setup_completion_build";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SetupAcceptanceProgress {
+    BelowThreshold { accepted: usize, threshold: u16 },
+    ThresholdReached { accepted: usize, threshold: u16 },
+}
+
+fn classify_setup_acceptances(accepted: usize, threshold: u16) -> SetupAcceptanceProgress {
+    if accepted >= threshold as usize {
+        SetupAcceptanceProgress::ThresholdReached {
+            accepted,
+            threshold,
+        }
+    } else {
+        SetupAcceptanceProgress::BelowThreshold {
+            accepted,
+            threshold,
+        }
+    }
+}
 
 /// Validate the feature-level guardian setup parameter shape.
 #[aura_macros::capability_boundary(
@@ -140,7 +201,7 @@ pub fn build_setup_completion(
     let _ = GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY;
     let accepted_guardians: Vec<AuthorityId> = acceptances
         .iter()
-        .filter(|acceptance| acceptance.accepted)
+        .filter(|acceptance| acceptance.decision() == GuardianDecision::Accepted)
         .map(|acceptance| acceptance.guardian_id)
         .collect();
 
@@ -284,21 +345,33 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         let acceptances = self.execute_choreographic_setup(invitation).await?;
 
         // Check if we have enough acceptances
-        if acceptances.len() < request.threshold as usize {
-            let reason = format!(
-                "Insufficient guardian acceptances: got {}, need {}",
-                acceptances.len(),
-                request.threshold
-            );
-            let _ = self
-                .emit_failed_setup(context_id, &setup_id, reason.clone())
-                .await;
+        debug_assert!(
+            acceptances
+                .iter()
+                .all(|acceptance| acceptance.setup_id == setup_id),
+            "guardian acceptances must all belong to the active setup"
+        );
+        debug_assert!(
+            acceptances
+                .iter()
+                .all(|acceptance| acceptance.decision() == GuardianDecision::Accepted),
+            "local setup helper should only surface accepted guardians"
+        );
 
-            return Ok(RecoveryResponse::error(format!(
-                "Insufficient guardian acceptances: got {}, need {}",
-                acceptances.len(),
-                request.threshold
-            )));
+        match classify_setup_acceptances(acceptances.len(), request.threshold) {
+            SetupAcceptanceProgress::BelowThreshold {
+                accepted,
+                threshold,
+            } => {
+                let reason =
+                    format!("Insufficient guardian acceptances: got {accepted}, need {threshold}");
+                let _ = self
+                    .emit_failed_setup(context_id, &setup_id, reason.clone())
+                    .await;
+
+                return Ok(RecoveryResponse::error(reason));
+            }
+            SetupAcceptanceProgress::ThresholdReached { .. } => {}
         }
 
         // Generate threshold keys for the recovery authority
@@ -778,6 +851,49 @@ mod tests {
 
         assert!(completion.success);
         assert_eq!(accepted_guardians, vec![accepted.guardian_id]);
+    }
+
+    #[test]
+    fn guardian_acceptance_exposes_explicit_decision() {
+        let accepted = GuardianAcceptance {
+            guardian_id: test_authority_id(1),
+            setup_id: "setup-2".to_string(),
+            accepted: true,
+            public_key: vec![1],
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 3,
+                uncertainty: None,
+            }),
+        };
+        let declined = GuardianAcceptance {
+            accepted: false,
+            ..accepted.clone()
+        };
+
+        assert_eq!(accepted.decision(), GuardianDecision::Accepted);
+        assert_eq!(declined.decision(), GuardianDecision::Declined);
+    }
+
+    #[test]
+    fn setup_completion_exposes_explicit_outcome() {
+        let completion = SetupCompletion {
+            setup_id: "setup-3".to_string(),
+            success: true,
+            guardian_set: GuardianSet::new(vec![GuardianProfile::new(test_authority_id(1))]),
+            threshold: 1,
+            encrypted_shares: Vec::new(),
+            public_key_package: Vec::new(),
+        };
+
+        assert_eq!(completion.outcome(), SetupCompletionOutcome::Succeeded);
+        assert_eq!(
+            SetupCompletion {
+                success: false,
+                ..completion
+            }
+            .outcome(),
+            SetupCompletionOutcome::Failed
+        );
     }
 }
 

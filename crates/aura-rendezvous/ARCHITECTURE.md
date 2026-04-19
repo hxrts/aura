@@ -77,7 +77,7 @@ Contract alignment:
 |---------|----------|-------|
 | descriptor facts/reducers and validation logic | `Pure` | Deterministic descriptor semantics and reduction. |
 | channel establishment, handshake, and path-object selection inputs | `MoveOwned` | Exclusive channel-establishment authority remains explicit and typed even when `EstablishPath` is first-class. |
-| `RendezvousService` handshake registry | local service-owned mutation | Handshake state is service-local. Long-lived descriptor caches live in `aura-agent`. |
+| `RendezvousService` handshake registry | local service-owned mutation | Handshake state is service-local, TTL-bounded, and capacity-bounded. Long-lived descriptor caches live in `aura-agent`. |
 | `FloodPropagation` topology/budget/nonce state | bounded coordination state | Uses injected topology references and local flood bookkeeping. |
 | long-lived discovery runtime ownership | none local | Ongoing peer/discovery ownership belongs in higher-layer runtime services. |
 

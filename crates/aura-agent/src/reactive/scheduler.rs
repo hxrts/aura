@@ -28,6 +28,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
+/// Large channel because scheduler updates fan out to UI observers and commit
+/// awaiters; short bursts should not immediately force subscribers into lag.
+const VIEW_UPDATE_CHANNEL_CAPACITY: usize = 1024;
+
 #[cfg(target_arch = "wasm32")]
 pub type ReactiveUpdateFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
 #[cfg(not(target_arch = "wasm32"))]
@@ -182,7 +186,13 @@ impl<T> FactCommitResult<T> {
                     Err(broadcast::error::RecvError::Closed) => {
                         return Err(FactCommitError::SchedulerShutdown)
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(
+                            skipped,
+                            "Reactive scheduler subscriber lagged while awaiting processed batch"
+                        );
+                        continue;
+                    }
                 }
             }
         } else {
@@ -345,7 +355,7 @@ impl ReactiveScheduler {
         broadcast::Sender<ViewUpdate>,
     ) {
         let (fact_tx, fact_rx) = mpsc::channel(256);
-        let (update_tx, _) = broadcast::channel(1024);
+        let (update_tx, _) = broadcast::channel(VIEW_UPDATE_CHANNEL_CAPACITY);
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let scheduler = Self {
             config,

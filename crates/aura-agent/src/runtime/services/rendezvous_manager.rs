@@ -560,6 +560,7 @@ impl RendezvousManager {
             probe_timeout_ms: 5000,
             stun_server: None,
             max_relay_hops: 3,
+            ..RendezvousConfig::default()
         };
 
         let service = Arc::new(RendezvousService::new(self.authority_id, rendezvous_config));

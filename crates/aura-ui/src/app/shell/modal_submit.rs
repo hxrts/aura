@@ -4,13 +4,23 @@ use crate::semantic_lifecycle::{
     UiWorkflowHandoffOwner,
 };
 use aura_app::frontend_primitives::SubmittedOperationWorkflowError;
+use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui_contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind,
 };
 
+const DEFAULT_HARNESS_CEREMONY_POLL_INTERVAL_MS: u64 = 1_000;
+
 pub(crate) fn harness_log(line: &str) {
     tracing::info!("{line}");
+}
+
+fn ceremony_poll_interval() -> Duration {
+    runtime_workflows::harness_observed_poll_interval(
+        "AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS",
+        DEFAULT_HARNESS_CEREMONY_POLL_INTERVAL_MS,
+    )
 }
 
 pub(crate) fn launch_create_invitation_workflow(
@@ -146,14 +156,15 @@ pub(crate) fn monitor_runtime_device_enrollment_ceremony(
     rerender: Arc<dyn Fn() + Send + Sync>,
 ) {
     spawn_ui(async move {
+        let mut policy = ceremony_workflows::CeremonyPollPolicy::for_kind(
+            status_handle.kind(),
+            ceremony_poll_interval(),
+        );
+        policy.refresh_settings_on_complete = false;
         let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
             &app_core,
             &status_handle,
-            ceremony_workflows::CeremonyPollPolicy {
-                interval: Duration::from_secs(1),
-                refresh_settings_on_complete: false,
-                ..Default::default()
-            },
+            policy,
             |status| {
                 controller.update_runtime_device_enrollment_status(
                     status.accepted_count,
@@ -201,10 +212,14 @@ pub(crate) fn monitor_runtime_key_rotation_ceremony(
     rerender: Arc<dyn Fn() + Send + Sync>,
 ) {
     spawn_ui(async move {
+        let policy = ceremony_workflows::CeremonyPollPolicy::for_kind(
+            status_handle.kind(),
+            ceremony_poll_interval(),
+        );
         let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
             &app_core,
             &status_handle,
-            ceremony_workflows::CeremonyPollPolicy::with_interval(Duration::from_secs(1)),
+            policy,
             |_| {},
             |duration| {
                 let app_core = app_core.clone();
@@ -232,6 +247,78 @@ pub(crate) fn monitor_runtime_key_rotation_ceremony(
             }
         }
     });
+}
+
+#[cfg(test)]
+#[allow(clippy::disallowed_types)] // Test-only env serialization guard stays synchronous and never crosses await boundaries.
+mod tests {
+    use aura_app::ui::workflows::runtime as runtime_workflows;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvRestore {
+        saved: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvRestore {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self {
+                saved: keys
+                    .iter()
+                    .map(|key| (*key, std::env::var_os(key)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in &self.saved {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ceremony_poll_interval_defaults_to_fixed_production_value() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _restore = EnvRestore::capture(&["AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS"]);
+        std::env::remove_var("AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS");
+
+        assert_eq!(
+            runtime_workflows::harness_observed_poll_interval_for_mode(
+                false,
+                "AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS",
+                1_000,
+            ),
+            Duration::from_millis(1_000)
+        );
+    }
+
+    #[test]
+    fn ceremony_poll_interval_honors_harness_override() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _restore = EnvRestore::capture(&["AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS"]);
+        std::env::set_var("AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS", "250");
+
+        assert_eq!(
+            runtime_workflows::harness_observed_poll_interval_for_mode(
+                true,
+                "AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS",
+                1_000,
+            ),
+            Duration::from_millis(250)
+        );
+    }
 }
 
 pub(crate) fn removable_device_for_modal(

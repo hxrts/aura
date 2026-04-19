@@ -5,17 +5,23 @@
 //! Target: <200 lines, leverage tungstenite ecosystem.
 
 use super::{
-    ConnectionId, TransportAddress, TransportConfig, TransportConnection, TransportError,
-    TransportMetadata, TransportResult, TransportSocketAddr, TransportUrl,
+    utils::TimeoutHelper, ConnectionId, TransportAddress, TransportConfig, TransportConnection,
+    TransportError, TransportMetadata, TransportResult, TransportSocketAddr, TransportUrl,
 };
 use async_trait::async_trait;
 use aura_core::effects::{
     NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream,
 };
 use futures_util::{SinkExt, StreamExt};
-use tokio::net::TcpStream;
-use tokio::time::timeout;
-use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
+use std::io;
+use std::net::{IpAddr, SocketAddr};
+use tokio::net::{lookup_host, TcpStream};
+use tokio::time::{sleep, timeout};
+use tokio_tungstenite::{
+    accept_async, client_async,
+    tungstenite::{self, Message},
+    WebSocketStream,
+};
 use url::Url;
 use uuid::Uuid;
 
@@ -37,22 +43,123 @@ impl WebSocketTransportHandler {
         Self::new(TransportConfig::default())
     }
 
+    fn is_retryable_connect_error(error: &io::Error) -> bool {
+        matches!(
+            error.kind(),
+            io::ErrorKind::ConnectionRefused
+                | io::ErrorKind::ConnectionReset
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::NotConnected
+                | io::ErrorKind::AddrNotAvailable
+                | io::ErrorKind::TimedOut
+                | io::ErrorKind::Interrupted
+                | io::ErrorKind::WouldBlock
+                | io::ErrorKind::HostUnreachable
+                | io::ErrorKind::NetworkUnreachable
+        )
+    }
+
+    fn connect_retry_delay(&self, attempt: usize) -> std::time::Duration {
+        let delay = TimeoutHelper::exponential_backoff(
+            attempt as u32,
+            self.config.connect_retry_base_delay.get(),
+            self.config.connect_retry_max_delay.get(),
+        );
+        TimeoutHelper::add_jitter(delay, 20)
+    }
+
+    async fn resolve_socket_addr(
+        &self,
+        url: &TransportUrl,
+    ) -> Result<SocketAddr, WebSocketConnectError> {
+        let url_ref = url.as_url();
+        let host = url_ref
+            .host_str()
+            .ok_or_else(|| WebSocketConnectError::Protocol("Missing host in URL".to_string()))?;
+        let port = url_ref
+            .port_or_known_default()
+            .ok_or_else(|| WebSocketConnectError::Protocol("Missing port in URL".to_string()))?;
+
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            return Ok(SocketAddr::new(ip, port));
+        }
+
+        let mut addresses = timeout(self.config.dns_timeout.get(), lookup_host((host, port)))
+            .await
+            .map_err(|_| WebSocketConnectError::DnsTimeout {
+                host: host.to_string(),
+                port,
+            })?
+            .map_err(WebSocketConnectError::Dns)?;
+
+        addresses
+            .next()
+            .ok_or_else(|| WebSocketConnectError::NoAddresses {
+                host: host.to_string(),
+                port,
+            })
+    }
+
+    async fn connect_once(
+        &self,
+        url: &TransportUrl,
+    ) -> Result<
+        (
+            WebSocketStream<TcpStream>,
+            tungstenite::handshake::client::Response,
+        ),
+        WebSocketConnectError,
+    > {
+        let addr = self.resolve_socket_addr(url).await?;
+        let stream = timeout(self.config.connect_timeout.get(), TcpStream::connect(addr))
+            .await
+            .map_err(|_| WebSocketConnectError::ConnectTimeout { addr })?
+            .map_err(WebSocketConnectError::ConnectIo)?;
+
+        timeout(
+            self.config.connect_timeout.get(),
+            client_async(url.as_str(), stream),
+        )
+        .await
+        .map_err(|_| WebSocketConnectError::HandshakeTimeout)?
+        .map_err(WebSocketConnectError::Handshake)
+    }
+
+    async fn connect_with_retry(
+        &self,
+        url: &TransportUrl,
+    ) -> TransportResult<(
+        WebSocketStream<TcpStream>,
+        tungstenite::handshake::client::Response,
+    )> {
+        let attempts = self.config.connect_retry_attempts.get();
+        let mut last_error = None;
+
+        for attempt in 0..attempts {
+            match self.connect_once(url).await {
+                Ok(connection) => return Ok(connection),
+                Err(error) => {
+                    let retryable = error.is_retryable();
+                    last_error = Some(error);
+                    if !retryable || attempt + 1 == attempts {
+                        break;
+                    }
+                    sleep(self.connect_retry_delay(attempt)).await;
+                }
+            }
+        }
+
+        Err(last_error
+            .unwrap_or(WebSocketConnectError::HandshakeTimeout)
+            .into_transport_error())
+    }
+
     /// Connect to WebSocket server
     pub async fn connect(
         &self,
         url: TransportUrl,
     ) -> TransportResult<(WebSocketStream<TcpStream>, TransportConnection)> {
-        let url_ref = url.as_url();
-        let (ws_stream, response) = timeout(
-            self.config.connect_timeout.get(),
-            client_async(
-                url.as_str(),
-                TcpStream::connect(url_ref.socket_addrs(|| None)?[0]).await?,
-            ),
-        )
-        .await
-        .map_err(|_| TransportError::Timeout("WebSocket connect timeout".to_string()))?
-        .map_err(|e| TransportError::ConnectionFailed(format!("WebSocket connect failed: {e}")))?;
+        let (ws_stream, response) = self.connect_with_retry(&url).await?;
 
         let local_addr =
             TransportAddress::from(TransportSocketAddr::from(ws_stream.get_ref().local_addr()?));
@@ -337,5 +444,118 @@ impl NetworkCoreEffects for WebSocketTransportHandler {
         Err(NetworkError::ReceiveFailed {
             reason: "WebSocket receive requires connection management".to_string(),
         })
+    }
+}
+
+#[derive(Debug)]
+enum WebSocketConnectError {
+    Protocol(String),
+    DnsTimeout { host: String, port: u16 },
+    NoAddresses { host: String, port: u16 },
+    Dns(io::Error),
+    ConnectTimeout { addr: SocketAddr },
+    ConnectIo(io::Error),
+    HandshakeTimeout,
+    Handshake(tungstenite::Error),
+}
+
+impl WebSocketConnectError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::DnsTimeout { .. } | Self::ConnectTimeout { .. } | Self::HandshakeTimeout => true,
+            Self::Dns(error) | Self::ConnectIo(error) => {
+                WebSocketTransportHandler::is_retryable_connect_error(error)
+            }
+            Self::Handshake(tungstenite::Error::Io(error)) => {
+                WebSocketTransportHandler::is_retryable_connect_error(error)
+            }
+            Self::Protocol(_) | Self::NoAddresses { .. } | Self::Handshake(_) => false,
+        }
+    }
+
+    fn into_transport_error(self) -> TransportError {
+        match self {
+            Self::Protocol(reason) => TransportError::Protocol(reason),
+            Self::DnsTimeout { host, port } => {
+                TransportError::Timeout(format!("WebSocket DNS lookup timeout for {host}:{port}"))
+            }
+            Self::NoAddresses { host, port } => TransportError::ConnectionFailed(format!(
+                "WebSocket DNS lookup returned no addresses for {host}:{port}"
+            )),
+            Self::Dns(error) => {
+                TransportError::ConnectionFailed(format!("WebSocket DNS lookup failed: {error}"))
+            }
+            Self::ConnectTimeout { addr } => {
+                TransportError::Timeout(format!("WebSocket TCP connect timeout for {addr}"))
+            }
+            Self::ConnectIo(error) => {
+                TransportError::ConnectionFailed(format!("WebSocket TCP connect failed: {error}"))
+            }
+            Self::HandshakeTimeout => {
+                TransportError::Timeout("WebSocket handshake timeout".to_string())
+            }
+            Self::Handshake(error) => {
+                TransportError::ConnectionFailed(format!("WebSocket connect failed: {error}"))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+    use tokio::time::Duration;
+
+    fn test_config() -> TransportConfig {
+        TransportConfig {
+            connect_timeout: super::super::NonZeroDuration::from_millis(75)
+                .expect("connect timeout"),
+            dns_timeout: super::super::NonZeroDuration::from_millis(50).expect("dns timeout"),
+            read_timeout: super::super::NonZeroDuration::from_millis(75).expect("read timeout"),
+            write_timeout: super::super::NonZeroDuration::from_millis(75).expect("write timeout"),
+            connect_retry_attempts: std::num::NonZeroUsize::new(4).expect("retry attempts"),
+            connect_retry_base_delay: super::super::NonZeroDuration::from_millis(30)
+                .expect("retry base delay"),
+            connect_retry_max_delay: super::super::NonZeroDuration::from_millis(30)
+                .expect("retry max delay"),
+            buffer_size: std::num::NonZeroUsize::new(4096).expect("buffer size"),
+        }
+    }
+
+    #[tokio::test]
+    async fn websocket_connect_retries_transient_connection_refusals() {
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
+        let addr = socket.local_addr().expect("reserved addr");
+        drop(socket);
+
+        let server = async move {
+            sleep(Duration::from_millis(35)).await;
+            let listener = TcpListener::bind(addr)
+                .await
+                .expect("bind delayed websocket listener");
+            let (stream, _) = listener.accept().await.expect("accept websocket client");
+            let _ = accept_async(stream)
+                .await
+                .expect("complete websocket handshake after retry");
+        };
+
+        let handler = WebSocketTransportHandler::new(test_config());
+        let url = Url::parse(&format!("ws://127.0.0.1:{}/retry", addr.port()))
+            .expect("retry websocket url");
+
+        let client = async move {
+            handler
+                .connect(TransportUrl::from(url))
+                .await
+                .expect("websocket connect should retry until listener is ready")
+        };
+        let (_, (_stream, connection)) = tokio::join!(server, client);
+
+        assert_eq!(
+            connection.metadata.protocol,
+            super::super::TransportProtocol::WebSocket
+        );
     }
 }

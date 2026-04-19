@@ -1,6 +1,9 @@
 mod submission;
 mod types;
 
+use futures::executor::block_on;
+use std::future::Future;
+
 pub use submission::{
     CeremonyMonitorHandoffSubmission, LocalTerminalSubmission, SubmittedOperation,
     WorkflowHandoffSubmission,
@@ -11,12 +14,40 @@ pub use types::{
     WorkflowHandoffRelease,
 };
 
+/// Run a frontend-owned sync bridge future at a sanctioned Layer 7 boundary.
+///
+/// This helper exists so shared/frontend crates do not scatter raw `block_on()`
+/// calls across semantic owner wrappers. On native targets it rejects nested
+/// Tokio runtime usage before blocking, which catches accidental coupling
+/// between synchronous callback paths and already-running async executors.
+#[track_caller]
+pub fn run_frontend_sync_boundary<F>(boundary: &'static str, future: F) -> F::Output
+where
+    F: Future,
+{
+    assert_native_sync_boundary(boundary);
+    block_on(future)
+}
+
+#[track_caller]
+fn assert_native_sync_boundary(_boundary: &'static str) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            panic!(
+                "{_boundary} cannot synchronously block inside a Tokio runtime; \
+                 use an async handoff or enter through the sanctioned shell/bootstrap boundary"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        dropped_owner_error, CeremonyMonitorHandoffSubmission, LocalTerminalSubmission,
-        SubmittedOperation, SubmittedOperationPublisher, SubmittedOperationRelease,
-        SubmittedOperationWorkflowError, WorkflowHandoffSubmission,
+        dropped_owner_error, run_frontend_sync_boundary, CeremonyMonitorHandoffSubmission,
+        LocalTerminalSubmission, SubmittedOperation, SubmittedOperationPublisher,
+        SubmittedOperationRelease, SubmittedOperationWorkflowError, WorkflowHandoffSubmission,
     };
     use crate::ui_contract::{
         OperationId, OperationInstanceId, SemanticOperationCausality, SemanticOperationKind,
@@ -308,5 +339,32 @@ mod tests {
         let status = dropped_owner_error(SemanticOperationKind::CreateHome);
         assert_eq!(status.kind, SemanticOperationKind::CreateHome);
         assert_eq!(status.phase, SemanticOperationPhase::Failed);
+    }
+
+    #[test]
+    fn sync_boundary_runs_future_outside_runtime() {
+        let value =
+            run_frontend_sync_boundary("sync_boundary_runs_future_outside_runtime", async {
+                42usize
+            });
+
+        assert_eq!(value, 42);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[should_panic(expected = "cannot synchronously block inside a Tokio runtime")]
+    fn sync_boundary_rejects_nested_tokio_runtime() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap_or_else(|error| panic!("failed to build tokio runtime for test: {error}"));
+
+        runtime.block_on(async {
+            let _ =
+                run_frontend_sync_boundary("sync_boundary_rejects_nested_tokio_runtime", async {
+                    7usize
+                });
+        });
     }
 }

@@ -1,5 +1,5 @@
 //! Runtime-owned adaptive selection manager.
-#![allow(dead_code)]
+#![allow(dead_code)] // Cleanup target (2026-07): remove after adaptive selection migration finishes and unused staging helpers disappear.
 
 use super::config_profiles::impl_service_config_profiles;
 use super::local_health_observer::LocalHealthObserverService;
@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Cleanup target (2026-07): drop after actor ingress is exercised outside local tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SelectionManagerCommand {
     SelectProfile,

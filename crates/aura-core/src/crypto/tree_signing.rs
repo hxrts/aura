@@ -30,6 +30,7 @@ use crate::{AttestedOp, TreeOpKind};
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 // === Size bounds for serialized cryptographic data (Safety §2) ===
 
@@ -61,11 +62,11 @@ pub const MAX_MESSAGE_BYTES: usize = 1024;
 /// separate DKG or resharing ceremonies.
 ///
 /// This wraps the frost-ed25519 SigningShare type for serialization.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Share {
     /// Share identifier (1..=n)
     pub identifier: u16,
-    /// Secret share value (serialized frost SigningShare)
+    /// Security-sensitive serialized signing share. Zeroized on drop.
     #[serde(with = "serde_bytes")]
     pub value: Vec<u8>,
 }
@@ -107,11 +108,11 @@ impl Share {
 /// context to prevent reuse across different operations.
 ///
 /// This wraps the frost-ed25519 SigningNonces type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Nonce {
     /// Nonce identifier (for tracking)
     pub id: [u8; 32],
-    /// Secret nonce value (serialized frost SigningNonces)
+    /// Security-sensitive serialized signing nonces. Zeroized on drop.
     #[serde(with = "serde_bytes")]
     pub value: Vec<u8>,
 }

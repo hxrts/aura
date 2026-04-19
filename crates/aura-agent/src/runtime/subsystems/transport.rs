@@ -49,7 +49,6 @@ impl TransportStatsCounters {
         self.send_failures.fetch_add(1, Ordering::Relaxed);
     }
 
-    #[allow(dead_code)]
     fn record_receive_failure(&self) {
         self.receive_failures.fetch_add(1, Ordering::Relaxed);
     }
@@ -94,6 +93,7 @@ struct TransportSubsystemShared {
 pub struct TransportSubsystem {
     /// Core transport handler
     #[allow(dead_code)]
+    // TODO(2026-07): remove if transport construction no longer needs to keep the concrete handler for future direct access.
     handler: aura_effects::transport::RealTransportHandler,
     /// Shared mutable transport state boundary.
     shared: Arc<TransportSubsystemShared>,
@@ -113,7 +113,7 @@ impl TransportSubsystem {
     }
 
     /// Create a transport subsystem with shared transport for simulation
-    #[allow(dead_code)]
+    #[allow(dead_code)] /* Retained for simulation builders until all shared-transport construction flows are wired through runtime effects. */
     pub fn with_shared_transport(shared: SharedTransport, authority: AuthorityId) -> Self {
         // Register this authority in the shared network
         shared.register(authority);
@@ -147,7 +147,7 @@ impl TransportSubsystem {
     }
 
     /// Get reference to the transport handler
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained until runtime construction or diagnostics need the concrete handler directly.
     pub fn handler(&self) -> &aura_effects::transport::RealTransportHandler {
         &self.handler
     }
@@ -158,7 +158,7 @@ impl TransportSubsystem {
     }
 
     /// Get shared stats reference
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained for stats-focused tests until production code reads counters directly.
     fn stats(&self) -> Arc<TransportStatsCounters> {
         Arc::clone(&self.shared.stats)
     }
@@ -184,7 +184,7 @@ impl TransportSubsystem {
     }
 
     /// Drain all envelopes from the inbox
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained for deterministic inbox-drain tests and local transport debugging.
     pub fn drain_inbox(&self) -> Vec<TransportEnvelope> {
         let mut inbox = self.shared.inbox.write();
         std::mem::take(&mut *inbox)
@@ -211,7 +211,7 @@ impl TransportSubsystem {
     }
 
     /// Record a receive failure
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained until receive-failure accounting is emitted by runtime transport callsites.
     pub fn record_receive_failure(&self) {
         self.shared.stats.record_receive_failure();
     }

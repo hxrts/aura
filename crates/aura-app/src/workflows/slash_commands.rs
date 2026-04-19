@@ -122,13 +122,13 @@ impl SlashCommandKind {
                 boundary: SlashCommandSemanticBoundary::ObservedRead,
                 owner_model: SlashCommandOwnerModel::OwnerlessObserved,
                 capability: slash_command_capability(self),
-                semantic_operation: None,
+                semantic_operation: slash_command_semantic_operation(self),
             },
             Self::Neighborhood | Self::NhAdd | Self::NhLink => SlashCommandMetadata {
                 boundary: SlashCommandSemanticBoundary::SemanticMutation,
                 owner_model: SlashCommandOwnerModel::LocalTerminal,
                 capability: slash_command_capability(self),
-                semantic_operation: Some(slash_command_semantic_operation(self)),
+                semantic_operation: slash_command_semantic_operation(self),
             },
             Self::Msg
             | Self::Me
@@ -152,7 +152,7 @@ impl SlashCommandKind {
                 boundary: SlashCommandSemanticBoundary::CapabilityGatedSemanticMutation,
                 owner_model: SlashCommandOwnerModel::LocalTerminal,
                 capability: slash_command_capability(self),
-                semantic_operation: Some(slash_command_semantic_operation(self)),
+                semantic_operation: slash_command_semantic_operation(self),
             },
         }
     }
@@ -518,8 +518,10 @@ const fn slash_command_capability(kind: SlashCommandKind) -> CommandCapability {
     }
 }
 
-fn slash_command_semantic_operation(kind: SlashCommandKind) -> SlashCommandSemanticOperation {
-    match kind {
+fn slash_command_semantic_operation(
+    kind: SlashCommandKind,
+) -> Option<SlashCommandSemanticOperation> {
+    Some(match kind {
         SlashCommandKind::Msg | SlashCommandKind::Me => SlashCommandSemanticOperation {
             operation_id: OperationId::send_message(),
             kind: SemanticOperationKind::SendChatMessage,
@@ -604,10 +606,8 @@ fn slash_command_semantic_operation(kind: SlashCommandKind) -> SlashCommandSeman
             operation_id: OperationId::set_channel_mode(),
             kind: SemanticOperationKind::SetChannelMode,
         },
-        SlashCommandKind::Who | SlashCommandKind::Whois | SlashCommandKind::Help => {
-            unreachable!("observed slash commands do not have semantic operations")
-        }
-    }
+        SlashCommandKind::Who | SlashCommandKind::Whois | SlashCommandKind::Help => return None,
+    })
 }
 
 fn classify_chat_command_error(

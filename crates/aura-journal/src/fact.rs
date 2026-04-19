@@ -21,6 +21,7 @@ use aura_core::{
     Hash32, Result,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Journal namespace for scoping facts
@@ -58,7 +59,7 @@ impl Journal {
 
     /// Add a fact to the journal
     pub fn add_fact(&mut self, fact: Fact) -> Result<()> {
-        self.facts.insert(fact);
+        let _ = self.insert_fact_deduplicated(fact);
         Ok(())
     }
 
@@ -95,13 +96,14 @@ impl JoinSemilattice for Journal {
             "Cannot merge journals from different namespaces"
         );
 
-        let mut merged_facts = self.facts.clone();
-        merged_facts.extend(other.facts.clone());
-
-        Self {
-            namespace: self.namespace.clone(),
-            facts: merged_facts,
+        let mut merged = Self::new(self.namespace.clone());
+        for fact in self.facts.iter().cloned() {
+            let _ = merged.insert_fact_deduplicated(fact);
         }
+        for fact in other.facts.iter().cloned() {
+            let _ = merged.insert_fact_deduplicated(fact);
+        }
+        merged
     }
 }
 
@@ -114,7 +116,9 @@ impl Journal {
             self.namespace, other.namespace,
             "Cannot merge journals from different namespaces"
         );
-        self.facts.extend(other.facts);
+        for fact in other.facts {
+            let _ = self.insert_fact_deduplicated(fact);
+        }
     }
 
     /// Add a fact with options
@@ -126,8 +130,26 @@ impl Journal {
         if let Some(agreement) = options.initial_agreement {
             fact.agreement = agreement;
         }
-        self.facts.insert(fact);
+        let _ = self.insert_fact_deduplicated(fact);
         Ok(())
+    }
+
+    fn insert_fact_deduplicated(&mut self, fact: Fact) -> bool {
+        let identity = fact.deduplication_id();
+        if self
+            .facts
+            .iter()
+            .any(|existing| existing.deduplication_id() == identity)
+        {
+            tracing::debug!(
+                namespace = ?self.namespace,
+                deduplication_id = %hex::encode(identity),
+                "Ignoring duplicate fact submission"
+            );
+            false
+        } else {
+            self.facts.insert(fact)
+        }
     }
 
     /// Get a fact by its order ID
@@ -568,6 +590,18 @@ impl Fact {
             },
         }
     }
+
+    /// Stable identifier for duplicate-submission detection.
+    ///
+    /// This uses order + timestamp plus canonicalized content bytes so the
+    /// journal can reject retransmits even when an envelope payload is encoded
+    /// differently but decodes to the same semantic content.
+    pub fn deduplication_id(&self) -> Hash32 {
+        let mut bytes = aura_core::util::serialization::to_vec(&self.order).unwrap_or_default();
+        bytes.extend(aura_core::util::serialization::to_vec(&self.timestamp).unwrap_or_default());
+        bytes.extend(self.content.canonical_identity_bytes());
+        Hash32(hash(&bytes))
+    }
 }
 
 impl PartialOrd for Fact {
@@ -591,6 +625,49 @@ fn cmp_serialized<T: Serialize>(left: &T, right: &T) -> std::cmp::Ordering {
     let left_bytes = aura_core::util::serialization::to_vec(left).unwrap_or_default();
     let right_bytes = aura_core::util::serialization::to_vec(right).unwrap_or_default();
     left_bytes.cmp(&right_bytes)
+}
+
+impl FactContent {
+    fn canonical_identity_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::Relational(RelationalFact::Generic {
+                context_id,
+                envelope,
+            }) => aura_core::util::serialization::to_vec(&(
+                context_id,
+                canonicalize_fact_envelope(envelope),
+            ))
+            .unwrap_or_default(),
+            _ => aura_core::util::serialization::to_vec(self).unwrap_or_default(),
+        }
+    }
+}
+
+fn canonicalize_fact_envelope(envelope: &FactEnvelope) -> FactEnvelope {
+    if let Some(payload) = canonicalize_envelope_payload(envelope) {
+        FactEnvelope {
+            type_id: envelope.type_id.clone(),
+            schema_version: envelope.schema_version,
+            encoding: FactEncoding::DagCbor,
+            payload,
+        }
+    } else {
+        envelope.clone()
+    }
+}
+
+fn canonicalize_envelope_payload(envelope: &FactEnvelope) -> Option<Vec<u8>> {
+    match envelope.encoding {
+        FactEncoding::DagCbor => {
+            let value: JsonValue =
+                aura_core::util::serialization::from_slice(&envelope.payload).ok()?;
+            aura_core::util::serialization::to_vec(&value).ok()
+        }
+        FactEncoding::Json => {
+            let value: JsonValue = serde_json::from_slice(&envelope.payload).ok()?;
+            aura_core::util::serialization::to_vec(&value).ok()
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1552,4 +1629,65 @@ pub struct SnapshotFact {
     pub superseded_facts: Vec<OrderTime>,
     /// Snapshot sequence number
     pub sequence: u64,
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn json_generic_fact(payload: &[u8]) -> Fact {
+        Fact::new(
+            OrderTime([7u8; 32]),
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 42,
+                uncertainty: Some(0),
+            }),
+            FactContent::Relational(RelationalFact::Generic {
+                context_id: ContextId::new_from_entropy([9u8; 32]),
+                envelope: FactEnvelope {
+                    type_id: FactTypeId::from("test/v1"),
+                    schema_version: 1,
+                    encoding: FactEncoding::Json,
+                    payload: payload.to_vec(),
+                },
+            }),
+        )
+    }
+
+    #[test]
+    fn journal_rejects_duplicate_json_facts_with_noncanonical_payload_bytes() {
+        let namespace = JournalNamespace::Context(ContextId::new_from_entropy([1u8; 32]));
+        let mut journal = Journal::new(namespace);
+
+        journal
+            .add_fact(json_generic_fact(br#"{"channel":"alpha","epoch":1}"#))
+            .expect("first insert succeeds");
+        journal
+            .add_fact(json_generic_fact(
+                br#"{ "channel" : "alpha", "epoch" : 1 }"#,
+            ))
+            .expect("duplicate semantic insert is ignored");
+
+        assert_eq!(journal.size(), 1);
+    }
+
+    #[test]
+    fn journal_join_deduplicates_equivalent_fact_retransmits() {
+        let namespace = JournalNamespace::Context(ContextId::new_from_entropy([2u8; 32]));
+        let mut left = Journal::new(namespace.clone());
+        let mut right = Journal::new(namespace);
+
+        left.add_fact(json_generic_fact(br#"{"channel":"alpha","epoch":1}"#))
+            .expect("left insert succeeds");
+        right
+            .add_fact(json_generic_fact(
+                br#"{ "channel" : "alpha", "epoch" : 1 }"#,
+            ))
+            .expect("right duplicate insert succeeds");
+
+        left.join_assign(right);
+
+        assert_eq!(left.size(), 1);
+    }
 }

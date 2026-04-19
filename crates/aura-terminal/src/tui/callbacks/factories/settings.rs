@@ -234,7 +234,8 @@ impl SettingsCallbacks {
                     let tx_monitor = tx.clone();
                     spawn_ctx(ctx.clone(), async move {
                         let policy =
-                            aura_app::ui::workflows::ceremonies::CeremonyPollPolicy::with_interval(
+                            aura_app::ui::workflows::ceremonies::CeremonyPollPolicy::for_kind(
+                                status_handle.kind(),
                                 Duration::from_millis(500),
                             );
                         match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
@@ -322,12 +323,11 @@ impl SettingsCallbacks {
                     // Best-effort: monitor completion and toast success/failure.
                     let tx_monitor = tx.clone();
                     spawn_ctx(ctx.clone(), async move {
-                        let policy = aura_app::ui::workflows::ceremonies::CeremonyPollPolicy {
-                            interval: Duration::from_millis(250),
-                            max_attempts: 160,
-                            rollback_on_failure: true,
-                            refresh_settings_on_complete: true,
-                        };
+                        let policy =
+                            aura_app::ui::workflows::ceremonies::CeremonyPollPolicy::for_kind(
+                                status_handle.kind(),
+                                Duration::from_millis(250),
+                            );
                         match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
                         ctx.app_core_raw(),
                         &status_handle,

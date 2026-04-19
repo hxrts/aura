@@ -6,6 +6,7 @@ use aura_app::ui::types::{
 use aura_app::ui_contract::{
     InvitationFactKind, OperationState, RuntimeEventSnapshot, RuntimeFact,
 };
+use aura_app::views::{truncate_id_for_display, EffectiveName};
 use aura_core::effects::reactive::ReactiveEffects;
 use std::sync::Arc;
 
@@ -264,17 +265,7 @@ fn runtime_event_timestamp(total_events: usize, index: usize) -> u64 {
 }
 
 fn display_contact_name(contact: &aura_app::ui::types::Contact) -> String {
-    if !contact.nickname.trim().is_empty() {
-        return contact.nickname.clone();
-    }
-    if let Some(suggestion) = contact
-        .nickname_suggestion
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        return suggestion.clone();
-    }
-    contact.id.to_string().chars().take(8).collect()
+    contact.effective_name()
 }
 
 fn display_contact_name_for_authority(contacts: &ContactsState, authority_id: &str) -> String {
@@ -282,7 +273,7 @@ fn display_contact_name_for_authority(contacts: &ContactsState, authority_id: &s
         .all_contacts()
         .find(|contact| contact.id.to_string() == authority_id)
         .map(display_contact_name)
-        .unwrap_or_else(|| authority_id.chars().take(8).collect())
+        .unwrap_or_else(|| truncate_id_for_display(authority_id))
 }
 
 fn runtime_event_notification(
@@ -441,6 +432,86 @@ mod tests {
         assert_eq!(runtime.items[0].id, format!("contact-accepted:{alice}"));
         assert_eq!(runtime.items[0].kind_label, "Contact Invite Accepted");
         assert_eq!(runtime.items[0].title, "Alice is now a contact");
+    }
+
+    #[test]
+    fn build_notifications_runtime_view_uses_shared_contact_name_fallbacks() {
+        let suggestion_only = AuthorityId::new_from_entropy([4u8; 32]);
+        let fallback_only = AuthorityId::new_from_entropy([5u8; 32]);
+        let fallback_name = truncate_id_for_display(&fallback_only.to_string());
+        let runtime_event = |id: &str, fact: RuntimeFact| RuntimeEventSnapshot {
+            id: RuntimeEventId(id.to_string()),
+            fact,
+        };
+        let contacts = ContactsState::from_contacts([
+            Contact {
+                id: suggestion_only,
+                nickname: String::new(),
+                nickname_suggestion: Some("Suggested".to_string()),
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: true,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::Contact,
+                invitation_code: None,
+            },
+            Contact {
+                id: fallback_only,
+                nickname: String::new(),
+                nickname_suggestion: None,
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: false,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::Contact,
+                invitation_code: None,
+            },
+        ]);
+        let runtime = build_notifications_runtime_view(
+            InvitationsState::default(),
+            RecoveryState::default(),
+            contacts,
+            None,
+            &[
+                runtime_event(
+                    "runtime-event-4",
+                    RuntimeFact::InvitationAccepted {
+                        invitation_kind: InvitationFactKind::Contact,
+                        authority_id: Some(suggestion_only.to_string()),
+                        operation_state: Some(OperationState::Succeeded),
+                    },
+                ),
+                runtime_event(
+                    "runtime-event-5",
+                    RuntimeFact::InvitationAccepted {
+                        invitation_kind: InvitationFactKind::Contact,
+                        authority_id: Some(fallback_only.to_string()),
+                        operation_state: Some(OperationState::Succeeded),
+                    },
+                ),
+            ],
+        );
+
+        let suggestion_item = runtime
+            .items
+            .iter()
+            .find(|item| item.id == format!("contact-accepted:{suggestion_only}"));
+        let fallback_item = runtime
+            .items
+            .iter()
+            .find(|item| item.id == format!("contact-accepted:{fallback_only}"));
+        let expected_fallback_title = format!("{fallback_name} is now a contact");
+
+        assert_eq!(
+            suggestion_item.map(|item| item.title.as_str()),
+            Some("Suggested is now a contact")
+        );
+        assert_eq!(
+            fallback_item.map(|item| item.title.as_str()),
+            Some(expected_fallback_title.as_str())
+        );
     }
 
     #[test]

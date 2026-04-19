@@ -4,9 +4,10 @@
 //! NO choreography - single-party effect handler only.
 //! Target: <200 lines, leverage tokio ecosystem.
 
+use super::env::tcp_listen_addr;
 use super::{
-    ConnectionId, TransportAddress, TransportConfig, TransportConnection, TransportError,
-    TransportMetadata, TransportResult, TransportSocketAddr,
+    utils::TimeoutHelper, ConnectionId, TransportAddress, TransportConfig, TransportConnection,
+    TransportError, TransportMetadata, TransportResult, TransportSocketAddr,
 };
 use async_trait::async_trait;
 use aura_core::{
@@ -15,10 +16,11 @@ use aura_core::{
     },
     hash,
 };
+use std::io;
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 
 /// TCP transport handler implementation
@@ -39,15 +41,69 @@ impl TcpTransportHandler {
         Self::new(TransportConfig::default())
     }
 
+    fn is_retryable_connect_error(error: &io::Error) -> bool {
+        matches!(
+            error.kind(),
+            io::ErrorKind::ConnectionRefused
+                | io::ErrorKind::ConnectionReset
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::NotConnected
+                | io::ErrorKind::AddrNotAvailable
+                | io::ErrorKind::TimedOut
+                | io::ErrorKind::Interrupted
+                | io::ErrorKind::WouldBlock
+                | io::ErrorKind::HostUnreachable
+                | io::ErrorKind::NetworkUnreachable
+        )
+    }
+
+    fn connect_retry_delay(&self, attempt: usize) -> std::time::Duration {
+        let delay = TimeoutHelper::exponential_backoff(
+            attempt as u32,
+            self.config.connect_retry_base_delay.get(),
+            self.config.connect_retry_max_delay.get(),
+        );
+        TimeoutHelper::add_jitter(delay, 20)
+    }
+
+    async fn connect_stream_once(
+        &self,
+        addr: SocketAddr,
+    ) -> Result<TcpStream, ConnectAttemptError> {
+        timeout(self.config.connect_timeout.get(), TcpStream::connect(addr))
+            .await
+            .map_err(|_| ConnectAttemptError::Timeout)?
+            .map_err(ConnectAttemptError::Io)
+    }
+
+    async fn connect_stream_with_retry(&self, addr: SocketAddr) -> TransportResult<TcpStream> {
+        let attempts = self.config.connect_retry_attempts.get();
+        let mut last_error = None;
+
+        for attempt in 0..attempts {
+            match self.connect_stream_once(addr).await {
+                Ok(stream) => return Ok(stream),
+                Err(error) => {
+                    let retryable = error.is_retryable();
+                    last_error = Some(error);
+                    if !retryable || attempt + 1 == attempts {
+                        break;
+                    }
+                    sleep(self.connect_retry_delay(attempt)).await;
+                }
+            }
+        }
+
+        Err(last_error
+            .unwrap_or(ConnectAttemptError::Timeout)
+            .into_transport_error("TCP connect"))
+    }
+
     /// Connect to remote peer via TCP
     pub async fn connect(&self, addr: TransportSocketAddr) -> TransportResult<TransportConnection> {
-        let stream = timeout(
-            self.config.connect_timeout.get(),
-            TcpStream::connect(*addr.as_socket_addr()),
-        )
-        .await
-        .map_err(|_| TransportError::Timeout("TCP connect timeout".to_string()))?
-        .map_err(|e| TransportError::ConnectionFailed(format!("TCP connect failed: {e}")))?;
+        let stream = self
+            .connect_stream_with_retry(*addr.as_socket_addr())
+            .await?;
 
         let local_addr = TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
         let remote_addr = TransportAddress::from(TransportSocketAddr::from(stream.peer_addr()?));
@@ -193,7 +249,8 @@ impl NetworkCoreEffects for TcpTransportHandler {
             reason: format!("Invalid address: {e}"),
         })?;
 
-        let mut stream = TcpStream::connect(addr)
+        let mut stream = self
+            .connect_stream_with_retry(addr)
             .await
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
 
@@ -219,12 +276,9 @@ impl NetworkCoreEffects for TcpTransportHandler {
         // Bind to the configured address (or ephemeral if not provided) and
         // read a single framed message. This keeps the handler stateless while
         // still allowing inbound delivery in tests and small deployments.
-        let bind_addr: SocketAddr = std::env::var("AURA_TCP_LISTEN_ADDR")
-            .unwrap_or_else(|_| "127.0.0.1:0".to_string())
-            .parse()
-            .map_err(|e| NetworkError::ReceiveFailed {
-                reason: format!("Invalid listen address: {e}"),
-            })?;
+        let bind_addr = tcp_listen_addr().map_err(|error| NetworkError::ReceiveFailed {
+            reason: error.to_string(),
+        })?;
 
         let listener =
             TcpListener::bind(bind_addr)
@@ -295,7 +349,8 @@ impl NetworkExtendedEffects for TcpTransportHandler {
         let addr: SocketAddr = address
             .parse()
             .map_err(|e| NetworkError::ConnectionFailed(format!("Invalid address: {e}")))?;
-        let _stream = TcpStream::connect(addr)
+        let _stream = self
+            .connect_stream_with_retry(addr)
             .await
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
         // Generate deterministic connection ID from address
@@ -321,4 +376,80 @@ fn uuid_from_addr(addr: &SocketAddr) -> Uuid {
     let mut uuid_bytes = [0u8; 16];
     uuid_bytes.copy_from_slice(&hash_bytes[..16]);
     Uuid::from_bytes(uuid_bytes)
+}
+
+#[derive(Debug)]
+enum ConnectAttemptError {
+    Timeout,
+    Io(io::Error),
+}
+
+impl ConnectAttemptError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::Timeout => true,
+            Self::Io(error) => TcpTransportHandler::is_retryable_connect_error(error),
+        }
+    }
+
+    fn into_transport_error(self, operation: &str) -> TransportError {
+        match self {
+            Self::Timeout => TransportError::Timeout(format!("{operation} timeout")),
+            Self::Io(error) => {
+                TransportError::ConnectionFailed(format!("{operation} failed: {error}"))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use tokio::time::Duration;
+
+    fn test_config() -> TransportConfig {
+        TransportConfig {
+            connect_timeout: super::super::NonZeroDuration::from_millis(50)
+                .expect("connect timeout"),
+            dns_timeout: super::super::NonZeroDuration::from_millis(50).expect("dns timeout"),
+            read_timeout: super::super::NonZeroDuration::from_millis(50).expect("read timeout"),
+            write_timeout: super::super::NonZeroDuration::from_millis(50).expect("write timeout"),
+            connect_retry_attempts: std::num::NonZeroUsize::new(4).expect("retry attempts"),
+            connect_retry_base_delay: super::super::NonZeroDuration::from_millis(30)
+                .expect("retry base delay"),
+            connect_retry_max_delay: super::super::NonZeroDuration::from_millis(30)
+                .expect("retry max delay"),
+            buffer_size: std::num::NonZeroUsize::new(4096).expect("buffer size"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tcp_connect_retries_transient_connection_refusals() {
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
+        let addr = socket.local_addr().expect("reserved addr");
+        drop(socket);
+
+        let server = async move {
+            sleep(Duration::from_millis(35)).await;
+            let listener = TcpListener::bind(addr)
+                .await
+                .expect("bind delayed listener");
+            let _ = listener.accept().await.expect("accept retried tcp client");
+        };
+
+        let handler = TcpTransportHandler::new(test_config());
+        let client = async move {
+            handler
+                .connect(TransportSocketAddr::from(addr))
+                .await
+                .expect("tcp connect should retry until listener is ready")
+        };
+        let (_, connection) = tokio::join!(server, client);
+
+        assert_eq!(
+            connection.metadata.protocol,
+            super::super::TransportProtocol::Tcp
+        );
+    }
 }

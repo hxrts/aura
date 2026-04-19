@@ -25,8 +25,9 @@ fn round_trip_registered_fact_envelopes() {
         };
         let bytes = try_encode_fact(&FactTypeId::new(type_id), *version, &fact)
             .expect("encode should succeed");
-        let decoded: TestFact = try_decode_fact(&FactTypeId::new(type_id), *version, &bytes)
-            .expect("decode should succeed");
+        let decoded: TestFact =
+            try_decode_fact(&FactTypeId::new(type_id), *version, *version, &bytes)
+                .expect("decode should succeed");
         assert_eq!(decoded, fact);
     }
 }
@@ -39,7 +40,7 @@ fn rejects_version_mismatch() {
     };
     let bytes =
         try_encode_fact(&FactTypeId::new("test/v1"), 1, &fact).expect("encode should succeed");
-    let err = try_decode_fact::<TestFact>(&FactTypeId::new("test/v1"), 2, &bytes)
+    let err = try_decode_fact::<TestFact>(&FactTypeId::new("test/v1"), 2, 2, &bytes)
         .expect_err("expected version mismatch");
     assert!(matches!(err, FactError::VersionMismatch { .. }));
 }
@@ -52,7 +53,7 @@ fn rejects_type_mismatch() {
     };
     let bytes =
         try_encode_fact(&FactTypeId::new("test/v1"), 1, &fact).expect("encode should succeed");
-    let err = try_decode_fact::<TestFact>(&FactTypeId::new("other/v1"), 1, &bytes)
+    let err = try_decode_fact::<TestFact>(&FactTypeId::new("other/v1"), 1, 1, &bytes)
         .expect_err("expected type mismatch");
     assert!(matches!(err, FactError::TypeMismatch { .. }));
 }
@@ -133,7 +134,7 @@ fn encoding_content_hash_is_pinned() {
     let content_hash = hash::hash(&bytes);
 
     // Roundtrip must be exact
-    let decoded: TestFact = try_decode_fact(&type_id, version, &bytes).expect("decode");
+    let decoded: TestFact = try_decode_fact(&type_id, version, version, &bytes).expect("decode");
     assert_eq!(decoded, fact);
 
     // The encoding must be deterministic so the hash is stable

@@ -258,9 +258,7 @@ async fn test_effect_error_handling() {
         async fn execute(&self, command: EffectCommand) -> Result<EffectResult> {
             match command {
                 EffectCommand::ChargeBudget { amount, .. } if amount > FlowCost::new(1000) => {
-                    Err(AuraError::Internal {
-                        message: "Insufficient budget".to_string(),
-                    })
+                    Err(AuraError::internal("Insufficient budget"))
                 }
                 EffectCommand::ChargeBudget { amount, .. } => Ok(EffectResult::RemainingBudget(
                     1000u32.saturating_sub(amount.value()),

@@ -256,10 +256,10 @@ fn map_err(e: aura_core::AuraError) -> AmpChannelError {
     match e {
         aura_core::AuraError::NotFound { .. } => AmpChannelError::NotFound,
         aura_core::AuraError::PermissionDenied { .. } => AmpChannelError::Unauthorized,
-        aura_core::AuraError::Storage { message } => AmpChannelError::Storage(message),
-        aura_core::AuraError::Crypto { message } => AmpChannelError::Crypto(message),
-        aura_core::AuraError::Invalid { message } => AmpChannelError::InvalidState(message),
-        aura_core::AuraError::Internal { message } => AmpChannelError::Internal(message),
+        aura_core::AuraError::Storage { message, .. } => AmpChannelError::Storage(message),
+        aura_core::AuraError::Crypto { message, .. } => AmpChannelError::Crypto(message),
+        aura_core::AuraError::Invalid { message, .. } => AmpChannelError::InvalidState(message),
+        aura_core::AuraError::Internal { message, .. } => AmpChannelError::Internal(message),
         other => AmpChannelError::Internal(other.to_string()),
     }
 }

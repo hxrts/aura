@@ -7,11 +7,11 @@ use super::facts::{
     HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
     HOME_UNMUTE_FACT_TYPE_ID,
 };
-use super::types::{BanStatus, KickRecord, MuteStatus};
+use super::types::{BanStatus, KickRecord, ModerationScopeKey, MuteStatus};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn moderation_fact<T: DomainFact>(
     fact: &Fact,
@@ -29,30 +29,49 @@ fn moderation_fact<T: DomainFact>(
     }
 }
 
+fn moderation_scope_key(
+    authority: AuthorityId,
+    channel_id: Option<ChannelId>,
+) -> ModerationScopeKey {
+    (authority, channel_id)
+}
+
 fn remove_if_newer<T>(
-    active: &mut HashMap<AuthorityId, T>,
-    authority: &AuthorityId,
+    active: &mut HashMap<ModerationScopeKey, T>,
+    authority: AuthorityId,
+    channel_id: Option<ChannelId>,
     reversal_at_ms: u64,
     active_at_ms: impl Fn(&T) -> u64,
 ) {
-    if let Some(status) = active.get(authority) {
+    let key = moderation_scope_key(authority, channel_id);
+    if let Some(status) = active.get(&key) {
         if reversal_at_ms >= active_at_ms(status) {
-            active.remove(authority);
+            active.remove(&key);
         }
     }
 }
 
+fn remove_orphaned_channel_statuses<T>(
+    statuses: &mut HashMap<ModerationScopeKey, T>,
+    live_channels: &HashSet<ChannelId>,
+    channel_id_of: impl Fn(&T) -> Option<ChannelId>,
+) {
+    statuses.retain(|_, status| {
+        channel_id_of(status)
+            .map(|channel_id| live_channels.contains(&channel_id))
+            .unwrap_or(true)
+    });
+}
+
 fn status_applies_to_channel<T>(
-    statuses: &HashMap<AuthorityId, T>,
+    statuses: &HashMap<ModerationScopeKey, T>,
     authority: &AuthorityId,
     channel_id: Option<&ChannelId>,
-    applies_to_channel: impl Fn(&T, &ChannelId) -> bool,
 ) -> bool {
-    statuses.get(authority).is_some_and(|status| {
-        channel_id
-            .map(|channel| applies_to_channel(status, channel))
-            .unwrap_or(true)
-    })
+    statuses.contains_key(&moderation_scope_key(*authority, None))
+        || channel_id.is_some_and(|channel| {
+            statuses.contains_key(&moderation_scope_key(*authority, Some(*channel)))
+        })
 }
 
 /// Query current bans in a context
@@ -66,20 +85,24 @@ fn status_applies_to_channel<T>(
 /// * `current_time_ms` - Current time for expiration checking (ms since epoch)
 ///
 /// # Returns
-/// HashMap mapping AuthorityId to BanStatus for all currently banned users
+/// HashMap mapping `(AuthorityId, Option<ChannelId>)` to BanStatus for all
+/// currently banned scopes
 pub fn query_current_bans(
     facts: &[Fact],
     context_id: &ContextId,
     current_time_ms: u64,
-) -> HashMap<AuthorityId, BanStatus> {
-    let mut bans: HashMap<AuthorityId, BanStatus> = HashMap::new();
+) -> HashMap<ModerationScopeKey, BanStatus> {
+    let mut bans: HashMap<ModerationScopeKey, BanStatus> = HashMap::new();
 
     for fact in facts {
         if let Some(home_ban) =
             moderation_fact::<HomeBanFact>(fact, context_id, HOME_BAN_FACT_TYPE_ID)
         {
             let ban = BanStatus::from_fact(&home_ban);
-            bans.insert(ban.banned_authority, ban);
+            bans.insert(
+                moderation_scope_key(ban.banned_authority, ban.channel_id),
+                ban,
+            );
             continue;
         }
 
@@ -88,7 +111,8 @@ pub fn query_current_bans(
         {
             remove_if_newer(
                 &mut bans,
-                &home_unban.unbanned_authority,
+                home_unban.unbanned_authority,
+                home_unban.channel_id,
                 home_unban.unbanned_at_ms(),
                 |ban| ban.banned_at_ms,
             );
@@ -97,6 +121,19 @@ pub fn query_current_bans(
 
     bans.retain(|_, ban| !ban.is_expired(current_time_ms));
 
+    bans
+}
+
+/// Query current bans in a context, dropping channel-scoped bans whose
+/// referenced channels no longer exist.
+pub fn query_current_bans_in_live_channels(
+    facts: &[Fact],
+    context_id: &ContextId,
+    current_time_ms: u64,
+    live_channels: &HashSet<ChannelId>,
+) -> HashMap<ModerationScopeKey, BanStatus> {
+    let mut bans = query_current_bans(facts, context_id, current_time_ms);
+    remove_orphaned_channel_statuses(&mut bans, live_channels, |ban| ban.channel_id);
     bans
 }
 
@@ -112,20 +149,24 @@ pub fn query_current_bans(
 /// * `current_time_ms` - Current time for expiration checking (ms since epoch)
 ///
 /// # Returns
-/// HashMap mapping AuthorityId to MuteStatus for all currently muted users
+/// HashMap mapping `(AuthorityId, Option<ChannelId>)` to MuteStatus for all
+/// currently muted scopes
 pub fn query_current_mutes(
     facts: &[Fact],
     context_id: &ContextId,
     current_time_ms: u64,
-) -> HashMap<AuthorityId, MuteStatus> {
-    let mut mutes: HashMap<AuthorityId, MuteStatus> = HashMap::new();
+) -> HashMap<ModerationScopeKey, MuteStatus> {
+    let mut mutes: HashMap<ModerationScopeKey, MuteStatus> = HashMap::new();
 
     for fact in facts {
         if let Some(home_mute) =
             moderation_fact::<HomeMuteFact>(fact, context_id, HOME_MUTE_FACT_TYPE_ID)
         {
             let mute = MuteStatus::from_fact(&home_mute);
-            mutes.insert(mute.muted_authority, mute);
+            mutes.insert(
+                moderation_scope_key(mute.muted_authority, mute.channel_id),
+                mute,
+            );
             continue;
         }
 
@@ -134,7 +175,8 @@ pub fn query_current_mutes(
         {
             remove_if_newer(
                 &mut mutes,
-                &home_unmute.unmuted_authority,
+                home_unmute.unmuted_authority,
+                home_unmute.channel_id,
                 home_unmute.unmuted_at_ms(),
                 |mute| mute.muted_at_ms,
             );
@@ -143,6 +185,19 @@ pub fn query_current_mutes(
 
     mutes.retain(|_, mute| !mute.is_expired(current_time_ms));
 
+    mutes
+}
+
+/// Query current mutes in a context, dropping channel-scoped mutes whose
+/// referenced channels no longer exist.
+pub fn query_current_mutes_in_live_channels(
+    facts: &[Fact],
+    context_id: &ContextId,
+    current_time_ms: u64,
+    live_channels: &HashSet<ChannelId>,
+) -> HashMap<ModerationScopeKey, MuteStatus> {
+    let mut mutes = query_current_mutes(facts, context_id, current_time_ms);
+    remove_orphaned_channel_statuses(&mut mutes, live_channels, |mute| mute.channel_id);
     mutes
 }
 
@@ -193,7 +248,7 @@ pub fn is_user_banned(
     channel_id: Option<&ChannelId>,
 ) -> bool {
     let bans = query_current_bans(facts, context_id, current_time_ms);
-    status_applies_to_channel(&bans, authority, channel_id, BanStatus::applies_to_channel)
+    status_applies_to_channel(&bans, authority, channel_id)
 }
 
 /// Check if a user is currently muted in a context
@@ -218,12 +273,7 @@ pub fn is_user_muted(
     channel_id: Option<&ChannelId>,
 ) -> bool {
     let mutes = query_current_mutes(facts, context_id, current_time_ms);
-    status_applies_to_channel(
-        &mutes,
-        authority,
-        channel_id,
-        MuteStatus::applies_to_channel,
-    )
+    status_applies_to_channel(&mutes, authority, channel_id)
 }
 
 #[cfg(test)]
@@ -283,8 +333,8 @@ mod tests {
 
         let bans = query_current_bans(&facts, &context, 2000);
         assert_eq!(bans.len(), 1);
-        assert!(bans.contains_key(&user1));
-        assert_eq!(bans[&user1].reason, "test ban");
+        assert!(bans.contains_key(&(user1, None)));
+        assert_eq!(bans[&(user1, None)].reason, "test ban");
     }
 
     #[test]
@@ -528,5 +578,106 @@ mod tests {
             2000,
             Some(&channel2)
         ));
+    }
+
+    #[test]
+    fn test_multiple_channel_specific_bans_for_same_user_coexist() {
+        let context = test_context();
+        let user = test_authority(1);
+        let moderator = test_authority(2);
+        let channel1 = test_channel(1);
+        let channel2 = test_channel(2);
+
+        let facts = vec![
+            create_test_fact(
+                HomeBanFact {
+                    context_id: context,
+                    channel_id: Some(channel1),
+                    banned_authority: user,
+                    actor_authority: moderator,
+                    reason: "ban one".to_string(),
+                    banned_at: pt(1000),
+                    expires_at: None,
+                }
+                .to_generic(),
+                0,
+            ),
+            create_test_fact(
+                HomeBanFact {
+                    context_id: context,
+                    channel_id: Some(channel2),
+                    banned_authority: user,
+                    actor_authority: moderator,
+                    reason: "ban two".to_string(),
+                    banned_at: pt(2000),
+                    expires_at: None,
+                }
+                .to_generic(),
+                1,
+            ),
+        ];
+
+        let bans = query_current_bans(&facts, &context, 3000);
+        assert_eq!(bans.len(), 2);
+        assert_eq!(bans[&(user, Some(channel1))].reason, "ban one");
+        assert_eq!(bans[&(user, Some(channel2))].reason, "ban two");
+        assert!(is_user_banned(
+            &facts,
+            &context,
+            &user,
+            3000,
+            Some(&channel1)
+        ));
+        assert!(is_user_banned(
+            &facts,
+            &context,
+            &user,
+            3000,
+            Some(&channel2)
+        ));
+    }
+
+    #[test]
+    fn test_query_current_bans_in_live_channels_drops_orphans() {
+        let context = test_context();
+        let user = test_authority(1);
+        let moderator = test_authority(2);
+        let live_channel = test_channel(1);
+        let deleted_channel = test_channel(2);
+        let live_channels = HashSet::from([live_channel]);
+
+        let facts = vec![
+            create_test_fact(
+                HomeBanFact {
+                    context_id: context,
+                    channel_id: Some(live_channel),
+                    banned_authority: user,
+                    actor_authority: moderator,
+                    reason: "live".to_string(),
+                    banned_at: pt(1000),
+                    expires_at: None,
+                }
+                .to_generic(),
+                0,
+            ),
+            create_test_fact(
+                HomeBanFact {
+                    context_id: context,
+                    channel_id: Some(deleted_channel),
+                    banned_authority: user,
+                    actor_authority: moderator,
+                    reason: "orphan".to_string(),
+                    banned_at: pt(2000),
+                    expires_at: None,
+                }
+                .to_generic(),
+                1,
+            ),
+        ];
+
+        let bans = query_current_bans_in_live_channels(&facts, &context, 3000, &live_channels);
+        assert_eq!(bans.len(), 1);
+        assert!(bans.contains_key(&(user, Some(live_channel))));
+        assert!(!bans.contains_key(&(user, Some(deleted_channel))));
     }
 }

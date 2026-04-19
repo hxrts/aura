@@ -26,7 +26,7 @@ async-lock = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 cfg-if = "1"
-dioxus = { version = "0.7", default-features = false, features = ["launch", "macro", "hooks", "signals", "html"] }
+dioxus = { workspace = true, features = ["launch", "macro", "hooks", "signals", "html"] }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -34,9 +34,9 @@ tracing = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-net = { version = "0.6", features = ["http"] }
-js-sys = "0.3"
+js-sys = { workspace = true }
 serde-wasm-bindgen = "0.6"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
 tracing-wasm = "0.2"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlTextAreaElement", "Navigator", "Clipboard", "Storage", "Location", "console", "AbortController", "AbortSignal", "RequestInit", "Response"] }
+web-sys = { workspace = true, features = ["Window", "Document", "Element", "HtmlElement", "HtmlTextAreaElement", "Navigator", "Clipboard", "Storage", "Location", "console", "AbortController", "AbortSignal", "RequestInit", "Response"] }

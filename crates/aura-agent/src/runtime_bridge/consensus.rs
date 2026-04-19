@@ -15,6 +15,7 @@ use crate::core::default_context_id_for_authority;
 use crate::runtime::consensus::{
     membership_hash_from_participants, participant_identity_to_authority_id,
 };
+use crate::runtime_bridge::error_boundary::bridge_internal;
 
 fn capability_ref(capability: &CapabilityKey) -> String {
     let digest = aura_core::hash::hash(capability.as_str().as_bytes());
@@ -49,7 +50,7 @@ fn consensus_runtime_capability_handler() -> RuntimeCapabilityHandler {
 }
 
 pub(super) fn map_consensus_error(err: AuraError) -> IntentError {
-    IntentError::internal_error(format!("{err}"))
+    bridge_internal("Consensus operation failed", err)
 }
 
 /// Persist a consensus DKG transcript after successful key generation.
@@ -92,10 +93,8 @@ pub(super) async fn persist_consensus_dkg_transcript(
 
     let mut packages = Vec::with_capacity(participant_ids.len());
     for dealer in participant_ids {
-        let package =
-            aura_consensus::dkg::dealer::build_dealer_package(&config, dealer).map_err(|e| {
-                IntentError::internal_error(format!("Failed to build dealer package: {e}"))
-            })?;
+        let package = aura_consensus::dkg::dealer::build_dealer_package(&config, dealer)
+            .map_err(|e| bridge_internal("Build DKG dealer package failed", e))?;
         packages.push(package);
     }
 
@@ -106,9 +105,7 @@ pub(super) async fn persist_consensus_dkg_transcript(
     let capability_snapshot = capability_handler
         .capability_inventory()
         .await
-        .map_err(|e| {
-            IntentError::internal_error(format!("Capability inventory unavailable: {e}"))
-        })?;
+        .map_err(|e| bridge_internal("Consensus capability inventory unavailable", e))?;
     let snapshot_admitted = capability_snapshot
         .iter()
         .filter(|(_, admitted)| *admitted)
@@ -137,9 +134,10 @@ pub(super) async fn persist_consensus_dkg_transcript(
             missing_capability_ref = %missing_ref,
             "Byzantine admission mismatch: consensus profile requirement failed"
         );
-        return Err(IntentError::internal_error(format!(
-            "Consensus profile capability validation failed: {error}"
-        )));
+        return Err(bridge_internal(
+            "Consensus profile capability validation failed",
+            error,
+        ));
     }
     tracing::debug!(
         protocol = PROTOCOL_AURA_CONSENSUS,
@@ -163,9 +161,10 @@ pub(super) async fn persist_consensus_dkg_transcript(
             missing_capability_ref = %missing_ref,
             "Byzantine admission mismatch: required capability denied before DKG"
         );
-        return Err(IntentError::internal_error(format!(
-            "Missing Byzantine safety evidence before DKG: {error}"
-        )));
+        return Err(bridge_internal(
+            "Missing Byzantine safety evidence before DKG",
+            error,
+        ));
     }
     tracing::debug!(
         protocol = PROTOCOL_AURA_CONSENSUS,
@@ -191,7 +190,7 @@ pub(super) async fn persist_consensus_dkg_transcript(
         Some(byzantine_attestation),
     )
     .await
-    .map_err(|e| IntentError::internal_error(format!("Finalize DKG transcript failed: {e}")))?;
+    .map_err(|e| bridge_internal("Finalize DKG transcript failed", e))?;
 
     effects
         .commit_relational_facts(vec![
@@ -201,7 +200,7 @@ pub(super) async fn persist_consensus_dkg_transcript(
             consensus_commit.to_relational_fact(),
         ])
         .await
-        .map_err(|e| IntentError::internal_error(format!("Commit DKG fact failed: {e}")))?;
+        .map_err(|e| bridge_internal("Commit DKG fact failed", e))?;
 
     tracing::info!(
         authority_id = %authority_id,

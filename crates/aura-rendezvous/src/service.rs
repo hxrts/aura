@@ -17,6 +17,7 @@ use aura_core::FlowCost;
 use aura_core::{AuraError, AuraResult};
 use aura_guards::types;
 use std::collections::HashMap;
+use std::time::{Duration, Instant as MonotonicInstant};
 use tokio::sync::RwLock;
 
 // =============================================================================
@@ -34,6 +35,10 @@ pub struct RendezvousConfig {
     pub probe_timeout_ms: u64,
     /// Maximum relay hops
     pub max_relay_hops: u8,
+    /// Time-to-live for pending initiator handshakes in the local registry
+    pub pending_handshaker_ttl_ms: u64,
+    /// Maximum number of pending initiator handshakes retained locally
+    pub max_pending_handshakers: usize,
 }
 
 impl Default for RendezvousConfig {
@@ -43,6 +48,8 @@ impl Default for RendezvousConfig {
             stun_server: None,
             probe_timeout_ms: 5000, // 5 seconds
             max_relay_hops: 3,
+            pending_handshaker_ttl_ms: 60_000, // 60 seconds
+            max_pending_handshakers: 256,
         }
     }
 }
@@ -152,10 +159,44 @@ pub struct RendezvousService {
     descriptor_builder: DescriptorBuilder,
     /// Active handshake state machines (waiting for response or processing init)
     /// Key: (ContextId, Peer)
-    handshakers: RwLock<HashMap<(ContextId, AuthorityId), Handshaker>>,
+    handshakers: RwLock<HashMap<(ContextId, AuthorityId), PendingHandshaker>>,
+}
+
+#[derive(Debug)]
+struct PendingHandshaker {
+    handshaker: Handshaker,
+    inserted_at: MonotonicInstant,
+}
+
+impl PendingHandshaker {
+    fn new(handshaker: Handshaker) -> Self {
+        Self {
+            handshaker,
+            inserted_at: MonotonicInstant::now(),
+        }
+    }
+
+    fn is_expired(&self, now: MonotonicInstant, ttl: Duration) -> bool {
+        now.duration_since(self.inserted_at) >= ttl
+    }
 }
 
 impl RendezvousService {
+    fn pending_handshaker_ttl(&self) -> Duration {
+        Duration::from_millis(self.config.pending_handshaker_ttl_ms)
+    }
+
+    fn cleanup_expired_handshakers(
+        &self,
+        handshakers: &mut HashMap<(ContextId, AuthorityId), PendingHandshaker>,
+        now: MonotonicInstant,
+    ) -> usize {
+        let ttl = self.pending_handshaker_ttl();
+        let before = handshakers.len();
+        handshakers.retain(|_, pending| !pending.is_expired(now, ttl));
+        before.saturating_sub(handshakers.len())
+    }
+
     fn check_capability_and_budget(
         snapshot: &GuardSnapshot,
         capability: RendezvousCapability,
@@ -353,7 +394,25 @@ impl RendezvousService {
 
         // Store handshaker
         let mut handshakers = self.handshakers.write().await;
-        handshakers.insert((context_id, peer), handshaker);
+        let expired = self.cleanup_expired_handshakers(&mut handshakers, MonotonicInstant::now());
+        if expired > 0 {
+            tracing::warn!(
+                authority_id = %self.authority_id,
+                expired,
+                remaining = handshakers.len(),
+                "Expired pending rendezvous handshakers were removed before inserting a new one"
+            );
+        }
+        let key = (context_id, peer);
+        let replacing_existing = handshakers.contains_key(&key);
+        if !replacing_existing && handshakers.len() >= self.config.max_pending_handshakers {
+            return Err(AuraError::invalid(format!(
+                "Too many pending handshakes: {} >= {}",
+                handshakers.len(),
+                self.config.max_pending_handshakers
+            )));
+        }
+        handshakers.insert(key, PendingHandshaker::new(handshaker));
         drop(handshakers);
 
         // Create handshake init message
@@ -484,10 +543,20 @@ impl RendezvousService {
         effects: &E,
     ) -> AuraResult<Option<SecureChannel>> {
         let mut handshakers = self.handshakers.write().await;
-        let mut handshaker = handshakers
+        let expired = self.cleanup_expired_handshakers(&mut handshakers, MonotonicInstant::now());
+        if expired > 0 {
+            tracing::warn!(
+                authority_id = %self.authority_id,
+                expired,
+                remaining = handshakers.len(),
+                "Expired pending rendezvous handshakers were removed before handling completion"
+            );
+        }
+        let pending = handshakers
             .remove(&(context_id, peer))
             .ok_or_else(|| AuraError::invalid("No pending handshake found for peer"))?;
         drop(handshakers);
+        let mut handshaker = pending.handshaker;
 
         // Process Response message
         handshaker
@@ -784,5 +853,106 @@ mod tests {
         // Check if handshaker was stored
         let handshakers = service.handshakers.read().await;
         assert!(handshakers.contains_key(&(test_context(), peer)));
+    }
+
+    #[tokio::test]
+    async fn test_expired_pending_handshakers_are_swept_before_insert() {
+        let config = RendezvousConfig {
+            pending_handshaker_ttl_ms: 10,
+            ..RendezvousConfig::default()
+        };
+        let service = RendezvousService::new(test_authority(), config);
+        let peer = AuthorityId::new_from_entropy([4u8; 32]);
+
+        let expired_config = HandshakeConfig {
+            local: test_authority(),
+            remote: peer,
+            context_id: test_context(),
+            psk: [7u8; 32],
+            timeout_ms: 5,
+        };
+
+        {
+            let mut handshakers = service.handshakers.write().await;
+            handshakers.insert(
+                (test_context(), peer),
+                PendingHandshaker {
+                    handshaker: Handshaker::new(expired_config),
+                    inserted_at: MonotonicInstant::now() - Duration::from_millis(25),
+                },
+            );
+            let removed =
+                service.cleanup_expired_handshakers(&mut handshakers, MonotonicInstant::now());
+            assert_eq!(removed, 1);
+            assert!(handshakers.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pending_handshaker_capacity_rejects_new_entries() {
+        let config = RendezvousConfig {
+            max_pending_handshakers: 1,
+            pending_handshaker_ttl_ms: 60_000,
+            ..RendezvousConfig::default()
+        };
+        let service = RendezvousService::new(test_authority(), config);
+        let snapshot = test_snapshot();
+        let peer_a = AuthorityId::new_from_entropy([5u8; 32]);
+        let peer_b = AuthorityId::new_from_entropy([6u8; 32]);
+        let psk = [42u8; 32];
+        let mock_effects = MockNoise;
+
+        {
+            let mut handshakers = service.handshakers.write().await;
+            handshakers.insert(
+                (test_context(), peer_a),
+                PendingHandshaker::new(Handshaker::new(HandshakeConfig {
+                    local: test_authority(),
+                    remote: peer_a,
+                    context_id: test_context(),
+                    psk,
+                    timeout_ms: 5,
+                })),
+            );
+        }
+
+        let descriptor = RendezvousDescriptor {
+            authority_id: peer_b,
+            device_id: None,
+            context_id: test_context(),
+            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
+            handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
+            valid_from: 0,
+            valid_until: 10000,
+            nonce: [0u8; 32],
+            nickname_suggestion: None,
+        };
+        let establish_path = descriptor
+            .advertised_establish_paths()
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("establish path"));
+
+        let error = match service
+            .prepare_establish_channel(
+                &snapshot,
+                test_context(),
+                peer_b,
+                &establish_path,
+                &psk,
+                &[0u8; 32],
+                &[0u8; 32],
+                100,
+                &descriptor,
+                &mock_effects,
+            )
+            .await
+        {
+            Ok(_) => panic!("capacity limit should reject new pending handshake"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("Too many pending handshakes"));
     }
 }

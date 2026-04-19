@@ -317,6 +317,7 @@ impl VerifyFact {
         aura_core::types::facts::try_decode_fact(
             verify_fact_type_id(),
             VERIFY_FACT_SCHEMA_VERSION,
+            VERIFY_FACT_SCHEMA_VERSION,
             bytes,
         )
     }

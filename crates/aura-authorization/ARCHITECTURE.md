@@ -30,6 +30,11 @@ profiles, and evaluated capability frontiers.
 - Authority-centric resource scopes (AuthorityOp, ContextOp).
 - Capability refinement via meet-semilattice: `C₁ ⊓ C₂ ≤ min(C₁, C₂)`.
 - Biscuit tokens for cryptographic delegation.
+- Biscuit evaluation must receive an explicit current-time value; missing time
+  fails closed rather than defaulting to epoch 0.
+- Biscuit revocation is authority-wide and epoch-driven: rotating the
+  authority root key invalidates previously issued tokens for that authority;
+  this crate does not maintain a separate per-token revocation list.
 - Issuance profiles are explicit and reviewable; there is no implicit
   "grant every declared capability" path.
 - Evaluated frontiers in guard snapshots are distinct from issuance profiles and

@@ -1,5 +1,5 @@
 //! Runtime-owned cover traffic planning.
-#![allow(dead_code)]
+#![allow(dead_code)] // Cleanup target (2026-07): remove after adaptive privacy cover planning is wired into the runtime service graph.
 
 use super::config_profiles::impl_service_config_profiles;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use aura_core::service::{MoveEnvelope, MovePathBinding};
 use tokio::sync::RwLock;
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Cleanup target (2026-07): drop after actor ingress is exercised outside local tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CoverTrafficGeneratorCommand {
     PlanCover,

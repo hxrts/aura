@@ -312,10 +312,10 @@ fn channel_membership_schema_version() -> u16 {
 
 fn map_err(e: aura_core::AuraError) -> AmpChannelError {
     match e {
-        aura_core::AuraError::NotFound { message: _ } => AmpChannelError::NotFound,
-        aura_core::AuraError::Storage { message } => AmpChannelError::Storage(message),
-        aura_core::AuraError::PermissionDenied { message: _ } => AmpChannelError::Unauthorized,
-        aura_core::AuraError::Crypto { message } => AmpChannelError::Crypto(message),
+        aura_core::AuraError::NotFound { .. } => AmpChannelError::NotFound,
+        aura_core::AuraError::Storage { message, .. } => AmpChannelError::Storage(message),
+        aura_core::AuraError::PermissionDenied { .. } => AmpChannelError::Unauthorized,
+        aura_core::AuraError::Crypto { message, .. } => AmpChannelError::Crypto(message),
         other => AmpChannelError::Internal(other.to_string()),
     }
 }

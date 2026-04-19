@@ -38,6 +38,7 @@
 - [System Internals Guide](807_system_internals_guide.md)
 - [Distributed Maintenance Guide](808_maintenance_guide.md)
 - [Capability Vocabulary Inventory](809_capability_vocabulary_inventory.md)
+- [Environment Configuration Guide](810_environment_configuration_guide.md)
 - [User Flow Coverage Report](997_flow_coverage.md)
 - [Verification Coverage Report](998_verification_coverage.md)
 - [Project Structure](999_project_structure.md)

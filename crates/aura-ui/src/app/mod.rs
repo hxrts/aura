@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn runtime_semantic_snapshot_keeps_settings_loading_until_authoritative_projection_arrives() {
         let mut model = UiModel::new("authority-test".to_string());
-        model.account_ready = true;
+        model.account_setup.ready = true;
         model.set_screen(ScreenId::Settings);
 
         let loading_snapshot = runtime_semantic_snapshot(
@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn runtime_semantic_snapshot_keeps_neighborhood_loading_until_home_projection_arrives() {
         let mut model = UiModel::new("authority-test".to_string());
-        model.account_ready = true;
+        model.account_setup.ready = true;
         model.set_screen(ScreenId::Neighborhood);
 
         let loading_snapshot = runtime_semantic_snapshot(

@@ -4,6 +4,12 @@ use super::facts::{HomeBanFact, HomeKickFact, HomeMuteFact};
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use serde::{Deserialize, Serialize};
 
+/// Moderation scope key for current-status lookups.
+///
+/// The optional channel component distinguishes home-wide moderation
+/// (`None`) from channel-scoped moderation (`Some(channel_id)`).
+pub type ModerationScopeKey = (AuthorityId, Option<ChannelId>);
+
 /// Current ban status for a user
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BanStatus {

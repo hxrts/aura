@@ -130,6 +130,11 @@ and continue to map to the same canonical coverage anchors:
   `workflows/invitation/{create,accept,readiness}.rs`, and
   `workflows/messaging/{channel_refs,channels,send}.rs`. Shared-flow source
   metadata continues to publish through the `aura-app::ui_contract` facade.
+- Settings/device and notifications/authority work keep the same canonical
+  anchors. Device add/remove and shared settings remain bound to
+  `scenario12-mixed-device-enrollment-removal-e2e.toml` plus
+  `shared-settings-parity.toml`, while notifications navigation and authority
+  switching remain bound to `shared-notifications-and-authority.toml`.
 
 Scenario 13 remains the canonical anchor for the shared contacts lifecycle
 because it exercises the parity-critical semantic controls for `send friend

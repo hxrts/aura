@@ -221,6 +221,7 @@ where
             write_timeout: NonZeroDuration::from_secs(30)
                 .expect("write timeout should be non-zero"),
             buffer_size: NonZeroUsize::new(64 * 1024).expect("buffer size should be non-zero"),
+            ..TransportConfig::default()
         };
 
         let transport_manager = RetryingTransportManager::new(transport_config, config.max_retries);

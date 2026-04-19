@@ -37,5 +37,5 @@ pub use scope::{
 // Fact encoding types
 pub use facts::{
     try_decode_fact, try_decode_fact_compatible, try_encode_fact, FactDelta, FactDeltaReducer,
-    FactEncoding, FactEnvelope, FactError, FactTypeId,
+    FactEncoding, FactEnvelope, FactError, FactSchemaCompatibility, FactTypeId,
 };

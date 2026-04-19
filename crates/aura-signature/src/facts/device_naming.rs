@@ -225,6 +225,7 @@ impl DeviceNamingFact {
         aura_core::types::facts::try_decode_fact(
             device_naming_fact_type_id(),
             DEVICE_NAMING_SCHEMA_VERSION,
+            DEVICE_NAMING_SCHEMA_VERSION,
             bytes,
         )
     }

@@ -185,7 +185,7 @@ pub mod types {
     };
     // Naming pattern
     pub use crate::views::contacts::ContactRelationshipState;
-    pub use crate::views::naming::EffectiveName;
+    pub use crate::views::naming::{truncate_id_for_display, EffectiveName};
     pub use crate::views::{
         classify_threshold_security, format_recovery_status, security_level_hint, AccountBackup,
         AccountConfig, BanRecord, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,

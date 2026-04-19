@@ -930,9 +930,9 @@ impl SyncServiceManager {
         participant2_id: AuthorityId,
         confirmation: EpochConfirmation,
     ) -> Result<(), SyncManagerError> {
-        let participant_id = match role {
-            EpochRotationProtocolRole::Participant1 => participant1_id,
-            EpochRotationProtocolRole::Participant2 => participant2_id,
+        let (participant_id, active_role_name) = match role {
+            EpochRotationProtocolRole::Participant1 => (participant1_id, "Participant1"),
+            EpochRotationProtocolRole::Participant2 => (participant2_id, "Participant2"),
             EpochRotationProtocolRole::Coordinator => {
                 return Err(SyncManagerError::ParticipantRoleRequired)
             }
@@ -940,11 +940,6 @@ impl SyncServiceManager {
         let session_id = epoch_rotation_session_id(&confirmation.rotation_id);
         self.record_native_epoch_session(participant_id, session_id)
             .await;
-        let active_role_name = match role {
-            EpochRotationProtocolRole::Participant1 => "Participant1",
-            EpochRotationProtocolRole::Participant2 => "Participant2",
-            EpochRotationProtocolRole::Coordinator => unreachable!(),
-        };
         let roles = vec![
             Self::epoch_role(coordinator_id, 0),
             Self::epoch_role(participant_id, 0),

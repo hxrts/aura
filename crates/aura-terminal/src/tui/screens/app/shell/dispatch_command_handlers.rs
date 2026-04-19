@@ -207,7 +207,8 @@ fn handle_recovery_and_ceremonies_dispatch(
                         let tasks = tasks.clone();
                         let tasks_handle = tasks;
                         tasks_handle.spawn(async move {
-                            let policy = CeremonyPollPolicy::with_interval(
+                            let policy = CeremonyPollPolicy::for_kind(
+                                status_handle.kind(),
                                 std::time::Duration::from_millis(500),
                             );
                             match monitor_key_rotation_ceremony_with_policy(
@@ -384,7 +385,8 @@ fn handle_recovery_and_ceremonies_dispatch(
                         let tasks = tasks.clone();
                         let tasks_handle = tasks;
                         tasks_handle.spawn(async move {
-                            let policy = CeremonyPollPolicy::with_interval(
+                            let policy = CeremonyPollPolicy::for_kind(
+                                status_handle.kind(),
                                 std::time::Duration::from_millis(500),
                             );
                             match monitor_key_rotation_ceremony_with_policy(

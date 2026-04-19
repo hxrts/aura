@@ -416,7 +416,7 @@ fn build_authoritative_ui_snapshot(
     Ok(snapshot)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(not(test), allow(dead_code))] // Shared semantic export is test-driven today; keep it until non-test callers or a dedicated fixture module exists.
 pub fn authoritative_ui_snapshot(
     state: &TuiState,
     semantic_inputs: TuiSemanticInputs<'_>,

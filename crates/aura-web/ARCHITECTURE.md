@@ -246,6 +246,10 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 - Those publication diagnostics are typed internally through publication
   status, binding-mode, and reliability classes before they are serialized onto
   the browser globals.
+- Browser-owned async account/bootstrap flows must not silently drop Dioxus
+  signal writes when the shell is contended or unmounting. The shell may retry
+  state publication on the next browser tick for the active generation, but it
+  must emit a structured warning if the write still cannot be observed.
 - Runtime identity staging and bootstrap handoff completion semantics are part
   of that compatibility surface; changes must preserve the distinction between
   accepted/enqueued work and completed bootstrap state.

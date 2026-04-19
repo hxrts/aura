@@ -674,7 +674,7 @@ mod tests {
 
         model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Devices;
-        model.has_secondary_device = true;
+        model.demo.has_secondary_device = true;
         model.set_secondary_device_name(Some("Laptop".to_string()));
 
         apply_text_keys(&mut model, "r", &clipboard);
@@ -689,7 +689,7 @@ mod tests {
         ));
         apply_named_key(&mut model, "enter", 1, &clipboard);
 
-        assert!(!model.has_secondary_device);
+        assert!(!model.has_secondary_device());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Device removal complete")
@@ -735,7 +735,7 @@ mod tests {
         let clipboard = MemoryClipboard::default();
         model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Authority;
-        model.has_secondary_device = true;
+        model.demo.has_secondary_device = true;
 
         apply_text_keys(&mut model, "m", &clipboard);
         assert!(matches!(modal_state(&model), Some(ModalState::MfaSetup)));
@@ -900,7 +900,7 @@ mod tests {
         let clipboard = MemoryClipboard::default();
         model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Authority;
-        model.has_secondary_device = true;
+        model.demo.has_secondary_device = true;
 
         apply_text_keys(&mut model, "m", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);

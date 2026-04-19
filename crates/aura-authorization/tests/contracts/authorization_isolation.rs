@@ -35,7 +35,7 @@ fn cross_authority_token_rejected() {
     let scope = common::context_scope(10);
 
     // Authorization must fail — token signed by A's key, verified against B's key
-    let result = bridge_b.authorize(&token, AuthorizationOp::Read, &scope);
+    let result = bridge_b.authorize_with_time(&token, AuthorizationOp::Read, &scope, Some(1_000));
     assert!(
         result.is_err(),
         "token from authority A must be rejected by authority B's evaluator"
@@ -68,7 +68,7 @@ fn token_without_capability_denied() {
 
     // Write requires capability("write") — token doesn't have it
     let result = bridge
-        .authorize(&token, AuthorizationOp::Write, &scope)
+        .authorize_with_time(&token, AuthorizationOp::Write, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("evaluation should succeed even if denied: {err:?}"));
     assert!(
         !result.authorized,
@@ -95,12 +95,12 @@ fn read_capability_does_not_imply_write() {
     let scope = common::context_scope(8);
 
     let read_result = bridge
-        .authorize(&token, AuthorizationOp::Read, &scope)
+        .authorize_with_time(&token, AuthorizationOp::Read, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("read authorization evaluation failed: {err:?}"));
     assert!(read_result.authorized, "read capability should allow read");
 
     let write_result = bridge
-        .authorize(&token, AuthorizationOp::Write, &scope)
+        .authorize_with_time(&token, AuthorizationOp::Write, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("write authorization evaluation failed: {err:?}"));
     assert!(
         !write_result.authorized,
@@ -135,7 +135,7 @@ fn double_attenuation_cannot_restore_capabilities() {
     let scope = common::context_scope(22);
 
     let write_check = bridge
-        .authorize(&read_only, AuthorizationOp::Write, &scope)
+        .authorize_with_time(&read_only, AuthorizationOp::Write, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("write evaluation for read-only token failed: {err:?}"));
     assert!(!write_check.authorized, "read-only token must block write");
 
@@ -146,12 +146,45 @@ fn double_attenuation_cannot_restore_capabilities() {
         .unwrap_or_else(|err| panic!("failed to attenuate read-only token again: {err:?}"));
 
     let write_check2 = bridge
-        .authorize(&double_attenuated, AuthorizationOp::Write, &scope)
+        .authorize_with_time(
+            &double_attenuated,
+            AuthorizationOp::Write,
+            &scope,
+            Some(1_000),
+        )
         .unwrap_or_else(|err| {
             panic!("write evaluation for doubly attenuated token failed: {err:?}")
         });
     assert!(
         !write_check2.authorized,
         "double attenuation must not restore write capability"
+    );
+}
+
+/// Rotating the authority root key for the same authority id must invalidate
+/// tokens signed under the previous epoch/key material.
+#[test]
+fn authority_epoch_rotation_revokes_previous_tokens() {
+    let authority_id = common::authority_id(30);
+    let recipient = common::authority_id(31);
+
+    let previous_epoch = TokenAuthority::new(authority_id);
+    let token = previous_epoch
+        .create_token(recipient, common::read_capability())
+        .unwrap_or_else(|err| panic!("failed to create pre-rotation token: {err:?}"));
+
+    let rotated_epoch = TokenAuthority::new(authority_id);
+    let rotated_bridge =
+        BiscuitAuthorizationBridge::new(rotated_epoch.root_public_key(), authority_id);
+
+    let result = rotated_bridge.authorize_with_time(
+        &token,
+        AuthorizationOp::Read,
+        &common::context_scope(32),
+        Some(1_000),
+    );
+    assert!(
+        result.is_err(),
+        "rotated authority key must reject tokens issued before the epoch change"
     );
 }

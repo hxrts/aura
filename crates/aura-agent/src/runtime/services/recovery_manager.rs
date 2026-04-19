@@ -109,6 +109,23 @@ impl RecoveryManager {
             .collect()
     }
 
+    /// List recovery ids whose request expiry has passed.
+    pub async fn expired_ids(&self, current_time: u64) -> Vec<RecoveryId> {
+        self.state
+            .read()
+            .await
+            .recoveries
+            .iter()
+            .filter_map(|(id, recovery)| {
+                recovery
+                    .request
+                    .expires_at
+                    .filter(|expiry| *expiry <= current_time)
+                    .map(|_| id.clone())
+            })
+            .collect()
+    }
+
     /// Cleanup expired recoveries. Returns removed count.
     pub async fn cleanup_expired(&self, current_time: u64) -> usize {
         with_state_mut_validated(

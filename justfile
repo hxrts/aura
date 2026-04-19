@@ -705,6 +705,7 @@ ci-annotation-ratchet:
     just _policy-check check ownership-annotation-ratchet semantic-owner
     just _policy-check check ownership-annotation-ratchet actor-owned
     just _policy-check check ownership-annotation-ratchet capability-boundary
+    just _policy-check check ignored-test-count-ratchet
 
 ci-ownership-categories:
     just _policy-check check ownership-category-declarations

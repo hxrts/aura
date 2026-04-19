@@ -191,19 +191,43 @@ impl IoContext {
     #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
     #[must_use]
     pub fn with_defaults() -> Self {
+        Self::try_with_defaults().unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// Create an IoContext with default configuration as a typed result.
+    ///
+    /// This is the recoverable variant for shell/bootstrap callers.
+    pub fn try_with_defaults() -> TerminalResult<Self> {
         if tokio::runtime::Handle::try_current().is_ok() {
-            panic!("IoContext::with_defaults() cannot be called inside a tokio runtime; use IoContext::with_defaults_async().await instead");
+            return Err(TerminalError::Config(
+                "IoContext::try_with_defaults() cannot be called inside a tokio runtime; use IoContext::try_with_defaults_async().await instead".to_string(),
+            ));
         }
 
-        let app_core = AppCore::new(aura_app::ui::types::AppConfig::default())
-            .expect("Failed to create default AppCore");
+        let app_core =
+            AppCore::new(aura_app::ui::types::AppConfig::default()).map_err(|error| {
+                TerminalError::Config(format!("failed to create default AppCore: {error}"))
+            })?;
         let app_core = Arc::new(RwLock::new(app_core));
-        let app_core = tokio::runtime::Builder::new_current_thread()
+        let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("Failed to build tokio runtime for IoContext::with_defaults")
+            .map_err(|error| {
+                TerminalError::structured_operation(
+                    "TUI_IO_RUNTIME_BUILD",
+                    format!(
+                        "failed to build tokio runtime for IoContext::try_with_defaults: {error}"
+                    ),
+                )
+            })?;
+        let app_core = runtime
             .block_on(InitializedAppCore::new(app_core))
-            .expect("Failed to init signals for IoContext::with_defaults");
+            .map_err(|error| {
+                TerminalError::structured_operation(
+                    "TUI_IO_INIT_SIGNALS",
+                    format!("failed to init signals for IoContext::try_with_defaults: {error}"),
+                )
+            })?;
 
         let mode = TuiMode::Production;
         IoContext::builder()
@@ -213,18 +237,30 @@ impl IoContext {
             .with_mode(mode)
             .with_existing_account(true)
             .build()
-            .expect("IoContext::with_defaults: all required fields provided")
+            .map_err(|error| TerminalError::Config(error.to_string()))
     }
 
     /// Create an IoContext with default configuration (async version).
     #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
     pub async fn with_defaults_async() -> Self {
-        let app_core = AppCore::new(aura_app::ui::types::AppConfig::default())
-            .expect("Failed to create default AppCore");
-        let app_core = Arc::new(RwLock::new(app_core));
-        let app_core = InitializedAppCore::new(app_core)
+        Self::try_with_defaults_async()
             .await
-            .expect("Failed to init signals for IoContext::with_defaults_async");
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// Create an IoContext with default configuration as a typed async result.
+    pub async fn try_with_defaults_async() -> TerminalResult<Self> {
+        let app_core =
+            AppCore::new(aura_app::ui::types::AppConfig::default()).map_err(|error| {
+                TerminalError::Config(format!("failed to create default AppCore: {error}"))
+            })?;
+        let app_core = Arc::new(RwLock::new(app_core));
+        let app_core = InitializedAppCore::new(app_core).await.map_err(|error| {
+            TerminalError::structured_operation(
+                "TUI_IO_INIT_SIGNALS_ASYNC",
+                format!("failed to init signals for IoContext::try_with_defaults_async: {error}"),
+            )
+        })?;
 
         let mode = TuiMode::Production;
         IoContext::builder()
@@ -234,7 +270,7 @@ impl IoContext {
             .with_mode(mode)
             .with_existing_account(true)
             .build()
-            .expect("IoContext::with_defaults_async: all required fields provided")
+            .map_err(|error| TerminalError::Config(error.to_string()))
     }
 
     #[inline]
@@ -1094,4 +1130,40 @@ impl Default for IoContext {
 pub trait HasContext {
     fn set_context(&mut self, ctx: Arc<IoContext>);
     fn context(&self) -> Option<&Arc<IoContext>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IoContext;
+    use crate::error::TerminalError;
+
+    #[test]
+    fn try_with_defaults_rejects_nested_runtime() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap_or_else(|error| panic!("failed to build tokio runtime for test: {error}"));
+
+        let error = match runtime.block_on(async { IoContext::try_with_defaults() }) {
+            Ok(_) => panic!("expected nested runtime defaults constructor to fail"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(error, TerminalError::Config(_)));
+        assert!(
+            error
+                .to_string()
+                .contains("cannot be called inside a tokio runtime"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_with_defaults_async_returns_initialized_context() {
+        let ctx = IoContext::try_with_defaults_async()
+            .await
+            .unwrap_or_else(|error| panic!("expected async defaults context: {error}"));
+
+        assert!(ctx.has_app_core());
+    }
 }
