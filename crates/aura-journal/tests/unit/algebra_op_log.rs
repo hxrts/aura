@@ -4,17 +4,21 @@ use aura_journal::AttestedOp;
 use aura_journal::Hash32;
 
 fn create_test_operation(leaf_id: u32, parent_epoch: Epoch) -> AttestedOp {
+    let leaf = match LeafNode::new_device(
+        LeafId(leaf_id),
+        aura_core::DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
+        vec![leaf_id as u8; 32],
+    ) {
+        Ok(leaf) => leaf,
+        Err(err) => panic!("valid leaf: {err}"),
+    };
+
     AttestedOp {
         op: TreeOp {
             parent_epoch,
             parent_commitment: [0u8; 32],
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode::new_device(
-                    LeafId(leaf_id),
-                    aura_core::DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
-                    vec![leaf_id as u8; 32],
-                )
-                .expect("valid leaf"),
+                leaf,
                 under: NodeIndex(0),
             },
             version: 1,
@@ -178,7 +182,9 @@ fn filtering_and_queries() {
     let early_ops = log.operations_in_epoch_range(Epoch::initial(), Epoch::new(5));
     assert_eq!(early_ops.len(), 2);
 
-    let latest = log.latest_operation().expect("latest op");
+    let Some(latest) = log.latest_operation() else {
+        panic!("latest op");
+    };
     assert_eq!(latest.op.parent_epoch, Epoch::new(10));
 
     let epoch_zero_ops = log.filter(|op| op.op.parent_epoch == Epoch::initial());

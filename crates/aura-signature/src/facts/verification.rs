@@ -292,16 +292,7 @@ impl VerifyFact {
 
     /// Get the timestamp for this fact in milliseconds
     pub fn timestamp_ms(&self) -> u64 {
-        match self {
-            VerifyFact::AuthorityRegistered { registered_at, .. } => registered_at.ts_ms,
-            VerifyFact::AuthoritySuspended { suspended_at, .. } => suspended_at.ts_ms,
-            VerifyFact::AuthorityRevoked { revoked_at, .. } => revoked_at.ts_ms,
-            VerifyFact::AuthorityReactivated { reactivated_at, .. } => reactivated_at.ts_ms,
-            VerifyFact::AuthorityCapabilitiesUpdated { updated_at, .. } => updated_at.ts_ms,
-            VerifyFact::AccountPolicySet { set_at, .. } => set_at.ts_ms,
-            VerifyFact::IdentityVerified { verified_at, .. } => verified_at.ts_ms,
-            VerifyFact::ThresholdSignatureVerified { verified_at, .. } => verified_at.ts_ms,
-        }
+        self.timestamp().ts_ms
     }
 
     /// Encode this fact with a canonical envelope.
@@ -330,24 +321,6 @@ impl VerifyFact {
         )
     }
 
-    /// Encode this fact with proper error handling.
-    ///
-    /// # Errors
-    ///
-    /// Returns `FactError` if serialization fails.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, FactError> {
-        self.try_encode()
-    }
-
-    /// Decode a fact with proper error handling.
-    ///
-    /// # Errors
-    ///
-    /// Returns `FactError` if deserialization fails or version/type mismatches.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FactError> {
-        Self::try_decode(bytes)
-    }
-
     /// Create an AuthorityRegistered fact with millisecond timestamp
     pub fn authority_registered_ms(
         authority_id: AuthorityId,
@@ -361,10 +334,7 @@ impl VerifyFact {
             public_key,
             capabilities,
             registered_epoch,
-            registered_at: PhysicalTime {
-                ts_ms: registered_at_ms,
-                uncertainty: None,
-            },
+            registered_at: exact_physical_time(registered_at_ms),
         }
     }
 
@@ -379,10 +349,7 @@ impl VerifyFact {
             authority_id,
             reason,
             suspended_epoch,
-            suspended_at: PhysicalTime {
-                ts_ms: suspended_at_ms,
-                uncertainty: None,
-            },
+            suspended_at: exact_physical_time(suspended_at_ms),
         }
     }
 
@@ -397,10 +364,7 @@ impl VerifyFact {
             authority_id,
             reason,
             revoked_epoch,
-            revoked_at: PhysicalTime {
-                ts_ms: revoked_at_ms,
-                uncertainty: None,
-            },
+            revoked_at: exact_physical_time(revoked_at_ms),
         }
     }
 
@@ -413,10 +377,7 @@ impl VerifyFact {
         Self::AuthorityReactivated {
             authority_id,
             reactivated_epoch,
-            reactivated_at: PhysicalTime {
-                ts_ms: reactivated_at_ms,
-                uncertainty: None,
-            },
+            reactivated_at: exact_physical_time(reactivated_at_ms),
         }
     }
 
@@ -431,10 +392,7 @@ impl VerifyFact {
             authority_id,
             new_capabilities,
             updated_epoch,
-            updated_at: PhysicalTime {
-                ts_ms: updated_at_ms,
-                uncertainty: None,
-            },
+            updated_at: exact_physical_time(updated_at_ms),
         }
     }
 
@@ -449,10 +407,7 @@ impl VerifyFact {
             account_id,
             threshold,
             set_epoch,
-            set_at: PhysicalTime {
-                ts_ms: set_at_ms,
-                uncertainty: None,
-            },
+            set_at: exact_physical_time(set_at_ms),
         }
     }
 
@@ -469,10 +424,7 @@ impl VerifyFact {
             verification_type,
             success,
             confidence,
-            verified_at: PhysicalTime {
-                ts_ms: verified_at_ms,
-                uncertainty: None,
-            },
+            verified_at: exact_physical_time(verified_at_ms),
         }
     }
 
@@ -491,10 +443,7 @@ impl VerifyFact {
             threshold,
             message_hash,
             success,
-            verified_at: PhysicalTime {
-                ts_ms: verified_at_ms,
-                uncertainty: None,
-            },
+            verified_at: exact_physical_time(verified_at_ms),
         }
     }
 
@@ -530,6 +479,26 @@ impl VerifyFact {
             VerifyFact::IdentityVerified { .. } => "identity_verified",
             VerifyFact::ThresholdSignatureVerified { .. } => "threshold_signature_verified",
         }
+    }
+
+    fn timestamp(&self) -> &PhysicalTime {
+        match self {
+            VerifyFact::AuthorityRegistered { registered_at, .. } => registered_at,
+            VerifyFact::AuthoritySuspended { suspended_at, .. } => suspended_at,
+            VerifyFact::AuthorityRevoked { revoked_at, .. } => revoked_at,
+            VerifyFact::AuthorityReactivated { reactivated_at, .. } => reactivated_at,
+            VerifyFact::AuthorityCapabilitiesUpdated { updated_at, .. } => updated_at,
+            VerifyFact::AccountPolicySet { set_at, .. } => set_at,
+            VerifyFact::IdentityVerified { verified_at, .. } => verified_at,
+            VerifyFact::ThresholdSignatureVerified { verified_at, .. } => verified_at,
+        }
+    }
+}
+
+fn exact_physical_time(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
     }
 }
 
@@ -594,16 +563,10 @@ impl FactDeltaReducer<VerifyFact, VerifyFactDelta> for VerifyFactReducer {
                 delta.authorities_reactivated.push(*authority_id);
             }
             VerifyFact::IdentityVerified { success, .. } => {
-                delta.verifications_performed += 1;
-                if *success {
-                    delta.verifications_successful += 1;
-                }
+                record_verification(&mut delta, *success);
             }
             VerifyFact::ThresholdSignatureVerified { success, .. } => {
-                delta.verifications_performed += 1;
-                if *success {
-                    delta.verifications_successful += 1;
-                }
+                record_verification(&mut delta, *success);
             }
             VerifyFact::AuthorityCapabilitiesUpdated { .. }
             | VerifyFact::AccountPolicySet { .. } => {
@@ -615,24 +578,38 @@ impl FactDeltaReducer<VerifyFact, VerifyFactDelta> for VerifyFactReducer {
     }
 }
 
+fn record_verification(delta: &mut VerifyFactDelta, success: bool) {
+    delta.verifications_performed += 1;
+    if success {
+        delta.verifications_successful += 1;
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use aura_core::types::facts::FactDeltaReducer;
 
-    /// VerifyFact preserves authority_id, timestamp, epoch, and fact_type.
-    #[test]
-    fn test_verify_fact_authority_id() {
-        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
+    fn test_authority_id(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
 
-        let fact = VerifyFact::authority_registered_ms(
-            authority_id,
-            PublicKeyBytes::new([1u8; 32]),
+    fn registered_fact(seed: u8) -> VerifyFact {
+        VerifyFact::authority_registered_ms(
+            test_authority_id(seed),
+            PublicKeyBytes::new([seed; 32]),
             Cap::top(),
             Epoch::new(1),
             1000,
-        );
+        )
+    }
+
+    /// VerifyFact preserves authority_id, timestamp, epoch, and fact_type.
+    #[test]
+    fn test_verify_fact_authority_id() {
+        let authority_id = test_authority_id(1);
+        let fact = registered_fact(1);
 
         assert_eq!(fact.authority_id(), Some(authority_id));
         assert_eq!(fact.timestamp_ms(), 1000);
@@ -644,15 +621,8 @@ mod tests {
     #[test]
     fn test_verify_fact_reducer() {
         let reducer = VerifyFactReducer::new();
-        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
-
-        let fact = VerifyFact::authority_registered_ms(
-            authority_id,
-            PublicKeyBytes::new([2u8; 32]),
-            Cap::top(),
-            Epoch::new(1),
-            1000,
-        );
+        let fact = registered_fact(2);
+        let authority_id = fact.authority_id().unwrap();
 
         let delta = reducer.apply(&fact);
         assert_eq!(delta.authorities_registered.len(), 1);
@@ -662,7 +632,7 @@ mod tests {
     /// Identity verification fact tracks performed and successful counts.
     #[test]
     fn test_verification_fact() {
-        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
+        let authority_id = test_authority_id(1);
 
         let fact = VerifyFact::identity_verified_ms(
             authority_id,
@@ -685,7 +655,7 @@ mod tests {
     /// Timestamp accessor on VerifyFact.
     #[test]
     fn test_timestamp_ms() {
-        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
+        let authority_id = test_authority_id(1);
 
         let fact = VerifyFact::authority_suspended_ms(
             authority_id,

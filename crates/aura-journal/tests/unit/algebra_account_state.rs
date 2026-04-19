@@ -34,7 +34,7 @@ fn join_semilattice() {
     let account_id = AccountId(uuid::Uuid::from_bytes([4u8; 16]));
     let (_sk, group_public_key) = aura_core::util::test_utils::test_key_pair(3);
 
-    let mut state1 = AccountState::new(account_id, group_public_key.clone());
+    let mut state1 = AccountState::new(account_id, group_public_key);
     let mut state2 = AccountState::new(account_id, group_public_key);
 
     state1.set_epoch_if_higher(3);

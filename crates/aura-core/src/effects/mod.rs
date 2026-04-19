@@ -42,8 +42,7 @@
 
 macro_rules! impl_arc_effect {
     ($trait_name:path { $($methods:item)* }) => {
-        #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
-        #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+        #[async_trait::async_trait]
         impl<T: $trait_name + Send + Sync + ?Sized> $trait_name for std::sync::Arc<T> {
             $($methods)*
         }

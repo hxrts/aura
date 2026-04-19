@@ -17,8 +17,13 @@ fn priority_values() {
 
 #[test]
 fn intent_creation() {
+    let leaf = match LeafNode::new_device(LeafId(0), test_device_id(9), vec![0u8; 32]) {
+        Ok(leaf) => leaf,
+        Err(err) => panic!("leaf: {err}"),
+    };
+
     let op = TreeOperation::AddLeaf {
-        leaf: LeafNode::new_device(LeafId(0), test_device_id(9), vec![0u8; 32]).expect("leaf"),
+        leaf,
         under: NodeIndex(0),
     };
 

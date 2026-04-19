@@ -5,7 +5,7 @@
 
 #![allow(missing_docs)]
 
-#[path = "support/mod.rs"]
+#[path = "support.rs"]
 mod support;
 
 use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};

@@ -121,7 +121,7 @@ impl BiscuitAuthorizationBridge {
         match operation {
             "read" => Self::biscuit(authorizer.add_check(check!("check if capability(\"read\")")))?,
             "write" => {
-                Self::biscuit(authorizer.add_check(check!("check if capability(\"write\")")))?
+                Self::biscuit(authorizer.add_check(check!("check if capability(\"write\")")))?;
             }
             "execute" => {
                 Self::biscuit(authorizer.add_check(check!("check if capability(\"execute\")")))?;

@@ -62,7 +62,14 @@ impl CryptoMessage {
 
     /// Get the protocol type for this message
     pub fn protocol_type(&self) -> &'static str {
-        match &self.payload {
+        self.payload.protocol_type()
+    }
+}
+
+impl CryptoPayload {
+    /// Get the protocol type for this payload.
+    pub fn protocol_type(&self) -> &'static str {
+        match self {
             CryptoPayload::Resharing(_) => "resharing",
         }
     }
@@ -87,6 +94,20 @@ pub enum ResharingMessage {
     AbortResharing(AbortResharingMessage),
     /// Rollback failed resharing to previous state
     RollbackResharing(RollbackResharingMessage),
+}
+
+impl ResharingMessage {
+    /// Get the session id carried by this resharing message.
+    pub fn session_id(&self) -> SessionId {
+        match self {
+            ResharingMessage::InitiateResharing(message) => message.session_id,
+            ResharingMessage::DistributeSubShare(message) => message.session_id,
+            ResharingMessage::AcknowledgeSubShare(message) => message.session_id,
+            ResharingMessage::FinalizeResharing(message) => message.session_id,
+            ResharingMessage::AbortResharing(message) => message.session_id,
+            ResharingMessage::RollbackResharing(message) => message.session_id,
+        }
+    }
 }
 
 /// Initiate resharing protocol message

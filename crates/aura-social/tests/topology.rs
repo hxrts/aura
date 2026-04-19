@@ -1,6 +1,6 @@
 //! Social topology, access level, and simulation tests.
 
-#[path = "support/mod.rs"]
+#[path = "support.rs"]
 mod support;
 
 mod topology {

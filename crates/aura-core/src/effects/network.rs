@@ -209,16 +209,20 @@ pub trait UdpEffects: Send + Sync {
     ) -> Result<Arc<dyn UdpEndpointEffects>, NetworkError>;
 }
 
-impl_arc_effect!(UdpEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: UdpEffects + Send + Sync + ?Sized> UdpEffects for Arc<T> {
     async fn udp_bind(
         &self,
         addr: UdpEndpoint,
     ) -> Result<Arc<dyn UdpEndpointEffects>, NetworkError> {
         (**self).udp_bind(addr).await
     }
-});
+}
 
-impl_arc_effect!(UdpEndpointEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: UdpEndpointEffects + Send + Sync + ?Sized> UdpEndpointEffects for Arc<T> {
     async fn set_broadcast(&self, enabled: bool) -> Result<(), NetworkError> {
         (**self).set_broadcast(enabled).await
     }
@@ -230,7 +234,7 @@ impl_arc_effect!(UdpEndpointEffects {
     async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, UdpEndpoint), NetworkError> {
         (**self).recv_from(buffer).await
     }
-});
+}
 
 /// Stream type for peer connection events
 pub type PeerEventStream = std::pin::Pin<Box<dyn futures::Stream<Item = PeerEvent> + Send>>;
@@ -297,11 +301,15 @@ pub trait NetworkChangeEffects: Send + Sync {
     }
 }
 
-impl_arc_effect!(NetworkChangeEffects {
-    async fn subscribe_network_changes(&self) -> Result<Box<dyn NetworkChangeStream>, NetworkError> {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: NetworkChangeEffects + Send + Sync + ?Sized> NetworkChangeEffects for Arc<T> {
+    async fn subscribe_network_changes(
+        &self,
+    ) -> Result<Box<dyn NetworkChangeStream>, NetworkError> {
         (**self).subscribe_network_changes().await
     }
-});
+}
 
 /// Core network effects interface for communication operations.
 ///
@@ -379,7 +387,9 @@ pub trait NetworkExtendedEffects: NetworkCoreEffects + Send + Sync {
 pub trait NetworkEffects: NetworkCoreEffects + NetworkExtendedEffects {}
 
 impl<T: NetworkCoreEffects + NetworkExtendedEffects + ?Sized> NetworkEffects for T {}
-impl_arc_effect!(NetworkCoreEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: NetworkCoreEffects + Send + Sync + ?Sized> NetworkCoreEffects for Arc<T> {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         (**self).send_to_peer(peer_id, message).await
     }
@@ -391,9 +401,11 @@ impl_arc_effect!(NetworkCoreEffects {
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
         (**self).receive().await
     }
-});
+}
 
-impl_arc_effect!(NetworkExtendedEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: NetworkExtendedEffects + Send + Sync + ?Sized> NetworkExtendedEffects for Arc<T> {
     async fn receive_from(&self, peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         (**self).receive_from(peer_id).await
     }
@@ -421,4 +433,4 @@ impl_arc_effect!(NetworkExtendedEffects {
     async fn close(&self, connection_id: &str) -> Result<(), NetworkError> {
         (**self).close(connection_id).await
     }
-});
+}

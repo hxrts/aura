@@ -49,6 +49,7 @@ pub mod messages;
 pub(crate) mod registry;
 pub mod session;
 pub mod threshold;
+mod verification_common;
 
 // Re-export commonly used types
 pub use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
@@ -64,11 +65,13 @@ pub use event_validation::{
 
 use aura_core::hash::hash;
 use aura_macros::aura_error_types;
+use std::collections::HashMap;
+use std::hash::Hash;
 
 // Internal imports for SimpleIdentityVerifier implementation
 use authority::verify_authority_signature;
+use event_validation::validate_threshold_signature as validate_threshold_signature_event;
 use guardian::verify_guardian_signature;
-use threshold::verify_threshold_signature;
 
 // Re-export domain types
 pub use aura_core::types::relationships::*;
@@ -124,6 +127,47 @@ aura_error_types! {
 
 pub type Result<T> = std::result::Result<T, AuthenticationError>;
 
+fn get_key<'a, K, V>(
+    map: &'a HashMap<K, V>,
+    key: &K,
+    missing_error: impl FnOnce() -> AuthenticationError,
+) -> Result<&'a V>
+where
+    K: Eq + Hash,
+{
+    map.get(key).ok_or_else(missing_error)
+}
+
+fn insert_key<K, V>(map: &mut HashMap<K, V>, key: K, value: V)
+where
+    K: Eq + Hash,
+{
+    map.insert(key, value);
+}
+
+fn verified_identity(proof: &IdentityProof, message: &[u8]) -> VerifiedIdentity {
+    VerifiedIdentity {
+        proof: proof.clone(),
+        message_hash: hash(message),
+    }
+}
+
+fn threshold_signer_requirement(threshold_sig: &ThresholdSig) -> Result<u16> {
+    let signer_count = u16::try_from(threshold_sig.signers.len()).map_err(|_| {
+        AuthenticationError::InvalidThresholdSignature {
+            details: "threshold signer set exceeds supported size".to_string(),
+        }
+    })?;
+
+    if signer_count == 0 {
+        Err(AuthenticationError::InvalidThresholdSignature {
+            details: "threshold signature requires at least one signer".to_string(),
+        })
+    } else {
+        Ok(signer_count)
+    }
+}
+
 /// Key material for identity verification
 ///
 /// **Note**: For most use cases, prefer `SimpleIdentityVerifier` which provides
@@ -163,7 +207,7 @@ impl KeyMaterial {
         &self,
         authority_id: &aura_core::AuthorityId,
     ) -> Result<&Ed25519VerifyingKey> {
-        self.authority_keys.get(authority_id).ok_or_else(|| {
+        get_key(&self.authority_keys, authority_id, || {
             AuthenticationError::InvalidAuthoritySignature {
                 details: format!("Unknown authority: {authority_id}"),
             }
@@ -176,7 +220,7 @@ impl KeyMaterial {
         authority_id: aura_core::AuthorityId,
         public_key: Ed25519VerifyingKey,
     ) {
-        self.authority_keys.insert(authority_id, public_key);
+        insert_key(&mut self.authority_keys, authority_id, public_key);
     }
 
     /// Get the guardian public key
@@ -184,7 +228,7 @@ impl KeyMaterial {
         &self,
         guardian_id: &aura_core::GuardianId,
     ) -> Result<&Ed25519VerifyingKey> {
-        self.guardian_keys.get(guardian_id).ok_or_else(|| {
+        get_key(&self.guardian_keys, guardian_id, || {
             AuthenticationError::InvalidGuardianSignature {
                 details: format!("Unknown guardian: {guardian_id}"),
             }
@@ -197,7 +241,7 @@ impl KeyMaterial {
         guardian_id: aura_core::GuardianId,
         public_key: Ed25519VerifyingKey,
     ) {
-        self.guardian_keys.insert(guardian_id, public_key);
+        insert_key(&mut self.guardian_keys, guardian_id, public_key);
     }
 
     /// Get the group public key for threshold verification
@@ -205,7 +249,7 @@ impl KeyMaterial {
         &self,
         account_id: &aura_core::AccountId,
     ) -> Result<&Ed25519VerifyingKey> {
-        self.group_keys.get(account_id).ok_or_else(|| {
+        get_key(&self.group_keys, account_id, || {
             AuthenticationError::InvalidThresholdSignature {
                 details: format!("No group key for account: {account_id}"),
             }
@@ -218,7 +262,7 @@ impl KeyMaterial {
         account_id: aura_core::AccountId,
         group_key: Ed25519VerifyingKey,
     ) {
-        self.group_keys.insert(account_id, group_key);
+        insert_key(&mut self.group_keys, account_id, group_key);
     }
 }
 
@@ -324,15 +368,10 @@ impl SimpleIdentityVerifier {
                 authority_id,
                 signature,
             } => {
-                // For authority signatures, we use the authority_id as the message
                 let message = authority_id.0.as_bytes();
-                let message_hash = hash(message);
                 let public_key = self.key_material.get_authority_public_key(authority_id)?;
                 verify_authority_signature(*authority_id, message, signature, public_key)?;
-                Ok(VerifiedIdentity {
-                    proof: proof.clone(),
-                    message_hash,
-                })
+                Ok(verified_identity(proof, message))
             }
             _ => Err(AuthenticationError::InvalidAuthoritySignature {
                 details: "Proof is not an authority signature".to_string(),
@@ -348,24 +387,17 @@ impl SimpleIdentityVerifier {
     ) -> Result<VerifiedIdentity> {
         match proof {
             IdentityProof::Threshold(threshold_sig) => {
-                // Use account_id as the message context for threshold verification
                 let message = account_id.0.as_bytes();
-                let message_hash = hash(message);
                 let group_key = self.key_material.get_group_public_key(&account_id)?;
+                let required_threshold = threshold_signer_requirement(threshold_sig)?;
 
-                // Calculate minimum signers from the signature shares
-                let min_signers = threshold_sig.signers.len().max(1);
-
-                verify_threshold_signature(
+                validate_threshold_signature_event(
+                    threshold_sig,
                     message,
-                    &threshold_sig.signature,
                     group_key,
-                    min_signers,
+                    required_threshold,
                 )?;
-                Ok(VerifiedIdentity {
-                    proof: proof.clone(),
-                    message_hash,
-                })
+                Ok(verified_identity(proof, message))
             }
             _ => Err(AuthenticationError::InvalidThresholdSignature {
                 details: "Proof is not a threshold signature".to_string(),
@@ -384,13 +416,9 @@ impl SimpleIdentityVerifier {
                 guardian_id,
                 signature,
             } => {
-                let message_hash = hash(message);
                 let public_key = self.key_material.get_guardian_public_key(guardian_id)?;
                 verify_guardian_signature(*guardian_id, message, signature, public_key)?;
-                Ok(VerifiedIdentity {
-                    proof: proof.clone(),
-                    message_hash,
-                })
+                Ok(verified_identity(proof, message))
             }
             _ => Err(AuthenticationError::InvalidGuardianSignature {
                 details: "Proof is not a guardian signature".to_string(),
@@ -407,5 +435,146 @@ impl SimpleIdentityVerifier {
 impl Default for SimpleIdentityVerifier {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use aura_core::crypto::ed25519::Ed25519SigningKey;
+
+    fn authority_id(seed: u8) -> aura_core::AuthorityId {
+        aura_core::AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn guardian_id(seed: u8) -> aura_core::GuardianId {
+        aura_core::GuardianId::new_from_entropy([seed; 32])
+    }
+
+    fn account_id(seed: u8) -> aura_core::AccountId {
+        aura_core::AccountId::new_from_entropy([seed; 32])
+    }
+
+    fn signing_material(seed: u8, message: &[u8]) -> (Ed25519Signature, Ed25519VerifyingKey) {
+        let signing_key = Ed25519SigningKey::from_bytes([seed; 32]);
+        let verifying_key = signing_key.verifying_key().unwrap();
+        let signature = signing_key.sign(message).unwrap();
+        (signature, verifying_key)
+    }
+
+    #[test]
+    fn unknown_authority_key_lookup_fails() {
+        let verifier = SimpleIdentityVerifier::new();
+        let authority_id = authority_id(1);
+        let (signature, _) = signing_material(9, authority_id.0.as_bytes());
+        let proof = IdentityProof::Authority {
+            authority_id,
+            signature,
+        };
+
+        let result = verifier.verify_authority_signature(&proof);
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AuthenticationError::InvalidAuthoritySignature { .. }
+        ));
+    }
+
+    #[test]
+    fn authority_signature_verification_hashes_authority_context() {
+        let mut verifier = SimpleIdentityVerifier::new();
+        let authority_id = authority_id(2);
+        let message = authority_id.0.as_bytes();
+        let (signature, verifying_key) = signing_material(10, message);
+        verifier.add_authority_key(authority_id, verifying_key);
+        let proof = IdentityProof::Authority {
+            authority_id,
+            signature,
+        };
+
+        let verified = verifier.verify_authority_signature(&proof).unwrap();
+
+        assert_eq!(verified.message_hash, hash(message));
+    }
+
+    #[test]
+    fn guardian_proof_type_mismatch_is_rejected() {
+        let mut verifier = SimpleIdentityVerifier::new();
+        let authority_id = authority_id(3);
+        let (signature, verifying_key) = signing_material(20, authority_id.0.as_bytes());
+        verifier.add_authority_key(authority_id, verifying_key);
+        let proof = IdentityProof::Authority {
+            authority_id,
+            signature,
+        };
+
+        let result = verifier.verify_guardian_signature(&proof, b"guardian-message");
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AuthenticationError::InvalidGuardianSignature { .. }
+        ));
+    }
+
+    #[test]
+    fn threshold_signature_requires_nonempty_signers() {
+        let mut verifier = SimpleIdentityVerifier::new();
+        let account_id = account_id(4);
+        let message = account_id.0.as_bytes();
+        let (signature, verifying_key) = signing_material(21, message);
+        verifier.add_group_key(account_id, verifying_key);
+        let proof = IdentityProof::Threshold(ThresholdSig {
+            signature,
+            signers: Vec::new(),
+            signature_shares: Vec::new(),
+        });
+
+        let result = verifier.verify_threshold_signature(&proof, account_id);
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AuthenticationError::InvalidThresholdSignature { .. }
+        ));
+    }
+
+    #[test]
+    fn threshold_signature_verification_hashes_account_context() {
+        let mut verifier = SimpleIdentityVerifier::new();
+        let account_id = account_id(5);
+        let message = account_id.0.as_bytes();
+        let (signature, verifying_key) = signing_material(22, message);
+        verifier.add_group_key(account_id, verifying_key);
+        let proof = IdentityProof::Threshold(ThresholdSig {
+            signature,
+            signers: vec![1],
+            signature_shares: Vec::new(),
+        });
+
+        let verified = verifier
+            .verify_threshold_signature(&proof, account_id)
+            .unwrap();
+
+        assert_eq!(verified.message_hash, hash(message));
+    }
+
+    #[test]
+    fn guardian_signature_verification_hashes_message_context() {
+        let mut verifier = SimpleIdentityVerifier::new();
+        let guardian_id = guardian_id(6);
+        let message = b"guardian context";
+        let (signature, verifying_key) = signing_material(23, message);
+        verifier.add_guardian_key(guardian_id, verifying_key);
+        let proof = IdentityProof::Guardian {
+            guardian_id,
+            signature,
+        };
+
+        let verified = verifier.verify_guardian_signature(&proof, message).unwrap();
+
+        assert_eq!(verified.message_hash, hash(message));
     }
 }

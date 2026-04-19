@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use aura_core::Hash32;

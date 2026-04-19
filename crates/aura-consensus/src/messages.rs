@@ -274,16 +274,14 @@ mod tests {
         assert_eq!(evidence_delta.consensus_id, delta.consensus_id);
         assert_eq!(evidence_delta.timestamp_ms, delta.timestamp_ms);
         assert!(evidence_delta.equivocation_proofs.is_empty());
-        assert!(matches!(
-            ConsensusMessage::NonceCommit {
-                consensus_id: id,
-                commitment: NonceCommitment {
-                    signer: 1,
-                    commitment: vec![],
-                },
-            }
-            .evidence_delta(),
-            None
-        ));
+        assert!(ConsensusMessage::NonceCommit {
+            consensus_id: id,
+            commitment: NonceCommitment {
+                signer: 1,
+                commitment: vec![],
+            },
+        }
+        .evidence_delta()
+        .is_none());
     }
 }

@@ -151,7 +151,7 @@ surface. They exist only as migration or deletion targets.
 | `auth:request_guardian` | legacy alias | `auth:guardian:request_approval` | `crates/aura-authentication/src/guards.rs` | Rename in typed family |
 | `auth:approve_guardian` | legacy alias | `auth:guardian:verify` | `crates/aura-authentication/src/guards.rs` | Rename in typed family |
 | `auth:authenticate` | invalid drift | `auth:verify` or a new explicit `auth:status` if the owner decides status needs its own capability | `crates/aura-agent/src/handlers/auth.rs` | Phase 2/5 owner decision, then delete drift |
-| `initiate_consensus` | legacy choreography alias | `consensus:initiate` | `crates/aura-consensus/src/protocol/choreography.tell`, `crates/aura-consensus/src/protocol/GUARD_INTEGRATION.md` | Temporary parse bridge only if needed in Phase 4 |
+| `initiate_consensus` | legacy choreography alias | `consensus:initiate` | `crates/aura-consensus/src/protocol/choreography.tell`, `crates/aura-consensus/src/protocol/guards.rs` | Temporary parse bridge only if needed in Phase 4 |
 | `witness_nonce` | legacy choreography alias | `consensus:witness_nonce` | same as above | Temporary parse bridge only if needed in Phase 4 |
 | `aggregate_nonces` | legacy choreography alias | `consensus:aggregate_nonces` | same as above | Temporary parse bridge only if needed in Phase 4 |
 | `witness_sign` | legacy choreography alias | `consensus:witness_sign` | same as above | Temporary parse bridge only if needed in Phase 4 |

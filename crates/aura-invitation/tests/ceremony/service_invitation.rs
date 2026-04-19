@@ -5,9 +5,7 @@
 
 #![allow(missing_docs)]
 
-#[path = "../support/mod.rs"]
-mod support;
-
+use crate::support;
 use aura_core::types::identifiers::InvitationId;
 use aura_core::util::test_utils::test_authority_id;
 use aura_invitation::{

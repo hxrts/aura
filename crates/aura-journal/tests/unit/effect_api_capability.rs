@@ -78,7 +78,9 @@ fn capability_ref_with_attenuation() {
     )
     .with_attenuation(attenuation);
 
-    let att = cap.attenuation.expect("attenuation");
+    let Some(att) = cap.attenuation else {
+        panic!("attenuation");
+    };
     assert_eq!(att.max_uses, Some(5));
     assert_eq!(att.allowed_operations, Some(vec!["read".to_string()]));
 }

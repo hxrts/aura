@@ -1,6 +1,6 @@
 //! Extracted unit tests for `aura-journal`.
 
-#[path = "common/mod.rs"]
+#[path = "common.rs"]
 mod common;
 
 #[path = "unit/extensibility.rs"]

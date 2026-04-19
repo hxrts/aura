@@ -137,10 +137,16 @@ const MAINTENANCE_OPERATION_DESCRIPTORS: &[MaintenanceOperationDescriptor] = &[
 
 impl MaintenanceOperation {
     fn descriptor(self) -> &'static MaintenanceOperationDescriptor {
-        MAINTENANCE_OPERATION_DESCRIPTORS
-            .iter()
-            .find(|descriptor| descriptor.operation == self)
-            .expect("maintenance operation descriptor must exist")
+        match self {
+            Self::SnapshotProposed => &MAINTENANCE_OPERATION_DESCRIPTORS[0],
+            Self::SnapshotCompleted => &MAINTENANCE_OPERATION_DESCRIPTORS[1],
+            Self::CacheInvalidated => &MAINTENANCE_OPERATION_DESCRIPTORS[2],
+            Self::UpgradeActivated => &MAINTENANCE_OPERATION_DESCRIPTORS[3],
+            Self::AdminReplacement => &MAINTENANCE_OPERATION_DESCRIPTORS[4],
+            Self::ReleaseDistribution => &MAINTENANCE_OPERATION_DESCRIPTORS[5],
+            Self::ReleasePolicy => &MAINTENANCE_OPERATION_DESCRIPTORS[6],
+            Self::UpgradeExecution => &MAINTENANCE_OPERATION_DESCRIPTORS[7],
+        }
     }
 
     /// Get the operation category (compile-time exhaustive).

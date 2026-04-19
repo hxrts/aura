@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::AuthorityId;
 use aura_social::facts::{

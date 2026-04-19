@@ -6,7 +6,7 @@
 //! - Home and neighborhood availability
 //! - Social topology queries
 
-#[path = "support/mod.rs"]
+#[path = "support.rs"]
 mod support;
 
 use aura_core::effects::relay::RelayRelationship;

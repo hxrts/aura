@@ -198,7 +198,7 @@ impl EffectPolicyExt for EffectPolicyGuard {
         let policy = self.get_policy(operation, context_id);
 
         Ok(EffectPolicyResult {
-            operation: operation.clone(),
+            operation: *operation,
             context_id: context_id.cloned(),
             decision,
             policy,

@@ -3,7 +3,7 @@
 //! Exercises the public API: create channel/message facts, reduce through
 //! the view reducer, and verify the resulting deltas.
 
-#[path = "support/mod.rs"]
+#[path = "support.rs"]
 mod common;
 
 use aura_chat::{ChatDelta, ChatFact, ChatViewReducer, CHAT_FACT_TYPE_ID};

@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 //! Shared deterministic fixtures for chat integration tests.
 
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
