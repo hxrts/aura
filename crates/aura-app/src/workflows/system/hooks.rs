@@ -93,6 +93,9 @@ async fn refresh_authoritative_channel_and_recipient_readiness_hook(
 ) -> Result<(), AuraError> {
     let mut best_effort = workflow_best_effort();
     let _ = best_effort
+        .capture(crate::workflows::invitation::refresh_authoritative_invitation_readiness(app_core))
+        .await;
+    let _ = best_effort
         .capture(
             crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(
                 app_core,

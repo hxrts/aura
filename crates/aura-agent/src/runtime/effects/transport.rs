@@ -245,11 +245,18 @@ async fn resolve_move_route(
 ) -> Option<Route> {
     let manager = effects.rendezvous_manager()?;
     let descriptor = manager.get_descriptor(context, peer).await?;
-    descriptor
-        .advertised_move_paths()
-        .into_iter()
-        .map(|path| path.route)
-        .next()
+    let paths = descriptor.advertised_move_paths();
+    #[cfg(not(target_arch = "wasm32"))]
+    let paths = {
+        let mut paths = paths;
+        paths.sort_by_key(|path| match path.route.destination.protocol {
+            LinkProtocol::Tcp => 0u8,
+            LinkProtocol::WebSocket => 1u8,
+            _ => 2u8,
+        });
+        paths
+    };
+    paths.into_iter().map(|path| path.route).next()
 }
 
 async fn send_planned_envelope(
@@ -282,6 +289,18 @@ async fn send_planned_envelope(
         .ok_or(TransportError::DestinationUnreachable {
             destination: envelope.destination,
         })?;
+    if envelope
+        .metadata
+        .get("content-type")
+        .is_some_and(|value| value == "application/aura-invitation")
+    {
+        tracing::info!(
+            destination = %envelope.destination,
+            context = %envelope.context,
+            addr = %addr,
+            "Resolved invitation transport target"
+        );
+    }
     send_envelope_tcp(&addr, &envelope).await
 }
 

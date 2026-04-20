@@ -2348,6 +2348,53 @@ async fn execute_charge_flow_budget(
     Ok(Some(receipt))
 }
 
+async fn seed_peer_descriptor_for_authority_context(
+    authority: &AuthorityContext,
+    effects: &AuraEffectSystem,
+    peer: AuthorityId,
+) {
+    let Some(rendezvous_manager) = effects.rendezvous_manager() else {
+        return;
+    };
+
+    let authority_context = default_context_id_for_authority(peer);
+    if rendezvous_manager
+        .get_descriptor(authority_context, peer)
+        .await
+        .is_some()
+    {
+        return;
+    }
+
+    let local_context_id = authority.default_context_id();
+    let existing = rendezvous_manager.get_descriptor(local_context_id, peer).await;
+    let discovered = rendezvous_manager
+        .get_lan_discovered_peer(peer)
+        .await
+        .map(|peer| peer.descriptor);
+    let descriptor = match (existing, discovered) {
+        (Some(existing), Some(discovered))
+            if discovered.transport_hints.iter().any(
+                |hint| matches!(hint, aura_rendezvous::TransportHint::TcpDirect { .. }),
+            ) && !existing.transport_hints.iter().any(
+                |hint| matches!(hint, aura_rendezvous::TransportHint::TcpDirect { .. }),
+            ) =>
+        {
+            Some(discovered)
+        }
+        (Some(existing), _) => Some(existing),
+        (None, Some(discovered)) => Some(discovered),
+        (None, None) => None,
+    };
+
+    let Some(mut descriptor) = descriptor else {
+        return;
+    };
+
+    descriptor.context_id = authority_context;
+    let _ = rendezvous_manager.cache_descriptor(descriptor).await;
+}
+
 async fn execute_notify_peer(
     peer: AuthorityId,
     invitation_id: InvitationId,
@@ -2370,6 +2417,8 @@ async fn execute_notify_peer(
         emit_browser_harness_debug_event("invite_notify_self", "");
         return Ok(());
     }
+
+    seed_peer_descriptor_for_authority_context(authority, effects, peer).await;
 
     let authority_id = authority.authority_id();
     let (code, invitation_context) = if let Some(invitation) =
@@ -2447,7 +2496,7 @@ async fn execute_notify_peer(
         "invitation-context".to_string(),
         invitation_context.to_string(),
     );
-    tracing::debug!(
+    tracing::info!(
         destination = %peer,
         invitation_context = %invitation_context,
         code_has_context_field = code.contains("\"context_id\""),

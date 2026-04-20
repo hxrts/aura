@@ -230,6 +230,29 @@ impl SubmittedOperationPublisher for TuiSubmittedOperationPublisher {
     }
 }
 
+impl TuiSubmittedOperationPublisher {
+    fn publish_dispatched_sync(
+        &self,
+        operation_id: &OperationId,
+        instance_id: &OperationInstanceId,
+        kind: SemanticOperationKind,
+    ) {
+        let submission = authoritative_operation_status_update(
+            operation_id.clone(),
+            Some(instance_id.clone()),
+            None,
+            SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched),
+        );
+        if !send_ui_update_required_blocking(&self.tx, submission) {
+            tracing::warn!(
+                operation_id = %operation_id.0,
+                instance_id = %instance_id.0,
+                "terminal submission delivery failed: UI update channel closed"
+            );
+        }
+    }
+}
+
 struct SubmittedLocalOperationOwner(LocalTerminalSubmission<TuiSubmittedOperationPublisher>);
 struct SubmittedWorkflowOperationOwner(WorkflowHandoffSubmission<TuiSubmittedOperationPublisher>);
 
@@ -255,15 +278,31 @@ impl SubmittedLocalOperationOwner {
         kind: SemanticOperationKind,
     ) -> Self {
         let publisher = TuiSubmittedOperationPublisher { tx };
-        Self(run_frontend_sync_boundary(
-            "LocalTerminalOperationOwner::submit",
-            LocalTerminalSubmission::submit(
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let dispatched = publisher.clone();
+            let submission = LocalTerminalSubmission::submit_unpublished(
                 publisher,
                 operation_id,
                 kind,
                 next_owned_operation_instance_id,
-            ),
-        ))
+            );
+            dispatched.publish_dispatched_sync(
+                submission.operation_id(),
+                submission.instance_id(),
+                submission.kind(),
+            );
+            Self(submission)
+        } else {
+            Self(run_frontend_sync_boundary(
+                "LocalTerminalOperationOwner::submit",
+                LocalTerminalSubmission::submit(
+                    publisher,
+                    operation_id,
+                    kind,
+                    next_owned_operation_instance_id,
+                ),
+            ))
+        }
     }
 
     #[cfg(test)]
@@ -317,15 +356,31 @@ impl SubmittedWorkflowOperationOwner {
         kind: SemanticOperationKind,
     ) -> Self {
         let publisher = TuiSubmittedOperationPublisher { tx };
-        Self(run_frontend_sync_boundary(
-            "WorkflowHandoffOperationOwner::submit",
-            WorkflowHandoffSubmission::submit(
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let dispatched = publisher.clone();
+            let submission = WorkflowHandoffSubmission::submit_unpublished(
                 publisher,
                 operation_id,
                 kind,
                 next_owned_operation_instance_id,
-            ),
-        ))
+            );
+            dispatched.publish_dispatched_sync(
+                submission.operation_id(),
+                submission.instance_id(),
+                submission.kind(),
+            );
+            Self(submission)
+        } else {
+            Self(run_frontend_sync_boundary(
+                "WorkflowHandoffOperationOwner::submit",
+                WorkflowHandoffSubmission::submit(
+                    publisher,
+                    operation_id,
+                    kind,
+                    next_owned_operation_instance_id,
+                ),
+            ))
+        }
     }
 
     #[cfg(test)]
@@ -385,16 +440,32 @@ impl SubmittedCeremonyOwner {
         kind: SemanticOperationKind,
     ) -> Self {
         let publisher = TuiSubmittedOperationPublisher { tx };
-        Self {
-            inner: run_frontend_sync_boundary(
-                "CeremonySubmissionOwner::submit",
-                CeremonyMonitorHandoffSubmission::submit(
-                    publisher,
-                    operation_id,
-                    kind,
-                    next_owned_operation_instance_id,
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let dispatched = publisher.clone();
+            let submission = CeremonyMonitorHandoffSubmission::submit_unpublished(
+                publisher,
+                operation_id,
+                kind,
+                next_owned_operation_instance_id,
+            );
+            dispatched.publish_dispatched_sync(
+                submission.operation_id(),
+                submission.instance_id(),
+                submission.kind(),
+            );
+            Self { inner: submission }
+        } else {
+            Self {
+                inner: run_frontend_sync_boundary(
+                    "CeremonySubmissionOwner::submit",
+                    CeremonyMonitorHandoffSubmission::submit(
+                        publisher,
+                        operation_id,
+                        kind,
+                        next_owned_operation_instance_id,
+                    ),
                 ),
-            ),
+            }
         }
     }
 

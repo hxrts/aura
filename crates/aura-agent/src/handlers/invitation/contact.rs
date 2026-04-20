@@ -735,12 +735,23 @@ impl<'a> InvitationContactHandler<'a> {
                         continue;
                     }
 
+                    tracing::info!(
+                        authority = %self.handler.context.authority.authority_id(),
+                        invitation_code_len = code.len(),
+                        "Processing inbound invitation envelope"
+                    );
+
                     match self
                         .handler
                         .import_invitation_code(effects.as_ref(), code)
                         .await
                     {
                         Ok(_invitation) => {
+                            tracing::info!(
+                                authority = %self.handler.context.authority.authority_id(),
+                                invitation_id = %_invitation.invitation_id,
+                                "Imported inbound invitation envelope"
+                            );
                             processed = processed.saturating_add(1);
                         }
                         Err(error) => {

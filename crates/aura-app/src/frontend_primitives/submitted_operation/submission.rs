@@ -25,6 +25,16 @@ impl<P> SubmittedOperation<P>
 where
     P: SubmittedOperationPublisher,
 {
+    pub fn submit_unpublished(
+        publisher: P,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+        allocate_instance: impl FnOnce(&OperationId) -> OperationInstanceId,
+    ) -> Self {
+        let instance_id = allocate_instance(&operation_id);
+        Self::submit_with_instance_unpublished(publisher, operation_id, kind, instance_id)
+    }
+
     pub async fn submit(
         publisher: P,
         operation_id: OperationId,
@@ -44,6 +54,15 @@ where
         publisher
             .publish_dispatched(&operation_id, &instance_id, kind)
             .await;
+        Self::submit_with_instance_unpublished(publisher, operation_id, kind, instance_id)
+    }
+
+    pub fn submit_with_instance_unpublished(
+        publisher: P,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+        instance_id: OperationInstanceId,
+    ) -> Self {
         Self {
             publisher,
             operation_id,
@@ -119,6 +138,20 @@ impl<P> LocalTerminalSubmission<P>
 where
     P: SubmittedOperationPublisher,
 {
+    pub fn submit_unpublished(
+        publisher: P,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+        allocate_instance: impl FnOnce(&OperationId) -> OperationInstanceId,
+    ) -> Self {
+        Self(SubmittedOperation::submit_unpublished(
+            publisher,
+            operation_id,
+            kind,
+            allocate_instance,
+        ))
+    }
+
     pub async fn submit(
         publisher: P,
         operation_id: OperationId,
@@ -138,6 +171,20 @@ where
             SubmittedOperation::submit_with_instance(publisher, operation_id, kind, instance_id)
                 .await,
         )
+    }
+
+    pub fn submit_with_instance_unpublished(
+        publisher: P,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+        instance_id: OperationInstanceId,
+    ) -> Self {
+        Self(SubmittedOperation::submit_with_instance_unpublished(
+            publisher,
+            operation_id,
+            kind,
+            instance_id,
+        ))
     }
 
     #[must_use]
@@ -172,6 +219,20 @@ impl<P> WorkflowHandoffSubmission<P>
 where
     P: SubmittedOperationPublisher,
 {
+    pub fn submit_unpublished(
+        publisher: P,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+        allocate_instance: impl FnOnce(&OperationId) -> OperationInstanceId,
+    ) -> Self {
+        Self(SubmittedOperation::submit_unpublished(
+            publisher,
+            operation_id,
+            kind,
+            allocate_instance,
+        ))
+    }
+
     pub async fn submit(
         publisher: P,
         operation_id: OperationId,
@@ -191,6 +252,20 @@ where
             SubmittedOperation::submit_with_instance(publisher, operation_id, kind, instance_id)
                 .await,
         )
+    }
+
+    pub fn submit_with_instance_unpublished(
+        publisher: P,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+        instance_id: OperationInstanceId,
+    ) -> Self {
+        Self(SubmittedOperation::submit_with_instance_unpublished(
+            publisher,
+            operation_id,
+            kind,
+            instance_id,
+        ))
     }
 
     #[must_use]
@@ -222,6 +297,20 @@ impl<P> CeremonyMonitorHandoffSubmission<P>
 where
     P: SubmittedOperationPublisher,
 {
+    pub fn submit_unpublished(
+        publisher: P,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+        allocate_instance: impl FnOnce(&OperationId) -> OperationInstanceId,
+    ) -> Self {
+        Self(SubmittedOperation::submit_unpublished(
+            publisher,
+            operation_id,
+            kind,
+            allocate_instance,
+        ))
+    }
+
     pub async fn submit(
         publisher: P,
         operation_id: OperationId,
@@ -241,6 +330,20 @@ where
             SubmittedOperation::submit_with_instance(publisher, operation_id, kind, instance_id)
                 .await,
         )
+    }
+
+    pub fn submit_with_instance_unpublished(
+        publisher: P,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+        instance_id: OperationInstanceId,
+    ) -> Self {
+        Self(SubmittedOperation::submit_with_instance_unpublished(
+            publisher,
+            operation_id,
+            kind,
+            instance_id,
+        ))
     }
 
     #[must_use]

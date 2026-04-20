@@ -14,12 +14,16 @@ use crate::runtime::services::ceremony_runner::{
 };
 use crate::runtime::{AuraEffectSystem, TaskSupervisor};
 use aura_core::effects::amp::ChannelBootstrapPackage;
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::DeviceId;
 use aura_core::Hash32;
 use std::str::FromStr;
 use std::sync::Arc;
+
+const DEFERRED_INVITATION_DELIVERY_ATTEMPTS: usize = 12;
+const DEFERRED_INVITATION_DELIVERY_BACKOFF_MS: u64 = 500;
 
 /// Invitation service API
 ///
@@ -189,6 +193,13 @@ impl InvitationServiceApi {
         let receiver_id = invitation.receiver_id;
         let command_count = deferred_network_effects.commands().len();
         let commands = deferred_network_effects.into_commands();
+        tracing::info!(
+            invitation_id = %invitation_id,
+            sender_id = %sender_id,
+            receiver_id = %receiver_id,
+            command_count,
+            "Scheduling deferred invitation delivery side effects"
+        );
         let fut = async move {
             tracing::debug!(
                 invitation_id = %invitation_id,
@@ -197,17 +208,55 @@ impl InvitationServiceApi {
                 command_count,
                 "Executing deferred invitation delivery side effects"
             );
-            if let Err(error) =
-                execute_invitation_effect_commands(commands, &authority, effects.as_ref(), true)
-                    .await
-            {
-                tracing::warn!(
-                    invitation_id = %invitation_id,
-                    sender_id = %sender_id,
-                    receiver_id = %receiver_id,
-                    error = %error,
-                    "Deferred invitation delivery side effects failed"
-                );
+            for attempt in 0..DEFERRED_INVITATION_DELIVERY_ATTEMPTS {
+                match execute_invitation_effect_commands(
+                    commands.clone(),
+                    &authority,
+                    effects.as_ref(),
+                    true,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        if attempt > 0 {
+                            tracing::info!(
+                                invitation_id = %invitation_id,
+                                sender_id = %sender_id,
+                                receiver_id = %receiver_id,
+                                attempts = attempt + 1,
+                                "Deferred invitation delivery succeeded after retry"
+                            );
+                        }
+                        return;
+                    }
+                    Err(error) => {
+                        let final_attempt = attempt + 1 == DEFERRED_INVITATION_DELIVERY_ATTEMPTS;
+                        if final_attempt {
+                            tracing::warn!(
+                                invitation_id = %invitation_id,
+                                sender_id = %sender_id,
+                                receiver_id = %receiver_id,
+                                attempts = attempt + 1,
+                                error = %error,
+                                "Deferred invitation delivery side effects failed after retries"
+                            );
+                            return;
+                        }
+
+                        tracing::warn!(
+                            invitation_id = %invitation_id,
+                            sender_id = %sender_id,
+                            receiver_id = %receiver_id,
+                            attempt = attempt + 1,
+                            retry_in_ms = DEFERRED_INVITATION_DELIVERY_BACKOFF_MS,
+                            error = %error,
+                            "Deferred invitation delivery failed; retrying"
+                        );
+                        let _ = effects
+                            .sleep_ms(DEFERRED_INVITATION_DELIVERY_BACKOFF_MS)
+                            .await;
+                    }
+                }
             }
         };
 
@@ -774,14 +823,18 @@ impl InvitationServiceApi {
     fn append_sender_hint(&self, mut code: String) -> String {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
-        // Only publish a browser-direct hint when we have an actual websocket
-        // listener address. Falling back to the raw bind address poisons the
-        // receiver cache with the TCP envelope port, which is not a websocket
-        // endpoint.
+        #[cfg(target_arch = "wasm32")]
         let sender_addr = self
             .effects
             .lan_transport()
             .and_then(|transport| transport.websocket_addrs().first().cloned());
+        #[cfg(not(target_arch = "wasm32"))]
+        let sender_addr = self
+            .effects
+            .lan_transport()
+            .and_then(|transport| transport.advertised_addrs().first().cloned());
+
+        #[cfg(target_arch = "wasm32")]
         let sender_hint = sender_addr.as_deref().map(|addr| {
             if addr.starts_with("ws://") || addr.starts_with("wss://") {
                 addr.to_string()
@@ -789,10 +842,14 @@ impl InvitationServiceApi {
                 format!("ws://{addr}")
             }
         });
+        #[cfg(not(target_arch = "wasm32"))]
+        let sender_hint = sender_addr
+            .as_deref()
+            .map(|addr| format!("tcp://{addr}"));
         tracing::info!(
             sender_addr = ?sender_addr,
             sender_hint = ?sender_hint,
-            "export invitation sender websocket hint"
+            "export invitation sender transport hint"
         );
         let sender_hint_segment = sender_hint
             .as_deref()
@@ -1089,6 +1146,23 @@ mod tests {
         assert!(
             !body.contains("execute_invitation_effect_commands(\n            prepared.deferred_network_effects.into_commands(),"),
             "channel invites must not execute deferred network effects inline"
+        );
+    }
+
+    #[test]
+    fn deferred_invitation_delivery_retries_after_failure() {
+        let source = include_str!("invitation_service.rs");
+        let start = source
+            .find("fn spawn_deferred_invitation_delivery(")
+            .expect("deferred delivery definition");
+        let body = &source[start..];
+        assert!(
+            body.contains("for attempt in 0..DEFERRED_INVITATION_DELIVERY_ATTEMPTS"),
+            "deferred invitation delivery must retry bounded background delivery attempts"
+        );
+        assert!(
+            body.contains("Deferred invitation delivery failed; retrying"),
+            "deferred invitation delivery should log retryable failures explicitly"
         );
     }
 
