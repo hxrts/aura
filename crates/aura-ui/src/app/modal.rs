@@ -680,7 +680,7 @@ mod tests {
         model
             .runtime_events
             .push(aura_app::ui::contract::RuntimeEventSnapshot {
-                id: aura_app::ui::contract::RuntimeEventId("runtime-event-1".to_string()),
+                id: aura_app::ui::contract::RuntimeEventId::synthetic("runtime-event-1"),
                 fact: RuntimeFact::InvitationCodeReady {
                     receiver_authority_id: None,
                     source_operation: OperationId::invitation_create(),

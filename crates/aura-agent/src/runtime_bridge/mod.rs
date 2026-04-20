@@ -103,6 +103,9 @@ const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 8_000;
 const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
 // Harness-only convergence tuning. These affect local retry pacing for tests
 // and debug sessions, not protocol meaning, so env overrides are acceptable.
+const HARNESS_MODE_ENV_VAR: &str = "AURA_HARNESS_MODE";
+const HARNESS_SYNC_ROUNDS_ENV_VAR: &str = "AURA_HARNESS_SYNC_ROUNDS";
+const HARNESS_SYNC_BACKOFF_MS_ENV_VAR: &str = "AURA_HARNESS_SYNC_BACKOFF_MS";
 const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
 
@@ -340,11 +343,11 @@ fn require_rendezvous_service(
 }
 
 fn harness_mode_enabled() -> bool {
-    std::env::var_os("AURA_HARNESS_MODE").is_some()
+    std::env::var_os(HARNESS_MODE_ENV_VAR).is_some()
 }
 
 fn harness_sync_rounds() -> usize {
-    std::env::var("AURA_HARNESS_SYNC_ROUNDS")
+    std::env::var(HARNESS_SYNC_ROUNDS_ENV_VAR)
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|rounds| *rounds > 0)
@@ -352,7 +355,7 @@ fn harness_sync_rounds() -> usize {
 }
 
 fn harness_sync_backoff_ms() -> u64 {
-    std::env::var("AURA_HARNESS_SYNC_BACKOFF_MS")
+    std::env::var(HARNESS_SYNC_BACKOFF_MS_ENV_VAR)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(DEFAULT_HARNESS_SYNC_BACKOFF_MS)

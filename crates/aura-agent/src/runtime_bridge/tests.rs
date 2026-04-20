@@ -72,9 +72,9 @@ fn test_rendezvous_status_default() {
 #[test]
 fn harness_sync_policy_defaults_when_env_missing() {
     let _guard = env_lock().lock_blocking();
-    std::env::remove_var("AURA_HARNESS_MODE");
-    std::env::remove_var("AURA_HARNESS_SYNC_ROUNDS");
-    std::env::remove_var("AURA_HARNESS_SYNC_BACKOFF_MS");
+    std::env::remove_var(HARNESS_MODE_ENV_VAR);
+    std::env::remove_var(HARNESS_SYNC_ROUNDS_ENV_VAR);
+    std::env::remove_var(HARNESS_SYNC_BACKOFF_MS_ENV_VAR);
 
     assert!(!harness_mode_enabled());
     assert_eq!(harness_sync_rounds(), DEFAULT_HARNESS_SYNC_ROUNDS);
@@ -84,17 +84,17 @@ fn harness_sync_policy_defaults_when_env_missing() {
 #[test]
 fn harness_sync_policy_honors_explicit_env_values() {
     let _guard = env_lock().lock_blocking();
-    std::env::set_var("AURA_HARNESS_MODE", "1");
-    std::env::set_var("AURA_HARNESS_SYNC_ROUNDS", "5");
-    std::env::set_var("AURA_HARNESS_SYNC_BACKOFF_MS", "125");
+    std::env::set_var(HARNESS_MODE_ENV_VAR, "1");
+    std::env::set_var(HARNESS_SYNC_ROUNDS_ENV_VAR, "5");
+    std::env::set_var(HARNESS_SYNC_BACKOFF_MS_ENV_VAR, "125");
 
     assert!(harness_mode_enabled());
     assert_eq!(harness_sync_rounds(), 5);
     assert_eq!(harness_sync_backoff_ms(), 125);
 
-    std::env::remove_var("AURA_HARNESS_MODE");
-    std::env::remove_var("AURA_HARNESS_SYNC_ROUNDS");
-    std::env::remove_var("AURA_HARNESS_SYNC_BACKOFF_MS");
+    std::env::remove_var(HARNESS_MODE_ENV_VAR);
+    std::env::remove_var(HARNESS_SYNC_ROUNDS_ENV_VAR);
+    std::env::remove_var(HARNESS_SYNC_BACKOFF_MS_ENV_VAR);
 }
 
 #[tokio::test]
@@ -156,13 +156,13 @@ async fn ensure_peer_channel_requires_sync_peers_after_established_channel() {
 async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_fallback() {
     let _guard = env_lock().lock().await;
     let _env_restore = EnvRestore::capture(&[
-        "AURA_HARNESS_MODE",
-        "AURA_HARNESS_SYNC_ROUNDS",
-        "AURA_HARNESS_SYNC_BACKOFF_MS",
+        HARNESS_MODE_ENV_VAR,
+        HARNESS_SYNC_ROUNDS_ENV_VAR,
+        HARNESS_SYNC_BACKOFF_MS_ENV_VAR,
     ]);
-    std::env::set_var("AURA_HARNESS_MODE", "1");
-    std::env::set_var("AURA_HARNESS_SYNC_ROUNDS", "2");
-    std::env::set_var("AURA_HARNESS_SYNC_BACKOFF_MS", "50");
+    std::env::set_var(HARNESS_MODE_ENV_VAR, "1");
+    std::env::set_var(HARNESS_SYNC_ROUNDS_ENV_VAR, "2");
+    std::env::set_var(HARNESS_SYNC_BACKOFF_MS_ENV_VAR, "50");
 
     let authority = AuthorityId::new_from_entropy([78u8; 32]);
     let peer = AuthorityId::new_from_entropy([79u8; 32]);

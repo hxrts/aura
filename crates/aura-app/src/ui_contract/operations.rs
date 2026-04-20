@@ -56,6 +56,13 @@ pub struct OperationInstanceId(pub String);
 #[serde(transparent)]
 pub struct RuntimeEventId(pub String);
 
+impl RuntimeEventId {
+    #[must_use]
+    pub fn synthetic(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChannelFactKey {
     pub id: Option<String>,

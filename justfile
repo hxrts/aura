@@ -669,6 +669,15 @@ ci-preflight:
 
 # Verify shared user-flow policy guardrails and required docs/guidance sync
 ci-user-flow-policy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${AURA_UX_POLICY_DIFF_RANGE:-}" || -z "${AURA_UX_GUIDANCE_DIFF_RANGE:-}" ]]; then
+        if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            local_range="$(git merge-base origin/main HEAD)"
+            export AURA_UX_POLICY_DIFF_RANGE="${AURA_UX_POLICY_DIFF_RANGE:-$local_range}"
+            export AURA_UX_GUIDANCE_DIFF_RANGE="${AURA_UX_GUIDANCE_DIFF_RANGE:-$local_range}"
+        fi
+    fi
     just _policy-check check user-flow-policy-guardrails
     just _policy-check check user-flow-guidance-sync
     just ci-harness-ownership-policy

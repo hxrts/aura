@@ -419,7 +419,7 @@ mod tests {
             contacts,
             None,
             &[RuntimeEventSnapshot {
-                id: RuntimeEventId("runtime-event-1".to_string()),
+                id: RuntimeEventId::synthetic("runtime-event-1"),
                 fact: RuntimeFact::InvitationAccepted {
                     invitation_kind: InvitationFactKind::Contact,
                     authority_id: Some(alice.to_string()),
@@ -440,7 +440,7 @@ mod tests {
         let fallback_only = AuthorityId::new_from_entropy([5u8; 32]);
         let fallback_name = truncate_id_for_display(&fallback_only.to_string());
         let runtime_event = |id: &str, fact: RuntimeFact| RuntimeEventSnapshot {
-            id: RuntimeEventId(id.to_string()),
+            id: RuntimeEventId::synthetic(id),
             fact,
         };
         let contacts = ContactsState::from_contacts([
@@ -522,7 +522,7 @@ mod tests {
             ContactsState::default(),
             None,
             &[RuntimeEventSnapshot {
-                id: RuntimeEventId("runtime-event-2".to_string()),
+                id: RuntimeEventId::synthetic("runtime-event-2"),
                 fact: RuntimeFact::GuardianInvitationAccepted {
                     authority_id: Some("guardian-1".to_string()),
                     guardian_name: Some("Alice".to_string()),
@@ -544,7 +544,7 @@ mod tests {
             ContactsState::default(),
             None,
             &[RuntimeEventSnapshot {
-                id: RuntimeEventId("runtime-event-3".to_string()),
+                id: RuntimeEventId::synthetic("runtime-event-3"),
                 fact: RuntimeFact::DeviceEnrollmentAccepted {
                     device_id: Some("device-1".to_string()),
                     device_name: Some("Laptop".to_string()),
