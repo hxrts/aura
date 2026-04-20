@@ -613,7 +613,7 @@ pub(super) fn execute_harness_followup_command(
             let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
-                update_tx.clone(),
+                update_tx,
                 OperationId::invitation_create(),
                 SemanticOperationKind::InviteActorToChannel,
             );
@@ -665,7 +665,6 @@ pub(super) fn execute_harness_followup_command(
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             let app_core = app_ctx.app_core.raw().clone();
             let tasks = app_ctx.tasks();
-            let update_tx = update_tx.clone();
             let receiver = authority_id;
             let channel_name_hint = channel.name.clone();
             let channel_id = channel
@@ -690,8 +689,8 @@ pub(super) fn execute_harness_followup_command(
                         message: None,
                         ttl_ms: None,
                     };
-                let transfer =
-                    operation.handoff_to_app_workflow(SemanticOperationTransferScope::InviteActorToChannel);
+                let transfer = operation
+                    .handoff_to_app_workflow(SemanticOperationTransferScope::InviteActorToChannel);
                 if let Err(error) = transfer
                     .run_workflow(
                         app_core.clone(),

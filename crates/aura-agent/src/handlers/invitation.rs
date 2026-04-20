@@ -2367,25 +2367,28 @@ async fn seed_peer_descriptor_for_authority_context(
     }
 
     let local_context_id = authority.default_context_id();
-    let existing = rendezvous_manager.get_descriptor(local_context_id, peer).await;
+    let existing = rendezvous_manager
+        .get_descriptor(local_context_id, peer)
+        .await;
     let discovered = rendezvous_manager
         .get_lan_discovered_peer(peer)
         .await
         .map(|peer| peer.descriptor);
-    let descriptor = match (existing, discovered) {
-        (Some(existing), Some(discovered))
-            if discovered.transport_hints.iter().any(
-                |hint| matches!(hint, aura_rendezvous::TransportHint::TcpDirect { .. }),
-            ) && !existing.transport_hints.iter().any(
-                |hint| matches!(hint, aura_rendezvous::TransportHint::TcpDirect { .. }),
-            ) =>
-        {
-            Some(discovered)
-        }
-        (Some(existing), _) => Some(existing),
-        (None, Some(discovered)) => Some(discovered),
-        (None, None) => None,
-    };
+    let descriptor =
+        match (existing, discovered) {
+            (Some(existing), Some(discovered))
+                if discovered.transport_hints.iter().any(|hint| {
+                    matches!(hint, aura_rendezvous::TransportHint::TcpDirect { .. })
+                }) && !existing.transport_hints.iter().any(|hint| {
+                    matches!(hint, aura_rendezvous::TransportHint::TcpDirect { .. })
+                }) =>
+            {
+                Some(discovered)
+            }
+            (Some(existing), _) => Some(existing),
+            (None, Some(discovered)) => Some(discovered),
+            (None, None) => None,
+        };
 
     let Some(mut descriptor) = descriptor else {
         return;

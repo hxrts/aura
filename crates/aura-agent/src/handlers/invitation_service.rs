@@ -843,9 +843,7 @@ impl InvitationServiceApi {
             }
         });
         #[cfg(not(target_arch = "wasm32"))]
-        let sender_hint = sender_addr
-            .as_deref()
-            .map(|addr| format!("tcp://{addr}"));
+        let sender_hint = sender_addr.as_deref().map(|addr| format!("tcp://{addr}"));
         tracing::info!(
             sender_addr = ?sender_addr,
             sender_hint = ?sender_hint,

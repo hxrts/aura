@@ -205,6 +205,8 @@ Note-to-self is a real AMP channel provisioned at account bootstrap, not a displ
 
 The notifications shared-flow anchor remains navigation-only. Parity coverage for notifications navigation requires the TUI and web shells to expose the same semantic screen transition and detail-view contract, but notification empty-state copy is informational only and must not introduce parity-critical invitation or recovery actions outside the canonical shared workflows.
 
+Native invitation and device-enrollment exports have an additional transport contract now. In non-wasm runs, `sender_hint` is a transport hint and must use the canonical `tcp://host:port` form rather than websocket-style `ws://` or `wss://` URLs. LAN integration and harness assertions should treat that field as a native direct-transport hint, not as a browser transport endpoint. When the runtime has both a stored rendezvous descriptor and a LAN-discovered descriptor for the same peer, invitation seeding should prefer the discovered descriptor if it adds a `TcpDirect` transport hint that the stored descriptor lacks so native shared-flow tests continue to exercise the direct LAN path.
+
 ### Shared Semantic Ownership Inventory
 
 Use this as the authoritative ownership map for the shared semantic stack. If code does not match this table, treat it as ownership cleanup debt rather than as an acceptable alternate pattern.
