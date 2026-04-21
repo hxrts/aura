@@ -166,6 +166,7 @@ pub use crate::scenario_contract::{
     VariableAction as SemanticVariableAction, SEMANTIC_COMMAND_SUPPORT,
 };
 pub use crate::ui_contract::{
+    AmpChannelTransitionSnapshot, AmpTransitionPolicySnapshot, AmpTransitionState,
     ConfirmationState, ControlId, FieldId, ListId, MessageSnapshot, ModalId, OperationId,
     OperationSnapshot, OperationState, ScreenId, SelectionSnapshot as UiSelectionSnapshot,
     SharedFlowId, SharedFlowScenarioCoverage, SharedListSupport, SharedModalSupport,

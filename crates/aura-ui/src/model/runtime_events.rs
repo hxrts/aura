@@ -21,6 +21,7 @@ impl UiModel {
             let drain = self.runtime_events.len().saturating_sub(32);
             self.runtime_events.drain(0..drain);
         }
+        self.advance_semantic_revision();
     }
 }
 
@@ -77,6 +78,7 @@ impl UiController {
 
     pub fn push_runtime_fact(&self, fact: RuntimeFact) {
         self.try_update_model(|model| model.push_runtime_fact(fact));
+        self.request_rerender();
     }
 
     pub fn ensure_runtime_contact(

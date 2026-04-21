@@ -4,6 +4,9 @@ mod types;
 use futures::executor::block_on;
 use std::future::Future;
 
+#[cfg(not(target_arch = "wasm32"))]
+use ::tokio as runtime_probe;
+
 pub use submission::{
     CeremonyMonitorHandoffSubmission, LocalTerminalSubmission, SubmittedOperation,
     WorkflowHandoffSubmission,
@@ -33,7 +36,7 @@ where
 fn assert_native_sync_boundary(_boundary: &'static str) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        if tokio::runtime::Handle::try_current().is_ok() {
+        if runtime_probe::runtime::Handle::try_current().is_ok() {
             panic!(
                 "{_boundary} cannot synchronously block inside a Tokio runtime; \
                  use an async handoff or enter through the sanctioned shell/bootstrap boundary"

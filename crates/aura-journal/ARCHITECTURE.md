@@ -70,6 +70,31 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines join-semilattice semantics and deterministic reduction.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines journal CRDT safety, deterministic reduction order, and `InvariantNonceUnique`.
+- [Journal](../../docs/105_journal.md#61-amp-channel-epoch-transition-reduction) defines AMP transition reduction states and single-live-successor exposure.
+
+### InvariantAmpTransitionSingleLiveSuccessor
+
+For one AMP channel parent prestate, context reduction may expose at most one
+live successor. Proposal-only facts remain `Observed`; exactly one valid
+unsuppressed A2 certificate becomes `A2Live`; conflicting A2 certificates or
+conflict evidence become `A2Conflict`; and A3 finalization is exposed only when
+durable evidence is unambiguous.
+
+Enforcement locus:
+- `src/reduction.rs`: `AmpTransitionParentKey` groups transition facts by parent prestate.
+- `src/reduction.rs`: `AmpTransitionReductionStatus` exposes `Observed`, `A2Live`, `A2Conflict`, `A3Finalized`, `A3Conflict`, `Aborted`, and `Superseded`.
+- `src/reduction.rs`: `ChannelEpochState::pending_bump` is derived only from an `A2Live` transition, not from proposal ordering.
+- `src/fact.rs`: AMP transition facts bind the canonical `transition_id`.
+
+Failure mode:
+- Reducer tie-breaks between conflicting certificates.
+- Live message acceptance uses a proposal without A2 evidence.
+- Recovery replay derives a different live successor from the same fact set.
+
+Verification hooks:
+- `cargo test -p hxrts-aura-journal amp_single_a2_certificate_exposes_one_live_successor`
+- `cargo test -p hxrts-aura-journal amp_conflicting_a2_certificates_expose_no_live_successor`
+- `cargo test -p hxrts-aura-journal amp_a3_finalization_advances_durable_epoch`
 
 ### InvariantNonceUnique
 

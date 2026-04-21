@@ -146,7 +146,7 @@ pub struct AuraCounterexampleReportV1 {
 /// Structured semantic regression entry derived from suite comparisons.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuraSemanticRegressionV1 {
-    pub input_index: usize,
+    pub input_index: u64,
     pub theorem_eligibility_changed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub productive_step_delta: Option<i64>,
@@ -432,7 +432,7 @@ pub fn compare_suite_catalogs(
                     .is_some_and(|delta| delta.abs() >= productive_step_threshold)
         })
         .map(|run| AuraSemanticRegressionV1 {
-            input_index: run.input_index,
+            input_index: run.input_index as u64,
             theorem_eligibility_changed: run.theorem_eligibility_changed,
             productive_step_delta: run.productive_step_delta,
             assumption_diagnostics_changed: run.assumption_diagnostics_changed,

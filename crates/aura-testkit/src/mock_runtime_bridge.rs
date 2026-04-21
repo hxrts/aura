@@ -32,6 +32,7 @@ use aura_app::runtime_bridge::{
     RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::CONTACTS_SIGNAL;
+use aura_app::ui_contract::AmpChannelTransitionSnapshot;
 use aura_app::views::contacts::{
     Contact, ContactRelationshipState, ContactsState, ReadReceiptPolicy,
 };
@@ -602,6 +603,14 @@ impl RuntimeBridge for MockRuntimeBridge {
             .get(&(context, channel))
             .cloned()
             .unwrap_or_default())
+    }
+
+    async fn amp_channel_transition_diagnostics(
+        &self,
+        _context: ContextId,
+        _channel: ChannelId,
+    ) -> Result<Option<AmpChannelTransitionSnapshot>, IntentError> {
+        Ok(None)
     }
 
     async fn moderation_status(

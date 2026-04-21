@@ -107,24 +107,20 @@ impl ChannelReadinessSeed {
     }
 
     fn merge_fact(&mut self, channel: ChannelFactKey, member_count: u32) {
-        if self
-            .fact_key
-            .name
-            .as_deref()
-            .is_none_or(|name| name.trim().is_empty())
-        {
+        if match self.fact_key.name.as_deref() {
+            Some(name) => name.trim().is_empty(),
+            None => true,
+        } {
             self.fact_key.name = channel.name;
         }
         self.member_count = self.member_count.max(member_count);
     }
 
     fn merge_observed_channel(&mut self, channel: &Channel) {
-        if self
-            .fact_key
-            .name
-            .as_deref()
-            .is_none_or(|name| name.trim().is_empty())
-            && !channel.name.trim().is_empty()
+        if (match self.fact_key.name.as_deref() {
+            Some(name) => name.trim().is_empty(),
+            None => true,
+        }) && !channel.name.trim().is_empty()
         {
             self.fact_key.name = Some(channel.name.clone());
         }

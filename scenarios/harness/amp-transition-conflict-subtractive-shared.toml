@@ -1,0 +1,125 @@
+# Shared AMP conflict and subtractive transition test:
+#
+# Exercises conflicting A2 certificates, conflict-tainted state that disables
+# successor sends, and subtractive membership removal after the bounded window.
+
+id = "amp-transition-conflict-subtractive-shared"
+goal = "Validate shared AMP conflict and subtractive-membership observations across frontend bindings."
+
+[[steps]]
+id = "launch"
+action = "launch_actors"
+timeout_ms = 20000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "onboarding"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-onboarding-visible"
+action = "screen_is"
+actor = "bob"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "alice-create-account"
+action = "create_account"
+actor = "alice"
+value = "AliceUser"
+timeout_ms = 4000
+
+[[steps]]
+id = "bob-create-account"
+action = "create_account"
+actor = "bob"
+value = "BobUser"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "bob-ready"
+action = "readiness_is"
+actor = "bob"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-a2-conflict"
+action = "publish_amp_transition_fixture"
+actor = "alice"
+value = "amp-conflict"
+amp_transition_fixture = "a2_conflict"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-a2-conflict"
+action = "publish_amp_transition_fixture"
+actor = "bob"
+value = "amp-conflict"
+amp_transition_fixture = "a2_conflict"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-conflict-event"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "successor-sends-disabled"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-conflict-event"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "successor-sends-disabled"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-subtractive-cutover"
+action = "publish_amp_transition_fixture"
+actor = "alice"
+value = "amp-subtractive"
+amp_transition_fixture = "subtractive_cutover"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-subtractive-cutover"
+action = "publish_amp_transition_fixture"
+actor = "bob"
+value = "amp-subtractive"
+amp_transition_fixture = "subtractive_cutover"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-subtractive-event"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "removed-participant"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-subtractive-event"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "removed-participant"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-matches-alice-subtractive-transition"
+action = "parity_with_actor"
+actor = "bob"
+peer_actor = "alice"
+timeout_ms = 5000

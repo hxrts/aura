@@ -246,6 +246,56 @@ All Category C ceremonies implement:
 
 When creating a new group/channel before the group key ceremony completes, Aura allows a bootstrap epoch using a trusted-dealer key (K2/A1). The dealer distributes a bootstrap key with the channel invite, enabling immediate encrypted messaging. This is explicitly provisional and superseded by the consensus-finalized group key (K3/A3) once the ceremony completes.
 
+### 5.5 AMP Channel Epoch Transition Refinement
+
+AMP channel epoch transitions use the existing `A1 -> A2 -> A3` agreement ladder with an AMP-specific live-state rule. This rule applies only to AMP channel epoch and membership state inside a relational context. It does not weaken authority-root membership, account commitment trees, guardian rotation, or recovery execution.
+
+For a channel transition:
+
+- `A1 observed` means a syntactically valid successor proposal exists as a journal fact, but it has no live operational authority.
+- `A2Live` means exactly one unsuppressed AMP-certified successor exists for the parent epoch and deterministic reduction exposes that successor as the live epoch for AMP send and receive policy.
+- `A3Finalized` means consensus-backed commit facts durably finalize a successor. The normal path finalizes the same `transition_id` previously exposed as `A2Live`.
+
+`A2Live` is operationally authoritative but non-durable. It may drive live AMP traffic before full A3 finalization, but durable shared state still requires the A3 consensus boundary described in [Consensus](108_consensus.md).
+
+Every AMP transition fact binds a canonical `transition_id`, a typed digest over:
+
+- `context_id`
+- `channel_id`
+- `parent_epoch`
+- `parent_commitment`
+- `successor_epoch`
+- `successor_commitment`
+- `membership_commitment`
+- `transition_policy`
+
+Proposals, A2 certificates, A3 commits, aborts, conflicts, and supersessions refer to the same transition only when this full identity matches. A different successor for the same parent is a conflicting transition.
+
+The reducer states for a parent transition group are:
+
+| State | Meaning |
+|---|---|
+| `Observed` | Proposal facts exist, but no live certificate is valid. |
+| `A2Live` | Exactly one valid unsuppressed AMP certificate selects a successor. |
+| `A2Conflict` | Conflicting valid certificates or unresolved equivocation evidence suppress live exposure. |
+| `A3Finalized` | Consensus-backed commit finalizes one successor. |
+| `A3Conflict` | Conflicting durable commit evidence suppresses live exposure. |
+| `Aborted` | Explicit abort evidence invalidates the proposal for live use. |
+| `Superseded` | Authorized supersession replaces an earlier transition path. |
+
+The reducer must never choose between conflicting valid `A2` certificates by arrival order, local preference, wall-clock time, or deterministic tie-breaking. If facts do not prove a single winner, no live successor is exposed.
+
+AMP transition policies distinguish additive and non-removal transitions from subtractive, removal, revocation, and emergency transitions. Additive transitions may permit bounded dual-epoch receive overlap. Subtractive and emergency transitions require stricter old-epoch acceptance so removed or suspected participants do not retain indefinite send authority.
+
+Emergency AMP transitions are channel-scoped control-plane transitions:
+
+- `EmergencyQuarantineTransition` excludes a suspect from the successor epoch, cuts new sends over immediately, minimizes old-epoch receive grace, and rotates or erases old secret material aggressively.
+- `EmergencyCryptoshredTransition` uses the strongest channel-scoped bar and destroys ordinary pre-emergency readable state at the `A2Live` cutover boundary.
+
+Emergency channel facts do not automatically remove authority-root membership
+or suspend recovery/governance rights. Those require separate authority-scoped
+governance facts and their own thresholds.
+
 ## 6. Consistency Metadata
 
 Each operation category has a purpose-built status type for tracking consistency.
@@ -579,8 +629,8 @@ Right: Channel creation is optimistic. Show immediately, sync status later.
 
 - [Consensus](108_consensus.md) for fast path and fallback consensus
 - [Journal](105_journal.md) for fact semantics and reduction flows
-- [AMP Protocol](112_amp.md) for channel encryption and key derivation
+- [Aura Messaging Protocol (AMP)](112_amp.md) for channel encryption and key derivation
 - [Relational Contexts](114_relational_contexts.md) for context vs channel distinction
-- [Choreography Guide](110_mpst_and_choreography.md) for session types in Category C
-- [Transport](111_transport_and_information_flow.md) for sync status tracking
+- [MPST and Choreography](110_mpst_and_choreography.md) for session types in Category C
+- [Transport and Information Flow](111_transport_and_information_flow.md) for sync status tracking
 - [Effect System](103_effect_system.md) for effect policies

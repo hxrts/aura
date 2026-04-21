@@ -1,12 +1,12 @@
 # Relational Contexts
 
-This document describes the architecture of relational contexts in Aura. It explains how cross-authority relationships are represented using dedicated context namespaces. It defines the structure of relational facts and the role of [Aura Consensus](108_consensus.md) in producing agreed relational state. It also describes privacy boundaries and the interpretation of relational data by participating authorities.
+This document describes the architecture of relational contexts in Aura. It explains how cross-authority relationships are represented using dedicated context namespaces. It defines the structure of relational facts and the role of [Consensus](108_consensus.md) in producing agreed relational state. It also describes privacy boundaries and the interpretation of relational data by participating authorities.
 
 Relational contexts are distinct from authority types. In particular, `Neighborhood` is modeled as an authority type in the `Neighborhood Plane` as described in [Social Architecture](115_social_architecture.md). Bilateral trust in the `Web of Trust Plane` is modeled as relational-context state, not as a new authority type.
 
 ## 1. RelationalContext Abstraction
 
-A relational context is shared state linking two or more authorities. A relational context has its own [journal](105_journal.md) namespace. A relational context does not expose internal authority structure. A relational context contains only the facts that the participating authorities choose to share.
+A relational context is shared state linking two or more authorities. A relational context has its own [Journal](105_journal.md) namespace. A relational context does not expose internal authority structure. A relational context contains only the facts that the participating authorities choose to share.
 
 A relational context is identified by a `ContextId`. Authorities publish relational facts inside the context journal. The context journal is a join semilattice under set union. Reduction produces a deterministic relational state.
 
@@ -39,6 +39,8 @@ pub struct FactEnvelope {
 ```
 
 The `Protocol` variant wraps core protocol facts that have specialized reduction logic in `reduce_context()`. These include `GuardianBinding`, `RecoveryGrant`, `Consensus`, AMP channel facts, DKG transcript commits, and lifecycle markers. The `Generic` variant provides extensibility for domain-specific facts using `FactEnvelope` which contains a typed payload with schema versioning.
+
+AMP channel facts include checkpoints, transition proposals, A2 certificates, A3 finalizations, abort evidence, conflict evidence, supersession evidence, and emergency alarms. These facts remain scoped to the relational context. They do not change authority-root membership, recovery rights, guardian bindings, or account commitment trees.
 
 Domain crates implement the `DomainFact` trait from `aura-journal/src/extensibility.rs`. They store facts via `DomainFact::to_generic()` which produces a `FactEnvelope`. The runtime registers reducers in `crates/aura-agent/src/fact_registry.rs` so `reduce_context()` can process Generic facts into `RelationalBinding` values.
 
@@ -165,7 +167,7 @@ This structure represents the reduced relational state. It contains relational b
 
 ## 6. Aura Consensus in Relational Contexts
 
-Some relational operations require strong agreement. [Aura Consensus](108_consensus.md) produces these operations. Aura Consensus uses a witness set drawn from participating authorities. Witnesses compute shares after verifying the prestate hash.
+Some relational operations require strong agreement. [Consensus](108_consensus.md) produces these operations. Aura Consensus uses a witness set drawn from participating authorities. Witnesses compute shares after verifying the prestate hash.
 
 Commit facts contain threshold signatures. Each commit fact is inserted into the relational context journal. Reduction interprets the commit fact as a confirmed relational operation.
 
@@ -560,7 +562,7 @@ Group membership changes are Category C because they affect encryption:
 3. **Consistency**: All members must agree on who's in the group
    - Solution: Ceremony ensures atomic membership view
 
-See [Consensus - Operation Categories](108_consensus.md#17-operation-categories) for the full decision tree.
+See [Operation Categories](109_operation_categories.md) for the full decision tree.
 
 ## 11. Summary
 

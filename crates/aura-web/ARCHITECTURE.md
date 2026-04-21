@@ -71,6 +71,11 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   `__AURA_UI_READY_GENERATION__` diagnostics reflect that transition. Render
   heartbeat remains the separate render-convergence signal.
 - Harness publication is semantic-first: pushed shared-contract state and render heartbeat are authoritative; DOM inspection is secondary diagnostics only.
+- AMP transition observations are carried in the published
+  `UiSnapshot.runtime_events` payload as
+  `RuntimeFact::AmpChannelTransitionUpdated`. The browser shell publishes the
+  full shared snapshot produced by `aura-ui` and must not strip or reinterpret
+  transition fields before Playwright/harness observation.
 - Browser harness publication is render-aligned: semantic snapshot publication
   and render heartbeat emission must be scheduled through
   `requestAnimationFrame` so harness render-convergence contracts observe

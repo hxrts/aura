@@ -117,6 +117,7 @@ module harness_amp_channel {
         amp_channel::invitations' = amp_channel::invitations,
         amp_channel::messages' = amp_channel::messages,
         amp_channel::deliveries' = amp_channel::deliveries,
+        amp_channel::transitions' = amp_channel::transitions,
         amp_channel::actor' = amp_channel::actor,
         amp_channel::channel' = amp_channel::channel,
         amp_channel::member' = amp_channel::member,
@@ -124,12 +125,94 @@ module harness_amp_channel {
         phase' = 14,
         action_name' = "assertInvariant"
       }
+    else if (phase == 14)
+      all {
+        phase == 14,
+        amp_channel::proposeTransition("bob", "guardians", "normal-t1", amp_channel::NormalTransition),
+        phase' = 15,
+        action_name' = "proposeTransition"
+      }
+    else if (phase == 15)
+      all {
+        phase == 15,
+        amp_channel::certifyTransition("normal-t1"),
+        phase' = 16,
+        action_name' = "certifyTransition"
+      }
+    else if (phase == 16)
+      all {
+        phase == 16,
+        amp_channel::finalizeTransition("normal-t1"),
+        phase' = 17,
+        action_name' = "finalizeTransition"
+      }
+    else if (phase == 17)
+      all {
+        phase == 17,
+        amp_channel::proposeTransition("bob", "guardians", "conflict-left", amp_channel::NormalTransition),
+        phase' = 18,
+        action_name' = "proposeTransition"
+      }
+    else if (phase == 18)
+      all {
+        phase == 18,
+        amp_channel::proposeTransition("alice", "guardians", "conflict-right", amp_channel::NormalTransition),
+        phase' = 19,
+        action_name' = "proposeTransition"
+      }
+    else if (phase == 19)
+      all {
+        phase == 19,
+        amp_channel::reportTransitionConflict("conflict-left", "conflict-right"),
+        phase' = 20,
+        action_name' = "reportTransitionConflict"
+      }
+    else if (phase == 20)
+      all {
+        phase == 20,
+        amp_channel::emergencyQuarantine("bob", "guardians", "quarantine-t1", "carol"),
+        phase' = 21,
+        action_name' = "emergencyQuarantine"
+      }
+    else if (phase == 21)
+      all {
+        phase == 21,
+        amp_channel::certifyTransition("quarantine-t1"),
+        phase' = 22,
+        action_name' = "certifyTransition"
+      }
+    else if (phase == 22)
+      all {
+        phase == 22,
+        amp_channel::emergencyCryptoshred("bob", "guardians", "cryptoshred-t1", "carol"),
+        phase' = 23,
+        action_name' = "emergencyCryptoshred"
+      }
+    else if (phase == 23)
+      all {
+        phase == 23,
+        assert(amp_channel::InvariantSingleLiveSuccessor),
+        assert(amp_channel::InvariantConflictSuppression),
+        assert(amp_channel::InvariantEmergencyNonRetroactivity),
+        amp_channel::channels' = amp_channel::channels,
+        amp_channel::invitations' = amp_channel::invitations,
+        amp_channel::messages' = amp_channel::messages,
+        amp_channel::deliveries' = amp_channel::deliveries,
+        amp_channel::transitions' = amp_channel::transitions,
+        amp_channel::actor' = amp_channel::actor,
+        amp_channel::channel' = amp_channel::channel,
+        amp_channel::member' = amp_channel::member,
+        amp_channel::message' = amp_channel::message,
+        phase' = 24,
+        action_name' = "assertTransitionInvariant"
+      }
     else all {
       false,
       amp_channel::channels' = amp_channel::channels,
       amp_channel::invitations' = amp_channel::invitations,
       amp_channel::messages' = amp_channel::messages,
       amp_channel::deliveries' = amp_channel::deliveries,
+      amp_channel::transitions' = amp_channel::transitions,
       amp_channel::actor' = amp_channel::actor,
       amp_channel::channel' = amp_channel::channel,
       amp_channel::member' = amp_channel::member,

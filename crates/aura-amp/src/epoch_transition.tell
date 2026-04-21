@@ -1,0 +1,34 @@
+module amp_epoch_transition exposing (AmpEpochTransition)
+
+protocol AmpEpochTransition =
+  roles Coordinator, Witness1, Witness2, Finalizer
+
+  Coordinator { guard_capability : "amp:epoch:propose"
+              , flow_cost : 120
+              , journal_facts : "amp_transition_proposed" }
+    -> Witness1 : ProposeTransition of crate.epoch_transition_choreography.AmpTransitionProposalMessage
+
+  Coordinator { guard_capability : "amp:epoch:propose"
+              , flow_cost : 120
+              , journal_facts : "amp_transition_proposed" }
+    -> Witness2 : ProposeTransition of crate.epoch_transition_choreography.AmpTransitionProposalMessage
+
+  Witness1 { guard_capability : "amp:epoch:witness"
+           , flow_cost : 80
+           , journal_facts : "amp_transition_witnessed" }
+    -> Coordinator : WitnessTransition of crate.epoch_transition_choreography.AmpTransitionWitnessMessage
+
+  Witness2 { guard_capability : "amp:epoch:witness"
+           , flow_cost : 80
+           , journal_facts : "amp_transition_witnessed" }
+    -> Coordinator : WitnessTransition of crate.epoch_transition_choreography.AmpTransitionWitnessMessage
+
+  Coordinator { guard_capability : "amp:epoch:certify"
+              , flow_cost : 140
+              , journal_facts : "amp_transition_certified" }
+    -> Finalizer : CertifyTransition of crate.epoch_transition_choreography.AmpTransitionCertificateMessage
+
+  Finalizer { guard_capability : "amp:epoch:finalize"
+            , flow_cost : 160
+            , journal_facts : "amp_transition_finalized" }
+    -> Coordinator : FinalizeTransition of crate.epoch_transition_choreography.AmpTransitionFinalizationMessage

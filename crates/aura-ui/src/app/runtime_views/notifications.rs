@@ -4,7 +4,8 @@ use aura_app::ui::types::{
     AppError, ContactRelationshipState, ContactsState, InvitationsState, RecoveryState,
 };
 use aura_app::ui_contract::{
-    InvitationFactKind, OperationState, RuntimeEventSnapshot, RuntimeFact,
+    AmpTransitionPolicySnapshot, AmpTransitionState, InvitationFactKind, OperationState,
+    RuntimeEventSnapshot, RuntimeFact,
 };
 use aura_app::views::{truncate_id_for_display, EffectiveName};
 use aura_core::effects::reactive::ReactiveEffects;
@@ -30,6 +31,11 @@ pub(in crate::app) enum NotificationRuntimeAction {
     SentInvitation,
     RecoveryApproval,
     FriendRequest,
+    AmpRaiseEmergencyAlarm,
+    AmpApproveQuarantine,
+    AmpApproveCryptoshred,
+    AmpViewConflictEvidence,
+    AmpViewFinalizationStatus,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -276,6 +282,56 @@ fn display_contact_name_for_authority(contacts: &ContactsState, authority_id: &s
         .unwrap_or_else(|| truncate_id_for_display(authority_id))
 }
 
+fn amp_transition_policy_label(policy: Option<AmpTransitionPolicySnapshot>) -> &'static str {
+    match policy {
+        Some(AmpTransitionPolicySnapshot::Normal) => "normal transition",
+        Some(AmpTransitionPolicySnapshot::Additive) => "additive transition",
+        Some(AmpTransitionPolicySnapshot::Subtractive) => "subtractive transition",
+        Some(AmpTransitionPolicySnapshot::EmergencyQuarantine) => "emergency quarantine",
+        Some(AmpTransitionPolicySnapshot::EmergencyCryptoshred) => "emergency cryptoshred",
+        None => "transition",
+    }
+}
+
+fn amp_transition_state_label(state: AmpTransitionState) -> &'static str {
+    match state {
+        AmpTransitionState::Observed => "Observed proposal",
+        AmpTransitionState::A2Live => "A2 live successor",
+        AmpTransitionState::A2Conflict => "A2 conflict",
+        AmpTransitionState::A3Finalized => "A3 finalized",
+        AmpTransitionState::A3Conflict => "A3 conflict",
+        AmpTransitionState::Aborted => "Aborted",
+        AmpTransitionState::Superseded => "Superseded",
+    }
+}
+
+fn amp_transition_action(
+    state: AmpTransitionState,
+    policy: Option<AmpTransitionPolicySnapshot>,
+    has_conflict: bool,
+) -> NotificationRuntimeAction {
+    if has_conflict
+        || matches!(
+            state,
+            AmpTransitionState::A2Conflict | AmpTransitionState::A3Conflict
+        )
+    {
+        return NotificationRuntimeAction::AmpViewConflictEvidence;
+    }
+    match policy {
+        Some(AmpTransitionPolicySnapshot::EmergencyCryptoshred) => {
+            NotificationRuntimeAction::AmpApproveCryptoshred
+        }
+        Some(AmpTransitionPolicySnapshot::EmergencyQuarantine) => {
+            NotificationRuntimeAction::AmpApproveQuarantine
+        }
+        _ if matches!(state, AmpTransitionState::Observed) => {
+            NotificationRuntimeAction::AmpRaiseEmergencyAlarm
+        }
+        _ => NotificationRuntimeAction::AmpViewFinalizationStatus,
+    }
+}
+
 fn runtime_event_notification(
     event: &RuntimeEventSnapshot,
     contacts: &ContactsState,
@@ -348,6 +404,46 @@ fn runtime_event_notification(
                 detail: device_id.clone().unwrap_or_else(|| name.clone()),
                 timestamp,
                 action: NotificationRuntimeAction::None,
+            })
+        }
+        RuntimeFact::AmpChannelTransitionUpdated { transition } => {
+            let channel = transition
+                .channel
+                .name
+                .as_deref()
+                .or(transition.channel.id.as_deref())
+                .unwrap_or("channel");
+            let state = amp_transition_state_label(transition.state);
+            let policy = amp_transition_policy_label(transition.emergency_policy);
+            let has_conflict = !transition.conflict_evidence.is_empty();
+            let mut subtitle = format!(
+                "{state}; stable epoch {}; {policy}",
+                transition.stable_epoch
+            );
+            if transition.cryptoshred_active {
+                subtitle.push_str("; pre-emergency readable state may be unavailable");
+            }
+            if !transition.suspect_authorities.is_empty() {
+                subtitle.push_str("; suspect excluded");
+            }
+
+            Some(NotificationRuntimeItem {
+                id: format!("amp-transition:{}", event.key()),
+                kind_label: "AMP Transition".to_string(),
+                title: format!("#{channel} transition: {state}"),
+                subtitle,
+                detail: transition
+                    .live_transition_id
+                    .clone()
+                    .or_else(|| transition.finalized_transition_id.clone())
+                    .or_else(|| transition.conflict_evidence.first().cloned())
+                    .unwrap_or_else(|| channel.to_string()),
+                timestamp,
+                action: amp_transition_action(
+                    transition.state,
+                    transition.emergency_policy,
+                    has_conflict,
+                ),
             })
         }
         _ => None,
@@ -557,5 +653,80 @@ mod tests {
         assert_eq!(runtime.items[0].id, "device-accepted:device-1");
         assert_eq!(runtime.items[0].kind_label, "Device Invite Accepted");
         assert_eq!(runtime.items[0].title, "Laptop joined this account");
+    }
+
+    #[test]
+    fn build_notifications_runtime_view_surfaces_amp_transition_events() {
+        let runtime = build_notifications_runtime_view(
+            InvitationsState::default(),
+            RecoveryState::default(),
+            ContactsState::default(),
+            None,
+            &[RuntimeEventSnapshot {
+                id: RuntimeEventId::synthetic("runtime-event-amp"),
+                fact: RuntimeFact::AmpChannelTransitionUpdated {
+                    transition: aura_app::ui_contract::AmpChannelTransitionSnapshot {
+                        channel: aura_app::ui_contract::ChannelFactKey::identified("channel-a"),
+                        stable_epoch: 4,
+                        state: AmpTransitionState::A2Conflict,
+                        live_transition_id: None,
+                        finalized_transition_id: None,
+                        conflict_evidence: vec!["evidence-a".to_string()],
+                        emergency_policy: Some(AmpTransitionPolicySnapshot::EmergencyQuarantine),
+                        suspect_authorities: vec!["authority-a".to_string()],
+                        quarantine_epochs: vec![5],
+                        prune_before_epochs: Vec::new(),
+                        cryptoshred_active: false,
+                        accusation_history: Vec::new(),
+                    },
+                },
+            }],
+        );
+
+        assert_eq!(runtime.items.len(), 1);
+        assert_eq!(runtime.items[0].kind_label, "AMP Transition");
+        assert!(runtime.items[0].title.contains("A2 conflict"));
+        assert_eq!(
+            runtime.items[0].action,
+            NotificationRuntimeAction::AmpViewConflictEvidence
+        );
+    }
+
+    #[test]
+    fn build_notifications_runtime_view_surfaces_amp_cryptoshred_confirmation() {
+        let runtime = build_notifications_runtime_view(
+            InvitationsState::default(),
+            RecoveryState::default(),
+            ContactsState::default(),
+            None,
+            &[RuntimeEventSnapshot {
+                id: RuntimeEventId::synthetic("runtime-event-amp-cryptoshred"),
+                fact: RuntimeFact::AmpChannelTransitionUpdated {
+                    transition: aura_app::ui_contract::AmpChannelTransitionSnapshot {
+                        channel: aura_app::ui_contract::ChannelFactKey::identified("channel-b"),
+                        stable_epoch: 8,
+                        state: AmpTransitionState::A2Live,
+                        live_transition_id: Some("transition-b".to_string()),
+                        finalized_transition_id: None,
+                        conflict_evidence: Vec::new(),
+                        emergency_policy: Some(AmpTransitionPolicySnapshot::EmergencyCryptoshred),
+                        suspect_authorities: Vec::new(),
+                        quarantine_epochs: Vec::new(),
+                        prune_before_epochs: vec![7],
+                        cryptoshred_active: true,
+                        accusation_history: Vec::new(),
+                    },
+                },
+            }],
+        );
+
+        assert_eq!(runtime.items.len(), 1);
+        assert!(runtime.items[0]
+            .subtitle
+            .contains("pre-emergency readable state may be unavailable"));
+        assert_eq!(
+            runtime.items[0].action,
+            NotificationRuntimeAction::AmpApproveCryptoshred
+        );
     }
 }

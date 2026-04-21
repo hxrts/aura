@@ -24,7 +24,9 @@ use aura_journal::DomainFact;
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
-use crate::{config::AmpRuntimeConfig, get_channel_state, AmpJournalEffects};
+use crate::{
+    config::AmpRuntimeConfig, get_channel_state, list_channel_participants, AmpJournalEffects,
+};
 
 /// Simple coordinator that writes AMP channel facts into the context journal.
 pub struct AmpChannelCoordinator<E> {
@@ -120,14 +122,14 @@ where
 
         let bump_nonce = self.effects.random_uuid().await.as_bytes().to_vec();
         let bump_id = aura_core::Hash32(hash(&bump_nonce));
-        let proposal = ProposedChannelEpochBump {
-            context: params.context,
-            channel: params.channel,
-            parent_epoch: state.chan_epoch,
-            new_epoch: state.chan_epoch + 1,
+        let proposal = ProposedChannelEpochBump::new(
+            params.context,
+            params.channel,
+            state.chan_epoch,
+            state.chan_epoch + 1,
             bump_id,
-            reason: ChannelBumpReason::Routine,
-        };
+            ChannelBumpReason::Routine,
+        );
 
         self.effects
             .insert_relational_fact(RelationalFact::Protocol(
@@ -207,11 +209,31 @@ where
         let state = get_channel_state(&self.effects, params.context, params.channel)
             .await
             .map_err(map_err)?;
+        if !crate::core::sender_allowed_by_epoch_state(&state, params.sender) {
+            return Err(AmpChannelError::Unauthorized);
+        }
+        let participants = list_channel_participants(&self.effects, params.context, params.channel)
+            .await
+            .map_err(map_err)?;
+        if !participants.is_empty() && !participants.contains(&params.sender) {
+            return Err(AmpChannelError::Unauthorized);
+        }
+        let send_epoch = state
+            .pending_bump
+            .as_ref()
+            .filter(|_| {
+                state.transition.as_ref().is_some_and(|transition| {
+                    transition.status
+                        == aura_journal::reduction::AmpTransitionReductionStatus::A2Live
+                })
+            })
+            .map(|pending| pending.new_epoch)
+            .unwrap_or(state.chan_epoch);
 
         let header = AmpHeader {
             context: params.context,
             channel: params.channel,
-            chan_epoch: state.chan_epoch,
+            chan_epoch: send_epoch,
             ratchet_gen: state.current_gen,
         };
 

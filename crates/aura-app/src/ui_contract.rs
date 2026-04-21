@@ -67,8 +67,10 @@ pub use shared_flow_support::{
 };
 pub use snapshots::{
     next_projection_revision, validate_harness_shell_structure, validate_render_convergence,
-    AuthoritativeSemanticFactsSnapshot, HarnessShellMode, HarnessShellStructureSnapshot,
-    ListItemSnapshot, ListSnapshot, MessageSnapshot, OperationSnapshot, ProjectionRevision,
-    QuiescenceSnapshot, QuiescenceState, RenderHeartbeat, RuntimeEventKind, RuntimeEventSnapshot,
-    RuntimeFact, SelectionSnapshot, ToastSnapshot, UiSnapshot,
+    AmpAccusationDiagnostic, AmpChannelTransitionSnapshot, AmpTransitionPolicySnapshot,
+    AmpTransitionState, AuthoritativeSemanticFactsSnapshot, HarnessShellMode,
+    HarnessShellStructureSnapshot, ListItemSnapshot, ListSnapshot, MessageSnapshot,
+    OperationSnapshot, ProjectionRevision, QuiescenceSnapshot, QuiescenceState, RenderHeartbeat,
+    RuntimeEventKind, RuntimeEventSnapshot, RuntimeFact, SelectionSnapshot, ToastSnapshot,
+    UiSnapshot,
 };

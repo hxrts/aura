@@ -28,19 +28,21 @@ fn recovery_from_journal_reconstructs_channel_state() {
         )),
     );
 
+    let proposal = aura_journal::fact::ProposedChannelEpochBump::new(
+        ctx,
+        channel,
+        0,
+        1,
+        Hash32::new([9u8; 32]),
+        aura_journal::fact::ChannelBumpReason::Routine,
+    );
     let committed = Fact::new(
         OrderTime([2u8; 32]),
         TimeStamp::OrderClock(OrderTime([2u8; 32])),
         FactContent::Relational(RelationalFact::Protocol(
-            ProtocolRelationalFact::AmpCommittedChannelEpochBump(CommittedChannelEpochBump {
-                context: ctx,
-                channel,
-                parent_epoch: 0,
-                new_epoch: 1,
-                chosen_bump_id: Hash32::new([9u8; 32]),
-                consensus_id: Hash32::new([8u8; 32]),
-                transcript_ref: None,
-            }),
+            ProtocolRelationalFact::AmpCommittedChannelEpochBump(
+                CommittedChannelEpochBump::from_proposal(&proposal, Hash32::new([8u8; 32]), None),
+            ),
         )),
     );
 

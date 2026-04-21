@@ -22,6 +22,10 @@ An authority (`AuthorityId`) is the cryptographic identity that holds capabiliti
 
 A nickname suggestion (`nickname_suggestion`) is metadata an authority optionally shares when connecting with someone. Users configure a default suggestion sent to all new connections. Users can share different suggestions with different people or opt out entirely.
 
+`Contact` is unilateral reachability or identification state. It means the local user knows how to recognize or reach an authority. It does not imply bilateral trust.
+
+`Friend` is bilateral accepted trust in the `Web of Trust Plane`. Friend lifecycle facts live in relational contexts. Friends of friends are local derivations or bounded introduction evidence, not canonical shared graph state.
+
 ### 1.4 Unified Naming Pattern
 
 The codebase uses a consistent naming pattern across entities (contacts, devices, discovered peers). The `EffectiveName` trait in `aura-app/src/views/naming.rs` defines the resolution order:
@@ -328,6 +332,8 @@ The `Web of Trust Plane` provides trust evidence:
 - bootstrap and accountability weight for trusted providers
 
 Direct friendship is authoritative shared state. Friend-of-friend is local derivation or bounded introduction evidence. It is not canonical shared graph state.
+
+Trust evidence may affect provider admission, weighting, and accountability preference. It must not create friend-shaped, FoF-shaped, guardian-shaped, or neighborhood-shaped route schemas. The provider should observe only the generic `Establish`, `Move`, or `Hold` service action.
 
 ### 12.3 Plane Fusion
 

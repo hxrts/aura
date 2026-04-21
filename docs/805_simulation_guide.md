@@ -326,6 +326,16 @@ assert!(results.property_violations.is_empty());
 
 Default suites are available for consensus, sync, chat, and recovery protocol classes. Scenario results include `properties_checked` and `property_violations` for CI reporting.
 
+## Adaptive Privacy Simulation
+
+Adaptive privacy validation uses simulation for cross-layer evidence. The simulator exercises anonymous path establishment, established-path reuse and expiry, move batching, cover traffic, selector-based retrieval, hold retention, provider saturation, partitions, churn, and long-offline bootstrap re-entry.
+
+The adaptive privacy matrix should include small, medium, and large reachable sets. It should also include clustered social topologies, partition and heal cycles, sparse sync opportunities, low organic traffic, provider saturation, and stale-node return with dead remembered descriptors.
+
+The evidence path tunes policy constants for production. Production ships one fixed adaptive policy. Development and simulation may vary constants such as cover floor, path-diversity floor, delay gain, hold retention, and retrieval rotation, but those tuning surfaces must not become user-facing production configuration.
+
+The current fixed-policy evidence is anchored by `crates/aura-simulator/tests/adaptive_privacy_phase_six.rs`. That lane checks the tuned policy, archived control-plane reports, bootstrap-observer reports, Telltale-backed anonymous path establishment, and reply-block accountability.
+
 ## Quint Integration
 
 Quint actions enable model-based testing. See [Verification and MBT Guide](806_verification_guide.md) for complete workflows.
@@ -347,6 +357,15 @@ assert!(result.all_properties_passed());
 ```
 
 Trace replay validates implementation against Quint model behavior.
+
+AMP epoch-transition simulation has a focused regression lane in
+`crates/aura-simulator/tests/amp_transition_scenarios.rs`. It covers delayed
+witnesses, partitions that create conflicting `A2` certificates, subtractive
+old-epoch receive cutover, emergency quarantine, emergency cryptoshred, replay,
+abort, supersession, and alarm-spam cases. Run it with
+`cargo test -p aura-simulator --test amp_transition_scenarios`; broader local
+development can continue to use `just test-crate aura-simulator` without
+requiring an exhaustive Quint/Apalache matrix.
 
 ## Conformance Workflow
 

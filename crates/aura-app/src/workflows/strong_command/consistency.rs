@@ -116,9 +116,10 @@ async fn consistency_invariant_holds(
                     .existing_channel()
                     .is_some_and(|channel| chat.channel(&channel.channel_id().0).is_some()),
                 ResolvedCommand::Leave => match scope_channel_id(&plan.scope, "leave") {
-                    Ok(channel_id) => chat
-                        .channel(&channel_id.0)
-                        .is_none_or(|channel| channel.member_count == 0),
+                    Ok(channel_id) => match chat.channel(&channel_id.0) {
+                        Some(channel) => channel.member_count == 0,
+                        None => true,
+                    },
                     Err(_) => false,
                 },
                 _ => false,

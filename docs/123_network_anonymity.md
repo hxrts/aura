@@ -2,7 +2,7 @@
 
 This document defines Aura's network privacy and network anonymity model. It specifies the route-layer cryptographic objects, bootstrap re-entry records, hop processing rules, and reply-block semantics used by adaptive privacy routing.
 
-This document complements [Transport and Information Flow](111_transport_and_information_flow.md), [Rendezvous](113_rendezvous.md), [Relational Contexts](114_relational_contexts.md), and [Social Architecture](115_social_architecture.md). Those documents define adjacent-peer transport, context-scoped discovery, relational trust facts, and social provisioning. This document defines the anonymous path layer that sits above those surfaces.
+This document complements [Transport and Information Flow](111_transport_and_information_flow.md), [Rendezvous Architecture](113_rendezvous.md), [Relational Contexts](114_relational_contexts.md), and [Social Architecture](115_social_architecture.md). Those documents define adjacent-peer transport, context-scoped discovery, relational trust facts, and social provisioning. This document defines the anonymous path layer that sits above those surfaces.
 
 ## 1. Scope
 
@@ -50,6 +50,16 @@ The route-layer construction uses the following rules:
 
 Aura uses SURB-like reply blocks as Aura-native typed objects with explicit expiry, scope, and accountability semantics.
 
+## 4.1 Deployment Model
+
+The service family model is always active. `Establish`, `Move`, and `Hold` are the normal service vocabulary for path creation, opaque movement, and custody.
+
+`LocalRoutingProfile::passthrough()` is the pre-privacy routing baseline. It uses mixing depth `0`, delay `0`, cover rate `0`, and path diversity `1`. `Hold` remains active under passthrough because it is an availability service, not a routing-profile knob.
+
+Production privacy uses encrypted path setup and encrypted `MoveEnvelope` processing with one fixed adaptive policy. Users do not tune this policy. Development and simulation may sweep policy constants, but production nodes use the evidence-backed constants shipped with the build.
+
+The current fixed policy uses path-diversity floor `2`, cover floor `2` packets per second, delay gain denominator `3`, neighborhood hold retention window `120s`, and retrieval-capability rotation beginning `10s` before expiry.
+
 ## 5. Link Encryption Versus Path Encryption
 
 `Link encryption` uses the adjacent-peer secure channel. It protects one hop and one transport edge.
@@ -79,7 +89,7 @@ The route layer uses the following typed objects:
 
 Bounded bootstrap introductions carry explicit introducer identity, introduced authority, scope, expiry, maximum remaining depth, and fan-out limits. They are trust and bootstrap evidence. They are not canonical shared route tiers.
 
-`EstablishedPath` remains the reusable route object consumed by `Move`. `MoveEnvelope` remains the shared movement envelope family. Phase 7 replaces transparent peel visibility with encrypted peel processing without changing the accountable movement boundary.
+`EstablishedPath` is the reusable route object consumed by `Move`. `MoveEnvelope` is the shared movement envelope family. Encrypted peel processing is the production route-layer behavior and preserves the accountable movement boundary.
 
 ## 7. Bootstrap and Re-Entry Surfaces
 
@@ -166,6 +176,12 @@ Reply blocks must remain distinct from:
 - adjacent-peer secure channel state
 - bootstrap trust records
 
+## 11.1 Movement Scheduling
+
+The runtime schedules protected movement through shared classes rather than separate transport families. Sync-blended traffic may wait for anti-entropy windows. Bounded-deadline replies carry accountability or control traffic with shorter deadlines. Synthetic cover fills the remaining cover floor.
+
+Application traffic and sync-blended retrieval reduce the synthetic-cover gap. Accountability replies are measured separately in the current deployment model. They do not reduce the first-deployment synthetic cover floor.
+
 ## 12. Per-Boundary Leakage
 
 Aura tracks privacy leakage by boundary. The route-layer design assumes leakage cannot be eliminated completely. The design instead constrains what each boundary can learn.
@@ -206,10 +222,7 @@ The implementation must satisfy the following boundaries:
 4. `MoveEnvelope` remains the shared accountable movement boundary
 5. `transparent_onion` remains a debug and simulation tool only
 
-Production paths must use encrypted peel processing once Phase 7 lands. Transparent helper branches must not remain on production routing paths after the encrypted path is validated.
-Transparent setup and header inspection objects remain quarantined behind the
-explicit `transparent_onion` feature surface and must fail closed in release
-production builds.
+Production paths use encrypted peel processing. Transparent setup and header inspection objects remain quarantined behind the explicit `transparent_onion` feature surface and must fail closed in release production builds.
 
 ## 16. Summary
 

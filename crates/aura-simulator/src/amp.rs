@@ -118,14 +118,14 @@ where
 
         let bump_nonce = self.effects.random_uuid().await.as_bytes().to_vec();
         let bump_id = aura_core::Hash32(hash(&bump_nonce));
-        let proposal = ProposedChannelEpochBump {
-            context: params.context,
-            channel: params.channel,
-            parent_epoch: state.chan_epoch,
-            new_epoch: state.chan_epoch + 1,
+        let proposal = ProposedChannelEpochBump::new(
+            params.context,
+            params.channel,
+            state.chan_epoch,
+            state.chan_epoch + 1,
             bump_id,
-            reason: ChannelBumpReason::Routine,
-        };
+            ChannelBumpReason::Routine,
+        );
 
         self.effects
             .insert_relational_fact(RelationalFact::Protocol(
@@ -237,11 +237,15 @@ where
         let state = get_channel_state(&self.effects, params.context, params.channel)
             .await
             .map_err(map_err)?;
+        if !aura_amp::core::sender_allowed_by_epoch_state(&state, params.sender) {
+            return Err(AmpChannelError::Unauthorized);
+        }
+        let send_ratchet = aura_amp::core::send_ratchet_from_epoch_state(&state);
 
         let header = AmpHeader {
             context: params.context,
             channel: params.channel,
-            chan_epoch: state.chan_epoch,
+            chan_epoch: send_ratchet.chan_epoch,
             ratchet_gen: state.current_gen,
         };
 

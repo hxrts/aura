@@ -14,14 +14,14 @@ async fn amp_consensus_smoke() {
     // Minimal proposal and witness set.
     let ctx = aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]);
     let channel = aura_core::types::identifiers::ChannelId::from_bytes([1u8; 32]);
-    let proposal = ProposedChannelEpochBump {
-        context: ctx,
+    let proposal = ProposedChannelEpochBump::new(
+        ctx,
         channel,
-        parent_epoch: 0,
-        new_epoch: 1,
-        bump_id: aura_core::Hash32::new([9u8; 32]),
-        reason: ChannelBumpReason::Routine,
-    };
+        0,
+        1,
+        aura_core::Hash32::new([9u8; 32]),
+        ChannelBumpReason::Routine,
+    );
 
     let witnesses = vec![AuthorityId::new_from_entropy([11u8; 32])];
     let prestate = aura_core::Prestate::new(
@@ -83,14 +83,14 @@ async fn amp_consensus_success_path_with_frost() {
 
     let ctx = aura_core::types::identifiers::ContextId::new_from_entropy([2u8; 32]);
     let channel = aura_core::types::identifiers::ChannelId::from_bytes([2u8; 32]);
-    let proposal = ProposedChannelEpochBump {
-        context: ctx,
+    let proposal = ProposedChannelEpochBump::new(
+        ctx,
         channel,
-        parent_epoch: 0,
-        new_epoch: 1,
-        bump_id: aura_core::Hash32::new([3u8; 32]),
-        reason: ChannelBumpReason::Routine,
-    };
+        0,
+        1,
+        aura_core::Hash32::new([3u8; 32]),
+        ChannelBumpReason::Routine,
+    );
 
     // Create test FROST keys
     let (frost_key_packages, gp) = aura_testkit::builders::keys::helpers::test_frost_key_shares(
@@ -158,14 +158,14 @@ async fn amp_consensus_missing_keys_fails() {
         aura_core::Hash32::default(),
     )
     .unwrap();
-    let proposal = ProposedChannelEpochBump {
-        context: aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]),
-        channel: aura_core::types::identifiers::ChannelId::from_bytes([1u8; 32]),
-        parent_epoch: 0,
-        new_epoch: 1,
-        bump_id: aura_core::Hash32::new([2u8; 32]),
-        reason: ChannelBumpReason::Routine,
-    };
+    let proposal = ProposedChannelEpochBump::new(
+        aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]),
+        aura_core::types::identifiers::ChannelId::from_bytes([1u8; 32]),
+        0,
+        1,
+        aura_core::Hash32::new([2u8; 32]),
+        ChannelBumpReason::Routine,
+    );
 
     let witnesses = vec![
         AuthorityId::new_from_entropy([10u8; 32]),

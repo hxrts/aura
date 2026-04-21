@@ -327,15 +327,15 @@ impl AmpChannelHarness {
         let consensus_id =
             Hash32::from_bytes(format!("amp-consensus:{channel}:{new_epoch}").as_bytes());
 
-        let bump = CommittedChannelEpochBump {
-            context: self.context_id,
+        let proposal = aura_journal::fact::ProposedChannelEpochBump::new(
+            self.context_id,
             channel,
-            parent_epoch: new_epoch.saturating_sub(1),
+            new_epoch.saturating_sub(1),
             new_epoch,
-            chosen_bump_id: bump_id,
-            consensus_id,
-            transcript_ref: None,
-        };
+            bump_id,
+            aura_journal::fact::ChannelBumpReason::Routine,
+        );
+        let bump = CommittedChannelEpochBump::from_proposal(&proposal, consensus_id, None);
 
         for agent in participants {
             let effects = agent.runtime().effects();

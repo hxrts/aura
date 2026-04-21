@@ -43,6 +43,7 @@ pub(super) async fn process_ui_update_match(
                         ..
                     } | RuntimeFact::GuardianInvitationAccepted { .. }
                         | RuntimeFact::DeviceEnrollmentAccepted { .. }
+                        | RuntimeFact::AmpChannelTransitionUpdated { .. }
                 )
             })
             .count()

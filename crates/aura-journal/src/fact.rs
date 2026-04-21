@@ -732,6 +732,7 @@ impl FactOptions {
 
 /// Types of facts that can be stored in the journal
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum FactContent {
     /// Attested operation on the commitment tree
     AttestedOp(AttestedOp),
@@ -891,6 +892,93 @@ impl ChannelBumpReason {
     }
 }
 
+impl From<ChannelBumpReason> for AmpTransitionPolicy {
+    fn from(reason: ChannelBumpReason) -> Self {
+        match reason {
+            ChannelBumpReason::Routine => Self::NormalTransition,
+            ChannelBumpReason::SuspiciousActivity => Self::EmergencyQuarantineTransition,
+            ChannelBumpReason::ConfirmedCompromise => Self::EmergencyCryptoshredTransition,
+        }
+    }
+}
+
+/// AMP channel epoch transition policy class.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum AmpTransitionPolicy {
+    /// Routine transition without special membership removal semantics.
+    #[default]
+    NormalTransition,
+    /// Additive or non-removal transition that may allow bounded receive overlap.
+    AdditiveTransition,
+    /// Removal or revocation transition with stricter old-epoch acceptance.
+    SubtractiveTransition,
+    /// Emergency quarantine excluding a suspected compromised participant.
+    EmergencyQuarantineTransition,
+    /// Emergency transition that destroys ordinary pre-emergency readable state.
+    EmergencyCryptoshredTransition,
+}
+
+/// Canonical identity for an AMP channel epoch transition.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct AmpTransitionIdentity {
+    /// Relational context containing this channel.
+    pub context: ContextId,
+    /// Channel identifier for this transition.
+    pub channel: ChannelId,
+    /// Parent epoch being transitioned from.
+    pub parent_epoch: u64,
+    /// Commitment for the parent epoch prestate.
+    pub parent_commitment: Hash32,
+    /// Successor epoch being transitioned to.
+    pub successor_epoch: u64,
+    /// Commitment for the successor epoch state.
+    pub successor_commitment: Hash32,
+    /// Commitment to the successor membership set.
+    pub membership_commitment: Hash32,
+    /// Policy class governing data-plane and emergency behavior.
+    pub transition_policy: AmpTransitionPolicy,
+}
+
+impl AmpTransitionIdentity {
+    /// Build the transition identity currently derivable from legacy epoch bump fields.
+    pub fn for_epoch_bump(
+        context: ContextId,
+        channel: ChannelId,
+        parent_epoch: u64,
+        successor_epoch: u64,
+        bump_id: Hash32,
+        reason: ChannelBumpReason,
+    ) -> Self {
+        Self {
+            context,
+            channel,
+            parent_epoch,
+            parent_commitment: Hash32::default(),
+            successor_epoch,
+            successor_commitment: bump_id,
+            membership_commitment: Hash32::default(),
+            transition_policy: reason.into(),
+        }
+    }
+
+    /// Compute the canonical typed transition id.
+    pub fn transition_id(&self) -> Hash32 {
+        let bytes = aura_core::util::serialization::to_vec(&("aura.amp.transition.v1", self))
+            .unwrap_or_default();
+        Hash32(hash(&bytes))
+    }
+}
+
+/// Witness signature over the canonical AMP transition payload.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct AmpTransitionWitnessSignature {
+    /// Stable witness authority id from the parent epoch committee.
+    pub witness: AuthorityId,
+    /// Signature bytes over the canonical witness payload.
+    pub signature: Vec<u8>,
+}
+
 /// Optimistic bump from epoch e to e+1
 ///
 /// Inserted before consensus finalizes the bump; at most one pending bump per epoch.
@@ -908,6 +996,69 @@ pub struct ProposedChannelEpochBump {
     pub bump_id: Hash32,
     /// Reason for proposing this epoch bump
     pub reason: ChannelBumpReason,
+    /// Commitment for the parent epoch prestate.
+    #[serde(default)]
+    pub parent_commitment: Hash32,
+    /// Commitment for the proposed successor epoch.
+    #[serde(default)]
+    pub successor_commitment: Hash32,
+    /// Commitment to the successor membership set.
+    #[serde(default)]
+    pub membership_commitment: Hash32,
+    /// Transition policy class for this proposal.
+    #[serde(default)]
+    pub transition_policy: AmpTransitionPolicy,
+    /// Canonical transition identity digest.
+    #[serde(default)]
+    pub transition_id: Hash32,
+}
+
+impl ProposedChannelEpochBump {
+    /// Build a proposal with a canonical transition identity.
+    pub fn new(
+        context: ContextId,
+        channel: ChannelId,
+        parent_epoch: u64,
+        new_epoch: u64,
+        bump_id: Hash32,
+        reason: ChannelBumpReason,
+    ) -> Self {
+        let identity = AmpTransitionIdentity::for_epoch_bump(
+            context,
+            channel,
+            parent_epoch,
+            new_epoch,
+            bump_id,
+            reason,
+        );
+        Self {
+            context,
+            channel,
+            parent_epoch,
+            new_epoch,
+            bump_id,
+            reason,
+            parent_commitment: identity.parent_commitment,
+            successor_commitment: identity.successor_commitment,
+            membership_commitment: identity.membership_commitment,
+            transition_policy: identity.transition_policy,
+            transition_id: identity.transition_id(),
+        }
+    }
+
+    /// Canonical transition identity bound by this proposal.
+    pub fn transition_identity(&self) -> AmpTransitionIdentity {
+        AmpTransitionIdentity {
+            context: self.context,
+            channel: self.channel,
+            parent_epoch: self.parent_epoch,
+            parent_commitment: self.parent_commitment,
+            successor_epoch: self.new_epoch,
+            successor_commitment: self.successor_commitment,
+            membership_commitment: self.membership_commitment,
+            transition_policy: self.transition_policy,
+        }
+    }
 }
 
 /// Committed epoch bump, finalized by consensus
@@ -930,6 +1081,193 @@ pub struct CommittedChannelEpochBump {
     /// Optional DKG transcript reference for the finalized channel key material
     #[serde(default)]
     pub transcript_ref: Option<Hash32>,
+    /// Commitment for the parent epoch prestate.
+    #[serde(default)]
+    pub parent_commitment: Hash32,
+    /// Commitment for the finalized successor epoch.
+    #[serde(default)]
+    pub successor_commitment: Hash32,
+    /// Commitment to the successor membership set.
+    #[serde(default)]
+    pub membership_commitment: Hash32,
+    /// Transition policy class for this commit.
+    #[serde(default)]
+    pub transition_policy: AmpTransitionPolicy,
+    /// Canonical transition identity digest.
+    #[serde(default)]
+    pub transition_id: Hash32,
+}
+
+impl CommittedChannelEpochBump {
+    /// Build a committed bump from a proposal and consensus evidence.
+    pub fn from_proposal(
+        proposal: &ProposedChannelEpochBump,
+        consensus_id: Hash32,
+        transcript_ref: Option<Hash32>,
+    ) -> Self {
+        Self {
+            context: proposal.context,
+            channel: proposal.channel,
+            parent_epoch: proposal.parent_epoch,
+            new_epoch: proposal.new_epoch,
+            chosen_bump_id: proposal.bump_id,
+            consensus_id,
+            transcript_ref,
+            parent_commitment: proposal.parent_commitment,
+            successor_commitment: proposal.successor_commitment,
+            membership_commitment: proposal.membership_commitment,
+            transition_policy: proposal.transition_policy,
+            transition_id: proposal.transition_id,
+        }
+    }
+}
+
+/// A2 soft-safe AMP channel epoch transition certificate.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct CertifiedChannelEpochBump {
+    /// Canonical transition identity.
+    pub identity: AmpTransitionIdentity,
+    /// Canonical transition identity digest.
+    pub transition_id: Hash32,
+    /// Digest of the canonical witness payload signed by every witness.
+    pub witness_payload_digest: Hash32,
+    /// Digest of the witness committee used for this certificate.
+    pub committee_digest: Hash32,
+    /// Required quorum threshold.
+    pub threshold: u16,
+    /// Declared Byzantine fault bound for this policy.
+    pub fault_bound: u16,
+    /// Optional coordinator fencing epoch.
+    #[serde(default)]
+    pub coord_epoch: Option<u64>,
+    /// Inclusive lower generation bound for certificate validity.
+    #[serde(default)]
+    pub generation_min: Option<u64>,
+    /// Inclusive upper generation bound for certificate validity.
+    #[serde(default)]
+    pub generation_max: Option<u64>,
+    /// Witness signatures over the canonical transition payload.
+    pub witness_signatures: Vec<AmpTransitionWitnessSignature>,
+    /// Optional equivocation evidence references.
+    #[serde(default)]
+    pub equivocation_refs: BTreeSet<Hash32>,
+    /// Authorities explicitly excluded by the successor membership policy.
+    #[serde(default)]
+    pub excluded_authorities: BTreeSet<AuthorityId>,
+    /// Whether this certified transition represents readable-state destruction.
+    #[serde(default)]
+    pub readable_state_destroyed: bool,
+}
+
+/// A3 finalized AMP channel epoch transition commit.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct FinalizedChannelEpochBump {
+    /// Canonical transition identity.
+    pub identity: AmpTransitionIdentity,
+    /// Canonical transition identity digest.
+    pub transition_id: Hash32,
+    /// Consensus instance identifier that finalized the transition.
+    pub consensus_id: Hash32,
+    /// Optional DKG transcript reference for finalized channel key material.
+    #[serde(default)]
+    pub transcript_ref: Option<Hash32>,
+    /// Authorities explicitly excluded by the finalized successor membership.
+    #[serde(default)]
+    pub excluded_authorities: BTreeSet<AuthorityId>,
+    /// Whether this finalized transition represents readable-state destruction.
+    #[serde(default)]
+    pub readable_state_destroyed: bool,
+}
+
+/// Scope affected by abort, conflict, or supersession evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum AmpTransitionSuppressionScope {
+    /// Suppress only A2 live exposure.
+    A2LiveOnly,
+    /// Suppress both A2 live exposure and later A3 finalization.
+    A2AndA3,
+}
+
+/// Explicit abort evidence for an AMP transition.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct AmpTransitionAbort {
+    /// Relational context containing this channel.
+    pub context: ContextId,
+    /// Parent transition group this abort affects.
+    pub channel: ChannelId,
+    /// Parent epoch being transitioned from.
+    pub parent_epoch: u64,
+    /// Parent prestate commitment.
+    pub parent_commitment: Hash32,
+    /// Transition being invalidated.
+    pub transition_id: Hash32,
+    /// Authority or certificate evidence authorizing the abort.
+    pub evidence_id: Hash32,
+    /// Suppression scope.
+    pub scope: AmpTransitionSuppressionScope,
+}
+
+/// Equivocation or conflict evidence for AMP transition certificates.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct AmpTransitionConflict {
+    /// Relational context containing this channel.
+    pub context: ContextId,
+    /// Channel identifier.
+    pub channel: ChannelId,
+    /// Parent epoch being transitioned from.
+    pub parent_epoch: u64,
+    /// Parent prestate commitment.
+    pub parent_commitment: Hash32,
+    /// First conflicting transition id.
+    pub first_transition_id: Hash32,
+    /// Second conflicting transition id.
+    pub second_transition_id: Hash32,
+    /// Witness accused of duplicate-signing, if known.
+    #[serde(default)]
+    pub equivocating_witness: Option<AuthorityId>,
+    /// Evidence digest for the conflict proof.
+    pub evidence_id: Hash32,
+}
+
+/// Authorized supersession from one AMP transition path to another.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct AmpTransitionSupersession {
+    /// Relational context containing this channel.
+    pub context: ContextId,
+    /// Channel identifier.
+    pub channel: ChannelId,
+    /// Parent epoch being transitioned from.
+    pub parent_epoch: u64,
+    /// Parent prestate commitment.
+    pub parent_commitment: Hash32,
+    /// Transition being replaced.
+    pub superseded_transition_id: Hash32,
+    /// Transition replacing it.
+    pub superseding_transition_id: Hash32,
+    /// Authority or certificate evidence authorizing supersession.
+    pub evidence_id: Hash32,
+    /// Suppression scope for the superseded transition.
+    pub scope: AmpTransitionSuppressionScope,
+}
+
+/// Informational emergency alarm for an AMP channel.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct AmpEmergencyAlarm {
+    /// Relational context containing this channel.
+    pub context: ContextId,
+    /// Channel identifier.
+    pub channel: ChannelId,
+    /// Parent epoch where suspicion was raised.
+    pub parent_epoch: u64,
+    /// Parent prestate commitment.
+    pub parent_commitment: Hash32,
+    /// Authority suspected of compromise.
+    pub suspect: AuthorityId,
+    /// Authority raising the alarm.
+    pub raised_by: AuthorityId,
+    /// Alarm evidence digest.
+    pub evidence_id: Hash32,
 }
 
 /// Finalized DKG transcript commit (consensus-backed)
@@ -1096,8 +1434,20 @@ pub enum ProtocolRelationalFact {
     AmpChannelCheckpoint(ChannelCheckpoint),
     /// Proposed channel epoch bump (optimistic)
     AmpProposedChannelEpochBump(ProposedChannelEpochBump),
+    /// A2-certified AMP channel epoch bump (live, non-durable)
+    AmpCertifiedChannelEpochBump(CertifiedChannelEpochBump),
     /// Committed channel epoch bump (final)
     AmpCommittedChannelEpochBump(CommittedChannelEpochBump),
+    /// A3-finalized AMP channel epoch bump
+    AmpFinalizedChannelEpochBump(FinalizedChannelEpochBump),
+    /// Explicit AMP transition abort evidence
+    AmpTransitionAbort(AmpTransitionAbort),
+    /// AMP transition conflict or equivocation evidence
+    AmpTransitionConflict(AmpTransitionConflict),
+    /// Authorized AMP transition supersession
+    AmpTransitionSupersession(AmpTransitionSupersession),
+    /// Informational AMP emergency alarm
+    AmpEmergencyAlarm(AmpEmergencyAlarm),
     /// Channel policy overrides
     AmpChannelPolicy(ChannelPolicy),
     /// AMP channel bootstrap metadata (dealer key)
@@ -1167,7 +1517,15 @@ impl ProtocolRelationalFact {
                     channel: bump.channel,
                     parent_epoch: bump.parent_epoch,
                     new_epoch: bump.new_epoch,
-                    bump_id: bump.bump_id,
+                    transition_id: bump.transition_id,
+                }
+            }
+            ProtocolRelationalFact::AmpCertifiedChannelEpochBump(bump) => {
+                ProtocolFactKey::AmpCertifiedChannelEpochBump {
+                    channel: bump.identity.channel,
+                    parent_epoch: bump.identity.parent_epoch,
+                    successor_epoch: bump.identity.successor_epoch,
+                    transition_id: bump.transition_id,
                 }
             }
             ProtocolRelationalFact::AmpCommittedChannelEpochBump(bump) => {
@@ -1175,7 +1533,47 @@ impl ProtocolRelationalFact {
                     channel: bump.channel,
                     parent_epoch: bump.parent_epoch,
                     new_epoch: bump.new_epoch,
-                    chosen_bump_id: bump.chosen_bump_id,
+                    transition_id: bump.transition_id,
+                }
+            }
+            ProtocolRelationalFact::AmpFinalizedChannelEpochBump(bump) => {
+                ProtocolFactKey::AmpFinalizedChannelEpochBump {
+                    channel: bump.identity.channel,
+                    parent_epoch: bump.identity.parent_epoch,
+                    successor_epoch: bump.identity.successor_epoch,
+                    transition_id: bump.transition_id,
+                }
+            }
+            ProtocolRelationalFact::AmpTransitionAbort(abort) => {
+                ProtocolFactKey::AmpTransitionAbort {
+                    channel: abort.channel,
+                    parent_epoch: abort.parent_epoch,
+                    transition_id: abort.transition_id,
+                }
+            }
+            ProtocolRelationalFact::AmpTransitionConflict(conflict) => {
+                ProtocolFactKey::AmpTransitionConflict {
+                    channel: conflict.channel,
+                    parent_epoch: conflict.parent_epoch,
+                    first_transition_id: conflict.first_transition_id,
+                    second_transition_id: conflict.second_transition_id,
+                    evidence_id: conflict.evidence_id,
+                }
+            }
+            ProtocolRelationalFact::AmpTransitionSupersession(supersession) => {
+                ProtocolFactKey::AmpTransitionSupersession {
+                    channel: supersession.channel,
+                    parent_epoch: supersession.parent_epoch,
+                    superseded_transition_id: supersession.superseded_transition_id,
+                    superseding_transition_id: supersession.superseding_transition_id,
+                }
+            }
+            ProtocolRelationalFact::AmpEmergencyAlarm(alarm) => {
+                ProtocolFactKey::AmpEmergencyAlarm {
+                    channel: alarm.channel,
+                    parent_epoch: alarm.parent_epoch,
+                    suspect: alarm.suspect,
+                    evidence_id: alarm.evidence_id,
                 }
             }
             ProtocolRelationalFact::AmpChannelPolicy(policy) => ProtocolFactKey::AmpChannelPolicy {
@@ -1249,7 +1647,13 @@ impl ProtocolRelationalFact {
             ),
             ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint) => checkpoint.context,
             ProtocolRelationalFact::AmpProposedChannelEpochBump(bump) => bump.context,
+            ProtocolRelationalFact::AmpCertifiedChannelEpochBump(bump) => bump.identity.context,
             ProtocolRelationalFact::AmpCommittedChannelEpochBump(bump) => bump.context,
+            ProtocolRelationalFact::AmpFinalizedChannelEpochBump(bump) => bump.identity.context,
+            ProtocolRelationalFact::AmpTransitionAbort(abort) => abort.context,
+            ProtocolRelationalFact::AmpTransitionConflict(conflict) => conflict.context,
+            ProtocolRelationalFact::AmpTransitionSupersession(supersession) => supersession.context,
+            ProtocolRelationalFact::AmpEmergencyAlarm(alarm) => alarm.context,
             ProtocolRelationalFact::AmpChannelPolicy(policy) => policy.context,
             ProtocolRelationalFact::AmpChannelBootstrap(bootstrap) => bootstrap.context,
             ProtocolRelationalFact::LeakageEvent(event) => event.context_id,
@@ -1271,9 +1675,19 @@ impl ProtocolRelationalFact {
             ProtocolRelationalFact::AmpProposedChannelEpochBump(..) => {
                 "AmpProposedChannelEpochBump"
             }
+            ProtocolRelationalFact::AmpCertifiedChannelEpochBump(..) => {
+                "AmpCertifiedChannelEpochBump"
+            }
             ProtocolRelationalFact::AmpCommittedChannelEpochBump(..) => {
                 "AmpCommittedChannelEpochBump"
             }
+            ProtocolRelationalFact::AmpFinalizedChannelEpochBump(..) => {
+                "AmpFinalizedChannelEpochBump"
+            }
+            ProtocolRelationalFact::AmpTransitionAbort(..) => "AmpTransitionAbort",
+            ProtocolRelationalFact::AmpTransitionConflict(..) => "AmpTransitionConflict",
+            ProtocolRelationalFact::AmpTransitionSupersession(..) => "AmpTransitionSupersession",
+            ProtocolRelationalFact::AmpEmergencyAlarm(..) => "AmpEmergencyAlarm",
             ProtocolRelationalFact::AmpChannelPolicy(..) => "AmpChannelPolicy",
             ProtocolRelationalFact::AmpChannelBootstrap(..) => "AmpChannelBootstrap",
             ProtocolRelationalFact::LeakageEvent(..) => "LeakageEvent",
@@ -1457,8 +1871,19 @@ pub enum ProtocolFactKey {
         parent_epoch: u64,
         /// The proposed new epoch.
         new_epoch: u64,
-        /// Unique identifier for this bump proposal.
-        bump_id: Hash32,
+        /// Canonical transition identifier.
+        transition_id: Hash32,
+    },
+    /// A2-certified AMP channel epoch bump.
+    AmpCertifiedChannelEpochBump {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// The epoch being bumped from.
+        parent_epoch: u64,
+        /// The certified successor epoch.
+        successor_epoch: u64,
+        /// Canonical transition identifier.
+        transition_id: Hash32,
     },
     /// Committed AMP channel epoch bump.
     AmpCommittedChannelEpochBump {
@@ -1468,8 +1893,63 @@ pub enum ProtocolFactKey {
         parent_epoch: u64,
         /// The committed new epoch.
         new_epoch: u64,
-        /// The chosen bump proposal identifier.
-        chosen_bump_id: Hash32,
+        /// Canonical transition identifier.
+        transition_id: Hash32,
+    },
+    /// A3-finalized AMP channel epoch bump.
+    AmpFinalizedChannelEpochBump {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// The epoch being bumped from.
+        parent_epoch: u64,
+        /// The finalized successor epoch.
+        successor_epoch: u64,
+        /// Canonical transition identifier.
+        transition_id: Hash32,
+    },
+    /// AMP transition abort evidence.
+    AmpTransitionAbort {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// Parent epoch affected by the abort.
+        parent_epoch: u64,
+        /// Transition identifier being aborted.
+        transition_id: Hash32,
+    },
+    /// AMP transition conflict evidence.
+    AmpTransitionConflict {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// Parent epoch affected by the conflict.
+        parent_epoch: u64,
+        /// First conflicting transition id.
+        first_transition_id: Hash32,
+        /// Second conflicting transition id.
+        second_transition_id: Hash32,
+        /// Evidence digest.
+        evidence_id: Hash32,
+    },
+    /// AMP transition supersession evidence.
+    AmpTransitionSupersession {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// Parent epoch affected by supersession.
+        parent_epoch: u64,
+        /// Transition being replaced.
+        superseded_transition_id: Hash32,
+        /// Replacement transition.
+        superseding_transition_id: Hash32,
+    },
+    /// AMP emergency alarm.
+    AmpEmergencyAlarm {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// Parent epoch affected by alarm.
+        parent_epoch: u64,
+        /// Suspect authority.
+        suspect: AuthorityId,
+        /// Alarm evidence digest.
+        evidence_id: Hash32,
     },
     /// Channel policy override.
     AmpChannelPolicy {
@@ -1532,7 +2012,13 @@ impl ProtocolFactKey {
             ProtocolFactKey::Consensus { .. } => "consensus",
             ProtocolFactKey::AmpChannelCheckpoint { .. } => "amp-channel-checkpoint",
             ProtocolFactKey::AmpProposedChannelEpochBump { .. } => "amp-proposed-epoch-bump",
+            ProtocolFactKey::AmpCertifiedChannelEpochBump { .. } => "amp-certified-epoch-bump",
             ProtocolFactKey::AmpCommittedChannelEpochBump { .. } => "amp-committed-epoch-bump",
+            ProtocolFactKey::AmpFinalizedChannelEpochBump { .. } => "amp-finalized-epoch-bump",
+            ProtocolFactKey::AmpTransitionAbort { .. } => "amp-transition-abort",
+            ProtocolFactKey::AmpTransitionConflict { .. } => "amp-transition-conflict",
+            ProtocolFactKey::AmpTransitionSupersession { .. } => "amp-transition-supersession",
+            ProtocolFactKey::AmpEmergencyAlarm { .. } => "amp-emergency-alarm",
             ProtocolFactKey::AmpChannelPolicy { .. } => "amp-channel-policy",
             ProtocolFactKey::AmpChannelBootstrap { .. } => "amp-channel-bootstrap",
             ProtocolFactKey::LeakageEvent { .. } => "leakage-event",
@@ -1570,21 +2056,92 @@ impl ProtocolFactKey {
                 channel,
                 parent_epoch,
                 new_epoch,
-                bump_id,
-            } => {
-                aura_core::util::serialization::to_vec(&(channel, parent_epoch, new_epoch, bump_id))
-                    .unwrap_or_default()
-            }
-            ProtocolFactKey::AmpCommittedChannelEpochBump {
-                channel,
-                parent_epoch,
-                new_epoch,
-                chosen_bump_id,
+                transition_id,
             } => aura_core::util::serialization::to_vec(&(
                 channel,
                 parent_epoch,
                 new_epoch,
-                chosen_bump_id,
+                transition_id,
+            ))
+            .unwrap_or_default(),
+            ProtocolFactKey::AmpCertifiedChannelEpochBump {
+                channel,
+                parent_epoch,
+                successor_epoch,
+                transition_id,
+            } => aura_core::util::serialization::to_vec(&(
+                channel,
+                parent_epoch,
+                successor_epoch,
+                transition_id,
+            ))
+            .unwrap_or_default(),
+            ProtocolFactKey::AmpCommittedChannelEpochBump {
+                channel,
+                parent_epoch,
+                new_epoch,
+                transition_id,
+            } => aura_core::util::serialization::to_vec(&(
+                channel,
+                parent_epoch,
+                new_epoch,
+                transition_id,
+            ))
+            .unwrap_or_default(),
+            ProtocolFactKey::AmpFinalizedChannelEpochBump {
+                channel,
+                parent_epoch,
+                successor_epoch,
+                transition_id,
+            } => aura_core::util::serialization::to_vec(&(
+                channel,
+                parent_epoch,
+                successor_epoch,
+                transition_id,
+            ))
+            .unwrap_or_default(),
+            ProtocolFactKey::AmpTransitionAbort {
+                channel,
+                parent_epoch,
+                transition_id,
+            } => aura_core::util::serialization::to_vec(&(channel, parent_epoch, transition_id))
+                .unwrap_or_default(),
+            ProtocolFactKey::AmpTransitionConflict {
+                channel,
+                parent_epoch,
+                first_transition_id,
+                second_transition_id,
+                evidence_id,
+            } => aura_core::util::serialization::to_vec(&(
+                channel,
+                parent_epoch,
+                first_transition_id,
+                second_transition_id,
+                evidence_id,
+            ))
+            .unwrap_or_default(),
+            ProtocolFactKey::AmpTransitionSupersession {
+                channel,
+                parent_epoch,
+                superseded_transition_id,
+                superseding_transition_id,
+            } => aura_core::util::serialization::to_vec(&(
+                channel,
+                parent_epoch,
+                superseded_transition_id,
+                superseding_transition_id,
+            ))
+            .unwrap_or_default(),
+            ProtocolFactKey::AmpEmergencyAlarm {
+                channel,
+                parent_epoch,
+                suspect,
+                evidence_id,
+            } => aura_core::util::serialization::to_vec(&(
+                channel,
+                parent_epoch,
+                suspect,
+                evidence_id,
             ))
             .unwrap_or_default(),
             ProtocolFactKey::AmpChannelPolicy { channel } => {

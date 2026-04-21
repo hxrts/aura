@@ -1029,6 +1029,57 @@ mod tests {
     }
 
     #[test]
+    fn semantic_snapshot_exports_amp_transition_runtime_notification_items() {
+        let mut state = TuiState::new();
+        state.notifications.selected_index = 0;
+        state.upsert_runtime_fact(RuntimeFact::AmpChannelTransitionUpdated {
+            transition: aura_app::ui_contract::AmpChannelTransitionSnapshot {
+                channel: aura_app::ui_contract::ChannelFactKey::identified("channel-a"),
+                stable_epoch: 4,
+                state: aura_app::ui_contract::AmpTransitionState::A2Conflict,
+                live_transition_id: None,
+                finalized_transition_id: None,
+                conflict_evidence: vec!["evidence-a".to_string()],
+                emergency_policy: Some(
+                    aura_app::ui_contract::AmpTransitionPolicySnapshot::EmergencyQuarantine,
+                ),
+                suspect_authorities: vec!["authority-a".to_string()],
+                quarantine_epochs: vec![5],
+                prune_before_epochs: Vec::new(),
+                cryptoshred_active: false,
+                accusation_history: Vec::new(),
+            },
+        });
+
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        );
+
+        let notifications = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Notifications)
+            .unwrap_or_else(|| panic!("notifications list should exist"));
+
+        assert!(notifications
+            .items
+            .iter()
+            .any(|item| item.id == "amp-transition:channel-a"));
+        assert!(snapshot.has_runtime_event(
+            aura_app::ui_contract::RuntimeEventKind::AmpChannelTransitionUpdated,
+            Some("evidence-a"),
+        ));
+    }
+
+    #[test]
     fn semantic_snapshot_exports_tui_owned_runtime_facts() {
         let mut state = TuiState::new();
         state.upsert_runtime_fact(RuntimeFact::InvitationCodeReady {

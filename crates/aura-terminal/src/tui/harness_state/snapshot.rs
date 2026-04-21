@@ -64,6 +64,15 @@ fn passive_notification_runtime_fact_id(fact: &RuntimeFact) -> Option<String> {
             "device-accepted:{}",
             device_id.as_deref().unwrap_or("*")
         )),
+        RuntimeFact::AmpChannelTransitionUpdated { transition } => Some(format!(
+            "amp-transition:{}",
+            transition
+                .channel
+                .name
+                .as_deref()
+                .or(transition.channel.id.as_deref())
+                .unwrap_or("*")
+        )),
         _ => None,
     }
 }

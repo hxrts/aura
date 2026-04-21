@@ -124,6 +124,80 @@ Category B operations use proposal/approval state. Category C operations use cer
 
 See [Operation Categories](109_operation_categories.md) for the full consistency metadata type definitions. See [Effects and Handlers Guide](802_effects_guide.md) for delivery tracking patterns.
 
+### 10.1 Adaptive Privacy Movement
+
+`MoveEnvelope` is the shared accountable movement boundary for relay traffic, retrieval traffic, held-object deposit and retrieval, accountability replies, and cover traffic where those flows use the adaptive privacy substrate. These flows do not regain separate mailbox, retrieval, relay, or cache-specific transport families.
+
+Movement runs over an explicit path. The path may be a direct established path in passthrough mode, or an anonymous `EstablishedPath` in privacy mode. `Move` does not smuggle route setup back into the envelope.
+
+The runtime schedules movement through three classes. Sync-blended traffic rides anti-entropy windows when deadlines allow it. Bounded-deadline replies carry accountability and control traffic that needs shorter latency. Synthetic cover fills the remaining cover floor after application traffic and sync-blended retrieval are counted.
+
+Accountability replies share the same movement substrate, but the first deployment measures them separately. They do not reduce the synthetic cover floor. This prevents mandatory witness traffic from being mistaken for discretionary cover.
+
+### 10.2 AMP Channel Epoch Data Plane
+
+AMP message acceptance is subordinate to reducer-derived channel epoch state.
+The ratchet consumes the reduced control-plane view from the relational
+context journal; it does not decide membership truth or choose among competing
+successor epochs.
+
+A received AMP message is accepted only when all of the following hold:
+
+- the message epoch is the stable epoch or the single reducer-exposed
+  `A2Live` successor epoch
+- the sender is a member of that exact epoch's membership commitment
+- the generation is within the configured skip window or acceptance horizon
+- cryptographic validation succeeds
+
+Dual-epoch acceptance is policy-limited. Additive and non-removal transitions
+may permit bounded old-epoch receive overlap. Subtractive, removal, revocation,
+and emergency transitions require stricter old-epoch handling so removed or
+suspected participants cannot keep sending indefinitely while the network is
+slow.
+
+Runtime ratchet derivation follows the same rule. Sends use the stable epoch
+unless the reducer exposes exactly one `A2Live` successor, in which case sends
+cut over to that successor. Receives allow stable-plus-successor overlap for
+additive and ordinary non-removal transitions, reject old-epoch traffic for
+subtractive and cryptoshred transitions, and allow only minimal old-epoch grace
+for quarantine transitions. Emergency suspect exclusions are enforced at AMP
+send boundaries and do not imply authority-root membership changes.
+
+### 10.3 Emergency AMP Policies
+
+AMP emergency transitions are control-plane epoch transitions, not informal
+warning messages.
+
+`EmergencyQuarantineTransition` excludes the suspect from the successor epoch
+once the A2 certificate makes the successor live. New application sends cut
+over to the successor epoch immediately. Old-epoch receive grace is minimal and
+must be explicitly authorized by the transition policy. Implementations erase
+old sender keys, receiver chain keys, skipped-message key caches, staged epoch
+material, and channel-adjacent access material aggressively, subject to local
+retention policy.
+
+`EmergencyCryptoshredTransition` is the strongest channel-scoped emergency
+mode. When its successor becomes `A2Live`, ordinary pre-emergency readable
+state is destroyed immediately according to local cryptoshredding policy. A3
+finalization later durably commits the already-live successor; it does not
+delay cryptoshredding.
+
+Emergency transitions protect future traffic and reduce future at-rest
+exposure on honest devices. They do not retroactively protect data already
+seen, decrypted, or exfiltrated before cutover.
+
+Operator diagnostics must present emergency AMP actions with that limitation:
+quarantine and cryptoshred reduce future exposure and local readable remnants
+after the reducer exposes the emergency successor, but they are not an incident
+response guarantee for content already copied outside honest devices. Cooldown
+and accusation diagnostics are generation/evidence based; wall-clock timers are
+operator display metadata only and are not reducer inputs.
+
+Channel emergency facts do not automatically remove authority-root membership
+or recovery/governance rights. Recovery suspension, governance suspension, and
+durable structural removal are separate authority-scoped governance actions
+with their own thresholds.
+
 ## 11. Anti-Entropy Sync Protocol
 
 Anti-entropy implements journal synchronization between peers. The protocol exchanges digests, plans reconciliation, and transfers operations.

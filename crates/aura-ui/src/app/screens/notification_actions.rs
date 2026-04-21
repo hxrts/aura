@@ -4,7 +4,7 @@ use crate::semantic_lifecycle::{
 };
 use aura_app::frontend_primitives::SubmittedOperationWorkflowError;
 use aura_app::ui_contract::{
-    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    ControlId, OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind,
 };
 
@@ -26,6 +26,36 @@ fn handle_workflow_error(controller: &UiController, error: SubmittedOperationWor
             controller.runtime_error_toast(detail);
         }
     }
+}
+
+fn control_dom_id(control_id: ControlId) -> Option<String> {
+    control_id.web_dom_id().map(str::to_string)
+}
+
+fn amp_observed_action(
+    controller: Arc<UiController>,
+    render_tick: Signal<u64>,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+    success_message: &'static str,
+    unsupported_detail: Option<&'static str>,
+) {
+    let operation = UiLocalOperationOwner::submit(controller.clone(), operation_id, kind);
+    if let Some(detail) = unsupported_detail {
+        operation.fail_with(
+            SemanticOperationError::new(
+                SemanticFailureDomain::Command,
+                SemanticFailureCode::UnsupportedCommand,
+            )
+            .with_detail(detail),
+        );
+        controller.runtime_error_toast(detail);
+    } else {
+        operation.succeed(None);
+        controller.info_toast(success_message);
+    }
+    let mut tick = render_tick;
+    tick.set(tick() + 1);
 }
 
 pub(in crate::app) fn accept_invitation_action(
@@ -452,6 +482,91 @@ pub(in crate::app) fn NotificationActionBar(
                 }
             }
         }
+        NotificationRuntimeAction::AmpRaiseEmergencyAlarm => rsx! {
+            UiButton {
+                id: control_dom_id(ControlId::AmpRaiseEmergencyAlarmButton),
+                label: "Raise Alarm".to_string(),
+                variant: ButtonVariant::Secondary,
+                onclick: move |_| {
+                    amp_observed_action(
+                        controller.clone(),
+                        render_tick,
+                        OperationId::amp_raise_emergency_alarm(),
+                        SemanticOperationKind::AmpRaiseEmergencyAlarm,
+                        "Emergency alarm status opened",
+                        Some("AMP emergency alarm submission is not available from this frontend yet"),
+                    );
+                },
+            }
+        },
+        NotificationRuntimeAction::AmpApproveQuarantine => rsx! {
+            UiButton {
+                id: control_dom_id(ControlId::AmpApproveQuarantineButton),
+                label: "Approve Quarantine".to_string(),
+                variant: ButtonVariant::Primary,
+                onclick: move |_| {
+                    amp_observed_action(
+                        controller.clone(),
+                        render_tick,
+                        OperationId::amp_approve_quarantine(),
+                        SemanticOperationKind::AmpApproveQuarantine,
+                        "Quarantine approval status opened",
+                        Some("AMP quarantine approval submission is not available from this frontend yet"),
+                    );
+                },
+            }
+        },
+        NotificationRuntimeAction::AmpApproveCryptoshred => rsx! {
+            UiButton {
+                id: control_dom_id(ControlId::AmpApproveCryptoshredButton),
+                label: "Confirm Cryptoshred".to_string(),
+                variant: ButtonVariant::Primary,
+                onclick: move |_| {
+                    amp_observed_action(
+                        controller.clone(),
+                        render_tick,
+                        OperationId::amp_approve_cryptoshred(),
+                        SemanticOperationKind::AmpApproveCryptoshred,
+                        "Cryptoshred confirmation status opened",
+                        Some("AMP cryptoshred approval is destructive and not available from this frontend yet; pre-emergency readability may be lost once approved"),
+                    );
+                },
+            }
+        },
+        NotificationRuntimeAction::AmpViewConflictEvidence => rsx! {
+            UiButton {
+                id: control_dom_id(ControlId::AmpViewConflictEvidenceButton),
+                label: "View Evidence".to_string(),
+                variant: ButtonVariant::Secondary,
+                onclick: move |_| {
+                    amp_observed_action(
+                        controller.clone(),
+                        render_tick,
+                        OperationId::amp_view_conflict_evidence(),
+                        SemanticOperationKind::AmpViewConflictEvidence,
+                        "Conflict evidence is shown in the transition notification details",
+                        None,
+                    );
+                },
+            }
+        },
+        NotificationRuntimeAction::AmpViewFinalizationStatus => rsx! {
+            UiButton {
+                id: control_dom_id(ControlId::AmpViewFinalizationStatusButton),
+                label: "Finalization Status".to_string(),
+                variant: ButtonVariant::Secondary,
+                onclick: move |_| {
+                    amp_observed_action(
+                        controller.clone(),
+                        render_tick,
+                        OperationId::amp_view_finalization_status(),
+                        SemanticOperationKind::AmpViewFinalizationStatus,
+                        "Finalization status is shown in the transition notification details",
+                        None,
+                    );
+                },
+            }
+        },
         NotificationRuntimeAction::None => rsx! {},
     }
 }

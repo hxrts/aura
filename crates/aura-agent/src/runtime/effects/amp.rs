@@ -64,14 +64,14 @@ impl AmpChannelEffects for AuraEffectSystem {
             .map_err(map_amp_err)?;
         let bump_nonce = self.random_uuid().await.as_bytes().to_vec();
         let bump_id = Hash32(hash(&bump_nonce));
-        let proposal = aura_journal::fact::ProposedChannelEpochBump {
-            context: params.context,
-            channel: params.channel,
-            parent_epoch: state.chan_epoch,
-            new_epoch: state.chan_epoch + 1,
+        let proposal = aura_journal::fact::ProposedChannelEpochBump::new(
+            params.context,
+            params.channel,
+            state.chan_epoch,
+            state.chan_epoch + 1,
             bump_id,
-            reason: aura_journal::fact::ChannelBumpReason::Routine,
-        };
+            aura_journal::fact::ChannelBumpReason::Routine,
+        );
 
         aura_protocol::amp::emit_proposed_bump(self, proposal.clone())
             .await

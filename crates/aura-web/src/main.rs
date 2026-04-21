@@ -233,6 +233,34 @@ mod tests {
     }
 
     #[test]
+    fn web_semantic_snapshot_publication_keeps_runtime_events_intact() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let publication_path = repo_root.join("crates/aura-web/src/harness/publication.rs");
+        let publication_source =
+            std::fs::read_to_string(&publication_path).unwrap_or_else(|error| {
+                panic!("failed to read {}: {error}", publication_path.display())
+            });
+        let publish_body = publication_source
+            .split("pub(crate) fn publish_ui_snapshot")
+            .nth(1)
+            .unwrap_or_else(|| panic!("missing publish_ui_snapshot"))
+            .split("pub(crate) fn publish_semantic_controller_snapshot")
+            .next()
+            .unwrap_or_else(|| panic!("missing publication test boundary"));
+
+        assert!(
+            publish_body.contains("to_value(&published_snapshot)")
+                && publish_body.contains("JSON::stringify(&value)"),
+            "browser publication must serialize the full UiSnapshot so AMP transition runtime_events remain shared-contract payloads"
+        );
+        assert!(
+            !publish_body.contains("runtime_events.clear()")
+                && !publish_body.contains("runtime_events: Vec::new()"),
+            "browser publication must not strip runtime_events before publishing to the harness"
+        );
+    }
+
+    #[test]
     fn web_generation_reset_clears_controller_and_publication_snapshot_dedup() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let bridge_path = repo_root.join("crates/aura-web/src/harness_bridge.rs");

@@ -62,10 +62,11 @@ pub enum IntentKind {
     SendFriendRequest,
     AcceptFriendRequest,
     DeclineFriendRequest,
+    PublishAmpTransitionFixture,
 }
 
 impl IntentKind {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::OpenScreen,
         Self::CreateAccount,
         Self::CreateHome,
@@ -84,5 +85,6 @@ impl IntentKind {
         Self::SendFriendRequest,
         Self::AcceptFriendRequest,
         Self::DeclineFriendRequest,
+        Self::PublishAmpTransitionFixture,
     ];
 }

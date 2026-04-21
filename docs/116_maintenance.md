@@ -54,6 +54,14 @@ pub struct CacheKey(pub String);
 
 This structure identifies a cached entry. Devices invalidate cached data when they observe newer invalidation facts.
 
+### 3.1 Hold Garbage Collection
+
+`Hold` GC uses the same epoch, invalidation, and storage-pressure vocabulary as journal GC. It does not use the same authority model. Journal GC prunes authoritative shared state after threshold-backed snapshot evidence, while `Hold` GC prunes opaque custody objects through local provider policy.
+
+Held objects are scoped to the epoch in which they were deposited. Epoch rotation makes prior-epoch objects GC-eligible unless a retrieval capability explicitly spans the new epoch. Retrieval-capability expiration and storage pressure can also make a held object eligible for local eviction.
+
+Eviction priority is epoch and then age. It must not vary by social distance, friendship, home membership, or introduction provenance. Uniform treatment prevents retention behavior from becoming a side channel under onion routing.
+
 ## 4. OTA Upgrades
 
 OTA in Aura separates two concerns:
@@ -199,7 +207,7 @@ Automatic synchronization implements periodic journal replication between device
 
 ### 8.1 Peer Discovery and Selection
 
-Devices discover sync peers through the rendezvous system described in [Rendezvous](113_rendezvous.md). The peer manager consumes runtime-owned rendezvous descriptor snapshots. The peer manager maintains metadata for each discovered peer. This metadata includes connection state, trust level, sync success rate, and active session count.
+Devices discover sync peers through the rendezvous system described in [Rendezvous Architecture](113_rendezvous.md). The peer manager consumes runtime-owned rendezvous descriptor snapshots. The peer manager maintains metadata for each discovered peer. This metadata includes connection state, trust level, sync success rate, and active session count.
 
 ```rust
 pub struct PeerMetadata {

@@ -318,6 +318,15 @@ impl RuntimeBridge for OfflineRuntimeBridge {
             })
     }
 
+    async fn amp_channel_transition_diagnostics(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<Option<crate::ui_contract::AmpChannelTransitionSnapshot>, IntentError> {
+        let _ = (context, channel);
+        Ok(None)
+    }
+
     async fn moderation_status(
         &self,
         context_id: ContextId,
