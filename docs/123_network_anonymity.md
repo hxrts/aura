@@ -6,10 +6,7 @@ This document complements [Transport and Information Flow](111_transport_and_inf
 
 ## 1. Scope
 
-Aura provides two distinct network protection layers:
-
-1. `Link encryption` protects one adjacent transport hop.
-2. `Path encryption` protects the anonymous multi-hop route object carried across several adjacent hops.
+Aura provides two distinct network protection layers. `Link encryption` protects one adjacent transport hop. `Path encryption` protects the anonymous multi-hop route object carried across several adjacent hops.
 
 Link encryption and path encryption solve different problems. Link encryption hides packet contents from the local network and from passive observers on one transport edge. Path encryption hides deeper route structure and reply-path structure from intermediate forwarding hops.
 
@@ -23,30 +20,15 @@ The direct-channel baseline remains authoritative for adjacent-peer secure chann
 
 ## 3. Network Privacy Goals
 
-Aura's route layer has the following goals:
+The route layer prevents an intermediate hop from reading deeper route state or deriving the final destination from its local peel result alone. It allows bounded stale-node re-entry without a singleton bootstrap service. Bootstrap hints stay signed, expiring, replay-bounded, and scope-limited. Reply paths remain typed and accountability-aware.
 
-- prevent an intermediate hop from reading deeper route state
-- prevent an intermediate hop from deriving the final destination from its local peel result alone
-- allow bounded stale-node re-entry without a singleton bootstrap service
-- keep bootstrap hints signed, expiring, replay-bounded, and scope-limited
-- keep reply paths typed and accountability-aware
-
-Aura's route layer has the following non-goals:
-
-- defeat a global passive observer
-- create a globally enumerable neighborhood graph
-- create a canonical shared Web-of-Trust topology map
+The route layer does not defeat a global passive observer. It does not create a globally enumerable neighborhood graph. It does not create a canonical shared Web-of-Trust topology map.
 
 ## 4. Route-Layer Construction
 
 Aura adopts a route-layer construction based on Curve25519, Aura's centralized KDF, and `ChaCha20-Poly1305`.
 
-The route-layer construction uses the following rules:
-
-1. Each anonymous path setup flow creates a fresh route identifier and fresh ephemeral route secret material.
-2. Each hop derives a forward hop key stream and a backward hop key stream from the route secret material through Aura's centralized KDF.
-3. Each hop encrypts or decrypts only its own layer with `ChaCha20-Poly1305`.
-4. Each hop receives enough authenticated metadata to identify the next processing action, but not enough to reconstruct deeper route state.
+Each anonymous path setup flow creates a fresh route identifier and fresh ephemeral route secret material. Each hop derives a forward hop key stream and a backward hop key stream from the route secret material through Aura's centralized KDF. Each hop encrypts or decrypts only its own layer with `ChaCha20-Poly1305`. Each hop receives enough authenticated metadata to identify the next processing action, but not enough to reconstruct deeper route state.
 
 Aura uses SURB-like reply blocks as Aura-native typed objects with explicit expiry, scope, and accountability semantics.
 
@@ -56,9 +38,7 @@ The service family model is always active. `Establish`, `Move`, and `Hold` are t
 
 `LocalRoutingProfile::passthrough()` is the pre-privacy routing baseline. It uses mixing depth `0`, delay `0`, cover rate `0`, and path diversity `1`. `Hold` remains active under passthrough because it is an availability service, not a routing-profile knob.
 
-Production privacy uses encrypted path setup and encrypted `MoveEnvelope` processing with one fixed adaptive policy. Users do not tune this policy. Development and simulation may sweep policy constants, but production nodes use the evidence-backed constants shipped with the build.
-
-The current fixed policy uses path-diversity floor `2`, cover floor `2` packets per second, delay gain denominator `3`, neighborhood hold retention window `120s`, and retrieval-capability rotation beginning `10s` before expiry.
+Production privacy uses encrypted path setup and encrypted `MoveEnvelope` processing with one fixed adaptive policy. Users do not tune this policy. Development and simulation may sweep policy constants. Production nodes use the evidence-backed constants shipped with the build. The current fixed policy uses path-diversity floor `2`, cover floor `2` packets per second, delay gain denominator `3`, neighborhood hold retention window `120s`, and retrieval-capability rotation beginning `10s` before expiry.
 
 ## 5. Link Encryption Versus Path Encryption
 
@@ -66,70 +46,39 @@ The current fixed policy uses path-diversity floor `2`, cover floor `2` packets 
 
 `Path encryption` uses the route-layer construction from section 4. It protects the route object carried inside the link-protected channel. Intermediate hops remove one route layer and learn only the immediate forwarding decision and the local accountability material for that hop.
 
-The two layers must remain distinct:
-
-- path-layer keys must not be reused as adjacent-peer channel keys
-- adjacent-peer channel state must not be treated as route-hop state
-- application or context semantic keys must not be treated as route-layer keys
+The two layers must remain distinct. Path-layer keys must not be reused as adjacent-peer channel keys. Adjacent-peer channel state must not be treated as route-hop state. Application or context semantic keys must not be treated as route-layer keys.
 
 ## 6. Route-Layer Objects
 
-The route layer uses the following typed objects:
+### 6.1 Bootstrap records
 
-- `BootstrapContactHint`
-- `NeighborhoodReentryHint`
-- bounded bootstrap introduction records
-- `EstablishedPath`
-- `MoveEnvelope`
-- typed reply blocks
-
-`BootstrapContactHint` records a remembered direct contact or prior provider that may help stale-node re-entry. It carries a scope, expiry, freshness data, and signed contact material. It does not represent canonical route truth.
+`BootstrapContactHint` records a remembered direct contact or prior provider that may help stale-node re-entry. It carries scope, expiry, freshness data, and signed contact material. It does not represent canonical route truth.
 
 `NeighborhoodReentryHint` records a board-published re-entry surface. It carries a neighborhood-scoped publication, expiry, replay bound, and signed route-surface material. It does not expose a globally enumerable topology map.
 
-Bounded bootstrap introductions carry explicit introducer identity, introduced authority, scope, expiry, maximum remaining depth, and fan-out limits. They are trust and bootstrap evidence. They are not canonical shared route tiers.
+Bounded bootstrap introductions carry explicit introducer identity, introduced authority, scope, expiry, maximum remaining depth, and fan-out limits. They are trust and bootstrap evidence rather than canonical shared route tiers.
+
+### 6.2 Path and movement objects
 
 `EstablishedPath` is the reusable route object consumed by `Move`. `MoveEnvelope` is the shared movement envelope family. Encrypted peel processing is the production route-layer behavior and preserves the accountable movement boundary.
 
+Typed reply blocks provide backward anonymous delivery. Their semantics are defined in section 11.
+
 ## 7. Bootstrap and Re-Entry Surfaces
 
-Aura supports stale-node re-entry through several overlapping bootstrap surfaces:
+Aura supports stale-node re-entry through several overlapping bootstrap surfaces. These include remembered direct contacts and prior providers, neighborhood discovery boards, bounded Web-of-Trust bootstrap introductions, and rotating bootstrap relays or bridge providers. These surfaces are ordered inputs, not canonical shared route truth. Runtime selection may widen from one surface to the next when prior attempts fail or when freshness decays.
 
-1. remembered direct contacts and prior providers
-2. neighborhood discovery boards
-3. bounded Web-of-Trust bootstrap introductions
-4. rotating bootstrap relays or bridge providers
-
-These surfaces are ordered inputs, not canonical shared route truth. Runtime selection may widen from one surface to the next when prior attempts fail or when freshness decays.
-
-Aura explicitly rejects the following bootstrap designs:
-
-- a singleton bootstrap authority
-- a globally enumerable neighborhood adjacency map
-- a canonical shared friends-of-friends graph
+Aura explicitly rejects bootstrap designs that rely on a singleton bootstrap authority, a globally enumerable neighborhood adjacency map, or a canonical shared friends-of-friends graph.
 
 ## 8. Neighborhood Discovery Boards
 
-Neighborhood discovery boards publish signed, expiring, scope-limited re-entry hints. A board publication must include:
-
-- the publishing authority
-- the scoped neighborhood or re-entry domain
-- an expiry time
-- a replay-bounded publication identifier
-- the advertised route-layer or move-surface public material
+Neighborhood discovery boards publish signed, expiring, scope-limited re-entry hints. A board publication must include the publishing authority, the scoped neighborhood or re-entry domain, an expiry time, a replay-bounded publication identifier, and the advertised route-layer or move-surface public material.
 
 Board contents are advisory. Runtime caches may merge them. Runtime caches must not elevate them into canonical route truth. Runtime caches must not expose a stable global graph projection derived from board contents.
 
 ## 9. Bounded Bootstrap Introductions
 
-Bootstrap introductions are Web-of-Trust evidence used for stale-node re-entry. Each introduction must include:
-
-- introducer authority
-- introduced authority
-- scope
-- expiry
-- maximum remaining depth
-- maximum fan-out
+Bootstrap introductions are Web-of-Trust evidence used for stale-node re-entry. Each introduction must include introducer authority, introduced authority, scope, expiry, maximum remaining depth, and maximum fan-out.
 
 Introductions are valid only within their declared bounds. Runtime policy may consume them as discovery and permit input. Runtime policy must not publish a canonical shared introduction tier or transitive trust graph.
 
@@ -143,38 +92,15 @@ Every forwarding hop performs the following route-layer steps:
 4. recover the next forwarding instruction or reply instruction
 5. emit local accountability state and continue on the adjacent secure channel
 
-A hop may learn:
-
-- that it is on the route
-- the previous hop on the adjacent edge
-- the next hop on the adjacent edge
-- local replay and expiry state
-
-A hop may not learn:
-
-- the full route
-- deeper hop keys
-- the final destination unless it is the exit hop
-- the full reply path unless it is processing its own reply layer
+A hop may learn that it is on the route, the previous and next hops on the adjacent edges, and its local replay and expiry state. A hop may not learn the full route, deeper hop keys, the final destination unless it is the exit hop, or the full reply path unless it is processing its own reply layer.
 
 ## 11. Typed Reply Blocks
 
-Aura uses typed reply blocks for backward anonymous delivery. A reply block is an Aura-native object with:
-
-- scope
-- route binding
-- expiry
-- replay bound
-- backward hop material
-- accountability linkage
+Aura uses typed reply blocks for backward anonymous delivery. A reply block is an Aura-native object with scope, route binding, expiry, replay bound, backward hop material, and accountability linkage.
 
 Reply blocks are not borrowed Tor SURB packets. They are typed Aura objects that integrate with Aura movement, accountability, and retrieval-capability rotation rules.
 
-Reply blocks must remain distinct from:
-
-- application message payloads
-- adjacent-peer secure channel state
-- bootstrap trust records
+Reply blocks must remain distinct from application message payloads, adjacent-peer secure channel state, and bootstrap trust records.
 
 ## 11.1 Movement Scheduling
 
@@ -186,23 +112,13 @@ Application traffic and sync-blended retrieval reduce the synthetic-cover gap. A
 
 Aura tracks privacy leakage by boundary. The route-layer design assumes leakage cannot be eliminated completely. The design instead constrains what each boundary can learn.
 
-The main boundaries are:
+The main boundaries are an external observer of adjacent link traffic, an intermediate forwarding hop, a compromised subset of route hops, and a stale-node bootstrap observer.
 
-- external observer of adjacent link traffic
-- intermediate forwarding hop
-- compromised subset of route hops
-- stale-node bootstrap observer
-
-An external observer may see timing, packet count, and adjacent link endpoints. An intermediate hop may see its adjacent predecessor and successor and its local peel result. A stale-node bootstrap observer may see limited board, introduction, or bridge use, but it must not recover a canonical shared topology map from that data alone.
+An external observer may see timing, packet count, and adjacent link endpoints. An intermediate hop may see its adjacent predecessor and successor and its local peel result. A stale-node bootstrap observer may see limited board, introduction, or bridge use. It must not recover a canonical shared topology map from that data alone.
 
 ## 13. Adversary Assumptions
 
-Aura assumes the following adversary model:
-
-- local passive observers exist
-- some forwarding hops may be compromised
-- bootstrap boards and bridge providers may be observed
-- stale-node re-entry may happen after long offline gaps and physical movement
+Aura assumes an adversary model in which local passive observers exist, some forwarding hops may be compromised, bootstrap boards and bridge providers may be observed, and stale-node re-entry may happen after long offline gaps and physical movement.
 
 Aura does not assume a global passive adversary can be defeated. Aura does not assume that service relationships reveal nothing. Aura aims to reduce graph leakage and route leakage under partitioned socially rooted operation.
 
@@ -214,15 +130,9 @@ Aura chooses Curve25519, a centralized KDF surface, and `ChaCha20-Poly1305` beca
 
 ## 15. Required Implementation Boundaries
 
-The implementation must satisfy the following boundaries:
+The implementation must satisfy several boundaries. `aura-effects` owns hop crypto primitives. Shared record types for bootstrap hints and re-entry hints remain authoritative typed objects. Runtime-owned caches merge bootstrap records locally and expire them locally.
 
-1. `aura-effects` owns hop crypto primitives
-2. shared record types for bootstrap hints and re-entry hints remain authoritative typed objects
-3. runtime-owned caches merge bootstrap records locally and expire them locally
-4. `MoveEnvelope` remains the shared accountable movement boundary
-5. `transparent_onion` remains a debug and simulation tool only
-
-Production paths use encrypted peel processing. Transparent setup and header inspection objects remain quarantined behind the explicit `transparent_onion` feature surface and must fail closed in release production builds.
+`MoveEnvelope` remains the shared accountable movement boundary. `transparent_onion` remains a debug and simulation tool only. Production paths use encrypted peel processing. Transparent setup and header inspection objects remain quarantined behind the explicit `transparent_onion` feature surface and must fail closed in release production builds.
 
 ## 16. Summary
 
