@@ -292,6 +292,9 @@ Coverage status uses three classes:
 | Retrieval not identity-addressed | `Conformance-backed` | `crates/aura-simulator/tests/adaptive_privacy_phase_six.rs`, selector-based `Hold` retrieval scenarios |
 | Custody remains opaque and non-authoritative | `Conformance-backed` | `crates/aura-simulator/tests/adaptive_privacy_phase_six.rs`, `Hold` custody and cache-replica validation |
 | Accountability evidence verified before local consequences | `Conformance-backed` | `crates/aura-simulator/tests/adaptive_privacy_phase_six.rs`, reply-block accountability control-plane lanes |
+| Anonymous setup uses fresh manager-owned route entropy | `Conformance-backed` | `runtime::services::path_manager::tests::establish_path_consumes_one_fresh_nonce_from_random_effects`, `runtime::services::path_manager::tests::fresh_establish_entropy_changes_path_replay_and_hop_keys` |
+| Encrypted anonymous setup is executable by each hop | `Conformance-backed` | `runtime::services::path_manager::tests::encrypted_setup_peels_forward_one_hop_at_a_time`, `derives_symmetric_route_setup_key_from_private_and_public_keys` |
+| Reply blocks are bound to path, kind, command scope, and single-use state | `Conformance-backed` | `runtime::services::hold_manager::tests::reply_block_rejects_cross_path_witness`, `runtime::services::hold_manager::tests::reply_block_rejects_cross_kind_witness`, `runtime::services::hold_manager::tests::visible_reply_block_fields_are_not_sufficient_to_forge_token` |
 | External observer protection level varies by deployment mode | `Specified only` | No direct proof or conformance mapping recorded here |
 
 ### Distributed Systems Contract Coverage

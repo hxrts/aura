@@ -175,7 +175,7 @@ pub struct MovePath {
 
 `EstablishPath` and `MovePath` are the explicit path objects consumed by current bootstrap and movement flows. They are derived from descriptor views plus runtime-local policy, but they remain socially neutral: home, neighborhood, guardian, friend, and similar provider roles must not appear in the path schema itself.
 
-Anonymous path establishment uses the same `Establish` family boundary. `aura-rendezvous` validates path objects and descriptor inputs. `aura-agent` owns reusable anonymous path lifecycle, route choice, and path reuse policy.
+Anonymous path establishment uses the same `Establish` family boundary. `aura-rendezvous` validates path objects and descriptor inputs. Route descriptors provide explicit route-layer X25519 public keys for relay hops, signed through the ordinary authority identity surfaces. `aura-agent` owns reusable anonymous path lifecycle, route choice, setup entropy, and path reuse policy.
 
 ## 5. MPST Choreographies
 

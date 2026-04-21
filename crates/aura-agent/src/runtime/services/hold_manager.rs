@@ -16,10 +16,10 @@ use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, Service
 use async_trait::async_trait;
 use aura_core::hash::hash;
 use aura_core::service::{
-    AccountabilityReplyBlock, HoldDepositReplyBlock, HoldDepositRequest, HoldRequestError,
-    HoldRetentionMetadata, HoldRetrievalReplyBlock, HoldRetrievalRequest, MoveReceiptReplyBlock,
-    ProviderCandidate, ProviderEvidence, ReplyBlockError, RetrievalCapability,
-    RetrievalCapabilityError, SelectionState, ServiceFamily, ServiceProfile,
+    AccountabilityReplyBlock, EstablishedPathRef, HoldDepositReplyBlock, HoldDepositRequest,
+    HoldRequestError, HoldRetentionMetadata, HoldRetrievalReplyBlock, HoldRetrievalRequest,
+    MoveReceiptReplyBlock, ProviderCandidate, ProviderEvidence, ReplyBlockError,
+    RetrievalCapability, RetrievalCapabilityError, SelectionState, ServiceFamily, ServiceProfile,
 };
 use aura_core::types::epochs::Epoch;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
@@ -200,6 +200,7 @@ pub struct AccountabilityWitness {
     pub scope: ContextId,
     pub family: ServiceFamily,
     pub profile: Option<ServiceProfile>,
+    pub reply_path: EstablishedPathRef,
     pub providers: Vec<AuthorityId>,
     pub command_scope: [u8; 32],
     pub selector: Option<[u8; 32]>,
@@ -303,6 +304,8 @@ struct ReplyBlockRecord {
     #[allow(dead_code)]
     /* TODO(2026-07): remove once reply-block diagnostics surface the witness kind. */
     kind: AccountabilityWitnessKind,
+    path_id: [u8; 32],
+    nonce: [u8; 32],
     command_scope: [u8; 32],
     valid_until: u64,
     used: bool,
@@ -324,6 +327,7 @@ struct HoldState {
     provider_loads: HashMap<AuthorityId, usize>,
     provider_budget: HashMap<AuthorityId, ProviderBudgetAccount>,
     reply_blocks: HashMap<[u8; 32], ReplyBlockRecord>,
+    next_reply_nonce: u64,
     pending_sync_retrievals: VecDeque<QueuedSyncRetrieval>,
     pending_sync_replies: VecDeque<QueuedAccountabilityReply>,
     lifecycle: ServiceHealth,
@@ -339,6 +343,7 @@ impl Default for HoldState {
             provider_loads: HashMap::new(),
             provider_budget: HashMap::new(),
             reply_blocks: HashMap::new(),
+            next_reply_nonce: 1,
             pending_sync_retrievals: VecDeque::new(),
             pending_sync_replies: VecDeque::new(),
             lifecycle: ServiceHealth::NotStarted,
@@ -390,6 +395,7 @@ impl HoldState {
 #[derive(Clone)]
 pub struct HoldManager {
     authority_id: AuthorityId,
+    reply_token_secret: [u8; 32],
     config: HoldManagerConfig,
     registry: Arc<ServiceRegistry>,
     state: Arc<RwLock<HoldState>>,
@@ -403,6 +409,7 @@ impl HoldManager {
     ) -> Self {
         Self {
             authority_id,
+            reply_token_secret: default_reply_token_secret(authority_id),
             config,
             registry,
             state: Arc::new(RwLock::new(HoldState {
@@ -621,16 +628,19 @@ impl HoldManager {
             vec![CacheKey(format!("hold:{content_key}"))],
             maintenance_epoch.identity_epoch,
         );
+        let reply_nonce = self.next_reply_nonce().await;
         let reply_block = HoldDepositReplyBlock {
             inner: self.issue_reply_block(
                 request.held_object.scope,
                 AccountabilityWitnessKind::HoldDeposit,
+                &request.reply_path,
                 command_scope(
                     &request.held_object.scope,
                     &content_key,
                     now_ms,
                     b"hold-deposit",
                 ),
+                reply_nonce,
                 now_ms,
             ),
         };
@@ -639,6 +649,7 @@ impl HoldManager {
             scope: request.held_object.scope,
             family: ServiceFamily::Hold,
             profile: Some(request.profile.clone()),
+            reply_path: request.reply_path.clone(),
             providers: plan.selected_authorities.clone(),
             command_scope: reply_block.inner.command_scope,
             selector: Some(capability.selector),
@@ -647,6 +658,7 @@ impl HoldManager {
         };
 
         let requested_profile = request.profile.clone();
+        let reply_path = request.reply_path.clone();
         let held_object = request.held_object.clone();
         let handoff = request.handoff.clone();
         let selected_holders = plan.selected_authorities.clone();
@@ -699,6 +711,8 @@ impl HoldManager {
                     ReplyBlockRecord {
                         scope: held_object.scope,
                         kind: AccountabilityWitnessKind::HoldDeposit,
+                        path_id: reply_path.path_id,
+                        nonce: reply_block.inner.nonce,
                         command_scope: reply_block.inner.command_scope,
                         valid_until: reply_block.inner.valid_until,
                         used: false,
@@ -753,19 +767,23 @@ impl HoldManager {
             let state = self.state.read().await;
             state.selector_index.get(&request.selector).cloned()
         };
+        let reply_nonce = self.next_reply_nonce().await;
         let reply_block = HoldRetrievalReplyBlock {
             inner: self.issue_reply_block(
                 request.scope,
                 AccountabilityWitnessKind::HoldRetrieval,
+                &request.reply_path,
                 command_scope(
                     &request.scope,
                     &hex_selector(request.selector),
                     now_ms,
                     b"hold-retrieve",
                 ),
+                reply_nonce,
                 now_ms,
             ),
         };
+        let reply_path = request.reply_path.clone();
 
         let Some((scope, content_key)) = key else {
             let witness = AccountabilityWitness {
@@ -773,6 +791,7 @@ impl HoldManager {
                 scope: request.scope,
                 family: ServiceFamily::Hold,
                 profile: Some(request.profile),
+                reply_path: reply_path.clone(),
                 providers: Vec::new(),
                 command_scope: reply_block.inner.command_scope,
                 selector: Some(request.selector),
@@ -787,6 +806,8 @@ impl HoldManager {
                         ReplyBlockRecord {
                             scope: request.scope,
                             kind: AccountabilityWitnessKind::HoldRetrieval,
+                            path_id: reply_path.path_id,
+                            nonce: reply_block.inner.nonce,
                             command_scope: reply_block.inner.command_scope,
                             valid_until: reply_block.inner.valid_until,
                             used: false,
@@ -883,6 +904,8 @@ impl HoldManager {
                     ReplyBlockRecord {
                         scope,
                         kind: AccountabilityWitnessKind::HoldRetrieval,
+                        path_id: reply_path.path_id,
+                        nonce: reply_block.inner.nonce,
                         command_scope: reply_block.inner.command_scope,
                         valid_until: reply_block.inner.valid_until,
                         used: false,
@@ -912,6 +935,7 @@ impl HoldManager {
             scope: request.scope,
             family: ServiceFamily::Hold,
             profile: Some(request.profile),
+            reply_path,
             providers,
             command_scope: reply_block.inner.command_scope,
             selector: Some(request.selector),
@@ -1151,13 +1175,17 @@ impl HoldManager {
     pub async fn issue_move_receipt_reply_block(
         &self,
         scope: ContextId,
+        reply_path: &EstablishedPathRef,
         command_scope: [u8; 32],
         now_ms: u64,
     ) -> MoveReceiptReplyBlock {
+        let reply_nonce = self.next_reply_nonce().await;
         let inner = self.issue_reply_block(
             scope,
             AccountabilityWitnessKind::MoveReceipt,
+            reply_path,
             command_scope,
+            reply_nonce,
             now_ms,
         );
         let token = inner.token;
@@ -1170,6 +1198,8 @@ impl HoldManager {
                     ReplyBlockRecord {
                         scope,
                         kind: AccountabilityWitnessKind::MoveReceipt,
+                        path_id: reply_path.path_id,
+                        nonce: inner.nonce,
                         command_scope,
                         valid_until,
                         used: false,
@@ -1265,9 +1295,26 @@ impl HoldManager {
             )
         );
         if !role_matches
+            || record.scope != reply_block.scope
+            || record.kind != kind
+            || record.path_id != witness.reply_path.path_id
+            || record.nonce != reply_block.nonce
             || record.command_scope != witness.command_scope
+            || reply_block.command_scope != witness.command_scope
+            || record.valid_until != reply_block.valid_until
             || witness.kind != kind
             || witness.family != family
+            || witness.scope != reply_block.scope
+            || witness.reply_path.scope != reply_block.scope
+            || reply_block.token
+                != self.reply_block_token(
+                    reply_block.scope,
+                    kind,
+                    record.path_id,
+                    record.command_scope,
+                    record.valid_until,
+                    record.nonce,
+                )
         {
             return Err(HoldManagerError::SelectorMiss);
         }
@@ -1354,21 +1401,64 @@ impl HoldManager {
     fn issue_reply_block(
         &self,
         scope: ContextId,
-        _kind: AccountabilityWitnessKind,
+        kind: AccountabilityWitnessKind,
+        reply_path: &EstablishedPathRef,
         command_scope: [u8; 32],
+        nonce_counter: u64,
         now_ms: u64,
     ) -> AccountabilityReplyBlock {
+        let valid_until = now_ms.saturating_add(self.config.reply_block_ttl_ms);
+        let nonce = reply_block_nonce(
+            self.authority_id,
+            scope,
+            reply_path.path_id,
+            kind,
+            command_scope,
+            nonce_counter,
+            now_ms,
+        );
         AccountabilityReplyBlock {
             scope,
-            token: hash(&reply_block_material(
-                self.authority_id,
+            token: self.reply_block_token(
                 scope,
+                kind,
+                reply_path.path_id,
                 command_scope,
-                now_ms,
-            )),
+                valid_until,
+                nonce,
+            ),
+            nonce,
             command_scope,
-            valid_until: now_ms.saturating_add(self.config.reply_block_ttl_ms),
+            valid_until,
         }
+    }
+
+    async fn next_reply_nonce(&self) -> u64 {
+        let mut state = self.state.write().await;
+        let nonce = state.next_reply_nonce;
+        state.next_reply_nonce = state.next_reply_nonce.saturating_add(1);
+        nonce
+    }
+
+    fn reply_block_token(
+        &self,
+        scope: ContextId,
+        kind: AccountabilityWitnessKind,
+        path_id: [u8; 32],
+        command_scope: [u8; 32],
+        valid_until: u64,
+        nonce: [u8; 32],
+    ) -> [u8; 32] {
+        hash(&reply_block_material(
+            self.reply_token_secret,
+            self.authority_id,
+            scope,
+            path_id,
+            kind,
+            command_scope,
+            valid_until,
+            nonce,
+        ))
     }
 }
 
@@ -1424,18 +1514,64 @@ fn selector_material(
     material
 }
 
-fn reply_block_material(
+fn default_reply_token_secret(authority_id: AuthorityId) -> [u8; 32] {
+    let mut material = Vec::new();
+    material.extend_from_slice(b"aura.hold.reply-token-secret.v1");
+    material.extend_from_slice(&authority_id.to_bytes());
+    hash(&material)
+}
+
+fn reply_block_nonce(
     authority_id: AuthorityId,
     scope: ContextId,
+    path_id: [u8; 32],
+    kind: AccountabilityWitnessKind,
     command_scope: [u8; 32],
+    nonce_counter: u64,
     now_ms: u64,
-) -> Vec<u8> {
+) -> [u8; 32] {
     let mut material = Vec::new();
+    material.extend_from_slice(b"aura.hold.reply-block-nonce.v1");
     material.extend_from_slice(&authority_id.to_bytes());
     material.extend_from_slice(&scope.to_bytes());
+    material.extend_from_slice(&path_id);
+    material.extend_from_slice(kind_tag(kind));
     material.extend_from_slice(&command_scope);
+    material.extend_from_slice(&nonce_counter.to_be_bytes());
     material.extend_from_slice(&now_ms.to_be_bytes());
+    hash(&material)
+}
+
+fn reply_block_material(
+    reply_token_secret: [u8; 32],
+    authority_id: AuthorityId,
+    scope: ContextId,
+    path_id: [u8; 32],
+    kind: AccountabilityWitnessKind,
+    command_scope: [u8; 32],
+    valid_until: u64,
+    nonce: [u8; 32],
+) -> Vec<u8> {
+    let mut material = Vec::new();
+    material.extend_from_slice(b"aura.hold.reply-block-token.v1");
+    material.extend_from_slice(&reply_token_secret);
+    material.extend_from_slice(&authority_id.to_bytes());
+    material.extend_from_slice(&scope.to_bytes());
+    material.extend_from_slice(&path_id);
+    material.extend_from_slice(kind_tag(kind));
+    material.extend_from_slice(&command_scope);
+    material.extend_from_slice(&valid_until.to_be_bytes());
+    material.extend_from_slice(&nonce);
     material
+}
+
+fn kind_tag(kind: AccountabilityWitnessKind) -> &'static [u8] {
+    match kind {
+        AccountabilityWitnessKind::MoveReceipt => b"move-receipt",
+        AccountabilityWitnessKind::HoldDeposit => b"hold-deposit",
+        AccountabilityWitnessKind::HoldRetrieval => b"hold-retrieval",
+        AccountabilityWitnessKind::HoldAudit => b"hold-audit",
+    }
 }
 
 fn content_key_for(held_object: &aura_core::HeldObject) -> String {
@@ -1466,6 +1602,14 @@ mod tests {
 
     fn context(seed: u8) -> ContextId {
         ContextId::new_from_entropy([seed; 32])
+    }
+
+    fn path_ref(scope: ContextId, seed: u8) -> EstablishedPathRef {
+        EstablishedPathRef {
+            scope,
+            path_id: [seed; 32],
+            valid_until: 10_000,
+        }
     }
 
     fn held(scope: ContextId, seed: &[u8]) -> aura_core::HeldObject {
@@ -1505,6 +1649,7 @@ mod tests {
                     requested_retention_ms: 500,
                     deposit_epoch: epoch.identity_epoch,
                     handoff: None,
+                    reply_path: path_ref(scope, 1),
                 },
                 &candidates,
                 100,
@@ -1543,6 +1688,7 @@ mod tests {
                     profile: ServiceProfile::DeferredDeliveryHold,
                     scope,
                     selector: deposit.retrieval_capability.selector,
+                    reply_path: path_ref(scope, 2),
                 },
                 150,
                 epoch,
@@ -1572,6 +1718,7 @@ mod tests {
                     requested_retention_ms: 500,
                     deposit_epoch: epoch.identity_epoch,
                     handoff: None,
+                    reply_path: path_ref(scope, 3),
                 },
                 &[candidate(authority(2)), candidate(authority(3))],
                 100,
@@ -1586,6 +1733,7 @@ mod tests {
                     profile: ServiceProfile::CacheReplicaHold,
                     scope,
                     selector: deposit.retrieval_capability.selector,
+                    reply_path: path_ref(scope, 4),
                 },
                 760,
                 epoch,
@@ -1637,6 +1785,7 @@ mod tests {
                     requested_retention_ms: 500,
                     deposit_epoch: epoch.identity_epoch,
                     handoff: None,
+                    reply_path: path_ref(scope, 5),
                 },
                 &[candidate(authority(2))],
                 100,
@@ -1650,6 +1799,7 @@ mod tests {
                     profile: ServiceProfile::DeferredDeliveryHold,
                     scope,
                     selector: deposit.retrieval_capability.selector,
+                    reply_path: path_ref(scope, 6),
                 },
                 120,
                 400,
@@ -1677,6 +1827,7 @@ mod tests {
                     requested_retention_ms: 500,
                     deposit_epoch: epoch.identity_epoch,
                     handoff: None,
+                    reply_path: path_ref(scope, 7),
                 },
                 &[candidate(authority(2))],
                 100,
@@ -1692,6 +1843,7 @@ mod tests {
                     requested_retention_ms: 500,
                     deposit_epoch: epoch.identity_epoch,
                     handoff: None,
+                    reply_path: path_ref(scope, 8),
                 },
                 &[candidate(authority(2))],
                 101,
@@ -1714,14 +1866,16 @@ mod tests {
             registry.clone(),
         );
         let scope = context(11);
+        let reply_path = path_ref(scope, 9);
         let move_reply = manager
-            .issue_move_receipt_reply_block(scope, [7; 32], 100)
+            .issue_move_receipt_reply_block(scope, &reply_path, [7; 32], 100)
             .await;
         let witness = AccountabilityWitness {
             kind: AccountabilityWitnessKind::MoveReceipt,
             scope,
             family: ServiceFamily::Move,
             profile: None,
+            reply_path,
             providers: vec![authority(2)],
             command_scope: [7; 32],
             selector: None,
@@ -1738,6 +1892,10 @@ mod tests {
             .verify_move_receipt(VerifierRole::AdjacentMoveHop, &move_reply, &witness, 130)
             .await
             .expect("verified");
+        assert!(manager
+            .verify_move_receipt(VerifierRole::AdjacentMoveHop, &move_reply, &witness, 131)
+            .await
+            .is_err());
         manager
             .apply_verified_witness(verified)
             .await
@@ -1748,5 +1906,106 @@ mod tests {
             .await
             .expect("provider health");
         assert_eq!(health.success_count, 1);
+    }
+
+    #[tokio::test]
+    async fn reply_block_rejects_cross_path_witness() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let manager = HoldManager::new(authority(1), HoldManagerConfig::for_testing(), registry);
+        let scope = context(12);
+        let original_path = path_ref(scope, 10);
+        let wrong_path = path_ref(scope, 11);
+        let reply = manager
+            .issue_move_receipt_reply_block(scope, &original_path, [7; 32], 100)
+            .await;
+        let witness = AccountabilityWitness {
+            kind: AccountabilityWitnessKind::MoveReceipt,
+            scope,
+            family: ServiceFamily::Move,
+            profile: None,
+            reply_path: wrong_path,
+            providers: vec![authority(2)],
+            command_scope: [7; 32],
+            selector: None,
+            observed_at_ms: 120,
+            success: true,
+        };
+
+        assert!(manager
+            .verify_move_receipt(VerifierRole::AdjacentMoveHop, &reply, &witness, 130)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn reply_block_rejects_cross_kind_witness() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let manager = HoldManager::new(authority(1), HoldManagerConfig::for_testing(), registry);
+        let scope = context(13);
+        let reply_path = path_ref(scope, 12);
+        let reply = manager
+            .issue_move_receipt_reply_block(scope, &reply_path, [7; 32], 100)
+            .await;
+        let witness = AccountabilityWitness {
+            kind: AccountabilityWitnessKind::HoldDeposit,
+            scope,
+            family: ServiceFamily::Move,
+            profile: None,
+            reply_path,
+            providers: vec![authority(2)],
+            command_scope: [7; 32],
+            selector: None,
+            observed_at_ms: 120,
+            success: true,
+        };
+
+        assert!(manager
+            .verify_move_receipt(VerifierRole::AdjacentMoveHop, &reply, &witness, 130)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn visible_reply_block_fields_are_not_sufficient_to_forge_token() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let manager = HoldManager::new(authority(1), HoldManagerConfig::for_testing(), registry);
+        let scope = context(14);
+        let reply_path = path_ref(scope, 13);
+        let reply = manager
+            .issue_move_receipt_reply_block(scope, &reply_path, [7; 32], 100)
+            .await;
+        let forged = MoveReceiptReplyBlock {
+            inner: AccountabilityReplyBlock {
+                scope: reply.inner.scope,
+                token: hash(
+                    &[
+                        reply.inner.nonce.as_slice(),
+                        reply.inner.command_scope.as_slice(),
+                        &reply.inner.valid_until.to_be_bytes(),
+                    ]
+                    .concat(),
+                ),
+                nonce: reply.inner.nonce,
+                command_scope: reply.inner.command_scope,
+                valid_until: reply.inner.valid_until,
+            },
+        };
+        let witness = AccountabilityWitness {
+            kind: AccountabilityWitnessKind::MoveReceipt,
+            scope,
+            family: ServiceFamily::Move,
+            profile: None,
+            reply_path,
+            providers: vec![authority(2)],
+            command_scope: [7; 32],
+            selector: None,
+            observed_at_ms: 120,
+            success: true,
+        };
+
+        assert!(manager
+            .verify_move_receipt(VerifierRole::AdjacentMoveHop, &forged, &witness, 130)
+            .await
+            .is_err());
     }
 }

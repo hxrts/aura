@@ -14,7 +14,7 @@ use super::service_registry::ServiceRegistry;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::runtime::TaskGroup;
 use async_trait::async_trait;
-use aura_core::effects::{time::PhysicalTimeEffects, RouteCryptoEffects};
+use aura_core::effects::{time::PhysicalTimeEffects, RandomEffects, RouteCryptoEffects};
 use aura_core::hash::hash;
 use aura_core::service::{
     AnonymousHopView, EncryptedAnonymousSetupLayer, EncryptedAnonymousSetupObject, EstablishedPath,
@@ -386,19 +386,55 @@ impl AnonymousPathManager {
         scope: ContextId,
         destination: AuthorityId,
         route: Route,
-        setup_nonce: [u8; 32],
+        random: &(impl RandomEffects + ?Sized),
         now_ms: u64,
     ) -> Result<(EstablishedPath, EncryptedAnonymousSetupObject), AnonymousPathManagerError> {
         let control = self
             .open_establish_session(scope, destination, &route, "anonymous_path_manager", now_ms)
             .await?;
+        let setup_nonce = random.random_bytes_32().await;
         let (path, setup, _) = self
-            .establish_path_with_control(&control, scope, destination, route, setup_nonce, now_ms)
+            .establish_path_with_control_and_nonce(
+                &control,
+                scope,
+                destination,
+                route,
+                setup_nonce,
+                now_ms,
+            )
             .await?;
         Ok((path, setup))
     }
 
     pub async fn establish_path_with_control(
+        &self,
+        control: &AnonymousPathEstablishControl,
+        scope: ContextId,
+        destination: AuthorityId,
+        route: Route,
+        random: &(impl RandomEffects + ?Sized),
+        now_ms: u64,
+    ) -> Result<
+        (
+            EstablishedPath,
+            EncryptedAnonymousSetupObject,
+            AnonymousPathEstablishControl,
+        ),
+        AnonymousPathManagerError,
+    > {
+        let setup_nonce = random.random_bytes_32().await;
+        self.establish_path_with_control_and_nonce(
+            control,
+            scope,
+            destination,
+            route,
+            setup_nonce,
+            now_ms,
+        )
+        .await
+    }
+
+    async fn establish_path_with_control_and_nonce(
         &self,
         control: &AnonymousPathEstablishControl,
         scope: ContextId,
@@ -483,6 +519,15 @@ impl AnonymousPathManager {
             .await?;
         let forward_hop_keys = hop_keys.iter().map(|keys| keys.0).collect::<Vec<_>>();
         let backward_hop_keys = hop_keys.iter().map(|keys| keys.1).collect::<Vec<_>>();
+        let setup_ephemeral_private_key = setup_nonce;
+        let setup_ephemeral_public_key = self
+            .route_crypto
+            .route_public_key(setup_ephemeral_private_key)
+            .await
+            .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
+        let setup_peel_keys = self
+            .derive_setup_peel_keys(scope, path_id, setup_ephemeral_private_key, &route)
+            .await?;
         let path = EstablishedPath {
             path_id,
             scope,
@@ -498,6 +543,7 @@ impl AnonymousPathManager {
 
         let setup = EncryptedAnonymousSetupObject {
             established_path: path.as_ref(),
+            setup_ephemeral_public_key,
             link_protection: LinkProtectionMode::TransportLink,
             path_protection: PathProtectionMode::Encrypted,
             hop_count: route.hops.len() as u8,
@@ -506,6 +552,7 @@ impl AnonymousPathManager {
                     &route,
                     valid_until,
                     replay_window_id,
+                    &setup_peel_keys,
                     &forward_hop_keys,
                     &backward_hop_keys,
                 )
@@ -659,11 +706,39 @@ impl AnonymousPathManager {
         Ok(keys)
     }
 
+    async fn derive_setup_peel_keys(
+        &self,
+        scope: ContextId,
+        path_id: [u8; 32],
+        setup_ephemeral_private_key: [u8; 32],
+        route: &Route,
+    ) -> Result<Vec<[u8; 32]>, AnonymousPathManagerError> {
+        let mut keys = Vec::with_capacity(route.hops.len());
+        for (index, hop) in route.hops.iter().enumerate() {
+            let hop_public_key = hop
+                .route_layer_public_key
+                .ok_or(AnonymousPathManagerError::MissingRouteLayerPublicKey)?;
+            let context = setup_peel_context(scope, path_id, hop.authority_id, index as u16)?;
+            let key = self
+                .route_crypto
+                .derive_route_setup_key(
+                    setup_ephemeral_private_key,
+                    hop_public_key,
+                    context.as_slice(),
+                )
+                .await
+                .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
+            keys.push(key);
+        }
+        Ok(keys)
+    }
+
     async fn build_encrypted_setup_layers(
         &self,
         route: &Route,
         valid_until: u64,
         replay_window_id: [u8; 32],
+        setup_peel_keys: &[[u8; 32]],
         forward_hop_keys: &[[u8; 32]],
         backward_hop_keys: &[[u8; 32]],
     ) -> Result<Option<Box<EncryptedAnonymousSetupLayer>>, AnonymousPathManagerError> {
@@ -697,7 +772,7 @@ impl AnonymousPathManager {
             let aad = setup_layer_aad(hop.authority_id, index as u16)?;
             let ciphertext = self
                 .route_crypto
-                .encrypt_hop_layer(forward_hop_keys[index], nonce, &aad, &plaintext)
+                .encrypt_hop_layer(setup_peel_keys[index], nonce, &aad, &plaintext)
                 .await
                 .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
             next = Some(Box::new(EncryptedAnonymousSetupLayer {
@@ -713,7 +788,7 @@ impl AnonymousPathManager {
         &self,
         layer: &EncryptedAnonymousSetupLayer,
         hop_index: usize,
-        forward_key: [u8; 32],
+        setup_peel_key: [u8; 32],
     ) -> Result<
         (AnonymousHopView, Option<Box<EncryptedAnonymousSetupLayer>>),
         AnonymousPathManagerError,
@@ -726,12 +801,38 @@ impl AnonymousPathManager {
         )?;
         let plaintext = self
             .route_crypto
-            .decrypt_hop_layer(forward_key, layer.nonce, &aad, &layer.ciphertext)
+            .decrypt_hop_layer(setup_peel_key, layer.nonce, &aad, &layer.ciphertext)
             .await
             .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
         let payload = serialization::from_slice::<EncryptedSetupPayload>(&plaintext)
             .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))?;
         Ok((payload.hop_view, payload.next))
+    }
+
+    pub async fn derive_setup_peel_key_for_hop(
+        &self,
+        setup: &EncryptedAnonymousSetupObject,
+        layer: &EncryptedAnonymousSetupLayer,
+        hop_index: usize,
+        route_private_key: [u8; 32],
+    ) -> Result<[u8; 32], AnonymousPathManagerError> {
+        let hop_authority = layer.hop_authority.ok_or_else(|| {
+            AnonymousPathManagerError::RouteCrypto("missing hop authority".into())
+        })?;
+        let context = setup_peel_context(
+            setup.established_path.scope,
+            setup.established_path.path_id,
+            hop_authority,
+            hop_index as u16,
+        )?;
+        self.route_crypto
+            .derive_route_setup_key(
+                route_private_key,
+                setup.setup_ephemeral_public_key,
+                context.as_slice(),
+            )
+            .await
+            .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))
     }
 
     pub async fn wrap_reply_payload(
@@ -1114,6 +1215,22 @@ fn setup_layer_aad(
         .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))
 }
 
+fn setup_peel_context(
+    scope: ContextId,
+    path_id: [u8; 32],
+    authority_id: AuthorityId,
+    hop_index: u16,
+) -> Result<Vec<u8>, AnonymousPathManagerError> {
+    serialization::to_vec(&(
+        b"aura.route.setup.peel.v1",
+        scope,
+        path_id,
+        authority_id,
+        hop_index,
+    ))
+    .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))
+}
+
 fn reply_layer_aad(
     path_id: [u8; 32],
     hop_index: u16,
@@ -1135,10 +1252,57 @@ fn remember_replay_marker(state: &mut PathState, marker: [u8; 32], max_entries: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::RandomCoreEffects;
     use aura_core::service::{
         LinkEndpoint, LinkProtectionMode, LinkProtocol, MoveEnvelope, MovePathBinding,
         PathProtectionMode, RelayHop, Route,
     };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TestRandom {
+        next: AtomicUsize,
+        seeds: Vec<[u8; 32]>,
+    }
+
+    impl TestRandom {
+        fn single(seed: u8) -> Self {
+            Self {
+                next: AtomicUsize::new(0),
+                seeds: vec![[seed; 32]],
+            }
+        }
+
+        fn sequence(seeds: impl IntoIterator<Item = u8>) -> Self {
+            Self {
+                next: AtomicUsize::new(0),
+                seeds: seeds.into_iter().map(|seed| [seed; 32]).collect(),
+            }
+        }
+
+        fn draws(&self) -> usize {
+            self.next.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl RandomCoreEffects for TestRandom {
+        async fn random_bytes(&self, len: usize) -> Vec<u8> {
+            let seed = self.random_bytes_32().await;
+            seed.into_iter().cycle().take(len).collect()
+        }
+
+        async fn random_bytes_32(&self) -> [u8; 32] {
+            let index = self.next.fetch_add(1, Ordering::SeqCst);
+            self.seeds
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| [index as u8; 32])
+        }
+
+        async fn random_u64(&self) -> u64 {
+            u64::from_le_bytes(self.random_bytes_32().await[..8].try_into().unwrap())
+        }
+    }
 
     fn authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
@@ -1152,18 +1316,30 @@ mod tests {
         LinkEndpoint::direct(LinkProtocol::Tcp, format!("127.0.0.1:{port}"))
     }
 
-    fn route() -> Route {
+    async fn route_for(manager: &AnonymousPathManager) -> Route {
         Route {
             hops: vec![
                 RelayHop {
                     authority_id: authority(2),
                     link_endpoint: endpoint(7000),
-                    route_layer_public_key: Some([2; 32]),
+                    route_layer_public_key: Some(
+                        manager
+                            .route_crypto
+                            .route_public_key([2; 32])
+                            .await
+                            .expect("derive first route public key"),
+                    ),
                 },
                 RelayHop {
                     authority_id: authority(3),
                     link_endpoint: endpoint(7001),
-                    route_layer_public_key: Some([3; 32]),
+                    route_layer_public_key: Some(
+                        manager
+                            .route_crypto
+                            .route_public_key([3; 32])
+                            .await
+                            .expect("derive second route public key"),
+                    ),
                 },
             ],
             destination: endpoint(9000),
@@ -1175,9 +1351,11 @@ mod tests {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let random = TestRandom::single(7);
+        let route = route_for(&manager).await;
 
         let (path, setup) = manager
-            .establish_path(context(1), authority(9), route(), [7; 32], 100)
+            .establish_path(context(1), authority(9), route, &random, 100)
             .await
             .expect("establish encrypted path");
 
@@ -1206,33 +1384,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn establish_path_consumes_one_fresh_nonce_from_random_effects() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let manager =
+            AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let random = TestRandom::single(7);
+        let route = route_for(&manager).await;
+
+        manager
+            .establish_path(context(1), authority(9), route, &random, 100)
+            .await
+            .expect("establish encrypted path");
+
+        assert_eq!(random.draws(), 1);
+    }
+
+    #[tokio::test]
+    async fn fresh_establish_entropy_changes_path_replay_and_hop_keys() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let manager =
+            AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let random = TestRandom::sequence([7, 8]);
+        let route = route_for(&manager).await;
+
+        let (first_path, first_setup) = manager
+            .establish_path(context(1), authority(9), route.clone(), &random, 100)
+            .await
+            .expect("first establish");
+        let (second_path, second_setup) = manager
+            .establish_path(context(1), authority(9), route, &random, 100)
+            .await
+            .expect("second establish");
+
+        assert_ne!(first_path.path_id, second_path.path_id);
+        assert_ne!(
+            first_setup.established_path.path_id,
+            second_setup.established_path.path_id
+        );
+        let (first_view, _) = manager
+            .peel_setup_layer(
+                first_setup.root.as_ref().expect("first root"),
+                0,
+                manager
+                    .derive_setup_peel_key_for_hop(
+                        &first_setup,
+                        first_setup.root.as_ref().expect("first root"),
+                        0,
+                        [2; 32],
+                    )
+                    .await
+                    .expect("derive first setup peel key"),
+            )
+            .await
+            .expect("peel first setup");
+        let (second_view, _) = manager
+            .peel_setup_layer(
+                second_setup.root.as_ref().expect("second root"),
+                0,
+                manager
+                    .derive_setup_peel_key_for_hop(
+                        &second_setup,
+                        second_setup.root.as_ref().expect("second root"),
+                        0,
+                        [2; 32],
+                    )
+                    .await
+                    .expect("derive second setup peel key"),
+            )
+            .await
+            .expect("peel second setup");
+        assert_ne!(first_view.replay_window_id, second_view.replay_window_id);
+        assert_ne!(first_path.forward_hop_keys, second_path.forward_hop_keys);
+        assert_ne!(first_path.backward_hop_keys, second_path.backward_hop_keys);
+        assert_eq!(random.draws(), 2);
+    }
+
+    #[tokio::test]
     async fn encrypted_setup_peels_forward_one_hop_at_a_time() {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let random = TestRandom::single(7);
+        let route = route_for(&manager).await;
 
-        let (path, setup) = manager
-            .establish_path(context(1), authority(9), route(), [7; 32], 100)
+        let (_path, setup) = manager
+            .establish_path(context(1), authority(9), route, &random, 100)
             .await
             .expect("establish encrypted path");
         let root = setup.root.as_ref().expect("root layer");
+        let first_setup_key = manager
+            .derive_setup_peel_key_for_hop(&setup, root, 0, [2; 32])
+            .await
+            .expect("derive first setup peel key");
         let (first_view, next) = manager
-            .peel_setup_layer(root, 0, path.forward_hop_keys[0])
+            .peel_setup_layer(root, 0, first_setup_key)
             .await
             .expect("peel first layer");
         assert_eq!(first_view.hop_authority, Some(authority(2)));
         assert_eq!(first_view.successor, Some(endpoint(7001)));
         let next = next.expect("second encrypted layer");
+        let wrong_setup_key = manager
+            .derive_setup_peel_key_for_hop(&setup, &next, 1, [2; 32])
+            .await
+            .expect("derive wrong setup peel key");
         let wrong_key_error = manager
-            .peel_setup_layer(&next, 1, path.forward_hop_keys[0])
+            .peel_setup_layer(&next, 1, wrong_setup_key)
             .await
             .expect_err("wrong hop key should not inspect deeper layer");
         assert!(matches!(
             wrong_key_error,
             AnonymousPathManagerError::RouteCrypto(_)
         ));
+        let second_setup_key = manager
+            .derive_setup_peel_key_for_hop(&setup, &next, 1, [3; 32])
+            .await
+            .expect("derive second setup peel key");
         let (second_view, terminal) = manager
-            .peel_setup_layer(&next, 1, path.forward_hop_keys[1])
+            .peel_setup_layer(&next, 1, second_setup_key)
             .await
             .expect("peel second layer");
         assert_eq!(second_view.hop_authority, Some(authority(3)));
@@ -1245,9 +1513,11 @@ mod tests {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let random = TestRandom::single(4);
+        let route = route_for(&manager).await;
 
         let (path, _) = manager
-            .establish_path(context(1), authority(9), route(), [4; 32], 100)
+            .establish_path(context(1), authority(9), route, &random, 100)
             .await
             .expect("establish encrypted path");
         let wrapped = manager
@@ -1271,13 +1541,36 @@ mod tests {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let route = route_for(&manager).await;
 
+        let first_control = manager
+            .open_establish_session(context(1), authority(9), &route, "owner-a", 100)
+            .await
+            .expect("open first establish session");
         manager
-            .establish_path(context(1), authority(9), route(), [5; 32], 100)
+            .establish_path_with_control_and_nonce(
+                &first_control,
+                context(1),
+                authority(9),
+                route.clone(),
+                [5; 32],
+                100,
+            )
             .await
             .expect("first establish");
+        let second_control = manager
+            .open_establish_session(context(1), authority(9), &route, "owner-b", 101)
+            .await
+            .expect("open second establish session");
         let error = manager
-            .establish_path(context(1), authority(9), route(), [5; 32], 101)
+            .establish_path_with_control_and_nonce(
+                &second_control,
+                context(1),
+                authority(9),
+                route,
+                [5; 32],
+                101,
+            )
             .await
             .expect_err("duplicate setup should reject");
         assert!(matches!(
@@ -1291,9 +1584,11 @@ mod tests {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let random = TestRandom::single(4);
+        let route = route_for(&manager).await;
 
         let (path, _) = manager
-            .establish_path(context(1), authority(9), route(), [4; 32], 100)
+            .establish_path(context(1), authority(9), route, &random, 100)
             .await
             .expect("establish path");
         let error = manager
@@ -1311,13 +1606,14 @@ mod tests {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let random = TestRandom::single(1);
 
         let error = manager
             .establish_path(
                 context(1),
                 authority(9),
                 Route::direct(endpoint(9000)),
-                [1; 32],
+                &random,
                 100,
             )
             .await
@@ -1333,12 +1629,20 @@ mod tests {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let route = route_for(&manager).await;
         let control = manager
-            .open_establish_session(context(1), authority(9), &route(), "path-owner", 100)
+            .open_establish_session(context(1), authority(9), &route, "path-owner", 100)
             .await
             .expect("open establish session");
         let (_path, _setup, completed) = manager
-            .establish_path_with_control(&control, context(1), authority(9), route(), [8; 32], 110)
+            .establish_path_with_control(
+                &control,
+                context(1),
+                authority(9),
+                route,
+                &TestRandom::single(8),
+                110,
+            )
             .await
             .expect("complete controlled establish");
         assert!(matches!(
@@ -1354,13 +1658,21 @@ mod tests {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let route = route_for(&manager).await;
         let mut control = manager
-            .open_establish_session(context(1), authority(9), &route(), "owner-a", 100)
+            .open_establish_session(context(1), authority(9), &route, "owner-a", 100)
             .await
             .expect("open establish session");
         control.ownership_capability.generation = 99;
         let error = manager
-            .establish_path_with_control(&control, context(1), authority(9), route(), [9; 32], 110)
+            .establish_path_with_control(
+                &control,
+                context(1),
+                authority(9),
+                route,
+                &TestRandom::single(9),
+                110,
+            )
             .await
             .expect_err("stale owner should reject");
         match error {
@@ -1376,12 +1688,20 @@ mod tests {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let route = route_for(&manager).await;
         let control = manager
-            .open_establish_session(context(1), authority(9), &route(), "owner-a", 100)
+            .open_establish_session(context(1), authority(9), &route, "owner-a", 100)
             .await
             .expect("open establish session");
         let error = manager
-            .establish_path_with_control(&control, context(1), authority(9), route(), [6; 32], 250)
+            .establish_path_with_control(
+                &control,
+                context(1),
+                authority(9),
+                route,
+                &TestRandom::single(6),
+                250,
+            )
             .await
             .expect_err("timed out control should reject");
         match error {
@@ -1397,8 +1717,9 @@ mod tests {
         let registry = Arc::new(ServiceRegistry::new());
         let manager =
             AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let route = route_for(&manager).await;
         let control = manager
-            .open_establish_session(context(1), authority(9), &route(), "owner-a", 100)
+            .open_establish_session(context(1), authority(9), &route, "owner-a", 100)
             .await
             .expect("open establish session");
         let cancelled = manager

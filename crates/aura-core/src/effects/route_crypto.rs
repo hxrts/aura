@@ -25,6 +25,20 @@ pub struct RouteHopKeyMaterial {
 /// Stateless route-layer hop cryptography.
 #[async_trait]
 pub trait RouteCryptoEffects: Send + Sync {
+    /// Derive a route-layer public key from route-layer private key material.
+    async fn route_public_key(
+        &self,
+        route_private_key: [u8; 32],
+    ) -> Result<[u8; 32], RouteCryptoError>;
+
+    /// Derive a route setup peel key from local private and peer public key material.
+    async fn derive_route_setup_key(
+        &self,
+        local_private_key: [u8; 32],
+        peer_public_key: [u8; 32],
+        context: &[u8],
+    ) -> Result<[u8; 32], RouteCryptoError>;
+
     /// Derive one hop's route-layer keys from a route secret seed and hop index.
     async fn derive_hop_key_material(
         &self,

@@ -26,9 +26,9 @@ The route layer does not defeat a global passive observer. It does not create a 
 
 ## 4. Route-Layer Construction
 
-Aura adopts a route-layer construction based on Curve25519, Aura's centralized KDF, and `ChaCha20-Poly1305`.
+Aura adopts a route-layer construction based on Curve25519, Aura's KDF, and `ChaCha20-Poly1305`. Each anonymous path setup flow consumes manager-owned setup entropy before deriving the route identifier, replay-window identifier, or hop keys. The initiator derives one setup ephemeral route-layer public key for that setup. Each hop derives its setup peel key from its route-layer private key, the initiator setup ephemeral public key, the path id, the scope, its authority id, and its hop index under the `aura.route.setup.peel.v1` context.
 
-Each anonymous path setup flow creates a fresh route identifier and fresh ephemeral route secret material. Each hop derives a forward hop key stream and a backward hop key stream from the route secret material through Aura's centralized KDF. Each hop encrypts or decrypts only its own layer with `ChaCha20-Poly1305`. Each hop receives enough authenticated metadata to identify the next processing action, but not enough to reconstruct deeper route state.
+Forward and backward path keys remain inside the encrypted hop-local setup payload. A hop receives those keys only after it proves it can peel its own setup layer with its private route key. Each hop encrypts or decrypts only its own layer with `ChaCha20-Poly1305`. Each hop receives enough authenticated metadata to identify the next processing action, but not enough to reconstruct deeper route state.
 
 Aura uses SURB-like reply blocks as Aura-native typed objects with explicit expiry, scope, and accountability semantics.
 
@@ -36,9 +36,9 @@ Aura uses SURB-like reply blocks as Aura-native typed objects with explicit expi
 
 The service family model is always active. `Establish`, `Move`, and `Hold` are the normal service vocabulary for path creation, opaque movement, and custody.
 
-`LocalRoutingProfile::passthrough()` is the pre-privacy routing baseline. It uses mixing depth `0`, delay `0`, cover rate `0`, and path diversity `1`. `Hold` remains active under passthrough because it is an availability service, not a routing-profile knob.
+`LocalRoutingProfile::passthrough()` is the pre-privacy routing baseline. It uses mixing depth `0`, delay `0`, cover rate `0`, and path diversity `1`. `Hold` remains available under passthrough because it is an availability service, not a routing-profile knob.
 
-Production privacy uses encrypted path setup and encrypted `MoveEnvelope` processing with one fixed adaptive policy. Users do not tune this policy. Development and simulation may sweep policy constants. Production nodes use the evidence-backed constants shipped with the build. The current fixed policy uses path-diversity floor `2`, cover floor `2` packets per second, delay gain denominator `3`, neighborhood hold retention window `120s`, and retrieval-capability rotation beginning `10s` before expiry.
+Production privacy uses encrypted path setup and encrypted `MoveEnvelope` processing with one fixed adaptive policy that users do not tune. Development and simulation may sweep policy constants, while production nodes use the evidence-backed constants shipped with the build. The current fixed policy uses path-diversity floor `2`, cover floor `2` packets per second, delay gain denominator `3`, neighborhood hold retention window `120s`, and retrieval-capability rotation beginning `10s` before expiry. Organic application and sync retrieval bytes are converted into canonical cover-packet units before the runtime computes the synthetic-cover gap.
 
 ## 5. Link Encryption Versus Path Encryption
 
@@ -56,11 +56,11 @@ The two layers must remain distinct. Path-layer keys must not be reused as adjac
 
 `NeighborhoodReentryHint` records a board-published re-entry surface. It carries a neighborhood-scoped publication, expiry, replay bound, and signed route-surface material. It does not expose a globally enumerable topology map.
 
-Bounded bootstrap introductions carry explicit introducer identity, introduced authority, scope, expiry, maximum remaining depth, and fan-out limits. They are trust and bootstrap evidence rather than canonical shared route tiers.
+`BootstrapIntroductionHint` carries introducer authority, introduced authority, scope, expiry, replay bound, maximum remaining depth, and maximum fan-out. It is trust and bootstrap evidence rather than a canonical shared route tier.
 
 ### 6.2 Path and movement objects
 
-`EstablishedPath` is the reusable route object consumed by `Move`. `MoveEnvelope` is the shared movement envelope family. Encrypted peel processing is the production route-layer behavior and preserves the accountable movement boundary.
+`EstablishedPath` is the reusable route object consumed by `Move`. `MoveEnvelope` is the shared movement envelope family. Encrypted setup objects carry the setup ephemeral public key needed for hop-local setup peel derivation. Encrypted peel processing is the production route-layer behavior and preserves the accountable movement boundary.
 
 Typed reply blocks provide backward anonymous delivery. Their semantics are defined in section 11.
 
@@ -72,7 +72,7 @@ Aura explicitly rejects bootstrap designs that rely on a singleton bootstrap aut
 
 ## 8. Neighborhood Discovery Boards
 
-Neighborhood discovery boards publish signed, expiring, scope-limited re-entry hints. A board publication must include the publishing authority, the scoped neighborhood or re-entry domain, an expiry time, a replay-bounded publication identifier, and the advertised route-layer or move-surface public material.
+Neighborhood discovery boards publish signed, expiring, scope-limited re-entry hints using the `NeighborhoodReentryHint` record. A publication carries the publishing authority, the scoped neighborhood or re-entry domain, an expiry time, a replay-bounded publication identifier, and the advertised route-layer or move-surface public material.
 
 Board contents are advisory. Runtime caches may merge them. Runtime caches must not elevate them into canonical route truth. Runtime caches must not expose a stable global graph projection derived from board contents.
 
@@ -86,27 +86,28 @@ Introductions are valid only within their declared bounds. Runtime policy may co
 
 Every forwarding hop performs the following route-layer steps:
 
-1. authenticate and decrypt the local hop layer
-2. verify route identifier, hop position, expiry, and replay bound
-3. derive the local forward or backward hop key stream
-4. recover the next forwarding instruction or reply instruction
-5. emit local accountability state and continue on the adjacent secure channel
+1. derive the setup peel key from the setup ephemeral public key and the hop route-layer private key
+2. authenticate and decrypt the local hop layer
+3. verify route identifier, hop position, expiry, and replay bound
+4. recover the local forward or backward hop key stream
+5. recover the next forwarding instruction or reply instruction
+6. emit local accountability state and continue on the adjacent secure channel
 
 A hop may learn that it is on the route, the previous and next hops on the adjacent edges, and its local replay and expiry state. A hop may not learn the full route, deeper hop keys, the final destination unless it is the exit hop, or the full reply path unless it is processing its own reply layer.
 
 ## 11. Typed Reply Blocks
 
-Aura uses typed reply blocks for backward anonymous delivery. A reply block is an Aura-native object with scope, route binding, expiry, replay bound, backward hop material, and accountability linkage.
+Aura uses typed reply blocks for backward anonymous delivery. The canonical record is `AccountabilityReplyBlock` and carries scope, expiry, nonce, an opaque single-use token, and a command-scoped accountability binding. Route binding is verifier-local state associated with the reply-block record and the submitted `EstablishedPathRef`. Backward hop material stays on the companion `EstablishedPath` and is not embedded in the reply block.
 
-Reply blocks are not borrowed Tor SURB packets. They are typed Aura objects that integrate with Aura movement, accountability, and retrieval-capability rotation rules.
+The opaque token is bound to path id, scope, reply-block kind, command scope, expiry, nonce, and a local token secret. Verification rejects cross-path use, cross-kind use, forged tokens built only from visible fields, and replay after the first valid witness submission. This keeps the wire-visible reply block from gaining a stable route-correlation field.
 
-Reply blocks must remain distinct from application message payloads, adjacent-peer secure channel state, and bootstrap trust records.
+Each service family wraps the canonical record in a typed form. `MoveReceiptReplyBlock`, `HoldDepositReplyBlock`, `HoldRetrievalReplyBlock`, and `HoldAuditReplyBlock` integrate with Aura movement, accountability, and retrieval-capability rotation rules. Reply blocks are not borrowed Tor SURB packets and must remain distinct from application message payloads, adjacent-peer secure channel state, and bootstrap trust records.
 
 ## 11.1 Movement Scheduling
 
 The runtime schedules protected movement through shared classes rather than separate transport families. Sync-blended traffic may wait for anti-entropy windows. Bounded-deadline replies carry accountability or control traffic with shorter deadlines. Synthetic cover fills the remaining cover floor.
 
-Application traffic and sync-blended retrieval reduce the synthetic-cover gap. Accountability replies are measured separately in the current deployment model. They do not reduce the first-deployment synthetic cover floor.
+Application traffic and sync-blended retrieval reduce the synthetic-cover gap after conversion into canonical cover-packet units. Accountability replies are measured separately in the current deployment model. They do not reduce the first-deployment synthetic cover floor.
 
 ## 12. Per-Boundary Leakage
 
@@ -130,10 +131,12 @@ Aura chooses Curve25519, a centralized KDF surface, and `ChaCha20-Poly1305` beca
 
 ## 15. Required Implementation Boundaries
 
-The implementation must satisfy several boundaries. `aura-effects` owns hop crypto primitives. Shared record types for bootstrap hints and re-entry hints remain authoritative typed objects. Runtime-owned caches merge bootstrap records locally and expire them locally.
+The implementation must satisfy several boundaries. `aura-effects` owns hop crypto primitives, route-layer public key derivation, and setup key agreement. Shared record types for bootstrap hints and re-entry hints remain authoritative typed objects. Runtime-owned caches merge bootstrap records locally and expire them locally.
+
+`AnonymousPathManager` owns setup entropy consumption, setup ephemeral public key publication, encrypted setup object construction, and anonymous established-path lifecycle. `HoldManager` owns verifier-local reply-block path binding and single-use token state. These runtime-owned services may expose typed records, but they must not push route-secret derivation or token verification into rendezvous descriptors or application payloads.
 
 `MoveEnvelope` remains the shared accountable movement boundary. `transparent_onion` remains a debug and simulation tool only. Production paths use encrypted peel processing. Transparent setup and header inspection objects remain quarantined behind the explicit `transparent_onion` feature surface and must fail closed in release production builds.
 
 ## 16. Summary
 
-Aura uses existing Noise-based adjacent-peer channels for link encryption and a separate Aura-native route-layer construction for anonymous path encryption. Bootstrap and re-entry use overlapping signed and expiring surfaces instead of a singleton service. Reply blocks remain typed Aura objects. Runtime selection stays local and does not promote bootstrap provenance into canonical shared route truth.
+Aura uses existing Noise-based adjacent-peer channels for link encryption and a separate Aura-native route-layer construction for anonymous path encryption. Bootstrap and re-entry use overlapping signed and expiring surfaces instead of a singleton service. Reply blocks remain typed Aura objects with verifier-local path binding and single-use keyed tokens. Runtime selection stays local and does not promote bootstrap provenance into canonical shared route truth.

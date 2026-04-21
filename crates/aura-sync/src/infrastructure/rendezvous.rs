@@ -518,8 +518,20 @@ mod tests {
 
     #[test]
     fn sync_blended_hold_window_orders_by_deadline_without_poll_loop() {
+        use aura_core::service::EstablishedPathRef;
+
         let adapter = RendezvousAdapter::new(test_authority(1));
         let context = test_context(5);
+        let first_path = EstablishedPathRef {
+            scope: context,
+            path_id: [12; 32],
+            valid_until: 1_000,
+        };
+        let second_path = EstablishedPathRef {
+            scope: context,
+            path_id: [13; 32],
+            valid_until: 1_000,
+        };
         let window = adapter.plan_sync_blended_hold_window(
             &[
                 SyncBlendedRetrieval {
@@ -527,6 +539,7 @@ mod tests {
                         profile: aura_core::ServiceProfile::DeferredDeliveryHold,
                         scope: context,
                         selector: [2; 32],
+                        reply_path: first_path,
                     },
                     deadline_ms: 200,
                 },
@@ -535,6 +548,7 @@ mod tests {
                         profile: aura_core::ServiceProfile::DeferredDeliveryHold,
                         scope: context,
                         selector: [1; 32],
+                        reply_path: second_path,
                     },
                     deadline_ms: 150,
                 },

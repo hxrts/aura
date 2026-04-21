@@ -8,7 +8,9 @@
 
 #![allow(clippy::unused_unit)]
 
-use aura_core::service::{AccountabilityReplyBlock, EstablishedPath, Route, ServiceFamily};
+use aura_core::service::{
+    AccountabilityReplyBlock, EstablishedPath, EstablishedPathRef, Route, ServiceFamily,
+};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_macros::tell;
 use aura_mpst::CompositionManifest;
@@ -113,6 +115,7 @@ pub struct ReplyBlockWitnessSubmission {
     pub family: ServiceFamily,
     pub kind: ReplyBlockWitnessKind,
     pub reply_block: AccountabilityReplyBlock,
+    pub reply_path: EstablishedPathRef,
     pub providers: Vec<AuthorityId>,
     pub command_scope: [u8; 32],
     pub selector: Option<[u8; 32]>,

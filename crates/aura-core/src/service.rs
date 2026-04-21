@@ -357,6 +357,9 @@ pub struct EncryptedAnonymousSetupLayer {
 pub struct EncryptedAnonymousSetupObject {
     /// Established path reference yielded by the setup.
     pub established_path: EstablishedPathRef,
+    /// Initiator ephemeral route-layer public key for setup peel-key derivation.
+    #[serde(default)]
+    pub setup_ephemeral_public_key: [u8; 32],
     /// Link-layer protection outside the path payload.
     pub link_protection: LinkProtectionMode,
     /// Encrypted path-layer protection mode.
@@ -1080,6 +1083,8 @@ pub struct HoldDepositRequest {
     /// Optional movement handoff metadata when the object arrived via `Move`.
     #[serde(default)]
     pub handoff: Option<MoveToHoldHandoff>,
+    /// Anonymous path that should carry the accountability reply.
+    pub reply_path: EstablishedPathRef,
 }
 
 impl HoldDepositRequest {
@@ -1104,6 +1109,8 @@ pub struct HoldRetrievalRequest {
     pub scope: ContextId,
     /// Opaque selector token derived from one or more retrieval capabilities.
     pub selector: [u8; 32],
+    /// Anonymous path that should carry the accountability reply.
+    pub reply_path: EstablishedPathRef,
 }
 
 impl HoldRetrievalRequest {
@@ -1126,6 +1133,8 @@ pub struct AccountabilityReplyBlock {
     pub scope: ContextId,
     /// Opaque single-use reply token.
     pub token: [u8; 32],
+    /// Wire-visible nonce bound into the verifier-local token record.
+    pub nonce: [u8; 32],
     /// Opaque command binding preventing replay across commands.
     pub command_scope: [u8; 32],
     /// Reply-block expiry timestamp.
@@ -1261,6 +1270,14 @@ mod tests {
 
     fn context(seed: u8) -> ContextId {
         ContextId::new_from_entropy([seed; 32])
+    }
+
+    fn path_ref(scope: ContextId, seed: u8) -> EstablishedPathRef {
+        EstablishedPathRef {
+            scope,
+            path_id: [seed; 32],
+            valid_until: 1_000,
+        }
     }
 
     fn endpoint(address: &str) -> LinkEndpoint {
@@ -1788,11 +1805,13 @@ mod tests {
                 source_path: None,
                 moved_at_ms: 10,
             }),
+            reply_path: path_ref(context(2), 7),
         };
         let retrieval = HoldRetrievalRequest {
             profile: ServiceProfile::CacheReplicaHold,
             scope: context(2),
             selector: [9; 32],
+            reply_path: path_ref(context(2), 8),
         };
 
         assert!(deposit.validate_profile().is_ok());
@@ -1843,6 +1862,7 @@ mod tests {
             inner: AccountabilityReplyBlock {
                 scope: context(7),
                 token: [4; 32],
+                nonce: [6; 32],
                 command_scope: [5; 32],
                 valid_until: 100,
             },

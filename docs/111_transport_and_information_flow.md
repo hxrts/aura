@@ -126,13 +126,11 @@ See [Operation Categories](109_operation_categories.md) for the full consistency
 
 ### 10.1 Adaptive Privacy Movement
 
-`MoveEnvelope` is the shared accountable movement boundary for relay traffic, retrieval traffic, held-object deposit and retrieval, accountability replies, and cover traffic where those flows use the adaptive privacy substrate. These flows do not regain separate mailbox, retrieval, relay, or cache-specific transport families.
+`MoveEnvelope` is the shared accountable movement boundary for relay traffic, retrieval traffic, held-object deposit and retrieval, accountability replies, and cover traffic where those flows use the adaptive privacy substrate. These flows do not regain separate mailbox, retrieval, relay, or cache-specific transport families. Movement runs over an explicit path, which may be a direct established path in passthrough mode or an anonymous `EstablishedPath` in privacy mode. `Move` does not smuggle route setup back into the envelope.
 
-Movement runs over an explicit path. The path may be a direct established path in passthrough mode, or an anonymous `EstablishedPath` in privacy mode. `Move` does not smuggle route setup back into the envelope.
+Typed reply blocks carry nonce, command-scope binding, and an opaque single-use token. The verifier binds each reply block to the submitted `EstablishedPathRef` through local reply-block state rather than through a stable wire-visible route field. This keeps accountability replies on the movement substrate without creating a separate callback transport.
 
-The runtime schedules movement through three classes. Sync-blended traffic rides anti-entropy windows when deadlines allow it. Bounded-deadline replies carry accountability and control traffic that needs shorter latency. Synthetic cover fills the remaining cover floor after application traffic and sync-blended retrieval are counted.
-
-Accountability replies share the same movement substrate, but the first deployment measures them separately. They do not reduce the synthetic cover floor. This prevents mandatory witness traffic from being mistaken for discretionary cover.
+The runtime schedules movement through three classes: sync-blended traffic rides anti-entropy windows when deadlines allow it, bounded-deadline replies carry accountability and control traffic that needs shorter latency, and synthetic cover fills the remaining cover floor after application traffic and sync-blended retrieval are counted as canonical cover-packet units. Accountability replies share the same movement substrate, but the first deployment measures them separately. They do not reduce the synthetic cover floor. This prevents mandatory witness traffic from being mistaken for discretionary cover.
 
 ### 10.2 AMP Channel Epoch Data Plane
 

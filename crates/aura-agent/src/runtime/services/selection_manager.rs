@@ -23,6 +23,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+const CANONICAL_COVER_PACKET_SIZE_BYTES: u64 = 1024;
+
 #[allow(dead_code)] // Cleanup target (2026-07): drop after actor ingress is exercised outside local tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SelectionManagerCommand {
@@ -318,9 +320,9 @@ impl SelectionManagerService {
             None
         };
 
-        let synthetic_cover_gap_per_second = routing_profile.cover_rate_per_second.saturating_sub(
-            ((health.traffic_volume_bytes + health.sync_blended_retrieval_bytes) / 1024) as u32,
-        );
+        let synthetic_cover_gap_per_second = routing_profile
+            .cover_rate_per_second
+            .saturating_sub(organic_cover_packets_per_second(&health));
 
         let profile = LocalSelectionProfile {
             scope,
@@ -1062,6 +1064,17 @@ fn apply_profile_hysteresis(
     candidate
 }
 
+fn organic_cover_packets_per_second(health: &LocalHealthSnapshot) -> u32 {
+    let organic_bytes = health
+        .traffic_volume_bytes
+        .saturating_add(health.sync_blended_retrieval_bytes);
+    organic_bytes
+        .saturating_add(CANONICAL_COVER_PACKET_SIZE_BYTES.saturating_sub(1))
+        .checked_div(CANONICAL_COVER_PACKET_SIZE_BYTES)
+        .unwrap_or(0)
+        .min(u32::MAX as u64) as u32
+}
+
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RuntimeService for SelectionManagerService {
@@ -1263,10 +1276,11 @@ mod tests {
             .message_class_constraints
             .iter()
             .any(|constraint| constraint.message_class == PrivacyMessageClass::Consensus));
-        assert!(
-            profile.synthetic_cover_gap_per_second
-                <= profile.move_decision.routing_profile.cover_rate_per_second
+        assert_eq!(
+            profile.move_decision.routing_profile.cover_rate_per_second,
+            1
         );
+        assert_eq!(profile.synthetic_cover_gap_per_second, 0);
         assert_eq!(profile.health.accountability_reply_bytes, 2048);
     }
 

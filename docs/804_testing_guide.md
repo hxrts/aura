@@ -153,6 +153,8 @@ also add:
 - removal of the superseded compatibility helper or explicit inventorying of
   the deferred cleanup
 
+Adaptive privacy route-layer changes need targeted conformance coverage for manager-owned setup entropy, per-hop setup peel derivation from route-layer private keys, cross-path and cross-kind reply-block rejection, single-use reply-block replay rejection, and exact cover-packet unit accounting. These tests should sit near the owning service or effect implementation unless the behavior requires simulator-scale evidence.
+
 ### Browser Compatibility Surface
 
 The browser compatibility surface includes the explicit `stage_runtime_identity` bootstrap handoff entrypoint plus the page-owned semantic submission queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`). The browser also publishes page-owned semantic submit readiness metadata. This includes whether the enqueue surface is installed (`enqueue_ready`), the active vs ready generation boundary, controller presence, current shell phase, and any in-flight bootstrap transition detail. Driver startup and recovery waits bind to product-owned bootstrap and rebinding state instead of stale driver-local probes.
