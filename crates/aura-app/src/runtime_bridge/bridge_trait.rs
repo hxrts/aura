@@ -8,6 +8,7 @@ use super::{
     SettingsBridgeState, SyncStatus,
 };
 use crate::core::IntentError;
+use crate::ui_contract::AmpChannelTransitionSnapshot;
 use crate::ReactiveHandler;
 use async_trait::async_trait;
 use aura_core::effects::amp::{
@@ -141,6 +142,13 @@ pub trait RuntimeBridge: Send + Sync {
         context: ContextId,
         channel: ChannelId,
     ) -> Result<Vec<AuthorityId>, IntentError>;
+
+    /// Return reducer-visible AMP transition diagnostics for one channel.
+    async fn amp_channel_transition_diagnostics(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<Option<AmpChannelTransitionSnapshot>, IntentError>;
 
     /// Retry channel-invitation acceptance notifications for an already
     /// accepted imported invitation once the receiver has established

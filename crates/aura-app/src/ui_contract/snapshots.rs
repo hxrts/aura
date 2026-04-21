@@ -46,6 +46,51 @@ pub struct OperationSnapshot {
     pub state: OperationState,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AmpTransitionState {
+    Observed,
+    A2Live,
+    A2Conflict,
+    A3Finalized,
+    A3Conflict,
+    Aborted,
+    Superseded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AmpTransitionPolicySnapshot {
+    Normal,
+    Additive,
+    Subtractive,
+    EmergencyQuarantine,
+    EmergencyCryptoshred,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AmpAccusationDiagnostic {
+    pub evidence_id: String,
+    pub witness: Option<String>,
+    pub cooldown_until_generation: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AmpChannelTransitionSnapshot {
+    pub channel: ChannelFactKey,
+    pub stable_epoch: u64,
+    pub state: AmpTransitionState,
+    pub live_transition_id: Option<String>,
+    pub finalized_transition_id: Option<String>,
+    pub conflict_evidence: Vec<String>,
+    pub emergency_policy: Option<AmpTransitionPolicySnapshot>,
+    pub suspect_authorities: Vec<String>,
+    pub quarantine_epochs: Vec<u64>,
+    pub prune_before_epochs: Vec<u64>,
+    pub cryptoshred_active: bool,
+    pub accusation_history: Vec<AmpAccusationDiagnostic>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeEventKind {
@@ -65,6 +110,7 @@ pub enum RuntimeEventKind {
     MessageDeliveryReady,
     RemoteFactsPulled,
     ChatSignalUpdated,
+    AmpChannelTransitionUpdated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,6 +181,9 @@ pub enum RuntimeFact {
         channel_count: u32,
         message_count: u32,
     },
+    AmpChannelTransitionUpdated {
+        transition: AmpChannelTransitionSnapshot,
+    },
 }
 
 impl RuntimeFact {
@@ -157,6 +206,9 @@ impl RuntimeFact {
             Self::MessageDeliveryReady { .. } => RuntimeEventKind::MessageDeliveryReady,
             Self::RemoteFactsPulled { .. } => RuntimeEventKind::RemoteFactsPulled,
             Self::ChatSignalUpdated { .. } => RuntimeEventKind::ChatSignalUpdated,
+            Self::AmpChannelTransitionUpdated { .. } => {
+                RuntimeEventKind::AmpChannelTransitionUpdated
+            }
         }
     }
 
@@ -264,6 +316,16 @@ impl RuntimeFact {
             Self::ChatSignalUpdated { active_channel, .. } => {
                 format!("chat_signal_updated:{active_channel}")
             }
+            Self::AmpChannelTransitionUpdated { transition } => format!(
+                "amp_channel_transition:{}:{:?}",
+                transition
+                    .channel
+                    .name
+                    .as_deref()
+                    .or(transition.channel.id.as_deref())
+                    .unwrap_or("*"),
+                transition.state
+            ),
         }
     }
 
@@ -378,6 +440,26 @@ impl RuntimeFact {
                 active_channel.contains(needle)
                     || channel_count.to_string().contains(needle)
                     || message_count.to_string().contains(needle)
+            }
+            Self::AmpChannelTransitionUpdated { transition } => {
+                transition.channel.matches_needle(needle)
+                    || format!("{:?}", transition.state).contains(needle)
+                    || transition
+                        .live_transition_id
+                        .as_deref()
+                        .is_some_and(|value| value.contains(needle))
+                    || transition
+                        .finalized_transition_id
+                        .as_deref()
+                        .is_some_and(|value| value.contains(needle))
+                    || transition
+                        .conflict_evidence
+                        .iter()
+                        .any(|value| value.contains(needle))
+                    || transition
+                        .suspect_authorities
+                        .iter()
+                        .any(|value| value.contains(needle))
             }
         }
     }
@@ -805,5 +887,39 @@ impl UiSnapshot {
                 &candidate.id == operation_id && &candidate.instance_id == instance_id
             })
             .map(|operation| operation.state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn amp_transition_runtime_fact_is_searchable_and_keyed() {
+        let fact = RuntimeFact::AmpChannelTransitionUpdated {
+            transition: AmpChannelTransitionSnapshot {
+                channel: ChannelFactKey::identified("channel-a"),
+                stable_epoch: 7,
+                state: AmpTransitionState::A2Conflict,
+                live_transition_id: None,
+                finalized_transition_id: None,
+                conflict_evidence: vec!["evidence-1".to_string()],
+                emergency_policy: Some(AmpTransitionPolicySnapshot::EmergencyQuarantine),
+                suspect_authorities: vec!["authority-1".to_string()],
+                quarantine_epochs: vec![8],
+                prune_before_epochs: Vec::new(),
+                cryptoshred_active: false,
+                accusation_history: vec![AmpAccusationDiagnostic {
+                    evidence_id: "evidence-1".to_string(),
+                    witness: None,
+                    cooldown_until_generation: Some(8),
+                }],
+            },
+        };
+
+        assert_eq!(fact.kind(), RuntimeEventKind::AmpChannelTransitionUpdated);
+        assert!(fact.key().contains("amp_channel_transition:channel-a"));
+        assert!(fact.matches_needle("authority-1"));
+        assert!(fact.matches_needle("evidence-1"));
     }
 }

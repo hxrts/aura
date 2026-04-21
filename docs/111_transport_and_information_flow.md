@@ -176,6 +176,13 @@ Emergency transitions protect future traffic and reduce future at-rest
 exposure on honest devices. They do not retroactively protect data already
 seen, decrypted, or exfiltrated before cutover.
 
+Operator diagnostics must present emergency AMP actions with that limitation:
+quarantine and cryptoshred reduce future exposure and local readable remnants
+after the reducer exposes the emergency successor, but they are not an incident
+response guarantee for content already copied outside honest devices. Cooldown
+and accusation diagnostics are generation/evidence based; wall-clock timers are
+operator display metadata only and are not reducer inputs.
+
 Channel emergency facts do not automatically remove authority-root membership
 or recovery/governance rights. Recovery suspension, governance suspension, and
 durable structural removal are separate authority-scoped governance actions

@@ -20,6 +20,10 @@ use aura_app::runtime_bridge::{
     RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
+use aura_app::ui_contract::{
+    AmpAccusationDiagnostic, AmpChannelTransitionSnapshot, AmpTransitionPolicySnapshot,
+    AmpTransitionState, ChannelFactKey,
+};
 use aura_app::views::home::{HomeState, HomesState};
 use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
@@ -260,6 +264,86 @@ async fn inspect_channel_context_facts(
     }
 
     Ok(inspection)
+}
+
+fn amp_transition_snapshot(
+    channel: ChannelId,
+    stable_epoch: u64,
+    transition: &aura_journal::reduction::AmpTransitionReduction,
+) -> AmpChannelTransitionSnapshot {
+    let conflict_evidence = transition
+        .conflict_evidence_ids
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let cooldown_until_generation = if transition.conflict_evidence_ids.is_empty() {
+        None
+    } else {
+        Some(stable_epoch.saturating_add(1))
+    };
+    let accusation_history = transition
+        .conflict_evidence_ids
+        .iter()
+        .map(|evidence_id| AmpAccusationDiagnostic {
+            evidence_id: evidence_id.to_string(),
+            witness: None,
+            cooldown_until_generation,
+        })
+        .collect::<Vec<_>>();
+    let emergency_policy = transition
+        .quarantine_epochs
+        .iter()
+        .next()
+        .map(|_| AmpTransitionPolicySnapshot::EmergencyQuarantine)
+        .or_else(|| {
+            (!transition.prune_before_epochs.is_empty())
+                .then_some(AmpTransitionPolicySnapshot::EmergencyCryptoshred)
+        });
+
+    AmpChannelTransitionSnapshot {
+        channel: ChannelFactKey::identified(channel.to_string()),
+        stable_epoch,
+        state: amp_transition_state(transition.status),
+        live_transition_id: transition.live_transition_id.map(|id| id.to_string()),
+        finalized_transition_id: transition.finalized_transition_id.map(|id| id.to_string()),
+        conflict_evidence,
+        emergency_policy,
+        suspect_authorities: transition
+            .emergency_suspects
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        quarantine_epochs: transition.quarantine_epochs.iter().copied().collect(),
+        prune_before_epochs: transition.prune_before_epochs.iter().copied().collect(),
+        cryptoshred_active: !transition.prune_before_epochs.is_empty(),
+        accusation_history,
+    }
+}
+
+fn amp_transition_state(
+    status: aura_journal::reduction::AmpTransitionReductionStatus,
+) -> AmpTransitionState {
+    match status {
+        aura_journal::reduction::AmpTransitionReductionStatus::Observed => {
+            AmpTransitionState::Observed
+        }
+        aura_journal::reduction::AmpTransitionReductionStatus::A2Live => AmpTransitionState::A2Live,
+        aura_journal::reduction::AmpTransitionReductionStatus::A2Conflict => {
+            AmpTransitionState::A2Conflict
+        }
+        aura_journal::reduction::AmpTransitionReductionStatus::A3Finalized => {
+            AmpTransitionState::A3Finalized
+        }
+        aura_journal::reduction::AmpTransitionReductionStatus::A3Conflict => {
+            AmpTransitionState::A3Conflict
+        }
+        aura_journal::reduction::AmpTransitionReductionStatus::Aborted => {
+            AmpTransitionState::Aborted
+        }
+        aura_journal::reduction::AmpTransitionReductionStatus::Superseded => {
+            AmpTransitionState::Superseded
+        }
+    }
 }
 
 async fn resolve_channel_ids_from_local_chat_facts(
@@ -969,6 +1053,26 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         Ok(participants.into_iter().collect())
+    }
+
+    async fn amp_channel_transition_diagnostics(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<Option<AmpChannelTransitionSnapshot>, IntentError> {
+        let effects = self.agent.runtime().effects();
+        let state = aura_protocol::amp::get_channel_state(&effects, context, channel)
+            .await
+            .map_err(|error| {
+                bridge_internal(
+                    "Read AMP transition diagnostics failed",
+                    format!("channel {channel} in context {context}: {error}"),
+                )
+            })?;
+        Ok(state
+            .transition
+            .as_ref()
+            .map(|transition| amp_transition_snapshot(channel, state.chan_epoch, transition)))
     }
 
     async fn resend_channel_invitation_acceptance_notifications(
