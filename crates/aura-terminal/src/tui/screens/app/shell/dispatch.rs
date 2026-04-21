@@ -9,8 +9,8 @@ use crate::tui::screens::app::subscriptions::{
     SharedPendingRequests, SharedThreshold,
 };
 use crate::tui::semantic_lifecycle::{
-    CeremonySubmissionOwner, LocalTerminalOperationOwner, SemanticOperationTransferScope,
-    WorkflowHandoffOperationOwner,
+    prepare_workflow_handoff_transfer, CeremonySubmissionOwner, LocalTerminalOperationOwner,
+    SemanticOperationTransferScope, WorkflowHandoffOperationOwner,
 };
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{publish_ui_update, UiOperationFailure, UiUpdatePublication};
@@ -178,6 +178,7 @@ fn is_passive_notification_runtime_fact(fact: &RuntimeFact) -> bool {
             ..
         } | RuntimeFact::GuardianInvitationAccepted { .. }
             | RuntimeFact::DeviceEnrollmentAccepted { .. }
+            | RuntimeFact::AmpChannelTransitionUpdated { .. }
     )
 }
 
@@ -678,6 +679,10 @@ pub(super) fn execute_harness_followup_command(
                 .map_err(|error| {
                     format!("selected channel context is not canonical for harness invite: {error}")
                 })?;
+            let (operation_instance_id, transfer) = prepare_workflow_handoff_transfer(
+                operation,
+                SemanticOperationTransferScope::InviteActorToChannel,
+            );
             tasks.spawn(async move {
                 let request =
                     aura_app::ui::workflows::messaging::handoff::InviteAuthorityToChannelRequest {
@@ -685,12 +690,10 @@ pub(super) fn execute_harness_followup_command(
                         channel_id,
                         context_id: Some(context_id),
                         channel_name_hint: Some(channel_name_hint),
-                        operation_instance_id: operation.workflow_instance_id(),
+                        operation_instance_id,
                         message: None,
                         ttl_ms: None,
                     };
-                let transfer = operation
-                    .handoff_to_app_workflow(SemanticOperationTransferScope::InviteActorToChannel);
                 if let Err(error) = transfer
                     .run_workflow(
                         app_core.clone(),

@@ -72,6 +72,7 @@ fn authoritative_runtime_replace_kinds() -> Vec<RuntimeEventKind> {
         RuntimeEventKind::RecipientPeersResolved,
         RuntimeEventKind::MessageCommitted,
         RuntimeEventKind::MessageDeliveryReady,
+        RuntimeEventKind::AmpChannelTransitionUpdated,
     ]
 }
 

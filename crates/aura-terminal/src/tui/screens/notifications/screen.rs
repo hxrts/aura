@@ -7,7 +7,10 @@ use iocraft::prelude::*;
 use aura_app::ui::signals::{CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::ui::types::invitations::{InvitationDirection, InvitationStatus, InvitationType};
 use aura_app::ui::types::{truncate_id_for_display, EffectiveName};
-use aura_app::ui_contract::{InvitationFactKind, OperationState, RuntimeFact};
+use aura_app::ui_contract::{
+    AmpTransitionPolicySnapshot, AmpTransitionState, InvitationFactKind, OperationState,
+    RuntimeFact,
+};
 
 use crate::tui::components::{DetailPanel, KeyValue, ListPanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -26,6 +29,7 @@ enum NotificationKind {
     ContactInviteAccepted,
     GuardianInviteAccepted,
     DeviceInviteAccepted,
+    AmpTransition,
 }
 
 impl NotificationKind {
@@ -38,6 +42,7 @@ impl NotificationKind {
             Self::ContactInviteAccepted => "✓",
             Self::GuardianInviteAccepted => "✓",
             Self::DeviceInviteAccepted => "✓",
+            Self::AmpTransition => "!",
         }
     }
 
@@ -50,6 +55,7 @@ impl NotificationKind {
             Self::ContactInviteAccepted => "Contact invite accepted",
             Self::GuardianInviteAccepted => "Guardian invite accepted",
             Self::DeviceInviteAccepted => "Device invite accepted",
+            Self::AmpTransition => "AMP transition",
         }
     }
 
@@ -62,6 +68,7 @@ impl NotificationKind {
             Self::ContactInviteAccepted => Theme::SUCCESS,
             Self::GuardianInviteAccepted => Theme::SUCCESS,
             Self::DeviceInviteAccepted => Theme::SUCCESS,
+            Self::AmpTransition => Theme::WARNING,
         }
     }
 }
@@ -77,6 +84,29 @@ struct NotificationItem {
 
 fn display_contact_name(contact: &aura_app::ui::types::Contact) -> String {
     contact.effective_name()
+}
+
+fn amp_transition_state_label(state: AmpTransitionState) -> &'static str {
+    match state {
+        AmpTransitionState::Observed => "Observed proposal",
+        AmpTransitionState::A2Live => "A2 live successor",
+        AmpTransitionState::A2Conflict => "A2 conflict",
+        AmpTransitionState::A3Finalized => "A3 finalized",
+        AmpTransitionState::A3Conflict => "A3 conflict",
+        AmpTransitionState::Aborted => "Aborted",
+        AmpTransitionState::Superseded => "Superseded",
+    }
+}
+
+fn amp_transition_policy_label(policy: Option<AmpTransitionPolicySnapshot>) -> &'static str {
+    match policy {
+        Some(AmpTransitionPolicySnapshot::Normal) => "normal transition",
+        Some(AmpTransitionPolicySnapshot::Additive) => "additive transition",
+        Some(AmpTransitionPolicySnapshot::Subtractive) => "subtractive transition",
+        Some(AmpTransitionPolicySnapshot::EmergencyQuarantine) => "emergency quarantine",
+        Some(AmpTransitionPolicySnapshot::EmergencyCryptoshred) => "emergency cryptoshred",
+        None => "transition",
+    }
 }
 
 fn runtime_event_timestamp(total_events: usize, index: usize) -> u64 {
@@ -151,6 +181,41 @@ fn runtime_notification_item(
                     .map(|count| format!("{count} registered devices"))
                     .unwrap_or_else(|| "Device enrollment completed".to_string()),
                 kind: NotificationKind::DeviceInviteAccepted,
+                timestamp,
+            })
+        }
+        RuntimeFact::AmpChannelTransitionUpdated { transition } => {
+            let channel = transition
+                .channel
+                .name
+                .as_deref()
+                .or(transition.channel.id.as_deref())
+                .unwrap_or("channel");
+            let state = amp_transition_state_label(transition.state);
+            let mut subtitle = format!(
+                "{state}; stable epoch {}; {}",
+                transition.stable_epoch,
+                amp_transition_policy_label(transition.emergency_policy)
+            );
+            if transition.cryptoshred_active {
+                subtitle.push_str("; pre-emergency readable state may be unavailable");
+            }
+            if !transition.conflict_evidence.is_empty() {
+                subtitle.push_str("; view conflict evidence");
+            }
+            Some(NotificationItem {
+                id: format!(
+                    "amp-transition:{}",
+                    transition
+                        .channel
+                        .name
+                        .as_deref()
+                        .or(transition.channel.id.as_deref())
+                        .unwrap_or("*")
+                ),
+                title: format!("#{channel} transition: {state}"),
+                subtitle,
+                kind: NotificationKind::AmpTransition,
                 timestamp,
             })
         }

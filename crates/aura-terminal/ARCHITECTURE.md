@@ -58,6 +58,12 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
   completion/degraded classification from `aura-app`; `aura-terminal` may
   format that metadata for users, but it must not infer semantic reason codes
   from local error-string matching.
+- AMP channel transition state in notifications and harness snapshots must
+  come from `RuntimeFact::AmpChannelTransitionUpdated` and the shared
+  `aura-app::ui_contract` payload. The TUI may surface live successor,
+  pending finalization, conflict, emergency quarantine, and cryptoshred
+  consequences, but it must not reconstruct those states from local
+  send/receive ratchet guesses.
 
 ### InvariantTerminalUiBoundary
 
@@ -91,6 +97,7 @@ For shared semantic flows, `aura-terminal` uses `Observed` for render state, pro
 |------|----------|---------------------|------------|--------------|
 | TUI command ingress queue and wakeup path | `ActorOwned` | TUI update/event loop | ingress/update-loop code | shell render code, harness |
 | Shell-rendered semantic operation lifecycle | `Observed` | authoritative semantic facts from `aura-app` | local UI presentation state only | harness, user-visible rendering |
+| AMP transition notification projection | `Observed` | `aura-app::ui_contract::RuntimeFact::AmpChannelTransitionUpdated` | local presentation state only | harness snapshots, notifications screen |
 | Owner-typed callback bridges for parity-critical flows | `Observed` shell over upstream `MoveOwned` / `ActorOwned` coordination | upstream workflow/runtime coordinators | local adaptation and owned handoff only; never terminal semantic truth | harness, shell |
 | Observed callback and subscription bridges | `Observed` | upstream workflow/runtime coordinators | local UI adaptation only; never terminal semantic truth | harness, shell |
 | Local focus/selection and nonsemantic view state | `Observed` | TUI shell/model | shell/update-loop code | harness snapshots |

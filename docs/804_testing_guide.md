@@ -205,6 +205,18 @@ Note-to-self is a real AMP channel provisioned at account bootstrap, not a displ
 
 The notifications shared-flow anchor remains navigation-only. Parity coverage for notifications navigation requires the TUI and web shells to expose the same semantic screen transition and detail-view contract, but notification empty-state copy is informational only and must not introduce parity-critical invitation or recovery actions outside the canonical shared workflows.
 
+AMP channel transition frontend coverage uses the same semantic observation
+lane. Transition state, live successor/finalization state, conflict evidence,
+emergency quarantine, cryptoshred status, and suspect exclusion must be
+asserted through `RuntimeFact::AmpChannelTransitionUpdated` entries in
+`UiSnapshot.runtime_events` plus shared notification list ids. Web and TUI
+frontends may render local affordances for emergency alarm, quarantine
+approval, cryptoshred approval, conflict evidence, and finalization status, but
+the controls and operation ids must come from `aura-app::ui_contract`. Tests
+must not infer AMP send/receive authority from local message-ratchet state or
+frontend-specific text; destructive cryptoshred affordances must surface an
+explicit confirmation label and the loss of pre-emergency readability.
+
 Native invitation and device-enrollment exports have an additional transport contract now. In non-wasm runs, `sender_hint` is a transport hint and must use the canonical `tcp://host:port` form rather than websocket-style `ws://` or `wss://` URLs. LAN integration and harness assertions should treat that field as a native direct-transport hint, not as a browser transport endpoint. When the runtime has both a stored rendezvous descriptor and a LAN-discovered descriptor for the same peer, invitation seeding should prefer the discovered descriptor if it adds a `TcpDirect` transport hint that the stored descriptor lacks so native shared-flow tests continue to exercise the direct LAN path.
 
 ### Shared Semantic Ownership Inventory
@@ -634,6 +646,17 @@ just ci-shared-flow-policy
 The shared-flow policy scripts target the published Cargo package names for renamed Layer 6 crates and macros. When invoking raw Cargo commands behind these lanes, use `hxrts-aura-app` and `hxrts-aura-macros` package ids instead of the legacy `aura-app` and `aura-macros` selectors. File-system crate paths remain `crates/aura-app` and `crates/aura-macros`.
 
 When shared flows export data through runtime events, the event payload is part of the contract. Invitation and device-enrollment code capture should come from `RuntimeFact` payloads in `UiSnapshot.runtime_events`, not clipboard scraping or frontend-local heuristics. Shared chat waits should bind to semantic selection state so the harness targets the single shared channel instead of falling back to incidental render order.
+
+AMP transition waits follow that runtime-event rule. Shared scenarios for
+normal transition, delayed/offline witnesses, conflicting `A2` certificates,
+subtractive membership, emergency quarantine, cryptoshred, rejected emergency
+attempts, cooldowns, duplicate-signing evidence, recovery replay, and
+authority-governance non-removal should wait on
+`RuntimeEventKind::AmpChannelTransitionUpdated`, parity snapshots, operation
+lifecycle, quiescence, and final reduced channel state. They must stay
+actor-based and semantic-only; raw DOM selectors, PTY keys, compatibility
+steps, and label-only assertions are diagnostic or frontend-conformance tools,
+not shared AMP evidence.
 
 Use `just ci-ui-parity-contract` for the narrower parity gate. That lane validates shared screen and module mappings, shared-flow scenario coverage, and parity-manifest consistency without running a full scenario matrix.
 

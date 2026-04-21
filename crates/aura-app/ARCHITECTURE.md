@@ -79,6 +79,12 @@ AMP channel transition diagnostics are part of this contract: transition state,
 A2 live/conflict state, emergency policy, suspect authorities, quarantine and
 cryptoshred/prune status, and accusation/cooldown evidence are represented once
 in `src/ui_contract/snapshots.rs` for both frontends.
+Shared AMP transition affordances are also rooted here. The frontend-visible
+controls and operation ids for emergency alarm, quarantine approval,
+cryptoshred approval, conflict-evidence viewing, and finalization-status
+viewing live in `src/ui_contract/ids.rs` and `src/ui_contract/operations.rs`;
+frontend crates may render or submit them, but they may not mint alternate
+semantic ids.
 
 Enforcement locus:
 - `src/ui_contract.rs` defines the shared contract boundary, with ownership split across `src/ui_contract/ids.rs`, `operations.rs`, `shared_flow_support.rs`, `harness_metadata.rs`, `parity.rs`, and `snapshots.rs`.

@@ -47,6 +47,11 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Semantic-command-plane execution: shared scenarios submit typed semantic commands and await typed readiness/handle/quiescence/projection contracts.
 - Frontend-conformance isolation: renderer-specific mechanics are conformance-only and must not be the primary execution substrate for shared flows.
 - Shared scenario inventory discipline: `scenarios/harness_inventory.toml` is semantic-only for shared flows. The remaining compatibility-step IR is justified only by `tests/phases/phase3_state_machine.rs` plus executor-internal metadata/wait shaping, and must not expand back into authoritative scenario coverage.
+- AMP transition shared scenarios observe reducer-derived transition facts
+  through `RuntimeEventKind::AmpChannelTransitionUpdated` in `UiSnapshot`; they
+  must not use frontend-local scripted compatibility steps, raw labels, or DOM
+  selectors to prove live-successor, conflict, quarantine, cryptoshred, or
+  finalization state.
 - Explicit lane capability contract: shared-semantic, raw-UI, and diagnostic-observation access are declared separately at preflight time; SSH is diagnostic-only until it implements the shared semantic contract.
 - Backend enum routing must expose exact lifecycle, diagnostic, observation, raw-UI, and semantic operations. Do not reintroduce broad `as_*` capability-casting wrappers or generic unsupported-capability bailouts.
 - The harness is an `Observed` plus orchestration crate. It may submit commands, wait on typed handles/readiness, and read projections, but it must not author semantic lifecycle truth.

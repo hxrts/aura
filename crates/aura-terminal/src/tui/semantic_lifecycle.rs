@@ -546,6 +546,15 @@ pub(crate) fn submit_local_terminal_operation(
     LocalTerminalOperationOwner::submit(app_core, tasks, tx, operation_id, kind)
 }
 
+pub(crate) fn prepare_workflow_handoff_transfer(
+    operation: WorkflowHandoffOperationOwner,
+    scope: SemanticOperationTransferScope,
+) -> (Option<OperationInstanceId>, SemanticOperationTransfer) {
+    let operation_instance_id = operation.workflow_instance_id();
+    let transfer = operation.handoff_to_app_workflow(scope);
+    (operation_instance_id, transfer)
+}
+
 impl WorkflowHandoffOperationOwner {
     pub(crate) fn submit(
         app_core: Arc<RwLock<AppCore>>,

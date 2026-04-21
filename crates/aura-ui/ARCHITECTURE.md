@@ -39,6 +39,12 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 - Shared screen and modal structure remains stable enough for semantic harness execution and render-convergence checks.
 - Parity-critical IDs, focus semantics, and action shapes are consumed from `aura-app::ui_contract`; they are not locally reinvented here.
 - Contacts-screen friend-management action availability must follow shared `aura-app` relationship-state controls; `aura-ui` may not invent a separate friendship state machine or alternate action matrix.
+- AMP channel transition notification state must be rendered from
+  `RuntimeFact::AmpChannelTransitionUpdated` snapshots and shared
+  `aura-app::ui_contract` action/control ids. `aura-ui` may expose observed
+  affordances for emergency alarm, quarantine approval, cryptoshred approval,
+  conflict evidence, and finalization status, but it may not infer send/receive
+  authority from local message-ratchet state.
 - Layer 7 shells may reuse `aura-ui`'s shared frontend operation-label taxonomy for user-facing error reporting instead of maintaining parallel label enums.
 - Parity-relevant ceremony progress in shared modals must consume upstream-owned lifecycle helpers from `aura-app::ui::workflows`; `aura-ui` must not keep bespoke poll/sleep loops for those paths.
 - Device-enrollment import and accept flows must rely on the upstream
@@ -103,6 +109,7 @@ Contract alignment:
 | Parity-critical operation rendering | `Observed` | Authoritative semantic facts from `aura-app` own truth; `model.rs` projects. |
 | Shared-flow completion helpers | `Observed` | Upstream workflow/runtime coordinators own truth; helpers dismiss UI state only. |
 | Notification action bar and action dispatchers | `Observed` | `notification_actions.rs` submits operations via handoff owners and renders action buttons; terminal truth stays in `aura-app` workflows. |
+| AMP transition notification projection | `Observed` | Reducer-derived runtime events from `aura-app` own transition truth; `app/runtime_views/notifications.rs` chooses shared labels/actions without local ratchet guesses. |
 | Dioxus-specific spawn wiring for shared task-owner | `ActorOwned` helper for Dioxus shells | `task_owner.rs` provides the Dioxus-specific default spawn wiring. The core `FrontendTaskOwner` type lives in `aura-app::frontend_primitives`. |
 | Mounted shell signal subscriptions | `ActorOwned` helper scoped to component lifetime | `app/shell/subscriptions.rs` owns cancellable component-scoped subscription tasks so preserved-profile rebootstrap tears down old generation observers instead of accumulating immortal frontend loops. |
 

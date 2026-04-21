@@ -661,6 +661,11 @@ pub enum ControlId {
     SettingsAddDeviceButton,
     SettingsRemoveDeviceButton,
     ChatSendMessageButton,
+    AmpRaiseEmergencyAlarmButton,
+    AmpApproveQuarantineButton,
+    AmpApproveCryptoshredButton,
+    AmpViewConflictEvidenceButton,
+    AmpViewFinalizationStatusButton,
 }
 
 impl ControlId {
@@ -716,6 +721,11 @@ impl ControlId {
             Self::SettingsAddDeviceButton => Some("aura-settings-add-device"),
             Self::SettingsRemoveDeviceButton => Some("aura-settings-remove-device"),
             Self::ChatSendMessageButton => Some("aura-chat-send-message"),
+            Self::AmpRaiseEmergencyAlarmButton => Some("aura-amp-raise-emergency-alarm"),
+            Self::AmpApproveQuarantineButton => Some("aura-amp-approve-quarantine"),
+            Self::AmpApproveCryptoshredButton => Some("aura-amp-approve-cryptoshred"),
+            Self::AmpViewConflictEvidenceButton => Some("aura-amp-view-conflict-evidence"),
+            Self::AmpViewFinalizationStatusButton => Some("aura-amp-view-finalization-status"),
             Self::Screen(ScreenId::Onboarding) => Some("aura-screen-onboarding"),
             Self::Screen(ScreenId::Neighborhood) => Some("aura-screen-neighborhood"),
             Self::Screen(ScreenId::Chat) => Some("aura-screen-chat"),
@@ -798,7 +808,7 @@ pub fn contacts_friend_action_controls(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_settings_section_item_id, settings_section_item_id,
+        classify_settings_section_item_id, settings_section_item_id, ControlId,
         FrontendSpecificSettingsSectionId, SettingsSectionSurfaceId, SharedSettingsSectionId,
         FRONTEND_SPECIFIC_SETTINGS_SECTIONS, PARITY_CRITICAL_SETTINGS_SECTIONS,
     };
@@ -829,5 +839,29 @@ mod tests {
             assert!(item_ids.insert(item_id), "settings item ids must be unique");
             assert_eq!(classify_settings_section_item_id(item_id), Some(surface));
         }
+    }
+
+    #[test]
+    fn amp_transition_action_controls_have_shared_dom_ids() {
+        assert_eq!(
+            ControlId::AmpRaiseEmergencyAlarmButton.web_dom_id(),
+            Some("aura-amp-raise-emergency-alarm")
+        );
+        assert_eq!(
+            ControlId::AmpApproveQuarantineButton.web_dom_id(),
+            Some("aura-amp-approve-quarantine")
+        );
+        assert_eq!(
+            ControlId::AmpApproveCryptoshredButton.web_dom_id(),
+            Some("aura-amp-approve-cryptoshred")
+        );
+        assert_eq!(
+            ControlId::AmpViewConflictEvidenceButton.web_dom_id(),
+            Some("aura-amp-view-conflict-evidence")
+        );
+        assert_eq!(
+            ControlId::AmpViewFinalizationStatusButton.web_dom_id(),
+            Some("aura-amp-view-finalization-status")
+        );
     }
 }

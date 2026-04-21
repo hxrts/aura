@@ -1835,6 +1835,59 @@ fn semantic_wait_runtime_events_require_authoritative_runtime_facts() {
 }
 
 #[test]
+fn semantic_wait_accepts_amp_transition_runtime_events_only_from_ui_snapshot() {
+    let step = crate::config::CompatibilityStep {
+        id: "wait-amp-transition".to_string(),
+        action: crate::config::CompatibilityAction::WaitFor,
+        runtime_event_kind: Some(RuntimeEventKind::AmpChannelTransitionUpdated),
+        contains: Some("evidence-1".to_string()),
+        ..Default::default()
+    };
+    let mut snapshot = UiSnapshot::loading(ScreenId::Notifications);
+    snapshot.runtime_events.push(RuntimeEventSnapshot {
+        id: RuntimeEventId::synthetic("runtime-event-amp-channel-a"),
+        fact: RuntimeFact::AmpChannelTransitionUpdated {
+            transition: aura_app::ui_contract::AmpChannelTransitionSnapshot {
+                channel: ChannelFactKey::identified("channel-a"),
+                stable_epoch: 2,
+                state: aura_app::ui_contract::AmpTransitionState::A2Conflict,
+                live_transition_id: None,
+                finalized_transition_id: None,
+                conflict_evidence: vec!["evidence-1".to_string()],
+                emergency_policy: Some(
+                    aura_app::ui_contract::AmpTransitionPolicySnapshot::EmergencyQuarantine,
+                ),
+                suspect_authorities: vec!["authority-1".to_string()],
+                quarantine_epochs: vec![3],
+                prune_before_epochs: Vec::new(),
+                cryptoshred_active: false,
+                accusation_history: Vec::new(),
+            },
+        },
+    });
+
+    assert!(
+        semantic_wait_matches(&step, &snapshot),
+        "AMP transition waits must resolve through UiSnapshot.runtime_events"
+    );
+
+    let mut list_only_snapshot = UiSnapshot::loading(ScreenId::Notifications);
+    list_only_snapshot.lists = vec![ListSnapshot {
+        id: ListId::Notifications,
+        items: vec![ListItemSnapshot {
+            id: "amp-transition:channel-a".to_string(),
+            selected: false,
+            confirmation: ConfirmationState::Confirmed,
+            is_current: false,
+        }],
+    }];
+    assert!(
+        !semantic_wait_matches(&step, &list_only_snapshot),
+        "AMP transition waits must not fall back to notification list ids"
+    );
+}
+
+#[test]
 fn semantic_wait_channel_runtime_events_require_authoritative_channel_binding_id() {
     let step = crate::config::CompatibilityStep {
         id: "wait-channel-membership".to_string(),

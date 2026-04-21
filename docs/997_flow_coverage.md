@@ -83,6 +83,7 @@ The two TUI-only conformance scenarios plus Scenario 13 are retained as frontend
 | Global navigation/help | TUI Global Navigation/Help Hotkeys | None | TUI frontend-conformance |
 | Neighborhood keypath navigation | TUI Neighborhood Keypaths/Detail | `real-runtime-mixed-startup-smoke.toml` | TUI frontend-conformance + shared startup |
 | Semantic observation contract | `semantic-observation-browser-smoke.toml` | `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | Browser + TUI |
+| AMP transition frontend observation | Runtime-event parity contract tests | Simulator transition scenarios from Phase 9; future real-runtime AMP transition scenarios | TUI + Web observation contract |
 
 Current parity-critical source changes touched the following shared-flow areas
 and continue to map to the same canonical coverage anchors:
@@ -135,6 +136,17 @@ and continue to map to the same canonical coverage anchors:
   `scenario12-mixed-device-enrollment-removal-e2e.toml` plus
   `shared-settings-parity.toml`, while notifications navigation and authority
   switching remain bound to `shared-notifications-and-authority.toml`.
+- AMP channel transition frontend observation is currently covered as a
+  shared-contract runtime-event surface rather than a full real-runtime
+  scenario. TUI and web must consume
+  `RuntimeFact::AmpChannelTransitionUpdated` through `UiSnapshot.runtime_events`
+  and shared `aura-app::ui_contract` action/control ids; harness tests assert
+  runtime-event waits and parity signatures on that contract. The real-runtime
+  scenario matrix for normal transition, delayed witnesses, conflicts,
+  subtractive membership, emergency quarantine, cryptoshred, and negative
+  emergency cases should be promoted only when the runtime exposes semantic AMP
+  transition commands that can drive those states without frontend-specific
+  compatibility steps.
 
 Scenario 13 remains the canonical anchor for the shared contacts lifecycle
 because it exercises the parity-critical semantic controls for `send friend

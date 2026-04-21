@@ -156,6 +156,11 @@ pub enum SemanticOperationKind {
     RemoveContact,
     StartRecovery,
     SubmitGuardianApproval,
+    AmpRaiseEmergencyAlarm,
+    AmpApproveQuarantine,
+    AmpApproveCryptoshred,
+    AmpViewConflictEvidence,
+    AmpViewFinalizationStatus,
 }
 
 #[aura_macros::ownership_lifecycle(
@@ -760,6 +765,31 @@ impl OperationId {
     }
 
     #[must_use]
+    pub fn amp_raise_emergency_alarm() -> Self {
+        Self("amp_raise_emergency_alarm".to_string())
+    }
+
+    #[must_use]
+    pub fn amp_approve_quarantine() -> Self {
+        Self("amp_approve_quarantine".to_string())
+    }
+
+    #[must_use]
+    pub fn amp_approve_cryptoshred() -> Self {
+        Self("amp_approve_cryptoshred".to_string())
+    }
+
+    #[must_use]
+    pub fn amp_view_conflict_evidence() -> Self {
+        Self("amp_view_conflict_evidence".to_string())
+    }
+
+    #[must_use]
+    pub fn amp_view_finalization_status() -> Self {
+        Self("amp_view_finalization_status".to_string())
+    }
+
+    #[must_use]
     pub fn update_contact_nickname() -> Self {
         Self("update_contact_nickname".to_string())
     }
@@ -822,5 +852,34 @@ impl OperationId {
     #[must_use]
     pub fn submit_guardian_approval() -> Self {
         Self("submit_guardian_approval".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn amp_transition_action_operation_ids_are_stable() {
+        assert_eq!(
+            OperationId::amp_raise_emergency_alarm().0,
+            "amp_raise_emergency_alarm"
+        );
+        assert_eq!(
+            OperationId::amp_approve_quarantine().0,
+            "amp_approve_quarantine"
+        );
+        assert_eq!(
+            OperationId::amp_approve_cryptoshred().0,
+            "amp_approve_cryptoshred"
+        );
+        assert_eq!(
+            OperationId::amp_view_conflict_evidence().0,
+            "amp_view_conflict_evidence"
+        );
+        assert_eq!(
+            OperationId::amp_view_finalization_status().0,
+            "amp_view_finalization_status"
+        );
     }
 }
