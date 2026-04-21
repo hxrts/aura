@@ -237,11 +237,15 @@ where
         let state = get_channel_state(&self.effects, params.context, params.channel)
             .await
             .map_err(map_err)?;
+        if !aura_amp::core::sender_allowed_by_epoch_state(&state, params.sender) {
+            return Err(AmpChannelError::Unauthorized);
+        }
+        let send_ratchet = aura_amp::core::send_ratchet_from_epoch_state(&state);
 
         let header = AmpHeader {
             context: params.context,
             channel: params.channel,
-            chan_epoch: state.chan_epoch,
+            chan_epoch: send_ratchet.chan_epoch,
             ratchet_gen: state.current_gen,
         };
 

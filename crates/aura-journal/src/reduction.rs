@@ -474,6 +474,8 @@ pub struct PendingBump {
     pub reason: ChannelBumpReason,
     /// Canonical transition identity digest for the live successor.
     pub transition_id: Hash32,
+    /// Transition policy class for the live successor.
+    pub transition_policy: AmpTransitionPolicy,
 }
 
 /// Parent prestate key for AMP channel transition reduction.
@@ -1219,6 +1221,9 @@ fn select_live_bump_from_transition(
             .map(|proposal| proposal.reason)
             .unwrap_or(ChannelBumpReason::Routine),
         transition_id,
+        transition_policy: proposal
+            .map(|proposal| proposal.transition_policy)
+            .unwrap_or(AmpTransitionPolicy::NormalTransition),
     })
 }
 

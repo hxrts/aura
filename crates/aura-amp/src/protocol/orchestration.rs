@@ -6,7 +6,7 @@
 use super::telemetry::{create_window_validation_result, WindowValidationResult, AMP_TELEMETRY};
 use crate::config::AmpRuntimeConfig;
 use crate::consensus::finalize_amp_bump_with_journal_default;
-use crate::core::{nonce_from_header, ratchet_from_epoch_state};
+use crate::core::{nonce_from_header, ratchet_from_epoch_state, send_ratchet_from_epoch_state};
 use crate::get_channel_state;
 use crate::wire::{deserialize_message, serialize_message, AmpMessage};
 use crate::{AmpEvidenceEffects, AmpJournalEffects};
@@ -172,7 +172,7 @@ pub async fn prepare_send<E: AmpJournalEffects>(
     channel: ChannelId,
 ) -> Result<(ChannelEpochState, RatchetDerivation)> {
     let state = get_channel_state(effects, context, channel).await?;
-    let ratchet_state = ratchet_from_epoch_state(&state);
+    let ratchet_state = send_ratchet_from_epoch_state(&state);
     let deriv = derive_for_send(context, channel, &ratchet_state, state.current_gen)
         .map_err(map_amp_error)?;
     Ok((state, deriv))

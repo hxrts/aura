@@ -145,6 +145,14 @@ and emergency transitions require stricter old-epoch handling so removed or
 suspected participants cannot keep sending indefinitely while the network is
 slow.
 
+Runtime ratchet derivation follows the same rule. Sends use the stable epoch
+unless the reducer exposes exactly one `A2Live` successor, in which case sends
+cut over to that successor. Receives allow stable-plus-successor overlap for
+additive and ordinary non-removal transitions, reject old-epoch traffic for
+subtractive and cryptoshred transitions, and allow only minimal old-epoch grace
+for quarantine transitions. Emergency suspect exclusions are enforced at AMP
+send boundaries and do not imply authority-root membership changes.
+
 ### 10.2 Emergency AMP Policies
 
 AMP emergency transitions are control-plane epoch transitions, not informal
