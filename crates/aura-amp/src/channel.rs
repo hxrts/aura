@@ -215,7 +215,7 @@ where
         let participants = list_channel_participants(&self.effects, params.context, params.channel)
             .await
             .map_err(map_err)?;
-        if !participants.contains(&params.sender) {
+        if !participants.is_empty() && !participants.contains(&params.sender) {
             return Err(AmpChannelError::Unauthorized);
         }
         let send_epoch = state

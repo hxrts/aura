@@ -26,6 +26,16 @@ Orchestrate AMP channel lifecycle and message transport coordination on top of r
 | Out | Relational facts | Channel checkpoints, epoch bumps, policies |
 | Out | Deterministic channel state | Via reduction |
 
+## Key Modules
+
+- `src/channel.rs`: AMP channel lifecycle effect implementation.
+- `src/core.rs`: pure ratchet derivation and data-plane policy helpers.
+- `src/choreography.rs` / `src/choreography.tell`: AMP data/ack choreography.
+- `src/epoch_transition_choreography.rs` / `src/epoch_transition.tell`: AMP
+  epoch-transition choreography payloads for proposal, witness collection, A2
+  certificate publication, and A3 finalization handoff.
+- `src/protocol/`: high-level send/receive orchestration and telemetry.
+
 ## Invariants
 
 - AMP facts are stored in the context journal using OrderClock ordering.

@@ -40,6 +40,7 @@ pub mod choreography;
 pub mod config;
 pub mod consensus;
 pub mod core;
+pub mod epoch_transition_choreography;
 pub mod evidence;
 pub mod journal;
 pub mod prelude;
