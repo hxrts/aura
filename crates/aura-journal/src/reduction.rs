@@ -4,9 +4,11 @@
 //! authority state and relational state from journal facts.
 
 use crate::fact::{
-    AttestedOp, ChannelBootstrap, ChannelBumpReason, ChannelCheckpoint, ChannelPolicy,
-    CommittedChannelEpochBump, FactContent, Journal, JournalNamespace, ProposedChannelEpochBump,
-    RelationalFact,
+    AmpEmergencyAlarm, AmpTransitionAbort, AmpTransitionConflict, AmpTransitionIdentity,
+    AmpTransitionPolicy, AmpTransitionSupersession, AmpTransitionSuppressionScope, AttestedOp,
+    CertifiedChannelEpochBump, ChannelBootstrap, ChannelBumpReason, ChannelCheckpoint,
+    ChannelPolicy, CommittedChannelEpochBump, FactContent, FinalizedChannelEpochBump, Journal,
+    JournalNamespace, ProposedChannelEpochBump, RelationalFact,
 };
 use aura_core::{
     effects::LeakageBudget,
@@ -266,6 +268,57 @@ fn compute_relational_state_hash(state: &RelationalState) -> Hash32 {
             hasher.update(pending.bump_id.as_bytes());
             hasher.update(&(pending.reason as u8).to_le_bytes());
         }
+        if let Some(transition) = &epoch_state.transition {
+            hasher.update(&(transition.status as u8).to_le_bytes());
+            if let Some(transition_id) = transition.live_transition_id {
+                hasher.update(transition_id.as_bytes());
+            }
+            if let Some(transition_id) = transition.finalized_transition_id {
+                hasher.update(transition_id.as_bytes());
+            }
+        }
+    }
+
+    hasher.update(b"AMP_TRANSITIONS");
+    for (parent, transition) in &state.amp_transitions {
+        hasher.update(parent.context.0.as_bytes());
+        hasher.update(parent.channel.as_bytes());
+        hasher.update(&parent.parent_epoch.to_le_bytes());
+        hasher.update(parent.parent_commitment.as_bytes());
+        hasher.update(&(transition.status as u8).to_le_bytes());
+        for value in &transition.observed_transition_ids {
+            hasher.update(value.as_bytes());
+        }
+        for value in &transition.certified_transition_ids {
+            hasher.update(value.as_bytes());
+        }
+        for value in &transition.finalized_transition_ids {
+            hasher.update(value.as_bytes());
+        }
+        if let Some(value) = transition.live_transition_id {
+            hasher.update(value.as_bytes());
+        }
+        if let Some(value) = transition.finalized_transition_id {
+            hasher.update(value.as_bytes());
+        }
+        for value in &transition.suppressed_transition_ids {
+            hasher.update(value.as_bytes());
+        }
+        for value in &transition.conflict_evidence_ids {
+            hasher.update(value.as_bytes());
+        }
+        for value in &transition.emergency_alarm_ids {
+            hasher.update(value.as_bytes());
+        }
+        for value in &transition.emergency_suspects {
+            hasher.update(value.0.as_bytes());
+        }
+        for value in &transition.quarantine_epochs {
+            hasher.update(&value.to_le_bytes());
+        }
+        for value in &transition.prune_before_epochs {
+            hasher.update(&value.to_le_bytes());
+        }
     }
 
     Hash32::new(hasher.finalize())
@@ -404,6 +457,8 @@ pub struct RelationalState {
     pub leakage_budget: LeakageBudget,
     /// AMP channel epoch state keyed by channel id
     pub channel_epochs: BTreeMap<ChannelId, ChannelEpochState>,
+    /// AMP channel transition reduction keyed by parent prestate
+    pub amp_transitions: BTreeMap<AmpTransitionParentKey, AmpTransitionReduction>,
 }
 
 /// Pending bump state for a channel
@@ -417,6 +472,83 @@ pub struct PendingBump {
     pub bump_id: Hash32,
     /// Reason for proposing this epoch bump
     pub reason: ChannelBumpReason,
+    /// Canonical transition identity digest for the live successor.
+    pub transition_id: Hash32,
+}
+
+/// Parent prestate key for AMP channel transition reduction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AmpTransitionParentKey {
+    /// Relational context containing this transition.
+    pub context: ContextId,
+    /// Channel identifier.
+    pub channel: ChannelId,
+    /// Parent epoch being transitioned from.
+    pub parent_epoch: u64,
+    /// Parent prestate commitment.
+    pub parent_commitment: Hash32,
+}
+
+impl From<&AmpTransitionIdentity> for AmpTransitionParentKey {
+    fn from(identity: &AmpTransitionIdentity) -> Self {
+        Self {
+            context: identity.context,
+            channel: identity.channel,
+            parent_epoch: identity.parent_epoch,
+            parent_commitment: identity.parent_commitment,
+        }
+    }
+}
+
+/// Reducer-visible AMP transition status for one parent prestate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum AmpTransitionReductionStatus {
+    /// Proposal facts exist, but no live or durable certificate is valid.
+    Observed,
+    /// Exactly one valid, unsuppressed A2 certificate exposes a live successor.
+    A2Live,
+    /// Conflicting A2 certificates or conflict evidence suppress live exposure.
+    A2Conflict,
+    /// Exactly one valid, unsuppressed A3 fact finalizes a durable successor.
+    A3Finalized,
+    /// Conflicting A3 finalizations suppress durable exposure.
+    A3Conflict,
+    /// Transition facts for this parent are explicitly aborted.
+    Aborted,
+    /// Transition facts for this parent are explicitly superseded.
+    Superseded,
+}
+
+/// Deterministic AMP transition reduction for one parent prestate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AmpTransitionReduction {
+    /// Parent prestate key being reduced.
+    pub parent: AmpTransitionParentKey,
+    /// Reduced status.
+    pub status: AmpTransitionReductionStatus,
+    /// Observed proposal transition ids.
+    pub observed_transition_ids: BTreeSet<Hash32>,
+    /// Valid A2 certificate transition ids before conflict resolution.
+    pub certified_transition_ids: BTreeSet<Hash32>,
+    /// Valid A3 finalization transition ids before conflict resolution.
+    pub finalized_transition_ids: BTreeSet<Hash32>,
+    /// Transition exposed for live sends/receives when status is A2Live.
+    pub live_transition_id: Option<Hash32>,
+    /// Transition exposed as durable when status is A3Finalized.
+    pub finalized_transition_id: Option<Hash32>,
+    /// Transition ids suppressed by abort or supersession evidence.
+    pub suppressed_transition_ids: BTreeSet<Hash32>,
+    /// Conflict evidence ids and conflicting transition ids.
+    pub conflict_evidence_ids: BTreeSet<Hash32>,
+    /// Emergency alarm evidence ids observed for this parent.
+    pub emergency_alarm_ids: BTreeSet<Hash32>,
+    /// Suspect authorities from emergency alarms and emergency transitions.
+    pub emergency_suspects: BTreeSet<AuthorityId>,
+    /// Successor epochs for quarantine transitions in this parent group.
+    pub quarantine_epochs: BTreeSet<u64>,
+    /// Epochs before which readable state may be pruned after cryptoshred.
+    pub prune_before_epochs: BTreeSet<u64>,
 }
 
 /// Derived AMP channel epoch state
@@ -434,6 +566,8 @@ pub struct ChannelEpochState {
     pub current_gen: u64,
     /// Skip window size in generations
     pub skip_window: u32,
+    /// Reducer-visible transition state for the current parent epoch.
+    pub transition: Option<AmpTransitionReduction>,
 }
 
 const DEFAULT_SKIP_WINDOW: u32 = 1024;
@@ -488,7 +622,13 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
             let mut channel_checkpoints: BTreeMap<(ChannelId, u64), Vec<ChannelCheckpoint>> =
                 BTreeMap::new();
             let mut proposed_bumps = Vec::new();
+            let mut certified_bumps = Vec::new();
             let mut committed_bumps = Vec::new();
+            let mut finalized_bumps = Vec::new();
+            let mut transition_aborts = Vec::new();
+            let mut transition_conflicts = Vec::new();
+            let mut transition_supersessions = Vec::new();
+            let mut emergency_alarms = Vec::new();
             let mut channel_policies: BTreeMap<ChannelId, ChannelPolicy> = BTreeMap::new();
             let mut channel_bootstraps: BTreeMap<ChannelId, ChannelBootstrap> = BTreeMap::new();
 
@@ -544,23 +684,35 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 continue;
                             }
                             crate::fact::ProtocolRelationalFact::AmpCertifiedChannelEpochBump(
-                                _,
-                            )
-                            | crate::fact::ProtocolRelationalFact::AmpFinalizedChannelEpochBump(
-                                _,
-                            )
-                            | crate::fact::ProtocolRelationalFact::AmpTransitionAbort(_)
-                            | crate::fact::ProtocolRelationalFact::AmpTransitionConflict(_)
-                            | crate::fact::ProtocolRelationalFact::AmpTransitionSupersession(_)
-                            | crate::fact::ProtocolRelationalFact::AmpEmergencyAlarm(_) => {
-                                let key = protocol.binding_key();
-                                bindings.push(RelationalBinding {
-                                    binding_type: RelationalBindingType::Generic(
-                                        key.sub_type().to_string(),
-                                    ),
-                                    context_id: *context_id,
-                                    data: key.data(),
-                                });
+                                bump,
+                            ) => {
+                                certified_bumps.push(bump.clone());
+                                continue;
+                            }
+                            crate::fact::ProtocolRelationalFact::AmpFinalizedChannelEpochBump(
+                                bump,
+                            ) => {
+                                finalized_bumps.push(bump.clone());
+                                continue;
+                            }
+                            crate::fact::ProtocolRelationalFact::AmpTransitionAbort(abort) => {
+                                transition_aborts.push(abort.clone());
+                                continue;
+                            }
+                            crate::fact::ProtocolRelationalFact::AmpTransitionConflict(
+                                conflict,
+                            ) => {
+                                transition_conflicts.push(conflict.clone());
+                                continue;
+                            }
+                            crate::fact::ProtocolRelationalFact::AmpTransitionSupersession(
+                                supersession,
+                            ) => {
+                                transition_supersessions.push(supersession.clone());
+                                continue;
+                            }
+                            crate::fact::ProtocolRelationalFact::AmpEmergencyAlarm(alarm) => {
+                                emergency_alarms.push(alarm.clone());
                                 continue;
                             }
                             crate::fact::ProtocolRelationalFact::AmpCommittedChannelEpochBump(
@@ -670,15 +822,27 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
             }
 
             let mut channel_epochs = BTreeMap::new();
+            let amp_transitions = reduce_amp_transitions(
+                &proposed_bumps,
+                &certified_bumps,
+                &committed_bumps,
+                &finalized_bumps,
+                &transition_aborts,
+                &transition_conflicts,
+                &transition_supersessions,
+                &emergency_alarms,
+            );
             let mut channel_ids = BTreeSet::new();
             channel_ids.extend(channel_checkpoints.keys().map(|(channel, _)| *channel));
             channel_ids.extend(proposed_bumps.iter().map(|b| b.channel));
+            channel_ids.extend(certified_bumps.iter().map(|b| b.identity.channel));
             channel_ids.extend(committed_bumps.iter().map(|b| b.channel));
+            channel_ids.extend(finalized_bumps.iter().map(|b| b.identity.channel));
             channel_ids.extend(channel_policies.keys().copied());
             channel_ids.extend(channel_bootstraps.keys().copied());
 
             for channel in channel_ids {
-                let chan_epoch = highest_committed_epoch(channel, &committed_bumps);
+                let chan_epoch = highest_reduced_epoch(channel, &amp_transitions);
                 // Find the latest checkpoint from any epoch <= current epoch
                 let checkpoint = (0..=chan_epoch)
                     .rev()
@@ -691,14 +855,16 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                     .or_else(|| channel_policies.get(&channel).and_then(|p| p.skip_window))
                     .unwrap_or(DEFAULT_SKIP_WINDOW);
                 let current_gen = last_checkpoint_gen;
-                let pending_bump = select_pending_bump(
-                    channel,
-                    chan_epoch,
-                    last_checkpoint_gen,
-                    current_gen,
-                    skip_window,
-                    &proposed_bumps,
-                );
+                let transition = amp_transitions
+                    .values()
+                    .find(|transition| {
+                        transition.parent.channel == channel
+                            && transition.parent.parent_epoch == chan_epoch
+                    })
+                    .cloned();
+                let pending_bump = transition.as_ref().and_then(|transition| {
+                    select_live_bump_from_transition(transition, &proposed_bumps)
+                });
                 let bootstrap = channel_bootstraps.get(&channel).cloned();
 
                 channel_epochs.insert(
@@ -710,6 +876,7 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                         last_checkpoint_gen,
                         current_gen,
                         skip_window,
+                        transition,
                     },
                 );
             }
@@ -719,26 +886,28 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                 flow_budgets,
                 leakage_budget,
                 channel_epochs,
+                amp_transitions,
             })
         }
         JournalNamespace::Authority(_) => Err(ReductionNamespaceError::AuthorityAsContext),
     }
 }
 
-fn highest_committed_epoch(
+fn highest_reduced_epoch(
     channel: ChannelId,
-    committed_bumps: &[CommittedChannelEpochBump],
+    amp_transitions: &BTreeMap<AmpTransitionParentKey, AmpTransitionReduction>,
 ) -> u64 {
-    let mut committed: Vec<&CommittedChannelEpochBump> = committed_bumps
-        .iter()
-        .filter(|b| b.channel == channel)
-        .collect();
-    committed.sort_by_key(|b| (b.parent_epoch, b.new_epoch, b.chosen_bump_id));
-
     let mut epoch = 0u64;
-    for bump in committed {
-        if bump.new_epoch == bump.parent_epoch + 1 && bump.parent_epoch == epoch {
-            epoch = bump.new_epoch;
+    loop {
+        let finalized = amp_transitions.values().any(|transition| {
+            transition.parent.channel == channel
+                && transition.parent.parent_epoch == epoch
+                && transition.status == AmpTransitionReductionStatus::A3Finalized
+        });
+        if finalized {
+            epoch += 1;
+        } else {
+            break;
         }
     }
     epoch
@@ -756,32 +925,379 @@ fn canonical_checkpoint(
     })
 }
 
-fn select_pending_bump(
-    channel: ChannelId,
-    chan_epoch: u64,
-    base_gen: u64,
-    current_gen: u64,
-    skip_window: u32,
+fn reduce_amp_transitions(
+    proposed: &[ProposedChannelEpochBump],
+    certified: &[CertifiedChannelEpochBump],
+    committed: &[CommittedChannelEpochBump],
+    finalized: &[FinalizedChannelEpochBump],
+    aborts: &[AmpTransitionAbort],
+    conflicts: &[AmpTransitionConflict],
+    supersessions: &[AmpTransitionSupersession],
+    alarms: &[AmpEmergencyAlarm],
+) -> BTreeMap<AmpTransitionParentKey, AmpTransitionReduction> {
+    let mut groups = BTreeSet::new();
+    for proposal in proposed
+        .iter()
+        .filter(|proposal| valid_proposed_bump(proposal))
+    {
+        groups.insert(AmpTransitionParentKey::from(
+            &proposal.transition_identity(),
+        ));
+    }
+    for cert in certified.iter().filter(|cert| valid_certified_bump(cert)) {
+        groups.insert(AmpTransitionParentKey::from(&cert.identity));
+    }
+    for bump in committed.iter().filter(|bump| valid_committed_bump(bump)) {
+        groups.insert(AmpTransitionParentKey {
+            context: bump.context,
+            channel: bump.channel,
+            parent_epoch: bump.parent_epoch,
+            parent_commitment: bump.parent_commitment,
+        });
+    }
+    for commit in finalized
+        .iter()
+        .filter(|commit| valid_finalized_bump(commit))
+    {
+        groups.insert(AmpTransitionParentKey::from(&commit.identity));
+    }
+    for abort in aborts {
+        groups.insert(AmpTransitionParentKey {
+            context: abort.context,
+            channel: abort.channel,
+            parent_epoch: abort.parent_epoch,
+            parent_commitment: abort.parent_commitment,
+        });
+    }
+    for conflict in conflicts {
+        groups.insert(AmpTransitionParentKey {
+            context: conflict.context,
+            channel: conflict.channel,
+            parent_epoch: conflict.parent_epoch,
+            parent_commitment: conflict.parent_commitment,
+        });
+    }
+    for supersession in supersessions {
+        groups.insert(AmpTransitionParentKey {
+            context: supersession.context,
+            channel: supersession.channel,
+            parent_epoch: supersession.parent_epoch,
+            parent_commitment: supersession.parent_commitment,
+        });
+    }
+    for alarm in alarms {
+        groups.insert(AmpTransitionParentKey {
+            context: alarm.context,
+            channel: alarm.channel,
+            parent_epoch: alarm.parent_epoch,
+            parent_commitment: alarm.parent_commitment,
+        });
+    }
+
+    groups
+        .into_iter()
+        .map(|parent| {
+            let reduction = reduce_amp_transition_group(
+                parent,
+                proposed,
+                certified,
+                committed,
+                finalized,
+                aborts,
+                conflicts,
+                supersessions,
+                alarms,
+            );
+            (parent, reduction)
+        })
+        .collect()
+}
+
+fn reduce_amp_transition_group(
+    parent: AmpTransitionParentKey,
+    proposed: &[ProposedChannelEpochBump],
+    certified: &[CertifiedChannelEpochBump],
+    committed: &[CommittedChannelEpochBump],
+    finalized: &[FinalizedChannelEpochBump],
+    aborts: &[AmpTransitionAbort],
+    conflicts: &[AmpTransitionConflict],
+    supersessions: &[AmpTransitionSupersession],
+    alarms: &[AmpEmergencyAlarm],
+) -> AmpTransitionReduction {
+    let observed_transition_ids = proposed
+        .iter()
+        .filter(|proposal| valid_proposed_bump(proposal))
+        .filter(|proposal| AmpTransitionParentKey::from(&proposal.transition_identity()) == parent)
+        .map(|proposal| proposal.transition_id)
+        .collect::<BTreeSet<_>>();
+
+    let mut certified_transition_ids = certified
+        .iter()
+        .filter(|cert| valid_certified_bump(cert))
+        .filter(|cert| AmpTransitionParentKey::from(&cert.identity) == parent)
+        .map(|cert| cert.transition_id)
+        .collect::<BTreeSet<_>>();
+
+    let mut finalized_transition_ids = finalized
+        .iter()
+        .filter(|commit| valid_finalized_bump(commit))
+        .filter(|commit| AmpTransitionParentKey::from(&commit.identity) == parent)
+        .map(|commit| commit.transition_id)
+        .collect::<BTreeSet<_>>();
+
+    finalized_transition_ids.extend(
+        committed
+            .iter()
+            .filter(|bump| valid_committed_bump(bump))
+            .filter(|bump| {
+                bump.context == parent.context
+                    && bump.channel == parent.channel
+                    && bump.parent_epoch == parent.parent_epoch
+                    && bump.parent_commitment == parent.parent_commitment
+            })
+            .map(|bump| bump.transition_id),
+    );
+
+    let mut suppressed_a2 = BTreeSet::new();
+    let mut suppressed_a3 = BTreeSet::new();
+    for abort in aborts
+        .iter()
+        .filter(|abort| abort_parent_key(abort) == parent)
+    {
+        suppressed_a2.insert(abort.transition_id);
+        if abort.scope == AmpTransitionSuppressionScope::A2AndA3 {
+            suppressed_a3.insert(abort.transition_id);
+        }
+    }
+    let mut superseded_any = false;
+    for supersession in supersessions
+        .iter()
+        .filter(|supersession| supersession_parent_key(supersession) == parent)
+    {
+        superseded_any = true;
+        suppressed_a2.insert(supersession.superseded_transition_id);
+        if supersession.scope == AmpTransitionSuppressionScope::A2AndA3 {
+            suppressed_a3.insert(supersession.superseded_transition_id);
+        }
+    }
+    let suppressed_transition_ids = suppressed_a2
+        .union(&suppressed_a3)
+        .copied()
+        .collect::<BTreeSet<_>>();
+
+    certified_transition_ids.retain(|transition_id| !suppressed_a2.contains(transition_id));
+    finalized_transition_ids.retain(|transition_id| !suppressed_a3.contains(transition_id));
+
+    let mut conflict_evidence_ids = BTreeSet::new();
+    for conflict in conflicts
+        .iter()
+        .filter(|conflict| conflict_parent_key(conflict) == parent)
+    {
+        conflict_evidence_ids.insert(conflict.evidence_id);
+        conflict_evidence_ids.insert(conflict.first_transition_id);
+        conflict_evidence_ids.insert(conflict.second_transition_id);
+    }
+    let emergency_alarm_ids = alarms
+        .iter()
+        .filter(|alarm| alarm_parent_key(alarm) == parent)
+        .map(|alarm| alarm.evidence_id)
+        .collect::<BTreeSet<_>>();
+    let mut emergency_suspects = alarms
+        .iter()
+        .filter(|alarm| alarm_parent_key(alarm) == parent)
+        .map(|alarm| alarm.suspect)
+        .collect::<BTreeSet<_>>();
+    let mut quarantine_epochs = BTreeSet::new();
+    let mut prune_before_epochs = BTreeSet::new();
+    for cert in certified
+        .iter()
+        .filter(|cert| valid_certified_bump(cert))
+        .filter(|cert| AmpTransitionParentKey::from(&cert.identity) == parent)
+    {
+        emergency_suspects.extend(cert.excluded_authorities.iter().copied());
+        if cert.identity.transition_policy == AmpTransitionPolicy::EmergencyQuarantineTransition {
+            quarantine_epochs.insert(cert.identity.successor_epoch);
+        }
+        if cert.readable_state_destroyed
+            || cert.identity.transition_policy
+                == AmpTransitionPolicy::EmergencyCryptoshredTransition
+        {
+            prune_before_epochs.insert(cert.identity.parent_epoch);
+        }
+    }
+    for commit in finalized
+        .iter()
+        .filter(|commit| valid_finalized_bump(commit))
+        .filter(|commit| AmpTransitionParentKey::from(&commit.identity) == parent)
+    {
+        emergency_suspects.extend(commit.excluded_authorities.iter().copied());
+        if commit.identity.transition_policy == AmpTransitionPolicy::EmergencyQuarantineTransition {
+            quarantine_epochs.insert(commit.identity.successor_epoch);
+        }
+        if commit.readable_state_destroyed
+            || commit.identity.transition_policy
+                == AmpTransitionPolicy::EmergencyCryptoshredTransition
+        {
+            prune_before_epochs.insert(commit.identity.parent_epoch);
+        }
+    }
+
+    let status;
+    let mut live_transition_id = None;
+    let mut finalized_transition_id = None;
+    let finalized_conflicts_with_a2 =
+        finalized_transition_ids
+            .iter()
+            .next()
+            .is_some_and(|transition_id| {
+                finalized_transition_ids.len() == 1
+                    && !certified_transition_ids.is_empty()
+                    && !certified_transition_ids.contains(transition_id)
+            });
+
+    if finalized_transition_ids.len() > 1 {
+        status = AmpTransitionReductionStatus::A3Conflict;
+    } else if finalized_conflicts_with_a2 {
+        status = AmpTransitionReductionStatus::A3Conflict;
+    } else if let Some(transition_id) = finalized_transition_ids.iter().next().copied() {
+        status = AmpTransitionReductionStatus::A3Finalized;
+        finalized_transition_id = Some(transition_id);
+    } else if conflict_evidence_ids.is_empty() && certified_transition_ids.len() == 1 {
+        let transition_id = certified_transition_ids.iter().next().copied();
+        status = AmpTransitionReductionStatus::A2Live;
+        live_transition_id = transition_id;
+    } else if !conflict_evidence_ids.is_empty() || certified_transition_ids.len() > 1 {
+        status = AmpTransitionReductionStatus::A2Conflict;
+    } else if !suppressed_transition_ids.is_empty() {
+        status = if superseded_any {
+            AmpTransitionReductionStatus::Superseded
+        } else {
+            AmpTransitionReductionStatus::Aborted
+        };
+    } else {
+        status = AmpTransitionReductionStatus::Observed;
+    }
+
+    AmpTransitionReduction {
+        parent,
+        status,
+        observed_transition_ids,
+        certified_transition_ids,
+        finalized_transition_ids,
+        live_transition_id,
+        finalized_transition_id,
+        suppressed_transition_ids,
+        conflict_evidence_ids,
+        emergency_alarm_ids,
+        emergency_suspects,
+        quarantine_epochs,
+        prune_before_epochs,
+    }
+}
+
+fn select_live_bump_from_transition(
+    transition: &AmpTransitionReduction,
     proposed: &[ProposedChannelEpochBump],
 ) -> Option<PendingBump> {
-    let spacing_needed = (skip_window / 2) as u64;
-    let spacing_met = current_gen.saturating_sub(base_gen) >= spacing_needed;
-
-    let mut candidates: Vec<&ProposedChannelEpochBump> = proposed
+    if transition.status != AmpTransitionReductionStatus::A2Live {
+        return None;
+    }
+    let transition_id = transition.live_transition_id?;
+    let proposal = proposed
         .iter()
-        .filter(|b| b.channel == channel)
-        .filter(|b| b.parent_epoch == chan_epoch && b.new_epoch == chan_epoch + 1)
-        .filter(|b| b.reason.bypass_spacing() || spacing_met)
-        .collect();
+        .find(|proposal| proposal.transition_id == transition_id);
 
-    candidates.sort_by_key(|b| (b.bump_id, b.new_epoch, b.parent_epoch));
-
-    candidates.into_iter().next().map(|b| PendingBump {
-        parent_epoch: b.parent_epoch,
-        new_epoch: b.new_epoch,
-        bump_id: b.bump_id,
-        reason: b.reason,
+    Some(PendingBump {
+        parent_epoch: transition.parent.parent_epoch,
+        new_epoch: proposal
+            .map(|proposal| proposal.new_epoch)
+            .unwrap_or(transition.parent.parent_epoch + 1),
+        bump_id: proposal
+            .map(|proposal| proposal.bump_id)
+            .unwrap_or(transition_id),
+        reason: proposal
+            .map(|proposal| proposal.reason)
+            .unwrap_or(ChannelBumpReason::Routine),
+        transition_id,
     })
+}
+
+fn valid_proposed_bump(proposal: &ProposedChannelEpochBump) -> bool {
+    proposal.new_epoch == proposal.parent_epoch + 1
+        && proposal.transition_id == proposal.transition_identity().transition_id()
+}
+
+fn valid_certified_bump(cert: &CertifiedChannelEpochBump) -> bool {
+    cert.identity.successor_epoch == cert.identity.parent_epoch + 1
+        && cert.transition_id == cert.identity.transition_id()
+        && cert.witness_payload_digest != Hash32::default()
+        && cert.threshold > 0
+        && unique_witness_count(cert) >= cert.threshold as usize
+}
+
+fn unique_witness_count(cert: &CertifiedChannelEpochBump) -> usize {
+    cert.witness_signatures
+        .iter()
+        .map(|signature| signature.witness)
+        .collect::<BTreeSet<_>>()
+        .len()
+}
+
+fn valid_committed_bump(bump: &CommittedChannelEpochBump) -> bool {
+    bump.new_epoch == bump.parent_epoch + 1
+        && bump.transition_id
+            == AmpTransitionIdentity {
+                context: bump.context,
+                channel: bump.channel,
+                parent_epoch: bump.parent_epoch,
+                parent_commitment: bump.parent_commitment,
+                successor_epoch: bump.new_epoch,
+                successor_commitment: bump.successor_commitment,
+                membership_commitment: bump.membership_commitment,
+                transition_policy: bump.transition_policy,
+            }
+            .transition_id()
+}
+
+fn valid_finalized_bump(commit: &FinalizedChannelEpochBump) -> bool {
+    commit.identity.successor_epoch == commit.identity.parent_epoch + 1
+        && commit.transition_id == commit.identity.transition_id()
+}
+
+fn abort_parent_key(abort: &AmpTransitionAbort) -> AmpTransitionParentKey {
+    AmpTransitionParentKey {
+        context: abort.context,
+        channel: abort.channel,
+        parent_epoch: abort.parent_epoch,
+        parent_commitment: abort.parent_commitment,
+    }
+}
+
+fn conflict_parent_key(conflict: &AmpTransitionConflict) -> AmpTransitionParentKey {
+    AmpTransitionParentKey {
+        context: conflict.context,
+        channel: conflict.channel,
+        parent_epoch: conflict.parent_epoch,
+        parent_commitment: conflict.parent_commitment,
+    }
+}
+
+fn supersession_parent_key(supersession: &AmpTransitionSupersession) -> AmpTransitionParentKey {
+    AmpTransitionParentKey {
+        context: supersession.context,
+        channel: supersession.channel,
+        parent_epoch: supersession.parent_epoch,
+        parent_commitment: supersession.parent_commitment,
+    }
+}
+
+fn alarm_parent_key(alarm: &AmpEmergencyAlarm) -> AmpTransitionParentKey {
+    AmpTransitionParentKey {
+        context: alarm.context,
+        channel: alarm.channel,
+        parent_epoch: alarm.parent_epoch,
+        parent_commitment: alarm.parent_commitment,
+    }
 }
 
 /// Compute snapshot state for garbage collection

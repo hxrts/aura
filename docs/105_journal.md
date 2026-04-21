@@ -237,6 +237,17 @@ certificates to choose a live successor. Single-winner exposure must come from
 fact validation: a valid AMP certificate, a valid A3 commit, explicit
 equivocation evidence, abort evidence, or supersession evidence.
 
+The `aura-journal` context reducer exposes this state as structured AMP
+transition reduction data. `RelationalState::amp_transitions` is keyed by
+`AmpTransitionParentKey { context, channel, parent_epoch,
+parent_commitment }`. Each `AmpTransitionReduction` records observed,
+certified, finalized, suppressed, conflict, and emergency evidence ids for
+that parent. `ChannelEpochState::transition` points at the current parent
+transition, and `ChannelEpochState::pending_bump` is populated only when the
+current parent is `A2Live`. Emergency reducer fields include suspect
+authorities, quarantine successor epochs, and prune-before epochs derived from
+emergency alarms and emergency transition facts.
+
 The reduced channel view distinguishes:
 
 - `stable_epoch`: last durable committed epoch

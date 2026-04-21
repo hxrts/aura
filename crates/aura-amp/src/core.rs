@@ -41,8 +41,10 @@ mod tests {
                 new_epoch: 4,
                 bump_id: aura_core::Hash32::new([3u8; 32]),
                 reason: ChannelBumpReason::Routine,
+                transition_id: aura_core::Hash32::new([4u8; 32]),
             }),
             bootstrap: None,
+            transition: None,
         };
 
         let ratchet = ratchet_from_epoch_state(&state);
