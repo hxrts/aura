@@ -1157,9 +1157,7 @@ fn reduce_amp_transition_group(
                     && !certified_transition_ids.contains(transition_id)
             });
 
-    if finalized_transition_ids.len() > 1 {
-        status = AmpTransitionReductionStatus::A3Conflict;
-    } else if finalized_conflicts_with_a2 {
+    if finalized_transition_ids.len() > 1 || finalized_conflicts_with_a2 {
         status = AmpTransitionReductionStatus::A3Conflict;
     } else if let Some(transition_id) = finalized_transition_ids.iter().next().copied() {
         status = AmpTransitionReductionStatus::A3Finalized;

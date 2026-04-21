@@ -697,13 +697,15 @@ fn add_protocol_fact(
     order: u8,
     fact: aura_journal::ProtocolRelationalFact,
 ) {
-    journal
-        .add_fact(Fact::new(
-            OrderTime([order; 32]),
-            TimeStamp::OrderClock(OrderTime([order; 32])),
-            FactContent::Relational(RelationalFact::Protocol(fact)),
-        ))
-        .unwrap();
+    let result = journal.add_fact(Fact::new(
+        OrderTime([order; 32]),
+        TimeStamp::OrderClock(OrderTime([order; 32])),
+        FactContent::Relational(RelationalFact::Protocol(fact)),
+    ));
+    assert!(
+        result.is_ok(),
+        "test protocol fact should be accepted into the journal: {result:?}"
+    );
 }
 
 #[test]

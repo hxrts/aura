@@ -1830,7 +1830,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
             IntentAction::PublishAmpTransitionFixture { channel, fixture } => {
                 self.send_harness_command(&HarnessUiCommand::ObserveRuntimeFact {
-                    fact: fixture.runtime_fact(channel),
+                    fact: Box::new(fixture.runtime_fact(channel)),
                 })?;
                 Ok(SemanticCommandResponse::accepted_without_value())
             }

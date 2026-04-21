@@ -160,7 +160,7 @@ pub(crate) fn apply_harness_command(
     match command {
         HarnessUiCommand::Ping => Ok(Vec::new()),
         HarnessUiCommand::ObserveRuntimeFact { fact } => {
-            state.upsert_runtime_fact(fact);
+            state.upsert_runtime_fact(*fact);
             Ok(Vec::new())
         }
         HarnessUiCommand::NavigateScreen { screen } => {

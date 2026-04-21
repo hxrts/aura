@@ -80,10 +80,10 @@ pub fn sender_allowed_by_epoch_state(
     state: &ChannelEpochState,
     sender: aura_core::types::identifiers::AuthorityId,
 ) -> bool {
-    state
-        .transition
-        .as_ref()
-        .is_none_or(|transition| !transition.emergency_suspects.contains(&sender))
+    match state.transition.as_ref() {
+        Some(transition) => !transition.emergency_suspects.contains(&sender),
+        None => true,
+    }
 }
 
 fn transition_status(state: &ChannelEpochState) -> Option<AmpTransitionReductionStatus> {

@@ -123,7 +123,7 @@ pub enum HarnessUiCommand {
         content: String,
     },
     ObserveRuntimeFact {
-        fact: RuntimeFact,
+        fact: Box<RuntimeFact>,
     },
 }
 

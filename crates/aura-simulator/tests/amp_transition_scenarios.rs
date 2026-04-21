@@ -58,13 +58,16 @@ fn partitioned_conflicting_a2_certificates_suppress_live_successor() {
 
     assert_eq!(transition.status, AmpTransitionReductionStatus::A2Conflict);
     assert!(transition.live_transition_id.is_none());
-    assert!(state.channel_epochs.get(&channel()).is_none_or(|channel| {
-        channel.pending_bump.is_none()
-            || channel
-                .transition
-                .as_ref()
-                .is_some_and(|transition| transition.live_transition_id.is_none())
-    }));
+    assert!(match state.channel_epochs.get(&channel()) {
+        Some(channel) => {
+            channel.pending_bump.is_none()
+                || channel
+                    .transition
+                    .as_ref()
+                    .is_some_and(|transition| transition.live_transition_id.is_none())
+        }
+        None => true,
+    });
     assert_eq!(
         oracle_status(&scenario),
         AmpTransitionReductionStatus::A2Conflict

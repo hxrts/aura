@@ -732,6 +732,7 @@ impl FactOptions {
 
 /// Types of facts that can be stored in the journal
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum FactContent {
     /// Attested operation on the commitment tree
     AttestedOp(AttestedOp),
