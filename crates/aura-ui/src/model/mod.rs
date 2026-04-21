@@ -1848,6 +1848,21 @@ mod tests {
     }
 
     #[test]
+    fn runtime_fact_push_advances_semantic_revision() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let initial = model.semantic_snapshot().revision;
+
+        model.push_runtime_fact(RuntimeFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: None,
+            operation_state: None,
+        });
+
+        let updated = model.semantic_snapshot().revision;
+        assert!(updated.is_newer_than(initial));
+    }
+
+    #[test]
     fn repeated_runtime_fact_reuses_existing_runtime_event_id() -> Result<(), &'static str> {
         let mut model = UiModel::new("authority-local".to_string());
         let fact = RuntimeFact::InvitationAccepted {
