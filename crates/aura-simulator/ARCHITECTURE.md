@@ -145,6 +145,7 @@ cargo test -p aura-simulator
 | Fault injection leaks to non-faulty paths | — | `tests/protocol_fault_injection.rs` | Covered |
 | ITF trace replay diverges from Quint | — | `tests/itf_trace_replay.rs` | Covered |
 | Liveness under partitions fails | — | `tests/liveness_under_partitions.rs` | Covered |
+| AMP transition conflict/emergency semantics drift from the reducer/model | — | `tests/amp_transition_scenarios.rs` | Covered |
 | Guard interpreter not deterministic | DeterministicReplay | `src/effects/guard_interpreter.rs` `test_deterministic_nonce_generation` | Covered |
 | Property monitor misses invariant violation | — | `tests/fault_invariant_monitor.rs` | Covered |
 

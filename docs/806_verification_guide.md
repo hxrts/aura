@@ -150,6 +150,15 @@ Use counterexamples to identify specification bugs or missing preconditions.
 
 Generative testing validates Rust implementations against Quint models.
 
+For AMP channel epoch transitions, the Quint model in
+`verification/quint/amp/channel.qnt` includes transition identity, reducer
+states, `A2Live`, `A2Conflict`, `A3Finalized`, `A3Conflict`, abort,
+supersession, and emergency non-retroactivity semantics. The focused Rust
+conformance lane is
+`cargo test -p aura-simulator --test amp_transition_scenarios`; it compares
+proposal/certificate/finalization/abort/conflict sequences against a small
+deterministic oracle and exercises old-epoch acceptance boundaries.
+
 ### The Trust Chain
 
 ```

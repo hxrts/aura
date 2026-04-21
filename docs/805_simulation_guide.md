@@ -348,6 +348,15 @@ assert!(result.all_properties_passed());
 
 Trace replay validates implementation against Quint model behavior.
 
+AMP epoch-transition simulation has a focused regression lane in
+`crates/aura-simulator/tests/amp_transition_scenarios.rs`. It covers delayed
+witnesses, partitions that create conflicting `A2` certificates, subtractive
+old-epoch receive cutover, emergency quarantine, emergency cryptoshred, replay,
+abort, supersession, and alarm-spam cases. Run it with
+`cargo test -p aura-simulator --test amp_transition_scenarios`; broader local
+development can continue to use `just test-crate aura-simulator` without
+requiring an exhaustive Quint/Apalache matrix.
+
 ## Conformance Workflow
 
 Simulation feeds native/WASM conformance testing. See [Testing Guide](804_testing_guide.md) for conformance lanes and corpus policy.
