@@ -1575,6 +1575,38 @@ fn execute_semantic_intent(
             )?;
             Ok(())
         }
+        IntentAction::PublishAmpTransitionFixture { channel, fixture } => {
+            let response = submit_shared_intent(
+                &metadata_step,
+                tool_api,
+                context,
+                &instance_id,
+                IntentAction::PublishAmpTransitionFixture {
+                    channel: channel.clone(),
+                    fixture: *fixture,
+                },
+            )?;
+            let handle = require_semantic_unit_submission(
+                &metadata_step,
+                "publish_amp_transition_fixture",
+                response,
+            )?;
+            record_submission_handle(context, &instance_id, handle.clone());
+            wait_for_contract_barriers(
+                &metadata_step,
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle,
+                    channel_binding: None,
+                    runtime_event_detail: Some(channel.clone()),
+                },
+            )?;
+            Ok(())
+        }
         IntentAction::OpenScreen { .. } | IntentAction::OpenSettingsSection(_) => unreachable!(),
     }
 }
@@ -1753,6 +1785,12 @@ fn resolve_intent_templates(
         IntentAction::DeclineFriendRequest { authority_id } => IntentAction::DeclineFriendRequest {
             authority_id: resolve_template(authority_id, context)?,
         },
+        IntentAction::PublishAmpTransitionFixture { channel, fixture } => {
+            IntentAction::PublishAmpTransitionFixture {
+                channel: resolve_template(channel, context)?,
+                fixture: *fixture,
+            }
+        }
     })
 }
 
@@ -2025,6 +2063,7 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             IntentAction::AcceptFriendRequest { .. } => "accept_friend_request",
             IntentAction::DeclineFriendRequest { .. } => "decline_friend_request",
             IntentAction::SwitchAuthority { .. } => "switch_authority",
+            IntentAction::PublishAmpTransitionFixture { .. } => "publish_amp_transition_fixture",
         },
         SemanticAction::Variables(variable) => match variable {
             aura_app::scenario_contract::VariableAction::Set { .. } => "set_var",

@@ -179,6 +179,12 @@ The canonical shared-flow coverage anchors for the current parity-critical user 
 - `scenario13-mixed-contact-channel-message-e2e.toml` for the shared chat, contacts, invitation, home creation, channel join, and message-send flow
 - `scenario12-mixed-device-enrollment-removal-e2e.toml` for device add and remove
 - `shared-notifications-and-authority.toml` and `shared-settings-parity.toml` for the remaining shared settings, authority, and navigation flows
+- `amp-transition-normal-shared.toml`,
+  `amp-transition-delayed-witness-shared.toml`,
+  `amp-transition-conflict-subtractive-shared.toml`,
+  `amp-transition-emergency-shared.toml`, and
+  `amp-transition-negative-shared.toml` for shared AMP transition
+  observation coverage
 
 The current `aura-app` split keeps those anchors unchanged while moving the
 authoritative flow owners into more specific modules. Shared-flow source-area

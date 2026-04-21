@@ -1,6 +1,7 @@
 use aura_app::frontend_primitives::FrontendUiOperation;
 use aura_app::scenario_contract::{
-    SharedActionContract, SubmissionContract, SubmissionState, SubmissionValueContract,
+    AmpTransitionFixture, SharedActionContract, SubmissionContract, SubmissionState,
+    SubmissionValueContract,
 };
 use aura_app::ui::contract::{OperationId, ScreenId};
 use aura_app::ui::scenarios::{
@@ -182,6 +183,10 @@ enum RoutedSemanticIntent {
     },
     DeclineFriendRequest {
         authority_id: AuthorityId,
+    },
+    PublishAmpTransitionFixture {
+        channel: String,
+        fixture: AmpTransitionFixture,
     },
 }
 
@@ -689,6 +694,9 @@ async fn route_semantic_intent(
                     .parse::<AuthorityId>()
                     .map_err(RouteSemanticIntentError::invalid_authority_id)?,
             })
+        }
+        IntentAction::PublishAmpTransitionFixture { channel, fixture } => {
+            Ok(RoutedSemanticIntent::PublishAmpTransitionFixture { channel, fixture })
         }
     }
 }
@@ -1406,6 +1414,10 @@ async fn execute_semantic_intent(
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
             declared_handle_unit_response(&contract, handle)
+        }
+        RoutedSemanticIntent::PublishAmpTransitionFixture { channel, fixture } => {
+            controller.push_runtime_fact(fixture.runtime_fact(channel));
+            declared_immediate_unit_response(&contract)
         }
     }
 }

@@ -2,8 +2,8 @@
 
 use super::values::is_row_index_item_id;
 use super::{
-    ActorId, EnvironmentAction, ExtractSource, InputKey, IntentAction, SettingsSection, UiAction,
-    VariableAction,
+    ActorId, AmpTransitionFixture, EnvironmentAction, ExtractSource, InputKey, IntentAction,
+    SettingsSection, UiAction, VariableAction,
 };
 use crate::ui_contract::{
     ConfirmationState, ControlId, FieldId, ListId, ModalId, OperationId, OperationState,
@@ -186,6 +186,7 @@ pub struct SemanticScenarioFileStep {
     pub invitee_authority_id: Option<String>,
     pub confirmation: Option<ConfirmationState>,
     pub section: Option<SettingsSection>,
+    pub amp_transition_fixture: Option<AmpTransitionFixture>,
     pub name: Option<String>,
     pub regex: Option<String>,
     pub group: Option<u32>,
@@ -220,6 +221,7 @@ pub enum SemanticActionKind {
     SendFriendRequest,
     AcceptFriendRequest,
     DeclineFriendRequest,
+    PublishAmpTransitionFixture,
     PasteClipboard,
     ReadClipboard,
     Navigate,
@@ -437,6 +439,16 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::DeclineFriendRequest => {
                 ScenarioAction::Intent(IntentAction::DeclineFriendRequest {
                     authority_id: required(value.value, "value", value.action)?,
+                })
+            }
+            SemanticActionKind::PublishAmpTransitionFixture => {
+                ScenarioAction::Intent(IntentAction::PublishAmpTransitionFixture {
+                    channel: required(value.value, "value", value.action)?,
+                    fixture: required(
+                        value.amp_transition_fixture,
+                        "amp_transition_fixture",
+                        value.action,
+                    )?,
                 })
             }
             SemanticActionKind::PasteClipboard => ScenarioAction::Ui(UiAction::PasteClipboard {

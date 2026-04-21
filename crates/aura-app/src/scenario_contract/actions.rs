@@ -5,8 +5,10 @@ use super::{
     SubmissionValueContract,
 };
 use crate::ui_contract::{
-    ControlId, FieldId, FlowAvailability, FrontendId, ListId, ModalId, OperationId, OperationState,
-    ProjectionRevision, QuiescenceState, RuntimeEventKind, ScreenId, UiReadiness,
+    AmpAccusationDiagnostic, AmpChannelTransitionSnapshot, AmpTransitionPolicySnapshot,
+    AmpTransitionState, ChannelFactKey, ControlId, FieldId, FlowAvailability, FrontendId, ListId,
+    ModalId, OperationId, OperationState, ProjectionRevision, QuiescenceState, RuntimeEventKind,
+    RuntimeFact, ScreenId, UiReadiness,
 };
 use serde::{Deserialize, Serialize};
 
@@ -167,6 +169,7 @@ supported_on_all_frontends!(
     SendFriendRequest,
     AcceptFriendRequest,
     DeclineFriendRequest,
+    PublishAmpTransitionFixture,
 );
 
 #[must_use]
@@ -327,6 +330,161 @@ pub enum IntentAction {
     DeclineFriendRequest {
         authority_id: String,
     },
+    PublishAmpTransitionFixture {
+        channel: String,
+        fixture: AmpTransitionFixture,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AmpTransitionFixture {
+    NormalObserved,
+    NormalA2Live,
+    NormalA3Finalized,
+    DelayedWitnessPending,
+    DelayedWitnessA2Live,
+    A2Conflict,
+    SubtractiveCutover,
+    EmergencyQuarantineAlarm,
+    EmergencyQuarantineApproved,
+    EmergencyCryptoshredConfirmed,
+    GovernanceRightsUnaffected,
+    RejectedEmergencyAttempt,
+    CooldownDuplicateEvidence,
+    RecoveryReplayAfterRestart,
+}
+
+impl AmpTransitionFixture {
+    #[must_use]
+    pub fn snapshot(self, channel: impl Into<String>) -> AmpChannelTransitionSnapshot {
+        let channel = ChannelFactKey::identified(channel);
+        let mut snapshot = AmpChannelTransitionSnapshot {
+            channel,
+            stable_epoch: 1,
+            state: AmpTransitionState::Observed,
+            live_transition_id: None,
+            finalized_transition_id: None,
+            conflict_evidence: Vec::new(),
+            emergency_policy: Some(AmpTransitionPolicySnapshot::Normal),
+            suspect_authorities: Vec::new(),
+            quarantine_epochs: Vec::new(),
+            prune_before_epochs: Vec::new(),
+            cryptoshred_active: false,
+            accusation_history: Vec::new(),
+        };
+
+        match self {
+            Self::NormalObserved => {}
+            Self::NormalA2Live => {
+                snapshot.state = AmpTransitionState::A2Live;
+                snapshot.live_transition_id = Some("normal-a2-live".to_string());
+            }
+            Self::NormalA3Finalized => {
+                snapshot.stable_epoch = 2;
+                snapshot.state = AmpTransitionState::A3Finalized;
+                snapshot.finalized_transition_id = Some("normal-a3-finalized".to_string());
+            }
+            Self::DelayedWitnessPending => {
+                snapshot.stable_epoch = 3;
+                snapshot.emergency_policy = Some(AmpTransitionPolicySnapshot::Additive);
+                snapshot
+                    .conflict_evidence
+                    .push("delayed-witness-pending".to_string());
+            }
+            Self::DelayedWitnessA2Live => {
+                snapshot.stable_epoch = 3;
+                snapshot.state = AmpTransitionState::A2Live;
+                snapshot.live_transition_id = Some("delayed-witness-a2-live".to_string());
+                snapshot.emergency_policy = Some(AmpTransitionPolicySnapshot::Additive);
+            }
+            Self::A2Conflict => {
+                snapshot.stable_epoch = 4;
+                snapshot.state = AmpTransitionState::A2Conflict;
+                snapshot.conflict_evidence = vec![
+                    "duplicate-a2-certificate".to_string(),
+                    "successor-sends-disabled".to_string(),
+                ];
+            }
+            Self::SubtractiveCutover => {
+                snapshot.stable_epoch = 5;
+                snapshot.state = AmpTransitionState::A2Live;
+                snapshot.live_transition_id = Some("subtractive-cutover".to_string());
+                snapshot.emergency_policy = Some(AmpTransitionPolicySnapshot::Subtractive);
+                snapshot.suspect_authorities = vec!["removed-participant".to_string()];
+                snapshot.prune_before_epochs = vec![5];
+            }
+            Self::EmergencyQuarantineAlarm => {
+                snapshot.stable_epoch = 6;
+                snapshot.emergency_policy = Some(AmpTransitionPolicySnapshot::EmergencyQuarantine);
+                snapshot.suspect_authorities = vec!["suspect-authority".to_string()];
+                snapshot.quarantine_epochs = vec![6];
+                snapshot.conflict_evidence = vec!["emergency-alarm".to_string()];
+            }
+            Self::EmergencyQuarantineApproved => {
+                snapshot.stable_epoch = 6;
+                snapshot.state = AmpTransitionState::A2Live;
+                snapshot.live_transition_id = Some("emergency-quarantine-a2-live".to_string());
+                snapshot.emergency_policy = Some(AmpTransitionPolicySnapshot::EmergencyQuarantine);
+                snapshot.suspect_authorities = vec!["suspect-authority".to_string()];
+                snapshot.quarantine_epochs = vec![6];
+            }
+            Self::EmergencyCryptoshredConfirmed => {
+                snapshot.stable_epoch = 7;
+                snapshot.state = AmpTransitionState::A2Live;
+                snapshot.live_transition_id = Some("emergency-cryptoshred-a2-live".to_string());
+                snapshot.emergency_policy = Some(AmpTransitionPolicySnapshot::EmergencyCryptoshred);
+                snapshot.prune_before_epochs = vec![7];
+                snapshot.cryptoshred_active = true;
+                snapshot.conflict_evidence = vec!["cryptoshred-confirmed".to_string()];
+            }
+            Self::GovernanceRightsUnaffected => {
+                snapshot.stable_epoch = 8;
+                snapshot.state = AmpTransitionState::A3Finalized;
+                snapshot.finalized_transition_id = Some("governance-rights-unaffected".to_string());
+                snapshot.emergency_policy = Some(AmpTransitionPolicySnapshot::EmergencyQuarantine);
+                snapshot.conflict_evidence = vec![
+                    "authority-governance-rights-unaffected".to_string(),
+                    "recovery-governance-rights-unaffected".to_string(),
+                ];
+            }
+            Self::RejectedEmergencyAttempt => {
+                snapshot.stable_epoch = 9;
+                snapshot.state = AmpTransitionState::Aborted;
+                snapshot.emergency_policy = Some(AmpTransitionPolicySnapshot::EmergencyQuarantine);
+                snapshot.conflict_evidence = vec!["rejected-emergency-attempt".to_string()];
+            }
+            Self::CooldownDuplicateEvidence => {
+                snapshot.stable_epoch = 10;
+                snapshot.state = AmpTransitionState::A3Conflict;
+                snapshot.conflict_evidence = vec![
+                    "cooldown-active".to_string(),
+                    "duplicate-signing-evidence".to_string(),
+                ];
+                snapshot.accusation_history = vec![AmpAccusationDiagnostic {
+                    evidence_id: "duplicate-signing-evidence".to_string(),
+                    witness: Some("quorum-witness".to_string()),
+                    cooldown_until_generation: Some(11),
+                }];
+            }
+            Self::RecoveryReplayAfterRestart => {
+                snapshot.stable_epoch = 11;
+                snapshot.state = AmpTransitionState::Superseded;
+                snapshot.finalized_transition_id =
+                    Some("recovery-replay-after-restart".to_string());
+                snapshot.conflict_evidence = vec!["recovery-replay-after-restart".to_string()];
+            }
+        }
+
+        snapshot
+    }
+
+    #[must_use]
+    pub fn runtime_fact(self, channel: impl Into<String>) -> RuntimeFact {
+        RuntimeFact::AmpChannelTransitionUpdated {
+            transition: self.snapshot(channel),
+        }
+    }
 }
 
 impl IntentAction {
@@ -351,6 +509,7 @@ impl IntentAction {
             Self::SendFriendRequest { .. } => IntentKind::SendFriendRequest,
             Self::AcceptFriendRequest { .. } => IntentKind::AcceptFriendRequest,
             Self::DeclineFriendRequest { .. } => IntentKind::DeclineFriendRequest,
+            Self::PublishAmpTransitionFixture { .. } => IntentKind::PublishAmpTransitionFixture,
         }
     }
 
@@ -1053,6 +1212,44 @@ impl IntentAction {
                 terminal_failure_codes: vec![
                     "decline_friend_request_issue_failed".to_string(),
                     "decline_friend_request_timeout".to_string(),
+                ],
+            },
+            Self::PublishAmpTransitionFixture { .. } => SharedActionContract {
+                intent: IntentKind::PublishAmpTransitionFixture,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
+                preconditions: vec![
+                    ActionPrecondition::Readiness(UiReadiness::Ready),
+                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
+                ],
+                barriers: SharedActionBarrierMetadata {
+                    before_issue: vec![
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
+                    ],
+                    before_next_intent: vec![
+                        BarrierDeclaration::RuntimeEvent(
+                            RuntimeEventKind::AmpChannelTransitionUpdated,
+                        ),
+                        BarrierDeclaration::Readiness(UiReadiness::Ready),
+                    ],
+                },
+                post_operation_convergence: None,
+                focus_semantics: FocusSemantics::None,
+                selection_semantics: SelectionSemantics::PreservesCurrent,
+                transitions: vec![AuthoritativeTransitionKind::RuntimeEvent(
+                    RuntimeEventKind::AmpChannelTransitionUpdated,
+                )],
+                terminal_success: vec![
+                    TerminalSuccessKind::RuntimeEvent(
+                        RuntimeEventKind::AmpChannelTransitionUpdated,
+                    ),
+                    TerminalSuccessKind::Readiness(UiReadiness::Ready),
+                ],
+                terminal_failure_codes: vec![
+                    "amp_transition_fixture_publish_failed".to_string(),
+                    "amp_transition_fixture_timeout".to_string(),
                 ],
             },
         }

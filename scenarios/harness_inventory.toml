@@ -48,6 +48,41 @@ runtime_substrate = "real_runtime"
 notes = "Shared semantic notifications navigation and authority-switch command coverage."
 
 [[scenario]]
+id = "amp-transition-normal-shared"
+path = "scenarios/harness/amp-transition-normal-shared.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Shared AMP normal epoch transition observation from observed proposal through A2 live successor to A3 finalization."
+
+[[scenario]]
+id = "amp-transition-delayed-witness-shared"
+path = "scenarios/harness/amp-transition-delayed-witness-shared.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Shared AMP delayed/offline witness pending state and convergence observation coverage."
+
+[[scenario]]
+id = "amp-transition-conflict-subtractive-shared"
+path = "scenarios/harness/amp-transition-conflict-subtractive-shared.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Shared AMP conflicting A2 certificate and subtractive membership cutover observation coverage."
+
+[[scenario]]
+id = "amp-transition-emergency-shared"
+path = "scenarios/harness/amp-transition-emergency-shared.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Shared AMP emergency quarantine, cryptoshred, and governance non-removal observation coverage."
+
+[[scenario]]
+id = "amp-transition-negative-shared"
+path = "scenarios/harness/amp-transition-negative-shared.toml"
+classification = "shared"
+runtime_substrate = "real_runtime"
+notes = "Shared AMP rejected emergency, cooldown duplicate evidence, and recovery replay observation coverage."
+
+[[scenario]]
 id = "tui-conformance-global-navigation-help-hotkeys"
 path = "scenarios/harness/tui-conformance-global-navigation-help-hotkeys.toml"
 classification = "tui_conformance"

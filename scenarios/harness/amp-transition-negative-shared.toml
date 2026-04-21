@@ -1,0 +1,157 @@
+# Shared AMP negative transition test:
+#
+# Exercises rejected emergency attempts, cooldown/duplicate-signing evidence,
+# and recovery replay after restart without renderer-specific scenario mechanics.
+
+id = "amp-transition-negative-shared"
+goal = "Validate shared AMP negative emergency and replay observations across frontend bindings."
+
+[[steps]]
+id = "launch"
+action = "launch_actors"
+timeout_ms = 20000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "onboarding"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-onboarding-visible"
+action = "screen_is"
+actor = "bob"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "alice-create-account"
+action = "create_account"
+actor = "alice"
+value = "AliceUser"
+timeout_ms = 4000
+
+[[steps]]
+id = "bob-create-account"
+action = "create_account"
+actor = "bob"
+value = "BobUser"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "bob-ready"
+action = "readiness_is"
+actor = "bob"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-rejected-emergency"
+action = "publish_amp_transition_fixture"
+actor = "alice"
+value = "amp-negative"
+amp_transition_fixture = "rejected_emergency_attempt"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-rejected-emergency"
+action = "publish_amp_transition_fixture"
+actor = "bob"
+value = "amp-negative"
+amp_transition_fixture = "rejected_emergency_attempt"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-rejected-emergency-event"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "rejected-emergency-attempt"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-rejected-emergency-event"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "rejected-emergency-attempt"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-cooldown-duplicate-evidence"
+action = "publish_amp_transition_fixture"
+actor = "alice"
+value = "amp-negative"
+amp_transition_fixture = "cooldown_duplicate_evidence"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-cooldown-duplicate-evidence"
+action = "publish_amp_transition_fixture"
+actor = "bob"
+value = "amp-negative"
+amp_transition_fixture = "cooldown_duplicate_evidence"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-cooldown-event"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "duplicate-signing-evidence"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-cooldown-event"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "duplicate-signing-evidence"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-recovery-replay"
+action = "publish_amp_transition_fixture"
+actor = "alice"
+value = "amp-negative"
+amp_transition_fixture = "recovery_replay_after_restart"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-recovery-replay"
+action = "publish_amp_transition_fixture"
+actor = "bob"
+value = "amp-negative"
+amp_transition_fixture = "recovery_replay_after_restart"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-recovery-replay-event"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "recovery-replay-after-restart"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-recovery-replay-event"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "amp_channel_transition_updated"
+value = "recovery-replay-after-restart"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-matches-alice-negative-transition"
+action = "parity_with_actor"
+actor = "bob"
+peer_actor = "alice"
+timeout_ms = 5000

@@ -159,6 +159,10 @@ pub(crate) fn apply_harness_command(
 ) -> Result<Vec<TuiCommand>, String> {
     match command {
         HarnessUiCommand::Ping => Ok(Vec::new()),
+        HarnessUiCommand::ObserveRuntimeFact { fact } => {
+            state.upsert_runtime_fact(fact);
+            Ok(Vec::new())
+        }
         HarnessUiCommand::NavigateScreen { screen } => {
             if let Some(screen) = screen_from_id(screen) {
                 state.router.go_to(screen);

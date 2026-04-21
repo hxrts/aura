@@ -22,8 +22,8 @@ The harness coverage model has two explicit lanes:
 
 | Metric | Count |
 |--------|-------|
-| Harness User Flow Scenarios | 11 |
-| Shared Semantic Scenarios | 6 |
+| Harness User Flow Scenarios | 16 |
+| Shared Semantic Scenarios | 11 |
 | Mixed-Runtime Scenarios (TUI + Web distinct keys) | 3 |
 | Frontend-Conformance Scenarios | 5 |
 | Core User Flow Domains | 13 |
@@ -52,6 +52,11 @@ This report is a traceability document for those classes. It is not a proof of p
 | Contact Invite Notification Roundtrip | `scenarios/harness/mixed-contact-invite-notification-roundtrip.toml` | Mixed TUI/Web symmetric contact invite acceptance notifications |
 | Shared Settings | `scenarios/harness/shared-settings-parity.toml` | Shared semantic settings parity |
 | Shared Notifications/Authority | `scenarios/harness/shared-notifications-and-authority.toml` | Shared semantic notifications navigation and authority-switch handling |
+| AMP Normal Transition | `scenarios/harness/amp-transition-normal-shared.toml` | Shared AMP observed to A2 live to A3 finalized transition observation |
+| AMP Delayed Witness Transition | `scenarios/harness/amp-transition-delayed-witness-shared.toml` | Shared AMP delayed/offline witness pending and convergence observation |
+| AMP Conflict/Subtractive Transition | `scenarios/harness/amp-transition-conflict-subtractive-shared.toml` | Shared AMP conflicting A2 certificate and subtractive membership observation |
+| AMP Emergency Transition | `scenarios/harness/amp-transition-emergency-shared.toml` | Shared AMP emergency quarantine, cryptoshred, and governance non-removal observation |
+| AMP Negative Transition | `scenarios/harness/amp-transition-negative-shared.toml` | Shared AMP rejected emergency, cooldown duplicate evidence, and recovery replay observation |
 | Browser Observation | `scenarios/harness/semantic-observation-browser-smoke.toml` | Browser semantic observation contract smoke |
 | TUI Observation | `scenarios/harness/semantic-observation-tui-smoke.toml` | TUI semantic observation contract smoke |
 | Quint Observation | `scenarios/harness/quint-semantic-observation-smoke.toml` | Quint-origin semantic observation reference |
@@ -83,7 +88,7 @@ The two TUI-only conformance scenarios plus Scenario 13 are retained as frontend
 | Global navigation/help | TUI Global Navigation/Help Hotkeys | None | TUI frontend-conformance |
 | Neighborhood keypath navigation | TUI Neighborhood Keypaths/Detail | `real-runtime-mixed-startup-smoke.toml` | TUI frontend-conformance + shared startup |
 | Semantic observation contract | `semantic-observation-browser-smoke.toml` | `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | Browser + TUI |
-| AMP transition frontend observation | Runtime-event parity contract tests | Simulator transition scenarios from Phase 9; future real-runtime AMP transition scenarios | TUI + Web observation contract |
+| AMP transition frontend observation | `amp-transition-normal-shared.toml`, `amp-transition-delayed-witness-shared.toml`, `amp-transition-conflict-subtractive-shared.toml`, `amp-transition-emergency-shared.toml`, `amp-transition-negative-shared.toml` | Runtime-event parity contract tests; simulator transition scenarios from Phase 9 | TUI + Web observation contract |
 
 Current parity-critical source changes touched the following shared-flow areas
 and continue to map to the same canonical coverage anchors:
@@ -136,16 +141,13 @@ and continue to map to the same canonical coverage anchors:
   `scenario12-mixed-device-enrollment-removal-e2e.toml` plus
   `shared-settings-parity.toml`, while notifications navigation and authority
   switching remain bound to `shared-notifications-and-authority.toml`.
-- AMP channel transition frontend observation is currently covered as a
-  shared-contract runtime-event surface rather than a full real-runtime
-  scenario. TUI and web must consume
-  `RuntimeFact::AmpChannelTransitionUpdated` through `UiSnapshot.runtime_events`
-  and shared `aura-app::ui_contract` action/control ids; harness tests assert
-  runtime-event waits and parity signatures on that contract. The real-runtime
-  scenario matrix for normal transition, delayed witnesses, conflicts,
-  subtractive membership, emergency quarantine, cryptoshred, and negative
-  emergency cases should be promoted only when the runtime exposes semantic AMP
-  transition commands that can drive those states without frontend-specific
+- AMP channel transition frontend observation is covered by shared semantic AMP
+  transition scenarios plus runtime-event parity contract tests. TUI and web
+  consume `RuntimeFact::AmpChannelTransitionUpdated` through
+  `UiSnapshot.runtime_events` and shared `aura-app::ui_contract`
+  action/control ids; the shared scenarios drive typed AMP transition fixtures
+  through the semantic command plane and assert
+  `RuntimeEventKind::AmpChannelTransitionUpdated` without frontend-specific
   compatibility steps.
 
 Scenario 13 remains the canonical anchor for the shared contacts lifecycle

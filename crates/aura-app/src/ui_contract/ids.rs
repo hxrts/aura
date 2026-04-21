@@ -1,6 +1,6 @@
 //! Shared UI identifiers, controls, and handle-shaped command surfaces.
 
-use super::{OperationId, OperationInstanceId};
+use super::{OperationId, OperationInstanceId, RuntimeFact};
 use serde::{Deserialize, Serialize};
 
 use crate::scenario_contract::SemanticCommandValue;
@@ -121,6 +121,9 @@ pub enum HarnessUiCommand {
     },
     SendChatMessage {
         content: String,
+    },
+    ObserveRuntimeFact {
+        fact: RuntimeFact,
     },
 }
 
