@@ -285,14 +285,14 @@ impl ChatServiceApi {
             .map_err(map_amp_state_error)?;
         let bump_nonce = self.effects.random_uuid().await.as_bytes().to_vec();
         let bump_id = Hash32(hash(&bump_nonce));
-        let proposal = ProposedChannelEpochBump {
-            context: context_id,
-            channel: channel_id,
-            parent_epoch: state.chan_epoch,
-            new_epoch: state.chan_epoch + 1,
+        let proposal = ProposedChannelEpochBump::new(
+            context_id,
+            channel_id,
+            state.chan_epoch,
+            state.chan_epoch + 1,
             bump_id,
             reason,
-        };
+        );
 
         emit_proposed_bump(self.effects.as_ref(), proposal.clone())
             .await

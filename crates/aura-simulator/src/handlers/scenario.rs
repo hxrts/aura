@@ -3620,7 +3620,7 @@ fn capture_adaptive_privacy_overlay(
         .values()
         .map(|state| AuraProviderOverlayV1 {
             provider: state.provider.clone(),
-            queue_depth: state.queue_depth,
+            queue_depth: state.queue_depth as u64,
             utilization_per_mille: bias_to_per_mille(state.utilization),
             health_score_per_mille: adaptive_privacy
                 .local_health
@@ -3640,7 +3640,7 @@ fn capture_adaptive_privacy_overlay(
         .map(|state| AuraAdmissionPressureOverlayV1 {
             profile_id: state.profile_id.clone(),
             density: sync_density_label(state.density).to_string(),
-            peer_count: state.peers.len(),
+            peer_count: state.peers.len() as u64,
         })
         .collect::<Vec<_>>();
     admission_pressure.sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
@@ -3651,8 +3651,8 @@ fn capture_adaptive_privacy_overlay(
         .map(|burst| AuraTopologyChurnOverlayV1 {
             burst_id: burst.id.clone(),
             affected_participants: burst.affected_participants.clone(),
-            entering: burst.entering,
-            leaving: burst.leaving,
+            entering: burst.entering as u64,
+            leaving: burst.leaving as u64,
             recorded_at_tick: burst.recorded_at,
         })
         .collect::<Vec<_>>();
@@ -3664,7 +3664,7 @@ fn capture_adaptive_privacy_overlay(
         .map(|pattern| AuraInterferenceOverlayV1 {
             path_id: pattern.path_id.clone(),
             compromised_hops: pattern.compromised_hops.clone(),
-            honest_hops_remaining: pattern.honest_hops_remaining,
+            honest_hops_remaining: pattern.honest_hops_remaining as u64,
             recorded_at_tick: pattern.recorded_at,
         })
         .collect::<Vec<_>>();
@@ -3672,7 +3672,7 @@ fn capture_adaptive_privacy_overlay(
 
     AuraEnvironmentOverlayV1 {
         mobility_profiles,
-        partition_heal_cycle_count: adaptive_privacy.partition_heal_cycles.len(),
+        partition_heal_cycle_count: adaptive_privacy.partition_heal_cycles.len() as u64,
         provider_heterogeneity,
         admission_pressure,
         topology_churn,

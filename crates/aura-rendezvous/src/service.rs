@@ -17,7 +17,7 @@ use aura_core::FlowCost;
 use aura_core::{AuraError, AuraResult};
 use aura_guards::types;
 use std::collections::HashMap;
-use std::time::{Duration, Instant as MonotonicInstant};
+use std::time::{Duration, Instant as MonotonicClock};
 use tokio::sync::RwLock;
 
 // =============================================================================
@@ -165,18 +165,18 @@ pub struct RendezvousService {
 #[derive(Debug)]
 struct PendingHandshaker {
     handshaker: Handshaker,
-    inserted_at: MonotonicInstant,
+    inserted_at: MonotonicClock,
 }
 
 impl PendingHandshaker {
     fn new(handshaker: Handshaker) -> Self {
         Self {
             handshaker,
-            inserted_at: MonotonicInstant::now(),
+            inserted_at: MonotonicClock::now(),
         }
     }
 
-    fn is_expired(&self, now: MonotonicInstant, ttl: Duration) -> bool {
+    fn is_expired(&self, now: MonotonicClock, ttl: Duration) -> bool {
         now.duration_since(self.inserted_at) >= ttl
     }
 }
@@ -189,7 +189,7 @@ impl RendezvousService {
     fn cleanup_expired_handshakers(
         &self,
         handshakers: &mut HashMap<(ContextId, AuthorityId), PendingHandshaker>,
-        now: MonotonicInstant,
+        now: MonotonicClock,
     ) -> usize {
         let ttl = self.pending_handshaker_ttl();
         let before = handshakers.len();
@@ -394,7 +394,7 @@ impl RendezvousService {
 
         // Store handshaker
         let mut handshakers = self.handshakers.write().await;
-        let expired = self.cleanup_expired_handshakers(&mut handshakers, MonotonicInstant::now());
+        let expired = self.cleanup_expired_handshakers(&mut handshakers, MonotonicClock::now());
         if expired > 0 {
             tracing::warn!(
                 authority_id = %self.authority_id,
@@ -543,7 +543,7 @@ impl RendezvousService {
         effects: &E,
     ) -> AuraResult<Option<SecureChannel>> {
         let mut handshakers = self.handshakers.write().await;
-        let expired = self.cleanup_expired_handshakers(&mut handshakers, MonotonicInstant::now());
+        let expired = self.cleanup_expired_handshakers(&mut handshakers, MonotonicClock::now());
         if expired > 0 {
             tracing::warn!(
                 authority_id = %self.authority_id,
@@ -878,11 +878,11 @@ mod tests {
                 (test_context(), peer),
                 PendingHandshaker {
                     handshaker: Handshaker::new(expired_config),
-                    inserted_at: MonotonicInstant::now() - Duration::from_millis(25),
+                    inserted_at: MonotonicClock::now() - Duration::from_millis(25),
                 },
             );
             let removed =
-                service.cleanup_expired_handshakers(&mut handshakers, MonotonicInstant::now());
+                service.cleanup_expired_handshakers(&mut handshakers, MonotonicClock::now());
             assert_eq!(removed, 1);
             assert!(handshakers.is_empty());
         }

@@ -34,16 +34,16 @@ pub async fn propose_bump<E: AmpJournalEffects>(
         .into());
     }
 
-    let proposal = ProposedChannelEpochBump {
+    let proposal = ProposedChannelEpochBump::new(
         context,
         channel,
-        parent_epoch: state.chan_epoch,
-        new_epoch: state.chan_epoch + 1,
-        reason: ChannelBumpReason::Routine,
-        bump_id: Hash32::new(hash::hash(
+        state.chan_epoch,
+        state.chan_epoch + 1,
+        Hash32::new(hash::hash(
             format!("amp-bump:{context}:{channel}").as_bytes(),
         )),
-    };
+        ChannelBumpReason::Routine,
+    );
 
     effects
         .insert_relational_fact(RelationalFact::Protocol(

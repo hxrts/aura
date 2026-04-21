@@ -35,7 +35,7 @@ pub struct AuraLinkAdmissionObservation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuraNodeCapabilityObservation {
     pub provider: String,
-    pub queue_depth: usize,
+    pub queue_depth: u64,
     pub utilization_per_mille: u64,
     pub recorded_at_tick: u64,
 }
@@ -90,7 +90,7 @@ pub struct AuraEnvironmentTraceArtifactV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuraProviderOverlayV1 {
     pub provider: String,
-    pub queue_depth: usize,
+    pub queue_depth: u64,
     pub utilization_per_mille: u64,
     pub health_score_per_mille: Option<u64>,
     pub latency_ms: Option<u64>,
@@ -101,7 +101,7 @@ pub struct AuraProviderOverlayV1 {
 pub struct AuraAdmissionPressureOverlayV1 {
     pub profile_id: String,
     pub density: String,
-    pub peer_count: usize,
+    pub peer_count: u64,
 }
 
 /// Aura-specific topology churn overlay.
@@ -109,8 +109,8 @@ pub struct AuraAdmissionPressureOverlayV1 {
 pub struct AuraTopologyChurnOverlayV1 {
     pub burst_id: String,
     pub affected_participants: Vec<String>,
-    pub entering: usize,
-    pub leaving: usize,
+    pub entering: u64,
+    pub leaving: u64,
     pub recorded_at_tick: u64,
 }
 
@@ -119,7 +119,7 @@ pub struct AuraTopologyChurnOverlayV1 {
 pub struct AuraInterferenceOverlayV1 {
     pub path_id: String,
     pub compromised_hops: Vec<String>,
-    pub honest_hops_remaining: usize,
+    pub honest_hops_remaining: u64,
     pub recorded_at_tick: u64,
 }
 
@@ -127,7 +127,7 @@ pub struct AuraInterferenceOverlayV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AuraEnvironmentOverlayV1 {
     pub mobility_profiles: Vec<String>,
-    pub partition_heal_cycle_count: usize,
+    pub partition_heal_cycle_count: u64,
     pub provider_heterogeneity: Vec<AuraProviderOverlayV1>,
     pub admission_pressure: Vec<AuraAdmissionPressureOverlayV1>,
     pub topology_churn: Vec<AuraTopologyChurnOverlayV1>,
@@ -247,7 +247,7 @@ impl AuraEnvironmentBridge {
     ) -> AuraNodeCapabilityObservation {
         let observation = AuraNodeCapabilityObservation {
             provider,
-            queue_depth,
+            queue_depth: queue_depth as u64,
             utilization_per_mille,
             recorded_at_tick,
         };

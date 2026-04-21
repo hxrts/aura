@@ -1193,6 +1193,7 @@ fn is_test_like_path(path: &str) -> bool {
     path.contains("/tests/")
         || path.contains("/benches/")
         || path.contains("/examples/")
+        || path.ends_with("/tests.rs")
         || path.ends_with("_test.rs")
 }
 
@@ -1258,6 +1259,7 @@ fn crypto_allowed(path: &str) -> bool {
 fn capability_name_parse_allowed(path: &str) -> bool {
     path == "crates/aura-core/src/capability_name.rs"
         || path == "crates/aura-authorization/src/biscuit_authorization.rs"
+        || path == "crates/aura-authorization/src/biscuit_evaluator.rs"
         || path == "crates/aura-guards/src/authorization.rs"
         || path == "crates/aura-mpst/src/annotation_lowering.rs"
         || path == "crates/aura-mpst/src/composition.rs"

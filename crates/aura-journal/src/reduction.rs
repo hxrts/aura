@@ -543,6 +543,26 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 proposed_bumps.push(bump.clone());
                                 continue;
                             }
+                            crate::fact::ProtocolRelationalFact::AmpCertifiedChannelEpochBump(
+                                _,
+                            )
+                            | crate::fact::ProtocolRelationalFact::AmpFinalizedChannelEpochBump(
+                                _,
+                            )
+                            | crate::fact::ProtocolRelationalFact::AmpTransitionAbort(_)
+                            | crate::fact::ProtocolRelationalFact::AmpTransitionConflict(_)
+                            | crate::fact::ProtocolRelationalFact::AmpTransitionSupersession(_)
+                            | crate::fact::ProtocolRelationalFact::AmpEmergencyAlarm(_) => {
+                                let key = protocol.binding_key();
+                                bindings.push(RelationalBinding {
+                                    binding_type: RelationalBindingType::Generic(
+                                        key.sub_type().to_string(),
+                                    ),
+                                    context_id: *context_id,
+                                    data: key.data(),
+                                });
+                                continue;
+                            }
                             crate::fact::ProtocolRelationalFact::AmpCommittedChannelEpochBump(
                                 bump,
                             ) => {

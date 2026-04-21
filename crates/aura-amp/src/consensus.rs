@@ -64,15 +64,8 @@ pub async fn run_amp_channel_epoch_bump(
     };
     let commit = run_consensus(prestate, proposal, params, random, time).await?;
 
-    let committed = CommittedChannelEpochBump {
-        context: proposal.context,
-        channel: proposal.channel,
-        parent_epoch: proposal.parent_epoch,
-        new_epoch: proposal.new_epoch,
-        chosen_bump_id: proposal.bump_id,
-        consensus_id: commit.consensus_id.0,
-        transcript_ref,
-    };
+    let committed =
+        CommittedChannelEpochBump::from_proposal(proposal, commit.consensus_id.0, transcript_ref);
 
     Ok((committed, commit))
 }

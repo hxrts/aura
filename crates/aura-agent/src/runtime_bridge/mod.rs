@@ -1226,14 +1226,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(map_amp_state_error)?;
         let bump_nonce = effects.random_bytes(32).await;
         let bump_id = Hash32(hash(&bump_nonce));
-        let proposal = ProposedChannelEpochBump {
+        let proposal = ProposedChannelEpochBump::new(
             context,
             channel,
-            parent_epoch: state.chan_epoch,
-            new_epoch: state.chan_epoch + 1,
+            state.chan_epoch,
+            state.chan_epoch + 1,
             bump_id,
-            reason: ChannelBumpReason::Routine,
-        };
+            ChannelBumpReason::Routine,
+        );
 
         emit_proposed_bump(effects.as_ref(), proposal.clone())
             .await

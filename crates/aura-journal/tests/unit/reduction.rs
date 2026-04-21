@@ -61,14 +61,14 @@ fn amp_routine_bump_respects_spacing_rule() {
         ck_commitment: Hash32::default(),
         skip_window_override: None,
     };
-    let proposed = ProposedChannelEpochBump {
-        context: ctx_id,
+    let proposed = ProposedChannelEpochBump::new(
+        ctx_id,
         channel,
-        parent_epoch: 0,
-        new_epoch: 1,
-        bump_id: Hash32::new([2u8; 32]),
-        reason: ChannelBumpReason::Routine,
-    };
+        0,
+        1,
+        Hash32::new([2u8; 32]),
+        ChannelBumpReason::Routine,
+    );
 
     journal
         .add_fact(Fact::new(
@@ -111,14 +111,14 @@ fn amp_emergency_bump_bypasses_spacing_rule() {
         ck_commitment: Hash32::default(),
         skip_window_override: None,
     };
-    let emergency = ProposedChannelEpochBump {
-        context: ctx_id,
+    let emergency = ProposedChannelEpochBump::new(
+        ctx_id,
         channel,
-        parent_epoch: 0,
-        new_epoch: 1,
-        bump_id: Hash32::new([4u8; 32]),
-        reason: ChannelBumpReason::SuspiciousActivity,
-    };
+        0,
+        1,
+        Hash32::new([4u8; 32]),
+        ChannelBumpReason::SuspiciousActivity,
+    );
 
     journal
         .add_fact(Fact::new(
@@ -225,14 +225,14 @@ fn amp_reduction_order_independent() {
         TimeStamp::OrderClock(OrderTime([2u8; 32])),
         FactContent::Relational(RelationalFact::Protocol(
             aura_journal::ProtocolRelationalFact::AmpProposedChannelEpochBump(
-                ProposedChannelEpochBump {
-                    context: ctx,
+                ProposedChannelEpochBump::new(
+                    ctx,
                     channel,
-                    parent_epoch: 0,
-                    new_epoch: 1,
-                    bump_id: Hash32::new([9u8; 32]),
-                    reason: ChannelBumpReason::Routine,
-                },
+                    0,
+                    1,
+                    Hash32::new([9u8; 32]),
+                    ChannelBumpReason::Routine,
+                ),
             ),
         )),
     );
