@@ -58,6 +58,10 @@ use aura_core::types::Epoch;
 use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, FlowCost, Journal};
 use aura_guards::{BiscuitGuardEvaluator, GuardContextProvider, GuardError};
 
+const ANTI_ENTROPY_OPERATION_ID: &str = "anti_entropy";
+const ANTI_ENTROPY_AUTHZ_OPERATION_ID: &str = "anti_entropy.authorize";
+const ANTI_ENTROPY_PROGRESS_OPERATION_ID: &str = "anti_entropy.progress";
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -268,7 +272,12 @@ impl SyncProgressCallback for LoggingProgressCallback {
                 peer_id,
                 total_peers,
             } => {
-                tracing::info!("Sync started with peer {} ({} total)", peer_id, total_peers);
+                tracing::info!(
+                    operation_id = ANTI_ENTROPY_PROGRESS_OPERATION_ID,
+                    peer_id = %peer_id,
+                    total_peers,
+                    "Sync started with peer"
+                );
             }
             SyncProgressEvent::DigestExchanged {
                 peer_id,
@@ -277,11 +286,12 @@ impl SyncProgressCallback for LoggingProgressCallback {
                 remote_ops,
             } => {
                 tracing::debug!(
-                    "Digest exchanged with {}: {:?} (local: {}, remote: {})",
-                    peer_id,
-                    status,
+                    operation_id = ANTI_ENTROPY_PROGRESS_OPERATION_ID,
+                    peer_id = %peer_id,
+                    digest_status = ?status,
                     local_ops,
-                    remote_ops
+                    remote_ops,
+                    "Digest exchanged with peer"
                 );
             }
             SyncProgressEvent::Pulling {
@@ -289,14 +299,26 @@ impl SyncProgressCallback for LoggingProgressCallback {
                 pulled,
                 total,
             } => {
-                tracing::debug!("Pulling from {}: {}/{}", peer_id, pulled, total);
+                tracing::debug!(
+                    operation_id = ANTI_ENTROPY_PROGRESS_OPERATION_ID,
+                    peer_id = %peer_id,
+                    pulled,
+                    total,
+                    "Pulling operations from peer"
+                );
             }
             SyncProgressEvent::Pushing {
                 peer_id,
                 pushed,
                 total,
             } => {
-                tracing::debug!("Pushing to {}: {}/{}", peer_id, pushed, total);
+                tracing::debug!(
+                    operation_id = ANTI_ENTROPY_PROGRESS_OPERATION_ID,
+                    peer_id = %peer_id,
+                    pushed,
+                    total,
+                    "Pushing operations to peer"
+                );
             }
             SyncProgressEvent::PeerCompleted {
                 peer_id,
@@ -305,11 +327,12 @@ impl SyncProgressCallback for LoggingProgressCallback {
                 peers_remaining,
             } => {
                 tracing::info!(
-                    "Peer {} completed: {} applied, success={}, {} remaining",
-                    peer_id,
+                    operation_id = ANTI_ENTROPY_PROGRESS_OPERATION_ID,
+                    peer_id = %peer_id,
                     applied,
                     success,
-                    peers_remaining
+                    peers_remaining,
+                    "Peer sync completed"
                 );
             }
             SyncProgressEvent::AllCompleted {
@@ -319,11 +342,12 @@ impl SyncProgressCallback for LoggingProgressCallback {
                 failed_peers,
             } => {
                 tracing::info!(
-                    "Sync completed: {} applied, {} duplicates, {} succeeded, {} failed",
+                    operation_id = ANTI_ENTROPY_PROGRESS_OPERATION_ID,
                     total_applied,
                     total_duplicates,
                     successful_peers,
-                    failed_peers
+                    failed_peers,
+                    "All peer syncs completed"
                 );
             }
             SyncProgressEvent::PeerFailed {
@@ -333,11 +357,12 @@ impl SyncProgressCallback for LoggingProgressCallback {
                 retry_attempt,
             } => {
                 tracing::warn!(
-                    "Peer {} failed: {} (retry={}, attempt={})",
-                    peer_id,
+                    operation_id = ANTI_ENTROPY_PROGRESS_OPERATION_ID,
+                    peer_id = %peer_id,
                     error,
                     will_retry,
-                    retry_attempt
+                    retry_attempt,
+                    "Peer sync failed"
                 );
             }
         }
@@ -490,11 +515,23 @@ impl AntiEntropyProtocol {
                 &mut flow_budget,
             ) {
                 Ok(guard_result) if guard_result.authorized => {
-                    tracing::debug!("Sync authorization granted for peer {}", peer);
+                    tracing::debug!(
+                        operation_id = ANTI_ENTROPY_AUTHZ_OPERATION_ID,
+                        authority_id = %effects.authority_id(),
+                        peer_id = %peer,
+                        capability = capability.as_str(),
+                        "Sync authorization granted for peer"
+                    );
                     Ok(())
                 }
                 Ok(_) => {
-                    tracing::warn!("Sync authorization denied for peer {}", peer);
+                    tracing::warn!(
+                        operation_id = ANTI_ENTROPY_AUTHZ_OPERATION_ID,
+                        authority_id = %effects.authority_id(),
+                        peer_id = %peer,
+                        capability = capability.as_str(),
+                        "Sync authorization denied for peer"
+                    );
                     Err(sync_biscuit_guard_error(
                         capability.as_str(),
                         peer,
@@ -504,13 +541,25 @@ impl AntiEntropyProtocol {
                     ))
                 }
                 Err(e) => {
-                    tracing::error!("Sync authorization error for peer {}: {:?}", peer, e);
+                    tracing::error!(
+                        operation_id = ANTI_ENTROPY_AUTHZ_OPERATION_ID,
+                        authority_id = %effects.authority_id(),
+                        peer_id = %peer,
+                        capability = capability.as_str(),
+                        error = ?e,
+                        "Sync authorization error for peer"
+                    );
                     Err(sync_biscuit_guard_error(capability.as_str(), peer, e))
                 }
             }
         } else {
             // No Biscuit authorization configured - deny access (authorization is required)
-            tracing::error!("Sync denied: no authorization configured for peer {}", peer);
+            tracing::error!(
+                operation_id = ANTI_ENTROPY_AUTHZ_OPERATION_ID,
+                authority_id = %effects.authority_id(),
+                peer_id = %peer,
+                "Sync denied: no authorization configured for peer"
+            );
             Err(AuraError::permission_denied(format!(
                 "Authorization required for sync with peer {peer}. Configure Biscuit token manager and guard evaluator."
             )))
@@ -539,9 +588,15 @@ impl AntiEntropyProtocol {
             + PhysicalTimeEffects
             + GuardContextProvider,
     {
+        let authority_id = effects.authority_id();
         // Check authorization before starting sync
         self.check_sync_authorization(effects, peer)?;
-        tracing::info!("Starting anti-entropy sync with peer {}", peer);
+        tracing::info!(
+            operation_id = ANTI_ENTROPY_OPERATION_ID,
+            authority_id = %authority_id,
+            peer_id = %peer,
+            "Starting anti-entropy sync with peer"
+        );
 
         let mut result = AntiEntropyResult::default();
 
@@ -566,28 +621,36 @@ impl AntiEntropyProtocol {
 
             if matches!(round_result.final_status, Some(DigestStatus::Equal)) {
                 tracing::info!(
-                    "Sync completed successfully after {} rounds with peer {}",
-                    result.rounds,
-                    peer
+                    operation_id = ANTI_ENTROPY_OPERATION_ID,
+                    authority_id = %authority_id,
+                    peer_id = %peer,
+                    rounds = result.rounds,
+                    "Sync completed successfully with peer"
                 );
                 break;
             }
 
             if result.rounds >= self.config.max_rounds {
                 tracing::warn!(
-                    "Reached max rounds ({}) syncing with peer {}",
-                    self.config.max_rounds,
-                    peer
+                    operation_id = ANTI_ENTROPY_OPERATION_ID,
+                    authority_id = %authority_id,
+                    peer_id = %peer,
+                    max_rounds = self.config.max_rounds,
+                    "Reached max rounds syncing with peer"
                 );
                 break;
             }
         }
 
         tracing::info!(
-            "Anti-entropy sync completed: {} applied, {} duplicates, {} rounds",
-            result.applied,
-            result.duplicates,
-            result.rounds
+            operation_id = ANTI_ENTROPY_OPERATION_ID,
+            authority_id = %authority_id,
+            peer_id = %peer,
+            applied = result.applied,
+            duplicates = result.duplicates,
+            rounds = result.rounds,
+            final_status = ?result.final_status,
+            "Anti-entropy sync completed"
         );
 
         Ok(result)
@@ -623,11 +686,12 @@ impl AntiEntropyProtocol {
         // Step 4: Compare digests
         let digest_status = Self::compare(&local_digest, &remote_digest);
         tracing::debug!(
-            "Digest comparison with peer {}: {:?} (local: {} ops, remote: {} ops)",
-            peer,
-            digest_status,
-            local_digest.operation_count,
-            remote_digest.operation_count
+            operation_id = ANTI_ENTROPY_OPERATION_ID,
+            peer_id = %peer,
+            digest_status = ?digest_status,
+            local_ops = local_digest.operation_count,
+            remote_ops = remote_digest.operation_count,
+            "Digest comparison with peer"
         );
 
         // Step 5: Plan and execute reconciliation if needed
@@ -681,9 +745,10 @@ impl AntiEntropyProtocol {
     {
         // Send digest to peer and wait for response
         tracing::debug!(
-            "Sending digest to peer {} ({} bytes)",
-            peer,
-            json_serialize("digest", "digest", local_digest)?.len()
+            operation_id = ANTI_ENTROPY_OPERATION_ID,
+            peer_id = %peer,
+            payload_bytes = json_serialize("digest", "digest", local_digest)?.len(),
+            "Sending digest to peer"
         );
 
         // Apply timeout for digest exchange
@@ -700,9 +765,10 @@ impl AntiEntropyProtocol {
             )
             .await?;
             tracing::debug!(
-                "Received digest from peer {} ({} ops)",
-                peer,
-                remote_digest.operation_count
+                operation_id = ANTI_ENTROPY_OPERATION_ID,
+                peer_id = %peer,
+                remote_ops = remote_digest.operation_count,
+                "Received digest from peer"
             );
 
             Ok(remote_digest)
@@ -729,10 +795,11 @@ impl AntiEntropyProtocol {
             .ok_or_else(|| sync_session_error("No operations needed despite LocalBehind status"))?;
 
         tracing::debug!(
-            "Requesting {} operations from peer {} starting at index {}",
-            request.max_ops,
-            peer,
-            request.from_index
+            operation_id = ANTI_ENTROPY_OPERATION_ID,
+            peer_id = %peer,
+            max_ops = request.max_ops,
+            from_index = request.from_index,
+            "Requesting operations from peer"
         );
 
         let pull_future = async {
@@ -749,85 +816,74 @@ impl AntiEntropyProtocol {
             .await?;
 
             tracing::debug!(
-                "Received {} operations from peer {}",
-                remote_ops.len(),
-                peer
+                operation_id = ANTI_ENTROPY_OPERATION_ID,
+                peer_id = %peer,
+                remote_ops = remote_ops.len(),
+                "Received operations from peer"
             );
 
             // Merge operations into local state
             let mut local_ops = vec![]; // In full implementation, get from journal
-            let mut merge_result = self.merge_batch(&mut local_ops, remote_ops)?;
-
-            // Update journal with merged operations using effect system
-            if merge_result.applied > 0 {
-                tracing::info!(
-                    "Applied {} new operations from peer {}",
-                    merge_result.applied,
-                    peer
+            let merge_chunk_size = self.merge_chunk_size();
+            let merge_batch_count = Self::merge_batch_count(remote_ops.len(), merge_chunk_size);
+            if remote_ops.len() > request.max_ops as usize {
+                tracing::warn!(
+                    operation_id = ANTI_ENTROPY_OPERATION_ID,
+                    peer_id = %peer,
+                    requested_max_ops = request.max_ops,
+                    received_ops = remote_ops.len(),
+                    merge_chunk_size,
+                    merge_batch_count,
+                    "Peer returned more operations than requested; applying in bounded chunks"
                 );
-
-                // Convert applied operations to journal deltas via effects
-                // Use the new fact-based journal system with proper effect handling
-                match self
-                    .convert_operations_to_journal_delta(effects, &merge_result)
-                    .await
-                {
-                    Ok(journal_delta) => {
-                        // Get current journal state and merge with delta
-                        let current_journal = effects.get_journal().await.unwrap_or_else(|e| {
-                            tracing::warn!("Failed to get current journal: {}, using empty", e);
-                            aura_core::Journal::new()
-                        });
-
-                        // Apply journal delta using CRDT merge operation
-                        match effects.merge_facts(current_journal, journal_delta).await {
-                            Ok(updated_journal) => {
-                                // Persist the updated journal state
-                                if let Err(e) = effects.persist_journal(&updated_journal).await {
-                                    tracing::error!("Failed to persist journal after sync: {}", e);
-                                    return Err(crate::core::errors::sync_protocol_with_peer(
-                                        "anti_entropy",
-                                        format!("Journal persistence failure: {e}"),
-                                        peer,
-                                    ));
-                                }
-
-                                tracing::debug!(
-                                    "Successfully applied {} journal deltas from peer {}",
-                                    merge_result.applied,
-                                    peer
-                                );
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to merge journal facts: {}", e);
-                                return Err(crate::core::errors::sync_protocol_with_peer(
-                                    "anti_entropy",
-                                    format!("Journal merge failed: {e}"),
-                                    peer,
-                                ));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to convert operations to journal delta: {}", e);
-                        return Err(crate::core::errors::sync_protocol_with_peer(
-                            "anti_entropy",
-                            format!("Delta conversion failed: {e}"),
-                            peer,
-                        ));
-                    }
-                }
-
+            } else {
                 tracing::debug!(
-                    "Successfully updated journal with {} new operations from peer {}",
-                    merge_result.applied,
-                    peer
+                    operation_id = ANTI_ENTROPY_OPERATION_ID,
+                    peer_id = %peer,
+                    received_ops = remote_ops.len(),
+                    merge_chunk_size,
+                    merge_batch_count,
+                    "Applying received operations in bounded merge batches"
                 );
             }
 
-            merge_result.final_status = Some(DigestStatus::LocalBehind);
-            merge_result.rounds = 1;
-            Ok(merge_result)
+            let mut total_result = AntiEntropyResult::default();
+            for (chunk_index, chunk) in remote_ops.chunks(merge_chunk_size).enumerate() {
+                let merge_result = self.merge_batch(&mut local_ops, chunk.to_vec())?;
+
+                tracing::debug!(
+                    operation_id = ANTI_ENTROPY_PROGRESS_OPERATION_ID,
+                    peer_id = %peer,
+                    merge_batch_index = chunk_index + 1,
+                    merge_batch_count,
+                    merge_batch_size = chunk.len(),
+                    applied = merge_result.applied,
+                    duplicates = merge_result.duplicates,
+                    "Processed anti-entropy merge batch"
+                );
+
+                if merge_result.applied > 0 {
+                    tracing::info!(
+                        operation_id = ANTI_ENTROPY_OPERATION_ID,
+                        peer_id = %peer,
+                        merge_batch_index = chunk_index + 1,
+                        merge_batch_count,
+                        merge_batch_size = chunk.len(),
+                        applied = merge_result.applied,
+                        "Applied new operations from peer"
+                    );
+
+                    self.persist_applied_operations_chunk(effects, peer, &merge_result.applied_ops)
+                        .await?;
+                }
+
+                total_result.applied += merge_result.applied;
+                total_result.duplicates += merge_result.duplicates;
+            }
+
+            total_result.final_status = Some(DigestStatus::LocalBehind);
+            total_result.rounds = 1;
+            Ok(total_result)
         };
 
         // Execute without runtime-specific timeout; callers should enforce via PhysicalTimeEffects if needed.
@@ -838,14 +894,14 @@ impl AntiEntropyProtocol {
     async fn convert_operations_to_journal_delta<E>(
         &self,
         _effects: &E,
-        merge_result: &AntiEntropyResult,
+        applied_ops: &[AttestedOp],
     ) -> SyncResult<aura_core::Journal>
     where
         E: JournalEffects + Send + Sync,
     {
         let mut journal_delta = aura_core::Journal::new();
 
-        for op in &merge_result.applied_ops {
+        for op in applied_ops {
             let fp = fingerprint(op).map_err(|e| {
                 sync_serialization_error(
                     "op_fingerprint",
@@ -866,11 +922,95 @@ impl AntiEntropyProtocol {
         }
 
         tracing::debug!(
-            "Created journal delta with {} applied operations",
-            merge_result.applied_ops.len()
+            operation_id = ANTI_ENTROPY_OPERATION_ID,
+            applied_ops = applied_ops.len(),
+            "Created journal delta from applied operations"
         );
 
         Ok(journal_delta)
+    }
+
+    async fn persist_applied_operations_chunk<E>(
+        &self,
+        effects: &E,
+        peer: DeviceId,
+        applied_ops: &[AttestedOp],
+    ) -> SyncResult<()>
+    where
+        E: JournalEffects + Send + Sync,
+    {
+        let journal_delta = self
+            .convert_operations_to_journal_delta(effects, applied_ops)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    operation_id = ANTI_ENTROPY_OPERATION_ID,
+                    peer_id = %peer,
+                    applied_ops = applied_ops.len(),
+                    error = %e,
+                    "Failed to convert operations to journal delta"
+                );
+                crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!("Delta conversion failed: {e}"),
+                    peer,
+                )
+            })?;
+
+        let current_journal = effects.get_journal().await.unwrap_or_else(|e| {
+            tracing::warn!(
+                operation_id = ANTI_ENTROPY_OPERATION_ID,
+                peer_id = %peer,
+                error = %e,
+                "Failed to get current journal; using empty journal"
+            );
+            aura_core::Journal::new()
+        });
+
+        let updated_journal = effects
+            .merge_facts(current_journal, journal_delta)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    operation_id = ANTI_ENTROPY_OPERATION_ID,
+                    peer_id = %peer,
+                    applied_ops = applied_ops.len(),
+                    error = %e,
+                    "Failed to merge journal facts"
+                );
+                crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!("Journal merge failed: {e}"),
+                    peer,
+                )
+            })?;
+
+        effects
+            .persist_journal(&updated_journal)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    operation_id = ANTI_ENTROPY_OPERATION_ID,
+                    peer_id = %peer,
+                    applied_ops = applied_ops.len(),
+                    error = %e,
+                    "Failed to persist journal after sync"
+                );
+                crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!("Journal persistence failure: {e}"),
+                    peer,
+                )
+            })?;
+
+        tracing::debug!(
+            operation_id = ANTI_ENTROPY_OPERATION_ID,
+            peer_id = %peer,
+            applied_ops = applied_ops.len(),
+            "Successfully updated journal with bounded anti-entropy merge batch"
+        );
+
+        Ok(())
     }
 
     /// Push operations to peer
@@ -888,14 +1028,24 @@ impl AntiEntropyProtocol {
         // Determine which operations to send
         let ops_to_send = self.operations_to_push(local_ops, local_digest, remote_digest);
 
-        tracing::debug!("Pushing {} operations to peer {}", ops_to_send.len(), peer);
+        tracing::debug!(
+            operation_id = ANTI_ENTROPY_OPERATION_ID,
+            peer_id = %peer,
+            operation_count = ops_to_send.len(),
+            "Pushing operations to peer"
+        );
 
         if !ops_to_send.is_empty() {
             // Serialize operations
             let ops_data = json_serialize("operations", "operations", ops_to_send)?;
             send_bytes_to_peer(effects, peer.0, &peer, "operations", ops_data).await?;
 
-            tracing::info!("Pushed {} operations to peer {}", ops_to_send.len(), peer);
+            tracing::info!(
+                operation_id = ANTI_ENTROPY_OPERATION_ID,
+                peer_id = %peer,
+                operation_count = ops_to_send.len(),
+                "Pushed operations to peer"
+            );
         }
 
         Ok(())
@@ -914,10 +1064,11 @@ impl AntiEntropyProtocol {
         E: JournalEffects + NetworkEffects + Send + Sync,
     {
         tracing::warn!(
-            "Diverged state detected with peer {} (local: {} ops, remote: {} ops)",
-            peer,
-            local_digest.operation_count,
-            remote_digest.operation_count
+            operation_id = ANTI_ENTROPY_OPERATION_ID,
+            peer_id = %peer,
+            local_ops = local_digest.operation_count,
+            remote_ops = remote_digest.operation_count,
+            "Diverged state detected with peer"
         );
 
         // For diverged state, we do a full exchange:
@@ -1052,6 +1203,18 @@ impl AntiEntropyProtocol {
             final_status: None,
             rounds: 1,
         })
+    }
+
+    fn merge_chunk_size(&self) -> usize {
+        self.config.batch_size.max(1) as usize
+    }
+
+    fn merge_batch_count(incoming_len: usize, merge_chunk_size: usize) -> usize {
+        if incoming_len == 0 {
+            0
+        } else {
+            incoming_len.div_ceil(merge_chunk_size)
+        }
     }
 }
 
@@ -1205,6 +1368,25 @@ mod tests {
         assert_eq!(result.applied, 2);
         assert_eq!(result.duplicates, 1);
         assert_eq!(local_ops.len(), 3);
+    }
+
+    #[test]
+    fn test_merge_batch_count_uses_configured_chunk_size() {
+        assert_eq!(AntiEntropyProtocol::merge_batch_count(0, 4), 0);
+        assert_eq!(AntiEntropyProtocol::merge_batch_count(1, 4), 1);
+        assert_eq!(AntiEntropyProtocol::merge_batch_count(4, 4), 1);
+        assert_eq!(AntiEntropyProtocol::merge_batch_count(5, 4), 2);
+        assert_eq!(AntiEntropyProtocol::merge_batch_count(9, 4), 3);
+    }
+
+    #[test]
+    fn test_merge_chunk_size_never_returns_zero() {
+        let protocol = AntiEntropyProtocol::new(AntiEntropyConfig {
+            batch_size: 0,
+            ..Default::default()
+        });
+
+        assert_eq!(protocol.merge_chunk_size(), 1);
     }
 
     // -------------------------------------------------------------------------

@@ -19,6 +19,7 @@ Orchestrate AMP channel lifecycle and message transport coordination on top of r
 |-----------|-------|------|
 | Down | `aura-core` | Effect trait definitions, domain types |
 | Down | `aura-journal` | Fact storage and reduction |
+| Down | `aura-macros` | Domain fact and choreography macros |
 | In | JournalEffects + OrderClockEffects | Canonical fact storage and ordering |
 | In | Guard chain effects | Send authorization and budgeting (from callers) |
 | In | Transport effects | Envelope delivery (via higher-level protocols) |

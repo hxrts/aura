@@ -27,8 +27,9 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    ChannelBinding, ContactInvitationCode, DiagnosticBackend, InstanceBackend, ObservationBackend,
-    RawUiBackend, SharedSemanticBackend, SubmittedAction, UiOperationHandle, UiSnapshotEvent,
+    ui_operation_handle_from_contract, ChannelBinding, ContactInvitationCode, DiagnosticBackend,
+    InstanceBackend, ObservationBackend, RawUiBackend, SharedSemanticBackend, SubmittedAction,
+    UiOperationHandle, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
@@ -43,7 +44,7 @@ enum BackendState {
 fn into_ui_operation_handle(
     handle: aura_app::ui_contract::HarnessUiOperationHandle,
 ) -> UiOperationHandle {
-    UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone())
+    ui_operation_handle_from_contract(handle)
 }
 
 fn require_ui_operation_handle(

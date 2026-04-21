@@ -189,6 +189,23 @@ mod tests {
     }
 
     #[test]
+    fn test_contacts_i_opens_create_invitation_modal() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Contacts);
+
+        let (state, commands) = transition(&state, events::char('i'));
+
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                TuiCommand::Dispatch(DispatchCommand::OpenCreateInvitationModal)
+            )),
+            "pressing 'i' on Contacts should open the create invitation modal"
+        );
+        assert_eq!(state.screen(), Screen::Contacts);
+    }
+
+    #[test]
     fn test_contacts_import_demo_ctrl_shortcut_still_autofills() {
         use crate::tui::state::modal_queue::QueuedModal;
         use crate::tui::state::views::ImportInvitationModalState;

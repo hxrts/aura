@@ -323,6 +323,10 @@ pub enum EffectCommand {
         receiver_id: Option<AuthorityId>,
         /// Type of invitation (Contact, Guardian, Channel)
         invitation_type: String,
+        /// Optional nickname to include
+        nickname: Option<String>,
+        /// Optional sender-local nickname for the invitee
+        receiver_nickname: Option<String>,
         /// Optional message to include
         message: Option<String>,
         /// TTL in seconds (None = no expiry)

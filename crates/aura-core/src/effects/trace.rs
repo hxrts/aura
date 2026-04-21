@@ -29,8 +29,7 @@ pub trait TraceEffects: Send + Sync {
     async fn trace_span_end(&self, span: TraceSpanId);
 }
 
-#[async_trait]
-impl<T: TraceEffects + ?Sized> TraceEffects for std::sync::Arc<T> {
+impl_arc_effect!(TraceEffects {
     async fn trace_event(&self, event: TraceEvent) {
         (**self).trace_event(event).await;
     }
@@ -42,4 +41,4 @@ impl<T: TraceEffects + ?Sized> TraceEffects for std::sync::Arc<T> {
     async fn trace_span_end(&self, span: TraceSpanId) {
         (**self).trace_span_end(span).await;
     }
-}
+});

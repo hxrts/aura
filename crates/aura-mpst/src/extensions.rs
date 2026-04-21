@@ -103,43 +103,58 @@ impl CompositeExtension {
         self
     }
 
+    fn with_role_extension(self, build: impl FnOnce(RoleId) -> ConcreteExtension) -> Self {
+        let role = self.role.clone();
+        self.add_extension(build(role))
+    }
+
+    fn with_role_operation_extension(
+        self,
+        build: impl FnOnce(RoleId, String) -> ConcreteExtension,
+    ) -> Self {
+        let role = self.role.clone();
+        let operation = self.operation.clone();
+        self.add_extension(build(role, operation))
+    }
+
     /// Add a capability guard
     pub fn with_capability_guard(self, capability: CapabilityName) -> Self {
-        let ext = ValidateCapability {
-            capability,
-            role: self.role.clone(),
-        };
-        self.add_extension(ConcreteExtension::ValidateCapability(ext))
+        self.with_role_extension(|role| {
+            ConcreteExtension::ValidateCapability(ValidateCapability { capability, role })
+        })
     }
 
     /// Add flow cost charging
     pub fn with_flow_cost(self, cost: u64) -> Self {
-        let ext = ChargeFlowCost {
-            cost,
-            operation: self.operation.clone(),
-            role: self.role.clone(),
-        };
-        self.add_extension(ConcreteExtension::ChargeFlowCost(ext))
+        self.with_role_operation_extension(|role, operation| {
+            ConcreteExtension::ChargeFlowCost(ChargeFlowCost {
+                cost,
+                operation,
+                role,
+            })
+        })
     }
 
     /// Add journal fact recording
     pub fn with_journal_fact(self, fact: String) -> Self {
-        let ext = JournalFact {
-            fact,
-            operation: self.operation.clone(),
-            role: self.role.clone(),
-        };
-        self.add_extension(ConcreteExtension::JournalFact(ext))
+        self.with_role_operation_extension(|role, operation| {
+            ConcreteExtension::JournalFact(JournalFact {
+                fact,
+                operation,
+                role,
+            })
+        })
     }
 
     /// Add guard chain execution
     pub fn with_guard_chain(self, guards: Vec<CapabilityName>) -> Self {
-        let ext = ExecuteGuardChain {
-            guards,
-            operation: self.operation.clone(),
-            role: self.role.clone(),
-        };
-        self.add_extension(ConcreteExtension::ExecuteGuardChain(ext))
+        self.with_role_operation_extension(|role, operation| {
+            ConcreteExtension::ExecuteGuardChain(ExecuteGuardChain {
+                guards,
+                operation,
+                role,
+            })
+        })
     }
 
     /// Get all contained extensions

@@ -102,14 +102,11 @@ impl<E: StorageEffects> AmpEvidenceEffects for E {
         consensus_id: ConsensusId,
         context: ContextId,
     ) -> Result<()> {
-        // Create evidence delta recording witness participation
-        let evidence_entry = format!("witness:{witness}:context:{context}");
-        let mut delta = EvidenceDelta::default();
-        delta
-            .entries
-            .insert(hex::encode(consensus_id.0 .0), evidence_entry.into_bytes());
-
-        self.merge_evidence_delta(consensus_id, delta).await
+        self.merge_evidence_delta(
+            consensus_id,
+            witness_participation_delta(witness, consensus_id, context),
+        )
+        .await
     }
 }
 
@@ -130,24 +127,48 @@ impl<'a, E: ?Sized + StorageEffects> AmpEvidenceStore<'a, E> {
     pub async fn merge_delta(&self, cid: ConsensusId, delta: EvidenceDelta) -> Result<()> {
         let mut record = self.current(cid).await?.unwrap_or_default();
         record.merge(delta);
-        let bytes =
-            serde_json::to_vec(&record).map_err(|e| AuraError::serialization(e.to_string()))?;
-        self.effects
-            .store(&evidence_key(cid), bytes)
-            .await
-            .map_err(|e| AuraError::storage(e.to_string()))
+        self.persist_record(cid, &record).await
     }
 
     /// Retrieve the current evidence record for a consensus id.
     pub async fn current(&self, cid: ConsensusId) -> Result<Option<EvidenceRecord>> {
         match self.effects.retrieve(&evidence_key(cid)).await {
             Ok(Some(bytes)) => {
-                let record: EvidenceRecord = serde_json::from_slice(&bytes)
-                    .map_err(|e| AuraError::serialization(e.to_string()))?;
+                let record: EvidenceRecord =
+                    serde_json::from_slice(&bytes).map_err(map_evidence_serialization_error)?;
                 Ok(Some(record))
             }
             Ok(None) => Ok(None),
-            Err(e) => Err(AuraError::storage(e.to_string())),
+            Err(e) => Err(map_evidence_storage_error(e)),
         }
     }
+
+    async fn persist_record(&self, cid: ConsensusId, record: &EvidenceRecord) -> Result<()> {
+        let bytes = serde_json::to_vec(record).map_err(map_evidence_serialization_error)?;
+        self.effects
+            .store(&evidence_key(cid), bytes)
+            .await
+            .map_err(map_evidence_storage_error)
+    }
+}
+
+fn witness_participation_delta(
+    witness: AuthorityId,
+    consensus_id: ConsensusId,
+    context: ContextId,
+) -> EvidenceDelta {
+    let mut delta = EvidenceDelta::default();
+    delta.entries.insert(
+        hex::encode(consensus_id.0 .0),
+        format!("witness:{witness}:context:{context}").into_bytes(),
+    );
+    delta
+}
+
+fn map_evidence_serialization_error(error: impl ToString) -> AuraError {
+    AuraError::serialization(error.to_string())
+}
+
+fn map_evidence_storage_error(error: impl ToString) -> AuraError {
+    AuraError::storage(error.to_string())
 }

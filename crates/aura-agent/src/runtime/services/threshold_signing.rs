@@ -815,10 +815,11 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         )
         .await;
 
-        self.ensure_bootstrap_device_leaf(authority, &key_result.public_key_package)
+        let (_key_packages, public_key_package, _mode) = key_result.into_parts();
+        self.ensure_bootstrap_device_leaf(authority, &public_key_package)
             .await?;
 
-        Ok(key_result.public_key_package)
+        Ok(public_key_package)
     }
 
     async fn sign(&self, context: SigningContext) -> Result<ThresholdSignature, AuraError> {
@@ -1006,10 +1007,11 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 )
                 .await
                 .map_err(|e| AuraError::internal(format!("Key generation failed: {}", e)))?;
+            let (key_packages, public_key_package, _mode) = result.into_parts();
 
             aura_core::effects::crypto::FrostKeyGenResult {
-                key_packages: result.key_packages,
-                public_key_package: result.public_key_package,
+                key_packages,
+                public_key_package,
             }
         };
 
@@ -1134,11 +1136,8 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             "Key rotation prepared - awaiting ceremony completion"
         );
 
-        Ok((
-            new_epoch,
-            key_result.key_packages,
-            key_result.public_key_package,
-        ))
+        let (key_packages, public_key_package) = key_result.into_parts();
+        Ok((new_epoch, key_packages, public_key_package))
     }
 
     async fn commit_key_rotation(

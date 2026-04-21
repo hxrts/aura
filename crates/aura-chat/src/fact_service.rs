@@ -22,6 +22,13 @@ impl ChatFactService {
         Self
     }
 
+    fn allowed_fact_append(cost: aura_core::FlowCost, fact: ChatFact) -> GuardOutcome {
+        GuardOutcome::allowed(vec![
+            EffectCommand::ChargeFlowBudget { cost },
+            EffectCommand::JournalAppend { fact },
+        ])
+    }
+
     /// Prepare a channel creation fact.
     pub fn prepare_create_channel(
         &self,
@@ -49,12 +56,7 @@ impl ChatFactService {
             snapshot.authority_id,
         );
 
-        GuardOutcome::allowed(vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::CHAT_CHANNEL_CREATE_COST,
-            },
-            EffectCommand::JournalAppend { fact },
-        ])
+        Self::allowed_fact_append(costs::CHAT_CHANNEL_CREATE_COST, fact)
     }
 
     /// Prepare a message-sent fact with an opaque payload.
@@ -91,19 +93,14 @@ impl ChatFactService {
             epoch_hint,
         );
 
-        GuardOutcome::allowed(vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::CHAT_MESSAGE_SEND_COST,
-            },
-            EffectCommand::JournalAppend { fact },
-        ])
+        Self::allowed_fact_append(costs::CHAT_MESSAGE_SEND_COST, fact)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::types::identifiers::{AuthorityId, ContextId};
+    use crate::test_support::{test_channel_id, test_guard_snapshot};
     use aura_core::FlowCost;
 
     /// Channel creation denied without required capability — chat operations
@@ -111,17 +108,11 @@ mod tests {
     #[test]
     fn denied_when_missing_capability() {
         let service = ChatFactService::new();
-        let snapshot = GuardSnapshot::new(
-            AuthorityId::new_from_entropy([1u8; 32]),
-            ContextId::new_from_entropy([2u8; 32]),
-            FlowCost::new(10),
-            vec![],
-            123,
-        );
+        let snapshot = test_guard_snapshot(1, 2, FlowCost::new(10), vec![], 123);
 
         let out = service.prepare_create_channel(
             &snapshot,
-            ChannelId::default(),
+            test_channel_id(0),
             "general".into(),
             None,
             false,
@@ -137,9 +128,9 @@ mod tests {
     #[test]
     fn approved_orders_budget_before_journal_append() {
         let service = ChatFactService::new();
-        let snapshot = GuardSnapshot::new(
-            AuthorityId::new_from_entropy([1u8; 32]),
-            ContextId::new_from_entropy([2u8; 32]),
+        let snapshot = test_guard_snapshot(
+            1,
+            2,
             FlowCost::new(10),
             vec![ChatCapability::MessageSend.as_name()],
             123,
@@ -147,7 +138,7 @@ mod tests {
 
         let out = service.prepare_send_message_sealed(
             &snapshot,
-            ChannelId::default(),
+            test_channel_id(0),
             "msg-1".to_string(),
             "Alice".to_string(),
             vec![1, 2, 3],
@@ -168,9 +159,9 @@ mod tests {
     #[test]
     fn send_denied_when_sender_is_muted_before_flow_budget() {
         let service = ChatFactService::new();
-        let snapshot = GuardSnapshot::new(
-            AuthorityId::new_from_entropy([5u8; 32]),
-            ContextId::new_from_entropy([6u8; 32]),
+        let snapshot = test_guard_snapshot(
+            5,
+            6,
             FlowCost::new(10),
             vec![ChatCapability::MessageSend.as_name()],
             123,
@@ -179,7 +170,7 @@ mod tests {
 
         let out = service.prepare_send_message_sealed(
             &snapshot,
-            ChannelId::default(),
+            test_channel_id(0),
             "message-1".into(),
             "you".into(),
             b"payload".to_vec(),

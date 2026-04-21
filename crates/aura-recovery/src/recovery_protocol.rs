@@ -3,7 +3,8 @@
 //! This module implements the recovery protocol using RelationalContexts,
 //! replacing the device-centric recovery model with authority-based recovery.
 
-use crate::facts::{RecoveryFact, RecoveryFactEmitter};
+use crate::facts::RecoveryFact;
+use crate::utils::workflow::{context_id_from_operation_id, persist_recovery_fact, trace_id};
 use aura_consensus::relational::run_consensus_with_commit;
 use aura_consensus::types::CommitFact;
 use aura_core::crypto::Ed25519Signature;
@@ -12,7 +13,7 @@ use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
-use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::time::TimeStamp;
 use aura_core::tree::LeafPublicKey;
 use aura_core::types::identifiers::{ContextId, RecoveryId};
 use aura_core::types::Epoch;
@@ -20,7 +21,6 @@ use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_effects::random::RealRandomHandler;
 use aura_effects::time::PhysicalTimeHandler;
-use aura_journal::DomainFact;
 use aura_macros::tell;
 use aura_relational::RelationalContext;
 use futures::lock::Mutex;
@@ -245,14 +245,7 @@ impl RecoveryProtocol {
             return Err(AuraError::permission_denied("Guardian not in recovery set"));
         }
 
-        // Record approval if unique
-        if !self
-            .approvals
-            .iter()
-            .any(|existing| existing.guardian_id == approval.guardian_id)
-        {
-            self.approvals.push(approval);
-        }
+        record_unique_approval(&mut self.approvals, approval);
 
         if !self.is_threshold_met(&self.approvals) {
             return Err(AuraError::permission_denied(
@@ -320,6 +313,37 @@ pub struct RecoveryProtocolHandler {
     approvals: Mutex<HashMap<RecoveryId, Vec<GuardianApproval>>>,
 }
 
+fn record_unique_approval(
+    approvals: &mut Vec<GuardianApproval>,
+    approval: GuardianApproval,
+) -> bool {
+    if approvals
+        .iter()
+        .any(|existing| existing.guardian_id == approval.guardian_id)
+    {
+        false
+    } else {
+        approvals.push(approval);
+        true
+    }
+}
+
+fn recovery_context_id(recovery_id: &RecoveryId) -> ContextId {
+    context_id_from_operation_id(recovery_id.as_str())
+}
+
+fn recovery_trace_id(recovery_id: &RecoveryId) -> Option<String> {
+    trace_id(recovery_id.as_str())
+}
+
+fn recovery_request_hash(recovery_id: &RecoveryId) -> Hash32 {
+    Hash32(hash::hash(recovery_id.as_str().as_bytes()))
+}
+
+fn recovery_share_hash(approval: &GuardianApproval) -> Hash32 {
+    Hash32(hash::hash(approval.signature.as_bytes()))
+}
+
 impl RecoveryProtocolHandler {
     /// Create a new recovery handler
     pub fn new(protocol: Arc<RecoveryProtocol>) -> Self {
@@ -333,21 +357,9 @@ impl RecoveryProtocolHandler {
     async fn emit_fact(
         &self,
         fact: RecoveryFact,
-        time_effects: &dyn PhysicalTimeEffects,
         journal_effects: &dyn JournalEffects,
     ) -> Result<()> {
-        let timestamp = time_effects.physical_time().await?.ts_ms;
-
-        let mut journal = journal_effects.get_journal().await?;
-        journal.facts.insert_with_context(
-            RecoveryFactEmitter::fact_key(&fact),
-            aura_core::FactValue::Bytes(DomainFact::to_bytes(&fact)),
-            aura_core::ActorId::synthetic(&fact.context_id().to_string()),
-            aura_core::FactTimestamp::new(timestamp),
-            None,
-        )?;
-        journal_effects.persist_journal(&journal).await?;
-        Ok(())
+        persist_recovery_fact(journal_effects, &fact).await
     }
 
     /// Handle recovery initiation
@@ -363,24 +375,18 @@ impl RecoveryProtocolHandler {
         approvals.insert(request.recovery_id.clone(), Vec::new());
 
         // Create context ID for this recovery ceremony
-        let context_id =
-            ContextId::new_from_entropy(hash::hash(request.recovery_id.as_str().as_bytes()));
+        let context_id = recovery_context_id(&request.recovery_id);
 
         // Emit RecoveryInitiated fact
         let timestamp = time_effects.physical_time().await?.ts_ms;
-        let request_hash = Hash32(hash::hash(request.recovery_id.as_str().as_bytes()));
         let initiated_fact = RecoveryFact::RecoveryInitiated {
             context_id,
             account_id: request.account_authority,
-            trace_id: Some(request.recovery_id.to_string()),
-            request_hash,
-            initiated_at: PhysicalTime {
-                ts_ms: timestamp,
-                uncertainty: None,
-            },
+            trace_id: recovery_trace_id(&request.recovery_id),
+            request_hash: recovery_request_hash(&request.recovery_id),
+            initiated_at: crate::utils::workflow::exact_physical_time(timestamp),
         };
-        self.emit_fact(initiated_fact, time_effects, journal)
-            .await?;
+        self.emit_fact(initiated_fact, journal).await?;
 
         // Notify guardians via effects
         self.notify_guardians_via_effects(&request, time_effects, network, journal)
@@ -398,23 +404,18 @@ impl RecoveryProtocolHandler {
         journal: &dyn JournalEffects,
     ) -> Result<bool> {
         // Create context ID for this recovery ceremony
-        let context_id =
-            ContextId::new_from_entropy(hash::hash(approval.recovery_id.as_str().as_bytes()));
+        let context_id = recovery_context_id(&approval.recovery_id);
 
         // Emit RecoveryShareSubmitted fact
         let timestamp = time_effects.physical_time().await?.ts_ms;
-        let share_hash = Hash32(hash::hash(approval.signature.as_bytes()));
         let share_fact = RecoveryFact::RecoveryShareSubmitted {
             context_id,
             guardian_id: approval.guardian_id,
-            trace_id: Some(approval.recovery_id.to_string()),
-            share_hash,
-            submitted_at: PhysicalTime {
-                ts_ms: timestamp,
-                uncertainty: None,
-            },
+            trace_id: recovery_trace_id(&approval.recovery_id),
+            share_hash: recovery_share_hash(&approval),
+            submitted_at: crate::utils::workflow::exact_physical_time(timestamp),
         };
-        self.emit_fact(share_fact, time_effects, journal).await?;
+        self.emit_fact(share_fact, journal).await?;
 
         // Add approval
         let mut approvals = self.approvals.lock().await;
@@ -422,7 +423,7 @@ impl RecoveryProtocolHandler {
             .entry(approval.recovery_id.clone())
             .or_insert_with(Vec::new);
 
-        ceremony_approvals.push(approval.clone());
+        record_unique_approval(ceremony_approvals, approval.clone());
 
         // Check if threshold met
         let threshold_met = self.protocol.is_threshold_met(ceremony_approvals);
@@ -433,14 +434,11 @@ impl RecoveryProtocolHandler {
             let approved_fact = RecoveryFact::RecoveryApproved {
                 context_id,
                 account_id: self.protocol.account_authority,
-                trace_id: Some(approval.recovery_id.to_string()),
+                trace_id: recovery_trace_id(&approval.recovery_id),
                 approvals_hash,
-                approved_at: PhysicalTime {
-                    ts_ms: timestamp,
-                    uncertainty: None,
-                },
+                approved_at: crate::utils::workflow::exact_physical_time(timestamp),
             };
-            self.emit_fact(approved_fact, time_effects, journal).await?;
+            self.emit_fact(approved_fact, journal).await?;
 
             self.update_journal_recovery_state_via_effects(
                 &approval.recovery_id,
@@ -554,23 +552,18 @@ impl RecoveryProtocolHandler {
         }
 
         // Create context ID for this recovery ceremony
-        let context_id = ContextId::new_from_entropy(hash::hash(recovery_id.as_str().as_bytes()));
+        let context_id = recovery_context_id(recovery_id);
 
         // Emit RecoveryCompleted fact
         let timestamp = time_effects.physical_time().await?.ts_ms;
-        let evidence_hash = Hash32(hash::hash(recovery_id.as_str().as_bytes()));
         let completed_fact = RecoveryFact::RecoveryCompleted {
             context_id,
             account_id: self.protocol.account_authority,
-            trace_id: Some(recovery_id.to_string()),
-            evidence_hash,
-            completed_at: PhysicalTime {
-                ts_ms: timestamp,
-                uncertainty: None,
-            },
+            trace_id: recovery_trace_id(recovery_id),
+            evidence_hash: recovery_request_hash(recovery_id),
+            completed_at: crate::utils::workflow::exact_physical_time(timestamp),
         };
-        self.emit_fact(completed_fact, time_effects, journal)
-            .await?;
+        self.emit_fact(completed_fact, journal).await?;
 
         // Create recovery outcome
         let result = RecoveryOutcome {

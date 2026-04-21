@@ -291,7 +291,7 @@ impl SemanticWorkflowOwner {
         Ok(())
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] /* Cleanup target (2026-07): remove if success publication stays fully encapsulated behind publish_success_with. */
     pub(in crate::workflows) async fn terminal_success_fact(
         &self,
     ) -> Result<AuthoritativeSemanticFact, AuraError> {
@@ -328,7 +328,7 @@ impl SemanticWorkflowOwner {
         Ok(fact)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] /* Cleanup target (2026-07): remove if typed proof publication stays fully encapsulated behind publish_success_with. */
     pub(in crate::workflows) async fn terminal_success_fact_with<Proof>(
         &self,
         proof: Proof,

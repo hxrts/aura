@@ -478,9 +478,10 @@ impl CryptoExtendedEffects for MockEffects {
             })
         } else if threshold >= 2 {
             let frost_result = self.frost_generate_keys(threshold, max_signers).await?;
+            let (key_packages, public_key_package) = frost_result.into_parts();
             Ok(SigningKeyGenResult {
-                key_packages: frost_result.key_packages,
-                public_key_package: frost_result.public_key_package,
+                key_packages,
+                public_key_package,
                 mode: SigningMode::Threshold,
             })
         } else {

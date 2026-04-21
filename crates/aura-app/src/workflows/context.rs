@@ -9,8 +9,8 @@ mod neighborhood;
 pub use crate::workflows::time::current_time_ms;
 use crate::AppCore;
 pub use active_home::{
-    authority_default_relational_context, current_home_context, current_home_id,
-    default_relational_context, missing_active_home_message, resolve_active_home,
+    authority_default_relational_context, current_group_context, current_home_context,
+    current_home_id, default_relational_context, missing_active_home_message, resolve_active_home,
     ActiveHomeResolution, ActiveHomeSource,
 };
 use async_lock::RwLock;
@@ -276,6 +276,70 @@ mod tests {
 
         let error = current_home_context(&app_core).await.unwrap_err();
         assert!(matches!(error, AuraError::NotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_current_group_context_uses_authority_default_without_home() {
+        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([41u8; 32]);
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_identity(
+                aura_core::types::identifiers::AccountId::new_from_entropy([42u8; 32]),
+                authority,
+                Vec::new(),
+            )
+            .expect("identity-bound app core"),
+        ));
+        init_signals_for_test(&app_core).await;
+        publish_test_homes_signal(&app_core).await;
+
+        let resolved_ctx = current_group_context(&app_core)
+            .await
+            .expect("group context should fall back to authority default");
+
+        assert_eq!(
+            resolved_ctx,
+            authority_default_relational_context(authority)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_current_group_context_does_not_prefer_active_home() {
+        let config = AppConfig::default();
+        let app_core = crate::testing::test_app_core(config);
+        init_signals_for_test(&app_core).await;
+        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([43u8; 32]);
+
+        let home_id = ChannelId::from_bytes(hash(b"group-context-home"));
+        let home_ctx = ContextId::new_from_entropy(hash(b"group-context-home-ctx"));
+        {
+            let mut core = app_core.write().await;
+            core.set_authority(authority);
+            let mut homes = core.views().get_homes();
+            let result = homes.add_home(HomeState::new(
+                home_id,
+                Some("Neighborhood Home".to_string()),
+                authority,
+                1,
+                home_ctx,
+            ));
+            if result.was_first {
+                homes.select_home(Some(result.home_id));
+            }
+            core.set_active_home_selection(Some(home_id));
+            core.views_mut().set_homes(homes);
+        }
+
+        publish_test_homes_signal(&app_core).await;
+
+        let resolved_ctx = current_group_context(&app_core)
+            .await
+            .expect("group context should ignore active home");
+
+        assert_eq!(
+            resolved_ctx,
+            authority_default_relational_context(authority)
+        );
+        assert_ne!(resolved_ctx, home_ctx);
     }
 
     #[tokio::test]

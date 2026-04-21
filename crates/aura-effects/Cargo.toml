@@ -28,7 +28,7 @@ aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
-futures-util = "0.3"
+futures-util = { workspace = true }
 cfg-if = "1"
 
 url = "2.5"
@@ -45,7 +45,7 @@ frost-core = { workspace = true }
 frost-ed25519 = { workspace = true }
 sha2 = { workspace = true }
 rand = { workspace = true }
-rand_chacha = "0.3"
+rand_chacha = { workspace = true }
 zeroize = { workspace = true }
 aes-gcm = { workspace = true }
 chacha20 = { workspace = true }
@@ -67,14 +67,14 @@ proptest = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["fs", "net"] }
-tokio-tungstenite = "0.23"
+tokio-tungstenite = { workspace = true }
 socket2 = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 indexed_db_futures = { version = "0.6.4", features = ["serde"] }
-js-sys = "0.3"
-wasm-bindgen-futures = "0.4"
-wasm-bindgen = "0.2"
+js-sys = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+wasm-bindgen = { workspace = true }
 web-time = "1"
-web-sys = { version = "0.3", features = ["Window", "Storage"] }
+web-sys = { workspace = true, features = ["Window", "Storage"] }
 gloo-timers = { version = "0.3", features = ["futures"] }

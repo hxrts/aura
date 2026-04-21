@@ -10,8 +10,8 @@ use aura_core::AuraError;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] /* Cleanup target (2026-07): remove after every channel-hint consumer reads the context hint or the field is deleted. */
 pub(crate) struct MaterializedChannelHint {
     pub(crate) channel_id: ChannelId,
     pub(crate) context_id: Option<ContextId>,
@@ -65,7 +65,7 @@ pub(crate) async fn identify_materialized_channel_hint(
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)] /* Cleanup target (2026-07): remove if moderator/moderation stop sharing this ranking helper. */
 pub(crate) fn best_home_for_context_by<F>(
     homes: &HomesState,
     context_id: ContextId,

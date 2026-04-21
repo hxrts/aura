@@ -150,8 +150,8 @@ impl FrostConsensusOrchestrator {
                 Ok(ConsensusResponse {
                     consensus_id,
                     result: Err(match e {
-                        AuraError::Network { message } => ConsensusError::Network(message),
-                        AuraError::Crypto { message } => ConsensusError::Crypto(message),
+                        AuraError::Network { message, .. } => ConsensusError::Network(message),
+                        AuraError::Crypto { message, .. } => ConsensusError::Crypto(message),
                         _ => ConsensusError::Internal(e.to_string()),
                     }),
                     duration_ms,

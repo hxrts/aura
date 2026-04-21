@@ -57,29 +57,14 @@ impl AuraContext {
     /// Create a new context for testing mode
     pub fn for_testing(authority_id: AuthorityId, device_id: DeviceId) -> Self {
         let created_at = 0u64; // Fixed timestamp for deterministic testing
-        let mut seed = Vec::with_capacity(40);
-        seed.extend_from_slice(authority_id.0.as_bytes());
-        seed.extend_from_slice(device_id.0.as_bytes());
-        seed.extend_from_slice(&created_at.to_le_bytes());
-        let digest = aura_core::hash::hash(&seed);
-        let mut op_bytes = [0u8; 16];
-        op_bytes.copy_from_slice(&digest[..16]);
-        let operation_id = uuid::Uuid::from_bytes(op_bytes);
-        Self {
+        Self::new_with_mode(
             authority_id,
             device_id,
-            execution_mode: ExecutionMode::Testing,
-            session_id: None,
             created_at,
-            account_id: None,
-            metadata: Arc::new(HashMap::new()),
-            operation_id,
-            epoch: created_at,
-            choreographic: None,
-            simulation: None,
-            agent: Some(AgentContext::new()),
-            middleware: MiddlewareContext::new(),
-        }
+            Self::testing_operation_id(authority_id, device_id, created_at),
+            ExecutionMode::Testing,
+            None,
+        )
     }
 
     /// Create a new context for production mode
@@ -89,177 +74,68 @@ impl AuraContext {
         created_at: u64,
         operation_id: Uuid,
     ) -> Self {
-        Self {
+        Self::new_with_mode(
             authority_id,
             device_id,
-            execution_mode: ExecutionMode::Production,
-            session_id: None,
             created_at,
-            account_id: None,
-            metadata: Arc::new(HashMap::new()),
             operation_id,
-            epoch: created_at,
-            choreographic: None,
-            simulation: None,
-            agent: Some(AgentContext::new()),
-            middleware: MiddlewareContext::new(),
-        }
+            ExecutionMode::Production,
+            None,
+        )
     }
 
     /// Create a new context for simulation mode
     pub fn for_simulation(authority_id: AuthorityId, device_id: DeviceId, seed: u64) -> Self {
         let created_at = seed; // Use seed as deterministic timestamp
-        Self {
+        Self::new_with_mode(
             authority_id,
             device_id,
-            execution_mode: ExecutionMode::Simulation { seed },
-            session_id: None,
             created_at,
-            account_id: None,
-            metadata: Arc::new(HashMap::new()),
-            operation_id: uuid::Uuid::from_u128(seed as u128), // Deterministic UUID from seed
-            epoch: created_at,
-            choreographic: None,
-            simulation: Some(SimulationContext::new(seed)),
-            agent: Some(AgentContext::new()),
-            middleware: MiddlewareContext::new(),
-        }
+            uuid::Uuid::from_u128(seed as u128), // Deterministic UUID from seed
+            ExecutionMode::Simulation { seed },
+            Some(SimulationContext::new(seed)),
+        )
     }
 
     /// Create new context with choreographic context
     pub fn with_choreographic(&self, context: ChoreographicContext) -> Self {
-        Self {
-            authority_id: self.authority_id,
-            device_id: self.device_id,
-            execution_mode: self.execution_mode,
-            session_id: self.session_id,
-            created_at: self.created_at,
-            account_id: self.account_id,
-            metadata: self.metadata.clone(),
-            operation_id: self.operation_id,
-            epoch: self.epoch,
-            choreographic: Some(context),
-            simulation: self.simulation.clone(),
-            agent: self.agent.clone(),
-            middleware: self.middleware.clone(),
-        }
+        self.updated(|next| next.choreographic = Some(context))
     }
 
     /// Create new context with session ID
     pub fn with_session(&self, session_id: SessionId) -> Self {
-        Self {
-            authority_id: self.authority_id,
-            device_id: self.device_id,
-            execution_mode: self.execution_mode,
-            session_id: Some(session_id),
-            created_at: self.created_at,
-            account_id: self.account_id,
-            metadata: self.metadata.clone(),
-            operation_id: self.operation_id,
-            epoch: self.epoch,
-            choreographic: self.choreographic.clone(),
-            simulation: self.simulation.clone(),
-            agent: self.agent.clone(),
-            middleware: self.middleware.clone(),
-        }
+        self.updated(|next| next.session_id = Some(session_id))
     }
 
     /// Create new context with account identifier
     pub fn with_account(&self, account_id: AccountId) -> Self {
-        Self {
-            authority_id: self.authority_id,
-            device_id: self.device_id,
-            execution_mode: self.execution_mode,
-            session_id: self.session_id,
-            created_at: self.created_at,
-            account_id: Some(account_id),
-            metadata: self.metadata.clone(),
-            operation_id: self.operation_id,
-            epoch: self.epoch,
-            choreographic: self.choreographic.clone(),
-            simulation: self.simulation.clone(),
-            agent: self.agent.clone(),
-            middleware: self.middleware.clone(),
-        }
+        self.updated(|next| next.account_id = Some(account_id))
     }
 
     /// Create new context with metadata entry
     pub fn with_metadata(&self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        let mut new_metadata = (*self.metadata).clone();
-        new_metadata.insert(key.into(), value.into());
-
-        Self {
-            authority_id: self.authority_id,
-            device_id: self.device_id,
-            execution_mode: self.execution_mode,
-            session_id: self.session_id,
-            created_at: self.created_at,
-            account_id: self.account_id,
-            metadata: Arc::new(new_metadata),
-            operation_id: self.operation_id,
-            epoch: self.epoch,
-            choreographic: self.choreographic.clone(),
-            simulation: self.simulation.clone(),
-            agent: self.agent.clone(),
-            middleware: self.middleware.clone(),
-        }
+        let key = key.into();
+        let value = value.into();
+        self.updated(|next| {
+            next.metadata = self.map_metadata(|metadata| {
+                metadata.insert(key, value);
+            });
+        })
     }
 
     /// Create new context with tracing
     pub fn with_tracing(&self, trace_id: String, span_id: String) -> Self {
-        Self {
-            authority_id: self.authority_id,
-            device_id: self.device_id,
-            execution_mode: self.execution_mode,
-            session_id: self.session_id,
-            created_at: self.created_at,
-            account_id: self.account_id,
-            metadata: self.metadata.clone(),
-            operation_id: self.operation_id,
-            epoch: self.epoch,
-            choreographic: self.choreographic.clone(),
-            simulation: self.simulation.clone(),
-            agent: self.agent.clone(),
-            middleware: self.middleware.with_tracing(trace_id, span_id),
-        }
+        self.updated(|next| next.middleware = self.middleware.with_tracing(trace_id, span_id))
     }
 
     /// Create new context with metrics enabled
     pub fn with_metrics(&self) -> Self {
-        Self {
-            authority_id: self.authority_id,
-            device_id: self.device_id,
-            execution_mode: self.execution_mode,
-            session_id: self.session_id,
-            created_at: self.created_at,
-            account_id: self.account_id,
-            metadata: self.metadata.clone(),
-            operation_id: self.operation_id,
-            epoch: self.epoch,
-            choreographic: self.choreographic.clone(),
-            simulation: self.simulation.clone(),
-            agent: self.agent.clone(),
-            middleware: self.middleware.with_metrics(),
-        }
+        self.updated(|next| next.middleware = self.middleware.with_metrics())
     }
 
     /// Create a derived context for a new operation
     pub fn child_operation(&self, operation_id: Uuid) -> Self {
-        Self {
-            authority_id: self.authority_id,
-            device_id: self.device_id,
-            execution_mode: self.execution_mode,
-            session_id: self.session_id,
-            created_at: self.created_at,
-            account_id: self.account_id,
-            metadata: self.metadata.clone(),
-            operation_id,
-            epoch: self.epoch,
-            choreographic: self.choreographic.clone(),
-            simulation: self.simulation.clone(),
-            agent: self.agent.clone(),
-            middleware: self.middleware.clone(),
-        }
+        self.updated(|next| next.operation_id = operation_id)
     }
 
     /// Check if this is a deterministic execution mode
@@ -275,6 +151,61 @@ impl AuraContext {
     /// Calculate elapsed time since context creation
     pub fn elapsed_millis(&self, current_time: u64) -> u64 {
         current_time.saturating_sub(self.created_at)
+    }
+
+    fn new_with_mode(
+        authority_id: AuthorityId,
+        device_id: DeviceId,
+        created_at: u64,
+        operation_id: Uuid,
+        execution_mode: ExecutionMode,
+        simulation: Option<SimulationContext>,
+    ) -> Self {
+        Self {
+            authority_id,
+            device_id,
+            execution_mode,
+            session_id: None,
+            created_at,
+            account_id: None,
+            metadata: Arc::new(HashMap::new()),
+            operation_id,
+            epoch: created_at,
+            choreographic: None,
+            simulation,
+            agent: Some(AgentContext::new()),
+            middleware: MiddlewareContext::new(),
+        }
+    }
+
+    fn testing_operation_id(
+        authority_id: AuthorityId,
+        device_id: DeviceId,
+        created_at: u64,
+    ) -> Uuid {
+        let mut seed = Vec::with_capacity(40);
+        seed.extend_from_slice(authority_id.0.as_bytes());
+        seed.extend_from_slice(device_id.0.as_bytes());
+        seed.extend_from_slice(&created_at.to_le_bytes());
+        let digest = aura_core::hash::hash(&seed);
+        let mut op_bytes = [0u8; 16];
+        op_bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(op_bytes)
+    }
+
+    fn updated(&self, update: impl FnOnce(&mut Self)) -> Self {
+        let mut next = self.clone();
+        update(&mut next);
+        next
+    }
+
+    fn map_metadata(
+        &self,
+        update: impl FnOnce(&mut HashMap<String, String>),
+    ) -> Arc<HashMap<String, String>> {
+        let mut metadata = (*self.metadata).clone();
+        update(&mut metadata);
+        Arc::new(metadata)
     }
 }
 

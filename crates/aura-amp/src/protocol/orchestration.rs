@@ -73,6 +73,21 @@ fn map_amp_error(err: AmpError) -> AuraError {
     AuraError::invalid(format!("AMP ratchet error: {err}"))
 }
 
+fn return_send_failure(context: ContextId, channel: ChannelId, error: AuraError) -> AuraError {
+    AMP_TELEMETRY.log_send_failure(context, channel, &error);
+    error
+}
+
+fn return_receive_failure(
+    context: ContextId,
+    header: Option<&AmpHeader>,
+    validation: Option<&WindowValidationResult>,
+    error: AuraError,
+) -> AuraError {
+    AMP_TELEMETRY.log_receive_failure(context, header, validation, &error);
+    error
+}
+
 /// Build guard chain for AMP send operations.
 fn build_amp_send_guard(
     context: ContextId,
@@ -282,10 +297,9 @@ where
     let payload_size = payload.len();
 
     // Phase 1: Prepare send (journal reduction and ratchet derivation)
-    let (state, deriv) = prepare_send(effects, context, channel).await.map_err(|e| {
-        AMP_TELEMETRY.log_send_failure(context, channel, &e);
-        e
-    })?;
+    let (state, deriv) = prepare_send(effects, context, channel)
+        .await
+        .map_err(|e| return_send_failure(context, channel, e))?;
     let header = deriv.header;
 
     // Phase 2: AEAD encryption
@@ -299,10 +313,7 @@ where
                 &header,
             )
             .await
-            .map_err(|e| {
-                AMP_TELEMETRY.log_send_failure(context, channel, &e);
-                e
-            })?,
+            .map_err(|e| return_send_failure(context, channel, e))?,
             None => deriv.message_key,
         }
     } else {
@@ -314,18 +325,17 @@ where
         .aes_gcm_encrypt(&payload, &key, &nonce)
         .await
         .map_err(|e| {
-            let err = AuraError::crypto(format!("AMP seal failed: {e}"));
-            AMP_TELEMETRY.log_send_failure(context, channel, &err);
-            err
+            return_send_failure(
+                context,
+                channel,
+                AuraError::crypto(format!("AMP seal failed: {e}")),
+            )
         })?;
 
     // Phase 3: Serialize
     let core_header = header;
     let msg = AmpMessage::new(core_header, sealed.clone());
-    let bytes = serialize_message(&msg).map_err(|e| {
-        AMP_TELEMETRY.log_send_failure(context, channel, &e);
-        e
-    })?;
+    let bytes = serialize_message(&msg).map_err(|e| return_send_failure(context, channel, e))?;
 
     // Phase 4: Guard chain execution
     let peer = GuardContextProvider::authority_id(effects);
@@ -333,18 +343,18 @@ where
     let guard_result = guard_chain
         .evaluate_with_coupling(effects)
         .await
-        .map_err(|e| {
-            AMP_TELEMETRY.log_send_failure(context, channel, &e);
-            e
-        })?;
+        .map_err(|e| return_send_failure(context, channel, e))?;
 
     if !guard_result.authorized {
-        let err = AuraError::permission_denied(
-            guard_result
-                .denial_reason
-                .unwrap_or_else(|| "AMP send unauthorized".to_string()),
+        let err = return_send_failure(
+            context,
+            channel,
+            AuraError::permission_denied(
+                guard_result
+                    .denial_reason
+                    .unwrap_or_else(|| "AMP send unauthorized".to_string()),
+            ),
         );
-        AMP_TELEMETRY.log_send_failure(context, channel, &err);
         return Err(err);
     }
 
@@ -360,11 +370,10 @@ where
     }
 
     // Phase 5: Network broadcast
-    effects.broadcast(bytes).await.map_err(|e| {
-        let err = AuraError::network(e.to_string());
-        AMP_TELEMETRY.log_send_failure(context, channel, &err);
-        err
-    })?;
+    effects
+        .broadcast(bytes)
+        .await
+        .map_err(|e| return_send_failure(context, channel, AuraError::network(e.to_string())))?;
 
     // Success telemetry
     AMP_TELEMETRY.log_send_success(
@@ -392,16 +401,18 @@ where
     let wire_size = bytes.len();
 
     // Phase 1: Deserialize
-    let wire: AmpMessage = deserialize_message(&bytes).map_err(|e| {
-        AMP_TELEMETRY.log_receive_failure(context, None, None, &e);
-        e
-    })?;
+    let wire: AmpMessage =
+        deserialize_message(&bytes).map_err(|e| return_receive_failure(context, None, None, e))?;
 
     // Phase 2: Context validation
     if wire.header.context != context {
-        let err = AuraError::invalid("AMP context mismatch");
+        let err = return_receive_failure(
+            context,
+            Some(&wire.header),
+            None,
+            AuraError::invalid("AMP context mismatch"),
+        );
         let transport_header = wire.header;
-        AMP_TELEMETRY.log_receive_failure(context, Some(&transport_header), None, &err);
         return Err(err);
     }
 
@@ -410,13 +421,7 @@ where
     let state = get_channel_state(effects, context, transport_header.channel).await?;
     let (deriv, window_validation) =
         validate_and_build_result(&state, transport_header).map_err(|(e, validation)| {
-            AMP_TELEMETRY.log_receive_failure(
-                context,
-                Some(&transport_header),
-                validation.as_ref(),
-                &e,
-            );
-            e
+            return_receive_failure(context, Some(&transport_header), validation.as_ref(), e)
         })?;
 
     // Phase 4: AEAD decryption
@@ -431,13 +436,12 @@ where
             )
             .await
             .map_err(|e| {
-                AMP_TELEMETRY.log_receive_failure(
+                return_receive_failure(
                     context,
                     Some(&transport_header),
                     Some(&window_validation),
-                    &e,
-                );
-                e
+                    e,
+                )
             })?,
             None => deriv.message_key,
         }
@@ -450,14 +454,12 @@ where
         .aes_gcm_decrypt(&wire.payload, &key, &nonce)
         .await
         .map_err(|e| {
-            let err = AuraError::crypto(format!("AMP open failed: {e}"));
-            AMP_TELEMETRY.log_receive_failure(
+            return_receive_failure(
                 context,
                 Some(&transport_header),
                 Some(&window_validation),
-                &err,
-            );
-            err
+                AuraError::crypto(format!("AMP open failed: {e}")),
+            )
         })?;
 
     // Success telemetry

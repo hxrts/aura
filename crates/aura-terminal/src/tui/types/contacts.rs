@@ -1,3 +1,4 @@
+use aura_app::ui::types::EffectiveName;
 use aura_app::ui::types::{Contact as AppContact, ContactRelationshipState};
 use iocraft::prelude::Color;
 
@@ -96,19 +97,27 @@ impl Contact {
     }
 }
 
+impl EffectiveName for Contact {
+    fn nickname(&self) -> Option<&str> {
+        (!self.nickname.is_empty()).then_some(self.nickname.as_str())
+    }
+
+    fn nickname_suggestion(&self) -> Option<&str> {
+        self.nickname_suggestion
+            .as_deref()
+            .filter(|value| !value.is_empty())
+    }
+
+    fn fallback_id(&self) -> String {
+        short_id(&self.id, 8)
+    }
+}
+
 impl From<&AppContact> for Contact {
     fn from(c: &AppContact) -> Self {
-        let nickname = if !c.nickname.is_empty() {
-            c.nickname.clone()
-        } else if let Some(suggested) = &c.nickname_suggestion {
-            suggested.clone()
-        } else {
-            String::new()
-        };
-
         Self {
             id: c.id.to_string(),
-            nickname,
+            nickname: c.nickname.clone(),
             nickname_suggestion: c.nickname_suggestion.clone(),
             status: if c.relationship_state.is_pending() {
                 ContactStatus::Pending
@@ -127,14 +136,62 @@ impl From<&AppContact> for Contact {
 /// Format a display name for an authority ID using contact information.
 pub fn format_contact_name(authority_id: &str, contacts: &[Contact]) -> String {
     if let Some(contact) = contacts.iter().find(|c| c.id == authority_id) {
-        if !contact.nickname.is_empty() {
-            return contact.nickname.clone();
-        }
-        if let Some(name) = contact.nickname_suggestion.as_ref() {
-            if !name.is_empty() {
-                return name.clone();
-            }
-        }
+        return contact.effective_name();
     }
     short_id(authority_id, 8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_app::ui::types::ContactRelationshipState;
+    use aura_core::types::identifiers::AuthorityId;
+
+    fn app_contact(
+        authority_id: AuthorityId,
+        nickname: &str,
+        nickname_suggestion: Option<&str>,
+    ) -> AppContact {
+        AppContact {
+            id: authority_id,
+            nickname: nickname.to_string(),
+            nickname_suggestion: nickname_suggestion.map(str::to_string),
+            is_guardian: false,
+            is_member: false,
+            last_interaction: None,
+            is_online: true,
+            read_receipt_policy: ReadReceiptPolicy::default(),
+            relationship_state: ContactRelationshipState::Contact,
+            invitation_code: None,
+        }
+    }
+
+    #[test]
+    fn app_contact_conversion_preserves_nickname_and_suggestion_distinction() {
+        let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
+        let converted = Contact::from(&app_contact(authority_id, "", Some("Suggested")));
+
+        assert!(converted.nickname.is_empty());
+        assert_eq!(converted.nickname_suggestion.as_deref(), Some("Suggested"));
+        assert_eq!(converted.effective_name(), "Suggested");
+    }
+
+    #[test]
+    fn format_contact_name_uses_shared_effective_name_fallback() {
+        let suggestion_only = AuthorityId::new_from_entropy([10u8; 32]);
+        let fallback_only = AuthorityId::new_from_entropy([11u8; 32]);
+        let contacts = vec![
+            Contact::from(&app_contact(suggestion_only, "", Some("Suggested"))),
+            Contact::from(&app_contact(fallback_only, "", None)),
+        ];
+
+        assert_eq!(
+            format_contact_name(&suggestion_only.to_string(), &contacts),
+            "Suggested"
+        );
+        assert_eq!(
+            format_contact_name(&fallback_only.to_string(), &contacts),
+            short_id(&fallback_only.to_string(), 8)
+        );
+    }
 }

@@ -9,7 +9,7 @@ use aura_simulator::quint::{
 };
 
 #[tokio::test]
-#[ignore]
+#[ignore = "requires local ITF trace artifact; re-enable when artifacts/traces/amp_channel.itf.json is regenerated for the current simulator contract"]
 async fn replay_amp_channel_lifecycle_trace() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

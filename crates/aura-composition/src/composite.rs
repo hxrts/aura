@@ -36,19 +36,31 @@ impl CompositeHandler {
         }
     }
 
+    fn with_mode(device_id: DeviceId, execution_mode: ExecutionMode) -> Self {
+        Self::new(device_id, execution_mode)
+    }
+
+    fn is_choreographic_effect(effect_type: EffectType) -> bool {
+        effect_type == EffectType::Choreographic
+    }
+
+    fn has_choreographic_handler(&self) -> bool {
+        self.session_handler.is_some()
+    }
+
     /// Create a composite handler for testing
     pub fn for_testing(device_id: DeviceId) -> Self {
-        Self::new(device_id, ExecutionMode::Testing)
+        Self::with_mode(device_id, ExecutionMode::Testing)
     }
 
     /// Create a composite handler for production
     pub fn for_production(device_id: DeviceId) -> Self {
-        Self::new(device_id, ExecutionMode::Production)
+        Self::with_mode(device_id, ExecutionMode::Production)
     }
 
     /// Create a composite handler for simulation
     pub fn for_simulation(device_id: DeviceId, seed: u64) -> Self {
-        Self::new(device_id, ExecutionMode::Simulation { seed })
+        Self::with_mode(device_id, ExecutionMode::Simulation { seed })
     }
 
     /// Register a handler for a specific effect type
@@ -60,7 +72,7 @@ impl CompositeHandler {
         if !handler.supports_effect(effect_type) {
             return Err(CompositeError::UnsupportedEffect { effect_type });
         }
-        if effect_type == EffectType::Choreographic {
+        if Self::is_choreographic_effect(effect_type) {
             self.session_handler = Some(handler);
             return Ok(());
         }
@@ -90,7 +102,7 @@ impl CompositeHandler {
         &mut self,
         effect_type: EffectType,
     ) -> Option<Box<dyn RegistrableHandler>> {
-        if effect_type == EffectType::Choreographic {
+        if Self::is_choreographic_effect(effect_type) {
             self.session_handler.take();
             return None;
         }
@@ -99,8 +111,8 @@ impl CompositeHandler {
 
     /// Check if a handler is registered for an effect type
     pub fn has_handler(&self, effect_type: EffectType) -> bool {
-        if effect_type == EffectType::Choreographic {
-            return self.session_handler.is_some();
+        if Self::is_choreographic_effect(effect_type) {
+            return self.has_choreographic_handler();
         }
         self.registry.is_registered(effect_type)
     }
@@ -108,7 +120,7 @@ impl CompositeHandler {
     /// Get all registered effect types
     pub fn registered_effect_types(&self) -> Vec<EffectType> {
         let mut effects = self.registry.registered_effect_types();
-        if self.session_handler.is_some() {
+        if self.has_choreographic_handler() {
             effects.push(EffectType::Choreographic);
         }
         effects
@@ -173,8 +185,8 @@ impl Handler for CompositeHandler {
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
-        if effect_type == EffectType::Choreographic {
-            return self.session_handler.is_some();
+        if Self::is_choreographic_effect(effect_type) {
+            return self.has_choreographic_handler();
         }
         self.registry.supports_effect(effect_type)
     }
@@ -242,19 +254,30 @@ impl CompositeHandlerAdapter {
         Self { composite }
     }
 
+    fn with_mode(device_id: DeviceId, execution_mode: ExecutionMode) -> Self {
+        Self::new(CompositeHandler::with_mode(device_id, execution_mode))
+    }
+
+    fn registry_operations(effect_type: EffectType) -> Vec<String> {
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
+    }
+
     /// Create adapter for testing
     pub fn for_testing(device_id: DeviceId) -> Self {
-        Self::new(CompositeHandler::for_testing(device_id))
+        Self::with_mode(device_id, ExecutionMode::Testing)
     }
 
     /// Create adapter for production
     pub fn for_production(device_id: DeviceId) -> Self {
-        Self::new(CompositeHandler::for_production(device_id))
+        Self::with_mode(device_id, ExecutionMode::Production)
     }
 
     /// Create adapter for simulation
     pub fn for_simulation(device_id: DeviceId, seed: u64) -> Self {
-        Self::new(CompositeHandler::for_simulation(device_id, seed))
+        Self::with_mode(device_id, ExecutionMode::Simulation { seed })
     }
 
     /// Register a handler
@@ -329,10 +352,7 @@ impl RegistrableHandler for CompositeHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        effect_registry::operations_for(effect_type)
-            .iter()
-            .map(|op| (*op).to_string())
-            .collect()
+        Self::registry_operations(effect_type)
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -353,6 +373,10 @@ impl HandlerRegistrableAdapter {
     fn new(handler: Box<dyn Handler>) -> Self {
         Self { handler }
     }
+
+    fn registry_operations(effect_type: EffectType) -> Vec<String> {
+        CompositeHandlerAdapter::registry_operations(effect_type)
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -371,10 +395,7 @@ impl RegistrableHandler for HandlerRegistrableAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        effect_registry::operations_for(effect_type)
-            .iter()
-            .map(|op| (*op).to_string())
-            .collect()
+        Self::registry_operations(effect_type)
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
@@ -390,6 +411,10 @@ impl RegistrableHandler for HandlerRegistrableAdapter {
 mod tests {
     use super::*;
     use crate::registry::Handler;
+
+    fn test_device(seed: u8) -> DeviceId {
+        DeviceId::new_from_entropy([seed; 32])
+    }
 
     /// Minimal handler used for registration tests
     struct TestConsoleHandler;
@@ -436,7 +461,7 @@ mod tests {
     /// handlers with the correct mode and device identity.
     #[test]
     fn test_composite_handler_creation() {
-        let device_id = DeviceId::new_from_entropy([1u8; 32]);
+        let device_id = test_device(1);
 
         let handler = CompositeHandler::for_testing(device_id);
         assert_eq!(handler.execution_mode(), ExecutionMode::Testing);
@@ -455,7 +480,7 @@ mod tests {
     /// Builder sets execution mode and preserves device identity through build.
     #[test]
     fn test_composite_handler_builder() {
-        let device_id = DeviceId::new_from_entropy([2u8; 32]);
+        let device_id = test_device(2);
 
         let builder =
             CompositeHandlerBuilder::new(device_id).execution_mode(ExecutionMode::Production);
@@ -471,7 +496,7 @@ mod tests {
     /// Adapter factories produce the correct execution mode for each variant.
     #[test]
     fn test_composite_handler_adapter() {
-        let device_id = DeviceId::new_from_entropy([3u8; 32]);
+        let device_id = test_device(3);
 
         let adapter = CompositeHandlerAdapter::for_testing(device_id);
         assert_eq!(Handler::execution_mode(&adapter), ExecutionMode::Testing);
@@ -489,7 +514,7 @@ mod tests {
     /// Registering a handler updates `has_handler` and `registered_effect_types`.
     #[test]
     fn test_handler_registration() {
-        let device_id = DeviceId::new_from_entropy([4u8; 32]);
+        let device_id = test_device(4);
         let mut composite = CompositeHandler::for_testing(device_id);
 
         // Initially no handlers registered
@@ -513,7 +538,7 @@ mod tests {
     /// empty for unsupported types.
     #[test]
     fn test_supported_operations() {
-        let device_id = DeviceId::new_from_entropy([5u8; 32]);
+        let device_id = test_device(5);
         let adapter = CompositeHandlerAdapter::for_testing(device_id);
 
         // Test that the operation mapping exists (even without registered handlers)

@@ -42,15 +42,13 @@
 pub mod errors;
 
 // Application effects implementation (Layer 2 pattern)
-/// Typed capability families shared across authorization policy surfaces.
-pub mod capabilities;
 pub mod effect_policy;
 pub mod effects;
 pub mod flow_budget;
 pub mod proposals;
 
 // Biscuit-based authorization
-pub mod biscuit_authorization;
+pub mod biscuit_evaluator;
 pub mod biscuit_token;
 pub mod facts;
 pub mod resource_scope;
@@ -78,7 +76,7 @@ pub use facts::{WotFact, WotFactDelta, WotFactReducer, WOT_FACT_TYPE_ID};
 pub use aura_core::types::scope::{AuthorityOp, ContextOp, ResourceScope};
 
 // Biscuit authorization types
-pub use biscuit_authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
+pub use biscuit_evaluator::{AuthorizationResult, BiscuitAuthorizationBridge};
 
 // Storage authorization types
 pub use storage_authorization::{
@@ -92,8 +90,9 @@ pub type CapResult<T> = Result<T, WotError>;
 
 // Re-export effect policy types
 pub use effect_policy::{
-    ApprovalThreshold, CapabilityRequirement, CeremonyType, EffectDecision, EffectPolicy,
-    EffectPolicyRegistry, EffectTiming, OperationType, SecurityLevel,
+    evaluation_candidates_for_generic_policy, ApprovalThreshold, CapabilityRequirement,
+    CeremonyType, EffectDecision, EffectPolicy, EffectPolicyRegistry, EffectTiming,
+    GenericCapability, OperationType, SecurityLevel,
 };
 
 // Re-export proposal types for deferred operations

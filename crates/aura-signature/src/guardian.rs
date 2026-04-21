@@ -3,6 +3,7 @@
 //! This module handles verifying that a guardian signed a message during
 //! recovery operations, proving guardian identity.
 
+use crate::verification_common::verify_ed25519_signature;
 use crate::{AuthenticationError, Result};
 use aura_core::GuardianId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
@@ -29,19 +30,17 @@ pub fn verify_guardian_signature(
     signature: &Ed25519Signature,
     guardian_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
-    // Verify the cryptographic signature
-    let valid =
-        aura_core::ed25519_verify(message, signature, guardian_public_key).map_err(|e| {
-            AuthenticationError::InvalidGuardianSignature {
-                details: format!("Guardian {guardian_id} signature verification failed: {e}"),
-            }
-        })?;
-
-    if !valid {
-        return Err(AuthenticationError::InvalidGuardianSignature {
+    verify_ed25519_signature(
+        message,
+        signature,
+        guardian_public_key,
+        |details| AuthenticationError::InvalidGuardianSignature {
+            details: format!("Guardian {guardian_id} signature verification failed: {details}"),
+        },
+        || AuthenticationError::InvalidGuardianSignature {
             details: format!("Guardian {guardian_id} signature invalid"),
-        });
-    }
+        },
+    )?;
 
     tracing::debug!(
         guardian_id = %guardian_id,
@@ -99,25 +98,28 @@ fn create_recovery_approval_message(
     message
 }
 
-// Tests commented out due to missing crypto functions in current aura_crypto API
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::hash;
+    use aura_core::crypto::ed25519::Ed25519SigningKey;
+
+    fn guardian_id(seed: u8) -> GuardianId {
+        GuardianId::new_from_entropy([seed; 32])
+    }
+
+    fn signing_material(seed: u8, message: &[u8]) -> (Ed25519Signature, Ed25519VerifyingKey) {
+        let signing_key = Ed25519SigningKey::from_bytes([seed; 32]);
+        let verifying_key = signing_key.verifying_key().unwrap();
+        let signature = signing_key.sign(message).unwrap();
+        (signature, verifying_key)
+    }
 
     /// Valid guardian signature verifies — happy path for recovery approval.
     #[test]
     fn test_verify_guardian_signature_success() {
-        let guardian_id = Uuid::from_bytes(hash::hash(b"guardian-test-1")[..16].try_into().unwrap());
-
-        // Generate a key pair for testing
-        let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key)
-            .expect("test signing key should be valid");
-
+        let guardian_id = guardian_id(1);
         let message = b"guardian test message";
-        let signature = aura_core::ed25519_sign(&signing_key, message);
+        let (signature, verifying_key) = signing_material(41, message);
 
         let result = verify_guardian_signature(guardian_id, message, &signature, &verifying_key);
 
@@ -127,20 +129,13 @@ mod tests {
     /// Wrong key must fail — prevents key substitution in recovery.
     #[test]
     fn test_verify_guardian_signature_invalid() {
-        let effects = Effects::test();
-        let guardian_id = Uuid::from_bytes(hash::hash(b"guardian-test-verify-2")[..16].try_into().unwrap());
-
-        // Generate two different key pairs
-        let signing_key1 = aura_core::generate_ed25519_key();
-        let verifying_key1 = aura_core::ed25519_verifying_key(&signing_key1)
-            .expect("test signing key should be valid");
-        let signing_key2 = aura_core::generate_ed25519_key();
-
+        let guardian_id = guardian_id(2);
         let message = b"guardian test message";
-        // Sign with key2 but verify with key1 (should fail)
-        let signature = aura_core::ed25519_sign(&signing_key2, message);
+        let (signature, _) = signing_material(51, message);
+        let (_, wrong_verifying_key) = signing_material(52, message);
 
-        let result = verify_guardian_signature(guardian_id, message, &signature, &verifying_key1);
+        let result =
+            verify_guardian_signature(guardian_id, message, &signature, &wrong_verifying_key);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -152,19 +147,12 @@ mod tests {
     /// Recovery approval: valid guardian signature with correct ceremony ID.
     #[test]
     fn test_verify_recovery_approval() {
-        let effects = Effects::test();
-        let guardian_id = effects.gen_uuid();
+        let guardian_id = guardian_id(3);
         let recovery_request_hash = [42u8; 32];
 
-        // Generate a key pair for testing
-        let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key)
-            .expect("test signing key should be valid");
-
-        // Create the approval message and sign it
         let approval_message =
             create_recovery_approval_message(guardian_id, &recovery_request_hash);
-        let signature = aura_core::ed25519_sign(&signing_key, &approval_message);
+        let (signature, verifying_key) = signing_material(61, &approval_message);
 
         let result = verify_recovery_approval(
             guardian_id,
@@ -179,7 +167,7 @@ mod tests {
     /// Recovery approval binding message is deterministic for same inputs.
     #[test]
     fn test_recovery_approval_message_format() {
-        let guardian_id = Uuid::from_bytes(hash::hash(b"guardian-test-approval-format")[..16].try_into().unwrap());
+        let guardian_id = guardian_id(4);
         let recovery_request_hash = [1u8; 32];
 
         let message = create_recovery_approval_message(guardian_id, &recovery_request_hash);
@@ -194,4 +182,3 @@ mod tests {
         assert_eq!(&message[16..48], &recovery_request_hash);
     }
 }
-*/

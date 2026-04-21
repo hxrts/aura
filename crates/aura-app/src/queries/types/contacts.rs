@@ -255,6 +255,13 @@ impl Query for ContactsQuery {
                     is_online: get_bool(&row, "is_online"),
                     read_receipt_policy: ReadReceiptPolicy::default(),
                     relationship_state: ContactRelationshipState::Contact,
+                    // The datalog "contact" predicate does not currently
+                    // surface the invitation code. The authoritative
+                    // ContactFact::Added.invitation_code is projected into
+                    // the Contact view through ContactsSignalView; this
+                    // query-based path is used for ad-hoc reads that do
+                    // not need the code.
+                    invitation_code: None,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

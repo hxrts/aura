@@ -15,49 +15,35 @@ pub use aura_core::domain::{
 // Chat Types
 // ============================================================================
 
-/// Unique identifier for a chat group
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ChatGroupId(pub Uuid);
+macro_rules! uuid_newtype {
+    ($doc:literal, $name:ident) => {
+        #[doc = $doc]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        pub struct $name(pub Uuid);
 
-impl ChatGroupId {
-    /// Create from UUID (typically from RandomEffects)
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
+        impl $name {
+            /// Create from UUID (typically from RandomEffects)
+            pub fn from_uuid(uuid: Uuid) -> Self {
+                Self(uuid)
+            }
 
-    /// Get the underlying UUID
-    pub fn as_uuid(&self) -> &Uuid {
-        &self.0
-    }
+            /// Get the underlying UUID
+            pub fn as_uuid(&self) -> &Uuid {
+                &self.0
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
 }
 
-impl std::fmt::Display for ChatGroupId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+uuid_newtype!("Unique identifier for a chat group", ChatGroupId);
 
-/// Unique identifier for a chat message
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ChatMessageId(pub Uuid);
-
-impl ChatMessageId {
-    /// Create from UUID (typically from RandomEffects)
-    pub fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    /// Get the underlying UUID
-    pub fn as_uuid(&self) -> &Uuid {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for ChatMessageId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+uuid_newtype!("Unique identifier for a chat message", ChatMessageId);
 
 /// Chat group member information
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +104,26 @@ pub struct ChatMessage {
 }
 
 impl ChatMessage {
+    fn new_with_type(
+        id: ChatMessageId,
+        group_id: ChatGroupId,
+        sender_id: AuthorityId,
+        content: String,
+        message_type: MessageType,
+        timestamp: TimeStamp,
+    ) -> Self {
+        Self {
+            id,
+            group_id,
+            sender_id,
+            content,
+            message_type,
+            timestamp,
+            reply_to: None,
+            metadata: std::collections::HashMap::new(),
+        }
+    }
+
     /// Create a new text message with provided IDs and timestamp (from effects)
     pub fn new_text(
         id: ChatMessageId,
@@ -126,16 +132,14 @@ impl ChatMessage {
         content: String,
         timestamp: TimeStamp,
     ) -> Self {
-        Self {
+        Self::new_with_type(
             id,
             group_id,
             sender_id,
             content,
-            message_type: MessageType::Text,
+            MessageType::Text,
             timestamp,
-            reply_to: None,
-            metadata: std::collections::HashMap::new(),
-        }
+        )
     }
 
     /// Create a system message with provided IDs and timestamp (from effects)
@@ -146,16 +150,14 @@ impl ChatMessage {
         content: String,
         timestamp: TimeStamp,
     ) -> Self {
-        Self {
+        Self::new_with_type(
             id,
             group_id,
-            sender_id: system_authority,
+            system_authority,
             content,
-            message_type: MessageType::System,
+            MessageType::System,
             timestamp,
-            reply_to: None,
-            metadata: std::collections::HashMap::new(),
-        }
+        )
     }
 
     /// Check if this is a system message

@@ -6,17 +6,22 @@
 use crate::{
     coordinator::{BaseCoordinator, BaseCoordinatorAccess, RecoveryCoordinator},
     effects::RecoveryEffects,
-    facts::{MembershipChangeType, RecoveryFact, RecoveryFactEmitter},
+    facts::{MembershipChangeType, RecoveryFact},
     types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
-    utils::EvidenceBuilder,
+    utils::{
+        workflow::{
+            context_id_from_operation_id, current_physical_time_or_zero, exact_physical_time,
+            persist_recovery_fact, trace_id,
+        },
+        EvidenceBuilder,
+    },
     RecoveryResult,
 };
 use async_trait::async_trait;
-use aura_core::effects::{JournalEffects, PhysicalTimeEffects};
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{hash, AuraError, Hash32};
-use aura_journal::DomainFact;
 use aura_macros::tell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -148,23 +153,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
 
     /// Emit a recovery fact to the journal.
     async fn emit_fact(&self, fact: RecoveryFact) -> RecoveryResult<()> {
-        let timestamp = self
-            .effect_system()
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0);
-
-        let mut journal = self.effect_system().get_journal().await?;
-        journal.facts.insert_with_context(
-            RecoveryFactEmitter::fact_key(&fact),
-            aura_core::FactValue::Bytes(DomainFact::to_bytes(&fact)),
-            aura_core::ActorId::synthetic(&fact.context_id().to_string()),
-            aura_core::FactTimestamp::new(timestamp),
-            None,
-        )?;
-        self.effect_system().persist_journal(&journal).await?;
-        Ok(())
+        persist_recovery_fact(self.effect_system().as_ref(), &fact).await
     }
 
     /// Convert local MembershipChange to facts MembershipChangeType
@@ -185,6 +174,50 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         }
     }
 
+    fn change_id(account_id: &AuthorityId, now_ms: u64) -> String {
+        format!("membership_{account_id}_{now_ms}")
+    }
+
+    fn proposal_hash(change_id: &str) -> Hash32 {
+        Hash32(hash::hash(change_id.as_bytes()))
+    }
+
+    async fn emit_change_rejected(
+        &self,
+        context_id: ContextId,
+        proposal_hash: Hash32,
+        change_id: &str,
+        reason: impl Into<String>,
+    ) -> RecoveryResult<()> {
+        let rejected_fact = RecoveryFact::MembershipChangeRejected {
+            context_id,
+            proposal_hash,
+            trace_id: trace_id(change_id),
+            reason: reason.into(),
+            rejected_at: current_physical_time_or_zero(self.effect_system().as_ref()).await,
+        };
+        self.emit_fact(rejected_fact).await
+    }
+
+    fn ensure_guardian_absent(
+        guardians: &[GuardianProfile],
+        guardian_id: AuthorityId,
+    ) -> RecoveryResult<()> {
+        if guardians.iter().any(|g| g.authority_id == guardian_id) {
+            Err(AuraError::invalid("Guardian already exists in set"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ensure_guardians_remaining(guardians: &[GuardianProfile]) -> RecoveryResult<()> {
+        if guardians.is_empty() {
+            Err(AuraError::invalid("Cannot remove last guardian"))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Execute membership change as change initiator.
     pub async fn execute_membership_change(
         &self,
@@ -199,21 +232,18 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             .unwrap_or(0);
 
         // Create change ID and context ID using hash of account + timestamp
-        let change_id = format!("membership_{}_{}", request.base.account_id, now_ms);
-        let context_id = ContextId::new_from_entropy(hash::hash(change_id.as_bytes()));
+        let change_id = Self::change_id(&request.base.account_id, now_ms);
+        let context_id = context_id_from_operation_id(&change_id);
 
         // Emit MembershipChangeProposed fact
-        let proposal_hash = Hash32(hash::hash(change_id.as_bytes()));
+        let proposal_hash = Self::proposal_hash(&change_id);
         let proposed_fact = RecoveryFact::MembershipChangeProposed {
             context_id,
             proposer_id: request.base.initiator_id,
-            trace_id: Some(change_id.clone()),
+            trace_id: trace_id(&change_id),
             change_type: Self::to_fact_change_type(&request.change),
             proposal_hash,
-            proposed_at: PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            },
+            proposed_at: exact_physical_time(now_ms),
         };
         self.emit_fact(proposed_fact).await?;
 
@@ -224,10 +254,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             proposer_id: request.base.initiator_id,
             change: request.change.clone(),
             new_threshold: request.new_threshold,
-            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            }),
+            timestamp: TimeStamp::PhysicalClock(exact_physical_time(now_ms)),
         };
 
         // Execute choreographic protocol (Phase 1-2)
@@ -240,24 +267,14 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
 
         // Check if we have enough approvals
         if approvals.len() < request.base.threshold as usize {
-            let rejected_fact =
-                RecoveryFact::MembershipChangeRejected {
-                    context_id,
-                    proposal_hash,
-                    trace_id: Some(change_id.clone()),
-                    reason: format!(
-                        "Insufficient guardian approvals: got {}, need {}",
-                        approvals.len(),
-                        request.base.threshold
-                    ),
-                    rejected_at: self.effect_system().physical_time().await.unwrap_or(
-                        PhysicalTime {
-                            ts_ms: 0,
-                            uncertainty: None,
-                        },
-                    ),
-                };
-            let _ = self.emit_fact(rejected_fact).await;
+            let reason = format!(
+                "Insufficient guardian approvals: got {}, need {}",
+                approvals.len(),
+                request.base.threshold
+            );
+            let _ = self
+                .emit_change_rejected(context_id, proposal_hash, &change_id, reason.clone())
+                .await;
 
             return Ok(RecoveryResponse::error(format!(
                 "Insufficient guardian approvals: got {}, need {}",
@@ -273,24 +290,14 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
 
         // Validate the new configuration
         if new_guardian_set.len() < final_threshold as usize {
-            let rejected_fact =
-                RecoveryFact::MembershipChangeRejected {
-                    context_id,
-                    proposal_hash,
-                    trace_id: Some(change_id.clone()),
-                    reason: format!(
-                        "Invalid configuration: {} guardians cannot satisfy threshold of {}",
-                        new_guardian_set.len(),
-                        final_threshold
-                    ),
-                    rejected_at: self.effect_system().physical_time().await.unwrap_or(
-                        PhysicalTime {
-                            ts_ms: 0,
-                            uncertainty: None,
-                        },
-                    ),
-                };
-            let _ = self.emit_fact(rejected_fact).await;
+            let reason = format!(
+                "Invalid configuration: {} guardians cannot satisfy threshold of {}",
+                new_guardian_set.len(),
+                final_threshold
+            );
+            let _ = self
+                .emit_change_rejected(context_id, proposal_hash, &change_id, reason.clone())
+                .await;
 
             return Ok(RecoveryResponse::error(format!(
                 "Invalid configuration: {} guardians cannot satisfy threshold of {}",
@@ -315,17 +322,10 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         let completed_fact = RecoveryFact::MembershipChangeCompleted {
             context_id,
             proposal_hash,
-            trace_id: Some(change_id.clone()),
+            trace_id: trace_id(&change_id),
             new_guardian_ids: new_guardian_set.iter().map(|g| g.authority_id).collect(),
             new_threshold: final_threshold,
-            completed_at: self
-                .effect_system()
-                .physical_time()
-                .await
-                .unwrap_or(PhysicalTime {
-                    ts_ms: 0,
-                    uncertainty: None,
-                }),
+            completed_at: current_physical_time_or_zero(self.effect_system().as_ref()).await,
         };
         self.emit_fact(completed_fact).await?;
 
@@ -380,12 +380,12 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         let vote_signature = hash::hash(&sig_input).to_vec();
 
         // Emit MembershipVoteCast fact
-        let context_id = ContextId::new_from_entropy(hash::hash(proposal.change_id.as_bytes()));
-        let proposal_hash = Hash32(hash::hash(proposal.change_id.as_bytes()));
+        let context_id = context_id_from_operation_id(&proposal.change_id);
+        let proposal_hash = Self::proposal_hash(&proposal.change_id);
         let vote_fact = RecoveryFact::MembershipVoteCast {
             context_id,
             voter_id: guardian_id,
-            trace_id: Some(proposal.change_id.clone()),
+            trace_id: trace_id(&proposal.change_id),
             proposal_hash,
             approved,
             voted_at: physical_time.clone(),
@@ -454,20 +454,12 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
 
         match change {
             MembershipChange::AddGuardian { guardian } => {
-                // Check if guardian already exists
-                if guardians
-                    .iter()
-                    .any(|g| g.authority_id == guardian.authority_id)
-                {
-                    return Err(AuraError::invalid("Guardian already exists in set"));
-                }
+                Self::ensure_guardian_absent(&guardians, guardian.authority_id)?;
                 guardians.push(guardian.clone());
             }
             MembershipChange::RemoveGuardian { guardian_id } => {
                 guardians.retain(|g| g.authority_id != *guardian_id);
-                if guardians.is_empty() {
-                    return Err(AuraError::invalid("Cannot remove last guardian"));
-                }
+                Self::ensure_guardians_remaining(&guardians)?;
             }
             MembershipChange::UpdateGuardian {
                 guardian_id,

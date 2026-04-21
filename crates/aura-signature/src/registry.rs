@@ -90,17 +90,7 @@ impl AuthorityRegistry {
             .get(&authority_id)
             .ok_or_else(|| AuraError::not_found("Unknown authority"))?;
 
-        let verified = match authority_info.status {
-            AuthorityStatus::Active => true,
-            AuthorityStatus::Suspended => false,
-            AuthorityStatus::Revoked => false,
-        };
-
-        let confidence = match authority_info.status {
-            AuthorityStatus::Active => Confidence::MAX,
-            AuthorityStatus::Suspended => Confidence::new(0.5).unwrap_or(Confidence::MIN),
-            AuthorityStatus::Revoked => Confidence::MIN,
-        };
+        let (verified, confidence) = verification_state(authority_info.status);
 
         Ok(VerificationResult {
             verified,
@@ -211,19 +201,8 @@ impl AuthorityRegistry {
         // Enforce monotonic lifecycle: Active → Suspended → Revoked.
         // Backward transitions are rejected to prevent reactivation of
         // revoked or suspended authorities.
-        let current = &authority_info.status;
-        let valid = match (current, &status) {
-            // Forward transitions
-            (AuthorityStatus::Active, AuthorityStatus::Suspended) => true,
-            (AuthorityStatus::Active, AuthorityStatus::Revoked) => true,
-            (AuthorityStatus::Suspended, AuthorityStatus::Revoked) => true,
-            // Same status (idempotent)
-            (a, b) if a == b => true,
-            // All other transitions are backward — rejected
-            _ => false,
-        };
-
-        if !valid {
+        let current = authority_info.status;
+        if !is_valid_status_transition(current, status) {
             return Err(AuraError::invalid(format!(
                 "Invalid lifecycle transition: {current:?} → {status:?} (backward transitions are forbidden)"
             )));
@@ -241,24 +220,49 @@ impl Default for AuthorityRegistry {
     }
 }
 
+fn suspended_confidence() -> Confidence {
+    Confidence::new(0.5).unwrap_or(Confidence::MIN)
+}
+
+fn verification_state(status: AuthorityStatus) -> (bool, Confidence) {
+    match status {
+        AuthorityStatus::Active => (true, Confidence::MAX),
+        AuthorityStatus::Suspended => (false, suspended_confidence()),
+        AuthorityStatus::Revoked => (false, Confidence::MIN),
+    }
+}
+
+fn is_valid_status_transition(current: AuthorityStatus, next: AuthorityStatus) -> bool {
+    current == next
+        || matches!(
+            (current, next),
+            (AuthorityStatus::Active, AuthorityStatus::Suspended)
+                | (AuthorityStatus::Active, AuthorityStatus::Revoked)
+                | (AuthorityStatus::Suspended, AuthorityStatus::Revoked)
+        )
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use aura_core::Cap;
 
+    fn test_authority_info(seed: u8, status: AuthorityStatus) -> AuthorityInfo {
+        AuthorityInfo {
+            authority_id: AuthorityId::new_from_entropy([seed; 32]),
+            public_key: PublicKeyBytes::new([seed; 32]),
+            capabilities: Cap::top(),
+            status,
+        }
+    }
+
     /// Active authority registers and appears in known_authorities map.
     #[test]
     fn test_authority_registration() {
         let mut verifier = AuthorityRegistry::new();
-        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
-
-        let authority_info = AuthorityInfo {
-            authority_id,
-            public_key: PublicKeyBytes::new([1u8; 32]),
-            capabilities: Cap::top(),
-            status: AuthorityStatus::Active,
-        };
+        let authority_info = test_authority_info(1, AuthorityStatus::Active);
+        let authority_id = authority_info.authority_id;
 
         assert!(verifier.register_authority(authority_info).is_ok());
         assert!(verifier.known_authorities().contains_key(&authority_id));
@@ -268,14 +272,8 @@ mod tests {
     #[test]
     fn test_authority_verification() {
         let mut verifier = AuthorityRegistry::new();
-        let authority_id = AuthorityId::new_from_entropy([2u8; 32]);
-
-        let authority_info = AuthorityInfo {
-            authority_id,
-            public_key: PublicKeyBytes::new([1u8; 32]),
-            capabilities: Cap::top(),
-            status: AuthorityStatus::Active,
-        };
+        let authority_info = test_authority_info(2, AuthorityStatus::Active);
+        let authority_id = authority_info.authority_id;
 
         verifier.register_authority(authority_info).unwrap();
 
@@ -288,14 +286,8 @@ mod tests {
     #[test]
     fn test_authority_status_update() {
         let mut verifier = AuthorityRegistry::new();
-        let authority_id = AuthorityId::new_from_entropy([3u8; 32]);
-
-        let authority_info = AuthorityInfo {
-            authority_id,
-            public_key: PublicKeyBytes::new([1u8; 32]),
-            capabilities: Cap::top(),
-            status: AuthorityStatus::Active,
-        };
+        let authority_info = test_authority_info(3, AuthorityStatus::Active);
+        let authority_id = authority_info.authority_id;
 
         verifier.register_authority(authority_info).unwrap();
 
@@ -317,14 +309,8 @@ mod tests {
     #[test]
     fn test_authority_lifecycle_transition() {
         let mut verifier = AuthorityRegistry::new();
-        let authority_id = AuthorityId::new_from_entropy([4u8; 32]);
-
-        let authority_info = AuthorityInfo {
-            authority_id,
-            public_key: PublicKeyBytes::new([2u8; 32]),
-            capabilities: Cap::top(),
-            status: AuthorityStatus::Active,
-        };
+        let authority_info = test_authority_info(4, AuthorityStatus::Active);
+        let authority_id = authority_info.authority_id;
 
         verifier.register_authority(authority_info).unwrap();
 
@@ -356,14 +342,8 @@ mod tests {
     #[test]
     fn test_backward_lifecycle_rejected() {
         let mut verifier = AuthorityRegistry::new();
-        let authority_id = AuthorityId::new_from_entropy([5u8; 32]);
-
-        let authority_info = AuthorityInfo {
-            authority_id,
-            public_key: PublicKeyBytes::new([5u8; 32]),
-            capabilities: Cap::top(),
-            status: AuthorityStatus::Active,
-        };
+        let authority_info = test_authority_info(5, AuthorityStatus::Active);
+        let authority_id = authority_info.authority_id;
         verifier.register_authority(authority_info).unwrap();
 
         // Suspend first
@@ -413,14 +393,8 @@ mod tests {
     #[test]
     fn test_idempotent_status_update() {
         let mut verifier = AuthorityRegistry::new();
-        let authority_id = AuthorityId::new_from_entropy([6u8; 32]);
-
-        let authority_info = AuthorityInfo {
-            authority_id,
-            public_key: PublicKeyBytes::new([6u8; 32]),
-            capabilities: Cap::top(),
-            status: AuthorityStatus::Active,
-        };
+        let authority_info = test_authority_info(6, AuthorityStatus::Active);
+        let authority_id = authority_info.authority_id;
         verifier.register_authority(authority_info).unwrap();
 
         // Active → Active is idempotent

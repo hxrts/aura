@@ -9,7 +9,8 @@ use crate::tui::screens::app::subscriptions::{
     SharedPendingRequests, SharedThreshold,
 };
 use crate::tui::semantic_lifecycle::{
-    CeremonySubmissionOwner, LocalTerminalOperationOwner, WorkflowHandoffOperationOwner,
+    CeremonySubmissionOwner, LocalTerminalOperationOwner, SemanticOperationTransferScope,
+    WorkflowHandoffOperationOwner,
 };
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{publish_ui_update, UiOperationFailure, UiUpdatePublication};
@@ -23,6 +24,7 @@ pub(super) enum NotificationSelection {
     ReceivedInvitation(String),
     SentInvitation(String),
     RecoveryRequest(String),
+    PassiveRuntimeEvent(String),
 }
 
 pub(super) async fn complete_ready_join_binding_submissions(
@@ -163,10 +165,27 @@ pub(super) fn set_authoritative_operation_state_sanctioned(
     state.set_authoritative_operation_state(operation_id, instance_id, causality, next_state);
 }
 
+fn runtime_notification_timestamp(total_facts: usize, index: usize) -> u64 {
+    u64::MAX.saturating_sub(total_facts.saturating_sub(index) as u64)
+}
+
+fn is_passive_notification_runtime_fact(fact: &RuntimeFact) -> bool {
+    matches!(
+        fact,
+        RuntimeFact::InvitationAccepted {
+            invitation_kind: aura_app::ui_contract::InvitationFactKind::Contact,
+            operation_state: Some(OperationState::Succeeded),
+            ..
+        } | RuntimeFact::GuardianInvitationAccepted { .. }
+            | RuntimeFact::DeviceEnrollmentAccepted { .. }
+    )
+}
+
 pub(super) fn read_selected_notification(
     selected_index: usize,
     invitations: &std::sync::Arc<parking_lot::RwLock<Vec<Invitation>>>,
     pending_requests: &std::sync::Arc<parking_lot::RwLock<Vec<crate::tui::types::PendingRequest>>>,
+    runtime_facts: &[RuntimeFact],
 ) -> Option<NotificationSelection> {
     let invitation_items = invitations
         .read()
@@ -200,8 +219,23 @@ pub(super) fn read_selected_notification(
         })
         .collect::<Vec<_>>();
 
+    let runtime_items = runtime_facts
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, fact)| {
+            if !is_passive_notification_runtime_fact(fact) {
+                return None;
+            }
+            Some((
+                runtime_notification_timestamp(runtime_facts.len(), idx),
+                NotificationSelection::PassiveRuntimeEvent(fact.key()),
+            ))
+        })
+        .collect::<Vec<_>>();
+
     let mut notifications = invitation_items;
     notifications.extend(recovery_items);
+    notifications.extend(runtime_items);
     notifications.sort_by(|left, right| right.0.cmp(&left.0));
 
     notifications
@@ -368,6 +402,8 @@ pub(super) fn execute_harness_followup_command(
         TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
             receiver_id,
             invitation_type,
+            nickname,
+            receiver_nickname,
             message,
             ttl_secs,
         }) => {
@@ -394,6 +430,8 @@ pub(super) fn execute_harness_followup_command(
             (cb.invitations.on_create)(
                 receiver_id,
                 invitation_type.as_str().to_string(),
+                nickname,
+                receiver_nickname,
                 message,
                 ttl_secs,
                 operation,
@@ -430,6 +468,7 @@ pub(super) fn execute_harness_followup_command(
                 state.notifications.selected_index,
                 shared_invitations,
                 shared_pending_requests,
+                &state.runtime_facts,
             );
             let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected else {
                 return Err("Select a received invitation to accept".to_string());
@@ -592,9 +631,6 @@ pub(super) fn execute_harness_followup_command(
             authority_id,
             channel_id,
         }) => {
-            let Some(cb) = callbacks.as_ref() else {
-                return Err("Contact callbacks are unavailable".to_string());
-            };
             let channels = shared_channels.read().clone();
             let channel_id_string = channel_id.clone();
             let Some(channel) = channels
@@ -621,18 +657,57 @@ pub(super) fn execute_harness_followup_command(
             let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
-                update_tx,
+                update_tx.clone(),
                 OperationId::invitation_create(),
                 SemanticOperationKind::InviteActorToChannel,
             );
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
-            (cb.contacts.on_invite_to_channel)(
-                authority_id.to_string(),
-                channel.id.clone(),
-                Some(context_id),
-                operation,
-            );
+            let app_core = app_ctx.app_core.raw().clone();
+            let tasks = app_ctx.tasks();
+            let receiver = authority_id;
+            let channel_name_hint = channel.name.clone();
+            let channel_id = channel
+                .id
+                .parse::<aura_core::ChannelId>()
+                .map_err(|error| {
+                    format!("selected channel id is not canonical for harness invite: {error}")
+                })?;
+            let context_id = context_id
+                .parse::<aura_core::ContextId>()
+                .map_err(|error| {
+                    format!("selected channel context is not canonical for harness invite: {error}")
+                })?;
+            tasks.spawn(async move {
+                let request =
+                    aura_app::ui::workflows::messaging::handoff::InviteAuthorityToChannelRequest {
+                        receiver,
+                        channel_id,
+                        context_id: Some(context_id),
+                        channel_name_hint: Some(channel_name_hint),
+                        operation_instance_id: operation.workflow_instance_id(),
+                        message: None,
+                        ttl_ms: None,
+                    };
+                let transfer = operation
+                    .handoff_to_app_workflow(SemanticOperationTransferScope::InviteActorToChannel);
+                if let Err(error) = transfer
+                    .run_workflow(
+                        app_core.clone(),
+                        update_tx.clone(),
+                        "harness invite actor to channel",
+                        aura_app::ui::workflows::messaging::handoff::invite_authority_to_channel(
+                            &app_core, request,
+                        ),
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        error = %error,
+                        "harness authoritative invite-to-channel workflow failed"
+                    );
+                }
+            });
             Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::AddDevice {
@@ -979,7 +1054,14 @@ fn open_observed_convenience_modal(
     match dispatch_cmd {
         DispatchCommand::OpenCreateInvitationModal => {
             let _ = shared_contacts_for_dispatch;
-            let modal_state = crate::tui::state::CreateInvitationModalState::new();
+            let mut modal_state = crate::tui::state::CreateInvitationModalState::new();
+            if let Some(current_authority) = new_state
+                .authorities
+                .get(new_state.current_authority_index)
+                .filter(|authority| !authority.nickname_suggestion.trim().is_empty())
+            {
+                modal_state.nickname = current_authority.nickname_suggestion.trim().to_string();
+            }
             new_state
                 .modal_queue
                 .enqueue(crate::tui::state::QueuedModal::ContactsCreate(modal_state));

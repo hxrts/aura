@@ -50,9 +50,11 @@ pub struct OperationSnapshot {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeEventKind {
     InvitationAccepted,
+    GuardianInvitationAccepted,
     InvitationCodeReady,
     PendingHomeInvitationReady,
     DeviceEnrollmentCodeReady,
+    DeviceEnrollmentAccepted,
     ContactLinkReady,
     HomeCreated,
     HomeEntered,
@@ -73,6 +75,10 @@ pub enum RuntimeFact {
         authority_id: Option<String>,
         operation_state: Option<OperationState>,
     },
+    GuardianInvitationAccepted {
+        authority_id: Option<String>,
+        guardian_name: Option<String>,
+    },
     InvitationCodeReady {
         receiver_authority_id: Option<String>,
         source_operation: OperationId,
@@ -83,6 +89,11 @@ pub enum RuntimeFact {
         device_name: Option<String>,
         code_len: Option<usize>,
         code: Option<String>,
+    },
+    DeviceEnrollmentAccepted {
+        device_id: Option<String>,
+        device_name: Option<String>,
+        device_count: Option<usize>,
     },
     ContactLinkReady {
         authority_id: Option<String>,
@@ -131,9 +142,11 @@ impl RuntimeFact {
     pub fn kind(&self) -> RuntimeEventKind {
         match self {
             Self::InvitationAccepted { .. } => RuntimeEventKind::InvitationAccepted,
+            Self::GuardianInvitationAccepted { .. } => RuntimeEventKind::GuardianInvitationAccepted,
             Self::InvitationCodeReady { .. } => RuntimeEventKind::InvitationCodeReady,
             Self::PendingHomeInvitationReady => RuntimeEventKind::PendingHomeInvitationReady,
             Self::DeviceEnrollmentCodeReady { .. } => RuntimeEventKind::DeviceEnrollmentCodeReady,
+            Self::DeviceEnrollmentAccepted { .. } => RuntimeEventKind::DeviceEnrollmentAccepted,
             Self::ContactLinkReady { .. } => RuntimeEventKind::ContactLinkReady,
             Self::HomeCreated { .. } => RuntimeEventKind::HomeCreated,
             Self::HomeEntered { .. } => RuntimeEventKind::HomeEntered,
@@ -158,6 +171,14 @@ impl RuntimeFact {
                 "invitation_accepted:{invitation_kind:?}:{}",
                 authority_id.as_deref().unwrap_or("*")
             ),
+            Self::GuardianInvitationAccepted {
+                authority_id,
+                guardian_name,
+            } => format!(
+                "guardian_invitation_accepted:{}:{}",
+                authority_id.as_deref().unwrap_or("*"),
+                guardian_name.as_deref().unwrap_or("*")
+            ),
             Self::InvitationCodeReady {
                 receiver_authority_id,
                 source_operation,
@@ -171,6 +192,18 @@ impl RuntimeFact {
             Self::DeviceEnrollmentCodeReady { device_name, .. } => format!(
                 "device_enrollment_code_ready:{}",
                 device_name.as_deref().unwrap_or("*")
+            ),
+            Self::DeviceEnrollmentAccepted {
+                device_id,
+                device_name,
+                device_count,
+            } => format!(
+                "device_enrollment_accepted:{}:{}:{}",
+                device_id.as_deref().unwrap_or("*"),
+                device_name.as_deref().unwrap_or("*"),
+                device_count
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "*".to_string())
             ),
             Self::ContactLinkReady {
                 authority_id,
@@ -247,6 +280,17 @@ impl RuntimeFact {
                     .is_some_and(|value| value.contains(needle))
                     || operation_state.is_some_and(|state| format!("{state:?}").contains(needle))
             }
+            Self::GuardianInvitationAccepted {
+                authority_id,
+                guardian_name,
+            } => {
+                authority_id
+                    .as_deref()
+                    .is_some_and(|value| value.contains(needle))
+                    || guardian_name
+                        .as_deref()
+                        .is_some_and(|value| value.contains(needle))
+            }
             Self::InvitationCodeReady {
                 receiver_authority_id,
                 source_operation,
@@ -269,6 +313,19 @@ impl RuntimeFact {
                     .is_some_and(|value| value.contains(needle))
                     || code_len.is_some_and(|value| value.to_string().contains(needle))
                     || code.as_deref().is_some_and(|value| value.contains(needle))
+            }
+            Self::DeviceEnrollmentAccepted {
+                device_id,
+                device_name,
+                device_count,
+            } => {
+                device_id
+                    .as_deref()
+                    .is_some_and(|value| value.contains(needle))
+                    || device_name
+                        .as_deref()
+                        .is_some_and(|value| value.contains(needle))
+                    || device_count.is_some_and(|value| value.to_string().contains(needle))
             }
             Self::ContactLinkReady {
                 authority_id,

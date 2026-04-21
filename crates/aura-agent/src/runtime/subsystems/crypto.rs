@@ -103,7 +103,7 @@ pub struct CryptoSubsystem {
 
 impl CryptoSubsystem {
     /// Create a new crypto subsystem with production random source
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used by deterministic and integration tests until runtime builders own all crypto construction.
     pub fn new(base_path: std::path::PathBuf) -> Self {
         Self {
             handler: RealCryptoHandler::new(),
@@ -113,7 +113,7 @@ impl CryptoSubsystem {
     }
 
     /// Create a crypto subsystem with deterministic seed for testing
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Used by deterministic and integration tests until runtime builders own all crypto construction.
     pub fn seeded(seed: [u8; 32], base_path: std::path::PathBuf) -> Self {
         Self {
             handler: RealCryptoHandler::seeded(seed),
@@ -141,7 +141,7 @@ impl CryptoSubsystem {
     }
 
     /// Get clone of the crypto handler (for effect trait delegation)
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained for effect delegation until all callers can borrow the handler directly.
     pub fn handler_clone(&self) -> RealCryptoHandler {
         self.handler.clone()
     }

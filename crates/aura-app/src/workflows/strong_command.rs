@@ -130,6 +130,7 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
 
         {
@@ -163,6 +164,7 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
         let bobby = Contact {
             id: AuthorityId::new_from_entropy([3u8; 32]),
@@ -174,6 +176,7 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
 
         {
@@ -226,6 +229,7 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
 
         {
@@ -595,6 +599,7 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
         let replacement = Contact {
             id: AuthorityId::new_from_entropy([22u8; 32]),
@@ -606,6 +611,7 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
 
         {

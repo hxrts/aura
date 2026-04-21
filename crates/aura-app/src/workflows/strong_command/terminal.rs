@@ -73,12 +73,12 @@ fn classify_permission_terminal_command_message(message: &str) -> CommandTermina
 #[must_use]
 pub fn classify_terminal_execution_error(error: &AuraError) -> CommandTerminalClassification {
     match error {
-        AuraError::Invalid { message } => classify_invalid_terminal_command_message(message),
+        AuraError::Invalid { message, .. } => classify_invalid_terminal_command_message(message),
         AuraError::NotFound { .. } => CommandTerminalClassification::new(
             CommandTerminalOutcomeStatus::Invalid,
             CommandTerminalReasonCode::NotFound,
         ),
-        AuraError::PermissionDenied { message } => {
+        AuraError::PermissionDenied { message, .. } => {
             classify_permission_terminal_command_message(message)
         }
         AuraError::Crypto { .. }

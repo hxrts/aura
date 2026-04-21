@@ -20,6 +20,7 @@ Guardian-based recovery protocol enabling threshold key recovery through social 
 | Incoming | aura-core | Effect traits, identifiers, threshold types |
 | Incoming | aura-authentication | Recovery context, operation types |
 | Incoming | aura-journal | Fact infrastructure |
+| Incoming | aura-macros | Capability boundary and derive macros |
 | Outgoing | — | `RecoveryFact`, `RecoveryFactReducer`, `RecoveryDelta` for journal integration |
 | Outgoing | — | `RecoveryEffects`, `RecoveryNetworkEffects` for recovery operations |
 | Outgoing | — | `GuardianSetupCoordinator`, `GuardianMembershipCoordinator` for guardian management |

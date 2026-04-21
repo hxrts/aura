@@ -112,6 +112,12 @@ pub struct Contact {
     /// facts plus bilateral friendship facts.
     #[serde(default)]
     pub relationship_state: ContactRelationshipState,
+    /// Invitation code that was used to establish this contact, if the
+    /// link was established via invitation. Populated from
+    /// `ContactFact::Added.invitation_code`. `None` for contacts added
+    /// through non-invitation paths or legacy facts without this field.
+    #[serde(default)]
+    pub invitation_code: Option<String>,
 }
 
 impl EffectiveName for Contact {
@@ -359,6 +365,7 @@ impl ContactsState {
                     is_online: false,
                     read_receipt_policy: ReadReceiptPolicy::default(),
                     relationship_state: ContactRelationshipState::Contact,
+                    invitation_code: None,
                 },
             );
             false
@@ -400,6 +407,7 @@ impl ContactsState {
                 is_online: false,
                 read_receipt_policy: ReadReceiptPolicy::default(),
                 relationship_state,
+                invitation_code: None,
             },
         );
     }

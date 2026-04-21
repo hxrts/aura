@@ -47,7 +47,7 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 | Arch | `just check-arch` | Verify architecture compliance |
 | Arch | `just ci-ownership-policy` | Run ownership/runtime boundary enforcement |
 | Arch | `just lint-arch-syntax` | Run Rust-native syntax/policy lints that replaced grep-heavy `arch.sh` checks |
-| Arch | `just ci-annotation-ratchet` | Run changed-files ownership annotation ratchets |
+| Arch | `just ci-annotation-ratchet` | Run changed-files ownership annotation ratchets and ignored-test-count ratchets |
 | Arch | `just ci-frontend-portability` | Run shared frontend portability and semantic-bridge syntax lints |
 | Arch | `just ci-frontend-handoff-boundary` | Run frontend semantic owner allocation / handoff boundary lints |
 
@@ -120,6 +120,8 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Annotation ratchet gate**: new parity-critical workflow boundaries,
   runtime services, and first-party capability gates must pass the
   changed-files ratchets in `just ci-annotation-ratchet`;
+  the same lane also enforces the ignored-test-count ratchet, so new
+  `#[ignore]` coverage must carry an intentional inventory update;
   prefer adding the declaration-layer attribute over adding a shell allowlist
 - **Frontend handoff boundary**: direct `LocalTerminalOperationOwner::submit`
   and `WorkflowHandoffOperationOwner::submit` allocation stays inside the

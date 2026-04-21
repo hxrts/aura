@@ -64,6 +64,7 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
         contact_id: alice,
         nickname: "Alice".to_string(),
         added_at: t(1),
+        invitation_code: None,
     };
     let renamed = ContactFact::Renamed {
         context_id: ctx,
@@ -128,6 +129,7 @@ async fn contacts_signal_updates_existing_contact_nickname_suggestion_on_added_f
         contact_id: alice,
         nickname: "Alice".to_string(),
         added_at: t(1),
+        invitation_code: None,
     };
     let updated_added = ContactFact::Added {
         context_id: ctx,
@@ -135,6 +137,7 @@ async fn contacts_signal_updates_existing_contact_nickname_suggestion_on_added_f
         contact_id: alice,
         nickname: "Alice-Maple".to_string(),
         added_at: t(2),
+        invitation_code: None,
     };
 
     let mut updates = pipeline.subscribe();
@@ -195,6 +198,7 @@ async fn contacts_signal_does_not_overwrite_human_suggestion_with_fallback_ident
         contact_id,
         nickname: "Alice-Maple".to_string(),
         added_at: t(1),
+        invitation_code: None,
     };
     let fallback_named = ContactFact::Added {
         context_id: ctx,
@@ -202,6 +206,7 @@ async fn contacts_signal_does_not_overwrite_human_suggestion_with_fallback_ident
         contact_id,
         nickname: contact_id.to_string(),
         added_at: t(2),
+        invitation_code: None,
     };
 
     let mut updates = pipeline.subscribe();
@@ -262,6 +267,7 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
         contact_id: guardian,
         nickname: "Guardian".to_string(),
         added_at: t(1),
+        invitation_code: None,
     };
 
     let binding = RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::GuardianBinding {

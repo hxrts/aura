@@ -2,29 +2,19 @@
 //! never widen it. If attenuation is not monotone, delegated tokens can
 //! gain capabilities the issuer didn't grant.
 
-use aura_authorization::{
-    BiscuitAuthorizationBridge, BiscuitTokenManager, ContextOp, ResourceScope, TokenAuthority,
-};
+use super::common;
+use aura_authorization::{BiscuitAuthorizationBridge, BiscuitTokenManager, TokenAuthority};
 use aura_core::types::scope::AuthorizationOp;
-use aura_core::{
-    capability_name,
-    types::identifiers::{AuthorityId, ContextId},
-};
 
 /// Read-attenuated token must block write operations — the core monotonicity
 /// property. If this fails, delegation can escalate privileges.
 #[test]
 fn attenuated_read_token_blocks_write() {
-    let issuer = AuthorityId::new_from_entropy([1u8; 32]);
-    let recipient = AuthorityId::new_from_entropy([2u8; 32]);
-    let context_id = ContextId::new_from_entropy([3u8; 32]);
-
+    let issuer = common::authority_id(1);
+    let recipient = common::authority_id(2);
     let authority = TokenAuthority::new(issuer);
     let token = authority
-        .create_token(
-            recipient,
-            vec![capability_name!("read"), capability_name!("write")],
-        )
+        .create_token(recipient, common::read_write_capabilities())
         .unwrap_or_else(|err| panic!("token creation should succeed: {err:?}"));
     let manager = BiscuitTokenManager::new(recipient, token.clone());
 
@@ -33,23 +23,20 @@ fn attenuated_read_token_blocks_write() {
         .unwrap_or_else(|err| panic!("attenuation should succeed: {err:?}"));
 
     let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
-    let scope = ResourceScope::Context {
-        context_id,
-        operation: ContextOp::AddBinding,
-    };
+    let scope = common::context_scope(3);
 
     let base_write = bridge
-        .authorize(&token, AuthorizationOp::Write, &scope)
+        .authorize_with_time(&token, AuthorizationOp::Write, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("base token authorization should evaluate: {err:?}"));
     assert!(base_write.authorized);
 
     let read_result = bridge
-        .authorize(&attenuated, AuthorizationOp::Read, &scope)
+        .authorize_with_time(&attenuated, AuthorizationOp::Read, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("attenuated read authorization should evaluate: {err:?}"));
     assert!(read_result.authorized);
 
     let write_result = bridge
-        .authorize(&attenuated, AuthorizationOp::Write, &scope)
+        .authorize_with_time(&attenuated, AuthorizationOp::Write, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("attenuated write authorization should evaluate: {err:?}"));
     assert!(!write_result.authorized);
 }

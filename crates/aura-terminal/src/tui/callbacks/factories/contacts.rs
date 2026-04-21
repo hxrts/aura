@@ -285,7 +285,13 @@ impl ContactsCallbacks {
                   operation: WorkflowHandoffOperationOwner| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
-                spawn_handoff_workflow_callback(
+                let followup_app_core = ctx.app_core_raw().clone();
+                let followup_receiver = contact_id.parse::<AuthorityId>().ok();
+                let followup_channel = channel.parse::<aura_core::types::ChannelId>().ok();
+                let followup_context = context_id
+                    .as_deref()
+                    .and_then(|value| value.parse::<aura_core::types::ContextId>().ok());
+                spawn_handoff_workflow_callback_with_success(
                     ctx,
                     tx,
                     operation,
@@ -312,6 +318,30 @@ impl ContactsCallbacks {
                                 None,
                             )
                             .await
+                        }
+                    },
+                    move |_tx, _invitation_id| {
+                        let app_core = followup_app_core.clone();
+                        async move {
+                            let Some(receiver) = followup_receiver else {
+                                return;
+                            };
+                            let Some(channel_id) = followup_channel else {
+                                return;
+                            };
+                            let Some(context_id) = followup_context else {
+                                return;
+                            };
+                            aura_app::ui::workflows::messaging::run_post_channel_invite_followups(
+                                &app_core,
+                                receiver,
+                                aura_app::ui::workflows::messaging::authoritative_channel_ref(
+                                    channel_id, context_id,
+                                ),
+                            )
+                            .await;
+                            let _ =
+                                aura_app::ui::workflows::system::refresh_account(&app_core).await;
                         }
                     },
                 );

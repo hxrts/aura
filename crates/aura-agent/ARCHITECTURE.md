@@ -25,6 +25,7 @@ Production runtime composition and effect system assembly for authority-based id
 | Consumes | `aura-protocol` (L4) | Protocol coordination |
 | Consumes | L2 domain crates | Journal, authorization, transport, etc. |
 | Consumes | L5 feature crates | End-to-end protocols |
+| Consumes | `aura-macros` (L2) | Ownership and service declaration macros |
 | Produces | `AgentBuilder`, `AuraAgent` | Runtime entry points |
 | Produces | `EffectContext`, `EffectRegistry` | Effect composition |
 | Produces | `AuraEffectSystem` | Subsystems: Crypto, Transport, Journal |
@@ -221,6 +222,11 @@ Rules:
 - Child tasks belong to exactly one task group.
 - Detached fire-and-forget tasks are forbidden in production runtime code.
 - Shutdown is hierarchical and parent-driven.
+- `src/runtime_bridge/` is also the L5/L6/L7 error normalization boundary:
+  feature- and service-local failures may stay crate-specific internally, but
+  bridge exports must classify frontend-visible failures into stable
+  `IntentError` categories (`ValidationFailed`, `NetworkError`,
+  `StorageError`, `ServiceError`, `InternalError`) with operation context.
 - Current `Move` traffic uses the shared transport envelope family plus the actor-owned `MoveManager`; social topology may influence admission and selection, but not the schema of the moved envelope itself.
 - Current `Hold` traffic uses selector-based retrieval over one shared custody substrate. `HoldManager` owns held-object copies, reply-block bookkeeping, runtime-local indexes, and provider budgets; only verified witnesses may update `Hold` provider health or admission penalties.
 

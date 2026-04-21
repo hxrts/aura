@@ -8,7 +8,7 @@ use super::{traits::GuardContextProvider, GuardEffects, LeakageBudget};
 use aura_core::{
     effects::PhysicalTimeEffects,
     types::identifiers::{AuthorityId, ContextId},
-    AuraError, AuraResult, FactValue, Journal,
+    AuraError, AuraResult, FactValue, Journal, PhysicalTime,
 };
 use aura_journal::fact::{FactContent, LeakageFact, LeakageObserverClass, RelationalFact};
 // TimeEffects removed - using PhysicalTimeEffects directly
@@ -58,6 +58,17 @@ pub struct PrivacyBudgetTracker {
 }
 
 impl PrivacyBudgetTracker {
+    async fn current_time_ms<T: PhysicalTimeEffects>(time_effects: &T) -> AuraResult<u64> {
+        Ok(Self::current_time(time_effects).await?.ts_ms)
+    }
+
+    async fn current_time<T: PhysicalTimeEffects>(time_effects: &T) -> AuraResult<PhysicalTime> {
+        time_effects
+            .physical_time()
+            .await
+            .map_err(|err| AuraError::internal(format!("time provider unavailable: {err}")))
+    }
+
     /// Create a new privacy budget tracker
     pub fn new(authority_id: AuthorityId, limits: LeakageBudget) -> Self {
         Self {
@@ -107,11 +118,7 @@ impl PrivacyBudgetTracker {
         self.state.consumed_budget = self.state.consumed_budget.add(&consumed);
 
         // Record the consumption
-        let timestamp = time_effects
-            .physical_time()
-            .await
-            .map_err(|err| AuraError::internal(format!("time provider unavailable: {err}")))?
-            .ts_ms;
+        let timestamp = Self::current_time_ms(time_effects).await?;
 
         let consumption = BudgetConsumption {
             operation_id: operation_id.clone(),
@@ -141,11 +148,7 @@ impl PrivacyBudgetTracker {
         &mut self,
         time_effects: &T,
     ) -> AuraResult<()> {
-        let current_time = time_effects
-            .physical_time()
-            .await
-            .map_err(|err| AuraError::internal(format!("time provider unavailable: {err}")))?
-            .ts_ms;
+        let current_time = Self::current_time_ms(time_effects).await?;
 
         let window_start = current_time.saturating_sub(self.state.tracking_window_hours * 3600);
 
@@ -276,7 +279,7 @@ async fn load_privacy_tracker<E: GuardEffects + PhysicalTimeEffects>(
 
     let mut tracker = PrivacyBudgetTracker::new(authority_id, limits);
 
-    let now_ms = effect_system.physical_time().await?.ts_ms;
+    let now_ms = PrivacyBudgetTracker::current_time_ms(effect_system).await?;
     let window_start = now_ms.saturating_sub(
         tracker
             .state
@@ -318,7 +321,7 @@ async fn append_leakage_facts<E: GuardEffects + PhysicalTimeEffects + GuardConte
     effect_system: &E,
     observable_by: Vec<AdversaryClass>,
 ) -> AuraResult<()> {
-    let timestamp = effect_system.physical_time().await?;
+    let timestamp = PrivacyBudgetTracker::current_time(effect_system).await?;
     let mut delta = Journal::new();
 
     for (observer, amount) in leakage_budget_entries(leakage_budget, &observable_by) {
@@ -403,7 +406,7 @@ pub async fn reset_privacy_budget<E: GuardEffects + PhysicalTimeEffects + GuardC
         observer: LeakageObserverClass::External,
         amount: 0,
         operation: RESET_OPERATION.to_string(),
-        timestamp: effect_system.physical_time().await?,
+        timestamp: PrivacyBudgetTracker::current_time(effect_system).await?,
     };
     let reset_content = FactContent::Relational(RelationalFact::Protocol(
         aura_journal::ProtocolRelationalFact::LeakageEvent(reset_event),

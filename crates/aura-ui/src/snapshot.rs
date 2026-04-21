@@ -13,7 +13,7 @@ use aura_app::views::chat::NOTE_TO_SELF_CHANNEL_NAME;
 const PANEL_WIDTH: usize = 38;
 const CONTENT_ROWS: usize = 20;
 pub fn render_canonical_snapshot(model: &UiModel) -> String {
-    if !model.account_ready {
+    if !model.account_ready() {
         return render_account_setup_snapshot(model);
     }
 
@@ -52,9 +52,9 @@ fn render_account_setup_snapshot(model: &UiModel) -> String {
     let mut lines = vec![
         "Welcome to Aura".to_string(),
         "Create Account".to_string(),
-        format!("Nickname: {}", model.account_setup_name),
+        format!("Nickname: {}", model.account_setup_name()),
     ];
-    if let Some(error) = &model.account_setup_error {
+    if let Some(error) = model.account_setup_error() {
         lines.push(format!("Error: {error}"));
     }
     lines.join("\n")
@@ -249,7 +249,7 @@ fn contacts_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
 
     if row_idx == model.contacts.len().saturating_add(2) {
         return (
-            format!("Last scan: {}", model.last_scan),
+            format!("Last scan: {}", model.last_scan()),
             String::new(),
             String::new(),
         );
@@ -299,7 +299,7 @@ fn settings_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
         let right = if matches!(section, SettingsSection::Profile) {
             format!("Nickname: {}", model.profile_nickname)
         } else if matches!(section, SettingsSection::Devices) {
-            let device_count = if model.has_secondary_device { 2 } else { 1 };
+            let device_count = if model.has_secondary_device() { 2 } else { 1 };
             format!("Devices: {device_count}")
         } else if matches!(section, SettingsSection::Authority) {
             format!("Authority: {} (local)", model.authority_id)
@@ -336,7 +336,7 @@ fn apply_modal_overlay(
                 *center = "Invite Contacts".to_string();
             } else if row_idx == 1 {
                 *center = if model.modal_hint.is_empty() {
-                    "Press Enter to create invitation".to_string()
+                    "Invitation code is created automatically".to_string()
                 } else {
                     model.modal_hint.clone()
                 };
@@ -439,7 +439,7 @@ fn apply_modal_overlay(
                         if row_idx == 0 {
                             *center = "Add Device — Step 1 of 3".to_string();
                         } else if row_idx == 1 {
-                            *center = state.name_input.clone();
+                            *center = state.draft_name().unwrap_or_default().to_string();
                         }
                     }
                     AddDeviceWizardStep::ShareCode => {

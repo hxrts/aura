@@ -5,6 +5,7 @@ use aura_core::effects::StorageCoreEffects;
 use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
 
+use crate::env::{tui_allows_stdio, tui_log_path_override};
 use crate::tui::tasks::UiTaskOwner;
 
 use super::{TuiMode, MAX_TUI_LOG_BYTES, TUI_LOG_KEY_PREFIX, TUI_LOG_QUEUE_CAPACITY};
@@ -36,7 +37,7 @@ impl io::Write for StorageLogWriter {
 
 #[allow(clippy::needless_pass_by_value)]
 pub(super) fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
-    if std::env::var("AURA_TUI_ALLOW_STDIO").ok().as_deref() == Some("1") {
+    if tui_allows_stdio() {
         let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
         let _ = tracing_subscriber::fmt()
             .with_env_filter(filter)
@@ -48,10 +49,8 @@ pub(super) fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMo
     }
 
     let default_name = mode.log_filename();
-    let log_key = std::env::var("AURA_TUI_LOG_PATH")
-        .ok()
-        .filter(|path| !path.trim().is_empty())
-        .unwrap_or_else(|| format!("{TUI_LOG_KEY_PREFIX}/{default_name}"));
+    let log_key =
+        tui_log_path_override().unwrap_or_else(|| format!("{TUI_LOG_KEY_PREFIX}/{default_name}"));
 
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(TUI_LOG_QUEUE_CAPACITY);
     let storage_task = storage.clone();

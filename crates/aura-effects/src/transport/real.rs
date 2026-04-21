@@ -126,10 +126,18 @@ mod tests {
         let config = TransportConfig {
             connect_timeout: crate::transport::NonZeroDuration::from_millis(5)
                 .expect("non-zero connect timeout"),
+            dns_timeout: crate::transport::NonZeroDuration::from_millis(5)
+                .expect("non-zero dns timeout"),
             read_timeout: crate::transport::NonZeroDuration::from_millis(5)
                 .expect("non-zero read timeout"),
             write_timeout: crate::transport::NonZeroDuration::from_millis(5)
                 .expect("non-zero write timeout"),
+            connect_retry_attempts: std::num::NonZeroUsize::new(1)
+                .expect("non-zero retry attempts"),
+            connect_retry_base_delay: crate::transport::NonZeroDuration::from_millis(5)
+                .expect("non-zero retry base delay"),
+            connect_retry_max_delay: crate::transport::NonZeroDuration::from_millis(5)
+                .expect("non-zero retry max delay"),
             buffer_size: std::num::NonZeroUsize::new(4096).expect("non-zero buffer size"),
         };
         let handler = RealTransportHandler::with_config(config.clone());

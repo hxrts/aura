@@ -145,25 +145,24 @@ impl Default for SimulationConfig {
 }
 
 impl AuraHandlerConfig {
-    /// Create configuration for testing mode
-    pub fn for_testing(device_id: DeviceId) -> Self {
+    fn with_execution_mode(device_id: DeviceId, execution_mode: ExecutionMode) -> Self {
         Self {
             device_id,
-            execution_mode: ExecutionMode::Testing,
-            middleware: MiddlewareConfig {
-                enable_logging: false, // Reduced noise in tests
-                enable_metrics: true,  // Useful for test validation
-                ..Default::default()
-            },
+            execution_mode,
             ..Default::default()
         }
+    }
+
+    /// Create configuration for testing mode
+    pub fn for_testing(device_id: DeviceId) -> Self {
+        Self::with_execution_mode(device_id, ExecutionMode::Testing)
+            .with_logging(false) // Reduced noise in tests
+            .with_metrics(true) // Useful for test validation
     }
 
     /// Create configuration for production mode
     pub fn for_production(device_id: DeviceId) -> Self {
         Self {
-            device_id,
-            execution_mode: ExecutionMode::Production,
             required_effects: vec![
                 EffectType::Console,
                 EffectType::Random,
@@ -172,25 +171,19 @@ impl AuraHandlerConfig {
                 EffectType::Storage,
                 EffectType::Time,
             ],
-            middleware: MiddlewareConfig {
-                enable_logging: true,
-                enable_metrics: true,
-                enable_tracing: true,
-                ..Default::default()
-            },
             platform: PlatformConfig {
                 enable_hardware_security: true,
                 ..Default::default()
             },
-            ..Default::default()
+            ..Self::with_execution_mode(device_id, ExecutionMode::Production)
         }
+        .with_metrics(true)
+        .with_tracing(true)
     }
 
     /// Create configuration for simulation mode
     pub fn for_simulation(device_id: DeviceId, seed: u64) -> Self {
         Self {
-            device_id,
-            execution_mode: ExecutionMode::Simulation { seed },
             required_effects: vec![
                 EffectType::Console,
                 EffectType::Random,
@@ -201,19 +194,15 @@ impl AuraHandlerConfig {
                 EffectType::FaultInjection,
                 EffectType::TimeControl,
             ],
-            middleware: MiddlewareConfig {
-                enable_logging: true,
-                enable_metrics: true,
-                ..Default::default()
-            },
             simulation: Some(SimulationConfig {
                 seed,
                 enable_fault_injection: true,
                 enable_time_control: true,
                 ..Default::default()
             }),
-            ..Default::default()
+            ..Self::with_execution_mode(device_id, ExecutionMode::Simulation { seed })
         }
+        .with_metrics(true)
     }
 
     /// Validate the configuration
@@ -276,42 +265,44 @@ impl AuraHandlerConfig {
         self
     }
 
-    /// Enable middleware
-    pub fn with_logging(mut self, enabled: bool) -> Self {
-        self.middleware.enable_logging = enabled;
+    fn map_middleware(mut self, update: impl FnOnce(&mut MiddlewareConfig)) -> Self {
+        update(&mut self.middleware);
         self
+    }
+
+    /// Enable middleware
+    pub fn with_logging(self, enabled: bool) -> Self {
+        self.map_middleware(|middleware| middleware.enable_logging = enabled)
     }
 
     /// Enable metrics
-    pub fn with_metrics(mut self, enabled: bool) -> Self {
-        self.middleware.enable_metrics = enabled;
-        self
+    pub fn with_metrics(self, enabled: bool) -> Self {
+        self.map_middleware(|middleware| middleware.enable_metrics = enabled)
     }
 
     /// Enable tracing
-    pub fn with_tracing(mut self, enabled: bool) -> Self {
-        self.middleware.enable_tracing = enabled;
-        self
+    pub fn with_tracing(self, enabled: bool) -> Self {
+        self.map_middleware(|middleware| middleware.enable_tracing = enabled)
     }
 
     /// Set global timeout
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.middleware.global_timeout = Some(timeout);
-        self
+    pub fn with_timeout(self, timeout: Duration) -> Self {
+        self.map_middleware(|middleware| middleware.global_timeout = Some(timeout))
     }
 
     /// Add custom middleware
     pub fn with_custom_middleware(
-        mut self,
+        self,
         name: String,
         priority: u32,
         config: HashMap<String, String>,
     ) -> Self {
-        self.middleware.custom_middleware.push(MiddlewareSpec {
-            name,
-            priority,
-            config,
-        });
-        self
+        self.map_middleware(|middleware| {
+            middleware.custom_middleware.push(MiddlewareSpec {
+                name,
+                priority,
+                config,
+            });
+        })
     }
 }

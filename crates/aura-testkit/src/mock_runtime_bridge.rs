@@ -321,6 +321,7 @@ impl MockRuntimeBridge {
                         is_online: false,
                         read_receipt_policy: ReadReceiptPolicy::default(),
                         relationship_state: ContactRelationshipState::Contact,
+                        invitation_code: None,
                     });
                 }
                 true
@@ -350,6 +351,7 @@ impl MockRuntimeBridge {
                     is_online: false,
                     read_receipt_policy: ReadReceiptPolicy::default(),
                     relationship_state: ContactRelationshipState::Contact,
+                    invitation_code: None,
                 });
                 true
             }
@@ -1136,6 +1138,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         receiver: AuthorityId,
         _nickname: Option<String>,
+        receiver_nickname: Option<String>,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
@@ -1152,6 +1155,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             created_at_ms: now,
             expires_at_ms,
             message,
+            receiver_nickname,
         };
 
         let mut invitations = self.invitations.write().await;
@@ -1182,6 +1186,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             created_at_ms: now,
             expires_at_ms,
             message,
+            receiver_nickname: None,
         };
 
         let mut invitations = self.invitations.write().await;
@@ -1217,6 +1222,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             created_at_ms: now,
             expires_at_ms,
             message,
+            receiver_nickname: None,
         };
 
         let mut invitations = self.invitations.write().await;
@@ -1274,6 +1280,7 @@ impl RuntimeBridge for MockRuntimeBridge {
                 is_online: false,
                 read_receipt_policy: ReadReceiptPolicy::default(),
                 relationship_state: ContactRelationshipState::Contact,
+                invitation_code: None,
             };
 
             // Add to contacts list, avoiding duplicates
@@ -1443,6 +1450,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             created_at_ms: now,
             expires_at_ms,
             message,
+            receiver_nickname: None,
         };
 
         // Store the imported invitation
@@ -1549,7 +1557,7 @@ mod tests {
 
         // Create invitation
         let invite = bridge
-            .create_contact_invitation(receiver, None, Some("Hello!".to_string()), None)
+            .create_contact_invitation(receiver, None, Some("Hello!".to_string()), None, None)
             .await
             .expect("Should create invitation");
 

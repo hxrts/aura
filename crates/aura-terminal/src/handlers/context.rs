@@ -175,6 +175,7 @@ struct ContextSnapshot {
 #[derive(Debug, Default, Deserialize)]
 struct RendezvousEnvelopeDebug {
     #[allow(dead_code)]
+    /* Debug snapshots may omit envelope ids today, but the parsed shape preserves them for later diagnostics. */
     pub envelope_id: Option<String>,
     pub role: Option<String>,
     pub transport: Option<String>,

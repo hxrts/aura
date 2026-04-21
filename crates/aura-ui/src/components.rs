@@ -37,17 +37,34 @@ pub struct ModalInputView {
 }
 
 #[derive(Clone, PartialEq)]
+pub struct ModalValueView {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ModalFooterActionView {
+    pub control_id: Option<ControlId>,
+    pub label: String,
+}
+
+#[derive(Clone, PartialEq)]
 pub struct ModalView {
     pub modal_id: ModalId,
     pub title: String,
     pub details: Vec<String>,
     pub keybind_rows: Vec<(String, String)>,
     pub inputs: Vec<ModalInputView>,
+    pub values: Vec<ModalValueView>,
+    pub values_after_inputs: bool,
     pub selectable_items: Vec<SelectableItem>,
+    pub cancel_label: String,
+    pub show_confirm: bool,
     pub enter_label: String,
     /// Optional shortcut buttons shown in the footer (e.g., demo invitation codes).
     /// Each entry is (label, value) where value is filled into the first input field.
     pub footer_shortcuts: Vec<(String, String)>,
+    pub footer_actions: Vec<ModalFooterActionView>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -257,30 +274,43 @@ pub fn UiModal(
     on_input_change: EventHandler<(FieldId, String)>,
     on_input_focus: EventHandler<FieldId>,
     #[props(default)] on_toggle_selection: Option<EventHandler<usize>>,
+    #[props(default)] on_footer_action: Option<EventHandler<usize>>,
 ) -> Element {
+    let mut open = use_signal(|| Some(true));
+    let modal_dom_id = modal.modal_id.web_dom_id().to_string();
+    let description_id = format!("{modal_dom_id}-description");
+
     rsx! {
-        div {
-            id: modal.modal_id.web_dom_id().to_string(),
-            class: "fixed inset-0 z-40 flex items-center justify-center bg-background/95 px-4 backdrop-blur-sm",
-            onclick: move |_| on_cancel.call(()),
-            div {
-                id: "aura-modal-content",
-                role: "dialog",
-                aria_modal: "true",
-                aria_labelledby: "aura-modal-title",
-                class: "aura-modal-fade w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl",
-                onclick: move |evt| evt.stop_propagation(),
+        LbDialogRoot {
+            id: Some(modal_dom_id),
+            open,
+            on_open_change: move |is_open| {
+                open.set(Some(is_open));
+                if !is_open {
+                    on_cancel.call(());
+                }
+            },
+            LbDialogOverlay {
+                class: Some("bg-background/95 backdrop-blur-sm".to_string()),
+            }
+            LbDialogContent {
+                id: Some("aura-modal-content".to_string()),
+                aria_describedby: description_id.clone(),
+                class: Some("aura-modal-fade w-full max-w-xl overflow-hidden rounded-sm border border-border bg-card p-0 text-card-foreground shadow-2xl".to_string()),
                 div {
                     class: "bg-card px-4 py-3 border-b border-border flex items-center justify-between gap-3",
-                    h2 {
+                    LbDialogTitle {
                         id: "aura-modal-title",
-                        class: "m-0 text-sm font-sans font-semibold text-card-foreground",
+                        class: Some("m-0 text-sm font-sans font-semibold text-card-foreground".to_string()),
                         "{modal.title}"
                     }
                     button {
                         r#type: "button",
                         class: "inline-flex h-8 w-8 items-center justify-center rounded-sm text-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
-                        onclick: move |_| on_cancel.call(()),
+                        onclick: move |_| {
+                            open.set(Some(false));
+                            on_cancel.call(());
+                        },
                         aria_label: "Close",
                         "×"
                     }
@@ -288,12 +318,41 @@ pub fn UiModal(
                 div {
                     class: "bg-card px-4 pt-4 pb-6 space-y-4 text-sm text-card-foreground",
                     p {
-                        id: "aura-modal-description",
+                        id: "{description_id}",
                         class: "sr-only",
                         "Aura modal dialog"
                     }
                     for line in modal.details {
                         p { class: "m-0 whitespace-pre-wrap break-words", "{line}" }
+                    }
+                    if !modal.values_after_inputs && !modal.values.is_empty() {
+                        div {
+                            class: "space-y-3",
+                            for value_view in modal.values.clone() {
+                                div {
+                                    class: "rounded-sm border border-border bg-background/70 px-3 py-3",
+                                    p {
+                                        class: "m-0 text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
+                                        "{value_view.label}"
+                                    }
+                                    if modal.modal_id == ModalId::CreateInvitation
+                                        && value_view.label == "Invite Code"
+                                    {
+                                        div {
+                                            id: "aura-invite-code-value",
+                                            key: "{value_view.value}",
+                                            class: "mt-2 min-h-28 overflow-x-auto break-all rounded-sm border border-border bg-background px-3 py-3 font-mono text-[0.92rem] leading-6 text-foreground shadow-inner",
+                                            code { "{value_view.value}" }
+                                        }
+                                    } else {
+                                        p {
+                                            class: "m-0 mt-2 break-all font-mono text-sm text-foreground",
+                                            "{value_view.value}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     if !modal.keybind_rows.is_empty() {
                         div {
@@ -316,7 +375,7 @@ pub fn UiModal(
                     if !modal.inputs.is_empty() {
                         div {
                             class: "pt-2 space-y-3",
-                            for input_view in modal.inputs.clone() {
+                            for (input_index, input_view) in modal.inputs.clone().into_iter().enumerate() {
                                 div {
                                     class: "space-y-2",
                                     label {
@@ -328,6 +387,7 @@ pub fn UiModal(
                                         id: "{input_view.field_id.web_dom_id().or_else(|| ControlId::ModalInput.web_dom_id()).required_dom_id(\"modal input field identifier must be defined\")}",
                                         class: "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring",
                                         autocomplete: "off",
+                                        autofocus: input_index == 0,
                                         value: "{input_view.value}",
                                         onfocus: {
                                             let field_id = input_view.field_id;
@@ -344,6 +404,35 @@ pub fn UiModal(
                             }
                         }
                     }
+                    if modal.values_after_inputs && !modal.values.is_empty() {
+                        div {
+                            class: "space-y-3",
+                            for value_view in modal.values.clone() {
+                                div {
+                                    class: "rounded-sm border border-border bg-background/70 px-3 py-3",
+                                    p {
+                                        class: "m-0 text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground",
+                                        "{value_view.label}"
+                                    }
+                                    if modal.modal_id == ModalId::CreateInvitation
+                                        && value_view.label == "Invite Code"
+                                    {
+                                        div {
+                                            id: "aura-invite-code-value",
+                                            key: "{value_view.value}",
+                                            class: "mt-2 min-h-28 overflow-x-auto break-all rounded-sm border border-border bg-background px-3 py-3 font-mono text-[0.92rem] leading-6 text-foreground shadow-inner",
+                                            code { "{value_view.value}" }
+                                        }
+                                    } else {
+                                        p {
+                                            class: "m-0 mt-2 break-all font-mono text-sm text-foreground",
+                                            "{value_view.value}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if !modal.selectable_items.is_empty() {
                         div {
                             class: "pt-2",
@@ -352,6 +441,7 @@ pub fn UiModal(
                                 for item in modal.selectable_items.clone() {
                                     button {
                                         r#type: "button",
+                                        aria_pressed: Some(item.selected),
                                         class: if item.selected {
                                             "flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-foreground bg-accent/60 transition-colors hover:bg-accent"
                                         } else {
@@ -379,6 +469,25 @@ pub fn UiModal(
                 }
                 div {
                     class: "bg-card px-4 pt-4 pb-3 border-t border-border flex items-center justify-end gap-2",
+                        for (index, action) in modal.footer_actions.clone().into_iter().enumerate() {
+                            UiButton {
+                                id: action
+                                    .control_id
+                                    .and_then(ControlId::web_dom_id)
+                                    .map(str::to_string),
+                                label: action.label,
+                                variant: ButtonVariant::Secondary,
+                                width_class: None,
+                                onclick: {
+                                    let handler = on_footer_action;
+                                    move |_| {
+                                        if let Some(handler) = handler.as_ref() {
+                                            handler.call(index);
+                                        }
+                                    }
+                                },
+                            }
+                        }
                         for (shortcut_label, shortcut_value) in modal.footer_shortcuts.clone() {
                             UiButton {
                                 label: shortcut_label,
@@ -402,22 +511,24 @@ pub fn UiModal(
                                     .required_dom_id("ControlId::ModalCancelButton must define a web DOM id")
                                     .to_string(),
                             ),
-                            label: "Cancel".to_string(),
+                            label: modal.cancel_label.clone(),
                             variant: ButtonVariant::Secondary,
                             width_class: None,
                             onclick: move |_| on_cancel.call(()),
                         }
-                        UiButton {
-                            id: Some(
-                                ControlId::ModalConfirmButton
-                                .web_dom_id()
-                                .required_dom_id("ControlId::ModalConfirmButton must define a web DOM id")
-                                    .to_string(),
-                            ),
-                            label: modal.enter_label.clone(),
-                            variant: ButtonVariant::Primary,
-                            width_class: None,
-                            onclick: move |_| on_confirm.call(()),
+                        if modal.show_confirm {
+                            UiButton {
+                                id: Some(
+                                    ControlId::ModalConfirmButton
+                                    .web_dom_id()
+                                    .required_dom_id("ControlId::ModalConfirmButton must define a web DOM id")
+                                        .to_string(),
+                                ),
+                                label: modal.enter_label,
+                                variant: ButtonVariant::Primary,
+                                width_class: None,
+                                onclick: move |_| on_confirm.call(()),
+                            }
                         }
                 }
             }

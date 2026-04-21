@@ -81,7 +81,7 @@ tokio-tungstenite = { workspace = true }
 gloo-net = { version = "0.6", features = ["http", "websocket"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Location"] }
+web-sys = { workspace = true, features = ["Window", "Location"] }
 
 [features]
 default = ["choreo-backend-telltale-machine"]

@@ -17,129 +17,88 @@ use super::{
     RandomEffects, StorageEffects,
 };
 
-/// Sealed supertrait for FROST threshold signing operations
-///
-/// Combines effects needed for cryptographic threshold signing protocols:
-/// network communication, cryptographic operations, time tracking, and logging.
-pub trait SigningEffects:
-    NetworkEffects + CryptoEffects + PhysicalTimeEffects + ConsoleEffects
-{
-    // Sealed trait - users cannot implement this directly
+macro_rules! composite_effect {
+    ($(#[$meta:meta])* $name:ident: $($bounds:path),+ $(,)?) => {
+        $(#[$meta])*
+        pub trait $name: $( $bounds + )* {}
+
+        impl<T> $name for T where T: $( $bounds + )* {}
+    };
 }
 
-/// Automatic implementation for types that satisfy the required bounds
-impl<T> SigningEffects for T where
-    T: NetworkEffects + CryptoEffects + PhysicalTimeEffects + ConsoleEffects
-{
-}
+composite_effect!(
+    /// Sealed supertrait for FROST threshold signing operations
+    ///
+    /// Combines effects needed for cryptographic threshold signing protocols:
+    /// network communication, cryptographic operations, time tracking, and logging.
+    SigningEffects: NetworkEffects, CryptoEffects, PhysicalTimeEffects, ConsoleEffects
+);
 
-/// Sealed supertrait for CRDT synchronization operations
-///
-/// Combines effects needed for CRDT state management and synchronization:
-/// storage access, journal operations, and logging.
-pub trait CrdtEffects: StorageEffects + JournalEffects + ConsoleEffects {
-    // Sealed trait - users cannot implement this directly
-}
+composite_effect!(
+    /// Sealed supertrait for CRDT synchronization operations
+    ///
+    /// Combines effects needed for CRDT state management and synchronization:
+    /// storage access, journal operations, and logging.
+    CrdtEffects: StorageEffects, JournalEffects, ConsoleEffects
+);
 
-/// Automatic implementation for types that satisfy the required bounds
-impl<T> CrdtEffects for T where T: StorageEffects + JournalEffects + ConsoleEffects {}
+composite_effect!(
+    /// Sealed supertrait for choreography coordination
+    ///
+    /// Combines effects needed for multi-party protocol coordination:
+    /// network communication, cryptographic operations, randomness, time tracking,
+    /// storage access, journal operations, and logging.
+    ChoreographyEffects:
+        NetworkEffects,
+        CryptoEffects,
+        RandomEffects,
+        PhysicalTimeEffects,
+        StorageEffects,
+        JournalEffects,
+        ConsoleEffects
+);
 
-/// Sealed supertrait for choreography coordination
-///
-/// Combines effects needed for multi-party protocol coordination:
-/// network communication, cryptographic operations, randomness, time tracking,
-/// storage access, journal operations, and logging.
-pub trait ChoreographyEffects:
-    NetworkEffects
-    + CryptoEffects
-    + RandomEffects
-    + PhysicalTimeEffects
-    + StorageEffects
-    + JournalEffects
-    + ConsoleEffects
-{
-    // Sealed trait - users cannot implement this directly
-}
+composite_effect!(
+    /// Sealed supertrait for anti-entropy synchronization
+    ///
+    /// Combines effects needed for anti-entropy protocols:
+    /// network communication, cryptographic operations, randomness, and logging.
+    AntiEntropyEffects: NetworkEffects, CryptoEffects, RandomEffects, ConsoleEffects
+);
 
-/// Automatic implementation for types that satisfy the required bounds
-impl<T> ChoreographyEffects for T where
-    T: NetworkEffects
-        + CryptoEffects
-        + RandomEffects
-        + PhysicalTimeEffects
-        + StorageEffects
-        + JournalEffects
-        + ConsoleEffects
-{
-}
+composite_effect!(
+    /// Sealed supertrait for tree operations
+    ///
+    /// Combines effects needed for tree coordination protocols:
+    /// network communication, cryptographic operations, time tracking,
+    /// storage access, and logging.
+    TreeEffects:
+        NetworkEffects,
+        CryptoEffects,
+        PhysicalTimeEffects,
+        StorageEffects,
+        ConsoleEffects
+);
 
-/// Sealed supertrait for anti-entropy synchronization
-///
-/// Combines effects needed for anti-entropy protocols:
-/// network communication, cryptographic operations, randomness, and logging.
-pub trait AntiEntropyEffects:
-    NetworkEffects + CryptoEffects + RandomEffects + ConsoleEffects
-{
-    // Sealed trait - users cannot implement this directly
-}
+composite_effect!(
+    /// Sealed supertrait for minimal effect operations
+    ///
+    /// Combines basic effects needed for simple operations:
+    /// cryptographic operations, randomness, and logging.
+    MinimalEffects: CryptoEffects, RandomEffects, ConsoleEffects
+);
 
-/// Automatic implementation for types that satisfy the required bounds
-impl<T> AntiEntropyEffects for T where
-    T: NetworkEffects + CryptoEffects + RandomEffects + ConsoleEffects
-{
-}
-
-/// Sealed supertrait for tree operations
-///
-/// Combines effects needed for tree coordination protocols:
-/// network communication, cryptographic operations, time tracking,
-/// storage access, and logging.
-pub trait TreeEffects:
-    NetworkEffects + CryptoEffects + PhysicalTimeEffects + StorageEffects + ConsoleEffects
-{
-    // Sealed trait - users cannot implement this directly
-}
-
-/// Automatic implementation for types that satisfy the required bounds
-impl<T> TreeEffects for T where
-    T: NetworkEffects + CryptoEffects + PhysicalTimeEffects + StorageEffects + ConsoleEffects
-{
-}
-
-/// Sealed supertrait for minimal effect operations
-///
-/// Combines basic effects needed for simple operations:
-/// cryptographic operations, randomness, and logging.
-pub trait MinimalEffects: CryptoEffects + RandomEffects + ConsoleEffects {
-    // Sealed trait - users cannot implement this directly
-}
-
-/// Automatic implementation for types that satisfy the required bounds
-impl<T> MinimalEffects for T where T: CryptoEffects + RandomEffects + ConsoleEffects {}
-
-/// Sealed supertrait for snapshot coordination
-///
-/// Combines effects needed for snapshot coordination protocols:
-/// network communication, cryptographic operations, time tracking,
-/// storage access, journal operations, and logging.
-pub trait SnapshotEffects:
-    NetworkEffects
-    + CryptoEffects
-    + PhysicalTimeEffects
-    + StorageEffects
-    + JournalEffects
-    + ConsoleEffects
-{
-    // Sealed trait - users cannot implement this directly
-}
-
-/// Automatic implementation for types that satisfy the required bounds
-impl<T> SnapshotEffects for T where
-    T: NetworkEffects
-        + CryptoEffects
-        + PhysicalTimeEffects
-        + StorageEffects
-        + JournalEffects
-        + ConsoleEffects
-{
-}
+composite_effect!(
+    /// Sealed supertrait for snapshot coordination
+    ///
+    /// Combines effects needed for snapshot coordination protocols:
+    /// network communication, cryptographic operations, time tracking,
+    /// storage access, journal operations, and logging.
+    SnapshotEffects:
+        NetworkEffects,
+        CryptoEffects,
+        PhysicalTimeEffects,
+        StorageEffects,
+        JournalEffects,
+        ConsoleEffects
+);

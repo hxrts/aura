@@ -10,6 +10,11 @@
 //! The evaluation returns `EffectCommand` data that an async interpreter executes.
 //! No guard performs I/O directly.
 //!
+//! This module owns reusable pure guard predicates such as capability checks,
+//! flow-budget checks, and recovery policy checks. `crate::service::AuthService`
+//! is the canonical owner of feature-level workflow shaping and journal fact
+//! construction.
+//!
 //! ```text
 //! ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 //! │  GuardSnapshot  │ --> │  Guard Eval     │ --> │  GuardOutcome   │
@@ -446,10 +451,11 @@ pub fn check_challenge_expiry(
 }
 
 /// Check if session duration is within acceptable bounds
-pub fn check_session_duration(duration_seconds: u64) -> Option<GuardOutcome> {
-    const MAX_SESSION_DURATION_SECS: u64 = 86400; // 24 hours
-
-    if duration_seconds > MAX_SESSION_DURATION_SECS {
+pub fn check_session_duration(
+    duration_seconds: u64,
+    max_duration_seconds: u64,
+) -> Option<GuardOutcome> {
+    if duration_seconds > max_duration_seconds {
         Some(deny(GuardReject {
             code: "session-duration-too-long",
             category: "auth",
@@ -464,9 +470,15 @@ pub fn check_session_duration(duration_seconds: u64) -> Option<GuardOutcome> {
 pub fn check_recovery_operation(
     snapshot: &GuardSnapshot,
     operation_type: &RecoveryOperationType,
+    is_emergency: bool,
+    require_recovery_capability: bool,
 ) -> Option<GuardOutcome> {
+    if !require_recovery_capability {
+        return None;
+    }
+
     // Emergency operations bypass normal checks but are logged
-    if snapshot.is_emergency {
+    if snapshot.is_emergency || is_emergency {
         return None;
     }
 
@@ -499,23 +511,33 @@ pub fn check_recovery_operation(
     None
 }
 
+/// Check capability and flow budget together using the shared pure guard
+/// predicates owned by this module.
+pub fn check_capability_and_flow_budget(
+    snapshot: &GuardSnapshot,
+    required_cap: &types::CapabilityId,
+    required_cost: FlowCost,
+) -> Option<GuardOutcome> {
+    check_capability(snapshot, required_cap).or_else(|| check_flow_budget(snapshot, required_cost))
+}
+
 // =============================================================================
 // Guard Evaluator
 // =============================================================================
 
 /// Evaluate a guard request against a snapshot
+///
+/// This request-shaped evaluator is a lightweight pure facade for tests and
+/// simple callers. `crate::service::AuthService` remains the canonical owner of
+/// feature workflow shaping, stable id generation, and auth fact construction.
 pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
     match request {
         GuardRequest::ChallengeRequest { scope: _ } => {
-            // Check capability
-            if let Some(outcome) =
-                check_capability(snapshot, &AuthenticationCapability::Request.as_name())
-            {
-                return outcome;
-            }
-
-            // Check budget
-            if let Some(outcome) = check_flow_budget(snapshot, costs::CHALLENGE_REQUEST_COST) {
+            if let Some(outcome) = check_capability_and_flow_budget(
+                snapshot,
+                &AuthenticationCapability::Request.as_name(),
+                costs::CHALLENGE_REQUEST_COST,
+            ) {
                 return outcome;
             }
 
@@ -538,15 +560,11 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             session_id,
             proof_hash,
         } => {
-            // Check capability
-            if let Some(outcome) =
-                check_capability(snapshot, &AuthenticationCapability::SubmitProof.as_name())
-            {
-                return outcome;
-            }
-
-            // Check budget
-            if let Some(outcome) = check_flow_budget(snapshot, costs::PROOF_SUBMISSION_COST) {
+            if let Some(outcome) = check_capability_and_flow_budget(
+                snapshot,
+                &AuthenticationCapability::SubmitProof.as_name(),
+                costs::PROOF_SUBMISSION_COST,
+            ) {
                 return outcome;
             }
 
@@ -567,15 +585,11 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
         }
 
         GuardRequest::ProofVerification { session_id } => {
-            // Check capability
-            if let Some(outcome) =
-                check_capability(snapshot, &AuthenticationCapability::Verify.as_name())
-            {
-                return outcome;
-            }
-
-            // Check budget
-            if let Some(outcome) = check_flow_budget(snapshot, costs::PROOF_VERIFICATION_COST) {
+            if let Some(outcome) = check_capability_and_flow_budget(
+                snapshot,
+                &AuthenticationCapability::Verify.as_name(),
+                costs::PROOF_VERIFICATION_COST,
+            ) {
                 return outcome;
             }
 
@@ -594,20 +608,16 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             scope,
             duration_seconds,
         } => {
-            // Check capability
-            if let Some(outcome) =
-                check_capability(snapshot, &AuthenticationCapability::CreateSession.as_name())
-            {
-                return outcome;
-            }
-
-            // Check budget
-            if let Some(outcome) = check_flow_budget(snapshot, costs::SESSION_CREATION_COST) {
+            if let Some(outcome) = check_capability_and_flow_budget(
+                snapshot,
+                &AuthenticationCapability::CreateSession.as_name(),
+                costs::SESSION_CREATION_COST,
+            ) {
                 return outcome;
             }
 
             // Check duration
-            if let Some(outcome) = check_session_duration(*duration_seconds) {
+            if let Some(outcome) = check_session_duration(*duration_seconds, 86_400) {
                 return outcome;
             }
 
@@ -631,22 +641,18 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             operation_type,
             required_guardians,
         } => {
-            // Check capability
-            if let Some(outcome) =
-                check_capability(snapshot, &GuardianAuthCapability::RequestApproval.as_name())
-            {
-                return outcome;
-            }
-
-            // Check budget
-            if let Some(outcome) =
-                check_flow_budget(snapshot, costs::GUARDIAN_APPROVAL_REQUEST_COST)
-            {
+            if let Some(outcome) = check_capability_and_flow_budget(
+                snapshot,
+                &GuardianAuthCapability::RequestApproval.as_name(),
+                costs::GUARDIAN_APPROVAL_REQUEST_COST,
+            ) {
                 return outcome;
             }
 
             // Check recovery operation type
-            if let Some(outcome) = check_recovery_operation(snapshot, operation_type) {
+            if let Some(outcome) =
+                check_recovery_operation(snapshot, operation_type, snapshot.is_emergency, true)
+            {
                 return outcome;
             }
 
@@ -676,17 +682,11 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             request_id,
             approved,
         } => {
-            // Check capability
-            if let Some(outcome) =
-                check_capability(snapshot, &GuardianAuthCapability::Verify.as_name())
-            {
-                return outcome;
-            }
-
-            // Check budget
-            if let Some(outcome) =
-                check_flow_budget(snapshot, costs::GUARDIAN_APPROVAL_DECISION_COST)
-            {
+            if let Some(outcome) = check_capability_and_flow_budget(
+                snapshot,
+                &GuardianAuthCapability::Verify.as_name(),
+                costs::GUARDIAN_APPROVAL_DECISION_COST,
+            ) {
                 return outcome;
             }
 
@@ -721,31 +721,11 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_authority() -> AuthorityId {
-        AuthorityId::new_from_entropy([1u8; 32])
-    }
-
-    fn test_snapshot() -> GuardSnapshot {
-        GuardSnapshot::new(
-            test_authority(),
-            None,
-            None,
-            FlowCost::new(100),
-            vec![
-                AuthenticationCapability::Request.as_name(),
-                AuthenticationCapability::SubmitProof.as_name(),
-                AuthenticationCapability::Verify.as_name(),
-                AuthenticationCapability::CreateSession.as_name(),
-            ],
-            1,
-            1000,
-        )
-    }
+    use crate::test_support::{protocol_scope, standard_guard_snapshot};
 
     #[test]
     fn test_guard_snapshot_has_capability() {
-        let snapshot = test_snapshot();
+        let snapshot = standard_guard_snapshot();
         assert!(snapshot.has_capability(&AuthenticationCapability::Request.as_name()));
         assert!(snapshot.has_capability(&AuthenticationCapability::SubmitProof.as_name()));
         assert!(!snapshot.has_capability(&GuardianAuthCapability::RequestApproval.as_name()));
@@ -753,7 +733,7 @@ mod tests {
 
     #[test]
     fn test_guard_snapshot_has_budget() {
-        let snapshot = test_snapshot();
+        let snapshot = standard_guard_snapshot();
         assert!(snapshot.has_budget(FlowCost::new(50)));
         assert!(snapshot.has_budget(FlowCost::new(100)));
         assert!(!snapshot.has_budget(FlowCost::new(101)));
@@ -796,14 +776,14 @@ mod tests {
 
     #[test]
     fn test_check_capability_success() {
-        let snapshot = test_snapshot();
+        let snapshot = standard_guard_snapshot();
         let result = check_capability(&snapshot, &AuthenticationCapability::Request.as_name());
         assert!(result.is_none());
     }
 
     #[test]
     fn test_check_capability_failure() {
-        let snapshot = test_snapshot();
+        let snapshot = standard_guard_snapshot();
         let result = check_capability(
             &snapshot,
             &GuardianAuthCapability::RequestApproval.as_name(),
@@ -814,14 +794,14 @@ mod tests {
 
     #[test]
     fn test_check_flow_budget_success() {
-        let snapshot = test_snapshot();
+        let snapshot = standard_guard_snapshot();
         let result = check_flow_budget(&snapshot, FlowCost::new(50));
         assert!(result.is_none());
     }
 
     #[test]
     fn test_check_flow_budget_failure() {
-        let snapshot = test_snapshot();
+        let snapshot = standard_guard_snapshot();
         let result = check_flow_budget(&snapshot, FlowCost::new(150));
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());
@@ -830,11 +810,9 @@ mod tests {
     /// Challenge request succeeds with required capability and budget.
     #[test]
     fn test_evaluate_challenge_request() {
-        let snapshot = test_snapshot();
+        let snapshot = standard_guard_snapshot();
         let request = GuardRequest::ChallengeRequest {
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            scope: protocol_scope("test"),
         };
 
         let outcome = evaluate_request(&snapshot, &request);
@@ -846,11 +824,9 @@ mod tests {
     /// prevents unbounded session lifetimes.
     #[test]
     fn test_evaluate_session_creation_duration_exceeded() {
-        let snapshot = test_snapshot();
+        let snapshot = standard_guard_snapshot();
         let request = GuardRequest::SessionCreation {
-            scope: SessionScope::Protocol {
-                protocol_type: "test".to_string(),
-            },
+            scope: protocol_scope("test"),
             duration_seconds: 100_000, // > 24 hours
         };
 
@@ -861,7 +837,7 @@ mod tests {
     /// Expired challenges are rejected — prevents replay of stale challenges.
     #[test]
     fn test_check_challenge_expiry() {
-        let snapshot = test_snapshot();
+        let snapshot = standard_guard_snapshot();
 
         // Not expired
         let result = check_challenge_expiry(&snapshot, 2000);

@@ -64,6 +64,7 @@
 // locks are safe here. See clippy.toml for blocking lock policy.
 #![allow(clippy::disallowed_types)]
 
+use crate::reducer_support::parse_typed_envelope;
 #[cfg(test)]
 use aura_core::relational::GuardianParameters;
 use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
@@ -85,6 +86,7 @@ pub mod facts;
 pub mod guardian;
 pub mod guardian_request;
 pub mod guardian_service;
+mod reducer_support;
 pub mod wot;
 
 /// Operation category map (A/B/C) for protocol gating and review.
@@ -284,53 +286,32 @@ impl RelationalContext {
 
     /// Get all guardian bindings in this context
     pub fn guardian_bindings(&self) -> Vec<GuardianBinding> {
-        self.get_facts()
-            .into_iter()
-            .filter_map(|fact| match fact {
-                RelationalFact::Generic { envelope, .. }
-                    if envelope.type_id.as_str()
-                        == crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID =>
-                {
-                    crate::facts::GuardianBindingDetailsFact::from_envelope(&envelope)
-                        .map(|f| f.binding)
-                }
-                _ => None,
-            })
-            .collect()
+        self.generic_domain_facts::<crate::facts::GuardianBindingDetailsFact>(
+            crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
+        )
+        .into_iter()
+        .map(|fact| fact.binding)
+        .collect()
     }
 
     /// Get guardian binding for a specific authority
     pub fn get_guardian_binding(&self, authority_id: AuthorityId) -> Option<GuardianBinding> {
-        self.get_facts()
-            .into_iter()
-            .filter_map(|fact| match fact {
-                RelationalFact::Generic { envelope, .. }
-                    if envelope.type_id.as_str()
-                        == crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID =>
-                {
-                    crate::facts::GuardianBindingDetailsFact::from_envelope(&envelope)
-                }
-                _ => None,
-            })
-            .find(|f| f.guardian_id == authority_id || f.account_id == authority_id)
-            .map(|f| f.binding)
+        self.generic_domain_facts::<crate::facts::GuardianBindingDetailsFact>(
+            crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
+        )
+        .into_iter()
+        .find(|f| f.guardian_id == authority_id || f.account_id == authority_id)
+        .map(|f| f.binding)
     }
 
     /// Get all recovery grants in this context
     pub fn recovery_grants(&self) -> Vec<RecoveryGrant> {
-        self.get_facts()
-            .into_iter()
-            .filter_map(|fact| match fact {
-                RelationalFact::Generic { envelope, .. }
-                    if envelope.type_id.as_str()
-                        == crate::facts::RECOVERY_GRANT_DETAILS_FACT_TYPE_ID =>
-                {
-                    crate::facts::RecoveryGrantDetailsFact::from_envelope(&envelope)
-                        .map(|f| f.grant)
-                }
-                _ => None,
-            })
-            .collect()
+        self.generic_domain_facts::<crate::facts::RecoveryGrantDetailsFact>(
+            crate::facts::RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
+        )
+        .into_iter()
+        .map(|fact| fact.grant)
+        .collect()
     }
 
     /// Deterministic key material for this context.
@@ -402,6 +383,20 @@ impl RelationalContext {
         &self,
         type_id: &str,
     ) -> Vec<aura_core::types::facts::FactEnvelope> {
+        self.generic_envelopes_by_type(type_id)
+    }
+
+    fn generic_domain_facts<F: DomainFact>(&self, type_id: &str) -> Vec<F> {
+        self.generic_envelopes_by_type(type_id)
+            .into_iter()
+            .filter_map(|envelope| parse_typed_envelope::<F>(&envelope, type_id))
+            .collect()
+    }
+
+    fn generic_envelopes_by_type(
+        &self,
+        type_id: &str,
+    ) -> Vec<aura_core::types::facts::FactEnvelope> {
         let Ok(journal) = self.journal.read() else {
             return Vec::new();
         };
@@ -457,11 +452,15 @@ impl RelationalContext {
 mod tests {
     use super::*;
 
+    fn authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
     /// Context with two participants: both are discoverable via has_participant.
     #[test]
     fn test_relational_context_creation() {
-        let auth1 = AuthorityId::new_from_entropy([60u8; 32]);
-        let auth2 = AuthorityId::new_from_entropy([61u8; 32]);
+        let auth1 = authority(60);
+        let auth2 = authority(61);
 
         let context = RelationalContext::new(vec![auth1, auth2]);
 
@@ -473,8 +472,8 @@ mod tests {
     /// Guardian binding is stored and retrievable after add.
     #[test]
     fn test_add_guardian_binding() {
-        let auth1 = AuthorityId::new_from_entropy([62u8; 32]);
-        let auth2 = AuthorityId::new_from_entropy([63u8; 32]);
+        let auth1 = authority(62);
+        let auth2 = authority(63);
 
         let context = RelationalContext::new(vec![auth1, auth2]);
 

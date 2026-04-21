@@ -21,11 +21,28 @@ fn test_header() -> AmpHeader {
     }
 }
 
+fn test_message(payload: Vec<u8>) -> AmpMessage {
+    AmpMessage::new(test_header(), payload)
+}
+
 fn serialize_or_panic(msg: &AmpMessage) -> Vec<u8> {
     match serialize_message(msg) {
         Ok(bytes) => bytes,
         Err(err) => panic!("serialization should succeed: {err}"),
     }
+}
+
+fn roundtrip_or_panic(msg: &AmpMessage) -> AmpMessage {
+    deserialize_or_panic(&serialize_or_panic(msg))
+}
+
+fn assert_messages_equal(actual: &AmpMessage, expected: &AmpMessage) {
+    assert_eq!(actual.schema_version, expected.schema_version);
+    assert_eq!(actual.header.context, expected.header.context);
+    assert_eq!(actual.header.channel, expected.header.channel);
+    assert_eq!(actual.header.chan_epoch, expected.header.chan_epoch);
+    assert_eq!(actual.header.ratchet_gen, expected.header.ratchet_gen);
+    assert_eq!(actual.payload, expected.payload);
 }
 
 fn deserialize_or_panic(bytes: &[u8]) -> AmpMessage {
@@ -52,10 +69,7 @@ fn test_amp_message_new() {
 
 #[test]
 fn test_serialize_deserialize_roundtrip() {
-    let header = test_header();
-    let payload = b"Hello, AMP world!".to_vec();
-
-    let original = AmpMessage::new(header, payload);
+    let original = test_message(b"Hello, AMP world!".to_vec());
 
     // Serialize
     let bytes = serialize_or_panic(&original);
@@ -65,35 +79,24 @@ fn test_serialize_deserialize_roundtrip() {
     let recovered = deserialize_or_panic(&bytes);
 
     // Verify roundtrip
-    assert_eq!(recovered.schema_version, original.schema_version);
-    assert_eq!(recovered.header.context, original.header.context);
-    assert_eq!(recovered.header.channel, original.header.channel);
-    assert_eq!(recovered.header.chan_epoch, original.header.chan_epoch);
-    assert_eq!(recovered.header.ratchet_gen, original.header.ratchet_gen);
-    assert_eq!(recovered.payload, original.payload);
+    assert_messages_equal(&recovered, &original);
 }
 
 #[test]
 fn test_serialize_empty_payload() {
-    let header = test_header();
-    let payload = vec![];
-
-    let msg = AmpMessage::new(header, payload);
-    let bytes = serialize_or_panic(&msg);
-    let recovered = deserialize_or_panic(&bytes);
+    let msg = test_message(vec![]);
+    let recovered = roundtrip_or_panic(&msg);
 
     assert!(recovered.payload.is_empty());
 }
 
 #[test]
 fn test_serialize_large_payload() {
-    let header = test_header();
     // 1MB payload
     let payload = vec![0xAB; 1024 * 1024];
 
-    let msg = AmpMessage::new(header, payload.clone());
-    let bytes = serialize_or_panic(&msg);
-    let recovered = deserialize_or_panic(&bytes);
+    let msg = test_message(payload.clone());
+    let recovered = roundtrip_or_panic(&msg);
 
     assert_eq!(recovered.payload.len(), payload.len());
     assert_eq!(recovered.payload, payload);
@@ -115,9 +118,7 @@ fn test_deserialize_empty_bytes() {
 
 #[test]
 fn test_deserialize_truncated_message() {
-    let header = test_header();
-    let payload = b"test payload".to_vec();
-    let msg = AmpMessage::new(header, payload);
+    let msg = test_message(b"test payload".to_vec());
 
     let bytes = serialize_or_panic(&msg);
 

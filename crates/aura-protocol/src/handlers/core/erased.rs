@@ -61,6 +61,12 @@ impl CompositeHandlerAdapter {
     fn new(composite: aura_composition::CompositeHandler) -> Self {
         Self { composite }
     }
+
+    fn handler_context(ctx: &AuraContext) -> aura_composition::HandlerContext {
+        let context_id = ContextId::new_from_entropy(hash(&ctx.authority_id.to_bytes()));
+        let snapshot = ContextSnapshot::new(ctx.authority_id, context_id, ctx.execution_mode);
+        aura_composition::HandlerContext::from_snapshot(snapshot)
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -73,10 +79,7 @@ impl AuraHandler for CompositeHandlerAdapter {
         parameters: &[u8],
         ctx: &AuraContext,
     ) -> Result<Vec<u8>, AuraHandlerError> {
-        // Convert AuraContext to HandlerContext
-        let context_id = ContextId::new_from_entropy(hash(&ctx.authority_id.to_bytes()));
-        let snapshot = ContextSnapshot::new(ctx.authority_id, context_id, ctx.execution_mode);
-        let handler_ctx = aura_composition::HandlerContext::from_snapshot(snapshot);
+        let handler_ctx = Self::handler_context(ctx);
 
         // Execute through composite handler
         self.composite
@@ -90,10 +93,7 @@ impl AuraHandler for CompositeHandlerAdapter {
         session: LocalSessionType,
         ctx: &AuraContext,
     ) -> Result<(), AuraHandlerError> {
-        // Convert AuraContext to HandlerContext
-        let context_id = ContextId::new_from_entropy(hash(&ctx.authority_id.to_bytes()));
-        let snapshot = ContextSnapshot::new(ctx.authority_id, context_id, ctx.execution_mode);
-        let handler_ctx = aura_composition::HandlerContext::from_snapshot(snapshot);
+        let handler_ctx = Self::handler_context(ctx);
 
         // Execute through composite handler
         self.composite
@@ -117,11 +117,13 @@ impl AuraHandler for CompositeHandlerAdapter {
 pub struct AuraHandlerFactory;
 
 impl AuraHandlerFactory {
+    fn boxed_adapter(composite: aura_composition::CompositeHandler) -> Box<dyn AuraHandler> {
+        Box::new(CompositeHandlerAdapter::new(composite))
+    }
+
     /// Create a handler for testing
     pub fn for_testing(device_id: aura_core::types::identifiers::DeviceId) -> Box<dyn AuraHandler> {
-        let composite = aura_composition::CompositeHandler::for_testing(device_id);
-        let adapter = CompositeHandlerAdapter::new(composite);
-        Box::new(adapter)
+        Self::boxed_adapter(aura_composition::CompositeHandler::for_testing(device_id))
     }
 
     /// Create a handler for production
@@ -142,9 +144,9 @@ impl AuraHandlerFactory {
         device_id: aura_core::types::identifiers::DeviceId,
         _seed: u64,
     ) -> Box<dyn AuraHandler> {
-        let composite = aura_composition::CompositeHandler::for_simulation(device_id, _seed);
-        let adapter = CompositeHandlerAdapter::new(composite);
-        Box::new(adapter)
+        Self::boxed_adapter(aura_composition::CompositeHandler::for_simulation(
+            device_id, _seed,
+        ))
     }
 }
 

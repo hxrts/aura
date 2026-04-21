@@ -21,6 +21,7 @@ Invitation protocol for establishing relationships between authorities, includin
 | Incoming | aura-authentication | Session and identity verification |
 | Incoming | aura-authorization | Biscuit tokens for invitation capabilities |
 | Incoming | aura-guards | Invitation guards |
+| Incoming | aura-macros | Capability boundary and derive macros |
 | Outgoing | — | `InvitationFact`, `InvitationFactReducer`, `InvitationDelta` for journal integration |
 | Outgoing | — | `InvitationCeremony` for multi-party invitation flows |
 | Outgoing | — | `InvitationProtocol` for invitation message exchange |

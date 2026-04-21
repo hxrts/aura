@@ -1,4 +1,7 @@
 #![allow(missing_docs)]
+#![allow(dead_code)]
+// Validation helpers are reached through workflow and proof-contract paths that
+// vary by target; strict all-target dead-code analysis does not see every use.
 
 use super::proof_issuance::{
     issue_channel_membership_ready_proof, issue_home_created_proof, ChannelMembershipReadyProof,
@@ -12,7 +15,6 @@ use async_lock::RwLock;
 use aura_core::{AuraError, ChannelId};
 use std::sync::Arc;
 
-#[allow(dead_code)]
 #[aura_macros::authoritative_source(kind = "app_core")]
 pub(in crate::workflows) async fn authoritative_semantic_facts_snapshot(
     app_core: &Arc<RwLock<AppCore>>,
@@ -20,7 +22,6 @@ pub(in crate::workflows) async fn authoritative_semantic_facts_snapshot(
     Ok(app_core.read().await.authoritative_semantic_facts())
 }
 
-#[allow(dead_code)]
 #[aura_macros::authoritative_source(kind = "signal")]
 pub(in crate::workflows) async fn prove_home_created(
     app_core: &Arc<RwLock<AppCore>>,
@@ -38,7 +39,6 @@ pub(in crate::workflows) async fn prove_home_created(
     }
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 #[aura_macros::authoritative_source(kind = "signal")]
 pub(in crate::workflows) async fn prove_channel_membership_ready(
     app_core: &Arc<RwLock<AppCore>>,

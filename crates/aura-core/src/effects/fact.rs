@@ -34,10 +34,6 @@
 //!
 //! Together they form the complete database interface.
 
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-
 use crate::domain::temporal::{
     FactOp, FactReceipt, Finality, FinalityError, ScopeFinalityConfig, ScopeId, TemporalPoint,
     TemporalQuery, Transaction, TransactionReceipt,
@@ -45,6 +41,8 @@ use crate::domain::temporal::{
 use crate::query::FactId;
 use crate::time::PhysicalTime;
 use crate::Hash32;
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 pub const MAX_TEMPORAL_FACT_CONTENT_BYTES: usize = 65_536;
 
@@ -349,9 +347,7 @@ pub struct CheckpointInfo {
 // Blanket Implementations
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Blanket implementation for Arc<T> where T: FactEffects
-#[async_trait]
-impl<T: FactEffects + ?Sized> FactEffects for Arc<T> {
+impl_arc_effect!(FactEffects {
     async fn apply_op(&self, op: FactOp, scope: &ScopeId) -> Result<FactReceipt, FactError> {
         (**self).apply_op(op, scope).await
     }
@@ -410,7 +406,7 @@ impl<T: FactEffects + ?Sized> FactEffects for Arc<T> {
     async fn list_checkpoints(&self, scope: &ScopeId) -> Result<Vec<CheckpointInfo>, FactError> {
         (**self).list_checkpoints(scope).await
     }
-}
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -430,10 +426,7 @@ mod tests {
     }
 
     fn time_at(ts_ms: u64) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        }
+        PhysicalTime::exact(ts_ms)
     }
 
     #[test]

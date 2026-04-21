@@ -159,6 +159,12 @@ pub enum EffectApiError {
 
 impl aura_core::ProtocolErrorCode for EffectApiError {
     fn code(&self) -> &'static str {
+        self.protocol_code()
+    }
+}
+
+impl EffectApiError {
+    fn protocol_code(&self) -> &'static str {
         match self {
             EffectApiError::NotAvailable => "effect_api_not_available",
             EffectApiError::AccessDenied { .. } => "effect_api_access_denied",

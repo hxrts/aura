@@ -1,4 +1,5 @@
 use super::{
+    error_boundary::{bridge_internal, bridge_network, bridge_network_message, bridge_validation},
     harness_mode_enabled, harness_sync_backoff_ms, harness_sync_rounds, require_rendezvous_service,
     require_sync_service, service_unavailable, AgentRuntimeBridge,
 };
@@ -140,7 +141,7 @@ pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), Inte
         } else {
             sync.sync_with_peers(&effects, peers)
                 .await
-                .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
+                .map_err(|e| bridge_internal("Sync failed", e))
         };
 
         let mut pull_error: Option<IntentError> = None;
@@ -201,33 +202,26 @@ pub(super) async fn process_ceremony_messages(
             bridge.agent.runtime().device_id(),
         ),
     )
-    .map_err(|e| {
-        IntentError::internal_error(format!(
-            "Failed to create invitation handler for inbox processing: {e}"
-        ))
-    })?;
+    .map_err(|e| bridge_internal("Create invitation handler for inbox processing failed", e))?;
     let processed_contact_messages = invitation_handler
         .process_contact_invitation_acceptances(bridge.agent.runtime().effects())
         .await
-        .map_err(|e| {
-            IntentError::internal_error(format!("Failed to process contact/chat envelopes: {e}"))
-        })?;
+        .map_err(|e| bridge_internal("Process contact/chat envelopes failed", e))?;
     let processed_handshakes = if let Some(rendezvous_manager) = bridge.agent.runtime().rendezvous()
     {
         let authority = bridge.agent.context().clone();
         let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
             .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to create rendezvous handler for handshake processing: {e}"
-                ))
+                bridge_internal(
+                    "Create rendezvous handler for handshake processing failed",
+                    e,
+                )
             })?
             .with_rendezvous_manager((*rendezvous_manager).clone());
         handler
             .process_handshake_envelopes(bridge.agent.runtime().effects())
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to process rendezvous handshakes: {e}"))
-            })?
+            .map_err(|e| bridge_internal("Process rendezvous handshakes failed", e))?
     } else {
         0
     };
@@ -273,11 +267,11 @@ pub(super) async fn sync_with_peer(
 
     let device_id: DeviceId = peer_id
         .parse()
-        .map_err(|e| IntentError::validation_failed(format!("Invalid peer ID: {e}")))?;
+        .map_err(|e| bridge_validation("Invalid peer ID", e))?;
     let effects = bridge.agent.runtime().effects();
     sync.sync_with_peers(&effects, vec![device_id])
         .await
-        .map_err(|e| IntentError::internal_error(format!("Sync failed: {e}")))
+        .map_err(|e| bridge_internal("Sync failed", e))
 }
 
 #[aura_macros::capability_boundary(
@@ -297,11 +291,7 @@ pub(super) async fn ensure_peer_channel(
 
     let authority = bridge.agent.context().clone();
     let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
-        .map_err(|e| {
-            IntentError::internal_error(format!(
-                "Failed to create rendezvous handler for peer channel setup: {e}"
-            ))
-        })?
+        .map_err(|e| bridge_internal("Create rendezvous handler for peer channel setup failed", e))?
         .with_rendezvous_manager((*rendezvous_manager).clone());
 
     let rounds = if harness_mode_enabled() {
@@ -330,15 +320,16 @@ pub(super) async fn ensure_peer_channel(
         .initiate_channel(&effects, context, peer)
         .await
         .map_err(|e| {
-            IntentError::network_error(format!(
-                "Failed to initiate peer channel for {peer} in {context}: {e}"
-            ))
+            bridge_network(
+                "Initiate peer channel failed",
+                format!("{peer} in {context}: {e}"),
+            )
         })?;
 
     if !result.success {
-        return Err(IntentError::network_error(result.error.unwrap_or_else(
-            || "peer channel initiation was denied".to_string(),
-        )));
+        return Err(bridge_network_message(result.error.unwrap_or_else(|| {
+            "peer channel initiation was denied".to_string()
+        })));
     }
 
     for round in 0..rounds {
@@ -361,7 +352,7 @@ pub(super) async fn ensure_peer_channel(
         }
     }
 
-    Err(IntentError::network_error(format!(
+    Err(bridge_network_message(format!(
         "peer channel for {peer} in {context} did not establish after bounded convergence"
     )))
 }

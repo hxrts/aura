@@ -9,16 +9,19 @@ use crate::facts::{HomeFact, HomeMemberFact, HomeStorageBudget, NeighborhoodMemb
 pub struct StorageService;
 
 impl StorageService {
+    fn validate_requested(available: u64, requested: u64) -> Result<(), SocialError> {
+        if requested > available {
+            return Err(SocialError::storage_exceeded(available, requested));
+        }
+        Ok(())
+    }
+
     /// Validate that a storage allocation request can be satisfied.
     pub fn validate_allocation(
         budget: &HomeStorageBudget,
         requested: u64,
     ) -> Result<(), SocialError> {
-        let available = budget.remaining_shared_storage();
-        if requested > available {
-            return Err(SocialError::storage_exceeded(available, requested));
-        }
-        Ok(())
+        Self::validate_requested(budget.remaining_shared_storage(), requested)
     }
 
     /// Calculate available space in a home.
@@ -69,12 +72,7 @@ impl StorageService {
     /// Validate that a new member can be added with default allocation.
     pub fn validate_new_member(budget: &HomeStorageBudget) -> Result<(), SocialError> {
         let default_allocation = HomeMemberFact::DEFAULT_STORAGE_ALLOCATION;
-        let remaining = Self::remaining_member_capacity(budget);
-
-        if default_allocation > remaining {
-            return Err(SocialError::storage_exceeded(remaining, default_allocation));
-        }
-        Ok(())
+        Self::validate_requested(Self::remaining_member_capacity(budget), default_allocation)
     }
 
     /// Validate that a home can join another neighborhood.
@@ -82,12 +80,7 @@ impl StorageService {
     /// Joining requires donating storage to the neighborhood.
     pub fn validate_neighborhood_join(budget: &HomeStorageBudget) -> Result<(), SocialError> {
         let allocation = NeighborhoodMemberFact::DEFAULT_ALLOCATION;
-        let available = budget.remaining_shared_storage();
-
-        if allocation > available {
-            return Err(SocialError::storage_exceeded(available, allocation));
-        }
-        Ok(())
+        Self::validate_requested(budget.remaining_shared_storage(), allocation)
     }
 }
 

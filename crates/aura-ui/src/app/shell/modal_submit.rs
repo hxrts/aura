@@ -4,13 +4,107 @@ use crate::semantic_lifecycle::{
     UiWorkflowHandoffOwner,
 };
 use aura_app::frontend_primitives::SubmittedOperationWorkflowError;
+use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui_contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind,
 };
 
+const DEFAULT_HARNESS_CEREMONY_POLL_INTERVAL_MS: u64 = 1_000;
+
 pub(crate) fn harness_log(line: &str) {
     tracing::info!("{line}");
+}
+
+fn ceremony_poll_interval() -> Duration {
+    runtime_workflows::harness_observed_poll_interval(
+        "AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS",
+        DEFAULT_HARNESS_CEREMONY_POLL_INTERVAL_MS,
+    )
+}
+
+pub(crate) fn launch_create_invitation_workflow(
+    controller: Arc<UiController>,
+    rerender: Arc<dyn Fn() + Send + Sync>,
+) {
+    let Some(create_state) = controller
+        .ui_model()
+        .as_ref()
+        .and_then(UiModel::create_invitation_modal)
+        .cloned()
+    else {
+        controller.runtime_error_toast("Invitation modal state is unavailable");
+        rerender();
+        return;
+    };
+    let nickname = (!create_state.nickname.trim().is_empty())
+        .then_some(create_state.nickname.trim().to_string());
+    let receiver_nickname = (!create_state.receiver_nickname.trim().is_empty())
+        .then_some(create_state.receiver_nickname.trim().to_string());
+    let message = (!create_state.message.trim().is_empty()).then_some(create_state.message);
+    let ttl_ms = Some(create_state.ttl_hours.max(1).saturating_mul(60 * 60 * 1000));
+    let app_core = controller.app_core().clone();
+    let rerender_for_create = rerender.clone();
+
+    spawn_ui(async move {
+        tracing::info!("create_invitation submit start");
+        let operation = UiWorkflowHandoffOwner::submit(
+            controller.clone(),
+            OperationId::invitation_create(),
+            SemanticOperationKind::CreateContactInvitation,
+        );
+        let workflow_instance_id = operation.workflow_instance_id();
+        let transfer =
+            operation.handoff_to_app_workflow(UiOperationTransferScope::CreateInvitation);
+        match transfer
+            .run_workflow(
+                controller.clone(),
+                "create_generic_contact_invitation",
+                invitation_workflows::handoff::create_generic_contact_invitation(
+                    &app_core,
+                    invitation_workflows::handoff::CreateGenericContactInvitationRequest {
+                        nickname,
+                        receiver_nickname,
+                        message,
+                        ttl_ms,
+                        operation_instance_id: workflow_instance_id,
+                    },
+                ),
+            )
+            .await
+        {
+            Ok(code) => {
+                tracing::info!("create_invitation export_invitation ok");
+                controller.write_clipboard(&code);
+                controller.remember_invitation_code(&code);
+                tracing::info!("create_invitation write_clipboard ok");
+                controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
+                    receiver_authority_id: None,
+                    source_operation: OperationId::invitation_create(),
+                    code: Some(code),
+                });
+                controller.info_toast("Invitation code copied to clipboard");
+                rerender_for_create();
+                tracing::info!("create_invitation operation succeeded");
+                tracing::info!("create_invitation complete");
+            }
+            Err(SubmittedOperationWorkflowError::Workflow(error)) => {
+                tracing::warn!(error = %error, "create_invitation workflow failed");
+                controller.runtime_error_toast(error.to_string());
+                rerender_for_create();
+            }
+            Err(
+                SubmittedOperationWorkflowError::Protocol(detail)
+                | SubmittedOperationWorkflowError::Panicked(detail),
+            ) => {
+                tracing::warn!("create_invitation workflow panicked");
+                controller.runtime_error_toast(detail);
+                rerender_for_create();
+            }
+        }
+        tracing::info!("create_invitation rerender");
+        rerender_for_create();
+    });
 }
 
 fn invitation_command_failure(detail: impl Into<String>) -> SemanticOperationError {
@@ -62,14 +156,15 @@ pub(crate) fn monitor_runtime_device_enrollment_ceremony(
     rerender: Arc<dyn Fn() + Send + Sync>,
 ) {
     spawn_ui(async move {
+        let mut policy = ceremony_workflows::CeremonyPollPolicy::for_kind(
+            status_handle.kind(),
+            ceremony_poll_interval(),
+        );
+        policy.refresh_settings_on_complete = false;
         let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
             &app_core,
             &status_handle,
-            ceremony_workflows::CeremonyPollPolicy {
-                interval: Duration::from_secs(1),
-                refresh_settings_on_complete: false,
-                ..Default::default()
-            },
+            policy,
             |status| {
                 controller.update_runtime_device_enrollment_status(
                     status.accepted_count,
@@ -117,10 +212,14 @@ pub(crate) fn monitor_runtime_key_rotation_ceremony(
     rerender: Arc<dyn Fn() + Send + Sync>,
 ) {
     spawn_ui(async move {
+        let policy = ceremony_workflows::CeremonyPollPolicy::for_kind(
+            status_handle.kind(),
+            ceremony_poll_interval(),
+        );
         let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
             &app_core,
             &status_handle,
-            ceremony_workflows::CeremonyPollPolicy::with_interval(Duration::from_secs(1)),
+            policy,
             |_| {},
             |duration| {
                 let app_core = app_core.clone();
@@ -148,6 +247,78 @@ pub(crate) fn monitor_runtime_key_rotation_ceremony(
             }
         }
     });
+}
+
+#[cfg(test)]
+#[allow(clippy::disallowed_types)] // Test-only env serialization guard stays synchronous and never crosses await boundaries.
+mod tests {
+    use aura_app::ui::workflows::runtime as runtime_workflows;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvRestore {
+        saved: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvRestore {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self {
+                saved: keys
+                    .iter()
+                    .map(|key| (*key, std::env::var_os(key)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in &self.saved {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ceremony_poll_interval_defaults_to_fixed_production_value() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _restore = EnvRestore::capture(&["AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS"]);
+        std::env::remove_var("AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS");
+
+        assert_eq!(
+            runtime_workflows::harness_observed_poll_interval_for_mode(
+                false,
+                "AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS",
+                1_000,
+            ),
+            Duration::from_millis(1_000)
+        );
+    }
+
+    #[test]
+    fn ceremony_poll_interval_honors_harness_override() {
+        let _guard = env_lock().lock().expect("env lock");
+        let _restore = EnvRestore::capture(&["AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS"]);
+        std::env::set_var("AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS", "250");
+
+        assert_eq!(
+            runtime_workflows::harness_observed_poll_interval_for_mode(
+                true,
+                "AURA_HARNESS_CEREMONY_POLL_INTERVAL_MS",
+                1_000,
+            ),
+            Duration::from_millis(250)
+        );
+    }
 }
 
 pub(crate) fn removable_device_for_modal(
@@ -797,6 +968,7 @@ fn submit_simple_modal_action(
                                             .complete_runtime_contact_invitation_acceptance(
                                                 accepted_authority_id,
                                                 display_name,
+                                                Some(code.clone()),
                                             );
                                         let post_accept_app_core = app_core.clone();
                                         spawn_ui(async move {
@@ -856,74 +1028,15 @@ fn submit_simple_modal_action(
             true
         }
         SimpleModalSubmitAction::CreateInvitation => {
-            let Some(create_state) = current_model
+            if current_model
                 .as_ref()
-                .and_then(UiModel::create_invitation_modal)
-                .cloned()
-            else {
-                controller.runtime_error_toast("Invitation modal state is unavailable");
-                rerender();
-                return true;
-            };
-            let message = (!create_state.message.trim().is_empty()).then_some(create_state.message);
-            let ttl_ms = Some(create_state.ttl_hours.max(1).saturating_mul(60 * 60 * 1000));
-
-            let app_core = controller.app_core().clone();
-            spawn_ui(async move {
-                tracing::info!("create_invitation submit start");
-                let operation = UiWorkflowHandoffOwner::submit(
-                    controller.clone(),
-                    OperationId::invitation_create(),
-                    SemanticOperationKind::CreateContactInvitation,
-                );
-                let workflow_instance_id = operation.workflow_instance_id();
-                let transfer =
-                    operation.handoff_to_app_workflow(UiOperationTransferScope::CreateInvitation);
-                match transfer
-                    .run_workflow(
-                        controller.clone(),
-                        "create_generic_contact_invitation",
-                        invitation_workflows::handoff::create_generic_contact_invitation(
-                            &app_core,
-                            invitation_workflows::handoff::CreateGenericContactInvitationRequest {
-                                nickname: None,
-                                message,
-                                ttl_ms,
-                                operation_instance_id: workflow_instance_id,
-                            },
-                        ),
-                    )
-                    .await
-                {
-                    Ok(code) => {
-                        tracing::info!("create_invitation export_invitation ok");
-                        controller.write_clipboard(&code);
-                        controller.remember_invitation_code(&code);
-                        tracing::info!("create_invitation write_clipboard ok");
-                        controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
-                            receiver_authority_id: None,
-                            source_operation: OperationId::invitation_create(),
-                            code: Some(code),
-                        });
-                        controller
-                            .complete_runtime_modal_success("Invitation code copied to clipboard");
-                        tracing::info!("create_invitation operation succeeded");
-                        tracing::info!("create_invitation complete");
-                    }
-                    Err(SubmittedOperationWorkflowError::Workflow(error)) => {
-                        tracing::warn!(error = %error, "create_invitation workflow failed");
-                        controller.runtime_error_toast(error.to_string());
-                    }
-                    Err(
-                        SubmittedOperationWorkflowError::Protocol(detail)
-                        | SubmittedOperationWorkflowError::Panicked(detail),
-                    ) => {
-                        tracing::warn!("create_invitation workflow panicked");
-                        controller.runtime_error_toast(detail);
-                    }
-                }
-                tracing::info!("create_invitation rerender");
-            });
+                .and_then(UiModel::current_invitation_code)
+                .is_none()
+            {
+                return false;
+            }
+            controller.close_modal();
+            rerender();
             true
         }
         SimpleModalSubmitAction::EditNickname => {

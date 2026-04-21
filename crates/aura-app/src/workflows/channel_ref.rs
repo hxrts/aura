@@ -6,7 +6,10 @@ use aura_core::AuraError;
 
 /// Reference to a channel identifier or name.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+#[cfg_attr(
+    not(feature = "signals"),
+    allow(dead_code) // Shared parsing stays available for non-signals builds until every caller is feature-gated.
+)]
 pub enum ChannelRef {
     /// Canonical channel id.
     Id(ChannelId),
@@ -15,7 +18,10 @@ pub enum ChannelRef {
 }
 
 impl ChannelRef {
-    #[cfg_attr(not(feature = "signals"), allow(dead_code))]
+    #[cfg_attr(
+        not(feature = "signals"),
+        allow(dead_code) // Non-signals command paths still reuse the parser during the staged messaging split.
+    )]
     pub fn parse(input: &str) -> Self {
         let normalized = normalize_channel_str(input);
         match normalized.parse::<ChannelId>() {
@@ -24,7 +30,10 @@ impl ChannelRef {
         }
     }
 
-    #[cfg_attr(not(feature = "signals"), allow(dead_code))]
+    #[cfg_attr(
+        not(feature = "signals"),
+        allow(dead_code) // Name-to-id normalization remains the shared fallback for non-signals send/query flows.
+    )]
     pub fn to_channel_id(&self) -> ChannelId {
         match self {
             ChannelRef::Id(id) => *id,
@@ -33,7 +42,10 @@ impl ChannelRef {
     }
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+#[cfg_attr(
+    not(feature = "signals"),
+    allow(dead_code) // Keep normalization colocated with ChannelRef while legacy non-signals selectors remain supported.
+)]
 fn normalize_channel_str(channel: &str) -> &str {
     channel
 }
@@ -78,7 +90,7 @@ impl ChannelSelector {
         Ok(Self::Name(normalized_name.to_string()))
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Strict selectors retain deterministic hashing even before every caller migrates off ChannelRef.
     pub fn to_channel_id(&self) -> ChannelId {
         match self {
             Self::Id(id) => *id,

@@ -239,32 +239,6 @@ fn spawn_observed_result_callback<T, Action, ActionFut, Success, SuccessFut, Fai
     });
 }
 
-fn spawn_handoff_workflow_callback<T, Fut, F>(
-    ctx: Arc<IoContext>,
-    tx: UiUpdateSender,
-    operation: WorkflowHandoffOperationOwner,
-    spec: WorkflowHandoffSpec,
-    workflow: F,
-) where
-    T: Clone + Send + 'static,
-    Fut: Future<Output = WorkflowTerminalOutcome<T>> + Send + 'static,
-    F: FnOnce(
-            Arc<RwLock<aura_app::ui::types::AppCore>>,
-            Option<aura_app::ui_contract::OperationInstanceId>,
-        ) -> Fut
-        + Send
-        + 'static,
-{
-    spawn_handoff_workflow_callback_with_success(
-        ctx,
-        tx,
-        operation,
-        spec,
-        workflow,
-        |_tx, _value| async {},
-    );
-}
-
 fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
     ctx: Arc<IoContext>,
     tx: UiUpdateSender,

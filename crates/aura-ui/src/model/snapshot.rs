@@ -176,12 +176,12 @@ impl UiModel {
             Some(ControlId::ModalInput)
         } else if let Some(open_modal) = open_modal {
             Some(ControlId::Modal(open_modal))
-        } else if self.account_ready {
+        } else if self.account_ready() {
             Some(ControlId::Screen(Self::canonical_ready_screen(self.screen)))
         } else {
             Some(ControlId::OnboardingRoot)
         };
-        let screen = if self.account_ready {
+        let screen = if self.account_ready() {
             Self::canonical_ready_screen(self.screen)
         } else {
             ScreenId::Onboarding
@@ -191,10 +191,10 @@ impl UiModel {
             screen,
             focused_control,
             open_modal,
-            readiness: readiness_owner::account_gate_readiness(self.account_ready),
+            readiness: readiness_owner::account_gate_readiness(self.account_ready()),
             revision: self.semantic_revision,
             quiescence: QuiescenceSnapshot::derive(
-                readiness_owner::account_gate_readiness(self.account_ready),
+                readiness_owner::account_gate_readiness(self.account_ready()),
                 open_modal,
                 &self.operations,
             ),

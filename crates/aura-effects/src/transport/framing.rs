@@ -47,7 +47,62 @@ pub struct Frame {
     pub payload: Vec<u8>,
 }
 
-const FRAME_HEADER_SIZE: usize = 17; // 1 + 4 + 1 + 8 + 3 padding
+/// Borrowed frame view backed by a reusable receive buffer.
+#[derive(Debug)]
+pub struct BufferedFrame<'a> {
+    /// Frame header containing type, length, and metadata.
+    pub header: FrameHeader,
+    /// Borrowed payload bytes stored in the reusable receive buffer.
+    pub payload: &'a [u8],
+}
+
+impl BufferedFrame<'_> {
+    /// Convert the buffered view into an owned frame.
+    pub fn into_owned(self) -> Frame {
+        Frame {
+            header: self.header,
+            payload: self.payload.to_vec(),
+        }
+    }
+}
+
+/// Reusable inbound frame buffer with a per-connection memory budget.
+#[derive(Debug, Clone)]
+pub struct FrameReceiveBuffer {
+    max_buffered_bytes: usize,
+    payload: Vec<u8>,
+}
+
+impl FrameReceiveBuffer {
+    /// Create a buffer with a fixed maximum inbound byte budget.
+    pub fn new(max_buffered_bytes: usize) -> Self {
+        Self {
+            max_buffered_bytes,
+            payload: Vec::new(),
+        }
+    }
+
+    fn prepare(&mut self, payload_length: usize) -> TransportResult<&mut [u8]> {
+        let required = FRAME_HEADER_SIZE
+            .checked_add(payload_length)
+            .ok_or_else(|| TransportError::Protocol("Frame size overflow".to_string()))?;
+        if required > self.max_buffered_bytes {
+            return Err(TransportError::Protocol(format!(
+                "Inbound frame exceeds buffered byte budget: {} > {}",
+                required, self.max_buffered_bytes
+            )));
+        }
+
+        self.payload.resize(payload_length, 0);
+        Ok(self.payload.as_mut_slice())
+    }
+
+    fn payload(&self, payload_length: usize) -> &[u8] {
+        &self.payload[..payload_length]
+    }
+}
+
+const FRAME_HEADER_SIZE: usize = 14; // 1 + 4 + 1 + 8 bytes on the wire
 
 impl FramingHandler {
     /// Create new framing handler
@@ -59,6 +114,56 @@ impl FramingHandler {
     #[allow(clippy::should_implement_trait)] // Method provides default config, not implementing Default trait
     pub fn default() -> Self {
         Self::new(1_048_576)
+    }
+
+    fn default_receive_buffer(&self) -> FrameReceiveBuffer {
+        FrameReceiveBuffer::new(FRAME_HEADER_SIZE + self.max_frame_size as usize)
+    }
+
+    fn parse_header(&self, header_bytes: &[u8; FRAME_HEADER_SIZE]) -> TransportResult<FrameHeader> {
+        let frame_type = match header_bytes[0] {
+            0 => FrameType::Data,
+            1 => FrameType::Control,
+            2 => FrameType::Heartbeat,
+            3 => FrameType::Error,
+            other => {
+                return Err(TransportError::Protocol(format!(
+                    "Invalid frame type: {other}"
+                )))
+            }
+        };
+
+        let payload_length = u32::from_be_bytes([
+            header_bytes[1],
+            header_bytes[2],
+            header_bytes[3],
+            header_bytes[4],
+        ]);
+        if payload_length > self.max_frame_size {
+            return Err(TransportError::Protocol(format!(
+                "Payload too large: {} > {}",
+                payload_length, self.max_frame_size
+            )));
+        }
+
+        let flags = header_bytes[5];
+        let sequence = u64::from_be_bytes([
+            header_bytes[6],
+            header_bytes[7],
+            header_bytes[8],
+            header_bytes[9],
+            header_bytes[10],
+            header_bytes[11],
+            header_bytes[12],
+            header_bytes[13],
+        ]);
+
+        Ok(FrameHeader {
+            frame_type,
+            payload_length,
+            flags,
+            sequence,
+        })
     }
 
     /// Serialize frame to bytes
@@ -92,60 +197,13 @@ impl FramingHandler {
                 "Insufficient data for frame header".to_string(),
             ));
         }
-
-        let mut cursor = 0;
-
-        // Parse header
-        let frame_type = match data[cursor] {
-            0 => FrameType::Data,
-            1 => FrameType::Control,
-            2 => FrameType::Heartbeat,
-            3 => FrameType::Error,
-            other => {
-                return Err(TransportError::Protocol(format!(
-                    "Invalid frame type: {other}"
-                )))
-            }
-        };
-        cursor += 1;
-
-        let payload_length = u32::from_be_bytes([
-            data[cursor],
-            data[cursor + 1],
-            data[cursor + 2],
-            data[cursor + 3],
-        ]);
-        cursor += 4;
-
-        let flags = data[cursor];
-        cursor += 1;
-
-        let sequence = u64::from_be_bytes([
-            data[cursor],
-            data[cursor + 1],
-            data[cursor + 2],
-            data[cursor + 3],
-            data[cursor + 4],
-            data[cursor + 5],
-            data[cursor + 6],
-            data[cursor + 7],
-        ]);
-
-        let header = FrameHeader {
-            frame_type,
-            payload_length,
-            flags,
-            sequence,
-        };
+        let header_bytes: [u8; FRAME_HEADER_SIZE] = data[..FRAME_HEADER_SIZE]
+            .try_into()
+            .map_err(|_| TransportError::Protocol("Invalid frame header".to_string()))?;
+        let header = self.parse_header(&header_bytes)?;
+        let payload_length = header.payload_length;
 
         // Validate payload length
-        if payload_length > self.max_frame_size {
-            return Err(TransportError::Protocol(format!(
-                "Payload too large: {} > {}",
-                payload_length, self.max_frame_size
-            )));
-        }
-
         let expected_total_size = FRAME_HEADER_SIZE + payload_length as usize;
         if data.len() < expected_total_size {
             return Err(TransportError::Protocol(
@@ -175,6 +233,21 @@ impl FramingHandler {
     where
         R: AsyncRead + Unpin,
     {
+        let mut receive_buffer = self.default_receive_buffer();
+        self.receive_frame_buffered(reader, &mut receive_buffer)
+            .await
+            .map(BufferedFrame::into_owned)
+    }
+
+    /// Receive a framed message into a reusable bounded inbound buffer.
+    pub async fn receive_frame_buffered<'a, R>(
+        &self,
+        reader: &mut R,
+        receive_buffer: &'a mut FrameReceiveBuffer,
+    ) -> TransportResult<BufferedFrame<'a>>
+    where
+        R: AsyncRead + Unpin,
+    {
         // Read header first
         let mut header_bytes = [0u8; FRAME_HEADER_SIZE];
         reader
@@ -182,35 +255,19 @@ impl FramingHandler {
             .await
             .map_err(TransportError::Io)?;
 
-        // Parse payload length from header
-        let payload_length = u32::from_be_bytes([
-            header_bytes[1],
-            header_bytes[2],
-            header_bytes[3],
-            header_bytes[4],
-        ]);
-
-        if payload_length > self.max_frame_size {
-            return Err(TransportError::Protocol(format!(
-                "Payload too large: {} > {}",
-                payload_length, self.max_frame_size
-            )));
-        }
-
+        let header = self.parse_header(&header_bytes)?;
+        let payload_length_usize = header.payload_length as usize;
         // Read payload
-        let payload_length_usize = payload_length as usize;
-        let mut payload_bytes = vec![0u8; payload_length_usize];
+        let payload_bytes = receive_buffer.prepare(payload_length_usize)?;
         reader
-            .read_exact(&mut payload_bytes)
+            .read_exact(payload_bytes)
             .await
             .map_err(TransportError::Io)?;
 
-        // Combine and deserialize
-        let mut frame_data = Vec::with_capacity(FRAME_HEADER_SIZE + payload_length_usize);
-        frame_data.extend_from_slice(&header_bytes);
-        frame_data.extend_from_slice(&payload_bytes);
-
-        self.deserialize_frame(&frame_data)
+        Ok(BufferedFrame {
+            header,
+            payload: receive_buffer.payload(payload_length_usize),
+        })
     }
 
     /// Create data frame
@@ -278,5 +335,59 @@ impl FramingHandler {
 
         let message = serde_json::from_slice(&frame.payload)?;
         Ok(message)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use tokio::io::BufReader;
+
+    #[tokio::test]
+    async fn receive_frame_buffered_reuses_bounded_buffer_across_frames() {
+        let handler = FramingHandler::new(128);
+        let first = handler
+            .serialize_frame(&handler.create_data_frame(vec![1; 32], 1))
+            .unwrap();
+        let second = handler
+            .serialize_frame(&handler.create_data_frame(vec![2; 48], 2))
+            .unwrap();
+        let data = [first, second].concat();
+        let mut stream = BufReader::new(data.as_slice());
+        let mut buffer = FrameReceiveBuffer::new(FRAME_HEADER_SIZE + 64);
+
+        {
+            let first_frame = handler
+                .receive_frame_buffered(&mut stream, &mut buffer)
+                .await
+                .expect("first frame within buffered budget");
+            assert_eq!(first_frame.header.sequence, 1);
+            assert_eq!(first_frame.payload.len(), 32);
+        }
+
+        let second_frame = handler
+            .receive_frame_buffered(&mut stream, &mut buffer)
+            .await
+            .expect("second frame within buffered budget");
+        assert_eq!(second_frame.header.sequence, 2);
+        assert_eq!(second_frame.payload.len(), 48);
+    }
+
+    #[tokio::test]
+    async fn receive_frame_buffered_rejects_frames_above_buffer_budget() {
+        let handler = FramingHandler::new(128);
+        let frame = handler
+            .serialize_frame(&handler.create_data_frame(vec![9; 48], 7))
+            .unwrap();
+        let mut stream = BufReader::new(frame.as_slice());
+        let mut buffer = FrameReceiveBuffer::new(FRAME_HEADER_SIZE + 32);
+
+        let error = handler
+            .receive_frame_buffered(&mut stream, &mut buffer)
+            .await
+            .expect_err("payload above buffered budget must fail");
+
+        assert!(matches!(error, TransportError::Protocol(_)));
     }
 }

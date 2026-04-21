@@ -86,6 +86,12 @@ pub enum TransportCoordinationError {
 
 impl aura_core::ProtocolErrorCode for TransportCoordinationError {
     fn code(&self) -> &'static str {
+        self.protocol_code()
+    }
+}
+
+impl TransportCoordinationError {
+    fn protocol_code(&self) -> &'static str {
         match self {
             TransportCoordinationError::ConnectionLimitExceeded { .. } => {
                 "transport_connection_limit_exceeded"
@@ -215,6 +221,7 @@ where
             write_timeout: NonZeroDuration::from_secs(30)
                 .expect("write timeout should be non-zero"),
             buffer_size: NonZeroUsize::new(64 * 1024).expect("buffer size should be non-zero"),
+            ..TransportConfig::default()
         };
 
         let transport_manager = RetryingTransportManager::new(transport_config, config.max_retries);

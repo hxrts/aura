@@ -7,17 +7,27 @@ pub async fn create_contact_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
     nickname: Option<String>,
+    receiver_nickname: Option<String>,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationHandle, AuraError> {
-    create_contact_invitation_with_instance(app_core, receiver, nickname, message, ttl_ms, None)
-        .await
+    create_contact_invitation_with_instance(
+        app_core,
+        receiver,
+        nickname,
+        receiver_nickname,
+        message,
+        ttl_ms,
+        None,
+    )
+    .await
 }
 
 pub async fn create_contact_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
     nickname: Option<String>,
+    receiver_nickname: Option<String>,
     message: Option<String>,
     ttl_ms: Option<u64>,
     operation_instance_id: Option<OperationInstanceId>,
@@ -30,8 +40,15 @@ pub async fn create_contact_invitation_with_instance(
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    let invitation =
-        create_contact_invitation_runtime(app_core, receiver, nickname, message, ttl_ms).await?;
+    let invitation = create_contact_invitation_runtime(
+        app_core,
+        receiver,
+        nickname,
+        receiver_nickname,
+        message,
+        ttl_ms,
+    )
+    .await?;
     owner
         .publish_success_with(issue_invitation_created_proof(
             invitation.invitation_id.clone(),
@@ -44,6 +61,7 @@ async fn create_contact_invitation_runtime(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
     nickname: Option<String>,
+    receiver_nickname: Option<String>,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
@@ -53,7 +71,15 @@ async fn create_contact_invitation_runtime(
         "create_contact_invitation",
         "create_contact_invitation",
         INVITATION_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.create_contact_invitation(receiver, nickname, message, ttl_ms),
+        || {
+            runtime.create_contact_invitation(
+                receiver,
+                nickname,
+                receiver_nickname,
+                message,
+                ttl_ms,
+            )
+        },
     )
     .await
     .map_err(|e| {
@@ -74,6 +100,7 @@ pub async fn create_contact_invitation_code_with_terminal_status(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
     nickname: Option<String>,
+    receiver_nickname: Option<String>,
     message: Option<String>,
     ttl_ms: Option<u64>,
     instance_id: Option<OperationInstanceId>,
@@ -87,9 +114,15 @@ pub async fn create_contact_invitation_code_with_terminal_status(
     let result: Result<String, AuraError> = async {
         publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
             .await?;
-        let invitation =
-            create_contact_invitation_runtime(app_core, receiver, nickname, message, ttl_ms)
-                .await?;
+        let invitation = create_contact_invitation_runtime(
+            app_core,
+            receiver,
+            nickname,
+            receiver_nickname,
+            message,
+            ttl_ms,
+        )
+        .await?;
         let code = super::export_invitation_runtime(app_core, &invitation.invitation_id).await?;
         owner
             .publish_success_with(issue_invitation_created_proof(
@@ -115,6 +148,7 @@ pub async fn create_contact_invitation_code_with_terminal_status(
 pub async fn create_generic_contact_invitation_code_terminal_status(
     app_core: &Arc<RwLock<AppCore>>,
     nickname: Option<String>,
+    receiver_nickname: Option<String>,
     message: Option<String>,
     ttl_ms: Option<u64>,
     instance_id: Option<OperationInstanceId>,
@@ -127,7 +161,13 @@ pub async fn create_generic_contact_invitation_code_terminal_status(
     );
     let result: Result<String, AuraError> = async {
         create_generic_contact_invitation_code_owned(
-            app_core, nickname, message, ttl_ms, &owner, None,
+            app_core,
+            nickname,
+            receiver_nickname,
+            message,
+            ttl_ms,
+            &owner,
+            None,
         )
         .await
     }
@@ -159,6 +199,7 @@ pub async fn create_generic_contact_invitation_code_terminal_status(
 async fn create_generic_contact_invitation_code_owned(
     app_core: &Arc<RwLock<AppCore>>,
     nickname: Option<String>,
+    receiver_nickname: Option<String>,
     message: Option<String>,
     ttl_ms: Option<u64>,
     owner: &SemanticWorkflowOwner,
@@ -169,8 +210,15 @@ async fn create_generic_contact_invitation_code_owned(
     publish_invitation_owner_status(owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
     let receiver = require_runtime(app_core).await?.authority_id();
-    let invitation =
-        create_contact_invitation_runtime(app_core, receiver, nickname, message, ttl_ms).await?;
+    let invitation = create_contact_invitation_runtime(
+        app_core,
+        receiver,
+        nickname,
+        receiver_nickname,
+        message,
+        ttl_ms,
+    )
+    .await?;
     let code = super::export_invitation_runtime(app_core, &invitation.invitation_id).await?;
     owner
         .publish_success_with(issue_invitation_created_proof(

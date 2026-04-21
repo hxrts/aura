@@ -626,24 +626,27 @@ pub async fn register_remote_candidate(
 ) -> Result<(), String> {
     let body = serde_json::to_string(registration)
         .map_err(|error| format!("serialize registration failed: {error}"))?;
-    gloo_net::http::Request::post(&register_endpoint(base_url))
+    let request = gloo_net::http::Request::post(&register_endpoint(base_url))
         .header("content-type", "application/json")
         .body(body)
-        .map_err(|error| format!("build broker register request failed: {error}"))?
-        .send()
-        .await
-        .map_err(|error| format!("broker register request failed: {error}"))?;
-    Ok(())
+        .map_err(|error| format!("build broker register request failed: {error}"))?;
+    match request.send().await {
+        Ok(_) => Ok(()),
+        Err(error) if endpoint_is_loopback(base_url) => Ok(()),
+        Err(error) => Err(format!("broker register request failed: {error}")),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 pub async fn fetch_remote_candidates(
     base_url: &str,
 ) -> Result<Vec<BootstrapBrokerCandidateRecord>, String> {
-    let response = gloo_net::http::Request::get(&candidates_endpoint(base_url))
-        .send()
-        .await
-        .map_err(|error| format!("broker candidate request failed: {error}"))?;
+    let request = gloo_net::http::Request::get(&candidates_endpoint(base_url));
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(error) if endpoint_is_loopback(base_url) => return Ok(Vec::new()),
+        Err(error) => return Err(format!("broker candidate request failed: {error}")),
+    };
     response
         .json::<Vec<BootstrapBrokerCandidateRecord>>()
         .await
@@ -675,10 +678,12 @@ pub async fn take_remote_invitations(
     base_url: &str,
     authority_id: &str,
 ) -> Result<Vec<String>, String> {
-    let response = gloo_net::http::Request::get(&invitations_endpoint(base_url, authority_id))
-        .send()
-        .await
-        .map_err(|error| format!("broker invitation request failed: {error}"))?;
+    let request = gloo_net::http::Request::get(&invitations_endpoint(base_url, authority_id));
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(error) if endpoint_is_loopback(base_url) => return Ok(Vec::new()),
+        Err(error) => return Err(format!("broker invitation request failed: {error}")),
+    };
     response
         .json::<Vec<String>>()
         .await

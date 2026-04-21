@@ -51,6 +51,8 @@ pub mod effects;
 pub mod persistent;
 pub mod prelude;
 pub mod pure;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod wire;
 
 // Re-export effect types

@@ -1,3 +1,4 @@
+use super::error_boundary::bridge_internal;
 use super::{require_rendezvous_service, service_unavailable, AgentRuntimeBridge};
 use crate::runtime::services::bootstrap_broker::endpoint_is_loopback;
 use crate::runtime::system::register_bootstrap_candidate_with;
@@ -47,7 +48,7 @@ pub(super) async fn trigger_discovery(
     rendezvous
         .trigger_discovery()
         .await
-        .map_err(|e| IntentError::internal_error(format!("Failed to trigger discovery: {}", e)))
+        .map_err(|e| bridge_internal("Trigger discovery failed", e))
 }
 
 pub(super) async fn get_bootstrap_candidates(
@@ -69,11 +70,7 @@ pub(super) async fn get_bootstrap_candidates(
     let broker_candidates = rendezvous
         .list_bootstrap_broker_candidates()
         .await
-        .map_err(|error| {
-            IntentError::internal_error(format!(
-                "Failed to list bootstrap broker candidates: {error}"
-            ))
-        })?;
+        .map_err(|error| bridge_internal("List bootstrap broker candidates failed", error))?;
     candidates.extend(broker_candidates.into_iter().filter_map(|candidate| {
         Some(BootstrapCandidateInfo {
             authority_id: candidate.authority_id()?,
@@ -96,18 +93,11 @@ pub(super) async fn send_bootstrap_invitation(
         BootstrapCandidateOrigin::Lan => rendezvous
             .send_lan_invitation(&peer.authority_id, &peer.address, invitation_code)
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to send LAN invitation: {}", e))
-            }),
+            .map_err(|e| bridge_internal("Send LAN invitation failed", e)),
         BootstrapCandidateOrigin::LocalBroker | BootstrapCandidateOrigin::LanBroker => rendezvous
             .send_bootstrap_broker_invitation(peer.authority_id, invitation_code)
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to send bootstrap broker invitation: {}",
-                    e
-                ))
-            }),
+            .map_err(|e| bridge_internal("Send bootstrap broker invitation failed", e)),
     }
 }
 
@@ -123,9 +113,5 @@ pub(super) async fn refresh_bootstrap_candidate_registration(
 
     register_bootstrap_candidate_with(rendezvous, lan_transport.as_ref())
         .await
-        .map_err(|error| {
-            IntentError::internal_error(format!(
-                "Failed to refresh bootstrap candidate registration: {error}"
-            ))
-        })
+        .map_err(|error| bridge_internal("Refresh bootstrap candidate registration failed", error))
 }

@@ -8,7 +8,6 @@ use aura_core::types::scope::{AuthorityOp, ContextOp, ResourceScope};
 use aura_core::types::Epoch;
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{
-    hash::hash,
     semilattice::JoinSemilattice,
     types::identifiers::{AuthorityId, ContextId},
     AuraError, FactValue, Journal,
@@ -22,70 +21,6 @@ const DEFAULT_FLOW_BUDGET_LIMIT: u64 = 1024;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredJournal {
     journal: Journal,
-}
-
-fn derive_context_id(label: &[u8], parts: &[&[u8]]) -> ContextId {
-    let mut input = Vec::new();
-    input.extend_from_slice(label);
-    for part in parts {
-        input.extend_from_slice(part);
-    }
-    ContextId::new_from_entropy(hash(&input))
-}
-
-fn protocol_context_id(protocol: &crate::fact::ProtocolRelationalFact) -> ContextId {
-    use crate::fact::ProtocolRelationalFact::*;
-    match protocol {
-        GuardianBinding {
-            account_id,
-            guardian_id,
-            ..
-        } => derive_context_id(
-            b"guardian-binding",
-            &[&account_id.to_bytes(), &guardian_id.to_bytes()],
-        ),
-        RecoveryGrant {
-            account_id,
-            guardian_id,
-            grant_hash,
-        } => derive_context_id(
-            b"recovery-grant",
-            &[
-                &account_id.to_bytes(),
-                &guardian_id.to_bytes(),
-                grant_hash.as_bytes(),
-            ],
-        ),
-        Consensus {
-            consensus_id,
-            operation_hash,
-            ..
-        } => derive_context_id(
-            b"consensus",
-            &[consensus_id.as_bytes(), operation_hash.as_bytes()],
-        ),
-        AmpChannelCheckpoint(checkpoint) => checkpoint.context,
-        AmpProposedChannelEpochBump(proposed) => proposed.context,
-        AmpCommittedChannelEpochBump(committed) => committed.context,
-        AmpChannelPolicy(policy) => policy.context,
-        AmpChannelBootstrap(bootstrap) => bootstrap.context,
-        LeakageEvent(event) => event.context_id,
-        SessionDelegation(event) => event.context_id,
-        DkgTranscriptCommit(commit) => commit.context,
-        ConvergenceCert(cert) => cert.context,
-        ReversionFact(reversion) => reversion.context,
-        RotateFact(rotate) => rotate.context,
-    }
-}
-
-fn relational_context_id(rel: &crate::fact::RelationalFact) -> ContextId {
-    use crate::fact::RelationalFact::*;
-    match rel {
-        Protocol(protocol) => protocol_context_id(protocol),
-        // Generic handles all domain-specific facts (ChatFact, InvitationFact, ContactFact)
-        // via DomainFact::to_generic() - context_id is always stored in the binding
-        Generic { context_id, .. } => *context_id,
-    }
 }
 
 /// Domain-specific journal handler that persists state via StorageEffects
@@ -139,27 +74,6 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
         self
     }
 
-    fn with_authorization_if(mut self, auth: Option<(Vec<u8>, A)>) -> Self {
-        if let Some((token_data, auth_effects)) = auth {
-            self = self.with_authorization(token_data, auth_effects);
-        }
-        self
-    }
-
-    fn with_verifying_key_if(mut self, verifying_key: Option<Vec<u8>>) -> Self {
-        if let Some(pk) = verifying_key {
-            self = self.with_verifying_key(pk);
-        }
-        self
-    }
-
-    fn with_fact_registry_if(mut self, registry: Option<FactRegistry>) -> Self {
-        if let Some(reg) = registry {
-            self = self.with_fact_registry(reg);
-        }
-        self
-    }
-
     /// Get a reference to the fact registry if one is attached.
     pub fn fact_registry(&self) -> Option<&FactRegistry> {
         self.fact_registry.as_ref()
@@ -172,13 +86,10 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
                     authority_id: self.authority_id,
                     operation: AuthorityOp::UpdateTree,
                 },
-                crate::fact::FactContent::Relational(rel) => {
-                    let context_id = relational_context_id(rel);
-                    ResourceScope::Context {
-                        context_id,
-                        operation: ContextOp::UpdateParams,
-                    }
-                }
+                crate::fact::FactContent::Relational(rel) => ResourceScope::Context {
+                    context_id: rel.context_id(),
+                    operation: ContextOp::UpdateParams,
+                },
                 crate::fact::FactContent::Snapshot(_) => ResourceScope::Authority {
                     authority_id: self.authority_id,
                     operation: AuthorityOp::Rotate,
@@ -236,31 +147,24 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
         Ok(())
     }
 
-    fn extract_fact_contents(&self, journal: &Journal) -> Vec<crate::fact::FactContent> {
-        let mut contents = Vec::new();
-        for (_key, value) in journal.read_facts().iter() {
-            match value {
-                FactValue::Bytes(bytes) => {
-                    if let Ok(content) = serde_json::from_slice(bytes) {
-                        contents.push(content);
-                    }
-                }
-                FactValue::String(text) => {
-                    if let Ok(content) = serde_json::from_str(text) {
-                        contents.push(content);
-                    }
-                }
-                FactValue::Nested(nested) => {
-                    if let Ok(bytes) = serde_json::to_vec(nested) {
-                        if let Ok(content) = serde_json::from_slice(&bytes) {
-                            contents.push(content);
-                        }
-                    }
-                }
-                _ => {}
-            }
+    fn decode_fact_content(value: &FactValue) -> Option<crate::fact::FactContent> {
+        match value {
+            FactValue::Bytes(bytes) => serde_json::from_slice(bytes).ok(),
+            FactValue::String(text) => serde_json::from_str(text).ok(),
+            FactValue::Nested(nested) => serde_json::to_vec(nested)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok()),
+            _ => None,
         }
-        contents
+    }
+
+    fn extract_fact_contents(&self, journal: &Journal) -> Vec<crate::fact::FactContent> {
+        journal
+            .read_facts()
+            .iter()
+            .map(|(_key, value)| value)
+            .filter_map(Self::decode_fact_content)
+            .collect()
     }
 
     fn journal_key(&self) -> &'static str {
@@ -421,45 +325,16 @@ impl JournalHandlerFactory {
         verifying_key: Option<Vec<u8>>,
         fact_registry: Option<FactRegistry>,
     ) -> JournalHandler<C, S, A> {
-        JournalHandler::with_authority(authority_id, crypto, storage)
-            .with_authorization_if(authorization)
-            .with_verifying_key_if(verifying_key)
-            .with_fact_registry_if(fact_registry)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use aura_core::domain::content::Hash32;
-    use aura_core::types::flow::{FlowBudget, FlowCost, FlowNonce, Receipt, ReceiptSig};
-    use aura_core::types::identifiers::{AuthorityId, ContextId};
-    use aura_core::types::Epoch;
-
-    #[test]
-    fn flow_budget_charge_uses_cost_not_nonce() {
-        let current = FlowBudget {
-            limit: 100,
-            spent: 20,
-            epoch: Epoch::new(1),
-        };
-        let receipt = Receipt::new(
-            ContextId::new_from_entropy([1u8; 32]),
-            AuthorityId::new_from_entropy([2u8; 32]),
-            AuthorityId::new_from_entropy([3u8; 32]),
-            Epoch::new(2),
-            FlowCost::new(7),
-            FlowNonce::new(99),
-            Hash32::zero(),
-            ReceiptSig::new(Vec::new()).unwrap(),
-        );
-
-        let updated = FlowBudget {
-            limit: current.limit,
-            spent: current.spent.saturating_add(receipt.cost.value() as u64),
-            epoch: receipt.epoch,
-        };
-        assert_eq!(updated.spent, 27);
-        assert_eq!(updated.limit, 100);
-        assert_eq!(updated.epoch, receipt.epoch);
+        let mut handler = JournalHandler::with_authority(authority_id, crypto, storage);
+        if let Some((token_data, auth_effects)) = authorization {
+            handler = handler.with_authorization(token_data, auth_effects);
+        }
+        if let Some(pk) = verifying_key {
+            handler = handler.with_verifying_key(pk);
+        }
+        if let Some(registry) = fact_registry {
+            handler = handler.with_fact_registry(registry);
+        }
+        handler
     }
 }

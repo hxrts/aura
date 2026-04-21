@@ -10,6 +10,9 @@ build_profile="${AURA_HARNESS_WEB_BUILD_PROFILE:-release}"
 dioxus_config="$web_root/Dioxus.toml"
 config_backup=""
 
+source "$script_dir/log-bootstrap.sh"
+aura_web_redirect_logs "$repo_root" "$repo_root/artifacts/aura-web/serve-static-${port}.log"
+
 restore_dioxus_config() {
     if [[ -n "$config_backup" && -f "$config_backup" ]]; then
         cp "$config_backup" "$dioxus_config"
@@ -43,9 +46,13 @@ web_sources_stale() {
     if [[ ! -f "$build_output" ]]; then
         return 0
     fi
-    local newest_src
-    newest_src="$(find "$repo_root/crates/aura-web/src" "$repo_root/crates/aura-ui/src" "$repo_root/crates/aura-app/src" -name '*.rs' -newer "$build_output" -print -quit 2>/dev/null || true)"
-    [[ -n "$newest_src" ]]
+    local newest_src=""
+    newest_src="$(find "$repo_root/crates" -path '*/src/*' -name '*.rs' -newer "$build_output" -print -quit 2>/dev/null || true)"
+    if [[ -n "$newest_src" ]]; then
+        return 0
+    fi
+    newest_src="$(find "$repo_root/crates" -name 'Cargo.toml' -newer "$build_output" -print -quit 2>/dev/null || true)"
+    [[ -n "$newest_src" || "$repo_root/Cargo.lock" -nt "$build_output" || "$repo_root/Cargo.toml" -nt "$build_output" ]]
 }
 
 for profile in debug release; do

@@ -1,6 +1,6 @@
 //! Property tests for access-level mapping, override rules, and storage allocation bounds.
 
-use aura_core::time::{PhysicalTime, TimeStamp};
+use crate::support::test_timestamp;
 use aura_core::types::identifiers::AuthorityId;
 use aura_social::{
     determine_default_access_level, AccessLevel, AccessOverrideFact, Home, HomeFact, HomeId,
@@ -24,13 +24,6 @@ fn authority_id(seed: u8) -> AuthorityId {
     let mut bytes = [0u8; 32];
     bytes[0] = seed;
     AuthorityId::new_from_entropy(bytes)
-}
-
-fn test_timestamp() -> TimeStamp {
-    TimeStamp::PhysicalClock(PhysicalTime {
-        ts_ms: 1_700_000_000_000,
-        uncertainty: None,
-    })
 }
 
 fn access_level_strategy() -> impl Strategy<Value = AccessLevel> {

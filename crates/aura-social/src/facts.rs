@@ -1075,6 +1075,13 @@ impl SocialFact {
     /// Default storage allocation for members: 200 KB
     pub const DEFAULT_MEMBER_STORAGE: u64 = 200 * 1024;
 
+    fn physical_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     /// Get the timestamp in milliseconds
     pub fn timestamp_ms(&self) -> u64 {
         match self {
@@ -1219,10 +1226,7 @@ impl SocialFact {
         Self::HomeCreated {
             home_id,
             context_id,
-            created_at: PhysicalTime {
-                ts_ms: created_at_ms,
-                uncertainty: None,
-            },
+            created_at: Self::physical_time(created_at_ms),
             creator_id,
             name,
             storage_limit: Self::DEFAULT_BLOCK_STORAGE_LIMIT,
@@ -1241,10 +1245,7 @@ impl SocialFact {
             authority_id,
             home_id,
             context_id,
-            joined_at: PhysicalTime {
-                ts_ms: joined_at_ms,
-                uncertainty: None,
-            },
+            joined_at: Self::physical_time(joined_at_ms),
             name,
             storage_allocated: Self::DEFAULT_MEMBER_STORAGE,
         }
@@ -1261,10 +1262,7 @@ impl SocialFact {
             authority_id,
             home_id,
             context_id,
-            left_at: PhysicalTime {
-                ts_ms: left_at_ms,
-                uncertainty: None,
-            },
+            left_at: Self::physical_time(left_at_ms),
         }
     }
 
@@ -1281,10 +1279,7 @@ impl SocialFact {
             context_id,
             used_bytes,
             total_bytes,
-            updated_at: PhysicalTime {
-                ts_ms: updated_at_ms,
-                uncertainty: None,
-            },
+            updated_at: Self::physical_time(updated_at_ms),
         }
     }
 
@@ -1301,10 +1296,7 @@ impl SocialFact {
             home_id,
             context_id,
             access_level,
-            set_at: PhysicalTime {
-                ts_ms: set_at_ms,
-                uncertainty: None,
-            },
+            set_at: Self::physical_time(set_at_ms),
         }
     }
 
@@ -1323,10 +1315,7 @@ impl SocialFact {
             full_caps,
             partial_caps,
             limited_caps,
-            configured_at: PhysicalTime {
-                ts_ms: configured_at_ms,
-                uncertainty: None,
-            },
+            configured_at: Self::physical_time(configured_at_ms),
         }
     }
 
@@ -1340,10 +1329,7 @@ impl SocialFact {
         Self::NeighborhoodReentryPublished {
             neighborhood_id,
             context_id,
-            published_at: PhysicalTime {
-                ts_ms: published_at_ms,
-                uncertainty: None,
-            },
+            published_at: Self::physical_time(published_at_ms),
             hint,
         }
     }

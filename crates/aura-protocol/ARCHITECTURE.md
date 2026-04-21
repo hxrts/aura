@@ -18,6 +18,7 @@ Coordinate multi-party protocols and guard-chain enforcement. This crate provide
 | Direction | Crate | What |
 |-----------|-------|------|
 | Down | `aura-core` | Effect trait definitions, domain types |
+| Down | `aura-macros` | Declaration and derive macros |
 | In | Effect trait implementations | Assembled by higher layers (agent/simulator) |
 | In | Choreographic annotations, session types | Protocol structure |
 | In | Journal and authorization facts | From domain crates |

@@ -78,6 +78,9 @@ pub mod guardian_auth_relational;
 /// Distributed Key Derivation (DKD) protocol implementation
 pub mod dkd;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 /// Operation category map (A/B/C) for protocol gating and review.
 ///
 /// Note: Categories should be reviewed against `docs/109_operation_categories.md`.

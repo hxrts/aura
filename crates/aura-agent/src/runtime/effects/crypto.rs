@@ -349,7 +349,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         // Bootstrap Biscuit authorization tokens
         self.bootstrap_biscuit_tokens(authority).await?;
 
-        Ok(signing_keys.public_key_package)
+        let (_key_packages, public_key_package, _mode) = signing_keys.into_parts();
+        Ok(public_key_package)
     }
 
     async fn sign(
@@ -538,9 +539,10 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
                 .handler()
                 .generate_signing_keys(new_threshold, new_total_participants)
                 .await?;
+            let (key_packages, public_key_package, _mode) = result.into_parts();
             FrostKeyGenResult {
-                key_packages: result.key_packages,
-                public_key_package: result.public_key_package,
+                key_packages,
+                public_key_package,
             }
         };
 
@@ -583,11 +585,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         )
         .await?;
 
-        Ok((
-            new_epoch,
-            key_result.key_packages,
-            key_result.public_key_package,
-        ))
+        let (key_packages, public_key_package) = key_result.into_parts();
+        Ok((new_epoch, key_packages, public_key_package))
     }
 
     async fn commit_key_rotation(

@@ -21,6 +21,7 @@ Synchronization protocol providing fact exchange, merkle verification, anti-entr
 | Incoming | aura-core | Effect traits, identifiers, session types |
 | Incoming | aura-journal | Fact infrastructure, commitment trees |
 | Incoming | lower-layer protocols | Transport coordination |
+| Incoming | aura-macros | Test harness and choreography macros |
 | Outgoing | — | `SyncCore` types for synchronization state |
 | Outgoing | — | `SyncProtocol`, `FactSyncProtocol`, `AuthorityJournalSync` for sync flows |
 | Outgoing | — | `MerkleVerifier`, `MerkleComparison`, `VerificationResult` for integrity checks |
@@ -51,6 +52,16 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic replication semantics.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines anti-entropy and integrity guarantees.
+
+### Tracing Convention
+
+Structured tracing is required for sync service and protocol logs.
+
+- Include `authority_id` when the effect/context provider exposes it.
+- Include `peer_id` for peer-scoped sync work.
+- Include `operation_id` for protocol or service phases such as `journal_sync` and `anti_entropy`.
+- Include `context_id` only when a real typed context is already in scope; do not fabricate one from weaker identifiers or log-only strings.
+- Prefer typed fields over interpolated message text so distributed-node log correlation stays queryable.
 
 ### InvariantSyncTheoremPackAdmission
 

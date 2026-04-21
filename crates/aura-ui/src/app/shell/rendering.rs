@@ -47,6 +47,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let render_tick_value = render_tick();
     let mut last_toast_key = use_signal(|| None::<String>);
     let mut last_chat_selection_key = use_signal(|| None::<String>);
+    let mut invite_modal_pending_signature = use_signal(|| None::<String>);
     let runtime_bridge_started = use_signal(|| false);
     let neighborhood_runtime = use_signal(NeighborhoodRuntimeView::default);
     let chat_runtime = use_signal(ChatRuntimeView::default);
@@ -163,6 +164,54 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
     let cancel_add_device_ceremony_id = shell_state.cancel_add_device_ceremony_id.clone();
     let rerender = schedule_update();
     controller.set_rerender_callback(rerender.clone());
+    let controller_for_invite_modal_watch = controller.clone();
+    let app_core_for_invite_modal_watch = controller.app_core().clone();
+    let rerender_for_invite_modal_watch = rerender.clone();
+    use_effect(move || {
+        let _ = render_tick();
+        let invite_signature = controller_for_invite_modal_watch
+            .ui_model()
+            .and_then(|model| {
+                matches!(model.modal_state(), Some(ModalState::CreateInvitation))
+                    .then(|| model.create_invitation_request_signature())
+                    .flatten()
+            });
+        let Some(signature) = invite_signature else {
+            invite_modal_pending_signature.set(None);
+            return;
+        };
+        if controller_for_invite_modal_watch
+            .ui_model()
+            .and_then(|model| model.current_invitation_code())
+            .is_some()
+        {
+            invite_modal_pending_signature.set(Some(signature));
+            return;
+        }
+        if invite_modal_pending_signature().as_deref() == Some(signature.as_str()) {
+            return;
+        }
+        invite_modal_pending_signature.set(Some(signature.clone()));
+        let controller = controller_for_invite_modal_watch.clone();
+        let app_core = app_core_for_invite_modal_watch.clone();
+        let rerender = rerender_for_invite_modal_watch.clone();
+        spawn_ui(async move {
+            let _ = time_workflows::sleep_ms(&app_core, 300).await;
+            let Some(model) = controller.ui_model() else {
+                return;
+            };
+            if !matches!(model.modal_state(), Some(ModalState::CreateInvitation)) {
+                return;
+            }
+            if model.create_invitation_request_signature().as_deref() != Some(signature.as_str()) {
+                return;
+            }
+            if model.current_invitation_code().is_some() {
+                return;
+            }
+            launch_create_invitation_workflow(controller.clone(), rerender.clone());
+        });
+    });
     let keydown_rerender = rerender.clone();
     let cancel_rerender = rerender.clone();
     let dedicated_primary_rerender = rerender.clone();
@@ -525,6 +574,27 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                                     controller.toggle_selectable_item(index);
                                     render_tick.set(render_tick() + 1);
                                 }
+                            },
+                            on_footer_action: {
+                                let controller = controller.clone();
+                                move |index: usize| {
+                                    if index == 0
+                                        && matches!(modal_state, Some(ModalState::CreateInvitation))
+                                    {
+                                        if let Some(code) = controller
+                                            .ui_model()
+                                            .and_then(|model| model.current_invitation_code())
+                                        {
+                                            controller.write_clipboard(&code);
+                                            controller.info_toast(
+                                                "Invitation code copied to clipboard",
+                                            );
+                                        } else {
+                                            controller.info_toast("Create an invitation first");
+                                        }
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                }
                             }
                         }
                         }
@@ -689,6 +759,27 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             move |index: usize| {
                                 controller.toggle_selectable_item(index);
                                 render_tick.set(render_tick() + 1);
+                            }
+                        },
+                        on_footer_action: {
+                            let controller = controller.clone();
+                            move |index: usize| {
+                                if index == 0
+                                    && matches!(modal_state, Some(ModalState::CreateInvitation))
+                                {
+                                    if let Some(code) = controller
+                                        .ui_model()
+                                        .and_then(|model| model.current_invitation_code())
+                                    {
+                                        controller.write_clipboard(&code);
+                                        controller.info_toast(
+                                            "Invitation code copied to clipboard",
+                                        );
+                                    } else {
+                                        controller.info_toast("Create an invitation first");
+                                    }
+                                    render_tick.set(render_tick() + 1);
+                                }
                             }
                         }
                         }

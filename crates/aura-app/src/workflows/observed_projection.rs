@@ -4,6 +4,10 @@
 //! ReactiveHandler signals (for app-level subscriptions) to ensure consistent
 //! state across both signal systems without pretending to be authoritative
 //! workflow primitives.
+#![allow(dead_code)]
+// These helpers are consumed from sibling workflow modules and unit-test-only
+// paths; strict all-target dead-code analysis does not model that usage
+// consistently across the workspace's clippy lanes.
 
 use std::sync::Arc;
 
@@ -50,14 +54,12 @@ where
     emit_signal(app_core, signal, state, signal_name).await
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn homes_signal_snapshot(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<HomesState, AuraError> {
     read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn replace_chat_projection_observed(
     app_core: &Arc<RwLock<AppCore>>,
     state: ChatState,
@@ -75,7 +77,6 @@ pub async fn replace_chat_projection_observed(
     .await
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn replace_recovery_projection_observed(
     app_core: &Arc<RwLock<AppCore>>,
     state: RecoveryState,
@@ -93,7 +94,6 @@ pub async fn replace_recovery_projection_observed(
     .await
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn replace_homes_projection_observed(
     app_core: &Arc<RwLock<AppCore>>,
     state: HomesState,
@@ -111,7 +111,6 @@ pub async fn replace_homes_projection_observed(
     .await
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn replace_contacts_projection_observed(
     app_core: &Arc<RwLock<AppCore>>,
     state: ContactsState,
@@ -129,7 +128,6 @@ pub async fn replace_contacts_projection_observed(
     .await
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn replace_neighborhood_projection_observed(
     app_core: &Arc<RwLock<AppCore>>,
     state: NeighborhoodState,
@@ -154,7 +152,6 @@ pub async fn replace_neighborhood_projection_observed(
 /// 2. CHAT_SIGNAL (for ReactiveEffects subscribers)
 ///
 /// OWNERSHIP: observed-display-update
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn update_chat_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut ChatState) -> T,
@@ -172,7 +169,6 @@ pub async fn update_chat_projection_observed<T>(
 
 /// Apply an authoritative chat fact to the local chat projection through the
 /// sanctioned chat reducer, then mirror the reduced state into `CHAT_SIGNAL`.
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn reduce_chat_fact_observed(
     app_core: &Arc<RwLock<AppCore>>,
     fact: &ChatFact,
@@ -201,19 +197,16 @@ pub async fn reduce_chat_fact_observed(
     Ok(())
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 fn parse_channel_id(raw: &str) -> Result<ChannelId, AuraError> {
     raw.parse::<ChannelId>()
         .map_err(|_| AuraError::invalid(format!("Invalid channel ID in chat delta: {raw}")))
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 fn parse_authority_id(raw: &str) -> Result<AuthorityId, AuraError> {
     parse_workflow_authority_id(raw)
         .map_err(|_| AuraError::invalid(format!("Invalid authority ID in chat delta: {raw}")))
 }
 
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 #[allow(clippy::manual_unwrap_or_default)]
 fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(), AuraError> {
     match delta {
@@ -427,7 +420,6 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
 /// 2. RECOVERY_SIGNAL (for ReactiveEffects subscribers)
 ///
 /// OWNERSHIP: observed-display-update
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn update_recovery_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut RecoveryState) -> T,
@@ -451,7 +443,6 @@ pub async fn update_recovery_projection_observed<T>(
 /// 2. CONTACTS_SIGNAL (for ReactiveEffects subscribers)
 ///
 /// OWNERSHIP: observed-display-update
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn update_contacts_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut ContactsState) -> T,
@@ -474,7 +465,6 @@ pub async fn update_contacts_projection_observed<T>(
 /// 2. HOMES_SIGNAL (for ReactiveEffects subscribers)
 ///
 /// OWNERSHIP: observed-display-update
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn update_homes_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut HomesState) -> T,
@@ -498,7 +488,6 @@ pub async fn update_homes_projection_observed<T>(
 /// 2. NEIGHBORHOOD_SIGNAL (for ReactiveEffects subscribers)
 ///
 /// OWNERSHIP: observed-display-update
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn update_neighborhood_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut NeighborhoodState) -> T,

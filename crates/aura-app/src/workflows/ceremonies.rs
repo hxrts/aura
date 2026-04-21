@@ -9,12 +9,13 @@ use std::sync::Arc;
 use async_lock::RwLock;
 
 use super::error::{ceremony_op, WorkflowError};
+use crate::core::IntentError;
 use crate::runtime_bridge::KeyRotationCeremonyStatus;
 use crate::ui_contract::{
     OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
     SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
 };
-use crate::workflows::runtime::timeout_runtime_call;
+use crate::workflows::runtime::{timeout_runtime_call, workflow_retry_policy};
 use crate::workflows::semantic_facts::{
     issue_device_enrollment_started_proof, SemanticWorkflowOwner,
 };
@@ -25,7 +26,198 @@ use aura_core::{AttemptBudget, AuraError, OperationContext, TraceContext};
 use std::future::Future;
 use std::time::Duration;
 
-const CEREMONY_RUNTIME_TIMEOUT: Duration = Duration::from_millis(30_000);
+const DEVICE_ENROLLMENT_START_TIMEOUT: Duration = Duration::from_millis(30_000);
+const DEVICE_REMOVAL_START_TIMEOUT: Duration = Duration::from_millis(20_000);
+
+fn ceremony_start_timeout(kind: crate::runtime_bridge::CeremonyKind) -> Duration {
+    match kind {
+        crate::runtime_bridge::CeremonyKind::DeviceEnrollment => DEVICE_ENROLLMENT_START_TIMEOUT,
+        crate::runtime_bridge::CeremonyKind::DeviceRemoval => DEVICE_REMOVAL_START_TIMEOUT,
+        crate::runtime_bridge::CeremonyKind::GuardianRotation
+        | crate::runtime_bridge::CeremonyKind::DeviceRotation => Duration::from_secs(30),
+        crate::runtime_bridge::CeremonyKind::Recovery
+        | crate::runtime_bridge::CeremonyKind::OtaActivation => Duration::from_secs(45),
+        crate::runtime_bridge::CeremonyKind::Invitation
+        | crate::runtime_bridge::CeremonyKind::RendezvousSecureChannel => Duration::from_secs(15),
+    }
+}
+
+fn ceremony_monitor_timeout(kind: crate::runtime_bridge::CeremonyKind) -> Duration {
+    match kind {
+        crate::runtime_bridge::CeremonyKind::GuardianRotation
+        | crate::runtime_bridge::CeremonyKind::DeviceRotation => Duration::from_secs(60),
+        crate::runtime_bridge::CeremonyKind::DeviceEnrollment
+        | crate::runtime_bridge::CeremonyKind::DeviceRemoval => Duration::from_secs(45),
+        crate::runtime_bridge::CeremonyKind::Recovery
+        | crate::runtime_bridge::CeremonyKind::OtaActivation => Duration::from_secs(90),
+        crate::runtime_bridge::CeremonyKind::Invitation
+        | crate::runtime_bridge::CeremonyKind::RendezvousSecureChannel => Duration::from_secs(20),
+    }
+}
+
+fn ceremony_monitor_attempts(kind: crate::runtime_bridge::CeremonyKind, interval: Duration) -> u32 {
+    let interval_ms = interval.as_millis().max(1);
+    let window_ms = ceremony_monitor_timeout(kind).as_millis();
+    let attempts = window_ms.div_ceil(interval_ms).saturating_add(2);
+    u32::try_from(attempts).unwrap_or(u32::MAX)
+}
+
+fn ceremony_start_retry_policy(
+    kind: crate::runtime_bridge::CeremonyKind,
+) -> Result<aura_core::RetryBudgetPolicy, AuraError> {
+    let (attempts, initial_delay, max_delay) = match kind {
+        crate::runtime_bridge::CeremonyKind::DeviceEnrollment => {
+            (4, Duration::from_millis(250), Duration::from_secs(1))
+        }
+        crate::runtime_bridge::CeremonyKind::DeviceRemoval => {
+            (3, Duration::from_millis(150), Duration::from_millis(750))
+        }
+        _ => (3, Duration::from_millis(200), Duration::from_millis(750)),
+    };
+    workflow_retry_policy(attempts, initial_delay, max_delay).map_err(AuraError::from)
+}
+
+fn retryable_ceremony_intent_error(error: &IntentError) -> bool {
+    matches!(
+        error,
+        IntentError::NetworkError { .. } | IntentError::ServiceError { .. }
+    )
+}
+
+async fn start_ceremony_with_retry<T, F, Fut>(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    kind: crate::runtime_bridge::CeremonyKind,
+    operation: &'static str,
+    stage: &'static str,
+    mut call: F,
+) -> Result<Result<T, IntentError>, AuraError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, IntentError>>,
+{
+    let policy = ceremony_start_retry_policy(kind)?;
+    let mut attempts = AttemptBudget::new(policy.max_attempts());
+
+    loop {
+        let attempt = attempts.record_attempt().map_err(AuraError::from)?;
+        match timeout_runtime_call(
+            runtime,
+            operation,
+            stage,
+            ceremony_start_timeout(kind),
+            &mut call,
+        )
+        .await
+        {
+            Ok(Ok(value)) => return Ok(Ok(value)),
+            Ok(Err(error)) if retryable_ceremony_intent_error(&error) && attempts.can_attempt() => {
+                let delay_ms = u64::try_from(policy.delay_for_attempt(attempt).as_millis())
+                    .unwrap_or(u64::MAX);
+                runtime.sleep_ms(delay_ms).await;
+            }
+            Ok(Err(error)) => return Ok(Err(error)),
+            Err(error) if error.is_retryable() && attempts.can_attempt() => {
+                let delay_ms = u64::try_from(policy.delay_for_attempt(attempt).as_millis())
+                    .unwrap_or(u64::MAX);
+                runtime.sleep_ms(delay_ms).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+async fn start_device_enrollment_from_runtime(
+    runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    nickname_suggestion: String,
+    invitee_authority_id: AuthorityId,
+) -> Result<Result<crate::runtime_bridge::DeviceEnrollmentStart, IntentError>, AuraError> {
+    let retry_runtime = runtime.clone();
+    start_ceremony_with_retry(
+        &runtime,
+        crate::runtime_bridge::CeremonyKind::DeviceEnrollment,
+        "start_device_enrollment_ceremony",
+        "initiate_device_enrollment_ceremony",
+        move || {
+            let runtime = retry_runtime.clone();
+            let nickname_suggestion = nickname_suggestion.clone();
+            async move {
+                runtime
+                    .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
+                    .await
+            }
+        },
+    )
+    .await
+}
+
+async fn start_device_removal_from_runtime(
+    runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    device_id: String,
+) -> Result<Result<CeremonyId, IntentError>, AuraError> {
+    let retry_runtime = runtime.clone();
+    start_ceremony_with_retry(
+        &runtime,
+        crate::runtime_bridge::CeremonyKind::DeviceRemoval,
+        "start_device_removal_ceremony",
+        "initiate_device_removal_ceremony",
+        move || {
+            let runtime = retry_runtime.clone();
+            let device_id = device_id.clone();
+            async move { runtime.initiate_device_removal_ceremony(device_id).await }
+        },
+    )
+    .await
+}
+
+async fn start_guardian_ceremony_from_runtime(
+    runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    threshold_k: FrostThreshold,
+    total_n: u16,
+    guardian_ids: Vec<AuthorityId>,
+) -> Result<Result<CeremonyId, IntentError>, AuraError> {
+    let retry_runtime = runtime.clone();
+    start_ceremony_with_retry(
+        &runtime,
+        crate::runtime_bridge::CeremonyKind::GuardianRotation,
+        "start_guardian_ceremony",
+        "initiate_guardian_ceremony",
+        move || {
+            let runtime = retry_runtime.clone();
+            let guardian_ids = guardian_ids.clone();
+            async move {
+                runtime
+                    .initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
+                    .await
+            }
+        },
+    )
+    .await
+}
+
+async fn start_device_threshold_ceremony_from_runtime(
+    runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    threshold_k: FrostThreshold,
+    total_n: u16,
+    device_ids: Vec<String>,
+) -> Result<Result<CeremonyId, IntentError>, AuraError> {
+    let retry_runtime = runtime.clone();
+    start_ceremony_with_retry(
+        &runtime,
+        crate::runtime_bridge::CeremonyKind::DeviceRotation,
+        "start_device_threshold_ceremony",
+        "initiate_device_threshold_ceremony",
+        move || {
+            let runtime = retry_runtime.clone();
+            let device_ids = device_ids.clone();
+            async move {
+                runtime
+                    .initiate_device_threshold_ceremony(threshold_k, total_n, &device_ids)
+                    .await
+            }
+        },
+    )
+    .await
+}
 
 /// Move-owned ceremony handle.
 ///
@@ -109,9 +301,14 @@ pub async fn start_guardian_ceremony(
     total_n: u16,
     guardian_ids: Vec<AuthorityId>,
 ) -> Result<CeremonyHandle, AuraError> {
-    let core = app_core.read().await;
-    core.initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
-        .await
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .cloned()
+            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
+    };
+    start_guardian_ceremony_from_runtime(runtime, threshold_k, total_n, guardian_ids)
+        .await?
         .map(|ceremony_id| {
             CeremonyHandle::new(
                 ceremony_id,
@@ -128,9 +325,14 @@ pub async fn start_device_threshold_ceremony(
     total_n: u16,
     device_ids: Vec<String>,
 ) -> Result<CeremonyHandle, AuraError> {
-    let core = app_core.read().await;
-    core.initiate_device_threshold_ceremony(threshold_k, total_n, &device_ids)
-        .await
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .cloned()
+            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
+    };
+    start_device_threshold_ceremony_from_runtime(runtime, threshold_k, total_n, device_ids)
+        .await?
         .map(|ceremony_id| {
             CeremonyHandle::new(
                 ceremony_id,
@@ -201,12 +403,10 @@ async fn start_device_enrollment_ceremony_owned(
             .cloned()
             .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
     };
-    let start = match timeout_runtime_call(
-        &runtime,
-        "start_device_enrollment_ceremony",
-        "initiate_device_enrollment_ceremony",
-        CEREMONY_RUNTIME_TIMEOUT,
-        || runtime.initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id),
+    let start = match start_device_enrollment_from_runtime(
+        runtime,
+        nickname_suggestion,
+        invitee_authority_id,
     )
     .await
     {
@@ -282,21 +482,15 @@ pub async fn start_device_removal_ceremony(
             .cloned()
             .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
     };
-    timeout_runtime_call(
-        &runtime,
-        "start_device_removal_ceremony",
-        "initiate_device_removal_ceremony",
-        CEREMONY_RUNTIME_TIMEOUT,
-        || runtime.initiate_device_removal_ceremony(device_id),
-    )
-    .await?
-    .map(|ceremony_id| {
-        CeremonyHandle::new(
-            ceremony_id,
-            crate::runtime_bridge::CeremonyKind::DeviceRemoval,
-        )
-    })
-    .map_err(|e| ceremony_op("start device removal", e).into())
+    start_device_removal_from_runtime(runtime, device_id)
+        .await?
+        .map(|ceremony_id| {
+            CeremonyHandle::new(
+                ceremony_id,
+                crate::runtime_bridge::CeremonyKind::DeviceRemoval,
+            )
+        })
+        .map_err(|e| ceremony_op("start device removal", e).into())
 }
 
 /// Polling policy for ceremonies.
@@ -317,6 +511,19 @@ impl CeremonyPollPolicy {
         Self {
             interval,
             ..Default::default()
+        }
+    }
+
+    pub fn for_kind(kind: crate::runtime_bridge::CeremonyKind, interval: Duration) -> Self {
+        Self {
+            interval,
+            max_attempts: ceremony_monitor_attempts(kind, interval),
+            rollback_on_failure: matches!(
+                kind,
+                crate::runtime_bridge::CeremonyKind::GuardianRotation
+                    | crate::runtime_bridge::CeremonyKind::DeviceRotation
+            ),
+            refresh_settings_on_complete: true,
         }
     }
 }
@@ -520,7 +727,7 @@ where
     SleepFn: FnMut(Duration) -> SleepFut,
     SleepFut: Future<Output = ()>,
 {
-    let policy = CeremonyPollPolicy::with_interval(poll_interval);
+    let policy = CeremonyPollPolicy::for_kind(handle.kind(), poll_interval);
     let lifecycle = monitor_key_rotation_ceremony_with_policy(
         app_core,
         handle,
@@ -531,4 +738,55 @@ where
     .await?;
 
     Ok(lifecycle.status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ceremony_monitor_policy_scales_by_kind() {
+        let interval = Duration::from_millis(250);
+
+        let enrollment = CeremonyPollPolicy::for_kind(
+            crate::runtime_bridge::CeremonyKind::DeviceEnrollment,
+            interval,
+        );
+        let recovery =
+            CeremonyPollPolicy::for_kind(crate::runtime_bridge::CeremonyKind::Recovery, interval);
+
+        assert_eq!(enrollment.max_attempts, 182);
+        assert_eq!(recovery.max_attempts, 362);
+        assert!(!enrollment.rollback_on_failure);
+        assert!(!recovery.rollback_on_failure);
+    }
+
+    #[test]
+    fn ceremony_start_timeout_is_kind_specific() {
+        assert_eq!(
+            ceremony_start_timeout(crate::runtime_bridge::CeremonyKind::DeviceEnrollment),
+            Duration::from_millis(30_000)
+        );
+        assert_eq!(
+            ceremony_start_timeout(crate::runtime_bridge::CeremonyKind::DeviceRemoval),
+            Duration::from_millis(20_000)
+        );
+        assert_eq!(
+            ceremony_monitor_timeout(crate::runtime_bridge::CeremonyKind::Recovery),
+            Duration::from_secs(90)
+        );
+    }
+
+    #[test]
+    fn only_transient_intent_errors_retry_for_ceremony_start() {
+        assert!(retryable_ceremony_intent_error(
+            &IntentError::network_error("timeout")
+        ));
+        assert!(retryable_ceremony_intent_error(
+            &IntentError::service_error("busy")
+        ));
+        assert!(!retryable_ceremony_intent_error(
+            &IntentError::validation_failed("bad input")
+        ));
+    }
 }

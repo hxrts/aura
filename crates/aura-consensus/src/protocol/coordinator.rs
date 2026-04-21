@@ -62,25 +62,12 @@ impl ConsensusProtocol {
                     if let Some(first_witness) = self.config.witnesses().first() {
                         let guard = SignRequestGuard::new(self.context_id, *first_witness);
                         let guard_result = guard.evaluate(effects).await?;
-
-                        if !guard_result.authorized {
-                            warn!(
-                                consensus_id = %consensus_id,
-                                reason = ?guard_result.denial_reason,
-                                "SignRequest guard denied"
-                            );
-                            return Err(AuraError::permission_denied(
-                                guard_result
-                                    .denial_reason
-                                    .unwrap_or_else(|| "Guard denied SignRequest".to_string()),
-                            ));
-                        }
-
-                        debug!(
-                            consensus_id = %consensus_id,
-                            receipt = ?guard_result.receipt.as_ref().map(|r| r.nonce),
-                            "SignRequest guard authorized"
-                        );
+                        self.require_send_guard_authorized(
+                            consensus_id,
+                            "SignRequest",
+                            "Guard denied SignRequest",
+                            guard_result,
+                        )?;
                     }
 
                     return Ok(Some(ConsensusMessage::SignRequest {
@@ -232,25 +219,12 @@ impl ConsensusProtocol {
         if let Some(first_witness) = self.config.witnesses().first() {
             let guard = ConsensusResultGuard::new(self.context_id, *first_witness);
             let guard_result = guard.evaluate(effects).await?;
-
-            if !guard_result.authorized {
-                warn!(
-                    consensus_id = %consensus_id,
-                    reason = ?guard_result.denial_reason,
-                    "ConsensusResult guard denied"
-                );
-                return Err(AuraError::permission_denied(
-                    guard_result
-                        .denial_reason
-                        .unwrap_or_else(|| "Guard denied ConsensusResult".to_string()),
-                ));
-            }
-
-            debug!(
-                consensus_id = %consensus_id,
-                receipt = ?guard_result.receipt.as_ref().map(|r| r.nonce),
-                "ConsensusResult guard authorized"
-            );
+            self.require_send_guard_authorized(
+                consensus_id,
+                "ConsensusResult",
+                "Guard denied ConsensusResult",
+                guard_result,
+            )?;
         }
 
         Ok(Some(ConsensusMessage::ConsensusResult {

@@ -17,6 +17,17 @@ Compile-time DSL parser for choreographies with Aura-specific annotations. Gener
 | `src/bin/ownership_lints.rs`: Ownership/runtime boundary enforcement lints for `just ci-ownership-policy`, including frontend handoff, best-effort side-effect, and proof-bearing success boundaries | |
 | Validated ownership marker attrs: `authoritative_source`, `strong_reference`, `weak_identifier`, `actor_root` | Unchecked ownership marker comments or ad hoc tags |
 
+### Consolidation Rationale
+
+`aura-macros` intentionally keeps the fact, choreography, effect, and
+ownership macros in one proc-macro crate. A cold-ish local
+`cargo check -p hxrts-aura-macros` measurement on 2026-04-19 completed in
+about 31.5s real time, and the dominant cost was the shared proc-macro /
+Telltale dependency stack rather than crate-local module boundaries. Splitting
+the crate would duplicate version coordination and shared helper maintenance
+without clearly removing that first-build cost, while the current consolidated
+crate is compiled once and then cached across dependents.
+
 ## Dependencies
 
 | Direction | Crate | What |

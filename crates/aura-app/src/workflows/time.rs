@@ -36,7 +36,6 @@ impl From<TimeUnavailable> for AuraError {
 }
 
 /// Resolve current wall-clock time in milliseconds via the runtime bridge.
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn current_time_ms(app_core: &Arc<RwLock<AppCore>>) -> Result<u64, TimeUnavailable> {
     let runtime = require_runtime(app_core)
         .await
@@ -59,7 +58,6 @@ pub async fn current_time_ms(app_core: &Arc<RwLock<AppCore>>) -> Result<u64, Tim
 
 /// Resolve a workflow timestamp using harness parity time when enabled and a
 /// local fallback when no runtime clock is available.
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn local_first_timestamp_ms(
     app_core: &Arc<RwLock<AppCore>>,
     scope: &str,
@@ -75,7 +73,6 @@ pub async fn local_first_timestamp_ms(
 }
 
 /// Sleep through the runtime bridge so callers stay runtime-neutral.
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn sleep_ms(app_core: &Arc<RwLock<AppCore>>, ms: u64) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
     runtime.sleep_ms(ms).await;

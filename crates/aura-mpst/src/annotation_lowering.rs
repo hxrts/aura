@@ -260,6 +260,17 @@ impl SenderAnnotationBlock {
             effects: Vec::new(),
         }
     }
+
+    fn push_effect(&mut self, build: impl FnOnce(RoleId) -> AuraEffect) {
+        self.effects.push(build(self.role.clone()));
+    }
+
+    fn push_default_flow_cost(&mut self) {
+        self.push_effect(|role| AuraEffect::FlowCost {
+            cost: DEFAULT_FLOW_COST,
+            role,
+        });
+    }
 }
 
 fn is_sender_annotation_record(record: &ProtocolAnnotationRecord) -> bool {
@@ -273,10 +284,7 @@ fn flush_sender_annotation_block(
 ) {
     if let Some(mut block) = block.take() {
         if !block.has_explicit_flow_cost {
-            block.effects.push(AuraEffect::FlowCost {
-                cost: DEFAULT_FLOW_COST,
-                role: block.role.clone(),
-            });
+            block.push_default_flow_cost();
         }
         effects.extend(block.effects);
     }
@@ -294,10 +302,7 @@ fn parse_sender_annotation_record(
                     record.value
                 ))
             })?;
-            block.effects.push(AuraEffect::GuardCapability {
-                capability,
-                role: block.role.clone(),
-            });
+            block.push_effect(|role| AuraEffect::GuardCapability { capability, role });
         }
         "flow_cost" => {
             if block.has_explicit_flow_cost {
@@ -306,45 +311,32 @@ fn parse_sender_annotation_record(
                 ));
             }
             let cost = parse_u64_annotation_value("flow_cost", &record.value)?;
-            block.effects.push(AuraEffect::FlowCost {
-                cost,
-                role: block.role.clone(),
-            });
+            block.push_effect(|role| AuraEffect::FlowCost { cost, role });
             block.has_explicit_flow_cost = true;
         }
         "journal_facts" => {
-            block.effects.push(AuraEffect::JournalFacts {
-                facts: record.value.clone(),
-                role: block.role.clone(),
-            });
+            let facts = record.value.clone();
+            block.push_effect(|role| AuraEffect::JournalFacts { facts, role });
         }
         "journal_merge" => {
             if parse_bool_annotation_value("journal_merge", &record.value)? {
-                block.effects.push(AuraEffect::JournalMerge {
-                    role: block.role.clone(),
-                });
+                block.push_effect(|role| AuraEffect::JournalMerge { role });
             }
         }
         "audit_log" => {
-            block.effects.push(AuraEffect::AuditLog {
-                action: record.value.clone(),
-                role: block.role.clone(),
-            });
+            let action = record.value.clone();
+            block.push_effect(|role| AuraEffect::AuditLog { action, role });
         }
         "leak" => {
-            block.effects.push(AuraEffect::Leakage {
-                observers: parse_leak_observers(&record.value)?,
-                role: block.role.clone(),
-            });
+            let observers = parse_leak_observers(&record.value)?;
+            block.push_effect(|role| AuraEffect::Leakage { observers, role });
         }
         "leakage_budget" => {
             parse_leakage_budget_string(&record.value)?;
         }
         "link" => {
-            block.effects.push(AuraEffect::Link {
-                directive: parse_link_directive(&record.value)?,
-                role: block.role.clone(),
-            });
+            let directive = parse_link_directive(&record.value)?;
+            block.push_effect(|role| AuraEffect::Link { directive, role });
         }
         key if is_ignored_upstream_annotation_key(key) => {}
         other => {
@@ -358,16 +350,16 @@ fn parse_sender_annotation_record(
 }
 
 fn parse_u64_annotation_value(key: &str, value: &str) -> Result<u64, AuraExtractionError> {
-    value.parse::<u64>().map_err(|_| {
-        AuraExtractionError::InvalidAnnotationValue(format!("{key} expects an integer literal"))
-    })
+    value
+        .parse::<u64>()
+        .map_err(|_| invalid_annotation_value(format!("{key} expects an integer literal")))
 }
 
 fn parse_bool_annotation_value(key: &str, value: &str) -> Result<bool, AuraExtractionError> {
     match value {
         "true" => Ok(true),
         "false" => Ok(false),
-        _ => Err(AuraExtractionError::InvalidAnnotationValue(format!(
+        _ => Err(invalid_annotation_value(format!(
             "{key} expects a boolean literal"
         ))),
     }
@@ -379,24 +371,11 @@ fn parse_leak_observers(value: &str) -> Result<Vec<String>, AuraExtractionError>
         .strip_prefix('(')
         .and_then(|value| value.strip_suffix(')'))
     {
-        let observers = inner
-            .split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-        if observers.is_empty() {
-            return Err(AuraExtractionError::InvalidAnnotationValue(
-                "leak requires observers".to_string(),
-            ));
-        }
-        return Ok(observers);
+        return parse_non_empty_csv_strings(inner, "leak requires observers");
     }
 
     if trimmed.is_empty() {
-        return Err(AuraExtractionError::InvalidAnnotationValue(
-            "leak requires observers".to_string(),
-        ));
+        return Err(invalid_annotation_value("leak requires observers"));
     }
 
     Ok(vec![trimmed.to_string()])
@@ -425,57 +404,32 @@ fn parse_link_directive(raw: &str) -> Result<LinkDirective, AuraExtractionError>
     let mut exports = Vec::new();
     let mut imports = Vec::new();
 
-    for segment in raw.split(['|', ';']) {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
-
-        let (key, value) = segment.split_once('=').ok_or_else(|| {
-            AuraExtractionError::InvalidAnnotationValue(
-                "link directive segments must be key=value pairs".to_string(),
-            )
-        })?;
-        let key = key.trim();
-        let value = value.trim();
+    for (key, value) in
+        parse_key_value_segments(raw, "link directive segments must be key=value pairs")?
+    {
         match key {
             "bundle" => {
                 if value.is_empty() {
-                    return Err(AuraExtractionError::InvalidAnnotationValue(
-                        "link bundle id cannot be empty".to_string(),
-                    ));
+                    return Err(invalid_annotation_value("link bundle id cannot be empty"));
                 }
                 bundle_id = Some(value.to_string());
             }
             "exports" => {
-                exports = value
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|entry| !entry.is_empty())
-                    .map(ToString::to_string)
-                    .collect();
+                exports = parse_csv_strings(value);
             }
             "imports" => {
-                imports = value
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|entry| !entry.is_empty())
-                    .map(ToString::to_string)
-                    .collect();
+                imports = parse_csv_strings(value);
             }
             other => {
-                return Err(AuraExtractionError::InvalidAnnotationValue(format!(
+                return Err(invalid_annotation_value(format!(
                     "unsupported link directive key: {other}"
                 )))
             }
         }
     }
 
-    let bundle_id = bundle_id.ok_or_else(|| {
-        AuraExtractionError::InvalidAnnotationValue(
-            "link directive requires bundle=<id>".to_string(),
-        )
-    })?;
+    let bundle_id =
+        bundle_id.ok_or_else(|| invalid_annotation_value("link directive requires bundle=<id>"))?;
 
     Ok(LinkDirective {
         bundle_id,
@@ -493,32 +447,80 @@ fn parse_leakage_budget_string(raw: &str) -> Result<Vec<u64>, AuraExtractionErro
         .trim();
 
     if inner.is_empty() {
-        return Err(AuraExtractionError::InvalidAnnotationValue(
+        return Err(invalid_annotation_value(
             "leakage_budget string must contain at least one integer".to_string(),
         ));
     }
 
-    inner
+    parse_non_empty_csv_entries(
+        inner,
+        "leakage_budget string must contain at least one integer",
+    )?
+    .into_iter()
+    .map(|value| {
+        value.parse::<u64>().map_err(|_| {
+            invalid_annotation_value(format!(
+                "leakage_budget string contains a non-integer entry: {value}"
+            ))
+        })
+    })
+    .collect()
+}
+
+fn invalid_annotation_value(message: impl Into<String>) -> AuraExtractionError {
+    AuraExtractionError::InvalidAnnotationValue(message.into())
+}
+
+fn parse_csv_strings(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn parse_non_empty_csv_strings(
+    raw: &str,
+    empty_message: &'static str,
+) -> Result<Vec<String>, AuraExtractionError> {
+    let values = parse_csv_strings(raw);
+    if values.is_empty() {
+        Err(invalid_annotation_value(empty_message))
+    } else {
+        Ok(values)
+    }
+}
+
+fn parse_non_empty_csv_entries<'a>(
+    raw: &'a str,
+    empty_message: &'static str,
+) -> Result<Vec<&'a str>, AuraExtractionError> {
+    let values = raw
         .split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| {
-            value.parse::<u64>().map_err(|_| {
-                AuraExtractionError::InvalidAnnotationValue(format!(
-                    "leakage_budget string contains a non-integer entry: {value}"
-                ))
-            })
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        Err(invalid_annotation_value(empty_message))
+    } else {
+        Ok(values)
+    }
+}
+
+fn parse_key_value_segments<'a>(
+    raw: &'a str,
+    invalid_shape_message: &'static str,
+) -> Result<Vec<(&'a str, &'a str)>, AuraExtractionError> {
+    raw.split(['|', ';'])
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let (key, value) = segment
+                .split_once('=')
+                .ok_or_else(|| invalid_annotation_value(invalid_shape_message))?;
+            Ok((key.trim(), value.trim()))
         })
-        .collect::<Result<Vec<_>, _>>()
-        .and_then(|values| {
-            if values.is_empty() {
-                Err(AuraExtractionError::InvalidAnnotationValue(
-                    "leakage_budget string must contain at least one integer".to_string(),
-                ))
-            } else {
-                Ok(values)
-            }
-        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -747,6 +749,22 @@ mod tests {
             err.to_string().contains("bundle=<id>"),
             "error should mention required bundle key"
         );
+    }
+
+    #[test]
+    fn test_duplicate_flow_cost_annotation_fails() {
+        let compiled = test_compiled_choreography(
+            r#"Alice { flow_cost : 10, flow_cost : 20 } -> Bob : Message"#,
+        );
+        let err = lower_aura_effects(&compiled).expect_err("duplicate flow_cost must fail");
+        assert!(err.to_string().contains("specified multiple times"));
+    }
+
+    #[test]
+    fn test_leak_annotation_requires_observers() {
+        let compiled = test_compiled_choreography(r#"Alice { leak : "" } -> Bob : Message"#);
+        let err = lower_aura_effects(&compiled).expect_err("empty leak list must fail");
+        assert!(err.to_string().contains("leak requires observers"));
     }
 
     #[test]

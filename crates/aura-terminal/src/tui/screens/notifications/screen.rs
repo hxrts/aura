@@ -4,8 +4,10 @@
 
 use iocraft::prelude::*;
 
-use aura_app::ui::signals::{INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
+use aura_app::ui::signals::{CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::ui::types::invitations::{InvitationDirection, InvitationStatus, InvitationType};
+use aura_app::ui::types::{truncate_id_for_display, EffectiveName};
+use aura_app::ui_contract::{InvitationFactKind, OperationState, RuntimeFact};
 
 use crate::tui::components::{DetailPanel, KeyValue, ListPanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -13,6 +15,7 @@ use crate::tui::layout::dim;
 use crate::tui::props::NotificationsViewProps;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::PendingRequest;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NotificationKind {
@@ -20,6 +23,9 @@ enum NotificationKind {
     GuardianInvite,
     HomeInvite,
     RecoveryApproval,
+    ContactInviteAccepted,
+    GuardianInviteAccepted,
+    DeviceInviteAccepted,
 }
 
 impl NotificationKind {
@@ -29,6 +35,9 @@ impl NotificationKind {
             Self::GuardianInvite => "◆",
             Self::HomeInvite => "■",
             Self::RecoveryApproval => "⊗",
+            Self::ContactInviteAccepted => "✓",
+            Self::GuardianInviteAccepted => "✓",
+            Self::DeviceInviteAccepted => "✓",
         }
     }
 
@@ -38,6 +47,9 @@ impl NotificationKind {
             Self::GuardianInvite => "Guardian request",
             Self::HomeInvite => "Home invite",
             Self::RecoveryApproval => "Recovery approval",
+            Self::ContactInviteAccepted => "Contact invite accepted",
+            Self::GuardianInviteAccepted => "Guardian invite accepted",
+            Self::DeviceInviteAccepted => "Device invite accepted",
         }
     }
 
@@ -47,6 +59,9 @@ impl NotificationKind {
             Self::GuardianInvite => Theme::WARNING,
             Self::HomeInvite => Theme::TEXT,
             Self::RecoveryApproval => Theme::SUCCESS,
+            Self::ContactInviteAccepted => Theme::SUCCESS,
+            Self::GuardianInviteAccepted => Theme::SUCCESS,
+            Self::DeviceInviteAccepted => Theme::SUCCESS,
         }
     }
 }
@@ -58,6 +73,89 @@ struct NotificationItem {
     subtitle: String,
     kind: NotificationKind,
     timestamp: u64,
+}
+
+fn display_contact_name(contact: &aura_app::ui::types::Contact) -> String {
+    contact.effective_name()
+}
+
+fn runtime_event_timestamp(total_events: usize, index: usize) -> u64 {
+    u64::MAX.saturating_sub(total_events.saturating_sub(index) as u64)
+}
+
+fn runtime_notification_item(
+    fact: &RuntimeFact,
+    timestamp: u64,
+    contact_names: &HashMap<String, String>,
+) -> Option<NotificationItem> {
+    match fact {
+        RuntimeFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: Some(authority_id),
+            operation_state: Some(OperationState::Succeeded),
+        } => {
+            let name = contact_names
+                .get(authority_id)
+                .cloned()
+                .unwrap_or_else(|| truncate_id_for_display(authority_id));
+            Some(NotificationItem {
+                id: format!("contact-accepted:{authority_id}"),
+                title: format!("{name} is now a contact"),
+                subtitle: "Contact link ready".to_string(),
+                kind: NotificationKind::ContactInviteAccepted,
+                timestamp,
+            })
+        }
+        RuntimeFact::GuardianInvitationAccepted {
+            authority_id,
+            guardian_name,
+        } => {
+            let name = guardian_name
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    authority_id
+                        .as_ref()
+                        .and_then(|value| contact_names.get(value).cloned())
+                })
+                .unwrap_or_else(|| "Guardian".to_string());
+            Some(NotificationItem {
+                id: format!(
+                    "guardian-accepted:{}",
+                    authority_id.as_deref().unwrap_or("*")
+                ),
+                title: format!("{name} is now a guardian"),
+                subtitle: "Guardian link ready".to_string(),
+                kind: NotificationKind::GuardianInviteAccepted,
+                timestamp,
+            })
+        }
+        RuntimeFact::DeviceEnrollmentAccepted {
+            device_id,
+            device_name,
+            device_count,
+        } => {
+            let name = device_name
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| {
+                    device_id
+                        .as_deref()
+                        .map(|value| value.chars().take(8).collect())
+                        .unwrap_or_else(|| "Device".to_string())
+                });
+            Some(NotificationItem {
+                id: format!("device-accepted:{}", device_id.as_deref().unwrap_or("*")),
+                title: format!("{name} joined this account"),
+                subtitle: device_count
+                    .map(|count| format!("{count} registered devices"))
+                    .unwrap_or_else(|| "Device enrollment completed".to_string()),
+                kind: NotificationKind::DeviceInviteAccepted,
+                timestamp,
+            })
+        }
+        _ => None,
+    }
 }
 
 /// Props for NotificationsScreen
@@ -76,6 +174,22 @@ pub fn NotificationsScreen(
 
     let reactive_invites = hooks.use_state(Vec::new);
     let reactive_recovery = hooks.use_state(Vec::new);
+    let reactive_contact_names = hooks.use_state(HashMap::<String, String>::new);
+
+    hooks.use_future({
+        let mut reactive_contact_names = reactive_contact_names.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |state| {
+                let names = state
+                    .all_contacts()
+                    .map(|contact| (contact.id.to_string(), display_contact_name(contact)))
+                    .collect::<HashMap<_, _>>();
+                reactive_contact_names.set(names);
+            })
+            .await;
+        }
+    });
 
     // Invitations notifications
     hooks.use_future({
@@ -164,7 +278,31 @@ pub fn NotificationsScreen(
 
     let mut notifications = reactive_invites.read().clone();
     notifications.extend(reactive_recovery.read().clone());
+    let contact_names = reactive_contact_names.read().clone();
+    notifications.extend(
+        props
+            .view
+            .runtime_facts
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, fact)| {
+                runtime_notification_item(
+                    fact,
+                    runtime_event_timestamp(props.view.runtime_facts.len(), idx),
+                    &contact_names,
+                )
+            }),
+    );
     notifications.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+    // Filter out dismissed notifications.
+    notifications.retain(|item| !props.view.dismissed_ids.contains(&item.id));
+
+    // Write back the visible IDs so the keyboard handler can resolve
+    // selected_index → concrete notification ID for dismissal.
+    if let Ok(mut sink) = props.view.visible_ids_sink.lock() {
+        *sink = notifications.iter().map(|item| item.id.clone()).collect();
+    }
 
     let selected_index = props
         .view

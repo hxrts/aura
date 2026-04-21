@@ -12,6 +12,18 @@ use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, RwLock};
 
+/// Small channel because lagging FRP subscribers can always resync from the
+/// latest retained value; the queue only needs to absorb short bursts.
+const DYNAMIC_UPDATE_CHANNEL_CAPACITY: usize = 64;
+
+fn log_dynamic_lag(stream: &'static str, skipped: u64) {
+    tracing::warn!(
+        stream,
+        skipped,
+        "Reactive Dynamic subscriber lagged; resyncing from latest value"
+    );
+}
+
 /// FRP primitive for reactive values
 ///
 /// Dynamic<T> represents a time-varying value that can be observed
@@ -34,7 +46,7 @@ pub struct Dynamic<T: Clone + Send + Sync + 'static> {
 impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     /// Create a new Dynamic with initial value
     pub fn new(initial: T) -> Self {
-        let (tx, _) = broadcast::channel(64);
+        let (tx, _) = broadcast::channel(DYNAMIC_UPDATE_CHANNEL_CAPACITY);
         let initial = Arc::new(initial);
         Self {
             shared: Arc::new(DynamicShared {
@@ -136,7 +148,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                             let transformed = f(value.as_ref());
                             mapped_clone.set(transformed).await;
                         }
-                        Err(RecvError::Lagged(_)) => {
+                        Err(RecvError::Lagged(skipped)) => {
+                            log_dynamic_lag("map", skipped);
                             // Re-sync from the latest state on lag to avoid stale values.
                             let latest = {
                                 let state = state.state.read().await;
@@ -194,7 +207,20 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                     tokio::select! {
                         res = rx_self.recv() => {
                             match res {
-                                Ok(_) | Err(RecvError::Lagged(_)) => {
+                                Ok(_) => {
+                                    let a = {
+                                        let state = self_state.state.read().await;
+                                        state.value.clone()
+                                    };
+                                    let b = {
+                                        let state = other_state.state.read().await;
+                                        state.value.clone()
+                                    };
+                                    let result = f(a.as_ref(), b.as_ref());
+                                    combined_clone.set(result).await;
+                                }
+                                Err(RecvError::Lagged(skipped)) => {
+                                    log_dynamic_lag("combine.left", skipped);
                                     let a = {
                                         let state = self_state.state.read().await;
                                         state.value.clone()
@@ -211,7 +237,20 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                         }
                         res = rx_other.recv() => {
                             match res {
-                                Ok(_) | Err(RecvError::Lagged(_)) => {
+                                Ok(_) => {
+                                    let a = {
+                                        let state = self_state.state.read().await;
+                                        state.value.clone()
+                                    };
+                                    let b = {
+                                        let state = other_state.state.read().await;
+                                        state.value.clone()
+                                    };
+                                    let result = f(a.as_ref(), b.as_ref());
+                                    combined_clone.set(result).await;
+                                }
+                                Err(RecvError::Lagged(skipped)) => {
+                                    log_dynamic_lag("combine.right", skipped);
                                     let a = {
                                         let state = self_state.state.read().await;
                                         state.value.clone()
@@ -268,7 +307,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                                 filtered_clone.set_arc(value).await;
                             }
                         }
-                        Err(RecvError::Lagged(_)) => {
+                        Err(RecvError::Lagged(skipped)) => {
+                            log_dynamic_lag("filter", skipped);
                             let latest = {
                                 let state = state.state.read().await;
                                 state.value.clone()
@@ -319,7 +359,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                             let new_acc = f(acc, value.as_ref());
                             folded_clone.set(new_acc).await;
                         }
-                        Err(RecvError::Lagged(_)) => {
+                        Err(RecvError::Lagged(skipped)) => {
+                            log_dynamic_lag("fold", skipped);
                             let latest = {
                                 let state = state.state.read().await;
                                 state.value.clone()

@@ -157,43 +157,32 @@ impl DeviceNamingFact {
             authority_id,
             device_id,
             nickname_suggestion,
-            PhysicalTime {
-                ts_ms: updated_at_ms,
-                uncertainty: None,
-            },
+            exact_physical_time(updated_at_ms),
         )
     }
 
     /// Get the device ID this fact applies to.
     #[must_use]
     pub fn device_id(&self) -> DeviceId {
-        match self {
-            Self::SuggestionUpdated { device_id, .. } => *device_id,
-        }
+        self.suggestion_updated_parts().2
     }
 
     /// Get the authority ID this fact belongs to.
     #[must_use]
     pub fn authority_id(&self) -> AuthorityId {
-        match self {
-            Self::SuggestionUpdated { authority_id, .. } => *authority_id,
-        }
+        self.suggestion_updated_parts().1
     }
 
     /// Get the context ID for this fact.
     #[must_use]
     pub fn context_id(&self) -> ContextId {
-        match self {
-            Self::SuggestionUpdated { context_id, .. } => *context_id,
-        }
+        self.suggestion_updated_parts().0
     }
 
     /// Get the timestamp of this fact.
     #[must_use]
     pub fn timestamp(&self) -> PhysicalTime {
-        match self {
-            Self::SuggestionUpdated { updated_at, .. } => updated_at.clone(),
-        }
+        self.updated_at().clone()
     }
 
     /// Get the timestamp in milliseconds.
@@ -205,12 +194,7 @@ impl DeviceNamingFact {
     /// Get the nickname suggestion.
     #[must_use]
     pub fn nickname_suggestion(&self) -> &str {
-        match self {
-            Self::SuggestionUpdated {
-                nickname_suggestion,
-                ..
-            } => nickname_suggestion,
-        }
+        self.suggestion_updated_parts().3
     }
 
     /// Check if this fact clears the suggestion (empty string).
@@ -241,26 +225,34 @@ impl DeviceNamingFact {
         aura_core::types::facts::try_decode_fact(
             device_naming_fact_type_id(),
             DEVICE_NAMING_SCHEMA_VERSION,
+            DEVICE_NAMING_SCHEMA_VERSION,
             bytes,
         )
     }
 
-    /// Encode this fact with proper error handling.
-    ///
-    /// # Errors
-    ///
-    /// Returns `FactError` if serialization fails.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, FactError> {
-        self.try_encode()
+    fn suggestion_updated_parts(&self) -> (ContextId, AuthorityId, DeviceId, &str) {
+        match self {
+            Self::SuggestionUpdated {
+                context_id,
+                authority_id,
+                device_id,
+                nickname_suggestion,
+                ..
+            } => (*context_id, *authority_id, *device_id, nickname_suggestion),
+        }
     }
 
-    /// Decode from raw bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns `FactError` if deserialization fails or type/version mismatches.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FactError> {
-        Self::try_decode(bytes)
+    fn updated_at(&self) -> &PhysicalTime {
+        match self {
+            Self::SuggestionUpdated { updated_at, .. } => updated_at,
+        }
+    }
+}
+
+fn exact_physical_time(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
     }
 }
 

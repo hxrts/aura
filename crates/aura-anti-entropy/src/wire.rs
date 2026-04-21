@@ -78,34 +78,27 @@ pub struct SyncWireMessage {
 impl SyncWireMessage {
     /// Create a legacy operation message (v1 compat).
     pub fn op(op: AttestedOp) -> Self {
-        Self {
-            schema_version: SYNC_WIRE_SCHEMA_VERSION,
-            payload: SyncWirePayload::Op(op),
-        }
+        Self::new(SyncWirePayload::Op(op))
     }
 
     /// Create an operation message with ack request.
     pub fn op_with_ack_request(op: AttestedOp) -> Self {
-        Self {
-            schema_version: SYNC_WIRE_SCHEMA_VERSION,
-            payload: SyncWirePayload::OpWithAck(OpWithAckRequest::with_ack_request(op)),
-        }
+        Self::new(SyncWirePayload::OpWithAck(
+            OpWithAckRequest::with_ack_request(op),
+        ))
     }
 
     /// Create an operation message without ack request.
     pub fn op_with_ack(op: AttestedOp, ack_requested: bool) -> Self {
-        Self {
-            schema_version: SYNC_WIRE_SCHEMA_VERSION,
-            payload: SyncWirePayload::OpWithAck(OpWithAckRequest { op, ack_requested }),
-        }
+        Self::new(SyncWirePayload::OpWithAck(OpWithAckRequest {
+            op,
+            ack_requested,
+        }))
     }
 
     /// Create an acknowledgment message.
     pub fn ack(ack: FactAck) -> Self {
-        Self {
-            schema_version: SYNC_WIRE_SCHEMA_VERSION,
-            payload: SyncWirePayload::Ack(ack),
-        }
+        Self::new(SyncWirePayload::Ack(ack))
     }
 
     /// Check if this message is an ack request.
@@ -133,18 +126,28 @@ impl SyncWireMessage {
             _ => None,
         }
     }
+
+    fn new(payload: SyncWirePayload) -> Self {
+        Self {
+            schema_version: SYNC_WIRE_SCHEMA_VERSION,
+            payload,
+        }
+    }
 }
 
 pub fn serialize_message(msg: &SyncWireMessage) -> Result<Vec<u8>, SyncError> {
-    aura_core::util::serialization::to_vec(msg).map_err(|e| SyncError::NetworkError {
-        operation: "serialize_wire_message",
-        detail: e.to_string(),
-    })
+    aura_core::util::serialization::to_vec(msg)
+        .map_err(|e| map_wire_error("serialize_wire_message", e))
 }
 
 pub fn deserialize_message(bytes: &[u8]) -> Result<SyncWireMessage, SyncError> {
-    aura_core::util::serialization::from_slice(bytes).map_err(|e| SyncError::NetworkError {
-        operation: "deserialize_wire_message",
-        detail: e.to_string(),
-    })
+    aura_core::util::serialization::from_slice(bytes)
+        .map_err(|e| map_wire_error("deserialize_wire_message", e))
+}
+
+fn map_wire_error(operation: &'static str, error: impl ToString) -> SyncError {
+    SyncError::NetworkError {
+        operation,
+        detail: error.to_string(),
+    }
 }

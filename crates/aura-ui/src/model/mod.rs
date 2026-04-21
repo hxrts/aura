@@ -126,6 +126,13 @@ pub struct ContactRow {
     pub is_guardian: bool,
     pub relationship_state: ContactRelationshipState,
     pub confirmation: ConfirmationState,
+    /// Invitation code used to establish this contact, if known.
+    ///
+    /// Populated by the outbound create-invitation flow (with the generated
+    /// code) and the inbound accept flow (with the pasted code). Session
+    /// state only — not yet persisted across restarts. Preserved across
+    /// projections from the authoritative runtime contacts view.
+    pub invitation_code: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +149,13 @@ pub struct ToastState {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct AccountSetupState {
+    pub ready: bool,
+    pub name: String,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedHome {
     pub id: String,
@@ -155,11 +169,32 @@ pub struct NotificationSelectionId(pub String);
 pub struct NeighborhoodMemberSelectionKey(pub String);
 
 #[derive(Debug, Clone)]
+pub struct DemoState {
+    pub last_invite_code: Option<String>,
+    pub last_scan: String,
+    pub has_secondary_device: bool,
+    pub secondary_device_name: Option<String>,
+    pub contact_shortcuts: Option<DemoContactShortcuts>,
+    pub device_shortcut: Option<DemoDeviceShortcut>,
+}
+
+impl Default for DemoState {
+    fn default() -> Self {
+        Self {
+            last_invite_code: None,
+            last_scan: "never".to_string(),
+            has_secondary_device: false,
+            secondary_device_name: None,
+            contact_shortcuts: None,
+            device_shortcut: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct UiModel {
     pub semantic_revision: ProjectionRevision,
-    pub account_ready: bool,
-    pub account_setup_name: String,
-    pub account_setup_error: Option<String>,
+    pub account_setup: AccountSetupState,
     pub screen: ScreenId,
     pub settings_section: SettingsSection,
     pub channels: Vec<ChannelRow>,
@@ -187,18 +222,17 @@ pub struct UiModel {
     pub authority_id: String,
     pub profile_nickname: String,
     pub invite_counter: u64,
-    pub last_invite_code: Option<String>,
-    pub last_scan: String,
-    pub has_secondary_device: bool,
-    pub secondary_device_name: Option<String>,
+    pub demo: DemoState,
     pub selected_contact_id: Option<AuthorityId>,
     pub selected_authority_id: Option<AuthorityId>,
     pub selected_channel: Option<String>,
     pub selected_neighborhood_member_key: Option<NeighborhoodMemberSelectionKey>,
     pub selected_notification_id: Option<NotificationSelectionId>,
+    /// Session-scoped set of notification IDs the user has dismissed.
+    /// Notifications in this set are filtered out during
+    /// `sync_runtime_notifications`. Cleared on session restart.
+    pub dismissed_notification_ids: std::collections::HashSet<NotificationSelectionId>,
     pub contact_details: bool,
-    pub demo_contact_shortcuts: Option<DemoContactShortcuts>,
-    pub demo_device_shortcut: Option<DemoDeviceShortcut>,
 }
 
 macro_rules! modal_state_accessors {
@@ -217,12 +251,39 @@ macro_rules! modal_state_accessors {
 }
 
 impl UiModel {
+    fn clear_generic_invitation_code_cache(&mut self) {
+        self.demo.last_invite_code = None;
+        self.runtime_events.retain(|event| {
+            !matches!(
+                &event.fact,
+                RuntimeFact::InvitationCodeReady {
+                    receiver_authority_id: None,
+                    source_operation,
+                    ..
+                } if *source_operation == OperationId::invitation_create()
+            )
+        });
+    }
+
+    pub(crate) fn clear_current_invitation_code(&mut self) {
+        self.clear_generic_invitation_code_cache();
+        if let Some(state) = self
+            .active_modal
+            .as_mut()
+            .and_then(ActiveModal::create_invitation_mut)
+        {
+            state.generated_code = None;
+        }
+    }
+
     pub fn new(authority_id: String) -> Self {
         Self {
             semantic_revision: next_projection_revision(None),
-            account_ready: true,
-            account_setup_name: String::new(),
-            account_setup_error: None,
+            account_setup: AccountSetupState {
+                ready: true,
+                name: String::new(),
+                error: None,
+            },
             screen: ScreenId::Neighborhood,
             settings_section: SettingsSection::Profile,
             channels: Vec::new(),
@@ -250,18 +311,14 @@ impl UiModel {
             authority_id,
             profile_nickname: "Ops".to_string(),
             invite_counter: 0,
-            last_invite_code: None,
-            last_scan: "never".to_string(),
-            has_secondary_device: false,
-            secondary_device_name: None,
+            demo: DemoState::default(),
             selected_contact_id: None,
             selected_authority_id: None,
             selected_channel: None,
             selected_neighborhood_member_key: None,
             selected_notification_id: None,
+            dismissed_notification_ids: std::collections::HashSet::new(),
             contact_details: false,
-            demo_contact_shortcuts: None,
-            demo_device_shortcut: None,
         }
     }
 
@@ -277,6 +334,18 @@ impl UiModel {
             .map(|row| row.name.as_str())
     }
 
+    pub fn account_ready(&self) -> bool {
+        self.account_setup.ready
+    }
+
+    pub fn account_setup_name(&self) -> &str {
+        &self.account_setup.name
+    }
+
+    pub fn account_setup_error(&self) -> Option<&str> {
+        self.account_setup.error.as_deref()
+    }
+
     pub fn selected_channel_id(&self) -> Option<&str> {
         self.selected_channel.as_deref()
     }
@@ -289,7 +358,7 @@ impl UiModel {
     }
 
     pub fn set_screen(&mut self, screen: ScreenId) {
-        let screen = if self.account_ready {
+        let screen = if self.account_setup.ready {
             Self::canonical_ready_screen(screen)
         } else {
             screen
@@ -317,6 +386,44 @@ impl UiModel {
         self.active_modal
             .as_ref()
             .and_then(ActiveModal::create_invitation)
+    }
+
+    #[must_use]
+    pub fn create_invitation_request_signature(&self) -> Option<String> {
+        self.create_invitation_modal().map(|state| {
+            format!(
+                "{}|{}|{}|{}",
+                state.nickname.trim(),
+                state.receiver_nickname.trim(),
+                state.message.trim(),
+                state.ttl_hours.max(1)
+            )
+        })
+    }
+
+    #[must_use]
+    pub fn current_invitation_code(&self) -> Option<String> {
+        if matches!(self.modal_state(), Some(ModalState::CreateInvitation)) {
+            return self
+                .create_invitation_modal()
+                .and_then(|state| state.generated_code.clone());
+        }
+        self.create_invitation_modal()
+            .and_then(|state| state.generated_code.clone())
+            .or_else(|| self.demo.last_invite_code.clone())
+            .or_else(|| {
+                self.runtime_events
+                    .iter()
+                    .rev()
+                    .find_map(|event| match &event.fact {
+                        RuntimeFact::InvitationCodeReady {
+                            receiver_authority_id: None,
+                            source_operation,
+                            code,
+                        } if *source_operation == OperationId::invitation_create() => code.clone(),
+                        _ => None,
+                    })
+            })
     }
 
     modal_state_accessors!(
@@ -397,17 +504,33 @@ impl UiModel {
     }
 
     pub fn set_modal_text_value(&mut self, value: impl Into<String>) {
+        let mut clear_invitation_code = false;
         let Some(active_modal) = self.active_modal.as_mut() else {
             return;
         };
         active_modal.set_text_value(value.into());
+        if let Some(state) = active_modal.create_invitation_mut() {
+            state.generated_code = None;
+            clear_invitation_code = true;
+        }
+        if clear_invitation_code {
+            self.clear_generic_invitation_code_cache();
+        }
     }
 
     pub fn set_modal_field_value(&mut self, field_id: FieldId, value: impl Into<String>) {
+        let mut clear_invitation_code = false;
         let Some(active_modal) = self.active_modal.as_mut() else {
             return;
         };
         active_modal.set_field_value(field_id, value.into());
+        if let Some(state) = active_modal.create_invitation_mut() {
+            state.generated_code = None;
+            clear_invitation_code = true;
+        }
+        if clear_invitation_code {
+            self.clear_generic_invitation_code_cache();
+        }
     }
 
     pub fn set_modal_active_field(&mut self, field_id: FieldId) {
@@ -472,6 +595,7 @@ impl UiModel {
             is_guardian: false,
             relationship_state: ContactRelationshipState::Contact,
             confirmation: ConfirmationState::Confirmed,
+            invitation_code: None,
         });
         if self.contacts.len() == 1 {
             self.selected_contact_id = Some(authority_id);
@@ -484,6 +608,7 @@ impl UiModel {
         name: String,
         is_guardian: bool,
         relationship_state: ContactRelationshipState,
+        invitation_code: Option<String>,
     ) {
         if let Some(existing) = self
             .contacts
@@ -497,6 +622,9 @@ impl UiModel {
                 ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
                 _ => ConfirmationState::Confirmed,
             };
+            if let Some(code) = invitation_code {
+                existing.invitation_code = Some(code);
+            }
             return;
         }
 
@@ -510,6 +638,7 @@ impl UiModel {
                 ContactRelationshipState::PendingOutbound => ConfirmationState::PendingLocal,
                 _ => ConfirmationState::Confirmed,
             },
+            invitation_code,
         });
 
         if self.selected_contact_id.is_none() {
@@ -631,8 +760,14 @@ impl UiModel {
         notifications: Vec<(NotificationSelectionId, String)>,
     ) {
         let previous = self.selected_notification_id.clone();
-        self.notification_ids = notifications.iter().map(|(id, _)| id.clone()).collect();
-        self.notifications = notifications.into_iter().map(|(_, title)| title).collect();
+        // Filter out dismissed notifications so they stay gone even when
+        // the runtime re-publishes them on signal refresh.
+        let visible: Vec<_> = notifications
+            .into_iter()
+            .filter(|(id, _)| !self.dismissed_notification_ids.contains(id))
+            .collect();
+        self.notification_ids = visible.iter().map(|(id, _)| id.clone()).collect();
+        self.notifications = visible.into_iter().map(|(_, title)| title).collect();
         self.selected_notification_id = previous
             .and_then(|id| {
                 self.notification_ids
@@ -641,6 +776,35 @@ impl UiModel {
                     .cloned()
             })
             .or_else(|| self.notification_ids.first().cloned());
+    }
+
+    /// Dismiss the currently selected notification by adding its ID to
+    /// the dismissed set. Advances selection to the next item (or
+    /// previous if the last item was dismissed). Session-scoped.
+    pub fn dismiss_selected_notification(&mut self) {
+        let Some(id) = self.selected_notification_id.clone() else {
+            return;
+        };
+        let dismissed_index = self
+            .notification_ids
+            .iter()
+            .position(|item| *item == id)
+            .unwrap_or(0);
+
+        self.dismissed_notification_ids.insert(id);
+        self.notification_ids.remove(dismissed_index);
+        if dismissed_index < self.notifications.len() {
+            self.notifications.remove(dismissed_index);
+        }
+
+        // Advance to the next notification, or fall back to the
+        // previous one if we just dismissed the last item.
+        if self.notification_ids.is_empty() {
+            self.selected_notification_id = None;
+        } else {
+            let next = dismissed_index.min(self.notification_ids.len() - 1);
+            self.selected_notification_id = self.notification_ids.get(next).cloned();
+        }
     }
 
     pub fn replace_channels(&mut self, channels: Vec<(String, String, String)>) {
@@ -673,24 +837,47 @@ impl UiModel {
 
     pub fn replace_contacts(
         &mut self,
-        contacts: Vec<(AuthorityId, String, bool, ContactRelationshipState)>,
+        contacts: Vec<(
+            AuthorityId,
+            String,
+            bool,
+            ContactRelationshipState,
+            Option<String>,
+        )>,
     ) {
         let previous = self.selected_contact_id;
+        // Preserve invitation_code from the previous list as a fallback —
+        // outbound/inbound UI flows may populate the code session-locally
+        // before the authoritative fact has been projected into the view.
+        // Prefer the projection's value when present.
+        let previous_invitation_codes: std::collections::HashMap<AuthorityId, String> = self
+            .contacts
+            .iter()
+            .filter_map(|row| {
+                row.invitation_code
+                    .as_ref()
+                    .map(|code| (row.authority_id, code.clone()))
+            })
+            .collect();
         self.contacts = contacts
             .into_iter()
             .map(
-                |(authority_id, name, is_guardian, relationship_state)| ContactRow {
-                    authority_id,
-                    name,
-                    selected: false,
-                    is_guardian,
-                    relationship_state,
-                    confirmation: match relationship_state {
-                        ContactRelationshipState::PendingOutbound => {
-                            ConfirmationState::PendingLocal
-                        }
-                        _ => ConfirmationState::Confirmed,
-                    },
+                |(authority_id, name, is_guardian, relationship_state, invitation_code)| {
+                    ContactRow {
+                        authority_id,
+                        name,
+                        selected: false,
+                        is_guardian,
+                        relationship_state,
+                        confirmation: match relationship_state {
+                            ContactRelationshipState::PendingOutbound => {
+                                ConfirmationState::PendingLocal
+                            }
+                            _ => ConfirmationState::Confirmed,
+                        },
+                        invitation_code: invitation_code
+                            .or_else(|| previous_invitation_codes.get(&authority_id).cloned()),
+                    }
                 },
             )
             .collect();
@@ -745,8 +932,8 @@ impl UiModel {
 
     pub fn sync_devices(&mut self, devices: Vec<(String, bool)>) {
         let secondary = devices.into_iter().find(|(_, is_current)| !*is_current);
-        self.has_secondary_device = secondary.is_some();
-        self.secondary_device_name = secondary.map(|(name, _)| name);
+        self.demo.has_secondary_device = secondary.is_some();
+        self.demo.secondary_device_name = secondary.map(|(name, _)| name);
     }
 
     pub fn selected_channel_topic(&self) -> &str {
@@ -788,15 +975,23 @@ impl UiModel {
     }
 
     pub fn secondary_device_name(&self) -> Option<&str> {
-        self.secondary_device_name.as_deref()
+        self.demo.secondary_device_name.as_deref()
+    }
+
+    pub fn has_secondary_device(&self) -> bool {
+        self.demo.has_secondary_device
+    }
+
+    pub fn last_scan(&self) -> &str {
+        &self.demo.last_scan
     }
 
     pub fn demo_contact_shortcuts(&self) -> Option<&DemoContactShortcuts> {
-        self.demo_contact_shortcuts.as_ref()
+        self.demo.contact_shortcuts.as_ref()
     }
 
     pub fn demo_device_shortcut(&self) -> Option<&DemoDeviceShortcut> {
-        self.demo_device_shortcut.as_ref()
+        self.demo.device_shortcut.as_ref()
     }
 
     pub fn configure_demo_contact_shortcuts(
@@ -804,7 +999,7 @@ impl UiModel {
         alice_invite_code: impl Into<String>,
         carol_invite_code: impl Into<String>,
     ) {
-        self.demo_contact_shortcuts = Some(DemoContactShortcuts {
+        self.demo.contact_shortcuts = Some(DemoContactShortcuts {
             alice_invite_code: alice_invite_code.into(),
             carol_invite_code: carol_invite_code.into(),
         });
@@ -815,14 +1010,14 @@ impl UiModel {
         name: impl Into<String>,
         invitee_authority_id: AuthorityId,
     ) {
-        self.demo_device_shortcut = Some(DemoDeviceShortcut {
+        self.demo.device_shortcut = Some(DemoDeviceShortcut {
             name: name.into(),
             invitee_authority_id,
         });
     }
 
     pub fn demo_device_invitee_authority_id(&self, device_name: &str) -> Option<AuthorityId> {
-        self.demo_device_shortcut.as_ref().and_then(|shortcut| {
+        self.demo.device_shortcut.as_ref().and_then(|shortcut| {
             shortcut
                 .name
                 .eq_ignore_ascii_case(device_name)
@@ -831,7 +1026,7 @@ impl UiModel {
     }
 
     pub fn set_secondary_device_name(&mut self, value: Option<String>) {
-        self.secondary_device_name = value;
+        self.demo.secondary_device_name = value;
     }
 }
 
@@ -1028,6 +1223,11 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn dismiss_selected_notification(&self) {
+        write_model(&self.model).dismiss_selected_notification();
+        self.request_rerender();
+    }
+
     pub fn open_create_invitation_modal(
         &self,
         _receiver_id: Option<&AuthorityId>,
@@ -1035,10 +1235,15 @@ impl UiController {
     ) {
         let mut model = write_model(&self.model);
         model.clear_operation(&OperationId::invitation_create());
+        model.clear_generic_invitation_code_cache();
+        let profile_nickname = model.profile_nickname.trim().to_string();
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+            nickname: profile_nickname,
+            receiver_nickname: String::new(),
             message: String::new(),
             ttl_hours: 24,
-            active_field: FieldId::InvitationMessage,
+            active_field: FieldId::Nickname,
+            generated_code: None,
         }));
         drop(model);
         self.request_rerender();
@@ -1063,7 +1268,42 @@ impl UiController {
 
     pub fn remember_invitation_code(&self, code: &str) {
         let mut model = write_model(&self.model);
-        model.last_invite_code = Some(code.to_string());
+        model.demo.last_invite_code = Some(code.to_string());
+        if let Some(state) = model
+            .active_modal
+            .as_mut()
+            .and_then(ActiveModal::create_invitation_mut)
+        {
+            state.generated_code = Some(code.to_string());
+        }
+        drop(model);
+        self.request_rerender();
+    }
+
+    /// Record the invitation code associated with a specific contact.
+    ///
+    /// Called by the outbound create-invitation flow with the target
+    /// authority and the generated code, and by the inbound accept flow
+    /// with the sender authority and the pasted code. Updates the contact
+    /// row if it exists; contacts added later will pick up the code via
+    /// `ensure_runtime_contact`. Phase 2 session-scoped; Phase 3 will
+    /// persist it.
+    pub fn set_contact_invitation_code(&self, authority_id: AuthorityId, code: String) {
+        self.try_update_model(|model| {
+            if let Some(row) = model
+                .contacts
+                .iter_mut()
+                .find(|row| row.authority_id == authority_id)
+            {
+                row.invitation_code = Some(code);
+            }
+        });
+        self.request_rerender();
+    }
+
+    pub fn close_modal(&self) {
+        let mut model = write_model(&self.model);
+        model.dismiss_modal();
         drop(model);
         self.request_rerender();
     }
@@ -1152,12 +1392,12 @@ impl UiController {
         account_setup_error: Option<String>,
     ) {
         let mut model = write_model(&self.model);
-        model.account_ready = account_ready;
+        model.account_setup.ready = account_ready;
         if account_ready && model.screen == ScreenId::Onboarding {
             model.set_screen(ScreenId::Neighborhood);
         }
-        model.account_setup_name = account_setup_name.into();
-        model.account_setup_error = account_setup_error;
+        model.account_setup.name = account_setup_name.into();
+        model.account_setup.error = account_setup_error;
         let snapshot = model.semantic_snapshot();
         drop(model);
         self.publish_ui_snapshot(snapshot);
@@ -1166,9 +1406,9 @@ impl UiController {
 
     pub fn finalize_account_setup(&self, screen: ScreenId) {
         let mut model = write_model(&self.model);
-        model.account_ready = true;
-        model.account_setup_name.clear();
-        model.account_setup_error = None;
+        model.account_setup.ready = true;
+        model.account_setup.name.clear();
+        model.account_setup.error = None;
         model.set_screen(screen);
         let snapshot = model.semantic_snapshot();
         drop(model);
@@ -1217,11 +1457,229 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActiveModal, NeighborhoodMode, ScreenId, TextModalState, UiModel};
+    use super::{
+        read_model, write_model, ActiveModal, ContactRelationshipState, CreateInvitationModalState,
+        NeighborhoodMode, ScreenId, TextModalState, UiModel,
+    };
+    use crate::MemoryClipboard;
+    use crate::UiController;
     use aura_app::ui::contract::{
         OperationId, OperationInstanceId, OperationState, RuntimeEventKind,
     };
     use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
+    use aura_app::{AppConfig, AppCore};
+    use aura_core::types::identifiers::AuthorityId;
+    use std::sync::Arc;
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    #[test]
+    fn ensure_runtime_contact_records_invitation_code_on_insert() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:ABC".to_string()),
+        );
+
+        let Some(row) = model.contacts.iter().find(|r| r.authority_id == alice) else {
+            panic!("contact should exist");
+        };
+        assert_eq!(row.invitation_code, Some("aura:v1:ABC".to_string()));
+    }
+
+    #[test]
+    fn ensure_runtime_contact_preserves_existing_code_when_none_supplied() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:KEEP".to_string()),
+        );
+        // Subsequent update without a code (e.g. a refresh projection
+        // that doesn't carry the code) must preserve the existing value.
+        model.ensure_runtime_contact(
+            alice,
+            "Alice Updated".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            None,
+        );
+
+        let Some(row) = model.contacts.iter().find(|r| r.authority_id == alice) else {
+            panic!("contact should exist");
+        };
+        assert_eq!(row.invitation_code, Some("aura:v1:KEEP".to_string()));
+        assert_eq!(row.name, "Alice Updated".to_string());
+    }
+
+    #[test]
+    fn ensure_runtime_contact_overwrites_code_on_reissue() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:OLD".to_string()),
+        );
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:NEW".to_string()),
+        );
+
+        let Some(row) = model.contacts.iter().find(|r| r.authority_id == alice) else {
+            panic!("contact should exist");
+        };
+        assert_eq!(row.invitation_code, Some("aura:v1:NEW".to_string()));
+    }
+
+    #[test]
+    fn current_invitation_code_prefers_modal_owned_code() {
+        let mut model = UiModel::new("local".to_string());
+        model.demo.last_invite_code = Some("INVITE-CACHED".to_string());
+        model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+            generated_code: Some("INVITE-MODAL".to_string()),
+            ..CreateInvitationModalState::default()
+        }));
+
+        assert_eq!(
+            model.current_invitation_code(),
+            Some("INVITE-MODAL".to_string())
+        );
+    }
+
+    #[test]
+    fn current_invitation_code_ignores_receiver_scoped_runtime_events() {
+        let mut model = UiModel::new("local".to_string());
+        model.active_modal = Some(ActiveModal::CreateInvitation(
+            CreateInvitationModalState::default(),
+        ));
+        model
+            .runtime_events
+            .push(aura_app::ui::contract::RuntimeEventSnapshot {
+                id: aura_app::ui::contract::RuntimeEventId::synthetic("runtime-event-1"),
+                fact: RuntimeFact::InvitationCodeReady {
+                    receiver_authority_id: Some(test_authority(7).to_string()),
+                    source_operation: OperationId::invitation_create(),
+                    code: Some("INVITE-RECEIVER".to_string()),
+                },
+            });
+
+        assert_eq!(model.current_invitation_code(), None);
+    }
+
+    #[test]
+    fn open_create_invitation_modal_prefills_profile_nickname() {
+        let controller = UiController::new(
+            Arc::new(async_lock::RwLock::new(
+                AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+            )),
+            Arc::new(MemoryClipboard::default()),
+        );
+        {
+            let mut model = write_model(&controller.model);
+            model.profile_nickname = "Maple".to_string();
+        }
+
+        controller.open_create_invitation_modal(None, None);
+
+        let model = read_model(&controller.model);
+        let Some(state) = model.create_invitation_modal() else {
+            panic!("create invitation modal should be open");
+        };
+        assert_eq!(state.nickname, "Maple");
+        assert!(state.receiver_nickname.is_empty());
+    }
+
+    #[test]
+    fn replace_contacts_carries_invitation_code_from_projection() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+        let bob = test_authority(2);
+
+        model.replace_contacts(vec![
+            (
+                alice,
+                "Alice".to_string(),
+                false,
+                ContactRelationshipState::Contact,
+                Some("aura:v1:FROM_PROJECTION".to_string()),
+            ),
+            (
+                bob,
+                "Bob".to_string(),
+                false,
+                ContactRelationshipState::Contact,
+                None,
+            ),
+        ]);
+
+        assert_eq!(
+            model
+                .contacts
+                .iter()
+                .find(|r| r.authority_id == alice)
+                .and_then(|r| r.invitation_code.clone()),
+            Some("aura:v1:FROM_PROJECTION".to_string())
+        );
+        assert!(model
+            .contacts
+            .iter()
+            .find(|r| r.authority_id == bob)
+            .and_then(|r| r.invitation_code.clone())
+            .is_none());
+    }
+
+    #[test]
+    fn replace_contacts_preserves_ui_local_code_when_projection_is_none() {
+        let mut model = UiModel::new("local".to_string());
+        let alice = test_authority(1);
+
+        // Session-local code set by the UI flow before the authoritative
+        // fact is projected back.
+        model.ensure_runtime_contact(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            Some("aura:v1:SESSION".to_string()),
+        );
+
+        // Refresh projection from the runtime view that does not yet
+        // carry the code — the UI-local code should not be wiped.
+        model.replace_contacts(vec![(
+            alice,
+            "Alice".to_string(),
+            false,
+            ContactRelationshipState::Contact,
+            None,
+        )]);
+
+        assert_eq!(
+            model
+                .contacts
+                .iter()
+                .find(|r| r.authority_id == alice)
+                .and_then(|r| r.invitation_code.clone()),
+            Some("aura:v1:SESSION".to_string())
+        );
+    }
 
     #[test]
     fn set_screen_clears_input_mode_and_buffer() {
@@ -1249,7 +1707,7 @@ mod tests {
     #[test]
     fn ready_models_canonicalize_onboarding_screen() {
         let mut model = UiModel::new("authority-local".to_string());
-        model.account_ready = true;
+        model.account_setup.ready = true;
 
         model.set_screen(ScreenId::Onboarding);
 

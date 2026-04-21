@@ -6,4 +6,5 @@ mod chain {
     mod guard_chain_properties;
     mod guard_chain_transport;
     mod guard_plan_golden;
+    mod support;
 }

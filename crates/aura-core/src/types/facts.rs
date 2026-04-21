@@ -143,8 +143,10 @@ pub enum FactError {
     },
 
     /// Schema version mismatch
-    #[error("schema version mismatch: expected {expected}, got {actual}")]
+    #[error("schema version mismatch: supported {min_supported}..={expected}, got {actual}")]
     VersionMismatch {
+        /// Minimum supported schema version.
+        min_supported: u16,
         /// Expected schema version
         expected: u16,
         /// Actual schema version found
@@ -181,6 +183,54 @@ pub struct FactEnvelope {
     pub encoding: FactEncoding,
     /// Encoded payload bytes.
     pub payload: Vec<u8>,
+}
+
+/// Declares which schema versions a decoder accepts for one fact family.
+///
+/// Migration contract:
+/// - `current` is the schema version emitted by the current writer.
+/// - `min_supported` is the oldest on-disk version this decoder still loads.
+/// - when bumping a fact schema, update `min_supported` only if the new type
+///   remains backward-compatible with those older payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FactSchemaCompatibility {
+    /// Oldest schema version accepted by the decoder.
+    pub min_supported: u16,
+    /// Newest schema version accepted by the decoder.
+    pub current: u16,
+}
+
+impl FactSchemaCompatibility {
+    /// Accept only a single exact schema version.
+    #[must_use]
+    pub const fn exact(schema_version: u16) -> Self {
+        Self {
+            min_supported: schema_version,
+            current: schema_version,
+        }
+    }
+
+    /// Accept an explicit inclusive schema-version range.
+    #[must_use]
+    pub const fn range(min_supported: u16, current: u16) -> Self {
+        Self {
+            min_supported,
+            current,
+        }
+    }
+
+    /// Validate that an observed schema version falls within the supported
+    /// inclusive range.
+    pub fn ensure_supported(self, actual: u16) -> Result<(), FactError> {
+        if actual < self.min_supported || actual > self.current {
+            return Err(FactError::VersionMismatch {
+                min_supported: self.min_supported,
+                expected: self.current,
+                actual,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Delta produced by applying domain facts during reduction.
@@ -235,14 +285,17 @@ pub fn encode_domain_fact<T: Serialize>(
 /// Decode a domain fact payload from a canonical envelope.
 pub fn decode_domain_fact<T: DeserializeOwned>(
     expected_type_id: &str,
-    expected_schema_version: u16,
+    schema_compatibility: FactSchemaCompatibility,
     bytes: &[u8],
 ) -> Option<T> {
     let envelope: FactEnvelope = crate::util::serialization::from_slice(bytes).ok()?;
     if envelope.type_id.as_str() != expected_type_id {
         return None;
     }
-    if envelope.schema_version != expected_schema_version {
+    if schema_compatibility
+        .ensure_supported(envelope.schema_version)
+        .is_err()
+    {
         return None;
     }
     if envelope.payload.len() > MAX_FACT_PAYLOAD_BYTES {
@@ -297,10 +350,12 @@ pub fn try_encode_fact<T: Serialize>(
 ///
 /// - `FactError::Serialization` if deserialization fails
 /// - `FactError::TypeMismatch` if the type ID doesn't match
-/// - `FactError::VersionMismatch` if the schema version doesn't match
+/// - `FactError::VersionMismatch` if the schema version falls outside the
+///   supported compatibility range
 pub fn try_decode_fact<T: DeserializeOwned>(
     expected_type_id: &FactTypeId,
-    expected_schema_version: u16,
+    min_supported_schema_version: u16,
+    current_schema_version: u16,
     bytes: &[u8],
 ) -> Result<T, FactError> {
     let envelope: FactEnvelope = crate::util::serialization::from_slice(bytes)?;
@@ -312,12 +367,8 @@ pub fn try_decode_fact<T: DeserializeOwned>(
         });
     }
 
-    if envelope.schema_version != expected_schema_version {
-        return Err(FactError::VersionMismatch {
-            expected: expected_schema_version,
-            actual: envelope.schema_version,
-        });
-    }
+    FactSchemaCompatibility::range(min_supported_schema_version, current_schema_version)
+        .ensure_supported(envelope.schema_version)?;
     if envelope.payload.len() > MAX_FACT_PAYLOAD_BYTES {
         return Err(FactError::PayloadTooLarge {
             size: envelope.payload.len() as u64,
@@ -349,35 +400,7 @@ pub fn try_decode_fact_compatible<T: DeserializeOwned>(
     max_schema_version: u16,
     bytes: &[u8],
 ) -> Result<T, FactError> {
-    let envelope: FactEnvelope = crate::util::serialization::from_slice(bytes)?;
-
-    if envelope.type_id.as_str() != expected_type_id.as_str() {
-        return Err(FactError::TypeMismatch {
-            expected: expected_type_id.to_string(),
-            actual: envelope.type_id.to_string(),
-        });
-    }
-
-    if envelope.schema_version > max_schema_version {
-        return Err(FactError::VersionMismatch {
-            expected: max_schema_version,
-            actual: envelope.schema_version,
-        });
-    }
-    if envelope.payload.len() > MAX_FACT_PAYLOAD_BYTES {
-        return Err(FactError::PayloadTooLarge {
-            size: envelope.payload.len() as u64,
-            max: MAX_FACT_PAYLOAD_BYTES as u64,
-        });
-    }
-
-    let payload = match envelope.encoding {
-        FactEncoding::DagCbor => crate::util::serialization::from_slice(&envelope.payload)?,
-        FactEncoding::Json => serde_json::from_slice(&envelope.payload)
-            .map_err(|e| FactError::InvalidEnvelope(format!("JSON decode failed: {e}")))?,
-    };
-
-    Ok(payload)
+    try_decode_fact(expected_type_id, 1, max_schema_version, bytes)
 }
 
 #[cfg(test)]
@@ -409,7 +432,7 @@ mod tests {
         };
 
         let bytes = try_encode_fact(&type_id, 1, &fact).unwrap();
-        let decoded: TestFact = try_decode_fact(&type_id, 1, &bytes).unwrap();
+        let decoded: TestFact = try_decode_fact(&type_id, 1, 1, &bytes).unwrap();
 
         assert_eq!(fact, decoded);
     }
@@ -424,7 +447,7 @@ mod tests {
         };
 
         let bytes = try_encode_fact(&type_id, 1, &fact).unwrap();
-        let result: Result<TestFact, _> = try_decode_fact(&wrong_type_id, 1, &bytes);
+        let result: Result<TestFact, _> = try_decode_fact(&wrong_type_id, 1, 1, &bytes);
 
         assert!(matches!(result, Err(FactError::TypeMismatch { .. })));
     }
@@ -438,9 +461,23 @@ mod tests {
         };
 
         let bytes = try_encode_fact(&type_id, 2, &fact).unwrap();
-        let result: Result<TestFact, _> = try_decode_fact(&type_id, 1, &bytes);
+        let result: Result<TestFact, _> = try_decode_fact(&type_id, 1, 1, &bytes);
 
         assert!(matches!(result, Err(FactError::VersionMismatch { .. })));
+    }
+
+    #[test]
+    fn test_backward_compatible_version_decode() {
+        let type_id = FactTypeId::new("test/v1");
+        let fact = TestFact {
+            value: 42,
+            name: "test".to_string(),
+        };
+
+        let bytes = try_encode_fact(&type_id, 1, &fact).unwrap();
+        let decoded: TestFact = try_decode_fact(&type_id, 1, 2, &bytes).unwrap();
+
+        assert_eq!(fact, decoded);
     }
 
     #[test]
@@ -519,7 +556,7 @@ mod tests {
         };
 
         let bytes = crate::util::serialization::to_vec(&envelope).unwrap();
-        let result: Result<TestFact, _> = try_decode_fact(&type_id, 1, &bytes);
+        let result: Result<TestFact, _> = try_decode_fact(&type_id, 1, 1, &bytes);
 
         assert!(matches!(result, Err(FactError::PayloadTooLarge { .. })));
     }

@@ -89,6 +89,12 @@ impl aura_core::ProtocolErrorCode for ValidationError {
     }
 }
 
+fn malformed_instance(reason: impl Into<String>) -> ValidationError {
+    ValidationError::MalformedInstance {
+        reason: reason.into(),
+    }
+}
+
 /// Validate a signature share.
 ///
 /// Quint: `ValidShare(share, cid, rid, pHash)`
@@ -108,7 +114,7 @@ pub fn validate_share(
     // Quint: share.dataBinding.bindCid == cid
     // Note: In pure core, we use string comparison on data_binding field
     // Production would verify cryptographic binding
-    let expected_binding = format!("{expected_cid}:{expected_rid}:{expected_prestate_hash}");
+    let _expected_binding = format!("{expected_cid}:{expected_rid}:{expected_prestate_hash}");
 
     // Quint: share.shareValue != ""
     if share.share_value.is_empty() {
@@ -135,7 +141,7 @@ pub fn validate_share(
 /// Lean: Aura.Consensus.Validity.validity
 pub fn validate_commit(
     commit: &PureCommitFact,
-    threshold: ConsensusThreshold,
+    _threshold: ConsensusThreshold,
 ) -> Result<(), ValidationError> {
     // Quint: cf.signature.sigValue != ""
     if commit.signature.is_empty() {
@@ -177,7 +183,7 @@ pub fn is_equivocator(proposals: &[ShareProposal], witness: &AuthorityId) -> boo
 pub fn shares_consistent(
     proposals: &[ShareProposal],
     result_id: &Hash32,
-    prestate_hash: &Hash32,
+    _prestate_hash: &Hash32,
 ) -> bool {
     proposals
         .iter()
@@ -200,37 +206,34 @@ pub fn shares_consistent(
 pub fn check_invariants(state: &ConsensusState) -> Result<(), ValidationError> {
     // Quint: inst.threshold >= 1
     if state.threshold.get() < 1 {
-        return Err(ValidationError::MalformedInstance {
-            reason: "threshold must be >= 1".to_string(),
-        });
+        return Err(malformed_instance("threshold must be >= 1"));
     }
 
     // Quint: inst.witnesses.size() >= inst.threshold
     if state.witnesses.len() < state.threshold.as_usize() {
-        return Err(ValidationError::MalformedInstance {
-            reason: format!(
-                "insufficient witnesses: {} < {}",
-                state.witnesses.len(),
-                state.threshold.get()
-            ),
-        });
+        return Err(malformed_instance(format!(
+            "insufficient witnesses: {} < {}",
+            state.witnesses.len(),
+            state.threshold.get()
+        )));
     }
 
     // Quint: inst.proposals.forall(p => inst.witnesses.contains(p.witness))
     for proposal in &state.proposals {
         if !state.witnesses.contains(&proposal.witness) {
-            return Err(ValidationError::MalformedInstance {
-                reason: format!("proposal from non-witness: {}", proposal.witness),
-            });
+            return Err(malformed_instance(format!(
+                "proposal from non-witness: {}",
+                proposal.witness
+            )));
         }
     }
 
     // Quint: inst.equivocators.subseteq(inst.witnesses)
     for equivocator in &state.equivocators {
         if !state.witnesses.contains(equivocator) {
-            return Err(ValidationError::MalformedInstance {
-                reason: format!("equivocator not in witness set: {equivocator}"),
-            });
+            return Err(malformed_instance(format!(
+                "equivocator not in witness set: {equivocator}"
+            )));
         }
     }
 
@@ -238,9 +241,7 @@ pub fn check_invariants(state: &ConsensusState) -> Result<(), ValidationError> {
     if state.phase == ConsensusPhase::Committed {
         // Quint: isCommitted implies hasCommit
         if state.commit_fact.is_none() {
-            return Err(ValidationError::MalformedInstance {
-                reason: "committed phase but no commit fact".to_string(),
-            });
+            return Err(malformed_instance("committed phase but no commit fact"));
         }
 
         // Quint: equivocators excluded from attestation

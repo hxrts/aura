@@ -19,6 +19,7 @@ use std::str::FromStr;
 
 use super::types::{OpError, OpFailureCode, OpResponse, OpResult};
 use super::EffectCommand;
+use crate::env::demo_device_id_override;
 
 // Re-export workflows for convenience
 pub use aura_app::ui::workflows::context::{
@@ -28,9 +29,7 @@ pub use aura_app::ui::workflows::context::{
 pub use aura_app::ui::workflows::invitation::accept_pending_channel_invitation;
 
 fn is_demo_mode() -> bool {
-    std::env::var("AURA_DEMO_DEVICE_ID")
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty())
+    demo_device_id_override().is_some()
 }
 
 fn formatted_home_name(home: &aura_app::ui::types::HomeState, fallback_id: ChannelId) -> String {

@@ -202,6 +202,12 @@ impl AuraHandlerError {
 
 impl aura_core::ProtocolErrorCode for AuraHandlerError {
     fn code(&self) -> &'static str {
+        self.protocol_code()
+    }
+}
+
+impl AuraHandlerError {
+    fn protocol_code(&self) -> &'static str {
         match self {
             AuraHandlerError::UnsupportedEffect { .. } => "handler_unsupported_effect",
             AuraHandlerError::UnknownOperation { .. } => "handler_unknown_operation",

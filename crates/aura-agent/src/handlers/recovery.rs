@@ -19,6 +19,7 @@ use aura_protocol::effects::EffectApiEffects;
 use aura_recovery::capabilities::RecoveryCapability;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Recovery operation state
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,30 +114,37 @@ pub struct RecoveryRequest {
 }
 
 /// Guardian approval for a recovery operation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct GuardianApproval {
+    #[zeroize(skip)]
     /// Recovery ceremony ID being approved
     pub recovery_id: RecoveryId,
+    #[zeroize(skip)]
     /// Guardian authority providing approval
     pub guardian_id: AuthorityId,
-    /// Guardian's signature over the recovery request
+    /// Guardian's signature over the recovery request. Cleared on drop along
+    /// with any embedded recovery share bytes.
     pub signature: Vec<u8>,
-    /// Optional encrypted share data
+    /// Optional encrypted share data. Zeroized on drop.
     pub share_data: Option<Vec<u8>>,
+    #[zeroize(skip)]
     /// Approval timestamp
     pub approved_at: u64,
 }
 
 /// Recovery operation result
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct RecoveryResult {
+    #[zeroize(skip)]
     /// Whether recovery succeeded
     pub success: bool,
+    #[zeroize(skip)]
     /// Recovery ceremony ID
     pub recovery_id: RecoveryId,
+    #[zeroize(skip)]
     /// Final state
     pub state: RecoveryState,
-    /// Recovered key material (if applicable)
+    /// Recovered key material (if applicable). Zeroized on drop.
     pub key_material: Option<Vec<u8>>,
     /// Guardian approvals received
     pub approvals: Vec<GuardianApproval>,
@@ -578,6 +586,11 @@ impl RecoveryHandler {
         self.recovery_manager.list_active().await
     }
 
+    /// List active recovery ids whose request expiry has passed.
+    pub async fn expired_recovery_ids(&self, current_time: u64) -> Vec<RecoveryId> {
+        self.recovery_manager.expired_ids(current_time).await
+    }
+
     /// Cleanup expired recovery ceremonies.
     ///
     /// Removes recoveries that have passed their expiration time.
@@ -732,7 +745,7 @@ mod tests {
             .unwrap();
 
         assert!(result.success);
-        match result.state {
+        match &result.state {
             RecoveryState::Complete { .. } => {}
             _ => panic!("Expected Complete state"),
         }
@@ -771,7 +784,7 @@ mod tests {
             .unwrap();
 
         assert!(!result.success);
-        match result.state {
+        match &result.state {
             RecoveryState::Failed { reason, .. } => {
                 assert_eq!(reason, "User cancelled");
             }

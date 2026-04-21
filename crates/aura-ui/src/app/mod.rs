@@ -10,9 +10,9 @@ mod shell;
 mod snapshot;
 
 use crate::components::{
-    AuthorityPickerItem, ButtonVariant, ModalInputView, ModalView, PillTone, SelectableItem,
-    UiAuthorityPickerModal, UiButton, UiCard, UiCardBody, UiCardFooter, UiDeviceEnrollmentModal,
-    UiFooter, UiListButton, UiListItem, UiModal, UiPill,
+    AuthorityPickerItem, ButtonVariant, ModalFooterActionView, ModalInputView, ModalValueView,
+    ModalView, PillTone, SelectableItem, UiAuthorityPickerModal, UiButton, UiCard, UiCardBody,
+    UiCardFooter, UiDeviceEnrollmentModal, UiFooter, UiListButton, UiListItem, UiModal, UiPill,
 };
 use crate::dom_ids::RequiredDomId;
 use crate::model::{
@@ -39,9 +39,12 @@ use aura_app::ui::workflows::moderator as moderator_workflows;
 use aura_app::ui::workflows::{
     access as access_workflows, contacts as contacts_workflows, context as context_workflows,
     invitation as invitation_workflows, messaging as messaging_workflows,
-    recovery as recovery_workflows, settings as settings_workflows, time as time_workflows,
+    recovery as recovery_workflows, settings as settings_workflows, system as system_workflows,
+    time as time_workflows,
 };
-use aura_app::ui_contract::{bridged_operation_statuses, ChannelFactKey, RuntimeFact};
+use aura_app::ui_contract::{
+    bridged_operation_statuses, AuthoritativeSemanticFact, ChannelFactKey, RuntimeFact,
+};
 use aura_app::views::chat::NOTE_TO_SELF_CHANNEL_NAME;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::hash::hash;
@@ -220,10 +223,18 @@ mod tests {
         assert!(accept_branch.contains("handoff::accept_imported_invitation("));
         assert!(!accept_branch.contains("complete_runtime_invitation_operation("));
 
-        assert!(create_branch.contains("UiWorkflowHandoffOwner::submit("));
-        assert!(create_branch.contains(".run_workflow("));
-        assert!(create_branch.contains("handoff::create_generic_contact_invitation("));
+        assert!(source.contains("fn launch_create_invitation_workflow("));
+        assert!(source.contains("handoff::create_generic_contact_invitation("));
+        assert!(source.contains("UiWorkflowHandoffOwner::submit("));
+        assert!(create_branch.contains("controller.close_modal();"));
+        assert!(!create_branch.contains("create_generic_contact_invitation("));
         assert!(!create_branch.contains("complete_runtime_modal_operation_success("));
+
+        let rendering_path = repo_root.join("crates/aura-ui/src/app/shell/rendering.rs");
+        let rendering_source = std::fs::read_to_string(&rendering_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", rendering_path.display()));
+        assert!(rendering_source.contains("let _ = render_tick();"));
+        assert!(rendering_source.contains("launch_create_invitation_workflow("));
     }
 
     #[test]
@@ -681,7 +692,7 @@ mod tests {
     #[test]
     fn runtime_semantic_snapshot_keeps_settings_loading_until_authoritative_projection_arrives() {
         let mut model = UiModel::new("authority-test".to_string());
-        model.account_ready = true;
+        model.account_setup.ready = true;
         model.set_screen(ScreenId::Settings);
 
         let loading_snapshot = runtime_semantic_snapshot(
@@ -722,7 +733,7 @@ mod tests {
     #[test]
     fn runtime_semantic_snapshot_keeps_neighborhood_loading_until_home_projection_arrives() {
         let mut model = UiModel::new("authority-test".to_string());
-        model.account_ready = true;
+        model.account_setup.ready = true;
         model.set_screen(ScreenId::Neighborhood);
 
         let loading_snapshot = runtime_semantic_snapshot(

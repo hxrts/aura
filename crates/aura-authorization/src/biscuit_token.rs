@@ -29,6 +29,11 @@ impl TokenGrantProfile for Vec<CapabilityName> {
 /// with the authority-centric identity model where authorities are the
 /// cryptographic actors that issue and manage tokens.
 ///
+/// **Revocation Model**: Aura revokes Biscuit material at the authority epoch /
+/// root-key boundary, not via a crate-local per-token revocation list. Rotating
+/// the authority root key invalidates previously issued tokens for that
+/// authority because verification is anchored to the current public key.
+///
 /// This replaces the legacy `AccountAuthority` pattern that used `AccountId`.
 pub struct TokenAuthority {
     authority_id: AuthorityId,
@@ -114,6 +119,10 @@ impl TokenAuthority {
 /// **Authority Model**: Tokens are managed per-authority, not per-device.
 /// This aligns with the authority-centric identity model where authorities
 /// are the cryptographic actors that hold and manage tokens.
+///
+/// **Revocation Assumption**: `BiscuitTokenManager` tracks the locally active
+/// token only. It does not maintain a revocation list; authority-wide epoch/root-key
+/// rotation is the invalidation mechanism for previously issued tokens.
 #[derive(Clone)]
 pub struct BiscuitTokenManager {
     authority_id: AuthorityId,
@@ -132,25 +141,27 @@ impl BiscuitTokenManager {
     /// Attenuate the token to only allow read operations on resources
     /// matching the given prefix.
     pub fn attenuate_read(&self, resource_prefix: &str) -> Result<Biscuit, BiscuitError> {
-        let prefix = resource_prefix.to_string();
-        let attenuated = self.current_token.append(block!(
-            r#"
-            check if operation("read");
-            check if resource($res), $res.starts_with({prefix});
-        "#
-        ))?;
-        Ok(attenuated)
+        self.attenuate_operation("read", resource_prefix)
     }
 
     /// Attenuate the token to only allow write operations on resources
     /// matching the given prefix.
     pub fn attenuate_write(&self, resource_prefix: &str) -> Result<Biscuit, BiscuitError> {
+        self.attenuate_operation("write", resource_prefix)
+    }
+
+    fn attenuate_operation(
+        &self,
+        operation: &str,
+        resource_prefix: &str,
+    ) -> Result<Biscuit, BiscuitError> {
         let prefix = resource_prefix.to_string();
         let attenuated = self.current_token.append(block!(
             r#"
-            check if operation("write");
+            check if operation({operation});
             check if resource($res), $res.starts_with({prefix});
-        "#
+        "#,
+            operation = operation,
         ))?;
         Ok(attenuated)
     }
@@ -271,4 +282,7 @@ pub enum BiscuitError {
 
     #[error("Invalid capability: {0}")]
     InvalidCapability(String),
+
+    #[error("Current time is required for Biscuit evaluation")]
+    TimeRequired,
 }

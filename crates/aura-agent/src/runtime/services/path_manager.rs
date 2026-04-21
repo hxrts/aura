@@ -7,7 +7,7 @@
 //! through admitted VM execution. Owner: `path_manager`. Removal condition:
 //! delete the local control state machine once the choreography becomes the
 //! canonical runtime execution path.
-#![allow(dead_code)]
+#![allow(dead_code)] // Cleanup target (2026-07): remove after anonymous-path choreography replaces the local control state machine.
 
 use super::config_profiles::impl_service_config_profiles;
 use super::service_registry::ServiceRegistry;
@@ -84,6 +84,7 @@ impl_service_config_profiles!(AnonymousPathManagerConfig {
 
 /// Summary projection for runtime-local anonymous path state.
 #[allow(dead_code)]
+// Cleanup target (2026-07): remove if no runtime consumer still needs the local anonymous-path projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnonymousPathProjection {
     pub active_paths: usize,
@@ -326,12 +327,12 @@ impl AnonymousPathManager {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Cleanup target (2026-07): remove if callers never need read-only config access outside tests.
     pub fn config(&self) -> &AnonymousPathManagerConfig {
         &self.config
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Cleanup target (2026-07): remove if projection snapshots remain test-only after choreography migration.
     pub async fn projection(&self) -> AnonymousPathProjection {
         let state = self.state.read().await;
         AnonymousPathProjection {

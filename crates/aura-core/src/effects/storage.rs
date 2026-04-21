@@ -195,9 +195,7 @@ pub trait StorageEffects: StorageCoreEffects + StorageExtendedEffects {}
 
 impl<T: StorageCoreEffects + StorageExtendedEffects + ?Sized> StorageEffects for T {}
 
-/// Blanket implementation for Arc<T> where T: StorageCoreEffects
-#[async_trait]
-impl<T: StorageCoreEffects + ?Sized> StorageCoreEffects for std::sync::Arc<T> {
+impl_arc_effect!(StorageCoreEffects {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         (**self).store(key, value).await
     }
@@ -213,11 +211,9 @@ impl<T: StorageCoreEffects + ?Sized> StorageCoreEffects for std::sync::Arc<T> {
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         (**self).list_keys(prefix).await
     }
-}
+});
 
-/// Blanket implementation for Arc<T> where T: StorageExtendedEffects
-#[async_trait]
-impl<T: StorageExtendedEffects + ?Sized> StorageExtendedEffects for std::sync::Arc<T> {
+impl_arc_effect!(StorageExtendedEffects {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         (**self).exists(key).await
     }
@@ -240,4 +236,4 @@ impl<T: StorageExtendedEffects + ?Sized> StorageExtendedEffects for std::sync::A
     async fn stats(&self) -> Result<StorageStats, StorageError> {
         (**self).stats().await
     }
-}
+});

@@ -41,6 +41,17 @@ fn derive_context_for_fact(fact: &JournalFact) -> ContextId {
     ContextId::new_from_entropy(hash(&input))
 }
 
+fn source_authority(namespace: &JournalNamespace) -> AuthorityId {
+    match namespace {
+        JournalNamespace::Authority(auth_id) => *auth_id,
+        JournalNamespace::Context(ctx_id) => {
+            let mut padded = [0u8; 32];
+            padded[..16].copy_from_slice(&ctx_id.to_bytes());
+            AuthorityId::new_from_entropy(padded)
+        }
+    }
+}
+
 impl Journal {
     /// Create a new journal for an account
     pub async fn new(account_id: AccountId, crypto: &dyn CryptoEffects) -> Result<Self, AuraError> {
@@ -292,81 +303,8 @@ impl Journal {
             .map(|fact| CommittedFact {
                 timestamp: fact.timestamp.clone(),
                 order: fact.order.clone(),
-                content_type: match &fact.content {
-                    FactContent::AttestedOp(_) => "AttestedOp".to_string(),
-                    FactContent::Relational(rel) => match rel {
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::GuardianBinding { .. },
-                        ) => "GuardianBinding".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::RecoveryGrant { .. },
-                        ) => "RecoveryGrant".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::Consensus { .. },
-                        ) => "Consensus".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::AmpChannelCheckpoint(..),
-                        ) => "AmpChannelCheckpoint".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::AmpProposedChannelEpochBump(..),
-                        ) => "AmpProposedChannelEpochBump".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::AmpCommittedChannelEpochBump(..),
-                        ) => "AmpCommittedChannelEpochBump".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::AmpChannelPolicy(..),
-                        ) => "AmpChannelPolicy".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::LeakageEvent(..),
-                        ) => "LeakageEvent".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::SessionDelegation(..),
-                        ) => "SessionDelegation".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::DkgTranscriptCommit(..),
-                        ) => "DkgTranscriptCommit".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::ConvergenceCert(..),
-                        ) => "ConvergenceCert".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::ReversionFact(..),
-                        ) => "ReversionFact".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::RotateFact(..),
-                        ) => "RotateFact".to_string(),
-                        crate::fact::RelationalFact::Protocol(
-                            crate::fact::ProtocolRelationalFact::AmpChannelBootstrap(..),
-                        ) => "AmpChannelBootstrap".to_string(),
-                        crate::fact::RelationalFact::Generic { envelope, .. } => {
-                            format!("Generic:{}", envelope.type_id.as_str())
-                        }
-                    },
-                    FactContent::Snapshot(_) => "Snapshot".to_string(),
-                    FactContent::RendezvousReceipt { .. } => "RendezvousReceipt".to_string(),
-                },
-                content_summary: match &fact.content {
-                    FactContent::AttestedOp(op) => {
-                        format!("{:?} -> {:?}", op.tree_op, op.new_commitment)
-                    }
-                    FactContent::Relational(rel) => match rel {
-                        crate::fact::RelationalFact::Generic { envelope, .. } => {
-                            // Try to decode payload as UTF-8 for readability
-                            String::from_utf8(envelope.payload.clone())
-                                .unwrap_or_else(|_| format!("{} bytes", envelope.payload.len()))
-                        }
-                        _ => format!("{rel:?}"),
-                    },
-                    FactContent::Snapshot(snap) => {
-                        format!(
-                            "seq={}, superseded={}",
-                            snap.sequence,
-                            snap.superseded_facts.len()
-                        )
-                    }
-                    FactContent::RendezvousReceipt { envelope_id, .. } => {
-                        format!("envelope={}", hex::encode(&envelope_id[..8]))
-                    }
-                },
+                content_type: fact.content.projection_type_label(),
+                content_summary: fact.content.projection_summary(),
             })
             .collect()
     }
@@ -377,17 +315,7 @@ impl Journal {
     /// converts them back to `JournalFact` format for storage and replay.
     /// The source authority is derived from the journal's namespace.
     pub fn journal_facts(&self) -> Vec<JournalFact> {
-        // Extract the authority from the journal namespace
-        let source_authority = match &self.fact_journal.namespace {
-            crate::fact::JournalNamespace::Authority(auth_id) => *auth_id,
-            crate::fact::JournalNamespace::Context(ctx_id) => {
-                // For context-scoped journals, derive an authority from the context
-                // Pad the 16-byte context ID to 32 bytes
-                let mut padded = [0u8; 32];
-                padded[..16].copy_from_slice(&ctx_id.to_bytes());
-                AuthorityId::new_from_entropy(padded)
-            }
-        };
+        let source_authority = source_authority(&self.fact_journal.namespace);
 
         self.fact_journal
             .iter_facts()

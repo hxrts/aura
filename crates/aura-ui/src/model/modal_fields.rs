@@ -29,6 +29,14 @@ impl ModalFieldDescriptor {
     }
 }
 
+fn single_text_field(
+    active: bool,
+    descriptor: ModalFieldDescriptor,
+    value: &str,
+) -> Option<(ModalFieldDescriptor, String)> {
+    active.then_some((descriptor, value.to_string()))
+}
+
 impl CreateChannelModalState {
     fn field_descriptor(&self) -> Option<ModalFieldDescriptor> {
         match self.step {
@@ -98,16 +106,21 @@ impl CreateChannelModalState {
 
 impl ThresholdWizardModalState {
     fn field_descriptor(&self) -> Option<ModalFieldDescriptor> {
-        if matches!(self.step, ThresholdWizardStep::Threshold) {
-            Some(ModalFieldDescriptor::ThresholdWizard)
-        } else {
-            None
-        }
+        single_text_field(
+            matches!(self.step, ThresholdWizardStep::Threshold),
+            ModalFieldDescriptor::ThresholdWizard,
+            &self.threshold_input,
+        )
+        .map(|(descriptor, _)| descriptor)
     }
 
     fn text_value(&self) -> Option<String> {
-        self.field_descriptor()
-            .map(|_| self.threshold_input.clone())
+        single_text_field(
+            matches!(self.step, ThresholdWizardStep::Threshold),
+            ModalFieldDescriptor::ThresholdWizard,
+            &self.threshold_input,
+        )
+        .map(|(_, value)| value)
     }
 
     fn set_text_value(&mut self, value: String) {
@@ -119,21 +132,25 @@ impl ThresholdWizardModalState {
 
 impl AddDeviceModalState {
     fn field_descriptor(&self) -> Option<ModalFieldDescriptor> {
-        if matches!(self.step, AddDeviceWizardStep::Name) {
-            Some(ModalFieldDescriptor::AddDeviceName)
-        } else {
-            None
-        }
+        single_text_field(
+            self.accepts_name_input(),
+            ModalFieldDescriptor::AddDeviceName,
+            self.draft_name().unwrap_or_default(),
+        )
+        .map(|(descriptor, _)| descriptor)
     }
 
     fn text_value(&self) -> Option<String> {
-        self.field_descriptor().map(|_| self.name_input.clone())
+        single_text_field(
+            self.accepts_name_input(),
+            ModalFieldDescriptor::AddDeviceName,
+            self.draft_name().unwrap_or_default(),
+        )
+        .map(|(_, value)| value)
     }
 
     fn set_text_value(&mut self, value: String) {
-        if self.field_descriptor().is_some() {
-            self.name_input = value;
-        }
+        self.set_draft_name(value);
     }
 }
 
@@ -160,43 +177,49 @@ impl CapabilityConfigModalState {
 }
 
 impl CreateInvitationModalState {
+    const fn normalized_field_id(field_id: FieldId) -> FieldId {
+        match field_id {
+            FieldId::Nickname
+            | FieldId::InvitationReceiverNickname
+            | FieldId::InvitationMessage
+            | FieldId::InvitationTtl => field_id,
+            _ => FieldId::Nickname,
+        }
+    }
+
     fn field_descriptor(&self) -> ModalFieldDescriptor {
         ModalFieldDescriptor::Direct(self.active_field)
     }
 
     fn text_value(&self) -> String {
         match self.active_field {
+            FieldId::Nickname => self.nickname.clone(),
+            FieldId::InvitationReceiverNickname => self.receiver_nickname.clone(),
             FieldId::InvitationMessage => self.message.clone(),
             FieldId::InvitationTtl => self.ttl_hours.to_string(),
-            _ => self.message.clone(),
+            _ => self.nickname.clone(),
         }
     }
 
     fn set_text_value(&mut self, value: String) {
         match self.active_field {
+            FieldId::Nickname => self.nickname = value,
+            FieldId::InvitationReceiverNickname => self.receiver_nickname = value,
             FieldId::InvitationMessage => self.message = value,
             FieldId::InvitationTtl => {
                 self.ttl_hours = value.trim().parse::<u64>().unwrap_or(self.ttl_hours.max(1));
             }
-            _ => self.message = value,
+            _ => self.nickname = value,
         }
     }
 
     fn set_field_value(&mut self, field_id: FieldId, value: String) {
-        self.active_field = match field_id {
-            FieldId::InvitationMessage => FieldId::InvitationMessage,
-            FieldId::InvitationTtl => FieldId::InvitationTtl,
-            _ => FieldId::InvitationMessage,
-        };
+        self.active_field = Self::normalized_field_id(field_id);
         self.set_text_value(value);
     }
 
     fn set_active_field(&mut self, field_id: FieldId) {
-        self.active_field = match field_id {
-            FieldId::InvitationMessage => FieldId::InvitationMessage,
-            FieldId::InvitationTtl => FieldId::InvitationTtl,
-            _ => FieldId::InvitationMessage,
-        };
+        self.active_field = Self::normalized_field_id(field_id);
     }
 }
 
@@ -292,5 +315,46 @@ impl ActiveModal {
 
     pub(super) fn accepts_text(&self) -> bool {
         self.field_descriptor().is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ActiveModal, AddDeviceModalState, AddDeviceWizardStep, CreateInvitationModalState,
+    };
+    use aura_app::ui::contract::FieldId;
+
+    #[test]
+    fn add_device_name_step_uses_explicit_draft_helpers() {
+        let mut state = AddDeviceModalState::default();
+        state.push_draft_name_char('L');
+        state.push_draft_name_char('a');
+        state.push_draft_name_char('p');
+        state.push_draft_name_char('t');
+        state.push_draft_name_char('o');
+        state.push_draft_name_char('p');
+
+        assert_eq!(state.draft_name(), Some("Laptop"));
+        assert_eq!(state.commit_draft_name().as_deref(), Some("Laptop"));
+        assert_eq!(state.device_name, "Laptop");
+        assert_eq!(state.draft_name(), Some(""));
+
+        state.step = AddDeviceWizardStep::ShareCode;
+        state.push_draft_name_char('X');
+        assert_eq!(state.draft_name(), None);
+    }
+
+    #[test]
+    fn create_invitation_field_updates_stay_on_supported_fields() {
+        let mut modal = ActiveModal::CreateInvitation(CreateInvitationModalState::default());
+        modal.set_active_field(FieldId::HomeName);
+        assert_eq!(
+            modal.field_descriptor().map(|field| field.field_id()),
+            Some(FieldId::Nickname)
+        );
+
+        modal.set_field_value(FieldId::InvitationMessage, "hello".to_string());
+        assert_eq!(modal.text_value().as_deref(), Some("hello"));
     }
 }

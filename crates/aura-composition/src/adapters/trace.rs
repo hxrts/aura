@@ -1,7 +1,9 @@
 //! Trace handler adapter
 
 use crate::adapters::collect_ops;
-use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
+use crate::adapters::utils::{
+    deserialize_operation_params, serialize_operation_result, void_result,
+};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::trace::{TraceEffects, TraceEvent, TraceSpanId};
@@ -45,7 +47,7 @@ impl RegistrableHandler for TraceHandlerAdapter {
                 let event: TraceEvent =
                     deserialize_operation_params(effect_type, operation, parameters)?;
                 self.handler.trace_event(event).await;
-                Ok(Vec::new())
+                Ok(void_result())
             }
             "trace_span" => {
                 let event: TraceEvent =
@@ -57,7 +59,7 @@ impl RegistrableHandler for TraceHandlerAdapter {
                 let span: TraceSpanId =
                     deserialize_operation_params(effect_type, operation, parameters)?;
                 self.handler.trace_span_end(span).await;
-                Ok(Vec::new())
+                Ok(void_result())
             }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,

@@ -505,22 +505,25 @@ struct ThresholdConfig {
     threshold: u32,
     #[serde(rename = "total_devices")]
     #[allow(dead_code)]
+    /* TODO(2026-07): delete if total-device config never becomes part of threshold execution. */
     total_devices: u32,
     #[allow(dead_code)]
+    /* TODO(2026-07): delete if threshold execution never consumes structured logging config. */
     logging: Option<LoggingConfig>,
     #[allow(dead_code)]
+    /* TODO(2026-07): delete if threshold execution never consumes transport tuning config. */
     network: Option<NetworkConfig>,
 }
 
 #[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // Retain the parsed logging shape until threshold execution wires these knobs through.
 struct LoggingConfig {
     level: String,
     structured: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // Retain the parsed network shape until threshold execution wires these knobs through.
 struct NetworkConfig {
     default_port: u16,
     timeout: u64,

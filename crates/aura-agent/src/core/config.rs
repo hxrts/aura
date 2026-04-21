@@ -23,13 +23,16 @@ fn default_true() -> bool {
 /// 1. `$AURA_PATH/.aura` if AURA_PATH is set
 /// 2. `~/.aura` (home directory)
 /// 3. `./.aura` (current directory fallback)
-pub fn default_storage_path() -> PathBuf {
+pub fn aura_storage_root() -> PathBuf {
     std::env::var("AURA_PATH")
         .ok()
         .map(PathBuf::from)
         .or_else(dirs::home_dir)
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".aura")
+}
+
+pub fn default_storage_path() -> PathBuf {
+    aura_storage_root().join(".aura")
 }
 
 /// Agent configuration

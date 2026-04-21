@@ -79,7 +79,12 @@ impl AmpChannelEffects for AuraEffectSystem {
 
         let policy =
             aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::AmpEpochBump);
-        if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized) {
+        let consensus_required =
+            crate::runtime::consensus::consensus_required_for_authority(self, self.authority_id)
+                .await;
+        if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized)
+            && consensus_required
+        {
             let tree_state = self.get_current_state().await.map_err(map_amp_err)?;
             let journal = self
                 .fetch_context_journal(params.context)

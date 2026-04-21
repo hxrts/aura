@@ -7,6 +7,7 @@ use aura_anti_entropy::SyncError;
 use aura_consensus::ConsensusError;
 use aura_core::effects::amp::AmpChannelError;
 use aura_core::AuraError;
+use aura_core::ProtocolErrorCode;
 use aura_guards::GuardError;
 use thiserror::Error;
 
@@ -44,6 +45,12 @@ pub enum ProtocolError {
 
 impl aura_core::ProtocolErrorCode for ProtocolError {
     fn code(&self) -> &'static str {
+        self.protocol_code()
+    }
+}
+
+impl ProtocolError {
+    fn protocol_code(&self) -> &'static str {
         match self {
             ProtocolError::Consensus(err) => err.code(),
             ProtocolError::Guard(err) => err.code(),

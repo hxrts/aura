@@ -5,21 +5,20 @@
 
 #![allow(missing_docs)]
 
-use aura_core::types::identifiers::{ContextId, InvitationId};
+use crate::support;
+use aura_core::types::identifiers::InvitationId;
 use aura_core::util::test_utils::test_authority_id;
-use aura_core::FlowCost;
 use aura_invitation::{
     capabilities::InvitationCapability, GuardSnapshot, InvitationConfig, InvitationService,
     InvitationType,
 };
 
 fn snapshot_with_caps(caps: &[InvitationCapability]) -> GuardSnapshot {
-    GuardSnapshot::new(
+    support::snapshot_with_caps(
         test_authority_id(10),
-        ContextId::new_from_entropy([20u8; 32]),
-        FlowCost::new(10),
-        caps.iter().map(InvitationCapability::as_name).collect(),
-        0,
+        support::test_context(20),
+        caps,
+        10,
         1,
     )
 }

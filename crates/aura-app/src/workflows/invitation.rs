@@ -363,6 +363,8 @@ pub mod handoff {
         pub receiver: AuthorityId,
         /// Optional nickname carried in the invitation payload.
         pub nickname: Option<String>,
+        /// Optional sender-local nickname for the invitee.
+        pub receiver_nickname: Option<String>,
         /// Optional invitation message.
         pub message: Option<String>,
         /// Optional invitation TTL in milliseconds.
@@ -376,6 +378,8 @@ pub mod handoff {
     pub struct CreateGenericContactInvitationRequest {
         /// Optional nickname carried in the invitation payload.
         pub nickname: Option<String>,
+        /// Optional sender-local nickname for the invitee.
+        pub receiver_nickname: Option<String>,
         /// Optional invitation message.
         pub message: Option<String>,
         /// Optional invitation TTL in milliseconds.
@@ -433,6 +437,7 @@ pub mod handoff {
             app_core,
             request.receiver,
             request.nickname,
+            request.receiver_nickname,
             request.message,
             request.ttl_ms,
             request.operation_instance_id,
@@ -448,6 +453,7 @@ pub mod handoff {
         super::create_generic_contact_invitation_code_terminal_status(
             app_core,
             request.nickname,
+            request.receiver_nickname,
             request.message,
             request.ttl_ms,
             request.operation_instance_id,
@@ -855,6 +861,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }]);
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(
@@ -906,6 +913,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }]);
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
@@ -1017,6 +1025,7 @@ mod tests {
             is_online: false,
             read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
             relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         };
 
         emit_signal(
@@ -1074,6 +1083,7 @@ mod tests {
                     is_online: false,
                     read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
                     relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+                    invitation_code: None,
                 },
             ]),
             crate::signal_defs::CONTACTS_SIGNAL_NAME,
@@ -1398,6 +1408,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }]);
         runtime.set_amp_channel_context(channel_id, context_id);
         runtime.set_amp_channel_participants(
@@ -1498,6 +1509,7 @@ mod tests {
                 created_at_ms: 1,
                 expires_at_ms: None,
                 message: None,
+                receiver_nickname: None,
             }]);
         };
         let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
@@ -1549,6 +1561,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }]);
 
         let app_core = Arc::new(RwLock::new(
@@ -1574,6 +1587,7 @@ mod tests {
                     is_online: false,
                     read_receipt_policy: crate::views::contacts::ReadReceiptPolicy::Disabled,
                     relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
+                    invitation_code: None,
                 },
             ]),
             CONTACTS_SIGNAL_NAME,
@@ -1622,6 +1636,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         };
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
@@ -1709,6 +1724,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }]);
         runtime.set_amp_channel_context(channel_id, context_id);
         runtime.set_amp_channel_participants(
@@ -1787,6 +1803,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }]);
         runtime.set_amp_channel_context(channel_id, context_id);
         runtime.set_amp_channel_state_exists(context_id, channel_id, true);
@@ -1864,6 +1881,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         };
 
         let error = accept_device_enrollment_invitation(&app_core, &invitation)
@@ -1909,6 +1927,7 @@ mod tests {
                 created_at_ms: 1,
                 expires_at_ms: None,
                 message: Some("sent".to_string()),
+                receiver_nickname: None,
             },
             InvitationInfo {
                 invitation_id: InvitationId::new("received-channel"),
@@ -1923,6 +1942,7 @@ mod tests {
                 created_at_ms: 2,
                 expires_at_ms: None,
                 message: Some("join".to_string()),
+                receiver_nickname: None,
             },
         ]);
         let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
@@ -1957,6 +1977,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         }]);
         let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
 
@@ -2118,6 +2139,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         };
         assert_eq!(
             semantic_kind_for_bridge_invitation(&contact),
@@ -2137,6 +2159,7 @@ mod tests {
             created_at_ms: 1,
             expires_at_ms: None,
             message: None,
+            receiver_nickname: None,
         };
         assert_eq!(
             semantic_kind_for_bridge_invitation(&channel),

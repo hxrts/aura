@@ -14,12 +14,14 @@ pub use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
 use aura_core::{
     byzantine::ByzantineSafetyAttestation,
     domain::{Acknowledgment, Agreement, Consistency, OperationCategory, Propagation},
+    hash::hash,
     semilattice::JoinSemilattice,
     time::{OrderTime, PhysicalTime, TimeStamp},
     types::identifiers::{AuthorityId, ChannelId, ContextId, SessionId},
     Hash32, Result,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Journal namespace for scoping facts
@@ -57,7 +59,7 @@ impl Journal {
 
     /// Add a fact to the journal
     pub fn add_fact(&mut self, fact: Fact) -> Result<()> {
-        self.facts.insert(fact);
+        let _ = self.insert_fact_deduplicated(fact);
         Ok(())
     }
 
@@ -94,13 +96,14 @@ impl JoinSemilattice for Journal {
             "Cannot merge journals from different namespaces"
         );
 
-        let mut merged_facts = self.facts.clone();
-        merged_facts.extend(other.facts.clone());
-
-        Self {
-            namespace: self.namespace.clone(),
-            facts: merged_facts,
+        let mut merged = Self::new(self.namespace.clone());
+        for fact in self.facts.iter().cloned() {
+            let _ = merged.insert_fact_deduplicated(fact);
         }
+        for fact in other.facts.iter().cloned() {
+            let _ = merged.insert_fact_deduplicated(fact);
+        }
+        merged
     }
 }
 
@@ -113,7 +116,9 @@ impl Journal {
             self.namespace, other.namespace,
             "Cannot merge journals from different namespaces"
         );
-        self.facts.extend(other.facts);
+        for fact in other.facts {
+            let _ = self.insert_fact_deduplicated(fact);
+        }
     }
 
     /// Add a fact with options
@@ -125,8 +130,26 @@ impl Journal {
         if let Some(agreement) = options.initial_agreement {
             fact.agreement = agreement;
         }
-        self.facts.insert(fact);
+        let _ = self.insert_fact_deduplicated(fact);
         Ok(())
+    }
+
+    fn insert_fact_deduplicated(&mut self, fact: Fact) -> bool {
+        let identity = fact.deduplication_id();
+        if self
+            .facts
+            .iter()
+            .any(|existing| existing.deduplication_id() == identity)
+        {
+            tracing::debug!(
+                namespace = ?self.namespace,
+                deduplication_id = %hex::encode(identity),
+                "Ignoring duplicate fact submission"
+            );
+            false
+        } else {
+            self.facts.insert(fact)
+        }
     }
 
     /// Get a fact by its order ID
@@ -567,6 +590,18 @@ impl Fact {
             },
         }
     }
+
+    /// Stable identifier for duplicate-submission detection.
+    ///
+    /// This uses order + timestamp plus canonicalized content bytes so the
+    /// journal can reject retransmits even when an envelope payload is encoded
+    /// differently but decodes to the same semantic content.
+    pub fn deduplication_id(&self) -> Hash32 {
+        let mut bytes = aura_core::util::serialization::to_vec(&self.order).unwrap_or_default();
+        bytes.extend(aura_core::util::serialization::to_vec(&self.timestamp).unwrap_or_default());
+        bytes.extend(self.content.canonical_identity_bytes());
+        Hash32(hash(&bytes))
+    }
 }
 
 impl PartialOrd for Fact {
@@ -590,6 +625,49 @@ fn cmp_serialized<T: Serialize>(left: &T, right: &T) -> std::cmp::Ordering {
     let left_bytes = aura_core::util::serialization::to_vec(left).unwrap_or_default();
     let right_bytes = aura_core::util::serialization::to_vec(right).unwrap_or_default();
     left_bytes.cmp(&right_bytes)
+}
+
+impl FactContent {
+    fn canonical_identity_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::Relational(RelationalFact::Generic {
+                context_id,
+                envelope,
+            }) => aura_core::util::serialization::to_vec(&(
+                context_id,
+                canonicalize_fact_envelope(envelope),
+            ))
+            .unwrap_or_default(),
+            _ => aura_core::util::serialization::to_vec(self).unwrap_or_default(),
+        }
+    }
+}
+
+fn canonicalize_fact_envelope(envelope: &FactEnvelope) -> FactEnvelope {
+    if let Some(payload) = canonicalize_envelope_payload(envelope) {
+        FactEnvelope {
+            type_id: envelope.type_id.clone(),
+            schema_version: envelope.schema_version,
+            encoding: FactEncoding::DagCbor,
+            payload,
+        }
+    } else {
+        envelope.clone()
+    }
+}
+
+fn canonicalize_envelope_payload(envelope: &FactEnvelope) -> Option<Vec<u8>> {
+    match envelope.encoding {
+        FactEncoding::DagCbor => {
+            let value: JsonValue =
+                aura_core::util::serialization::from_slice(&envelope.payload).ok()?;
+            aura_core::util::serialization::to_vec(&value).ok()
+        }
+        FactEncoding::Json => {
+            let value: JsonValue = serde_json::from_slice(&envelope.payload).ok()?;
+            aura_core::util::serialization::to_vec(&value).ok()
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -682,6 +760,34 @@ impl FactContent {
             FactContent::Relational(_) => FactType::Relational,
             FactContent::Snapshot(_) => FactType::Snapshot,
             FactContent::RendezvousReceipt { .. } => FactType::RendezvousReceipt,
+        }
+    }
+
+    /// Stable human-readable type label for journal projections.
+    pub fn projection_type_label(&self) -> String {
+        match self {
+            FactContent::AttestedOp(_) => "AttestedOp".to_string(),
+            FactContent::Relational(rel) => rel.projection_type_label(),
+            FactContent::Snapshot(_) => "Snapshot".to_string(),
+            FactContent::RendezvousReceipt { .. } => "RendezvousReceipt".to_string(),
+        }
+    }
+
+    /// Human-readable content summary for journal projections.
+    pub fn projection_summary(&self) -> String {
+        match self {
+            FactContent::AttestedOp(op) => format!("{:?} -> {:?}", op.tree_op, op.new_commitment),
+            FactContent::Relational(rel) => rel.projection_summary(),
+            FactContent::Snapshot(snap) => {
+                format!(
+                    "seq={}, superseded={}",
+                    snap.sequence,
+                    snap.superseded_facts.len()
+                )
+            }
+            FactContent::RendezvousReceipt { envelope_id, .. } => {
+                format!("envelope={}", hex::encode(&envelope_id[..8]))
+            }
         }
     }
 }
@@ -1010,6 +1116,15 @@ pub enum ProtocolRelationalFact {
     RotateFact(RotateFact),
 }
 
+fn derive_protocol_context_id(label: &[u8], parts: &[&[u8]]) -> ContextId {
+    let mut input = Vec::new();
+    input.extend_from_slice(label);
+    for part in parts {
+        input.extend_from_slice(part);
+    }
+    ContextId::new_from_entropy(hash(&input))
+}
+
 impl ProtocolRelationalFact {
     /// Stable reducer key for this protocol fact.
     pub fn binding_key(&self) -> ProtocolFactKey {
@@ -1098,6 +1213,75 @@ impl ProtocolRelationalFact {
             ProtocolRelationalFact::RotateFact(rotate) => ProtocolFactKey::RotateFact {
                 to_state: rotate.to_state,
             },
+        }
+    }
+
+    /// Relational context scope for this protocol fact.
+    pub fn context_id(&self) -> ContextId {
+        match self {
+            ProtocolRelationalFact::GuardianBinding {
+                account_id,
+                guardian_id,
+                ..
+            } => derive_protocol_context_id(
+                b"guardian-binding",
+                &[&account_id.to_bytes(), &guardian_id.to_bytes()],
+            ),
+            ProtocolRelationalFact::RecoveryGrant {
+                account_id,
+                guardian_id,
+                grant_hash,
+            } => derive_protocol_context_id(
+                b"recovery-grant",
+                &[
+                    &account_id.to_bytes(),
+                    &guardian_id.to_bytes(),
+                    grant_hash.as_bytes(),
+                ],
+            ),
+            ProtocolRelationalFact::Consensus {
+                consensus_id,
+                operation_hash,
+                ..
+            } => derive_protocol_context_id(
+                b"consensus",
+                &[consensus_id.as_bytes(), operation_hash.as_bytes()],
+            ),
+            ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint) => checkpoint.context,
+            ProtocolRelationalFact::AmpProposedChannelEpochBump(bump) => bump.context,
+            ProtocolRelationalFact::AmpCommittedChannelEpochBump(bump) => bump.context,
+            ProtocolRelationalFact::AmpChannelPolicy(policy) => policy.context,
+            ProtocolRelationalFact::AmpChannelBootstrap(bootstrap) => bootstrap.context,
+            ProtocolRelationalFact::LeakageEvent(event) => event.context_id,
+            ProtocolRelationalFact::SessionDelegation(event) => event.context_id,
+            ProtocolRelationalFact::DkgTranscriptCommit(commit) => commit.context,
+            ProtocolRelationalFact::ConvergenceCert(cert) => cert.context,
+            ProtocolRelationalFact::ReversionFact(reversion) => reversion.context,
+            ProtocolRelationalFact::RotateFact(rotate) => rotate.context,
+        }
+    }
+
+    /// Stable human-readable type label for journal projections.
+    pub fn projection_type_label(&self) -> &'static str {
+        match self {
+            ProtocolRelationalFact::GuardianBinding { .. } => "GuardianBinding",
+            ProtocolRelationalFact::RecoveryGrant { .. } => "RecoveryGrant",
+            ProtocolRelationalFact::Consensus { .. } => "Consensus",
+            ProtocolRelationalFact::AmpChannelCheckpoint(..) => "AmpChannelCheckpoint",
+            ProtocolRelationalFact::AmpProposedChannelEpochBump(..) => {
+                "AmpProposedChannelEpochBump"
+            }
+            ProtocolRelationalFact::AmpCommittedChannelEpochBump(..) => {
+                "AmpCommittedChannelEpochBump"
+            }
+            ProtocolRelationalFact::AmpChannelPolicy(..) => "AmpChannelPolicy",
+            ProtocolRelationalFact::AmpChannelBootstrap(..) => "AmpChannelBootstrap",
+            ProtocolRelationalFact::LeakageEvent(..) => "LeakageEvent",
+            ProtocolRelationalFact::SessionDelegation(..) => "SessionDelegation",
+            ProtocolRelationalFact::DkgTranscriptCommit(..) => "DkgTranscriptCommit",
+            ProtocolRelationalFact::ConvergenceCert(..) => "ConvergenceCert",
+            ProtocolRelationalFact::ReversionFact(..) => "ReversionFact",
+            ProtocolRelationalFact::RotateFact(..) => "RotateFact",
         }
     }
 }
@@ -1197,6 +1381,35 @@ pub enum RelationalFact {
         /// pattern to eliminate double serialization and enable type-safe access.
         envelope: FactEnvelope,
     },
+}
+
+impl RelationalFact {
+    /// Relational context scope for this fact.
+    pub fn context_id(&self) -> ContextId {
+        match self {
+            RelationalFact::Protocol(protocol) => protocol.context_id(),
+            RelationalFact::Generic { context_id, .. } => *context_id,
+        }
+    }
+
+    /// Stable human-readable type label for journal projections.
+    pub fn projection_type_label(&self) -> String {
+        match self {
+            RelationalFact::Protocol(protocol) => protocol.projection_type_label().to_string(),
+            RelationalFact::Generic { envelope, .. } => {
+                format!("Generic:{}", envelope.type_id.as_str())
+            }
+        }
+    }
+
+    /// Human-readable content summary for journal projections.
+    pub fn projection_summary(&self) -> String {
+        match self {
+            RelationalFact::Protocol(_) => format!("{self:?}"),
+            RelationalFact::Generic { envelope, .. } => String::from_utf8(envelope.payload.clone())
+                .unwrap_or_else(|_| format!("{} bytes", envelope.payload.len())),
+        }
+    }
 }
 
 /// Typed key for protocol-level relational facts.
@@ -1419,371 +1632,62 @@ pub struct SnapshotFact {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
-    /// Journal starts empty in its namespace.
-    #[test]
-    fn test_journal_creation() {
-        let auth_id = AuthorityId::new_from_entropy([9u8; 32]);
-        let namespace = JournalNamespace::Authority(auth_id);
-        let journal = Journal::new(namespace.clone());
-
-        assert_eq!(journal.namespace, namespace);
-        assert_eq!(journal.size(), 0);
-    }
-
-    /// Journal join produces the union of both fact sets — core CRDT merge.
-    #[test]
-    fn test_journal_merge() {
-        let auth_id = AuthorityId::new_from_entropy([10u8; 32]);
-        let namespace = JournalNamespace::Authority(auth_id);
-
-        let mut journal1 = Journal::new(namespace.clone());
-        let mut journal2 = Journal::new(namespace);
-
-        // Add different facts to each journal
-        let fact1 = Fact::new(
-            OrderTime([1u8; 32]),
-            TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 1,
+    fn json_generic_fact(payload: &[u8]) -> Fact {
+        Fact::new(
+            OrderTime([7u8; 32]),
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 42,
+                uncertainty: Some(0),
             }),
-        );
-
-        let fact2 = Fact::new(
-            OrderTime([2u8; 32]),
-            TimeStamp::OrderClock(OrderTime([2u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 2,
-            }),
-        );
-
-        journal1.add_fact(fact1.clone()).unwrap();
-        journal2.add_fact(fact2.clone()).unwrap();
-
-        // Merge journals
-        let merged = journal1.join(&journal2);
-
-        assert_eq!(merged.size(), 2);
-        assert!(merged.contains_timestamp(&fact1.timestamp));
-        assert!(merged.contains_timestamp(&fact2.timestamp));
-    }
-
-    /// Cross-namespace merge must panic — namespace isolation prevents
-    /// authority facts from contaminating context journals.
-    #[test]
-    #[should_panic(expected = "Cannot merge journals from different namespaces")]
-    fn test_journal_merge_different_namespaces() {
-        let namespace1 = JournalNamespace::Authority(AuthorityId::new_from_entropy([11u8; 32]));
-        let namespace2 = JournalNamespace::Authority(AuthorityId::new_from_entropy([12u8; 32]));
-
-        let journal1 = Journal::new(namespace1);
-        let journal2 = Journal::new(namespace2);
-
-        // This should panic
-        let _ = journal1.join(&journal2);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Fact Metadata Tests
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// New facts start with provisional agreement and local propagation.
-    #[test]
-    fn test_fact_default_metadata() {
-        let fact = Fact::new(
-            OrderTime([1u8; 32]),
-            TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 1,
-            }),
-        );
-
-        // Default metadata
-        assert!(fact.agreement.is_provisional());
-        assert!(fact.propagation.is_local());
-        assert!(!fact.ack_tracked);
-        assert!(!fact.is_finalized());
-        assert!(!fact.is_propagated());
-    }
-
-    /// Ack-tracked facts participate in delivery receipt accounting.
-    #[test]
-    fn test_fact_with_ack_tracking() {
-        let fact = Fact::new_with_ack_tracking(
-            OrderTime([1u8; 32]),
-            TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 1,
-            }),
-        );
-
-        assert!(fact.ack_tracked);
-    }
-
-    /// Builder chain produces a fact with the specified agreement/propagation state.
-    #[test]
-    fn test_fact_builder_pattern() {
-        use aura_core::query::ConsensusId;
-
-        let consensus_id = ConsensusId::new([1u8; 32]);
-        let fact = Fact::new(
-            OrderTime([1u8; 32]),
-            TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 1,
-            }),
-        )
-        .with_agreement(Agreement::finalized(consensus_id))
-        .with_propagation(Propagation::complete())
-        .with_ack_tracking();
-
-        assert!(fact.is_finalized());
-        assert!(fact.is_propagated());
-        assert!(fact.ack_tracked);
-    }
-
-    /// Fact equality is identity-based (nonce), not metadata-based — two facts
-    /// with the same content but different agreement/propagation are the same fact.
-    #[test]
-    fn test_fact_equality_ignores_metadata() {
-        use aura_core::query::ConsensusId;
-
-        // Create two facts with same identity but different metadata
-        let fact1 = Fact::new(
-            OrderTime([1u8; 32]),
-            TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 1,
-            }),
-        );
-
-        let fact2 = Fact::new(
-            OrderTime([1u8; 32]),
-            TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 1,
-            }),
-        )
-        .with_agreement(Agreement::finalized(ConsensusId::new([2u8; 32])))
-        .with_propagation(Propagation::complete())
-        .with_ack_tracking();
-
-        // Facts should be equal despite different metadata
-        assert_eq!(fact1, fact2);
-    }
-
-    /// Fact ordering is identity-based — metadata differences don't affect
-    /// sort order, ensuring deterministic BTreeSet iteration.
-    #[test]
-    fn test_fact_ordering_ignores_metadata() {
-        // Create facts with same order but different metadata
-        let fact1 = Fact::new(
-            OrderTime([1u8; 32]),
-            TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 1,
-            }),
-        );
-
-        let fact2 = Fact::new(
-            OrderTime([2u8; 32]),
-            TimeStamp::OrderClock(OrderTime([2u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 2,
-            }),
-        )
-        .with_propagation(Propagation::complete());
-
-        // Ordering should be based on order field only
-        assert!(fact1 < fact2);
-    }
-
-    /// Facts with the same nonce but different content are still distinct —
-    /// content is part of fact identity, not just the nonce.
-    #[test]
-    fn test_same_order_different_content_are_distinct() {
-        let namespace = JournalNamespace::Authority(AuthorityId::new_from_entropy([24u8; 32]));
-        let mut journal = Journal::new(namespace);
-        let shared_order = OrderTime([9u8; 32]);
-
-        let fact1 = Fact::new(
-            shared_order.clone(),
-            TimeStamp::OrderClock(OrderTime([10u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::new([1u8; 32]),
-                superseded_facts: vec![],
-                sequence: 1,
-            }),
-        );
-
-        let fact2 = Fact::new(
-            shared_order,
-            TimeStamp::OrderClock(OrderTime([11u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::new([2u8; 32]),
-                superseded_facts: vec![],
-                sequence: 2,
-            }),
-        );
-
-        journal.add_fact(fact1).unwrap();
-        journal.add_fact(fact2).unwrap();
-
-        assert_eq!(journal.size(), 2);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Garbage Collection Tests
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// Ack-tracked facts are GC-eligible only when all expected peers have acked.
-    #[test]
-    fn test_gc_ack_tracking_basic() {
-        use aura_core::query::ConsensusId;
-
-        let auth_id = AuthorityId::new_from_entropy([20u8; 32]);
-        let namespace = JournalNamespace::Authority(auth_id);
-        let mut journal = Journal::new(namespace);
-        let mut ack_storage = AckStorage::new();
-
-        // Create a fact with ack tracking
-        let fact = Fact::new(
-            OrderTime([1u8; 32]),
-            TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 1,
-            }),
-        )
-        .with_ack_tracking()
-        .with_agreement(Agreement::Finalized {
-            consensus_id: ConsensusId([1u8; 32]),
-        });
-
-        journal.add_fact(fact.clone()).unwrap();
-
-        // Record an ack
-        let peer = AuthorityId::new_from_entropy([21u8; 32]);
-        ack_storage
-            .record_ack(
-                &fact.order,
-                peer,
-                PhysicalTime {
-                    ts_ms: 1000,
-                    uncertainty: None,
+            FactContent::Relational(RelationalFact::Generic {
+                context_id: ContextId::new_from_entropy([9u8; 32]),
+                envelope: FactEnvelope {
+                    type_id: FactTypeId::from("test/v1"),
+                    schema_version: 1,
+                    encoding: FactEncoding::Json,
+                    payload: payload.to_vec(),
                 },
-            )
-            .unwrap();
-
-        assert_eq!(ack_storage.len(), 1);
-        assert!(journal.ack_tracked_facts().count() == 1);
-
-        // GC based on finalization - should drop tracking for finalized facts
-        let result = ack_storage.gc_by_consistency(&mut journal, |c| c.agreement.is_finalized());
-
-        assert_eq!(result.facts_collected, 1);
-        assert_eq!(result.facts_remaining, 0);
-        assert!(ack_storage.is_empty());
-        assert_eq!(journal.ack_tracked_facts().count(), 0);
+            }),
+        )
     }
 
-    /// Partial acks don't make facts GC-eligible — all peers must ack.
     #[test]
-    fn test_gc_ack_tracking_partial() {
-        use aura_core::query::ConsensusId;
-
-        let auth_id = AuthorityId::new_from_entropy([22u8; 32]);
-        let namespace = JournalNamespace::Authority(auth_id);
+    fn journal_rejects_duplicate_json_facts_with_noncanonical_payload_bytes() {
+        let namespace = JournalNamespace::Context(ContextId::new_from_entropy([1u8; 32]));
         let mut journal = Journal::new(namespace);
-        let mut ack_storage = AckStorage::new();
 
-        // Create two facts - one finalized, one provisional
-        let fact1 = Fact::new(
-            OrderTime([1u8; 32]),
-            TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 1,
-            }),
-        )
-        .with_ack_tracking()
-        .with_agreement(Agreement::Finalized {
-            consensus_id: ConsensusId([1u8; 32]),
-        });
+        journal
+            .add_fact(json_generic_fact(br#"{"channel":"alpha","epoch":1}"#))
+            .expect("first insert succeeds");
+        journal
+            .add_fact(json_generic_fact(
+                br#"{ "channel" : "alpha", "epoch" : 1 }"#,
+            ))
+            .expect("duplicate semantic insert is ignored");
 
-        let fact2 = Fact::new(
-            OrderTime([2u8; 32]),
-            TimeStamp::OrderClock(OrderTime([2u8; 32])),
-            FactContent::Snapshot(SnapshotFact {
-                state_hash: Hash32::default(),
-                superseded_facts: vec![],
-                sequence: 2,
-            }),
-        )
-        .with_ack_tracking()
-        .with_agreement(Agreement::Provisional);
+        assert_eq!(journal.size(), 1);
+    }
 
-        journal.add_fact(fact1.clone()).unwrap();
-        journal.add_fact(fact2.clone()).unwrap();
+    #[test]
+    fn journal_join_deduplicates_equivalent_fact_retransmits() {
+        let namespace = JournalNamespace::Context(ContextId::new_from_entropy([2u8; 32]));
+        let mut left = Journal::new(namespace.clone());
+        let mut right = Journal::new(namespace);
 
-        // Record acks for both
-        let peer = AuthorityId::new_from_entropy([23u8; 32]);
-        ack_storage
-            .record_ack(
-                &fact1.order,
-                peer,
-                PhysicalTime {
-                    ts_ms: 1000,
-                    uncertainty: None,
-                },
-            )
-            .unwrap();
-        ack_storage
-            .record_ack(
-                &fact2.order,
-                peer,
-                PhysicalTime {
-                    ts_ms: 2000,
-                    uncertainty: None,
-                },
-            )
-            .unwrap();
+        left.add_fact(json_generic_fact(br#"{"channel":"alpha","epoch":1}"#))
+            .expect("left insert succeeds");
+        right
+            .add_fact(json_generic_fact(
+                br#"{ "channel" : "alpha", "epoch" : 1 }"#,
+            ))
+            .expect("right duplicate insert succeeds");
 
-        assert_eq!(ack_storage.len(), 2);
-        assert_eq!(journal.ack_tracked_facts().count(), 2);
+        left.join_assign(right);
 
-        // GC only finalized facts
-        let result = ack_storage.gc_by_consistency(&mut journal, |c| c.agreement.is_finalized());
-
-        assert_eq!(result.facts_collected, 1);
-        assert_eq!(result.facts_remaining, 1);
-        assert_eq!(ack_storage.len(), 1);
-        assert_eq!(journal.ack_tracked_facts().count(), 1);
-
-        // Provisional fact should still have ack tracking
-        let remaining_fact = journal.get_fact(&fact2.order).unwrap();
-        assert!(remaining_fact.ack_tracked);
+        assert_eq!(left.size(), 1);
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::{HashMap, HashSet};
 use std::{cell::RefCell, future::Future, rc::Rc};
 
 #[derive(Default)]
@@ -65,6 +66,35 @@ fn schedule_coalesced_runtime_refresh<T, Loader, Fut>(
     });
 }
 
+fn display_guardian_contact_name(contact: &aura_app::ui::types::Contact) -> String {
+    if !contact.nickname.trim().is_empty() {
+        return contact.nickname.clone();
+    }
+    if let Some(suggestion) = contact
+        .nickname_suggestion
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return suggestion.clone();
+    }
+    contact.id.to_string().chars().take(8).collect()
+}
+
+fn contact_acceptance_refresh_keys(facts: &[AuthoritativeSemanticFact]) -> HashSet<String> {
+    facts
+        .iter()
+        .filter_map(|fact| match fact {
+            AuthoritativeSemanticFact::InvitationAccepted {
+                invitation_kind: aura_app::ui_contract::InvitationFactKind::Contact,
+                authority_id: Some(_),
+                ..
+            }
+            | AuthoritativeSemanticFact::ContactLinkReady { .. } => Some(fact.key()),
+            _ => None,
+        })
+        .collect()
+}
+
 pub(in crate::app) fn use_runtime_bridge_subscriptions(
     controller: Arc<UiController>,
     mut runtime_bridge_started: Signal<bool>,
@@ -84,6 +114,11 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
         use_hook(|| Rc::new(RefCell::new(CoalescedRefreshState::default())));
     let notifications_refresh_state =
         use_hook(|| Rc::new(RefCell::new(CoalescedRefreshState::default())));
+    let authoritative_contact_refresh_keys =
+        use_hook(|| Rc::new(RefCell::new(HashSet::<String>::new())));
+    let observed_guardian_contacts =
+        use_hook(|| Rc::new(RefCell::new(None::<HashMap<String, String>>)));
+    let observed_devices = use_hook(|| Rc::new(RefCell::new(None::<HashMap<String, String>>)));
     let controller_for_runtime = controller;
     use_effect(move || {
         if runtime_bridge_started() {
@@ -208,6 +243,146 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
                     neighborhood_refresh_state_for_runtime_contacts.clone(),
                     load_neighborhood_runtime_view,
                 );
+            }
+        });
+
+        let controller_for_guardian_notifications = controller_for_runtime.clone();
+        let observed_guardian_contacts_for_subscription = observed_guardian_contacts.clone();
+        subscription_task_owner.spawn_local_cancellable(async move {
+            let initial_contacts = {
+                let core = controller_for_guardian_notifications
+                    .app_core()
+                    .read()
+                    .await;
+                core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
+            };
+            *observed_guardian_contacts_for_subscription.borrow_mut() = Some(
+                initial_contacts
+                    .all_contacts()
+                    .filter(|contact| contact.is_guardian)
+                    .map(|contact| {
+                        (
+                            contact.id.to_string(),
+                            display_guardian_contact_name(contact),
+                        )
+                    })
+                    .collect(),
+            );
+
+            let Ok(mut stream) = ({
+                let core = controller_for_guardian_notifications
+                    .app_core()
+                    .read()
+                    .await;
+                core.subscribe(&*CONTACTS_SIGNAL)
+            }) else {
+                return;
+            };
+
+            while stream.recv().await.is_ok() {
+                let contacts = {
+                    let core = controller_for_guardian_notifications
+                        .app_core()
+                        .read()
+                        .await;
+                    core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
+                };
+                let current_guardians = contacts
+                    .all_contacts()
+                    .filter(|contact| contact.is_guardian)
+                    .map(|contact| {
+                        (
+                            contact.id.to_string(),
+                            display_guardian_contact_name(contact),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+                let new_guardians = {
+                    let mut previous = observed_guardian_contacts_for_subscription.borrow_mut();
+                    let added = previous
+                        .as_ref()
+                        .map(|known| {
+                            current_guardians
+                                .iter()
+                                .filter(|(authority_id, _)| !known.contains_key(*authority_id))
+                                .map(|(authority_id, guardian_name)| {
+                                    (authority_id.clone(), guardian_name.clone())
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    *previous = Some(current_guardians);
+                    added
+                };
+                for (authority_id, guardian_name) in new_guardians {
+                    controller_for_guardian_notifications.push_runtime_fact(
+                        RuntimeFact::GuardianInvitationAccepted {
+                            authority_id: Some(authority_id),
+                            guardian_name: Some(guardian_name),
+                        },
+                    );
+                }
+            }
+        });
+
+        let controller_for_device_notifications = controller_for_runtime.clone();
+        let observed_devices_for_subscription = observed_devices.clone();
+        subscription_task_owner.spawn_local_cancellable(async move {
+            let initial_settings = {
+                let core = controller_for_device_notifications.app_core().read().await;
+                core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default()
+            };
+            *observed_devices_for_subscription.borrow_mut() = Some(
+                initial_settings
+                    .devices
+                    .iter()
+                    .map(|device| (device.id.to_string(), device.name.clone()))
+                    .collect(),
+            );
+
+            let Ok(mut stream) = ({
+                let core = controller_for_device_notifications.app_core().read().await;
+                core.subscribe(&*SETTINGS_SIGNAL)
+            }) else {
+                return;
+            };
+
+            while stream.recv().await.is_ok() {
+                let settings = {
+                    let core = controller_for_device_notifications.app_core().read().await;
+                    core.read(&*SETTINGS_SIGNAL).await.unwrap_or_default()
+                };
+                let current_devices = settings
+                    .devices
+                    .iter()
+                    .map(|device| (device.id.to_string(), device.name.clone()))
+                    .collect::<HashMap<_, _>>();
+                let new_devices = {
+                    let mut previous = observed_devices_for_subscription.borrow_mut();
+                    let added = previous
+                        .as_ref()
+                        .map(|known| {
+                            current_devices
+                                .iter()
+                                .filter(|(device_id, _)| !known.contains_key(*device_id))
+                                .map(|(device_id, device_name)| {
+                                    (device_id.clone(), device_name.clone())
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    *previous = Some(current_devices);
+                    added
+                };
+                for (device_id, device_name) in new_devices {
+                    controller_for_device_notifications.push_runtime_fact(
+                        RuntimeFact::DeviceEnrollmentAccepted {
+                            device_id: Some(device_id),
+                            device_name: Some(device_name),
+                            device_count: Some(settings.devices.len()),
+                        },
+                    );
+                }
             }
         });
 
@@ -467,7 +642,39 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
             }
         });
 
+        let notifications_for_contacts = notifications_runtime;
+        let controller_for_notifications_contacts = controller_for_runtime.clone();
+        let subscription_task_owner_for_notifications_contacts = subscription_task_owner.clone();
+        let notifications_refresh_state_for_contacts = notifications_refresh_state.clone();
+        subscription_task_owner.spawn_local_cancellable(async move {
+            let Ok(mut stream) = ({
+                let core = controller_for_notifications_contacts
+                    .app_core()
+                    .read()
+                    .await;
+                core.subscribe(&*CONTACTS_SIGNAL)
+            }) else {
+                return;
+            };
+
+            while stream.recv().await.is_ok() {
+                schedule_coalesced_runtime_refresh(
+                    &subscription_task_owner_for_notifications_contacts,
+                    controller_for_notifications_contacts.clone(),
+                    notifications_for_contacts,
+                    notifications_refresh_state_for_contacts.clone(),
+                    load_notifications_runtime_view,
+                );
+            }
+        });
+
         let controller_for_authoritative_operations = controller_for_runtime.clone();
+        let notifications_for_authoritative_facts = notifications_runtime;
+        let subscription_task_owner_for_authoritative_operations = subscription_task_owner.clone();
+        let notifications_refresh_state_for_authoritative_operations =
+            notifications_refresh_state.clone();
+        let authoritative_contact_refresh_keys_for_operations =
+            authoritative_contact_refresh_keys.clone();
         subscription_task_owner.spawn_local_cancellable(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_authoritative_operations
@@ -502,7 +709,70 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
                         status,
                     );
                 }
+                schedule_coalesced_runtime_refresh(
+                    &subscription_task_owner_for_authoritative_operations,
+                    controller_for_authoritative_operations.clone(),
+                    notifications_for_authoritative_facts,
+                    notifications_refresh_state_for_authoritative_operations.clone(),
+                    load_notifications_runtime_view,
+                );
+                let refresh_keys = contact_acceptance_refresh_keys(&facts);
+                let should_refresh_account = {
+                    let mut previous_keys =
+                        authoritative_contact_refresh_keys_for_operations.borrow_mut();
+                    let should_refresh =
+                        refresh_keys.iter().any(|key| !previous_keys.contains(key));
+                    *previous_keys = refresh_keys;
+                    should_refresh
+                };
+                if should_refresh_account {
+                    let app_core = controller_for_authoritative_operations.app_core().clone();
+                    subscription_task_owner_for_authoritative_operations.spawn_local_cancellable(
+                        async move {
+                            let _ = system_workflows::refresh_account(&app_core).await;
+                        },
+                    );
+                }
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_app::ui_contract::InvitationFactKind;
+
+    #[test]
+    fn contact_acceptance_refresh_keys_ignore_non_contact_facts() {
+        let keys = contact_acceptance_refresh_keys(&[
+            AuthoritativeSemanticFact::PendingHomeInvitationReady,
+            AuthoritativeSemanticFact::InvitationAccepted {
+                invitation_kind: InvitationFactKind::Generic,
+                authority_id: Some("peer-a".to_string()),
+                operation_state: Some(OperationState::Succeeded),
+            },
+        ]);
+
+        assert!(keys.is_empty());
+    }
+
+    #[test]
+    fn contact_acceptance_refresh_keys_capture_contact_acceptance_and_link_facts() {
+        let keys = contact_acceptance_refresh_keys(&[
+            AuthoritativeSemanticFact::InvitationAccepted {
+                invitation_kind: InvitationFactKind::Contact,
+                authority_id: Some("peer-a".to_string()),
+                operation_state: Some(OperationState::Succeeded),
+            },
+            AuthoritativeSemanticFact::ContactLinkReady {
+                authority_id: "peer-a".to_string(),
+                contact_count: 1,
+            },
+        ]);
+
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains("invitation_accepted:Contact:peer-a"));
+        assert!(keys.contains("contact_link_ready:peer-a"));
+    }
 }

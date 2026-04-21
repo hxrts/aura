@@ -77,6 +77,7 @@
 
 pub mod cli;
 pub mod demo_invitation;
+pub mod env;
 pub mod error;
 pub mod handlers;
 pub mod ids;

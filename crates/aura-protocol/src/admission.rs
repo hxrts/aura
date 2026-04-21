@@ -119,6 +119,28 @@ pub struct ManifestAdmissionRequirements {
     pub theorem_pack_requirements: Vec<ResolvedTheoremPackRequirement>,
 }
 
+fn capability_key(capability: &str) -> CapabilityKey {
+    CapabilityKey::new(capability)
+}
+
+fn capability_keys<'a>(capabilities: impl IntoIterator<Item = &'a str>) -> Vec<CapabilityKey> {
+    capabilities.into_iter().map(capability_key).collect()
+}
+
+fn capability_name_set<'a>(capabilities: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
+    capabilities.into_iter().map(str::to_string).collect()
+}
+
+fn has_admitted_capability(
+    capability_inventory: &[(CapabilityKey, bool)],
+    required: &CapabilityKey,
+) -> bool {
+    capability_inventory
+        .iter()
+        .find(|(key, _)| key == required)
+        .is_some_and(|(_, admitted)| *admitted)
+}
+
 /// Resolve explicit admission metadata for one production protocol id.
 #[must_use]
 pub fn protocol_admission_profile(protocol_id: &str) -> Option<ProtocolAdmissionProfile> {
@@ -226,10 +248,7 @@ pub fn required_artifacts(protocol_id: &str) -> &'static [&'static str] {
 /// Required capability keys converted to core admission types.
 #[must_use]
 pub fn required_capability_keys(protocol_id: &str) -> Vec<CapabilityKey> {
-    required_artifacts(protocol_id)
-        .iter()
-        .map(|capability| CapabilityKey::new(*capability))
-        .collect()
+    capability_keys(required_artifacts(protocol_id).iter().copied())
 }
 
 /// Resolve combined runtime admission requirements for one generated manifest.
@@ -239,7 +258,7 @@ pub fn manifest_admission_requirements(
     let required_runtime_capabilities = manifest
         .required_capabilities
         .iter()
-        .map(|capability| CapabilityKey::new(capability.as_str()))
+        .map(|capability| capability_key(capability.as_str()))
         .collect::<BTreeSet<_>>();
     let mut theorem_pack_requirements = Vec::new();
     let mut resolved_required_theorem_pack_capabilities = BTreeSet::new();
@@ -263,11 +282,8 @@ pub fn manifest_admission_requirements(
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
-        let expected_declared_capabilities = profile
-            .declared_capabilities
-            .iter()
-            .map(|capability| (*capability).to_string())
-            .collect::<BTreeSet<_>>();
+        let expected_declared_capabilities = profile.declared_capabilities.iter().copied();
+        let expected_declared_capabilities = capability_name_set(expected_declared_capabilities);
         if declared_capabilities != expected_declared_capabilities {
             return Err(AdmissionError::Internal {
                 reason: format!(
@@ -278,11 +294,8 @@ pub fn manifest_admission_requirements(
 
         resolved_required_theorem_pack_capabilities.extend(declared_capabilities.iter().cloned());
 
-        let pack_runtime_capabilities = profile
-            .required_runtime_capabilities
-            .iter()
-            .map(|capability| CapabilityKey::new(*capability))
-            .collect::<Vec<_>>();
+        let pack_runtime_capabilities = profile.required_runtime_capabilities.iter().copied();
+        let pack_runtime_capabilities = capability_keys(pack_runtime_capabilities);
         theorem_pack_requirements.push(ResolvedTheoremPackRequirement {
             theorem_pack: required_theorem_pack.clone(),
             declared_capabilities: declaration.capabilities.clone(),
@@ -293,8 +306,9 @@ pub fn manifest_admission_requirements(
     let declared_required_theorem_pack_capabilities = manifest
         .required_theorem_pack_capabilities
         .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
+        .map(String::as_str);
+    let declared_required_theorem_pack_capabilities =
+        capability_name_set(declared_required_theorem_pack_capabilities);
     if declared_required_theorem_pack_capabilities != resolved_required_theorem_pack_capabilities {
         return Err(AdmissionError::Internal {
             reason: format!(
@@ -337,11 +351,8 @@ pub fn validate_termination_artifact_requirement(
         return Ok(());
     }
 
-    let required = CapabilityKey::new(CAPABILITY_TERMINATION_BOUNDED);
-    let admitted = capability_inventory
-        .iter()
-        .find(|(key, _)| key == &required)
-        .is_some_and(|(_, admitted)| *admitted);
+    let required = capability_key(CAPABILITY_TERMINATION_BOUNDED);
+    let admitted = has_admitted_capability(capability_inventory, &required);
     if admitted {
         Ok(())
     } else {
@@ -357,16 +368,15 @@ pub fn required_consensus_profile_capabilities(
     profile: ConsensusCapabilityProfile,
 ) -> Vec<CapabilityKey> {
     match profile {
-        ConsensusCapabilityProfile::FastPath => vec![
-            CapabilityKey::new(CAPABILITY_BYZANTINE_ENVELOPE),
-            CapabilityKey::new(CAPABILITY_MIXED_DETERMINISM),
-        ],
-        ConsensusCapabilityProfile::FallbackPath => vec![
-            CapabilityKey::new(CAPABILITY_BYZANTINE_ENVELOPE),
-            CapabilityKey::new(CAPABILITY_TERMINATION_BOUNDED),
-        ],
+        ConsensusCapabilityProfile::FastPath => {
+            capability_keys([CAPABILITY_BYZANTINE_ENVELOPE, CAPABILITY_MIXED_DETERMINISM])
+        }
+        ConsensusCapabilityProfile::FallbackPath => capability_keys([
+            CAPABILITY_BYZANTINE_ENVELOPE,
+            CAPABILITY_TERMINATION_BOUNDED,
+        ]),
         ConsensusCapabilityProfile::ThresholdSigning => {
-            vec![CapabilityKey::new(CAPABILITY_BYZANTINE_ENVELOPE)]
+            capability_keys([CAPABILITY_BYZANTINE_ENVELOPE])
         }
     }
 }
@@ -377,11 +387,7 @@ pub fn validate_consensus_profile_capabilities(
     capability_inventory: &[(CapabilityKey, bool)],
 ) -> Result<(), AdmissionError> {
     for required in required_consensus_profile_capabilities(profile) {
-        let admitted = capability_inventory
-            .iter()
-            .find(|(key, _)| key == &required)
-            .is_some_and(|(_, admitted)| *admitted);
-        if !admitted {
+        if !has_admitted_capability(capability_inventory, &required) {
             return Err(AdmissionError::MissingCapability {
                 capability: required,
             });

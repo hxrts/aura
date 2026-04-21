@@ -3,18 +3,12 @@
 //! Exercises the public API: create channel/message facts, reduce through
 //! the view reducer, and verify the resulting deltas.
 
+#[path = "support.rs"]
+mod common;
+
 use aura_chat::{ChatDelta, ChatFact, ChatViewReducer, CHAT_FACT_TYPE_ID};
 use aura_composition::view_delta::{downcast_delta, ViewDeltaReducer};
-use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::DomainFact;
-
-fn test_context() -> ContextId {
-    ContextId::new_from_entropy([1u8; 32])
-}
-
-fn test_authority() -> AuthorityId {
-    AuthorityId::new_from_entropy([3u8; 32])
-}
 
 /// Channel creation fact produces a ChannelAdded delta through the
 /// public view reducer API.
@@ -24,13 +18,13 @@ fn channel_creation_produces_view_delta() {
     assert_eq!(reducer.handles_type(), CHAT_FACT_TYPE_ID);
 
     let fact = ChatFact::channel_created_ms(
-        test_context(),
-        ChannelId::default(),
+        common::test_context_id(1),
+        common::test_channel_id(0),
         "general".to_string(),
         Some("General discussion".to_string()),
         false,
         1000,
-        test_authority(),
+        common::test_authority_id(3),
     );
 
     let bytes = fact.to_bytes();

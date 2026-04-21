@@ -21,9 +21,7 @@ use uuid::Uuid;
 
 fn derived_uuid(label: &[u8]) -> Uuid {
     let digest = hash::hash(label);
-    let mut uuid_bytes = [0u8; 16];
-    uuid_bytes.copy_from_slice(&digest[..16]);
-    Uuid::from_bytes(uuid_bytes)
+    uuid_from_prefix_bytes(&digest)
 }
 
 fn derived_uuid_with_bytes(domain: &[u8], bytes: &[u8]) -> Uuid {
@@ -31,8 +29,12 @@ fn derived_uuid_with_bytes(domain: &[u8], bytes: &[u8]) -> Uuid {
     h.update(domain);
     h.update(bytes);
     let digest = h.finalize();
+    uuid_from_prefix_bytes(&digest)
+}
+
+fn uuid_from_prefix_bytes(bytes: &[u8]) -> Uuid {
     let mut uuid_bytes = [0u8; 16];
-    uuid_bytes.copy_from_slice(&digest[..16]);
+    uuid_bytes.copy_from_slice(&bytes[..16]);
     Uuid::from_bytes(uuid_bytes)
 }
 
@@ -194,9 +196,7 @@ macro_rules! uuid_id {
         impl $name {
             /// Create from caller-provided entropy
             pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
-                let mut uuid_bytes = [0u8; 16];
-                uuid_bytes.copy_from_slice(&entropy[..16]);
-                Self(Uuid::from_bytes(uuid_bytes))
+                Self(uuid_from_prefix_bytes(&entropy))
             }
 
             /// Create from caller-provided entropy (alias)
@@ -508,9 +508,7 @@ pub struct DeviceId(pub Uuid);
 impl DeviceId {
     /// Create a device ID from 32 bytes of caller-provided entropy (effect-injected).
     pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&entropy[..16]);
-        Self(Uuid::from_bytes(uuid_bytes))
+        Self(uuid_from_prefix_bytes(&entropy))
     }
     /// Create from caller-provided entropy (alias)
     pub fn from_entropy(entropy: [u8; 32]) -> Self {
@@ -524,10 +522,7 @@ impl DeviceId {
 
     /// Create from 32 bytes (for testing)
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        // Take first 16 bytes for UUID
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes[..16]);
-        Self(Uuid::from_bytes(uuid_bytes))
+        Self(uuid_from_prefix_bytes(&bytes))
     }
 
     /// Convert to 32 bytes (compatible with from_bytes)
@@ -607,9 +602,7 @@ uuid_id!(
 impl AccountId {
     /// Create from 32 bytes (for testing)
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes[..16]);
-        Self(Uuid::from_bytes(uuid_bytes))
+        Self(uuid_from_prefix_bytes(&bytes))
     }
 }
 

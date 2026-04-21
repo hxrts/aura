@@ -272,6 +272,7 @@ pub async fn toggle_guardian_contact(
                 is_online: false,
                 read_receipt_policy: ReadReceiptPolicy::default(),
                 relationship_state: ContactRelationshipState::Contact,
+                invitation_code: None,
             });
         }
     })

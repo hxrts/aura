@@ -151,6 +151,7 @@ fn retrying_manager_construction() {
         read_timeout: NonZeroDuration::from_secs(30).expect("non-zero"),
         write_timeout: NonZeroDuration::from_secs(30).expect("non-zero"),
         buffer_size: NonZeroUsize::new(8192).expect("non-zero"),
+        ..TransportConfig::default()
     };
 
     let manager = RetryingTransportManager::new(config, 3);
@@ -166,6 +167,7 @@ fn retrying_manager_is_clone() {
         read_timeout: NonZeroDuration::from_secs(30).expect("non-zero"),
         write_timeout: NonZeroDuration::from_secs(30).expect("non-zero"),
         buffer_size: NonZeroUsize::new(4096).expect("non-zero"),
+        ..TransportConfig::default()
     };
 
     let manager = RetryingTransportManager::new(config, 5);

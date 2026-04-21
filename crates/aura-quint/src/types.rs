@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::time::Duration;
 
 /// Result of property verification using native Rust evaluator.
@@ -169,6 +170,75 @@ pub enum QuintType {
         /// Type parameters.
         params: Vec<QuintType>,
     },
+}
+
+impl fmt::Display for QuintType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bool => f.write_str("bool"),
+            Self::Int => f.write_str("int"),
+            Self::Str => f.write_str("str"),
+            Self::Set(inner) => write!(f, "Set[{inner}]"),
+            Self::Record(fields) => {
+                let mut field_entries = fields.iter().collect::<Vec<_>>();
+                field_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                let rendered = field_entries
+                    .into_iter()
+                    .map(|(name, quint_type)| format!("{name}: {quint_type}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{{ {rendered} }}")
+            }
+            Self::Function { params, result } => {
+                let rendered_params = params
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "({rendered_params}) => {result}")
+            }
+            Self::Union(types) => {
+                let rendered = types
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                f.write_str(&rendered)
+            }
+            Self::Custom { name, params } => {
+                if params.is_empty() {
+                    f.write_str(name)
+                } else {
+                    let rendered = params
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    write!(f, "{name}[{rendered}]")
+                }
+            }
+        }
+    }
+}
+
+impl From<&str> for QuintType {
+    fn from(s: &str) -> Self {
+        match s {
+            "bool" => Self::Bool,
+            "int" => Self::Int,
+            "str" => Self::Str,
+            _ => Self::Custom {
+                name: s.to_string(),
+                params: Vec::new(),
+            },
+        }
+    }
+}
+
+impl From<String> for QuintType {
+    fn from(s: String) -> Self {
+        Self::from(s.as_str())
+    }
 }
 
 /// Status of the Quint bridge connection.

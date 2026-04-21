@@ -49,6 +49,18 @@ pub struct EffectPolicyGuard {
 }
 
 impl EffectPolicyGuard {
+    fn matches_decision(
+        &self,
+        operation: &OperationType,
+        context_id: Option<&ContextId>,
+        predicate: impl FnOnce(&EffectDecision) -> bool,
+    ) -> bool {
+        match self.evaluate(operation, context_id) {
+            Ok(decision) => predicate(&decision),
+            Err(_) => false,
+        }
+    }
+
     /// Create a new effect policy guard with the given registry
     pub fn new(registry: EffectPolicyRegistry) -> Self {
         Self { registry }
@@ -92,10 +104,9 @@ impl EffectPolicyGuard {
         operation: &OperationType,
         context_id: Option<&ContextId>,
     ) -> bool {
-        matches!(
-            self.evaluate(operation, context_id),
-            Ok(EffectDecision::ApplyImmediate)
-        )
+        self.matches_decision(operation, context_id, |decision| {
+            matches!(decision, EffectDecision::ApplyImmediate)
+        })
     }
 
     /// Check if an operation requires a proposal
@@ -104,10 +115,9 @@ impl EffectPolicyGuard {
         operation: &OperationType,
         context_id: Option<&ContextId>,
     ) -> bool {
-        matches!(
-            self.evaluate(operation, context_id),
-            Ok(EffectDecision::CreateProposal { .. })
-        )
+        self.matches_decision(operation, context_id, |decision| {
+            matches!(decision, EffectDecision::CreateProposal { .. })
+        })
     }
 
     /// Check if an operation requires a ceremony
@@ -116,10 +126,9 @@ impl EffectPolicyGuard {
         operation: &OperationType,
         context_id: Option<&ContextId>,
     ) -> bool {
-        matches!(
-            self.evaluate(operation, context_id),
-            Ok(EffectDecision::RunCeremony { .. })
-        )
+        self.matches_decision(operation, context_id, |decision| {
+            matches!(decision, EffectDecision::RunCeremony { .. })
+        })
     }
 
     /// Get a mutable reference to the registry for configuration
@@ -189,7 +198,7 @@ impl EffectPolicyExt for EffectPolicyGuard {
         let policy = self.get_policy(operation, context_id);
 
         Ok(EffectPolicyResult {
-            operation: operation.clone(),
+            operation: *operation,
             context_id: context_id.cloned(),
             decision,
             policy,

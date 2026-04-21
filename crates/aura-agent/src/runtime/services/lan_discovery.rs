@@ -144,7 +144,7 @@ impl LanDiscoveryService {
     }
 
     /// Clear the descriptor (stop announcing).
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Cleanup target (2026-07): remove if no caller still needs explicit announce-clear beyond tests.
     pub async fn clear_descriptor(&self) {
         self.with_state_mut(|state| {
             state.descriptor = None;

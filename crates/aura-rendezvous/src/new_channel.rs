@@ -4,6 +4,7 @@
 //! This module provides the SecureChannel type that integrates with
 //! the guard chain for authorized communication.
 
+use crate::authority_hash::authority_hash_bytes;
 use aura_core::effects::noise::{
     HandshakeState as NoiseHandshakeState, NoiseEffects, NoiseParams, TransportState,
 };
@@ -15,11 +16,6 @@ use aura_core::{AuraError, AuraResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-
-/// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
-fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
-    hash::hash(&authority.to_bytes())
-}
 
 // =============================================================================
 // Secure Channel
@@ -243,6 +239,18 @@ pub struct ChannelManager {
 }
 
 impl ChannelManager {
+    fn channel_id_for_context_peer(
+        &self,
+        context_id: ContextId,
+        peer: AuthorityId,
+    ) -> Option<[u8; 32]> {
+        self.by_context_peer.get(&(context_id, peer)).copied()
+    }
+
+    fn active_channels_iter(&self) -> impl Iterator<Item = &SecureChannel> + '_ {
+        self.channels.values().filter(|channel| channel.is_active())
+    }
+
     /// Create a new channel manager
     pub fn new() -> Self {
         Self {
@@ -297,9 +305,8 @@ impl ChannelManager {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> Option<&SecureChannel> {
-        self.by_context_peer
-            .get(&(context_id, peer))
-            .and_then(|id| self.channels.get(id))
+        self.channel_id_for_context_peer(context_id, peer)
+            .and_then(|id| self.channels.get(&id))
     }
 
     /// Find mutable channel by context and peer
@@ -308,7 +315,7 @@ impl ChannelManager {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> Option<&mut SecureChannel> {
-        if let Some(id) = self.by_context_peer.get(&(context_id, peer)).copied() {
+        if let Some(id) = self.channel_id_for_context_peer(context_id, peer) {
             self.channels.get_mut(&id)
         } else {
             None
@@ -337,7 +344,7 @@ impl ChannelManager {
 
     /// Get all active channels
     pub fn active_channels(&self) -> Vec<&SecureChannel> {
-        self.channels.values().filter(|c| c.is_active()).collect()
+        self.active_channels_iter().collect()
     }
 
     /// Get channel count
@@ -347,7 +354,7 @@ impl ChannelManager {
 
     /// Get active channel count
     pub fn active_channel_count(&self) -> usize {
-        self.channels.values().filter(|c| c.is_active()).count()
+        self.active_channels_iter().count()
     }
 
     /// Remove closed or error channels to prevent unbounded growth.
@@ -511,6 +518,41 @@ impl Handshaker {
         AuraError::invalid(format!("Invalid state for {action:?}"))
     }
 
+    fn take_noise_state(&mut self) -> AuraResult<NoiseHandshakeState> {
+        self.noise_state
+            .take()
+            .ok_or_else(|| AuraError::internal("Missing noise state"))
+    }
+
+    fn store_noise_state(&mut self, noise_state: NoiseHandshakeState, state: HandshakeStatus) {
+        self.noise_state = Some(noise_state);
+        self.state = state;
+    }
+
+    async fn write_noise_message<E: NoiseEffects>(
+        &mut self,
+        payload: &[u8],
+        state: HandshakeStatus,
+        effects: &E,
+    ) -> AuraResult<Vec<u8>> {
+        let noise_state = self.take_noise_state()?;
+        let (message, new_state) = effects.write_message(noise_state, payload).await?;
+        self.store_noise_state(new_state, state);
+        Ok(message)
+    }
+
+    async fn read_noise_message<E: NoiseEffects>(
+        &mut self,
+        message: &[u8],
+        state: HandshakeStatus,
+        effects: &E,
+    ) -> AuraResult<()> {
+        let noise_state = self.take_noise_state()?;
+        let (_payload, new_state) = effects.read_message(noise_state, message).await?;
+        self.store_noise_state(new_state, state);
+        Ok(())
+    }
+
     /// Get the channel ID (if generated)
     pub fn channel_id(&self) -> Option<[u8; 32]> {
         self.channel_id
@@ -551,15 +593,13 @@ impl Handshaker {
             &self.config.remote,
             epoch,
         ));
+        self.noise_state = Some(noise_state);
 
         // Create handshake message
         // Payload can include metadata (like epoch)
         let payload = epoch.to_le_bytes();
-        let (message, new_state) = effects.write_message(noise_state, &payload).await?;
-
-        self.noise_state = Some(new_state);
-        self.state = HandshakeStatus::InitSent;
-        Ok(message)
+        self.write_noise_message(&payload, HandshakeStatus::InitSent, effects)
+            .await
     }
 
     /// Process init message (responder)
@@ -604,12 +644,10 @@ impl Handshaker {
             &self.config.local,
             epoch,
         ));
+        self.noise_state = Some(noise_state);
 
-        let (_payload, new_state) = effects.read_message(noise_state, message).await?;
-
-        self.noise_state = Some(new_state);
-        self.state = HandshakeStatus::InitReceived;
-        Ok(())
+        self.read_noise_message(message, HandshakeStatus::InitReceived, effects)
+            .await
     }
 
     /// Create response message (responder)
@@ -622,18 +660,10 @@ impl Handshaker {
             return Err(self.fail_invalid_state(HandshakeAction::CreateResponse));
         }
 
-        let noise_state = self
-            .noise_state
-            .take()
-            .ok_or_else(|| AuraError::internal("Missing noise state"))?;
-
         // Payload can include confirmation
         let payload = b"ACK";
-        let (message, new_state) = effects.write_message(noise_state, payload).await?;
-
-        self.noise_state = Some(new_state);
-        self.state = HandshakeStatus::ResponseSent;
-        Ok(message)
+        self.write_noise_message(payload, HandshakeStatus::ResponseSent, effects)
+            .await
     }
 
     /// Process response message (initiator)
@@ -646,16 +676,8 @@ impl Handshaker {
             return Err(self.fail_invalid_state(HandshakeAction::ProcessResponse));
         }
 
-        let noise_state = self
-            .noise_state
-            .take()
-            .ok_or_else(|| AuraError::internal("Missing noise state"))?;
-
-        let (_payload, new_state) = effects.read_message(noise_state, message).await?;
-
-        self.noise_state = Some(new_state);
-        self.state = HandshakeStatus::ResponseReceived;
-        Ok(())
+        self.read_noise_message(message, HandshakeStatus::ResponseReceived, effects)
+            .await
     }
 
     /// Complete the handshake and create the channel
@@ -678,10 +700,7 @@ impl Handshaker {
             .channel_id
             .ok_or_else(|| AuraError::internal("Channel ID not generated"))?;
 
-        let noise_state = self
-            .noise_state
-            .take()
-            .ok_or_else(|| AuraError::internal("Missing noise state"))?;
+        let noise_state = self.take_noise_state()?;
         let transport_state = effects.into_transport_mode(noise_state).await?;
 
         self.state = HandshakeStatus::Complete;
@@ -738,13 +757,19 @@ fn generate_channel_id(
 mod tests {
     use super::*;
 
+    fn test_participants() -> (AuthorityId, AuthorityId, ContextId) {
+        (
+            AuthorityId::new_from_entropy([1u8; 32]),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            ContextId::new_from_entropy([3u8; 32]),
+        )
+    }
+
     /// Rotating to the same or lower epoch is rejected — accepting stale
     /// epochs would let old keys decrypt new messages.
     #[test]
     fn channel_rotate_regression_marks_typed_error() {
-        let local = AuthorityId::new_from_entropy([1u8; 32]);
-        let remote = AuthorityId::new_from_entropy([2u8; 32]);
-        let context = ContextId::new_from_entropy([3u8; 32]);
+        let (local, remote, context) = test_participants();
         let mut channel = SecureChannel::new([4u8; 32], context, local, remote, 5, None);
 
         let error = match channel.rotate(5) {
@@ -765,14 +790,12 @@ mod tests {
     /// rather than undefined channel state.
     #[test]
     fn handshake_invalid_state_marks_typed_failure() {
-        let local = AuthorityId::new_from_entropy([5u8; 32]);
-        let remote = AuthorityId::new_from_entropy([6u8; 32]);
-        let context = ContextId::new_from_entropy([7u8; 32]);
+        let (local, remote, context) = test_participants();
         let mut handshaker = Handshaker::new(HandshakeConfig {
             local,
             remote,
             context_id: context,
-            psk: [8u8; 32],
+            psk: [4u8; 32],
             timeout_ms: 1000,
         });
 

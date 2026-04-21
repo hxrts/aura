@@ -26,6 +26,45 @@ const RESERVED_HOST_CAPABILITY_ROOTS: &[&str] = &[
     "flow_charge",
 ];
 
+const DEFAULT_DETERMINISM_POLICY_REF: &str = "aura.vm.prod.default";
+const PRODUCTION_STARTUP_DEFAULTS: &[(&str, &str)] = &[
+    ("amp_transport.AmpTransport", "aura.amp.transport"),
+    (
+        "guardian_auth_relational.GuardianAuthRelational",
+        "aura.authentication.guardian_auth_relational",
+    ),
+    ("invitation.InvitationExchange", "aura.invitation.exchange"),
+    (
+        "invitation_guardian.GuardianInvitation",
+        "aura.invitation.guardian",
+    ),
+    (
+        "invitation_device_enrollment.DeviceEnrollment",
+        "aura.invitation.device_enrollment",
+    ),
+    (
+        "guardian_ceremony.GuardianCeremony",
+        "aura.recovery.guardian_ceremony",
+    ),
+    (
+        "guardian_setup.GuardianSetup",
+        "aura.recovery.guardian_setup",
+    ),
+    (
+        "guardian_membership_change.GuardianMembershipChange",
+        "aura.recovery.guardian_membership_change",
+    ),
+    ("rendezvous.RendezvousExchange", "aura.rendezvous.exchange"),
+    (
+        "rendezvous_relay.RelayedRendezvous",
+        "aura.rendezvous.relay",
+    ),
+    (
+        "session_coordination.SessionCoordinationChoreography",
+        "aura.session.coordination",
+    ),
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedModuleCapability<'a> {
     module_id: &'a str,
@@ -315,12 +354,11 @@ fn parse_module_capability(
     capability: &CapabilityName,
 ) -> Result<Option<ParsedModuleCapability<'_>>, GuardCapabilityAdmissionError> {
     let value = capability.as_str();
-    if !value.starts_with("module:") {
+    let Some(module_value) = value.strip_prefix("module:") else {
         return Ok(None);
-    }
+    };
 
-    let mut parts = value.split(':');
-    let _module_namespace = parts.next();
+    let mut parts = module_value.split(':');
     let module_id = parts.next().unwrap_or_default();
     let path_root = parts.next().unwrap_or_default();
     if module_id.is_empty() || path_root.is_empty() {
@@ -354,9 +392,17 @@ impl CompositionStartupDefaults {
         Self {
             protocol_id: Some(protocol_id),
             required_capabilities: &[],
-            determinism_policy_ref: "aura.vm.prod.default",
+            determinism_policy_ref: DEFAULT_DETERMINISM_POLICY_REF,
         }
     }
+}
+
+fn production_startup_protocol_id(qualified_name: &str) -> Option<&'static str> {
+    PRODUCTION_STARTUP_DEFAULTS
+        .iter()
+        .find_map(|(known_name, protocol_id)| {
+            (*known_name == qualified_name).then_some(*protocol_id)
+        })
 }
 
 /// Static `@link` metadata extracted from choreography annotations.
@@ -392,53 +438,16 @@ pub fn startup_defaults_for_qualified_name(qualified_name: &str) -> CompositionS
             required_capabilities: &["byzantine_envelope"],
             determinism_policy_ref: "aura.vm.consensus_fallback.prod",
         },
-        "amp_transport.AmpTransport" => {
-            CompositionStartupDefaults::production_default("aura.amp.transport")
-        }
         "dkd_protocol.DkdChoreography" => CompositionStartupDefaults {
             protocol_id: Some("aura.dkg.ceremony"),
             required_capabilities: &["byzantine_envelope", "termination_bounded"],
             determinism_policy_ref: "aura.vm.dkg_ceremony.prod",
         },
-        "guardian_auth_relational.GuardianAuthRelational" => {
-            CompositionStartupDefaults::production_default(
-                "aura.authentication.guardian_auth_relational",
-            )
-        }
-        "invitation.InvitationExchange" => {
-            CompositionStartupDefaults::production_default("aura.invitation.exchange")
-        }
-        "invitation_guardian.GuardianInvitation" => {
-            CompositionStartupDefaults::production_default("aura.invitation.guardian")
-        }
-        "invitation_device_enrollment.DeviceEnrollment" => {
-            CompositionStartupDefaults::production_default("aura.invitation.device_enrollment")
-        }
         "recovery_protocol.RecoveryProtocol" => CompositionStartupDefaults {
             protocol_id: Some("aura.recovery.grant"),
             required_capabilities: &["termination_bounded"],
             determinism_policy_ref: "aura.vm.recovery_grant.prod",
         },
-        "guardian_ceremony.GuardianCeremony" => {
-            CompositionStartupDefaults::production_default("aura.recovery.guardian_ceremony")
-        }
-        "guardian_setup.GuardianSetup" => {
-            CompositionStartupDefaults::production_default("aura.recovery.guardian_setup")
-        }
-        "guardian_membership_change.GuardianMembershipChange" => {
-            CompositionStartupDefaults::production_default(
-                "aura.recovery.guardian_membership_change",
-            )
-        }
-        "rendezvous.RendezvousExchange" => {
-            CompositionStartupDefaults::production_default("aura.rendezvous.exchange")
-        }
-        "rendezvous_relay.RelayedRendezvous" => {
-            CompositionStartupDefaults::production_default("aura.rendezvous.relay")
-        }
-        "session_coordination.SessionCoordinationChoreography" => {
-            CompositionStartupDefaults::production_default("aura.session.coordination")
-        }
         "ota_activation.OTAActivationProtocol" => CompositionStartupDefaults {
             protocol_id: Some("aura.sync.ota_activation"),
             required_capabilities: &[],
@@ -454,11 +463,17 @@ pub fn startup_defaults_for_qualified_name(qualified_name: &str) -> CompositionS
             required_capabilities: &["termination_bounded"],
             determinism_policy_ref: "aura.vm.sync_anti_entropy.prod",
         },
-        _ => CompositionStartupDefaults {
-            protocol_id: None,
-            required_capabilities: &[],
-            determinism_policy_ref: "aura.vm.prod.default",
-        },
+        _ => {
+            if let Some(protocol_id) = production_startup_protocol_id(qualified_name) {
+                return CompositionStartupDefaults::production_default(protocol_id);
+            }
+
+            CompositionStartupDefaults {
+                protocol_id: None,
+                required_capabilities: &[],
+                determinism_policy_ref: DEFAULT_DETERMINISM_POLICY_REF,
+            }
+        }
     }
 }
 

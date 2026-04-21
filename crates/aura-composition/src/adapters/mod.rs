@@ -62,94 +62,66 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use aura_effects::TcpTransportHandler as RealTransportHandler;
 
+    fn assert_supported_operations(effect_type: EffectType, actual: Vec<String>) {
+        assert_eq!(
+            actual,
+            operations_for(effect_type)
+                .iter()
+                .map(|op| (*op).to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
     /// Every adapter reports exactly the operations declared in the
     /// aura-core effect registry for its effect type.
     #[test]
     fn test_supported_operations_match_registry_map() {
         use crate::registry::RegistrableHandler;
 
-        let console_ops = ConsoleHandlerAdapter::new(RealConsoleHandler::new())
-            .supported_operations(EffectType::Console);
-        assert_eq!(
-            console_ops,
-            operations_for(EffectType::Console)
-                .iter()
-                .map(|op| (*op).to_string())
-                .collect::<Vec<_>>()
+        assert_supported_operations(
+            EffectType::Console,
+            ConsoleHandlerAdapter::new(RealConsoleHandler::new())
+                .supported_operations(EffectType::Console),
         );
-
-        let random_ops = RandomHandlerAdapter::new(RealRandomHandler::new())
-            .supported_operations(EffectType::Random);
-        assert_eq!(
-            random_ops,
-            operations_for(EffectType::Random)
-                .iter()
-                .map(|op| (*op).to_string())
-                .collect::<Vec<_>>()
+        assert_supported_operations(
+            EffectType::Random,
+            RandomHandlerAdapter::new(RealRandomHandler::new())
+                .supported_operations(EffectType::Random),
         );
-
-        let crypto_ops = CryptoHandlerAdapter::new(RealCryptoHandler::new())
-            .supported_operations(EffectType::Crypto);
-        assert_eq!(
-            crypto_ops,
-            operations_for(EffectType::Crypto)
-                .iter()
-                .map(|op| (*op).to_string())
-                .collect::<Vec<_>>()
+        assert_supported_operations(
+            EffectType::Crypto,
+            CryptoHandlerAdapter::new(RealCryptoHandler::new())
+                .supported_operations(EffectType::Crypto),
         );
-
-        let storage_ops = StorageHandlerAdapter::new(FilesystemStorageHandler::with_default_path())
-            .supported_operations(EffectType::Storage);
-        assert_eq!(
-            storage_ops,
-            operations_for(EffectType::Storage)
-                .iter()
-                .map(|op| (*op).to_string())
-                .collect::<Vec<_>>()
+        assert_supported_operations(
+            EffectType::Storage,
+            StorageHandlerAdapter::new(FilesystemStorageHandler::with_default_path())
+                .supported_operations(EffectType::Storage),
         );
-
-        let time_ops = TimeHandlerAdapter::new(PhysicalTimeHandler::new())
-            .supported_operations(EffectType::Time);
-        assert_eq!(
-            time_ops,
-            operations_for(EffectType::Time)
-                .iter()
-                .map(|op| (*op).to_string())
-                .collect::<Vec<_>>()
+        assert_supported_operations(
+            EffectType::Time,
+            TimeHandlerAdapter::new(PhysicalTimeHandler::new())
+                .supported_operations(EffectType::Time),
         );
 
         cfg_if! {
             if #[cfg(not(target_arch = "wasm32"))] {
-                let network_ops = TransportHandlerAdapter::new(RealTransportHandler::default())
-                    .supported_operations(EffectType::Network);
-                assert_eq!(
-                    network_ops,
-                    operations_for(EffectType::Network)
-                        .iter()
-                        .map(|op| (*op).to_string())
-                        .collect::<Vec<_>>()
+                assert_supported_operations(
+                    EffectType::Network,
+                    TransportHandlerAdapter::new(RealTransportHandler::default())
+                        .supported_operations(EffectType::Network),
                 );
             }
         }
 
-        let system_ops = LoggingSystemHandlerAdapter::new(LoggingSystemHandler::default())
-            .supported_operations(EffectType::System);
-        assert_eq!(
-            system_ops,
-            operations_for(EffectType::System)
-                .iter()
-                .map(|op| (*op).to_string())
-                .collect::<Vec<_>>()
+        assert_supported_operations(
+            EffectType::System,
+            LoggingSystemHandlerAdapter::new(LoggingSystemHandler::default())
+                .supported_operations(EffectType::System),
         );
-
-        let trace_ops =
-            TraceHandlerAdapter::new(TraceHandler::new()).supported_operations(EffectType::Trace);
-        assert_eq!(
-            trace_ops,
-            operations_for(EffectType::Trace)
-                .iter()
-                .map(|op| (*op).to_string())
-                .collect::<Vec<_>>()
+        assert_supported_operations(
+            EffectType::Trace,
+            TraceHandlerAdapter::new(TraceHandler::new()).supported_operations(EffectType::Trace),
         );
     }
 }

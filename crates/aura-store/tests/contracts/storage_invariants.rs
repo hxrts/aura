@@ -1,16 +1,9 @@
 //! Storage domain invariant contracts — quota enforcement, chunk layout
 //! validation, and content-address integrity.
 
-use aura_core::time::PhysicalTime;
+use super::support::test_time;
 use aura_core::{AuthorityId, ChunkId, ContentSize, ContextId};
 use aura_store::{ByteSize, ChunkLayout, ErasureConfig, StorageFact};
-
-fn test_time(ts_ms: u64) -> PhysicalTime {
-    PhysicalTime {
-        ts_ms,
-        uncertainty: None,
-    }
-}
 
 /// Quota used_bytes must not exceed quota_bytes — the fundamental storage
 /// accounting invariant. If violated, authorities can consume unbounded space.

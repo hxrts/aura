@@ -80,15 +80,16 @@ pub(super) fn NotificationsScreen(
                                 NotificationActionBar {
                                     action: item.action.clone(),
                                     item_id: item.id,
-                                    controller,
+                                    controller: controller.clone(),
                                     render_tick,
                                 }
-                            }
-                            if let Some(code) = model.last_invite_code.as_ref() {
-                                div {
-                                    class: "w-full rounded-md border border-border bg-background/60 px-3 py-2 text-xs",
-                                    p { class: "m-0 text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground", "Last Invitation Code" }
-                                    p { class: "m-0 mt-1 break-all font-mono text-foreground", "{code}" }
+                                UiButton {
+                                    label: "Dismiss".to_string(),
+                                    variant: ButtonVariant::Secondary,
+                                    onclick: move |_| {
+                                        controller.dismiss_selected_notification();
+                                        render_tick.set(render_tick() + 1);
+                                    },
                                 }
                             }
                         }

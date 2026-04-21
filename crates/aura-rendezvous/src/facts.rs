@@ -20,13 +20,9 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
 
-const CHANNEL_CONTEXT_DOMAIN: &[u8] = b"AURA_RENDEZVOUS_CHANNEL_CONTEXT";
+use crate::authority_hash::authority_hash_bytes;
 
-/// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
-/// AuthorityId is 16 bytes (UUID), so we hash it to get a canonical 32-byte representation.
-fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
-    hash::hash(&authority.to_bytes())
-}
+const CHANNEL_CONTEXT_DOMAIN: &[u8] = b"AURA_RENDEZVOUS_CHANNEL_CONTEXT";
 
 /// Derive a deterministic context id for a rendezvous channel between two authorities.
 ///
@@ -73,18 +69,37 @@ fn is_zero_context(context_id: &ContextId) -> bool {
     context_id.as_bytes() == &[0u8; 16]
 }
 
+fn validate_bootstrap_hint_common(
+    scope: &ContextId,
+    link_endpoints: &[LinkEndpoint],
+    replay_window_id: &[u8; 32],
+) -> Result<(), BootstrapHintValidationError> {
+    if is_zero_context(scope) {
+        return Err(BootstrapHintValidationError::EmptyScope);
+    }
+    if link_endpoints.is_empty() {
+        return Err(BootstrapHintValidationError::MissingLinkEndpoints);
+    }
+    if *replay_window_id == [0; 32] {
+        return Err(BootstrapHintValidationError::ZeroReplayWindow);
+    }
+    Ok(())
+}
+
+fn bootstrap_hint_key_for(
+    sub_type: &'static str,
+    authority_id: &AuthorityId,
+    replay_window_id: &[u8; 32],
+) -> BootstrapHintKey {
+    let mut data = authority_hash_bytes(authority_id).to_vec();
+    data.extend_from_slice(replay_window_id);
+    BootstrapHintKey { sub_type, data }
+}
+
 pub fn validate_bootstrap_contact_hint(
     hint: &BootstrapContactHint,
 ) -> Result<(), BootstrapHintValidationError> {
-    if is_zero_context(&hint.scope) {
-        return Err(BootstrapHintValidationError::EmptyScope);
-    }
-    if hint.link_endpoints.is_empty() {
-        return Err(BootstrapHintValidationError::MissingLinkEndpoints);
-    }
-    if hint.replay_window_id == [0; 32] {
-        return Err(BootstrapHintValidationError::ZeroReplayWindow);
-    }
+    validate_bootstrap_hint_common(&hint.scope, &hint.link_endpoints, &hint.replay_window_id)?;
     if hint.valid_until <= hint.freshest_observed_at_ms {
         return Err(BootstrapHintValidationError::InvalidValidityWindow);
     }
@@ -94,15 +109,7 @@ pub fn validate_bootstrap_contact_hint(
 pub fn validate_neighborhood_reentry_hint(
     hint: &NeighborhoodReentryHint,
 ) -> Result<(), BootstrapHintValidationError> {
-    if is_zero_context(&hint.scope) {
-        return Err(BootstrapHintValidationError::EmptyScope);
-    }
-    if hint.link_endpoints.is_empty() {
-        return Err(BootstrapHintValidationError::MissingLinkEndpoints);
-    }
-    if hint.replay_window_id == [0; 32] {
-        return Err(BootstrapHintValidationError::ZeroReplayWindow);
-    }
+    validate_bootstrap_hint_common(&hint.scope, &hint.link_endpoints, &hint.replay_window_id)?;
     if hint.valid_until <= hint.published_at_ms {
         return Err(BootstrapHintValidationError::InvalidValidityWindow);
     }
@@ -112,15 +119,7 @@ pub fn validate_neighborhood_reentry_hint(
 pub fn validate_bootstrap_introduction_hint(
     hint: &BootstrapIntroductionHint,
 ) -> Result<(), BootstrapHintValidationError> {
-    if is_zero_context(&hint.scope) {
-        return Err(BootstrapHintValidationError::EmptyScope);
-    }
-    if hint.link_endpoints.is_empty() {
-        return Err(BootstrapHintValidationError::MissingLinkEndpoints);
-    }
-    if hint.replay_window_id == [0; 32] {
-        return Err(BootstrapHintValidationError::ZeroReplayWindow);
-    }
+    validate_bootstrap_hint_common(&hint.scope, &hint.link_endpoints, &hint.replay_window_id)?;
     if hint.remaining_depth == 0 || hint.max_fanout == 0 {
         return Err(BootstrapHintValidationError::InvalidIntroductionBounds);
     }
@@ -128,30 +127,27 @@ pub fn validate_bootstrap_introduction_hint(
 }
 
 pub fn bootstrap_contact_hint_key(hint: &BootstrapContactHint) -> BootstrapHintKey {
-    let mut data = authority_hash_bytes(&hint.authority_id).to_vec();
-    data.extend_from_slice(&hint.replay_window_id);
-    BootstrapHintKey {
-        sub_type: "bootstrap-contact-hint",
-        data,
-    }
+    bootstrap_hint_key_for(
+        "bootstrap-contact-hint",
+        &hint.authority_id,
+        &hint.replay_window_id,
+    )
 }
 
 pub fn neighborhood_reentry_hint_key(hint: &NeighborhoodReentryHint) -> BootstrapHintKey {
-    let mut data = authority_hash_bytes(&hint.publisher_authority).to_vec();
-    data.extend_from_slice(&hint.replay_window_id);
-    BootstrapHintKey {
-        sub_type: "neighborhood-reentry-hint",
-        data,
-    }
+    bootstrap_hint_key_for(
+        "neighborhood-reentry-hint",
+        &hint.publisher_authority,
+        &hint.replay_window_id,
+    )
 }
 
 pub fn bootstrap_introduction_hint_key(hint: &BootstrapIntroductionHint) -> BootstrapHintKey {
-    let mut data = authority_hash_bytes(&hint.introducer_authority).to_vec();
-    data.extend_from_slice(&hint.replay_window_id);
-    BootstrapHintKey {
-        sub_type: "bootstrap-introduction-hint",
-        data,
-    }
+    bootstrap_hint_key_for(
+        "bootstrap-introduction-hint",
+        &hint.introducer_authority,
+        &hint.replay_window_id,
+    )
 }
 
 /// Rendezvous domain facts stored in context journals
@@ -288,24 +284,18 @@ impl RendezvousDescriptor {
 
     /// Explicit establish paths derived from the advertised establish surface.
     pub fn advertised_establish_paths(&self) -> Vec<EstablishPath> {
-        self.advertised_service_descriptors()
+        self.advertised_link_endpoints()
             .into_iter()
-            .find_map(|descriptor| match descriptor.kind {
-                ServiceDescriptorKind::Establish(establish) => Some(establish.advertised_paths()),
-                _ => None,
-            })
-            .unwrap_or_default()
+            .map(EstablishPath::direct)
+            .collect()
     }
 
     /// Explicit move paths derived from the advertised move surface.
     pub fn advertised_move_paths(&self) -> Vec<MovePath> {
-        self.advertised_service_descriptors()
+        self.advertised_link_endpoints()
             .into_iter()
-            .find_map(|descriptor| match descriptor.kind {
-                ServiceDescriptorKind::Move(mv) => Some(mv.advertised_paths()),
-                _ => None,
-            })
-            .unwrap_or_default()
+            .map(MovePath::direct)
+            .collect()
     }
 
     /// Service-family advertisements derived from the rendezvous discovery data.
@@ -331,7 +321,7 @@ impl RendezvousDescriptor {
                 header: self.service_descriptor_header(ServiceFamily::Move),
                 profile: ServiceProfile::RelayTransport,
                 kind: ServiceDescriptorKind::Move(MoveDescriptor {
-                    link_endpoints: endpoints,
+                    link_endpoints: endpoints.clone(),
                     route: None,
                 }),
             },
@@ -339,7 +329,7 @@ impl RendezvousDescriptor {
                 header: self.service_descriptor_header(ServiceFamily::Hold),
                 profile: ServiceProfile::DeferredDeliveryHold,
                 kind: ServiceDescriptorKind::Hold(HoldDescriptor {
-                    link_endpoints: self.advertised_link_endpoints(),
+                    link_endpoints: endpoints.clone(),
                     selector_epoch: Some(0),
                 }),
             },
@@ -347,7 +337,7 @@ impl RendezvousDescriptor {
                 header: self.service_descriptor_header(ServiceFamily::Hold),
                 profile: ServiceProfile::CacheReplicaHold,
                 kind: ServiceDescriptorKind::Hold(HoldDescriptor {
-                    link_endpoints: self.advertised_link_endpoints(),
+                    link_endpoints: endpoints.clone(),
                     selector_epoch: Some(0),
                 }),
             },
@@ -356,9 +346,11 @@ impl RendezvousDescriptor {
 
     /// Return whether this descriptor advertises a specific family.
     pub fn supports_family(&self, family: ServiceFamily) -> bool {
-        self.advertised_service_descriptors()
-            .iter()
-            .any(|descriptor| descriptor.header.family == family)
+        !self.advertised_link_endpoints().is_empty()
+            && matches!(
+                family,
+                ServiceFamily::Establish | ServiceFamily::Move | ServiceFamily::Hold
+            )
     }
 
     fn service_descriptor_header(&self, family: ServiceFamily) -> ServiceDescriptorHeader {
@@ -693,13 +685,49 @@ pub enum TransportHint {
 }
 
 impl TransportHint {
+    fn direct_addr_components(
+        addr: &str,
+    ) -> Result<(TransportAddress, Option<BoundLocalAddr>), TransportAddressError> {
+        let addr = TransportAddress::new(addr)?;
+        let bound_local = Some(BoundLocalAddr(addr.clone()));
+        Ok((addr, bound_local))
+    }
+
+    fn direct_endpoint(
+        protocol: LinkProtocol,
+        addr: &TransportAddress,
+        bound_local: &Option<BoundLocalAddr>,
+    ) -> LinkEndpoint {
+        LinkEndpoint {
+            protocol,
+            address: Some(addr.to_string()),
+            relay_authority: None,
+            stun_server: None,
+            bound_local: bound_local.as_ref().map(|bound| bound.0.to_string()),
+        }
+    }
+
+    fn missing_endpoint_field(input: impl Into<String>, reason: &str) -> TransportAddressError {
+        TransportAddressError {
+            input: input.into(),
+            reason: reason.to_string(),
+        }
+    }
+
+    fn required_endpoint_address<'a>(
+        endpoint: &'a LinkEndpoint,
+        reason: &str,
+    ) -> Result<&'a str, TransportAddressError> {
+        endpoint
+            .address
+            .as_deref()
+            .ok_or_else(|| Self::missing_endpoint_field(String::new(), reason))
+    }
+
     /// Create a QuicDirect hint, validating the address.
     pub fn quic_direct(addr: &str) -> Result<Self, TransportAddressError> {
-        let addr = TransportAddress::new(addr)?;
-        Ok(TransportHint::QuicDirect {
-            bound_local: Some(BoundLocalAddr(addr.clone())),
-            addr,
-        })
+        let (addr, bound_local) = Self::direct_addr_components(addr)?;
+        Ok(TransportHint::QuicDirect { bound_local, addr })
     }
 
     /// Create a QuicReflexive hint, validating both addresses.
@@ -713,20 +741,14 @@ impl TransportHint {
 
     /// Create a TcpDirect hint, validating the address.
     pub fn tcp_direct(addr: &str) -> Result<Self, TransportAddressError> {
-        let addr = TransportAddress::new(addr)?;
-        Ok(TransportHint::TcpDirect {
-            bound_local: Some(BoundLocalAddr(addr.clone())),
-            addr,
-        })
+        let (addr, bound_local) = Self::direct_addr_components(addr)?;
+        Ok(TransportHint::TcpDirect { bound_local, addr })
     }
 
     /// Create a WebSocketDirect hint, validating the address.
     pub fn websocket_direct(addr: &str) -> Result<Self, TransportAddressError> {
-        let addr = TransportAddress::new(addr)?;
-        Ok(TransportHint::WebSocketDirect {
-            bound_local: Some(BoundLocalAddr(addr.clone())),
-            addr,
-        })
+        let (addr, bound_local) = Self::direct_addr_components(addr)?;
+        Ok(TransportHint::WebSocketDirect { bound_local, addr })
     }
 
     /// Create a WebSocketRelay hint.
@@ -737,13 +759,9 @@ impl TransportHint {
     /// Convert the legacy hint into the split connectivity endpoint model.
     pub fn to_link_endpoint(&self) -> LinkEndpoint {
         match self {
-            TransportHint::QuicDirect { addr, bound_local } => LinkEndpoint {
-                protocol: LinkProtocol::Quic,
-                address: Some(addr.to_string()),
-                relay_authority: None,
-                stun_server: None,
-                bound_local: bound_local.as_ref().map(|bound| bound.0.to_string()),
-            },
+            TransportHint::QuicDirect { addr, bound_local } => {
+                Self::direct_endpoint(LinkProtocol::Quic, addr, bound_local)
+            }
             TransportHint::QuicReflexive {
                 addr,
                 stun_server,
@@ -758,80 +776,51 @@ impl TransportHint {
             TransportHint::WebSocketRelay { relay_authority } => {
                 LinkEndpoint::relay(*relay_authority)
             }
-            TransportHint::WebSocketDirect { addr, bound_local } => LinkEndpoint {
-                protocol: LinkProtocol::WebSocket,
-                address: Some(addr.to_string()),
-                relay_authority: None,
-                stun_server: None,
-                bound_local: bound_local.as_ref().map(|bound| bound.0.to_string()),
-            },
-            TransportHint::TcpDirect { addr, bound_local } => LinkEndpoint {
-                protocol: LinkProtocol::Tcp,
-                address: Some(addr.to_string()),
-                relay_authority: None,
-                stun_server: None,
-                bound_local: bound_local.as_ref().map(|bound| bound.0.to_string()),
-            },
+            TransportHint::WebSocketDirect { addr, bound_local } => {
+                Self::direct_endpoint(LinkProtocol::WebSocket, addr, bound_local)
+            }
+            TransportHint::TcpDirect { addr, bound_local } => {
+                Self::direct_endpoint(LinkProtocol::Tcp, addr, bound_local)
+            }
         }
     }
 
     /// Rebuild a legacy hint from the split connectivity endpoint.
     pub fn from_link_endpoint(endpoint: &LinkEndpoint) -> Result<Self, TransportAddressError> {
         match endpoint.protocol {
-            LinkProtocol::Quic => {
-                let address = endpoint
-                    .address
-                    .as_deref()
-                    .ok_or_else(|| TransportAddressError {
-                        input: String::new(),
-                        reason: "quic endpoint missing address".to_string(),
-                    })?;
-                Self::quic_direct(address)
-            }
+            LinkProtocol::Quic => Self::quic_direct(Self::required_endpoint_address(
+                endpoint,
+                "quic endpoint missing address",
+            )?),
             LinkProtocol::QuicReflexive => {
-                let address = endpoint
-                    .address
-                    .as_deref()
-                    .ok_or_else(|| TransportAddressError {
-                        input: String::new(),
-                        reason: "reflexive endpoint missing address".to_string(),
-                    })?;
-                let stun_server =
-                    endpoint
-                        .stun_server
-                        .as_deref()
-                        .ok_or_else(|| TransportAddressError {
-                            input: address.to_string(),
-                            reason: "reflexive endpoint missing STUN server".to_string(),
-                        })?;
+                let address = Self::required_endpoint_address(
+                    endpoint,
+                    "reflexive endpoint missing address",
+                )?;
+                let stun_server = endpoint.stun_server.as_deref().ok_or_else(|| {
+                    Self::missing_endpoint_field(
+                        address.to_string(),
+                        "reflexive endpoint missing STUN server",
+                    )
+                })?;
                 Self::quic_reflexive(address, stun_server)
             }
-            LinkProtocol::Tcp => {
-                let address = endpoint
-                    .address
-                    .as_deref()
-                    .ok_or_else(|| TransportAddressError {
-                        input: String::new(),
-                        reason: "tcp endpoint missing address".to_string(),
-                    })?;
-                Self::tcp_direct(address)
-            }
-            LinkProtocol::WebSocket => {
-                let address = endpoint
-                    .address
-                    .as_deref()
-                    .ok_or_else(|| TransportAddressError {
-                        input: String::new(),
-                        reason: "websocket endpoint missing address".to_string(),
-                    })?;
-                Self::websocket_direct(address)
-            }
+            LinkProtocol::Tcp => Self::tcp_direct(Self::required_endpoint_address(
+                endpoint,
+                "tcp endpoint missing address",
+            )?),
+            LinkProtocol::WebSocket => Self::websocket_direct(Self::required_endpoint_address(
+                endpoint,
+                "websocket endpoint missing address",
+            )?),
             LinkProtocol::WebSocketRelay => endpoint
                 .relay_authority
                 .map(Self::websocket_relay)
-                .ok_or_else(|| TransportAddressError {
-                    input: String::new(),
-                    reason: "relay endpoint missing relay authority".to_string(),
+                .ok_or_else(|| {
+                    Self::missing_endpoint_field(
+                        String::new(),
+                        "relay endpoint missing relay authority",
+                    )
                 }),
         }
     }

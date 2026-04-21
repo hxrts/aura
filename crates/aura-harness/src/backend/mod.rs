@@ -261,6 +261,12 @@ pub trait SharedSemanticBackend {
     }
 }
 
+pub fn ui_operation_handle_from_contract(
+    handle: aura_app::ui_contract::HarnessUiOperationHandle,
+) -> UiOperationHandle {
+    UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone())
+}
+
 fn expect_semantic_command_unit(
     response: SemanticCommandResponse,
     operation: &str,

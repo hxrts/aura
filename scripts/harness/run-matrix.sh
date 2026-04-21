@@ -101,6 +101,14 @@ done
 [[ "$suite" == "shared" || "$suite" == "conformance" || "$suite" == "all" ]] || fail "invalid suite: $suite"
 [[ -f "$inventory" ]] || fail "missing inventory: $inventory"
 
+if [[ $dry_run -eq 0 && -z "${AURA_HARNESS_MATRIX_LOG_INITIALIZED:-}" ]]; then
+  mkdir -p "$repo_root/artifacts/harness/matrix"
+  export AURA_HARNESS_MATRIX_LOG_INITIALIZED=1
+  export AURA_HARNESS_MATRIX_LOG_FILE="${AURA_HARNESS_MATRIX_LOG_FILE:-$repo_root/artifacts/harness/matrix/${lane}-${suite}.log}"
+  : >"$AURA_HARNESS_MATRIX_LOG_FILE"
+  exec >>"$AURA_HARNESS_MATRIX_LOG_FILE" 2>&1
+fi
+
 suite_match() {
   local scenario_class="$1"
   case "$suite" in
@@ -136,8 +144,16 @@ lane_match() {
 }
 
 config_for_run() {
-  local scenario_class="$1"
-  local selected_lane="$2"
+  local scenario_id="$1"
+  local scenario_class="$2"
+  local selected_lane="$3"
+  case "$scenario_id" in
+    mixed-contact-invite-notification-roundtrip)
+      echo "configs/harness/mixed-web-tui-contact-notifications-loopback.toml"
+      return 0
+      ;;
+  esac
+
   case "$selected_lane:$scenario_class" in
     tui:shared|tui:tui_conformance) echo "configs/harness/local-loopback.toml" ;;
     web:shared|web:web_conformance) echo "configs/harness/browser-loopback.toml" ;;
@@ -169,34 +185,36 @@ ensure_built_artifact() {
   printf '%s\n' "$artifact_path"
 }
 
-prepare_lane_artifacts() {
-  local selected_lane="$1"
+config_has_mode() {
+  local config="$1"
+  local mode="$2"
+  rg -q "^mode = \"$mode\"$" "$repo_root/$config"
+}
+
+prepare_config_artifacts() {
+  local config="$1"
 
   if [[ -z "${AURA_HARNESS_BIN:-}" ]]; then
     export AURA_HARNESS_BIN
     AURA_HARNESS_BIN="$(ensure_built_artifact aura-harness aura-harness)"
   fi
 
-  case "$selected_lane" in
-    tui)
-      if [[ -z "${AURA_HARNESS_AURA_BIN:-}" ]]; then
-        export AURA_HARNESS_AURA_BIN
-        AURA_HARNESS_AURA_BIN="$(ensure_built_artifact aura-terminal aura)"
-      fi
-      ;;
-    web)
-      if [[ "${AURA_HARNESS_WEB_CHECK_DONE:-0}" != "1" ]]; then
-        (
-          cd "$repo_root"
-          just web-check
-        )
-        export AURA_HARNESS_WEB_CHECK_DONE=1
-      fi
-      ;;
-    *)
-      fail "unknown lane for artifact preparation: $selected_lane"
-      ;;
-  esac
+  if config_has_mode "$config" "local"; then
+    if [[ -z "${AURA_HARNESS_AURA_BIN:-}" ]]; then
+      export AURA_HARNESS_AURA_BIN
+      AURA_HARNESS_AURA_BIN="$(ensure_built_artifact aura-terminal aura)"
+    fi
+  fi
+
+  if config_has_mode "$config" "browser"; then
+    if [[ "${AURA_HARNESS_WEB_CHECK_DONE:-0}" != "1" ]]; then
+      (
+        cd "$repo_root"
+        just web-check
+      )
+      export AURA_HARNESS_WEB_CHECK_DONE=1
+    fi
+  fi
 }
 
 run_scenario() {
@@ -246,30 +264,29 @@ run_lane() {
 
   echo "[harness-matrix] lane=$selected_lane suite=$suite begin"
 
-  if [[ $dry_run -eq 0 ]]; then
-    prepare_lane_artifacts "$selected_lane"
-  fi
-
   while IFS='|' read -r scenario_id scenario_path scenario_class; do
     [[ -n "$scenario_id" ]] || continue
     suite_match "$scenario_class" || continue
     lane_match "$scenario_class" "$selected_lane" || continue
     scenario_id_requested "$scenario_id" || continue
 
-    config="$(config_for_run "$scenario_class" "$selected_lane")" || fail "no config for classification $scenario_class on lane $selected_lane"
+    config="$(config_for_run "$scenario_id" "$scenario_class" "$selected_lane")" || fail "no config for scenario $scenario_id classification $scenario_class on lane $selected_lane"
     count=$((count + 1))
 
     echo "[harness-matrix] lane=$selected_lane suite=$suite scenario=$scenario_id class=$scenario_class config=$config"
     if [[ $dry_run -eq 0 ]]; then
+      prepare_config_artifacts "$config"
       local run_token=""
       local run_root=""
       local transient_root=""
       local transient_key=""
       local harness_pid=""
+      local scenario_log=""
       run_token="$(run_token_for_scenario "$selected_lane" "$scenario_id")"
       run_root="$repo_root/.tmp/harness/matrix/$selected_lane/$scenario_id/$run_token"
       transient_key="$(printf '%s' "$run_token" | cksum | awk '{print $1}')"
       transient_root="$repo_root/.tmp/harness/transient/$transient_key"
+      scenario_log="$repo_root/artifacts/harness/matrix/scenarios/$selected_lane/$scenario_id/$run_token.log"
       (
         cd "$repo_root"
         export AURA_HARNESS_RUN_TOKEN="$run_token"
@@ -281,7 +298,8 @@ run_lane() {
         trap 'cleanup_run_scope "$AURA_HARNESS_RUN_ROOT" "$AURA_HARNESS_TRANSIENT_ROOT" "${harness_pid:-}"' EXIT INT TERM
         mkdir -p "$AURA_HARNESS_RUN_ROOT"
         mkdir -p "$AURA_HARNESS_TRANSIENT_ROOT"
-        run_scenario "$config" "$scenario_path" &
+        mkdir -p "$(dirname "$scenario_log")"
+        run_scenario "$config" "$scenario_path" >"$scenario_log" 2>&1 &
         harness_pid=$!
         wait "$harness_pid"
       )

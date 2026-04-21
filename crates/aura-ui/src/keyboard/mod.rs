@@ -148,7 +148,7 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
                 CharacterAction::ModalCopyInviteCode
             )
         {
-            if let Some(code) = model.last_invite_code.clone() {
+            if let Some(code) = model.current_invitation_code() {
                 clipboard.write(&code);
                 set_toast(model, '✓', "Copied to clipboard");
                 return;
@@ -319,11 +319,13 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+            nickname: String::new(),
+            receiver_nickname: String::new(),
             message: String::new(),
             ttl_hours: 24,
-            active_field: aura_app::ui::contract::FieldId::InvitationMessage,
+            active_field: aura_app::ui::contract::FieldId::Nickname,
+            generated_code: Some("INVITE-9".to_string()),
         }));
-        model.last_invite_code = Some("INVITE-9".to_string());
 
         apply_text_keys(&mut model, "c", &clipboard);
 
@@ -672,7 +674,7 @@ mod tests {
 
         model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Devices;
-        model.has_secondary_device = true;
+        model.demo.has_secondary_device = true;
         model.set_secondary_device_name(Some("Laptop".to_string()));
 
         apply_text_keys(&mut model, "r", &clipboard);
@@ -687,7 +689,7 @@ mod tests {
         ));
         apply_named_key(&mut model, "enter", 1, &clipboard);
 
-        assert!(!model.has_secondary_device);
+        assert!(!model.has_secondary_device());
         assert_eq!(
             model.toast.as_ref().map(|toast| toast.message.as_str()),
             Some("Device removal complete")
@@ -733,7 +735,7 @@ mod tests {
         let clipboard = MemoryClipboard::default();
         model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Authority;
-        model.has_secondary_device = true;
+        model.demo.has_secondary_device = true;
 
         apply_text_keys(&mut model, "m", &clipboard);
         assert!(matches!(modal_state(&model), Some(ModalState::MfaSetup)));
@@ -898,7 +900,7 @@ mod tests {
         let clipboard = MemoryClipboard::default();
         model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Authority;
-        model.has_secondary_device = true;
+        model.demo.has_secondary_device = true;
 
         apply_text_keys(&mut model, "m", &clipboard);
         apply_named_key(&mut model, "enter", 1, &clipboard);

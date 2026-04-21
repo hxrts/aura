@@ -89,6 +89,17 @@ pub enum ConsensusPhase {
 }
 
 impl ConsensusMessage {
+    /// Get the evidence delta carried by this message, if any.
+    pub fn evidence_delta(&self) -> Option<&EvidenceDelta> {
+        match self {
+            ConsensusMessage::Execute { evidence_delta, .. }
+            | ConsensusMessage::SignShare { evidence_delta, .. }
+            | ConsensusMessage::ConsensusResult { evidence_delta, .. }
+            | ConsensusMessage::Conflict { evidence_delta, .. } => Some(evidence_delta),
+            _ => None,
+        }
+    }
+
     /// Get the consensus ID for this message
     pub fn consensus_id(&self) -> ConsensusId {
         match self {
@@ -247,5 +258,30 @@ mod tests {
             evidence_delta: EvidenceDelta::empty(id, 0),
         };
         assert!(fast_sign.is_fast_path());
+    }
+
+    #[test]
+    fn test_evidence_delta_accessor() {
+        let id = ConsensusId::new(Hash32::default(), Hash32([1u8; 32]), 42);
+        let delta = EvidenceDelta::empty(id, 0);
+        let msg = ConsensusMessage::Conflict {
+            consensus_id: id,
+            conflicts: vec![],
+            evidence_delta: delta.clone(),
+        };
+
+        let evidence_delta = msg.evidence_delta().expect("conflict carries evidence");
+        assert_eq!(evidence_delta.consensus_id, delta.consensus_id);
+        assert_eq!(evidence_delta.timestamp_ms, delta.timestamp_ms);
+        assert!(evidence_delta.equivocation_proofs.is_empty());
+        assert!(ConsensusMessage::NonceCommit {
+            consensus_id: id,
+            commitment: NonceCommitment {
+                signer: 1,
+                commitment: vec![],
+            },
+        }
+        .evidence_delta()
+        .is_none());
     }
 }

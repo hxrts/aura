@@ -82,6 +82,37 @@ pub enum PrivacyLevel {
 }
 
 impl Envelope {
+    fn header(
+        frame_type: FrameType,
+        privacy_level: PrivacyLevel,
+        capability_hint: Option<String>,
+        frame_size: u32,
+    ) -> FrameHeader {
+        FrameHeader {
+            frame_type,
+            privacy_level,
+            capability_hint,
+            frame_size,
+        }
+    }
+
+    fn new_internal(
+        message_id: MessageId,
+        payload: Vec<u8>,
+        context_id: Option<ContextId>,
+        frame_type: FrameType,
+        privacy_level: PrivacyLevel,
+        capability_hint: Option<String>,
+        frame_size: u32,
+    ) -> Self {
+        Self {
+            message_id,
+            header: Self::header(frame_type, privacy_level, capability_hint, frame_size),
+            payload,
+            context_id,
+        }
+    }
+
     /// Create new envelope with minimal privacy preservation
     pub fn new(payload: Vec<u8>) -> Self {
         Self::new_with_id(MessageId::new(), payload)
@@ -89,17 +120,16 @@ impl Envelope {
 
     /// Create new envelope with specified message ID
     pub fn new_with_id(message_id: MessageId, payload: Vec<u8>) -> Self {
-        Self {
+        let frame_size = payload.len() as u32;
+        Self::new_internal(
             message_id,
-            header: FrameHeader {
-                frame_type: FrameType::Clear,
-                privacy_level: PrivacyLevel::Clear,
-                capability_hint: None,
-                frame_size: payload.len() as u32,
-            },
             payload,
-            context_id: None,
-        }
+            None,
+            FrameType::Clear,
+            PrivacyLevel::Clear,
+            None,
+            frame_size,
+        )
     }
 
     /// Create context-scoped envelope with privacy preservation
@@ -118,17 +148,16 @@ impl Envelope {
         context_id: ContextId,
         capability_hint: Option<String>,
     ) -> Self {
-        Self {
+        let frame_size = payload.len() as u32;
+        Self::new_internal(
             message_id,
-            header: FrameHeader {
-                frame_type: FrameType::ContextScoped,
-                privacy_level: PrivacyLevel::ContextScoped,
-                capability_hint,
-                frame_size: payload.len() as u32,
-            },
             payload,
-            context_id: Some(context_id),
-        }
+            Some(context_id),
+            FrameType::ContextScoped,
+            PrivacyLevel::ContextScoped,
+            capability_hint,
+            frame_size,
+        )
     }
 
     /// Create blinded envelope hiding all metadata
@@ -138,17 +167,15 @@ impl Envelope {
 
     /// Create blinded envelope with specified message ID
     pub fn new_blinded_with_id(message_id: MessageId, payload: Vec<u8>) -> Self {
-        Self {
+        Self::new_internal(
             message_id,
-            header: FrameHeader {
-                frame_type: FrameType::Blinded,
-                privacy_level: PrivacyLevel::Blinded,
-                capability_hint: None,
-                frame_size: 0, // Hide actual size
-            },
             payload,
-            context_id: None,
-        }
+            None,
+            FrameType::Blinded,
+            PrivacyLevel::Blinded,
+            None,
+            0, // Hide actual size
+        )
     }
 
     /// Check if envelope requires context scope

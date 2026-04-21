@@ -256,6 +256,8 @@ pub enum DispatchCommand {
     CreateInvitation {
         receiver_id: Option<AuthorityId>,
         invitation_type: InvitationKind,
+        nickname: Option<String>,
+        receiver_nickname: Option<String>,
         message: Option<String>,
         ttl_secs: Option<u64>,
     },

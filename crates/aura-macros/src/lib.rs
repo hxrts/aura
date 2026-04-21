@@ -27,8 +27,8 @@ use syn::visit::{self, Visit};
 use syn::{
     parse_quote, Attribute, Block, Error, Expr, ExprAwait, ExprCall, ExprGroup, ExprLit,
     ExprMethodCall, ExprParen, ExprReference, FnArg, GenericArgument, ImplItemFn, ItemEnum, ItemFn,
-    ItemStruct, Lit, LitStr, MetaNameValue, PatType, PathArguments, Result as SynResult, Token,
-    Type, TypePath,
+    ItemStruct, Lit, LitStr, MetaNameValue, PatType, PathArguments, Result as SynResult, Stmt,
+    Token, Type, TypePath,
 };
 
 mod capability_family;
@@ -650,7 +650,7 @@ struct ServiceSurfaceAttr {
 
 impl Parse for ActorOwnedAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let metas = parse_meta_name_values(input)?;
         let mut owner = None;
         let mut domain = None;
         let mut gate = None;
@@ -680,49 +680,22 @@ impl Parse for ActorOwnedAttr {
         }
 
         Ok(Self {
-            owner: owner.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_owned requires `owner = \"...\"`",
-                )
-            })?,
-            domain: domain.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_owned requires `domain = \"...\"`",
-                )
-            })?,
-            gate: gate.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_owned requires `gate = \"...\"`",
-                )
-            })?,
-            command: command.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_owned requires `command = Type`",
-                )
-            })?,
-            capacity: capacity.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_owned requires `capacity = N`",
-                )
-            })?,
-            category: category.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_owned requires `category = \"actor_owned\"`",
-                )
-            })?,
+            owner: require_attr_field(owner, "actor_owned requires `owner = \"...\"`")?,
+            domain: require_attr_field(domain, "actor_owned requires `domain = \"...\"`")?,
+            gate: require_attr_field(gate, "actor_owned requires `gate = \"...\"`")?,
+            command: require_attr_field(command, "actor_owned requires `command = Type`")?,
+            capacity: require_attr_field(capacity, "actor_owned requires `capacity = N`")?,
+            category: require_attr_field(
+                category,
+                "actor_owned requires `category = \"actor_owned\"`",
+            )?,
         })
     }
 }
 
 impl Parse for ServiceSurfaceAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let metas = parse_meta_name_values(input)?;
         let mut families = None;
         let mut object_categories = None;
         let mut discover = None;
@@ -735,17 +708,17 @@ impl Parse for ServiceSurfaceAttr {
 
         for meta in metas {
             if meta.path.is_ident("families") {
-                families = Some(parse_required_list_literal(&expect_string_literal(
+                families = Some(parse_required_string_list_field(
                     &meta,
                     "families",
                     "service_surface",
-                )?)?);
+                )?);
             } else if meta.path.is_ident("object_categories") {
-                object_categories = Some(parse_required_list_literal(&expect_string_literal(
+                object_categories = Some(parse_required_string_list_field(
                     &meta,
                     "object_categories",
                     "service_surface",
-                )?)?);
+                )?);
             } else if meta.path.is_ident("discover") {
                 discover = Some(expect_string_literal(&meta, "discover", "service_surface")?);
             } else if meta.path.is_ident("permit") {
@@ -755,17 +728,17 @@ impl Parse for ServiceSurfaceAttr {
             } else if meta.path.is_ident("select") {
                 select = Some(expect_string_literal(&meta, "select", "service_surface")?);
             } else if meta.path.is_ident("authoritative") {
-                authoritative = Some(parse_optional_list_literal(&expect_string_literal(
+                authoritative = Some(parse_optional_string_list_field(
                     &meta,
                     "authoritative",
                     "service_surface",
-                )?)?);
+                )?);
             } else if meta.path.is_ident("runtime_local") {
-                runtime_local = Some(parse_required_list_literal(&expect_string_literal(
+                runtime_local = Some(parse_required_string_list_field(
                     &meta,
                     "runtime_local",
                     "service_surface",
-                )?)?);
+                )?);
             } else if meta.path.is_ident("category") {
                 category = Some(expect_string_literal(&meta, "category", "service_surface")?);
             } else {
@@ -777,67 +750,43 @@ impl Parse for ServiceSurfaceAttr {
         }
 
         Ok(Self {
-            families: families.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "service_surface requires `families = \"A,B,...\"`",
-                )
-            })?,
-            object_categories: object_categories.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "service_surface requires `object_categories = \"a,b,...\"`",
-                )
-            })?,
-            discover: discover.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "service_surface requires `discover = \"...\"`",
-                )
-            })?,
-            permit: permit.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "service_surface requires `permit = \"...\"`",
-                )
-            })?,
-            transfer: transfer.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "service_surface requires `transfer = \"...\"`",
-                )
-            })?,
-            select: select.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "service_surface requires `select = \"...\"`",
-                )
-            })?,
-            authoritative: authoritative.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "service_surface requires `authoritative = \"a,b,...\"`",
-                )
-            })?,
-            runtime_local: runtime_local.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "service_surface requires `runtime_local = \"a,b,...\"`",
-                )
-            })?,
-            category: category.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "service_surface requires `category = \"service_surface\"`",
-                )
-            })?,
+            families: require_attr_field(
+                families,
+                "service_surface requires `families = \"A,B,...\"`",
+            )?,
+            object_categories: require_attr_field(
+                object_categories,
+                "service_surface requires `object_categories = \"a,b,...\"`",
+            )?,
+            discover: require_attr_field(
+                discover,
+                "service_surface requires `discover = \"...\"`",
+            )?,
+            permit: require_attr_field(permit, "service_surface requires `permit = \"...\"`")?,
+            transfer: require_attr_field(
+                transfer,
+                "service_surface requires `transfer = \"...\"`",
+            )?,
+            select: require_attr_field(select, "service_surface requires `select = \"...\"`")?,
+            authoritative: require_attr_field(
+                authoritative,
+                "service_surface requires `authoritative = \"a,b,...\"`",
+            )?,
+            runtime_local: require_attr_field(
+                runtime_local,
+                "service_surface requires `runtime_local = \"a,b,...\"`",
+            )?,
+            category: require_attr_field(
+                category,
+                "service_surface requires `category = \"service_surface\"`",
+            )?,
         })
     }
 }
 
 impl Parse for ActorRootAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let metas = parse_meta_name_values(input)?;
         let mut owner = None;
         let mut domain = None;
         let mut supervision = None;
@@ -861,37 +810,23 @@ impl Parse for ActorRootAttr {
         }
 
         Ok(Self {
-            owner: owner.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_root requires `owner = \"...\"`",
-                )
-            })?,
-            domain: domain.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_root requires `domain = \"...\"`",
-                )
-            })?,
-            supervision: supervision.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_root requires `supervision = \"...\"`",
-                )
-            })?,
-            category: category.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "actor_root requires `category = \"actor_owned\"`",
-                )
-            })?,
+            owner: require_attr_field(owner, "actor_root requires `owner = \"...\"`")?,
+            domain: require_attr_field(domain, "actor_root requires `domain = \"...\"`")?,
+            supervision: require_attr_field(
+                supervision,
+                "actor_root requires `supervision = \"...\"`",
+            )?,
+            category: require_attr_field(
+                category,
+                "actor_root requires `category = \"actor_owned\"`",
+            )?,
         })
     }
 }
 
 impl Parse for SemanticOwnerAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let metas = parse_meta_name_values(input)?;
         let mut owner = None;
         let mut wrapper = None;
         let mut terminal = None;
@@ -918,23 +853,23 @@ impl Parse for SemanticOwnerAttr {
             } else if meta.path.is_ident("proof") {
                 proof = Some(expect_type_value(&meta, "proof", "semantic_owner")?);
             } else if meta.path.is_ident("authoritative_inputs") {
-                authoritative_inputs = Some(parse_optional_list_literal(&expect_string_literal(
+                authoritative_inputs = Some(parse_optional_string_list_field(
                     &meta,
                     "authoritative_inputs",
                     "semantic_owner",
-                )?)?);
+                )?);
             } else if meta.path.is_ident("depends_on") {
-                depends_on = Some(parse_optional_list_literal(&expect_string_literal(
+                depends_on = Some(parse_optional_string_list_field(
                     &meta,
                     "depends_on",
                     "semantic_owner",
-                )?)?);
+                )?);
             } else if meta.path.is_ident("child_ops") {
-                child_ops = Some(parse_optional_list_literal(&expect_string_literal(
+                child_ops = Some(parse_optional_string_list_field(
                     &meta,
                     "child_ops",
                     "semantic_owner",
-                )?)?);
+                )?);
             } else if meta.path.is_ident("category") {
                 category = Some(expect_string_literal(&meta, "category", "semantic_owner")?);
             } else {
@@ -946,64 +881,43 @@ impl Parse for SemanticOwnerAttr {
         }
 
         Ok(Self {
-            owner: owner.ok_or_else(|| {
-                Error::new(proc_macro2::Span::call_site(), "semantic_owner requires `owner = \"...\"`")
-            })?,
-            wrapper: wrapper.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "semantic_owner requires `wrapper = \"...\"`",
-                )
-            })?,
-            terminal: terminal.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "semantic_owner requires `terminal = \"...\"`",
-                )
-            })?,
-            postcondition: postcondition.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "semantic_owner requires `postcondition = \"...\"`",
-                )
-            })?,
-            proof: Some(proof.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "semantic_owner requires `proof = TypePath`",
-                )
-            })?),
-            authoritative_inputs: authoritative_inputs.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "semantic_owner requires `authoritative_inputs = \"a,b,...\"` (use empty string for none)",
-                )
-            })?,
-            depends_on: depends_on.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "semantic_owner requires `depends_on = \"a,b,...\"` (use empty string for none)",
-                )
-            })?,
-            child_ops: child_ops.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "semantic_owner requires `child_ops = \"a,b,...\"` (use empty string for none)",
-                )
-            })?,
-            category: category.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "semantic_owner requires `category = \"move_owned\"`",
-                )
-            })?,
+            owner: require_attr_field(owner, "semantic_owner requires `owner = \"...\"`")?,
+            wrapper: require_attr_field(wrapper, "semantic_owner requires `wrapper = \"...\"`")?,
+            terminal: require_attr_field(
+                terminal,
+                "semantic_owner requires `terminal = \"...\"`",
+            )?,
+            postcondition: require_attr_field(
+                postcondition,
+                "semantic_owner requires `postcondition = \"...\"`",
+            )?,
+            proof: Some(require_attr_field(
+                proof,
+                "semantic_owner requires `proof = TypePath`",
+            )?),
+            authoritative_inputs: require_attr_field(
+                authoritative_inputs,
+                "semantic_owner requires `authoritative_inputs = \"a,b,...\"` (use empty string for none)",
+            )?,
+            depends_on: require_attr_field(
+                depends_on,
+                "semantic_owner requires `depends_on = \"a,b,...\"` (use empty string for none)",
+            )?,
+            child_ops: require_attr_field(
+                child_ops,
+                "semantic_owner requires `child_ops = \"a,b,...\"` (use empty string for none)",
+            )?,
+            category: require_attr_field(
+                category,
+                "semantic_owner requires `category = \"move_owned\"`",
+            )?,
         })
     }
 }
 
 impl Parse for CapabilityBoundaryAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let metas = parse_meta_name_values(input)?;
         let mut category = None;
         let mut capability = None;
         let mut family = None;
@@ -1036,174 +950,92 @@ impl Parse for CapabilityBoundaryAttr {
         }
 
         Ok(Self {
-            category: category.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "capability_boundary requires `category = \"capability_gated\"`",
-                )
-            })?,
-            capability: capability.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "capability_boundary requires `capability = \"...\"`",
-                )
-            })?,
-            family: family.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "capability_boundary requires `family = \"...\"`",
-                )
-            })?,
+            category: require_attr_field(
+                category,
+                "capability_boundary requires `category = \"capability_gated\"`",
+            )?,
+            capability: require_attr_field(
+                capability,
+                "capability_boundary requires `capability = \"...\"`",
+            )?,
+            family: require_attr_field(family, "capability_boundary requires `family = \"...\"`")?,
         })
     }
 }
 
 impl Parse for AuthoritativeSourceAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
-        let mut kind = None;
-
-        for meta in metas {
-            if meta.path.is_ident("kind") {
-                kind = Some(expect_string_literal(
-                    &meta,
-                    "kind",
-                    "authoritative_source",
-                )?);
-            } else {
-                return Err(Error::new_spanned(
-                    meta,
-                    "unsupported authoritative_source attribute key; expected `kind`",
-                ));
-            }
-        }
-
         Ok(Self {
-            kind: kind.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "authoritative_source requires `kind = \"...\"`",
-                )
-            })?,
+            kind: parse_single_string_attr(
+                input,
+                "authoritative_source",
+                "kind",
+                "unsupported authoritative_source attribute key; expected `kind`",
+                "authoritative_source requires `kind = \"...\"`",
+            )?,
         })
     }
 }
 
 impl Parse for StrongReferenceAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
-        let mut domain = None;
-
-        for meta in metas {
-            if meta.path.is_ident("domain") {
-                domain = Some(expect_string_literal(&meta, "domain", "strong_reference")?);
-            } else {
-                return Err(Error::new_spanned(
-                    meta,
-                    "unsupported strong_reference attribute key; expected `domain`",
-                ));
-            }
-        }
-
         Ok(Self {
-            domain: domain.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "strong_reference requires `domain = \"...\"`",
-                )
-            })?,
+            domain: parse_single_string_attr(
+                input,
+                "strong_reference",
+                "domain",
+                "unsupported strong_reference attribute key; expected `domain`",
+                "strong_reference requires `domain = \"...\"`",
+            )?,
         })
     }
 }
 
 impl Parse for WeakIdentifierAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
-        let mut domain = None;
-
-        for meta in metas {
-            if meta.path.is_ident("domain") {
-                domain = Some(expect_string_literal(&meta, "domain", "weak_identifier")?);
-            } else {
-                return Err(Error::new_spanned(
-                    meta,
-                    "unsupported weak_identifier attribute key; expected `domain`",
-                ));
-            }
-        }
-
         Ok(Self {
-            domain: domain.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "weak_identifier requires `domain = \"...\"`",
-                )
-            })?,
+            domain: parse_single_string_attr(
+                input,
+                "weak_identifier",
+                "domain",
+                "unsupported weak_identifier attribute key; expected `domain`",
+                "weak_identifier requires `domain = \"...\"`",
+            )?,
         })
     }
 }
 
 impl Parse for MustSettleAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
-        let mut kind = None;
-
-        for meta in metas {
-            if meta.path.is_ident("kind") {
-                kind = Some(expect_string_literal(&meta, "kind", "must_settle")?);
-            } else {
-                return Err(Error::new_spanned(
-                    meta,
-                    "unsupported must_settle attribute key; expected `kind`",
-                ));
-            }
-        }
-
         Ok(Self {
-            kind: kind.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "must_settle requires `kind = \"...\"`",
-                )
-            })?,
+            kind: parse_single_string_attr(
+                input,
+                "must_settle",
+                "kind",
+                "unsupported must_settle attribute key; expected `kind`",
+                "must_settle requires `kind = \"...\"`",
+            )?,
         })
     }
 }
 
 impl Parse for OwnerIssuedProofAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
-        let mut domain = None;
-
-        for meta in metas {
-            if meta.path.is_ident("domain") {
-                domain = Some(expect_string_literal(
-                    &meta,
-                    "domain",
-                    "owner_issued_proof",
-                )?);
-            } else {
-                return Err(Error::new_spanned(
-                    meta,
-                    "unsupported owner_issued_proof attribute key; expected `domain`",
-                ));
-            }
-        }
-
         Ok(Self {
-            domain: domain.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "owner_issued_proof requires `domain = \"...\"`",
-                )
-            })?,
+            domain: parse_single_string_attr(
+                input,
+                "owner_issued_proof",
+                "domain",
+                "unsupported owner_issued_proof attribute key; expected `domain`",
+                "owner_issued_proof requires `domain = \"...\"`",
+            )?,
         })
     }
 }
 
 impl Parse for OwnershipLifecycleAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let metas = parse_meta_name_values(input)?;
         let mut initial = None;
         let mut ordered = None;
         let mut terminals = None;
@@ -1216,17 +1048,17 @@ impl Parse for OwnershipLifecycleAttr {
                     "ownership_lifecycle",
                 )?);
             } else if meta.path.is_ident("ordered") {
-                ordered = Some(parse_list_literal(&expect_string_literal(
+                ordered = Some(parse_required_string_list_field(
                     &meta,
                     "ordered",
                     "ownership_lifecycle",
-                )?)?);
+                )?);
             } else if meta.path.is_ident("terminals") {
-                terminals = Some(parse_list_literal(&expect_string_literal(
+                terminals = Some(parse_required_string_list_field(
                     &meta,
                     "terminals",
                     "ownership_lifecycle",
-                )?)?);
+                )?);
             } else {
                 return Err(Error::new_spanned(
                     meta,
@@ -1236,26 +1068,51 @@ impl Parse for OwnershipLifecycleAttr {
         }
 
         Ok(Self {
-            initial: initial.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "ownership_lifecycle requires `initial = \"Variant\"`",
-                )
-            })?,
-            ordered: ordered.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "ownership_lifecycle requires `ordered = \"A,B,...\"`",
-                )
-            })?,
-            terminals: terminals.ok_or_else(|| {
-                Error::new(
-                    proc_macro2::Span::call_site(),
-                    "ownership_lifecycle requires `terminals = \"T1,T2,...\"`",
-                )
-            })?,
+            initial: require_attr_field(
+                initial,
+                "ownership_lifecycle requires `initial = \"Variant\"`",
+            )?,
+            ordered: require_attr_field(
+                ordered,
+                "ownership_lifecycle requires `ordered = \"A,B,...\"`",
+            )?,
+            terminals: require_attr_field(
+                terminals,
+                "ownership_lifecycle requires `terminals = \"T1,T2,...\"`",
+            )?,
         })
     }
+}
+
+fn parse_meta_name_values(
+    input: ParseStream<'_>,
+) -> SynResult<Punctuated<MetaNameValue, Token![,]>> {
+    Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)
+}
+
+fn require_attr_field<T>(value: Option<T>, message: &'static str) -> SynResult<T> {
+    value.ok_or_else(|| Error::new(proc_macro2::Span::call_site(), message))
+}
+
+fn parse_single_string_attr(
+    input: ParseStream<'_>,
+    attr: &str,
+    field: &str,
+    unsupported_message: &'static str,
+    required_message: &'static str,
+) -> SynResult<LitStr> {
+    let metas = parse_meta_name_values(input)?;
+    let mut value = None;
+
+    for meta in metas {
+        if meta.path.is_ident(field) {
+            value = Some(expect_string_literal(&meta, field, attr)?);
+        } else {
+            return Err(Error::new_spanned(meta, unsupported_message));
+        }
+    }
+
+    require_attr_field(value, required_message)
 }
 
 fn expect_string_literal(meta: &MetaNameValue, name: &str, attr: &str) -> SynResult<LitStr> {
@@ -1325,6 +1182,22 @@ fn parse_optional_list_literal(list: &LitStr) -> SynResult<Vec<LitStr>> {
 
 fn parse_required_list_literal(list: &LitStr) -> SynResult<Vec<LitStr>> {
     parse_list_literal(list)
+}
+
+fn parse_optional_string_list_field(
+    meta: &MetaNameValue,
+    name: &str,
+    attr: &str,
+) -> SynResult<Vec<LitStr>> {
+    parse_optional_list_literal(&expect_string_literal(meta, name, attr)?)
+}
+
+fn parse_required_string_list_field(
+    meta: &MetaNameValue,
+    name: &str,
+    attr: &str,
+) -> SynResult<Vec<LitStr>> {
+    parse_required_list_literal(&expect_string_literal(meta, name, attr)?)
 }
 
 fn validate_service_surface_struct(
@@ -1460,111 +1333,52 @@ fn transform_authoritative_source(
     item: TokenStream,
     config: AuthoritativeSourceAttr,
 ) -> TokenStream {
-    if let Ok(function) = syn::parse::<ItemFn>(item.clone()) {
-        if let Err(error) = validate_authoritative_source_kind(&config.kind) {
-            return error.to_compile_error().into();
-        }
-        return quote! { #function }.into();
+    if let Err(error) = validate_authoritative_source_kind(&config.kind) {
+        return error.to_compile_error().into();
     }
-    if let Ok(function) = syn::parse::<ImplItemFn>(item.clone()) {
-        if let Err(error) = validate_authoritative_source_kind(&config.kind) {
-            return error.to_compile_error().into();
-        }
-        return quote! { #function }.into();
-    }
-    Error::new(
-        proc_macro2::Span::call_site(),
+    passthrough_function_item(
+        item,
         "#[authoritative_source] may only be applied to free or impl functions",
     )
-    .to_compile_error()
-    .into()
 }
 
 fn transform_strong_reference(item: TokenStream, config: StrongReferenceAttr) -> TokenStream {
     if let Err(error) = validate_reference_domain(&config.domain, "strong_reference") {
         return error.to_compile_error().into();
     }
-    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
-        return quote! { #strukt }.into();
-    }
-    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
-        return quote! { #item_enum }.into();
-    }
-    Error::new(
-        proc_macro2::Span::call_site(),
+    passthrough_nominal_item(
+        item,
         "#[strong_reference] may only be applied to structs or enums",
     )
-    .to_compile_error()
-    .into()
 }
 
 fn transform_weak_identifier(item: TokenStream, config: WeakIdentifierAttr) -> TokenStream {
     if let Err(error) = validate_reference_domain(&config.domain, "weak_identifier") {
         return error.to_compile_error().into();
     }
-    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
-        return quote! { #strukt }.into();
-    }
-    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
-        return quote! { #item_enum }.into();
-    }
-    Error::new(
-        proc_macro2::Span::call_site(),
+    passthrough_nominal_item(
+        item,
         "#[weak_identifier] may only be applied to structs or enums",
     )
-    .to_compile_error()
-    .into()
 }
 
 fn transform_must_settle(item: TokenStream, config: MustSettleAttr) -> TokenStream {
-    let kind = config.kind;
-    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
-        return quote! {
-            #strukt
-            const _: &'static str = #kind;
-        }
-        .into();
-    }
-    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
-        return quote! {
-            #item_enum
-            const _: &'static str = #kind;
-        }
-        .into();
-    }
-    Error::new(
-        proc_macro2::Span::call_site(),
+    annotate_nominal_item_with_string(
+        item,
+        config.kind,
         "#[must_settle] may only be applied to structs or enums",
     )
-    .to_compile_error()
-    .into()
 }
 
 fn transform_owner_issued_proof(item: TokenStream, config: OwnerIssuedProofAttr) -> TokenStream {
     if let Err(error) = validate_reference_domain(&config.domain, "owner_issued_proof") {
         return error.to_compile_error().into();
     }
-    let domain = config.domain;
-    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
-        return quote! {
-            #strukt
-            const _: &'static str = #domain;
-        }
-        .into();
-    }
-    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
-        return quote! {
-            #item_enum
-            const _: &'static str = #domain;
-        }
-        .into();
-    }
-    Error::new(
-        proc_macro2::Span::call_site(),
+    annotate_nominal_item_with_string(
+        item,
+        config.domain,
         "#[owner_issued_proof] may only be applied to structs or enums",
     )
-    .to_compile_error()
-    .into()
 }
 
 fn validate_authoritative_source_kind(kind: &LitStr) -> SynResult<()> {
@@ -1595,6 +1409,130 @@ fn validate_reference_domain(domain: &LitStr, attr: &str) -> SynResult<()> {
     ))
 }
 
+fn passthrough_function_item(
+    item: TokenStream,
+    invalid_target_message: &'static str,
+) -> TokenStream {
+    if let Ok(function) = syn::parse::<ItemFn>(item.clone()) {
+        return quote! { #function }.into();
+    }
+    if let Ok(function) = syn::parse::<ImplItemFn>(item.clone()) {
+        return quote! { #function }.into();
+    }
+    Error::new(proc_macro2::Span::call_site(), invalid_target_message)
+        .to_compile_error()
+        .into()
+}
+
+fn passthrough_nominal_item(
+    item: TokenStream,
+    invalid_target_message: &'static str,
+) -> TokenStream {
+    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
+        return quote! { #strukt }.into();
+    }
+    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
+        return quote! { #item_enum }.into();
+    }
+    Error::new(proc_macro2::Span::call_site(), invalid_target_message)
+        .to_compile_error()
+        .into()
+}
+
+fn annotate_nominal_item_with_string(
+    item: TokenStream,
+    marker: LitStr,
+    invalid_target_message: &'static str,
+) -> TokenStream {
+    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
+        return quote! {
+            #strukt
+            const _: &'static str = #marker;
+        }
+        .into();
+    }
+    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
+        return quote! {
+            #item_enum
+            const _: &'static str = #marker;
+        }
+        .into();
+    }
+    Error::new(proc_macro2::Span::call_site(), invalid_target_message)
+        .to_compile_error()
+        .into()
+}
+
+fn prepend_statements(block_stmts: &mut Vec<Stmt>, statements: Vec<Stmt>) {
+    for (index, statement) in statements.into_iter().enumerate() {
+        block_stmts.insert(index, statement);
+    }
+}
+
+fn semantic_owner_contract_statements(config: &SemanticOwnerAttr) -> Vec<Stmt> {
+    let owner = config.owner.clone();
+    let wrapper = config.wrapper.clone();
+    let terminal = config.terminal.clone();
+    let postcondition = config.postcondition.clone();
+    let proof = config.proof.clone();
+    let authoritative_inputs = config.authoritative_inputs.clone();
+    let depends_on = config.depends_on.clone();
+    let child_ops = config.child_ops.clone();
+    let mut statements = vec![
+        parse_quote! {
+            let _: ::aura_core::SemanticOwnerProtocol =
+                ::aura_core::SemanticOwnerProtocol::CANONICAL;
+        },
+        parse_quote! {
+            let _: &'static str = #owner;
+        },
+        parse_quote! {
+            let _: &'static str = #wrapper;
+        },
+        parse_quote! {
+            let _: ::aura_core::BoundaryDeclarationCategory =
+                ::aura_core::BoundaryDeclarationCategory::MoveOwned;
+        },
+        parse_quote! {
+            let _: ::aura_core::SemanticOwnerPostcondition =
+                ::aura_core::SemanticOwnerPostcondition::new(#postcondition);
+        },
+    ];
+
+    if let Some(proof) = proof {
+        statements.push(parse_quote! {
+            let _: fn(#proof) = |proof| {
+                let _: ::aura_core::SemanticOwnerPostcondition =
+                    ::aura_core::SemanticSuccessProof::declared_postcondition(&proof);
+            };
+        });
+    }
+
+    for input in authoritative_inputs {
+        statements.push(parse_quote! {
+            let _: ::aura_core::SemanticOwnerAuthoritativeInput =
+                ::aura_core::SemanticOwnerAuthoritativeInput::new(#input);
+        });
+    }
+    for dependency in depends_on {
+        statements.push(parse_quote! {
+            let _: ::aura_core::SemanticOwnerDependency =
+                ::aura_core::SemanticOwnerDependency::new(#dependency);
+        });
+    }
+    for child_op in child_ops {
+        statements.push(parse_quote! {
+            let _: ::aura_core::SemanticOwnerChildOperation =
+                ::aura_core::SemanticOwnerChildOperation::new(#child_op);
+        });
+    }
+    statements.push(parse_quote! {
+        let _: &'static str = #terminal;
+    });
+
+    statements
+}
+
 fn transform_semantic_owner(item: TokenStream, config: SemanticOwnerAttr) -> TokenStream {
     if let Ok(function) = syn::parse::<ItemFn>(item.clone()) {
         return transform_semantic_owner_fn(function, config).into();
@@ -1614,14 +1552,6 @@ fn transform_semantic_owner_fn(
     mut function: ItemFn,
     config: SemanticOwnerAttr,
 ) -> proc_macro2::TokenStream {
-    let owner = config.owner.clone();
-    let wrapper = config.wrapper.clone();
-    let terminal = config.terminal.clone();
-    let postcondition = config.postcondition.clone();
-    let proof = config.proof.clone();
-    let authoritative_inputs = config.authoritative_inputs.clone();
-    let depends_on = config.depends_on.clone();
-    let child_ops = config.child_ops.clone();
     if let Err(error) = validate_semantic_owner_signature(
         &function.sig.inputs,
         function.sig.asyncness.is_some(),
@@ -1631,87 +1561,9 @@ fn transform_semantic_owner_fn(
     ) {
         return error.to_compile_error();
     }
-    function.block.stmts.insert(
-        0,
-        parse_quote! {
-            let _: ::aura_core::SemanticOwnerProtocol =
-                ::aura_core::SemanticOwnerProtocol::CANONICAL;
-        },
-    );
-    function.block.stmts.insert(
-        1,
-        parse_quote! {
-            let _: &'static str = #owner;
-        },
-    );
-    function.block.stmts.insert(
-        2,
-        parse_quote! {
-            let _: &'static str = #wrapper;
-        },
-    );
-    function.block.stmts.insert(
-        3,
-        parse_quote! {
-            let _: ::aura_core::BoundaryDeclarationCategory =
-                ::aura_core::BoundaryDeclarationCategory::MoveOwned;
-        },
-    );
-    function.block.stmts.insert(
-        4,
-        parse_quote! {
-            let _: ::aura_core::SemanticOwnerPostcondition =
-                ::aura_core::SemanticOwnerPostcondition::new(#postcondition);
-        },
-    );
-    if let Some(proof) = proof.clone() {
-        function.block.stmts.insert(
-            5,
-            parse_quote! {
-                let _: fn(#proof) = |proof| {
-                    let _: ::aura_core::SemanticOwnerPostcondition =
-                        ::aura_core::SemanticSuccessProof::declared_postcondition(&proof);
-                };
-            },
-        );
-    }
-    let proof_stmt_count = usize::from(proof.is_some());
-    for (index, input) in authoritative_inputs.iter().enumerate() {
-        let stmt_index = 5 + proof_stmt_count + index;
-        function.block.stmts.insert(
-            stmt_index,
-            parse_quote! {
-                let _: ::aura_core::SemanticOwnerAuthoritativeInput =
-                    ::aura_core::SemanticOwnerAuthoritativeInput::new(#input);
-            },
-        );
-    }
-    for (index, dependency) in depends_on.iter().enumerate() {
-        let stmt_index = 5 + proof_stmt_count + authoritative_inputs.len() + index;
-        function.block.stmts.insert(
-            stmt_index,
-            parse_quote! {
-                let _: ::aura_core::SemanticOwnerDependency =
-                    ::aura_core::SemanticOwnerDependency::new(#dependency);
-            },
-        );
-    }
-    for (index, child_op) in child_ops.iter().enumerate() {
-        let stmt_index =
-            5 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + index;
-        function.block.stmts.insert(
-            stmt_index,
-            parse_quote! {
-                let _: ::aura_core::SemanticOwnerChildOperation =
-                    ::aura_core::SemanticOwnerChildOperation::new(#child_op);
-            },
-        );
-    }
-    function.block.stmts.insert(
-        5 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + child_ops.len(),
-        parse_quote! {
-            let _: &'static str = #terminal;
-        },
+    prepend_statements(
+        &mut function.block.stmts,
+        semantic_owner_contract_statements(&config),
     );
     quote!(#function)
 }
@@ -1720,14 +1572,6 @@ fn transform_semantic_owner_impl_fn(
     mut function: ImplItemFn,
     config: SemanticOwnerAttr,
 ) -> proc_macro2::TokenStream {
-    let owner = config.owner.clone();
-    let wrapper = config.wrapper.clone();
-    let terminal = config.terminal.clone();
-    let postcondition = config.postcondition.clone();
-    let proof = config.proof.clone();
-    let authoritative_inputs = config.authoritative_inputs.clone();
-    let depends_on = config.depends_on.clone();
-    let child_ops = config.child_ops.clone();
     if let Err(error) = validate_semantic_owner_signature(
         &function.sig.inputs,
         function.sig.asyncness.is_some(),
@@ -1737,87 +1581,9 @@ fn transform_semantic_owner_impl_fn(
     ) {
         return error.to_compile_error();
     }
-    function.block.stmts.insert(
-        0,
-        parse_quote! {
-            let _: ::aura_core::SemanticOwnerProtocol =
-                ::aura_core::SemanticOwnerProtocol::CANONICAL;
-        },
-    );
-    function.block.stmts.insert(
-        1,
-        parse_quote! {
-            let _: &'static str = #owner;
-        },
-    );
-    function.block.stmts.insert(
-        2,
-        parse_quote! {
-            let _: &'static str = #wrapper;
-        },
-    );
-    function.block.stmts.insert(
-        3,
-        parse_quote! {
-            let _: ::aura_core::BoundaryDeclarationCategory =
-                ::aura_core::BoundaryDeclarationCategory::MoveOwned;
-        },
-    );
-    function.block.stmts.insert(
-        4,
-        parse_quote! {
-            let _: ::aura_core::SemanticOwnerPostcondition =
-                ::aura_core::SemanticOwnerPostcondition::new(#postcondition);
-        },
-    );
-    if let Some(proof) = proof.clone() {
-        function.block.stmts.insert(
-            5,
-            parse_quote! {
-                let _: fn(#proof) = |proof| {
-                    let _: ::aura_core::SemanticOwnerPostcondition =
-                        ::aura_core::SemanticSuccessProof::declared_postcondition(&proof);
-                };
-            },
-        );
-    }
-    let proof_stmt_count = usize::from(proof.is_some());
-    for (index, input) in authoritative_inputs.iter().enumerate() {
-        let stmt_index = 5 + proof_stmt_count + index;
-        function.block.stmts.insert(
-            stmt_index,
-            parse_quote! {
-                let _: ::aura_core::SemanticOwnerAuthoritativeInput =
-                    ::aura_core::SemanticOwnerAuthoritativeInput::new(#input);
-            },
-        );
-    }
-    for (index, dependency) in depends_on.iter().enumerate() {
-        let stmt_index = 5 + proof_stmt_count + authoritative_inputs.len() + index;
-        function.block.stmts.insert(
-            stmt_index,
-            parse_quote! {
-                let _: ::aura_core::SemanticOwnerDependency =
-                    ::aura_core::SemanticOwnerDependency::new(#dependency);
-            },
-        );
-    }
-    for (index, child_op) in child_ops.iter().enumerate() {
-        let stmt_index =
-            5 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + index;
-        function.block.stmts.insert(
-            stmt_index,
-            parse_quote! {
-                let _: ::aura_core::SemanticOwnerChildOperation =
-                    ::aura_core::SemanticOwnerChildOperation::new(#child_op);
-            },
-        );
-    }
-    function.block.stmts.insert(
-        5 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + child_ops.len(),
-        parse_quote! {
-            let _: &'static str = #terminal;
-        },
+    prepend_statements(
+        &mut function.block.stmts,
+        semantic_owner_contract_statements(&config),
     );
     quote!(#function)
 }
@@ -1883,48 +1649,25 @@ fn validate_semantic_owner_signature(
 }
 
 fn validate_actor_owned_struct(strukt: &ItemStruct, config: &ActorOwnedAttr) -> SynResult<()> {
-    if config.category.value() != "actor_owned" {
-        return Err(Error::new_spanned(
-            &config.category,
-            "actor_owned category must be `actor_owned`",
-        ));
-    }
-
-    let ident = strukt.ident.to_string();
-    if !matches_actor_owned_name(&ident) {
-        return Err(Error::new_spanned(
-            &strukt.ident,
-            "actor_owned is reserved for long-lived mutable async domains (expected a name ending with `Service`, `Manager`, `Coordinator`, `Subsystem`, or `Actor`)",
-        ));
-    }
-
-    for field in &strukt.fields {
-        if type_contains_forbidden_actor_substitute(&field.ty) {
-            return Err(Error::new_spanned(
-                &field.ty,
-                "actor_owned structs may not embed move-owned handoff or terminal-publication primitives directly",
-            ));
-        }
-    }
+    validate_actor_owned_category(&config.category, "actor_owned")?;
+    validate_actor_like_name(
+        &strukt.ident,
+        "actor_owned is reserved for long-lived mutable async domains (expected a name ending with `Service`, `Manager`, `Coordinator`, `Subsystem`, or `Actor`)",
+    )?;
+    validate_no_forbidden_actor_fields(
+        strukt,
+        "actor_owned structs may not embed move-owned handoff or terminal-publication primitives directly",
+    )?;
 
     Ok(())
 }
 
 fn validate_actor_root_struct(strukt: &ItemStruct, config: &ActorRootAttr) -> SynResult<()> {
-    if config.category.value() != "actor_owned" {
-        return Err(Error::new_spanned(
-            &config.category,
-            "actor_root category must be `actor_owned`",
-        ));
-    }
-
-    let ident = strukt.ident.to_string();
-    if !matches_actor_owned_name(&ident) {
-        return Err(Error::new_spanned(
-            &strukt.ident,
-            "actor_root is reserved for long-lived mutable async service roots (expected a name ending with `Service`, `Manager`, `Coordinator`, `Subsystem`, or `Actor`)",
-        ));
-    }
+    validate_actor_owned_category(&config.category, "actor_root")?;
+    validate_actor_like_name(
+        &strukt.ident,
+        "actor_root is reserved for long-lived mutable async service roots (expected a name ending with `Service`, `Manager`, `Coordinator`, `Subsystem`, or `Actor`)",
+    )?;
 
     if matches!(strukt.fields, syn::Fields::Unit) || strukt.fields.is_empty() {
         return Err(Error::new_spanned(
@@ -1933,15 +1676,39 @@ fn validate_actor_root_struct(strukt: &ItemStruct, config: &ActorRootAttr) -> Sy
         ));
     }
 
-    for field in &strukt.fields {
-        if type_contains_forbidden_actor_substitute(&field.ty) {
-            return Err(Error::new_spanned(
-                &field.ty,
-                "actor_root structs may not embed move-owned handoff or terminal-publication primitives directly",
-            ));
-        }
+    validate_no_forbidden_actor_fields(
+        strukt,
+        "actor_root structs may not embed move-owned handoff or terminal-publication primitives directly",
+    )?;
+
+    Ok(())
+}
+
+fn validate_actor_owned_category(category: &LitStr, attr: &str) -> SynResult<()> {
+    if category.value() == "actor_owned" {
+        return Ok(());
     }
 
+    Err(Error::new_spanned(
+        category,
+        format!("{attr} category must be `actor_owned`"),
+    ))
+}
+
+fn validate_actor_like_name(ident: &syn::Ident, message: &'static str) -> SynResult<()> {
+    if matches_actor_owned_name(&ident.to_string()) {
+        return Ok(());
+    }
+
+    Err(Error::new_spanned(ident, message))
+}
+
+fn validate_no_forbidden_actor_fields(strukt: &ItemStruct, message: &'static str) -> SynResult<()> {
+    for field in &strukt.fields {
+        if type_contains_forbidden_actor_substitute(&field.ty) {
+            return Err(Error::new_spanned(&field.ty, message));
+        }
+    }
     Ok(())
 }
 

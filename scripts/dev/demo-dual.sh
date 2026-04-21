@@ -16,6 +16,7 @@ Options:
 
 Notes:
   - The launcher owns the web server port and the TUI bind address.
+  - In dual mode, the launcher also owns the local bootstrap broker port.
   - Existing listeners on those configured ports are stopped before startup.
   - Browser-direct WebSocket transport is still runtime-assigned and flows
     through exported invitation or enrollment codes.
@@ -102,12 +103,17 @@ logs_dir="$demo_root/logs"
 pids_dir="$demo_root/pids"
 web_log="$logs_dir/web-static.log"
 browser_log="$logs_dir/browser-launch.log"
+launcher_log="$logs_dir/demo-launcher.log"
 web_pid_file="$pids_dir/web-static.pid"
 meta_file="$pids_dir/demo-meta.env"
 web_url="http://127.0.0.1:${web_port}/"
 bootstrap_broker_port="43102"
 bootstrap_broker_url="http://127.0.0.1:${bootstrap_broker_port}"
-web_app_url="${web_url}?__aura_demo_surface=web&__aura_bootstrap_broker=${bootstrap_broker_url}"
+active_bootstrap_broker_url=""
+if [[ "$mode" == "dual" || "$mode" == "tui" ]]; then
+  active_bootstrap_broker_url="$bootstrap_broker_url"
+fi
+web_app_url="${web_url}?__aura_demo_surface=web"
 tui_device_id="demo:tui"
 manual_browser_cmd=""
 browser_display_name=""
@@ -150,7 +156,11 @@ stop_port_listener() {
     return 0
   fi
 
-  mapfile -t existing_pids < <(lsof -PiTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)
+  local existing_pids=()
+  local existing_pid=""
+  while IFS= read -r existing_pid; do
+    [[ -n "$existing_pid" ]] && existing_pids+=("$existing_pid")
+  done < <(lsof -PiTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)
   if [[ "${#existing_pids[@]}" -eq 0 ]]; then
     return 0
   fi
@@ -223,7 +233,7 @@ MODE=$mode
 WEB_PORT=$web_port
 WEB_URL=$web_url
 WEB_APP_URL=$web_app_url
-BOOTSTRAP_BROKER_URL=$bootstrap_broker_url
+BOOTSTRAP_BROKER_URL=$active_bootstrap_broker_url
 TUI_BIND_ADDRESS=$tui_bind_address
 TUI_DATA_DIR=$tui_data_dir
 TUI_DEVICE_ID=$tui_device_id
@@ -233,6 +243,12 @@ BROWSER_LOG=$browser_log
 RESET=$reset
 BROWSER=$browser
 EOF
+}
+
+report_log_path() {
+  local label="$1"
+  local path="$2"
+  echo "[demo] ${label}: see ${path}" >&2
 }
 
 check_stale_owned_server() {
@@ -267,7 +283,7 @@ start_web_server() {
     if ! kill -0 "$web_server_pid" 2>/dev/null; then
       echo "" >&2
       echo "[demo] static web server exited before becoming reachable" >&2
-      tail -n 200 "$web_log" >&2 || true
+      report_log_path "web startup log" "$web_log"
       exit 1
     fi
     if curl -fsS "$web_url" >/dev/null 2>&1; then
@@ -291,7 +307,7 @@ start_web_server() {
   if [[ "$ready" != "1" ]]; then
     echo "" >&2
     echo "[demo] timed out waiting for static web server at $web_url" >&2
-    tail -n 200 "$web_log" >&2 || true
+    report_log_path "web startup log" "$web_log"
     exit 1
   fi
   printf "\r[demo] web server ready at %s%s\n" "$web_url" "$(printf ' %.0s' {1..30})" >&2
@@ -319,7 +335,7 @@ start_web_server_supervisor() {
         start_web_server
       fi
     done
-  ) &
+  ) >>"$launcher_log" 2>&1 &
   web_supervisor_pid=$!
 }
 
@@ -378,6 +394,7 @@ select_browser() {
 
 launch_browser() {
   : >"$browser_log"
+  set_manual_browser_command
 
   if [[ "$browser" == "none" ]]; then
     echo "[demo] browser auto-launch skipped (--browser none)"
@@ -401,20 +418,20 @@ launch_browser() {
   if [[ "$OSTYPE" == darwin* ]]; then
     if ! eval "$manual_browser_cmd" >>"$browser_log" 2>&1; then
       echo "[demo] browser launch failed for $browser_display_name" >&2
-      tail -n 200 "$browser_log" >&2 || true
+      report_log_path "browser launch log" "$browser_log"
       exit 1
     fi
   else
     if ! bash -lc "$manual_browser_cmd" >>"$browser_log" 2>&1 & then
       echo "[demo] browser launch failed for $browser_display_name" >&2
-      tail -n 200 "$browser_log" >&2 || true
+      report_log_path "browser launch log" "$browser_log"
       exit 1
     fi
     local browser_pid=$!
     sleep 1
     if ! kill -0 "$browser_pid" 2>/dev/null; then
       echo "[demo] browser launch process exited immediately for $browser_display_name" >&2
-      tail -n 200 "$browser_log" >&2 || true
+      report_log_path "browser launch log" "$browser_log"
       exit 1
     fi
   fi
@@ -427,8 +444,9 @@ print_runtime_summary() {
 [demo] web url: $web_url
 [demo] web app url: $web_app_url
 [demo] web port: $web_port
-[demo] bootstrap broker: $bootstrap_broker_url
+[demo] bootstrap broker: ${active_bootstrap_broker_url:-disabled}
 [demo] web log: $web_log
+[demo] launcher log: $launcher_log
 [demo] browser profile: $web_profile_dir
 [demo] browser log: $browser_log
 [demo] tui data dir: $tui_data_dir
@@ -449,6 +467,8 @@ check_tui_prereqs() {
   if [[ "$tui_port" =~ ^[0-9]+$ ]]; then
     stop_port_listener "$tui_port" "tui"
   fi
+
+  stop_port_listener "$bootstrap_broker_port" "bootstrap broker"
 }
 
 run_tui() {
@@ -466,7 +486,7 @@ run_web_wait_loop() {
   while true; do
     if [[ -n "$web_server_pid" ]] && ! kill -0 "$web_server_pid" 2>/dev/null; then
       echo "[demo] static web server exited unexpectedly" >&2
-      tail -n 200 "$web_log" >&2 || true
+      report_log_path "web runtime log" "$web_log"
       exit 1
     fi
     sleep 2

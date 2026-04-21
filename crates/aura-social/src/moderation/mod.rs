@@ -17,6 +17,7 @@ pub use facts::{
     HOME_REVOKE_MODERATOR_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
 };
 pub use query::{
-    is_user_banned, is_user_muted, query_current_bans, query_current_mutes, query_kick_history,
+    is_user_banned, is_user_muted, query_current_bans, query_current_bans_in_live_channels,
+    query_current_mutes, query_current_mutes_in_live_channels, query_kick_history,
 };
-pub use types::{BanStatus, KickRecord, MuteStatus};
+pub use types::{BanStatus, KickRecord, ModerationScopeKey, MuteStatus};

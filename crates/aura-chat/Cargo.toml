@@ -27,5 +27,8 @@ uuid = { workspace = true }
 [features]
 default = []
 
+[dev-dependencies]
+aura-testkit = { package = "aura-testkit", path = "../aura-testkit" }
+
 [lints]
 workspace = true

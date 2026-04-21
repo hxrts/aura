@@ -1,6 +1,8 @@
 //! Logging system handler adapter
 
-use crate::adapters::utils::{deserialize_operation_params, serialize_operation_result};
+use crate::adapters::utils::{
+    deserialize_operation_params, execution_failed, serialize_operation_result, void_result,
+};
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::registry as effect_registry;
@@ -16,6 +18,13 @@ pub struct LoggingSystemHandlerAdapter {
 impl LoggingSystemHandlerAdapter {
     pub fn new(handler: LoggingSystemHandler) -> Self {
         Self { handler }
+    }
+
+    fn registry_operations(effect_type: EffectType) -> Vec<String> {
+        effect_registry::operations_for(effect_type)
+            .iter()
+            .map(|op| (*op).to_string())
+            .collect()
     }
 }
 
@@ -40,10 +49,8 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                 self.handler
                     .log(&level, &component, &message)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
-                Ok(Vec::new())
+                    .map_err(execution_failed)?;
+                Ok(void_result())
             }
             "log_with_context" => {
                 let (level, component, message, context): (
@@ -55,52 +62,45 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                 self.handler
                     .log_with_context(&level, &component, &message, context)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
-                Ok(Vec::new())
+                    .map_err(execution_failed)?;
+                Ok(void_result())
             }
             "health_check" => {
-                let result = self.handler.health_check().await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
+                let result = self
+                    .handler
+                    .health_check()
+                    .await
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "get_system_info" => {
-                let result = self.handler.get_system_info().await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
+                let result = self
+                    .handler
+                    .get_system_info()
+                    .await
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "set_config" => {
                 let (key, value): (String, String) =
                     deserialize_operation_params(effect_type, operation, parameters)?;
-                self.handler.set_config(&key, &value).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
-                Ok(Vec::new())
+                self.handler
+                    .set_config(&key, &value)
+                    .await
+                    .map_err(execution_failed)?;
+                Ok(void_result())
             }
             "get_config" => {
                 let key: String = deserialize_operation_params(effect_type, operation, parameters)?;
-                let value = self.handler.get_config(&key).await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
+                let value = self
+                    .handler
+                    .get_config(&key)
+                    .await
+                    .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &value)
             }
             "get_metrics" => {
-                let result = self.handler.get_metrics().await.map_err(|e| {
-                    HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    }
-                })?;
+                let result = self.handler.get_metrics().await.map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
             "restart_component" => {
@@ -109,19 +109,12 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
                 self.handler
                     .restart_component(&component)
                     .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
-                Ok(Vec::new())
+                    .map_err(execution_failed)?;
+                Ok(void_result())
             }
             "shutdown" => {
-                self.handler
-                    .shutdown()
-                    .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
-                        source: Box::new(e),
-                    })?;
-                Ok(Vec::new())
+                self.handler.shutdown().await.map_err(execution_failed)?;
+                Ok(void_result())
             }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,
@@ -131,10 +124,7 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        effect_registry::operations_for(effect_type)
-            .iter()
-            .map(|op| (*op).to_string())
-            .collect()
+        Self::registry_operations(effect_type)
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {

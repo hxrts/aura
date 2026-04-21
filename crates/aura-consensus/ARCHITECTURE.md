@@ -20,6 +20,7 @@ Strong-agreement protocol for single-operation consensus using FROST threshold s
 | Direction | Crate | What |
 |-----------|-------|------|
 | Down | `aura-core` | Effect trait definitions, domain types |
+| Down | `aura-macros` | Choreography and capability-family macros |
 | In | `ContextId` | Isolation boundary |
 | In | `Prestate` | Commitment binding |
 | In | Witness set, threshold parameters | Protocol configuration |

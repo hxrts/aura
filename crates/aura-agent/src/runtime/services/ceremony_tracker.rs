@@ -297,6 +297,19 @@ impl TrackedCeremony {
 }
 
 impl CeremonyTracker {
+    fn timeout_for_kind(kind: CeremonyKind) -> Duration {
+        match kind {
+            CeremonyKind::GuardianRotation | CeremonyKind::DeviceRotation => {
+                Duration::from_secs(60)
+            }
+            CeremonyKind::DeviceEnrollment | CeremonyKind::DeviceRemoval => Duration::from_secs(45),
+            CeremonyKind::Recovery | CeremonyKind::OtaActivation => Duration::from_secs(90),
+            CeremonyKind::Invitation | CeremonyKind::RendezvousSecureChannel => {
+                Duration::from_secs(20)
+            }
+        }
+    }
+
     fn initial_mode_for_kind(kind: CeremonyKind) -> AgreementMode {
         match kind {
             CeremonyKind::GuardianRotation => {
@@ -337,7 +350,7 @@ impl CeremonyTracker {
         tasks: TaskGroup,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
     ) {
-        const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
+        const CLEANUP_INTERVAL: Duration = Duration::from_secs(1);
 
         let tracker = self.clone();
         let _cleanup_task_handle = tasks.spawn_interval_until_named(
@@ -410,7 +423,7 @@ impl CeremonyTracker {
             supersedes: Vec::new(),
             agreement_mode: Self::initial_mode_for_kind(kind),
             error_message: None,
-            timeout: Duration::from_secs(30),
+            timeout: Self::timeout_for_kind(kind),
             prestate_hash,
             committed_at: None,
             committed_consensus_id: None,
@@ -1030,6 +1043,57 @@ mod tests {
         assert_eq!(state.total_n, 3);
         assert_eq!(state.participants.len(), 3);
         assert_eq!(state.accepted_participants.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_kind_specific_timeouts_are_applied_on_registration() {
+        let tracker = CeremonyTracker::new(test_time());
+        let authority = AuthorityId::new_from_entropy([9u8; 32]);
+
+        tracker
+            .register(
+                test_ceremony_id("enrollment-timeout"),
+                CeremonyKind::DeviceEnrollment,
+                authority,
+                1,
+                1,
+                vec![ParticipantIdentity::device(DeviceId::new_from_entropy(
+                    [1u8; 32],
+                ))],
+                1,
+                Some(DeviceId::new_from_entropy([1u8; 32])),
+                Some("phone".to_string()),
+                Hash32([9; 32]),
+            )
+            .await
+            .unwrap();
+        tracker
+            .register(
+                test_ceremony_id("recovery-timeout"),
+                CeremonyKind::Recovery,
+                authority,
+                1,
+                1,
+                vec![ParticipantIdentity::guardian(authority)],
+                1,
+                None,
+                None,
+                Hash32([10; 32]),
+            )
+            .await
+            .unwrap();
+
+        let enrollment = tracker
+            .get(&test_ceremony_id("enrollment-timeout"))
+            .await
+            .unwrap();
+        let recovery = tracker
+            .get(&test_ceremony_id("recovery-timeout"))
+            .await
+            .unwrap();
+
+        assert_eq!(enrollment.timeout, Duration::from_secs(45));
+        assert_eq!(recovery.timeout, Duration::from_secs(90));
     }
 
     #[tokio::test]

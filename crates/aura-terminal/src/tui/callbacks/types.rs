@@ -62,11 +62,19 @@ pub(crate) type ThresholdLocalOwnedCallback =
 /// Arguments:
 /// - optional receiver authority ID
 /// - invitation type string (e.g. "contact", "guardian", "channel")
+/// - optional nickname
 /// - optional message
 /// - optional TTL (seconds)
 pub type CreateInvitationCallbackType = Arc<
-    dyn Fn(Option<AuthorityId>, String, Option<String>, Option<u64>, LocalTerminalOperationOwner)
-        + Send
+    dyn Fn(
+            Option<AuthorityId>,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<u64>,
+            LocalTerminalOperationOwner,
+        ) + Send
         + Sync,
 >;
 

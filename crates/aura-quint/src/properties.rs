@@ -1,42 +1,12 @@
 //! Property specification and management for Quint
 
+use crate::types::QuintType;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Unique identifier for a property specification
 pub type PropertyId = Uuid;
-
-/// Type information for Quint expressions
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum QuintType {
-    /// Boolean type
-    Bool,
-    /// Integer type
-    Int,
-    /// String type
-    Str,
-    /// Set type
-    Set(Box<QuintType>),
-    /// Record type
-    Record(HashMap<String, QuintType>),
-    /// Function type
-    Function {
-        /// Parameter types
-        params: Vec<QuintType>,
-        /// Return type
-        result: Box<QuintType>,
-    },
-    /// Union type
-    Union(Vec<QuintType>),
-    /// Custom type
-    Custom {
-        /// Type name
-        name: String,
-        /// Type parameters
-        params: Vec<QuintType>,
-    },
-}
 
 /// A property specification for formal verification
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,9 +142,10 @@ impl PropertySpec {
         spec.push_str(&format!("module {} {{\n", self.name.replace(" ", "_")));
 
         // Add context variables as constants or variables
-        for (name, var_type) in &self.context {
-            let type_str = quint_type_to_string(var_type);
-            spec.push_str(&format!("  const {}: {}\n", name, type_str));
+        let mut context_entries = self.context.iter().collect::<Vec<_>>();
+        context_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+        for (name, var_type) in context_entries {
+            spec.push_str(&format!("  const {}: {}\n", name, var_type));
         }
 
         // Add the property definition
@@ -283,9 +254,10 @@ impl PropertySuite {
         module.push_str(&format!("module {} {{\n", self.name.replace(" ", "_")));
 
         // Shared context
-        for (name, var_type) in &self.shared_context {
-            let type_str = quint_type_to_string(var_type);
-            module.push_str(&format!("  const {}: {}\n", name, type_str));
+        let mut shared_entries = self.shared_context.iter().collect::<Vec<_>>();
+        shared_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+        for (name, var_type) in shared_entries {
+            module.push_str(&format!("  const {}: {}\n", name, var_type));
         }
 
         // Individual properties
@@ -293,10 +265,11 @@ impl PropertySuite {
             module.push('\n');
 
             // Property-specific context
-            for (name, var_type) in &property.context {
+            let mut property_entries = property.context.iter().collect::<Vec<_>>();
+            property_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            for (name, var_type) in property_entries {
                 if !self.shared_context.contains_key(name) {
-                    let type_str = quint_type_to_string(var_type);
-                    module.push_str(&format!("  const {}: {}\n", name, type_str));
+                    module.push_str(&format!("  const {}: {}\n", name, var_type));
                 }
             }
 
@@ -321,63 +294,6 @@ impl PropertySuite {
 
         module.push_str("}\n");
         module
-    }
-}
-
-/// Convert QuintType to Quint syntax string
-fn quint_type_to_string(quint_type: &QuintType) -> String {
-    match quint_type {
-        QuintType::Bool => "bool".to_string(),
-        QuintType::Int => "int".to_string(),
-        QuintType::Str => "str".to_string(),
-        QuintType::Set(inner) => format!("Set[{}]", quint_type_to_string(inner)),
-        QuintType::Record(fields) => {
-            let field_strs: Vec<String> = fields
-                .iter()
-                .map(|(name, typ)| format!("{}: {}", name, quint_type_to_string(typ)))
-                .collect();
-            format!("{{ {} }}", field_strs.join(", "))
-        }
-        QuintType::Function { params, result } => {
-            let param_strs: Vec<String> = params.iter().map(quint_type_to_string).collect();
-            format!(
-                "({}) => {}",
-                param_strs.join(", "),
-                quint_type_to_string(result)
-            )
-        }
-        QuintType::Union(types) => {
-            let type_strs: Vec<String> = types.iter().map(quint_type_to_string).collect();
-            type_strs.join(" | ")
-        }
-        QuintType::Custom { name, params } => {
-            if params.is_empty() {
-                name.clone()
-            } else {
-                let param_strs: Vec<String> = params.iter().map(quint_type_to_string).collect();
-                format!("{}[{}]", name, param_strs.join(", "))
-            }
-        }
-    }
-}
-
-impl From<&str> for QuintType {
-    fn from(s: &str) -> Self {
-        match s {
-            "bool" => QuintType::Bool,
-            "int" => QuintType::Int,
-            "str" => QuintType::Str,
-            _ => QuintType::Custom {
-                name: s.to_string(),
-                params: Vec::new(),
-            },
-        }
-    }
-}
-
-impl From<String> for QuintType {
-    fn from(s: String) -> Self {
-        QuintType::from(s.as_str())
     }
 }
 

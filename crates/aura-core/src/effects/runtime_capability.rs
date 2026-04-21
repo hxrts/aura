@@ -90,8 +90,7 @@ pub trait RuntimeCapabilityEffects: Send + Sync {
     }
 }
 
-#[async_trait]
-impl<T: RuntimeCapabilityEffects + ?Sized> RuntimeCapabilityEffects for std::sync::Arc<T> {
+impl_arc_effect!(RuntimeCapabilityEffects {
     async fn capability_inventory(&self) -> Result<Vec<(CapabilityKey, bool)>, AdmissionError> {
         (**self).capability_inventory().await
     }
@@ -99,4 +98,4 @@ impl<T: RuntimeCapabilityEffects + ?Sized> RuntimeCapabilityEffects for std::syn
     async fn require_capabilities(&self, required: &[CapabilityKey]) -> Result<(), AdmissionError> {
         (**self).require_capabilities(required).await
     }
-}
+});

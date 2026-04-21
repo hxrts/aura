@@ -1,9 +1,15 @@
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
-use std::fs;
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
+#[path = "../lint_support.rs"]
+mod lint_support;
+
+use lint_support::{
+    collect_rust_files, collect_source_files, load_parsed_rust_files, load_source, ParsedRustFile,
+};
 use proc_macro2::Span;
 use quote::quote;
 use quote::ToTokens;
@@ -132,12 +138,6 @@ impl LintMode {
     }
 }
 
-struct ParsedRustFile {
-    path: PathBuf,
-    source: String,
-    syntax: File,
-}
-
 type StrongReferenceRegistry = HashMap<String, String>;
 
 const OWNERSHIP_MODEL_GUIDANCE: &str =
@@ -171,8 +171,7 @@ fn run() -> Result<(), String> {
 
         let mut violations = Vec::new();
         for file in &source_files {
-            let source = fs::read_to_string(file)
-                .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
+            let source = load_source(file)?;
             violations.extend(scan_browser_transport_single_owner(file, &source));
         }
 
@@ -197,18 +196,7 @@ fn run() -> Result<(), String> {
     rust_files.sort();
     rust_files.dedup();
 
-    let mut parsed_files = Vec::new();
-    for file in &rust_files {
-        let source = fs::read_to_string(file)
-            .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
-        let syntax = syn::parse_file(&source)
-            .map_err(|error| format!("failed to parse {}: {error}", file.display()))?;
-        parsed_files.push(ParsedRustFile {
-            path: file.clone(),
-            source,
-            syntax,
-        });
-    }
+    let parsed_files = load_parsed_rust_files(&rust_files)?;
 
     let strong_references = collect_strong_reference_registry(&parsed_files);
 
@@ -355,68 +343,6 @@ fn run() -> Result<(), String> {
     }
 
     println!("{}: clean", mode.display_name());
-    Ok(())
-}
-
-fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    if path.is_file() {
-        if path.extension() == Some(OsStr::new("rs")) {
-            files.push(path.to_path_buf());
-        }
-        return Ok(());
-    }
-    if !path.is_dir() {
-        return Err(format!("path does not exist: {}", path.display()));
-    }
-
-    for entry in fs::read_dir(path)
-        .map_err(|error| format!("failed to read directory {}: {error}", path.display()))?
-    {
-        let entry = entry.map_err(|error| {
-            format!("failed to read directory entry {}: {error}", path.display())
-        })?;
-        let entry_path = entry.path();
-        if entry_path.is_dir() {
-            collect_rust_files(&entry_path, files)?;
-        } else if entry_path.extension() == Some(OsStr::new("rs")) {
-            files.push(entry_path);
-        }
-    }
-
-    Ok(())
-}
-
-fn collect_source_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    if path.is_file() {
-        if matches!(
-            path.extension().and_then(OsStr::to_str),
-            Some("rs" | "ts" | "js")
-        ) {
-            files.push(path.to_path_buf());
-        }
-        return Ok(());
-    }
-    if !path.is_dir() {
-        return Err(format!("path does not exist: {}", path.display()));
-    }
-
-    for entry in fs::read_dir(path)
-        .map_err(|error| format!("failed to read directory {}: {error}", path.display()))?
-    {
-        let entry = entry.map_err(|error| {
-            format!("failed to read directory entry {}: {error}", path.display())
-        })?;
-        let entry_path = entry.path();
-        if entry_path.is_dir() {
-            collect_source_files(&entry_path, files)?;
-        } else if matches!(
-            entry_path.extension().and_then(OsStr::to_str),
-            Some("rs" | "ts" | "js")
-        ) {
-            files.push(entry_path);
-        }
-    }
-
     Ok(())
 }
 
@@ -2567,16 +2493,7 @@ fn scan_terminal_shell_explicit_exit_intent(file: &Path, source: &str) -> Vec<St
                 "outer TUI runner must convert fullscreen panics into typed terminal failure before process exit",
             ),
         ];
-        for (pattern, message) in required {
-            if !source.contains(pattern) {
-                violations.push(format!(
-                    "{}:1:1: {}. {}",
-                    file.display(),
-                    message,
-                    OWNERSHIP_MODEL_GUIDANCE
-                ));
-            }
-        }
+        violations.extend(required_pattern_violations(file, source, &required));
         if source.contains("authority_switch_request_handle(") {
             violations.push(format!(
                 "{}:1:1: side-channel authority_switch_request_handle reload ownership is forbidden; use explicit ShellExitIntent transfer instead. {}",
@@ -2609,16 +2526,7 @@ fn scan_terminal_shell_explicit_exit_intent(file: &Path, source: &str) -> Vec<St
                 "shell must fail closed if fullscreen exits without explicit ShellExitIntent ownership",
             ),
         ];
-        for (pattern, message) in required {
-            if !source.contains(pattern) {
-                violations.push(format!(
-                    "{}:1:1: {}. {}",
-                    file.display(),
-                    message,
-                    OWNERSHIP_MODEL_GUIDANCE
-                ));
-            }
-        }
+        violations.extend(required_pattern_violations(file, source, &required));
     }
 
     if display.ends_with("crates/aura-terminal/src/tui/context/io_context.rs") {
@@ -2644,19 +2552,29 @@ fn scan_terminal_shell_explicit_exit_intent(file: &Path, source: &str) -> Vec<St
                 "IoContext must expose explicit authority-switch intent",
             ),
         ];
-        for (pattern, message) in required {
-            if !source.contains(pattern) {
-                violations.push(format!(
-                    "{}:1:1: {}. {}",
-                    file.display(),
-                    message,
-                    OWNERSHIP_MODEL_GUIDANCE
-                ));
-            }
-        }
+        violations.extend(required_pattern_violations(file, source, &required));
     }
 
     violations
+}
+
+fn required_pattern_violations(
+    file: &Path,
+    source: &str,
+    required: &[(&str, &str)],
+) -> Vec<String> {
+    required
+        .iter()
+        .filter(|(pattern, _)| !source.contains(pattern))
+        .map(|(_, message)| {
+            format!(
+                "{}:1:1: {}. {}",
+                file.display(),
+                message,
+                OWNERSHIP_MODEL_GUIDANCE
+            )
+        })
+        .collect()
 }
 
 fn scan_must_settle_boundary(file: &Path, source: &str) -> Vec<String> {

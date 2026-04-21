@@ -78,6 +78,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                 new_state.notifications.selected_index,
                 shared_invitations_for_dispatch,
                 shared_pending_requests_for_dispatch,
+                &new_state.runtime_facts,
             );
             let approval_target = match selected {
                 Some(NotificationSelection::RecoveryRequest(request_id)) => Some(request_id),
@@ -206,7 +207,8 @@ fn handle_recovery_and_ceremonies_dispatch(
                         let tasks = tasks.clone();
                         let tasks_handle = tasks;
                         tasks_handle.spawn(async move {
-                            let policy = CeremonyPollPolicy::with_interval(
+                            let policy = CeremonyPollPolicy::for_kind(
+                                status_handle.kind(),
                                 std::time::Duration::from_millis(500),
                             );
                             match monitor_key_rotation_ceremony_with_policy(
@@ -383,7 +385,8 @@ fn handle_recovery_and_ceremonies_dispatch(
                         let tasks = tasks.clone();
                         let tasks_handle = tasks;
                         tasks_handle.spawn(async move {
-                            let policy = CeremonyPollPolicy::with_interval(
+                            let policy = CeremonyPollPolicy::for_kind(
+                                status_handle.kind(),
                                 std::time::Duration::from_millis(500),
                             );
                             match monitor_key_rotation_ceremony_with_policy(
@@ -1321,6 +1324,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.notifications.selected_index,
                 shared_invitations_for_dispatch,
                 shared_pending_requests_for_dispatch,
+                &new_state.runtime_facts,
             );
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
                 if let Some(update_tx) = update_tx_for_dispatch {
@@ -1355,6 +1359,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.notifications.selected_index,
                 shared_invitations_for_dispatch,
                 shared_pending_requests_for_dispatch,
+                &new_state.runtime_facts,
             );
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
                 let Some(update_tx) = update_tx_for_events else {
@@ -1376,6 +1381,8 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::CreateInvitation {
             receiver_id,
             invitation_type,
+            nickname,
+            receiver_nickname,
             message,
             ttl_secs,
         } => {
@@ -1399,6 +1406,8 @@ pub(super) fn handle_dispatch_command_match(
             (cb.invitations.on_create)(
                 receiver_id,
                 invitation_type.as_str().to_owned(),
+                nickname,
+                receiver_nickname,
                 message,
                 ttl_secs,
                 operation,
@@ -1424,6 +1433,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.notifications.selected_index,
                 shared_invitations_for_dispatch,
                 shared_pending_requests_for_dispatch,
+                &new_state.runtime_facts,
             );
             if let Some(NotificationSelection::SentInvitation(invitation_id)) = selected {
                 (cb.invitations.on_export)(invitation_id);

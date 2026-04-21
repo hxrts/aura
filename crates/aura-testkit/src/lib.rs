@@ -132,6 +132,7 @@ pub mod protocol_validation;
 pub mod replay; // Effect trace replay helpers for native parity/debug tooling
 pub mod simulation;
 pub mod stateful_effects;
+pub mod test_builders;
 pub mod test_utils;
 pub mod time;
 pub mod verification;
@@ -154,6 +155,7 @@ pub use mocks::*;
 pub use replay::*;
 // Re-export simulation components
 pub use simulation::{choreography::*, network::*};
+pub use test_builders::*;
 
 // Re-export protocol test API types
 pub use protocol_test::{

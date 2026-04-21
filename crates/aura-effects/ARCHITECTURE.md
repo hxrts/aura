@@ -80,6 +80,17 @@ These surfaces are allowed only as handler-local mechanics. They must not grow p
 - Upstream capability-gated effect entrypoints consumed through handler implementations.
 - No handler-local semantic lifecycle or readiness publication.
 
+### Transport Failure Handling
+
+- Transport connect retries stay bounded and handler-local. `aura-effects::transport`
+  may retry transient DNS / TCP / handshake failures with exponential backoff, but it
+  must not grow session ownership, peer registries, or multi-party coordination.
+- Retryable failures are limited to transient network conditions such as DNS timeout,
+  temporary address-resolution failure, connection refusal/reset, and handshake I/O
+  timeout. Protocol/URL errors and non-I/O handshake failures remain terminal.
+- Hostname resolution for WebSocket endpoints must stay inside an explicit async timeout
+  boundary; synchronous DNS lookups outside the timeout budget are not allowed.
+
 ## Testing
 
 ### Strategy

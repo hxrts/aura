@@ -195,6 +195,11 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::OpenCreateInvitationModal,
             ));
         }
+        KeyCode::Char('i') => {
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::OpenCreateInvitationModal,
+            ));
+        }
         KeyCode::Char('f') => {
             commands.push(TuiCommand::Dispatch(
                 DispatchCommand::SendSelectedFriendRequest,
@@ -210,7 +215,7 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::DeclineSelectedFriendRequest,
             ));
         }
-        KeyCode::Char('i') => {
+        KeyCode::Char('I') => {
             commands.push(TuiCommand::Dispatch(
                 DispatchCommand::InviteSelectedContactToChannel,
             ));
@@ -565,6 +570,27 @@ pub fn handle_notifications_key(
                     state.notifications.item_count,
                     NavKey::Down,
                 );
+            }
+        }
+        KeyCode::Char('d') => {
+            let idx = state.notifications.selected_index;
+            let Ok(visible) = state.notifications.visible_ids.lock() else {
+                return;
+            };
+            if let Some(id) = visible.get(idx).cloned() {
+                drop(visible);
+                state.notifications.dismissed_ids.insert(id);
+                // Shrink item count so navigation wraps correctly.
+                if state.notifications.item_count > 0 {
+                    state.notifications.item_count -= 1;
+                }
+                // Advance selection to keep a valid index.
+                if state.notifications.item_count == 0 {
+                    state.notifications.selected_index = 0;
+                } else {
+                    state.notifications.selected_index =
+                        idx.min(state.notifications.item_count - 1);
+                }
             }
         }
         _ => {}

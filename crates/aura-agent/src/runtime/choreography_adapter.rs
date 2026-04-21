@@ -186,7 +186,6 @@ pub struct ReceivedMessage {
 /// Request passed to dynamic message providers.
 #[derive(Debug)]
 pub struct MessageRequest<R: RoleId> {
-    #[allow(dead_code)]
     pub to: R,
     pub type_name: &'static str,
 }
@@ -226,7 +225,6 @@ struct RuntimeAdmissionConfig {
 ///   CapGuard and FlowGuard before each send operation.
 /// - **Journal Coupling**: When configured via `with_journal_coupler()`, records journal
 ///   facts after successful sends.
-#[allow(dead_code)]
 pub struct AuraProtocolAdapter<E, R>
 where
     E: ChoreographicEffects
@@ -255,7 +253,6 @@ where
     runtime_admission: Option<RuntimeAdmissionConfig>,
 }
 
-#[allow(dead_code)]
 impl<E, R> AuraProtocolAdapter<E, R>
 where
     E: ChoreographicEffects

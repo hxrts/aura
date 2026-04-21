@@ -4,9 +4,10 @@
 //! These tests demonstrate that choreographic annotations automatically generate
 //! `EffectCommand` sequences that execute through the unified interpreter infrastructure.
 
+use super::support::{test_authority, test_context};
 use aura_core::{
     effects::guard::{EffectCommand, EffectInterpreter, EffectResult},
-    AuthorityId, ContextId, FlowCost, Result,
+    FlowCost, Result,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -79,9 +80,9 @@ async fn test_guard_capability_annotation() {
 #[tokio::test]
 async fn test_flow_cost_annotation() {
     let interpreter = MockEffectInterpreter::new();
-    let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::new_from_entropy([2u8; 32]);
-    let peer = AuthorityId::new_from_entropy([1u8; 32]);
+    let authority = test_authority(1);
+    let context = test_context(2);
+    let peer = test_authority(1);
 
     // Simulate what the macro generates for: Client[flow_cost = 200] -> Server: Msg;
     let command = EffectCommand::ChargeBudget {
@@ -147,9 +148,9 @@ async fn test_journal_facts_annotation() {
 #[tokio::test]
 async fn test_multiple_annotations() {
     let interpreter = MockEffectInterpreter::new();
-    let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::new_from_entropy([2u8; 32]);
-    let peer = AuthorityId::new_from_entropy([1u8; 32]);
+    let authority = test_authority(1);
+    let context = test_context(2);
+    let peer = test_authority(1);
 
     // Simulate what the macro generates for:
     // Client[guard_capability = "chat:message:send", flow_cost = 100, leak = "External"] -> Server: Msg;
@@ -192,9 +193,9 @@ async fn test_multiple_annotations() {
 #[tokio::test]
 async fn test_effect_execution_order() {
     let interpreter = MockEffectInterpreter::new();
-    let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::new_from_entropy([2u8; 32]);
-    let peer = AuthorityId::new_from_entropy([1u8; 32]);
+    let authority = test_authority(1);
+    let context = test_context(2);
+    let peer = test_authority(1);
 
     // Execute commands in specific order
     let commands = vec![
@@ -257,9 +258,7 @@ async fn test_effect_error_handling() {
         async fn execute(&self, command: EffectCommand) -> Result<EffectResult> {
             match command {
                 EffectCommand::ChargeBudget { amount, .. } if amount > FlowCost::new(1000) => {
-                    Err(AuraError::Internal {
-                        message: "Insufficient budget".to_string(),
-                    })
+                    Err(AuraError::internal("Insufficient budget"))
                 }
                 EffectCommand::ChargeBudget { amount, .. } => Ok(EffectResult::RemainingBudget(
                     1000u32.saturating_sub(amount.value()),
@@ -274,9 +273,9 @@ async fn test_effect_error_handling() {
     }
 
     let interpreter = FailingInterpreter;
-    let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::new_from_entropy([2u8; 32]);
-    let peer = AuthorityId::new_from_entropy([1u8; 32]);
+    let authority = test_authority(1);
+    let context = test_context(2);
+    let peer = test_authority(1);
 
     // Command that should succeed
     let ok_command = EffectCommand::ChargeBudget {
@@ -313,8 +312,8 @@ async fn test_guard_chain_integration() {
     use std::collections::HashMap;
 
     // Create a snapshot with budget
-    let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::new_from_entropy([2u8; 32]);
+    let authority = test_authority(1);
+    let context = test_context(2);
     let mut budgets = HashMap::new();
     budgets.insert((context, authority), FlowCost::new(500));
 
@@ -335,7 +334,7 @@ async fn test_guard_chain_integration() {
     // Create a guard request
     let request = GuardRequest::new(authority, "test_op", FlowCost::new(100))
         .with_context_id(context)
-        .with_peer(AuthorityId::new_from_entropy([1u8; 32]));
+        .with_peer(test_authority(1));
 
     // Evaluate with standard guard chain
     let chain = GuardChain::standard();
@@ -360,9 +359,9 @@ async fn test_guard_chain_integration() {
 #[tokio::test]
 async fn test_unified_effect_command_system() {
     let interpreter = MockEffectInterpreter::new();
-    let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::new_from_entropy([2u8; 32]);
-    let peer = AuthorityId::new_from_entropy([1u8; 32]);
+    let authority = test_authority(1);
+    let context = test_context(2);
+    let peer = test_authority(1);
 
     // Effect from annotation (macro-generated)
     let annotation_effect = EffectCommand::ChargeBudget {

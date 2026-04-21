@@ -144,6 +144,9 @@ pub enum InvitationFact {
         sent_at: PhysicalTime,
         /// Optional expiration timestamp (uses unified time system)
         expires_at: Option<PhysicalTime>,
+        /// Optional sender-local nickname for the invitee.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        receiver_nickname: Option<String>,
         /// Optional message with the invitation
         message: Option<String>,
     },
@@ -282,6 +285,35 @@ pub enum InvitationFact {
 }
 
 impl InvitationFact {
+    fn exact_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
+    fn invitation_key_bytes(invitation_id: &InvitationId) -> Vec<u8> {
+        invitation_id.as_str().as_bytes().to_vec()
+    }
+
+    fn ceremony_key_bytes(ceremony_id: &CeremonyId) -> Vec<u8> {
+        ceremony_id.as_str().as_bytes().to_vec()
+    }
+
+    fn append_invitation_material(
+        material: &mut Vec<u8>,
+        prefix: &[u8],
+        invitation_id: &InvitationId,
+    ) {
+        material.extend_from_slice(prefix);
+        material.extend_from_slice(invitation_id.as_str().as_bytes());
+    }
+
+    fn append_ceremony_material(material: &mut Vec<u8>, prefix: &[u8], ceremony_id: &CeremonyId) {
+        material.extend_from_slice(prefix);
+        material.extend_from_slice(ceremony_id.as_str().as_bytes());
+    }
+
     /// Extract the invitation_id for invitation-scoped facts.
     pub fn invitation_id(&self) -> Option<&InvitationId> {
         match self {
@@ -358,35 +390,35 @@ impl InvitationFact {
         match self {
             InvitationFact::Sent { invitation_id, .. } => InvitationFactKey {
                 sub_type: "invitation-sent",
-                data: invitation_id.as_str().as_bytes().to_vec(),
+                data: Self::invitation_key_bytes(invitation_id),
             },
             InvitationFact::Accepted { invitation_id, .. } => InvitationFactKey {
                 sub_type: "invitation-accepted",
-                data: invitation_id.as_str().as_bytes().to_vec(),
+                data: Self::invitation_key_bytes(invitation_id),
             },
             InvitationFact::Declined { invitation_id, .. } => InvitationFactKey {
                 sub_type: "invitation-declined",
-                data: invitation_id.as_str().as_bytes().to_vec(),
+                data: Self::invitation_key_bytes(invitation_id),
             },
             InvitationFact::Cancelled { invitation_id, .. } => InvitationFactKey {
                 sub_type: "invitation-cancelled",
-                data: invitation_id.as_str().as_bytes().to_vec(),
+                data: Self::invitation_key_bytes(invitation_id),
             },
             InvitationFact::CeremonyInitiated { ceremony_id, .. } => InvitationFactKey {
                 sub_type: "ceremony-initiated",
-                data: ceremony_id.as_str().as_bytes().to_vec(),
+                data: Self::ceremony_key_bytes(ceremony_id),
             },
             InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => InvitationFactKey {
                 sub_type: "ceremony-acceptance-received",
-                data: ceremony_id.as_str().as_bytes().to_vec(),
+                data: Self::ceremony_key_bytes(ceremony_id),
             },
             InvitationFact::CeremonyCommitted { ceremony_id, .. } => InvitationFactKey {
                 sub_type: "ceremony-committed",
-                data: ceremony_id.as_str().as_bytes().to_vec(),
+                data: Self::ceremony_key_bytes(ceremony_id),
             },
             InvitationFact::CeremonyAborted { ceremony_id, .. } => InvitationFactKey {
                 sub_type: "ceremony-aborted",
-                data: ceremony_id.as_str().as_bytes().to_vec(),
+                data: Self::ceremony_key_bytes(ceremony_id),
             },
             InvitationFact::CeremonySuperseded {
                 superseded_ceremony_id,
@@ -394,7 +426,7 @@ impl InvitationFact {
                 ..
             } => {
                 // Key includes both IDs for unique identification
-                let mut data = superseded_ceremony_id.as_str().as_bytes().to_vec();
+                let mut data = Self::ceremony_key_bytes(superseded_ceremony_id);
                 data.extend_from_slice(b":");
                 data.extend_from_slice(superseding_ceremony_id.as_str().as_bytes());
                 InvitationFactKey {
@@ -423,14 +455,9 @@ impl InvitationFact {
             sender_id,
             receiver_id,
             invitation_type,
-            sent_at: PhysicalTime {
-                ts_ms: sent_at_ms,
-                uncertainty: None,
-            },
-            expires_at: expires_at_ms.map(|ts_ms| PhysicalTime {
-                ts_ms,
-                uncertainty: None,
-            }),
+            sent_at: Self::exact_time(sent_at_ms),
+            expires_at: expires_at_ms.map(Self::exact_time),
+            receiver_nickname: None,
             message,
         }
     }
@@ -445,10 +472,7 @@ impl InvitationFact {
             context_id: None,
             invitation_id,
             acceptor_id,
-            accepted_at: PhysicalTime {
-                ts_ms: accepted_at_ms,
-                uncertainty: None,
-            },
+            accepted_at: Self::exact_time(accepted_at_ms),
         }
     }
 
@@ -462,10 +486,7 @@ impl InvitationFact {
             context_id: None,
             invitation_id,
             decliner_id,
-            declined_at: PhysicalTime {
-                ts_ms: declined_at_ms,
-                uncertainty: None,
-            },
+            declined_at: Self::exact_time(declined_at_ms),
         }
     }
 
@@ -479,10 +500,7 @@ impl InvitationFact {
             context_id: None,
             invitation_id,
             canceller_id,
-            cancelled_at: PhysicalTime {
-                ts_ms: cancelled_at_ms,
-                uncertainty: None,
-            },
+            cancelled_at: Self::exact_time(cancelled_at_ms),
         }
     }
 }
@@ -497,46 +515,57 @@ fn derived_context_id(fact: &InvitationFact) -> ContextId {
             receiver_id,
             ..
         } => {
-            material.extend_from_slice(b"sent:");
-            material.extend_from_slice(invitation_id.as_str().as_bytes());
+            InvitationFact::append_invitation_material(&mut material, b"sent:", invitation_id);
             material.extend_from_slice(sender_id.to_string().as_bytes());
             material.extend_from_slice(receiver_id.to_string().as_bytes());
         }
         InvitationFact::Accepted { invitation_id, .. } => {
-            material.extend_from_slice(b"accepted:");
-            material.extend_from_slice(invitation_id.as_str().as_bytes());
+            InvitationFact::append_invitation_material(&mut material, b"accepted:", invitation_id);
         }
         InvitationFact::Declined { invitation_id, .. } => {
-            material.extend_from_slice(b"declined:");
-            material.extend_from_slice(invitation_id.as_str().as_bytes());
+            InvitationFact::append_invitation_material(&mut material, b"declined:", invitation_id);
         }
         InvitationFact::Cancelled { invitation_id, .. } => {
-            material.extend_from_slice(b"cancelled:");
-            material.extend_from_slice(invitation_id.as_str().as_bytes());
+            InvitationFact::append_invitation_material(&mut material, b"cancelled:", invitation_id);
         }
         InvitationFact::CeremonyInitiated { ceremony_id, .. } => {
-            material.extend_from_slice(b"ceremony-initiated:");
-            material.extend_from_slice(ceremony_id.as_str().as_bytes());
+            InvitationFact::append_ceremony_material(
+                &mut material,
+                b"ceremony-initiated:",
+                ceremony_id,
+            );
         }
         InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => {
-            material.extend_from_slice(b"ceremony-acceptance:");
-            material.extend_from_slice(ceremony_id.as_str().as_bytes());
+            InvitationFact::append_ceremony_material(
+                &mut material,
+                b"ceremony-acceptance:",
+                ceremony_id,
+            );
         }
         InvitationFact::CeremonyCommitted { ceremony_id, .. } => {
-            material.extend_from_slice(b"ceremony-committed:");
-            material.extend_from_slice(ceremony_id.as_str().as_bytes());
+            InvitationFact::append_ceremony_material(
+                &mut material,
+                b"ceremony-committed:",
+                ceremony_id,
+            );
         }
         InvitationFact::CeremonyAborted { ceremony_id, .. } => {
-            material.extend_from_slice(b"ceremony-aborted:");
-            material.extend_from_slice(ceremony_id.as_str().as_bytes());
+            InvitationFact::append_ceremony_material(
+                &mut material,
+                b"ceremony-aborted:",
+                ceremony_id,
+            );
         }
         InvitationFact::CeremonySuperseded {
             superseded_ceremony_id,
             superseding_ceremony_id,
             ..
         } => {
-            material.extend_from_slice(b"ceremony-superseded:");
-            material.extend_from_slice(superseded_ceremony_id.as_str().as_bytes());
+            InvitationFact::append_ceremony_material(
+                &mut material,
+                b"ceremony-superseded:",
+                superseded_ceremony_id,
+            );
             material.extend_from_slice(b":");
             material.extend_from_slice(superseding_ceremony_id.as_str().as_bytes());
         }

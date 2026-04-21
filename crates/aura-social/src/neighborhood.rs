@@ -24,6 +24,14 @@ pub struct Neighborhood {
 }
 
 impl Neighborhood {
+    fn canonical_adjacency(home_a: HomeId, home_b: HomeId) -> (HomeId, HomeId) {
+        if home_a <= home_b {
+            (home_a, home_b)
+        } else {
+            (home_b, home_a)
+        }
+    }
+
     /// Build a Neighborhood view from journal facts.
     ///
     /// # Arguments
@@ -42,13 +50,7 @@ impl Neighborhood {
 
         let mut one_hop_links: Vec<(HomeId, HomeId)> = adjacencies
             .iter()
-            .map(|a| {
-                if a.home_a <= a.home_b {
-                    (a.home_a, a.home_b)
-                } else {
-                    (a.home_b, a.home_a)
-                }
-            })
+            .map(|a| Self::canonical_adjacency(a.home_a, a.home_b))
             .collect();
         one_hop_links.sort_unstable();
         one_hop_links.dedup();
@@ -76,12 +78,7 @@ impl Neighborhood {
 
     /// Check if two blocks are adjacent in this neighborhood.
     pub fn are_adjacent(&self, home_a: HomeId, home_b: HomeId) -> bool {
-        // Adjacencies are stored in canonical order (a <= b)
-        let (a, b) = if home_a <= home_b {
-            (home_a, home_b)
-        } else {
-            (home_b, home_a)
-        };
+        let (a, b) = Self::canonical_adjacency(home_a, home_b);
         self.adjacencies.contains(&(a, b))
     }
 

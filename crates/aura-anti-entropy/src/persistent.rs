@@ -155,6 +155,12 @@ impl PersistentSyncHandler {
     pub fn invalidate_cache(&self) {
         self.initialized.store(false, Ordering::Release);
     }
+
+    async fn ensure_initialized_for(&self, operation: &'static str) -> Result<(), SyncError> {
+        self.ensure_initialized()
+            .await
+            .map_err(|e| sync_network_error(operation, e))
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -166,12 +172,7 @@ impl SyncEffects for PersistentSyncHandler {
     }
 
     async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
-        self.ensure_initialized()
-            .await
-            .map_err(|e| SyncError::NetworkError {
-                operation: "load_cached_digest",
-                detail: e.to_string(),
-            })?;
+        self.ensure_initialized_for("load_cached_digest").await?;
 
         let ops = self.ops_cache.read().await;
 
@@ -188,12 +189,7 @@ impl SyncEffects for PersistentSyncHandler {
         &self,
         _remote_digest: &BloomDigest,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        self.ensure_initialized()
-            .await
-            .map_err(|e| SyncError::NetworkError {
-                operation: "load_missing_ops",
-                detail: e.to_string(),
-            })?;
+        self.ensure_initialized_for("load_missing_ops").await?;
 
         // Return full oplog; guard chain filters where needed
         let ops = self.ops_cache.read().await;
@@ -210,12 +206,7 @@ impl SyncEffects for PersistentSyncHandler {
     }
 
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
-        self.ensure_initialized()
-            .await
-            .map_err(|e| SyncError::NetworkError {
-                operation: "merge_remote_ops",
-                detail: e.to_string(),
-            })?;
+        self.ensure_initialized_for("merge_remote_ops").await?;
 
         for op in ops {
             let op_hash =
@@ -227,11 +218,9 @@ impl SyncEffects for PersistentSyncHandler {
             // Check for duplicate
             let already = {
                 let store = self.ops_cache.read().await;
-                store.iter().any(|existing| {
-                    tree_storage::op_hash(existing)
-                        .map(|h| h == op_hash)
-                        .unwrap_or(false)
-                })
+                store
+                    .iter()
+                    .any(|existing| stored_op_hash(existing) == Some(Hash32(op_hash)))
             };
 
             if !already {
@@ -244,10 +233,7 @@ impl SyncEffects for PersistentSyncHandler {
                 // Persist to storage
                 self.persist_op(&op, op_hash)
                     .await
-                    .map_err(|e| SyncError::NetworkError {
-                        operation: "persist_op",
-                        detail: e.to_string(),
-                    })?;
+                    .map_err(|e| sync_network_error("persist_op", e))?;
             }
         }
         Ok(())
@@ -258,23 +244,14 @@ impl SyncEffects for PersistentSyncHandler {
     }
 
     async fn request_op(&self, _peer_id: DeviceId, cid: Hash32) -> Result<AttestedOp, SyncError> {
-        self.ensure_initialized()
-            .await
-            .map_err(|e| SyncError::NetworkError {
-                operation: "request_op",
-                detail: e.to_string(),
-            })?;
+        self.ensure_initialized_for("request_op").await?;
 
         let store = self.ops_cache.read().await;
-
-        for op in store.iter() {
-            if let Ok(hash) = tree_storage::op_hash(op) {
-                if Hash32(hash) == cid {
-                    return Ok(op.clone());
-                }
-            }
-        }
-        Err(SyncError::OperationNotFound)
+        store
+            .iter()
+            .find(|op| stored_op_hash(op) == Some(cid))
+            .cloned()
+            .ok_or(SyncError::OperationNotFound)
     }
 
     async fn push_op_to_peers(
@@ -290,4 +267,15 @@ impl SyncEffects for PersistentSyncHandler {
         // Local handler has no network peers
         Ok(Vec::new())
     }
+}
+
+fn sync_network_error(operation: &'static str, error: impl ToString) -> SyncError {
+    SyncError::NetworkError {
+        operation,
+        detail: error.to_string(),
+    }
+}
+
+fn stored_op_hash(op: &AttestedOp) -> Option<Hash32> {
+    tree_storage::op_hash(op).ok().map(Hash32)
 }

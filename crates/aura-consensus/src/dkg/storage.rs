@@ -34,6 +34,14 @@ impl Default for MemoryTranscriptStore {
     }
 }
 
+fn ensure_transcript_integrity(transcript: DkgTranscript) -> Result<DkgTranscript> {
+    let computed = compute_transcript_hash_from_transcript(&transcript)?;
+    if computed != transcript.transcript_hash {
+        return Err(AuraError::invalid("transcript hash mismatch"));
+    }
+    Ok(transcript)
+}
+
 #[async_trait]
 impl DkgTranscriptStore for MemoryTranscriptStore {
     async fn put(&self, transcript: &DkgTranscript) -> Result<Option<Hash32>> {
@@ -48,12 +56,8 @@ impl DkgTranscriptStore for MemoryTranscriptStore {
         let transcript = guard
             .get(reference)
             .cloned()
-            .ok_or_else(|| aura_core::AuraError::not_found("transcript not found"))?;
-        let computed = compute_transcript_hash_from_transcript(&transcript)?;
-        if computed != transcript.transcript_hash {
-            return Err(aura_core::AuraError::invalid("transcript hash mismatch"));
-        }
-        Ok(transcript)
+            .ok_or_else(|| AuraError::not_found("transcript not found"))?;
+        ensure_transcript_integrity(transcript)
     }
 }
 
@@ -102,10 +106,6 @@ impl<S: StorageEffects + ?Sized> DkgTranscriptStore for StorageTranscriptStore<S
             .map_err(|e| AuraError::storage(e.to_string()))?
             .ok_or_else(|| AuraError::not_found("transcript not found"))?;
         let transcript = from_slice(&blob).map_err(|e| AuraError::serialization(e.to_string()))?;
-        let computed = compute_transcript_hash_from_transcript(&transcript)?;
-        if computed != transcript.transcript_hash {
-            return Err(AuraError::invalid("transcript hash mismatch"));
-        }
-        Ok(transcript)
+        ensure_transcript_integrity(transcript)
     }
 }

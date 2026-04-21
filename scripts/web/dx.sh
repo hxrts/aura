@@ -51,6 +51,14 @@ if [[ -z "$repo_root" || ! -f "$manifest_path" ]]; then
   exit 1
 fi
 
+if [[ -t 1 && -z "${AURA_DX_LOG_REDIRECTED:-}" && "${AURA_DX_ALLOW_TTY:-0}" != "1" ]]; then
+  mkdir -p "$repo_root/artifacts/aura-web"
+  export AURA_DX_LOG_REDIRECTED=1
+  export AURA_DX_LOG_FILE="${AURA_DX_LOG_FILE:-$repo_root/artifacts/aura-web/dx.log}"
+  : >"$AURA_DX_LOG_FILE"
+  exec >>"$AURA_DX_LOG_FILE" 2>&1
+fi
+
 resolve_package_version() {
   local package_name="$1"
   cargo metadata --manifest-path "$manifest_path" --format-version 1 2>/dev/null |

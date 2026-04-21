@@ -5,6 +5,7 @@
 //! or budget charging.
 
 #![allow(missing_docs)]
+use super::support::{test_authority, test_context};
 use async_trait::async_trait;
 use aura_core::effects::authorization::AuthorizationError;
 use aura_core::effects::guard::{EffectCommand, EffectInterpreter, EffectResult};
@@ -319,9 +320,9 @@ impl LeakageEffects for TestEffects {
 
 #[tokio::test]
 async fn guard_chain_denies_transport_commands() {
-    let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let peer = AuthorityId::new_from_entropy([2u8; 32]);
-    let context = ContextId::new_from_entropy([3u8; 32]);
+    let authority = test_authority(1);
+    let peer = test_authority(2);
+    let context = test_context(3);
     let effects = TestEffects::new(authority);
 
     let request = GuardRequest::new(authority, "amp:send".to_string(), FlowCost::new(1))

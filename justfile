@@ -94,80 +94,19 @@ build-app-host:
 
 # Check Aura web shell + shared UI core for the WASM target
 web-check:
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-ui
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-web --target wasm32-unknown-unknown --features web
+    bash scripts/web/web-check.sh
 
 # Rebuild the local Tailwind bundle used by aura-web (no CDN)
 web-tailwind-build:
-    cd crates/aura-web && npm ci && npm run tailwind:build
+    bash scripts/web/tailwind-build.sh
 
 # Watch and rebuild the local Tailwind bundle for aura-web
 web-tailwind-watch:
-    cd crates/aura-web && npm run tailwind:watch
+    bash scripts/web/tailwind-watch.sh
 
 # Serve Aura web shell locally for harness/browser runs
 web-serve port="4173":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    selected_port="{{ port }}"
-    if command -v lsof >/dev/null 2>&1; then
-        mapfile -t existing_pids < <(lsof -PiTCP:"$selected_port" -sTCP:LISTEN -t 2>/dev/null || true)
-        if [ "${#existing_pids[@]}" -gt 0 ]; then
-            echo "Port $selected_port is already in use; stopping existing listener(s)." >&2
-            lsof -nP -iTCP:"$selected_port" -sTCP:LISTEN >&2 || true
-            kill "${existing_pids[@]}" 2>/dev/null || true
-            for _ in $(seq 1 30); do
-                if ! lsof -PiTCP:"$selected_port" -sTCP:LISTEN -t >/dev/null 2>&1; then
-                    break
-                fi
-                sleep 0.1
-            done
-            if lsof -PiTCP:"$selected_port" -sTCP:LISTEN -t >/dev/null 2>&1; then
-                echo "Port $selected_port is still busy after SIGTERM; force stopping listener(s)." >&2
-                kill -9 "${existing_pids[@]}" 2>/dev/null || true
-                sleep 0.1
-            fi
-            if lsof -PiTCP:"$selected_port" -sTCP:LISTEN -t >/dev/null 2>&1; then
-                echo "Failed to clear port $selected_port." >&2
-                lsof -nP -iTCP:"$selected_port" -sTCP:LISTEN >&2 || true
-                exit 1
-            fi
-        fi
-    fi
-    echo "Serving aura-web on http://127.0.0.1:$selected_port"
-    cd crates/aura-web
-    mkdir -p ../../artifacts
-    if [ ! -d node_modules ]; then
-        npm ci
-    fi
-    npm run tailwind:build
-    # Symlink CSS to target dir so tailwind:watch changes are immediately visible.
-    # dx serve copies assets at build time but doesn't re-copy on CSS changes.
-    target_css_dir="../../target/dx/aura-web/debug/web/public/assets"
-    source_css="$(pwd)/public/assets/tailwind.css"
-    sync_tailwind_link() {
-        mkdir -p "$target_css_dir"
-        rm -f "$target_css_dir/tailwind.css"
-        ln -s "$source_css" "$target_css_dir/tailwind.css"
-    }
-    sync_tailwind_link
-    npm run tailwind:watch > ../../artifacts/aura-web-tailwind.log 2>&1 &
-    tailwind_pid=$!
-    while true; do
-        sync_tailwind_link
-        sleep 1
-    done &
-    tailwind_link_pid=$!
-    cleanup() {
-        kill "$tailwind_pid" 2>/dev/null || true
-        kill "$tailwind_link_pid" 2>/dev/null || true
-        # Restore terminal settings in case dx serve corrupted them
-        stty sane 2>/dev/null || true
-    }
-    trap cleanup EXIT INT TERM
-    NO_COLOR=true ../../scripts/web/dx.sh serve --web --package aura-web --bin aura-web --features web --addr 0.0.0.0 --port "$selected_port" --open false
-    # Extra safety: restore terminal after dx exits
-    stty sane 2>/dev/null || true
+    bash scripts/web/serve-dev.sh "{{ port }}"
 
 # Alias for the main web development workflow (`web-serve`)
 web-dev port="4173":
@@ -730,6 +669,15 @@ ci-preflight:
 
 # Verify shared user-flow policy guardrails and required docs/guidance sync
 ci-user-flow-policy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${AURA_UX_POLICY_DIFF_RANGE:-}" || -z "${AURA_UX_GUIDANCE_DIFF_RANGE:-}" ]]; then
+        if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            local_range="$(git merge-base origin/main HEAD)"
+            export AURA_UX_POLICY_DIFF_RANGE="${AURA_UX_POLICY_DIFF_RANGE:-$local_range}"
+            export AURA_UX_GUIDANCE_DIFF_RANGE="${AURA_UX_GUIDANCE_DIFF_RANGE:-$local_range}"
+        fi
+    fi
     just _policy-check check user-flow-policy-guardrails
     just _policy-check check user-flow-guidance-sync
     just ci-harness-ownership-policy
@@ -766,6 +714,7 @@ ci-annotation-ratchet:
     just _policy-check check ownership-annotation-ratchet semantic-owner
     just _policy-check check ownership-annotation-ratchet actor-owned
     just _policy-check check ownership-annotation-ratchet capability-boundary
+    just _policy-check check ignored-test-count-ratchet
 
 ci-ownership-categories:
     just _policy-check check ownership-category-declarations

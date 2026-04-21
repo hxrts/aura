@@ -11,13 +11,19 @@ use serde_json::Value as JsonValue;
 use super::operation::JournalOperation;
 use super::parsers::*;
 
+fn fact_type(fact: &JsonValue) -> AuraResult<&str> {
+    fact.get("type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AuraError::invalid("Fact missing 'type' field"))
+}
+
+fn has_u64_field(fact: &JsonValue, key: &str) -> bool {
+    fact.get(key).is_some_and(|value| value.as_u64().is_some())
+}
+
 /// Convert JSON fact to journal operation
 pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation> {
-    // Parse the fact JSON to determine the operation type
-    let fact_type = fact
-        .get("type")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| AuraError::invalid("Fact missing 'type' field"))?;
+    let fact_type = fact_type(fact)?;
 
     match fact_type {
         "device_registration" => {
@@ -80,21 +86,15 @@ pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOpera
             })
         }
         "flow_budget_update" => {
-            // Parse flow budget update fact
-            let context_id = parse_context_id_from_fact(fact)?;
-            let peer_id = parse_device_id_from_fact(fact)?;
-            let new_limit = parse_budget_limit_from_fact(fact)?;
-            let cost = if fact.get("cost").is_some() {
-                Some(parse_budget_cost_from_fact(fact)?)
-            } else {
-                None
-            };
-
             Ok(JournalOperation::UpdateFlowBudget {
-                context_id,
-                peer_id,
-                new_limit,
-                cost,
+                context_id: parse_context_id_from_fact(fact)?,
+                peer_id: parse_device_id_from_fact(fact)?,
+                new_limit: parse_budget_limit_from_fact(fact)?,
+                cost: if has_u64_field(fact, "cost") || has_u64_field(fact, "flow_cost") {
+                    Some(parse_budget_cost_from_fact(fact)?)
+                } else {
+                    None
+                },
             })
         }
         "recovery_initiation" => {
@@ -171,19 +171,20 @@ pub fn json_value_to_fact_value(value: &JsonValue) -> AuraResult<FactValue> {
 /// Create a Journal from a JSON fact
 pub fn journal_from_json_fact(fact: &JsonValue) -> AuraResult<Journal> {
     let mut delta = Journal::default();
-    let mut fact_record = Fact::new();
-
-    match fact {
+    let fact_record = match fact {
         JsonValue::Object(map) => {
+            let mut nested = Fact::new();
             for (key, value) in map {
-                let _ = fact_record.insert(key.clone(), json_value_to_fact_value(value)?);
+                let _ = nested.insert(key.clone(), json_value_to_fact_value(value)?);
             }
+            nested
         }
         _ => {
-            let _ = fact_record.insert("value", json_value_to_fact_value(fact)?);
+            let mut nested = Fact::new();
+            let _ = nested.insert("value", json_value_to_fact_value(fact)?);
+            nested
         }
-    }
-
+    };
     delta.merge_facts(fact_record);
     Ok(delta)
 }

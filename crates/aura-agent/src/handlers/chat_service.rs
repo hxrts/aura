@@ -299,7 +299,15 @@ impl ChatServiceApi {
             .map_err(map_amp_proposal_error)?;
 
         let policy = policy_for(CeremonyFlow::AmpEpochBump);
-        if policy.allows_mode(AgreementMode::ConsensusFinalized) && !self.effects.is_testing() {
+        let consensus_required = crate::runtime::consensus::consensus_required_for_authority(
+            self.effects.as_ref(),
+            authority_id,
+        )
+        .await;
+        if policy.allows_mode(AgreementMode::ConsensusFinalized)
+            && consensus_required
+            && !self.effects.is_testing()
+        {
             let prestate = self.build_amp_prestate(authority_id, context_id).await?;
             let params = build_consensus_params(
                 context_id,

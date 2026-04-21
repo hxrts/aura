@@ -183,9 +183,7 @@ pub struct IndexStats {
     pub merkle_depth: u32,
 }
 
-/// Blanket implementation for Arc<T> where T: IndexedJournalEffects
-#[async_trait]
-impl<T: IndexedJournalEffects + ?Sized> IndexedJournalEffects for std::sync::Arc<T> {
+impl_arc_effect!(IndexedJournalEffects {
     fn watch_facts(&self) -> Box<dyn FactStreamReceiver> {
         (**self).watch_facts()
     }
@@ -232,4 +230,4 @@ impl<T: IndexedJournalEffects + ?Sized> IndexedJournalEffects for std::sync::Arc
     async fn index_stats(&self) -> Result<IndexStats, AuraError> {
         (**self).index_stats().await
     }
-}
+});

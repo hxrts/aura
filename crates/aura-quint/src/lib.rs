@@ -64,7 +64,10 @@ pub use evaluator::{InvariantVerificationResult, QuintEvaluator, TemporalVerific
 pub use handler::{QuintEffectHandler, QuintEvaluatorConfig};
 pub use properties::{PropertyKind, PropertySpec, PropertySuite};
 pub use runner::{QuintRunner, RunnerConfig};
-pub use types::VerificationResult;
+pub use types::{
+    BridgeStats, BridgeStatus, CounterExample, ExecutionTrace, ModuleInfo, QuintType,
+    StateSnapshot, TraceStep, VerificationConfig, VerificationDetails, VerificationResult,
+};
 
 // Re-export quint evaluator types
 pub use quint_evaluator::ir::{QuintError, QuintEx, QuintOutput};

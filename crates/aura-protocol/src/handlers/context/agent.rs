@@ -78,15 +78,11 @@ impl AgentContext {
 
     /// Create context with configuration value
     pub fn with_config(&self, key: &str, value: &str) -> Self {
-        let mut new_config = (*self.config).clone();
-        new_config.insert(key.to_string(), value.to_string());
-
-        Self {
-            platform: self.platform.clone(),
-            auth_state: self.auth_state.clone(),
-            config: Arc::new(new_config),
-            sessions: self.sessions.clone(),
-        }
+        self.updated(|next| {
+            next.config = self.map_config(|config| {
+                config.insert(key.to_string(), value.to_string());
+            });
+        })
     }
 
     /// Get a configuration value
@@ -96,20 +92,19 @@ impl AgentContext {
 
     /// Create context with new session
     pub fn with_session(&self, session_id: SessionId, session_type: &str, created_at: u64) -> Self {
-        let mut new_sessions = (*self.sessions).clone();
-        let metadata = SessionMetadata {
-            created_at,
-            session_type: session_type.to_string(),
-            data: Arc::new(HashMap::new()),
-        };
-        new_sessions.insert(session_id, metadata);
-
-        Self {
-            platform: self.platform.clone(),
-            auth_state: self.auth_state.clone(),
-            config: self.config.clone(),
-            sessions: Arc::new(new_sessions),
-        }
+        let session_type = session_type.to_string();
+        self.updated(|next| {
+            next.sessions = self.map_sessions(|sessions| {
+                sessions.insert(
+                    session_id,
+                    SessionMetadata {
+                        created_at,
+                        session_type,
+                        data: Arc::new(HashMap::new()),
+                    },
+                );
+            });
+        })
     }
 
     /// Get session metadata
@@ -119,15 +114,35 @@ impl AgentContext {
 
     /// Create context without session
     pub fn without_session(&self, session_id: &SessionId) -> Self {
-        let mut new_sessions = (*self.sessions).clone();
-        new_sessions.remove(session_id);
+        self.updated(|next| {
+            next.sessions = self.map_sessions(|sessions| {
+                sessions.remove(session_id);
+            });
+        })
+    }
 
-        Self {
-            platform: self.platform.clone(),
-            auth_state: self.auth_state.clone(),
-            config: self.config.clone(),
-            sessions: Arc::new(new_sessions),
-        }
+    fn updated(&self, update: impl FnOnce(&mut Self)) -> Self {
+        let mut next = self.clone();
+        update(&mut next);
+        next
+    }
+
+    fn map_config(
+        &self,
+        update: impl FnOnce(&mut HashMap<String, String>),
+    ) -> Arc<HashMap<String, String>> {
+        let mut config = (*self.config).clone();
+        update(&mut config);
+        Arc::new(config)
+    }
+
+    fn map_sessions(
+        &self,
+        update: impl FnOnce(&mut HashMap<SessionId, SessionMetadata>),
+    ) -> Arc<HashMap<SessionId, SessionMetadata>> {
+        let mut sessions = (*self.sessions).clone();
+        update(&mut sessions);
+        Arc::new(sessions)
     }
 }
 

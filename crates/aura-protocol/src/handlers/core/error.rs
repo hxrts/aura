@@ -93,6 +93,12 @@ impl FactoryError {
 
 impl aura_core::ProtocolErrorCode for FactoryError {
     fn code(&self) -> &'static str {
+        self.protocol_code()
+    }
+}
+
+impl FactoryError {
+    fn protocol_code(&self) -> &'static str {
         match self {
             FactoryError::ConfigurationError { .. } => "factory_configuration",
             FactoryError::HandlerCreationFailed { .. } => "factory_handler_creation",

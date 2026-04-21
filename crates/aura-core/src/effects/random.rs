@@ -67,9 +67,7 @@ pub trait RandomEffects: RandomCoreEffects + RandomExtendedEffects {}
 
 impl<T: RandomCoreEffects + RandomExtendedEffects + ?Sized> RandomEffects for T {}
 
-/// Blanket implementation for Arc<T> where T: RandomCoreEffects
-#[async_trait]
-impl<T: RandomCoreEffects + ?Sized> RandomCoreEffects for std::sync::Arc<T> {
+impl_arc_effect!(RandomCoreEffects {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         (**self).random_bytes(len).await
     }
@@ -81,4 +79,4 @@ impl<T: RandomCoreEffects + ?Sized> RandomCoreEffects for std::sync::Arc<T> {
     async fn random_u64(&self) -> u64 {
         (**self).random_u64().await
     }
-}
+});

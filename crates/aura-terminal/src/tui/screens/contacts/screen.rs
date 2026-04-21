@@ -14,7 +14,8 @@
 //!
 //! The contacts screen now handles both:
 //! - **Accept Invitation (a)**: Accept a contact invite code received out-of-band
-//! - **Send Invitation (n)**: Generate a new invite code to share with others
+//! - **Send Invitation (n / i)**: Generate a new invite code to share with others
+//! - **Invite Selected Contact To Channel (I)**: Send the selected contact a channel invitation
 //!
 //! In demo mode, `a` and `l` fill Alice's and Carol's codes respectively,
 //! with Ctrl aliases available when the terminal preserves modifiers.

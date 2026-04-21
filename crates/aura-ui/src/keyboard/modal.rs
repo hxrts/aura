@@ -24,7 +24,7 @@ pub(super) fn handle_modal_enter(
         ModalState::CreateInvitation => {
             model.invite_counter = model.invite_counter.saturating_add(1);
             let code = format!("INVITE-{}", model.invite_counter);
-            model.last_invite_code = Some(code.clone());
+            model.demo.last_invite_code = Some(code.clone());
             clipboard.write(&code);
             model.ensure_contact("Bob");
             model.toast = Some(ToastState {
@@ -232,18 +232,14 @@ pub(super) fn handle_modal_enter(
             if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
                 match state.step {
                     AddDeviceWizardStep::Name => {
-                        let name = state.name_input.trim().to_string();
-                        if name.is_empty() {
+                        let Some(_name) = state.commit_draft_name() else {
                             set_toast(model, '✗', "Device name is required");
                             return;
-                        }
-
-                        state.device_name = name;
+                        };
                         model.device_enrollment_counter =
                             model.device_enrollment_counter.saturating_add(1);
                         state.enrollment_code =
                             format!("DEVICE-ENROLL-{}", model.device_enrollment_counter);
-                        state.name_input.clear();
                         state.step = AddDeviceWizardStep::ShareCode;
                         model.modal_hint = "Add Device — Step 2 of 3".to_string();
                     }
@@ -267,7 +263,7 @@ pub(super) fn handle_modal_enter(
                 set_toast(model, '✗', "Enrollment code is required");
                 return;
             }
-            model.has_secondary_device = true;
+            model.demo.has_secondary_device = true;
             if model.secondary_device_name().is_none() {
                 let fallback = match model.active_modal.as_ref() {
                     Some(ActiveModal::AddDevice(state)) if !state.device_name.trim().is_empty() => {
@@ -294,8 +290,8 @@ pub(super) fn handle_modal_enter(
             }));
         }
         ModalState::ConfirmRemoveDevice => {
-            if model.has_secondary_device {
-                model.has_secondary_device = false;
+            if model.has_secondary_device() {
+                model.demo.has_secondary_device = false;
                 model.set_secondary_device_name(None);
                 set_toast(model, '✓', "Device removal complete");
             } else {

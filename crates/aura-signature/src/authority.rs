@@ -2,6 +2,7 @@
 //!
 //! This module handles verifying that an authority signed a message.
 
+use crate::verification_common::verify_ed25519_signature;
 use crate::{AuthenticationError, Result};
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
@@ -28,19 +29,17 @@ pub fn verify_authority_signature(
     signature: &Ed25519Signature,
     authority_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
-    // Verify the cryptographic signature
-    let valid =
-        aura_core::ed25519_verify(message, signature, authority_public_key).map_err(|e| {
-            AuthenticationError::InvalidAuthoritySignature {
-                details: format!("Authority {authority_id} signature verification failed: {e}"),
-            }
-        })?;
-
-    if !valid {
-        return Err(AuthenticationError::InvalidAuthoritySignature {
+    verify_ed25519_signature(
+        message,
+        signature,
+        authority_public_key,
+        |details| AuthenticationError::InvalidAuthoritySignature {
+            details: format!("Authority {authority_id} signature verification failed: {details}"),
+        },
+        || AuthenticationError::InvalidAuthoritySignature {
             details: format!("Authority {authority_id} signature invalid"),
-        });
-    }
+        },
+    )?;
 
     tracing::debug!(
         authority_id = %authority_id,
@@ -59,48 +58,43 @@ pub fn verify_signature(
     message: &[u8],
     signature: &Ed25519Signature,
 ) -> Result<()> {
-    let valid = aura_core::ed25519_verify(message, signature, public_key).map_err(|e| {
-        AuthenticationError::InvalidAuthoritySignature {
-            details: format!("Signature verification failed: {e}"),
-        }
-    })?;
-
-    if valid {
-        Ok(())
-    } else {
-        Err(AuthenticationError::InvalidAuthoritySignature {
+    verify_ed25519_signature(
+        message,
+        signature,
+        public_key,
+        |details| AuthenticationError::InvalidAuthoritySignature {
+            details: format!("Signature verification failed: {details}"),
+        },
+        || AuthenticationError::InvalidAuthoritySignature {
             details: "Signature verification failed".to_string(),
-        })
-    }
+        },
+    )
 }
 
-// Tests commented out due to missing crypto functions in current aura_crypto API
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::hash;
-    use aura_core::AuthorityId;
-    use uuid::Uuid;
+    use aura_core::crypto::ed25519::Ed25519SigningKey;
+
+    fn authority_id(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn signing_material(seed: u8, message: &[u8]) -> (Ed25519Signature, Ed25519VerifyingKey) {
+        let signing_key = Ed25519SigningKey::from_bytes([seed; 32]);
+        let verifying_key = signing_key.verifying_key().unwrap();
+        let signature = signing_key.sign(message).unwrap();
+        (signature, verifying_key)
+    }
 
     /// Valid signature from the correct key verifies successfully.
     #[test]
     fn test_verify_authority_signature_success() {
-        let digest = hash::hash(b"authority-test-1");
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&digest[..16]);
-        let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes));
-
-        // Generate a key pair for testing
-        let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key)
-            .expect("test signing key should be valid");
-
+        let authority_id = authority_id(1);
         let message = b"test message";
-        let signature = aura_core::ed25519_sign(&signing_key, message);
+        let (signature, verifying_key) = signing_material(21, message);
 
-        let result =
-            verify_authority_signature(authority_id, message, &signature, &verifying_key);
+        let result = verify_authority_signature(authority_id, message, &signature, &verifying_key);
 
         assert!(result.is_ok());
     }
@@ -108,23 +102,13 @@ mod tests {
     /// Signature from a different key must fail — prevents key substitution.
     #[test]
     fn test_verify_authority_signature_invalid() {
-        let digest = hash::hash(b"authority-test-2");
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&digest[..16]);
-        let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes));
-
-        // Generate two different key pairs
-        let signing_key1 = aura_core::generate_ed25519_key();
-        let verifying_key1 = aura_core::ed25519_verifying_key(&signing_key1)
-            .expect("test signing key should be valid");
-        let signing_key2 = aura_core::generate_ed25519_key();
-
+        let authority_id = authority_id(2);
         let message = b"test message";
-        // Sign with key2 but verify with key1 (should fail)
-        let signature = aura_core::ed25519_sign(&signing_key2, message);
+        let (signature, _) = signing_material(31, message);
+        let (_, wrong_verifying_key) = signing_material(32, message);
 
         let result =
-            verify_authority_signature(authority_id, message, &signature, &verifying_key1);
+            verify_authority_signature(authority_id, message, &signature, &wrong_verifying_key);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -133,4 +117,3 @@ mod tests {
         ));
     }
 }
-*/

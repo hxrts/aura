@@ -211,7 +211,7 @@ pub trait UdpEffects: Send + Sync {
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl<T: UdpEffects + ?Sized> UdpEffects for Arc<T> {
+impl<T: UdpEffects + Send + Sync + ?Sized> UdpEffects for Arc<T> {
     async fn udp_bind(
         &self,
         addr: UdpEndpoint,
@@ -222,7 +222,7 @@ impl<T: UdpEffects + ?Sized> UdpEffects for Arc<T> {
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl<T: UdpEndpointEffects + ?Sized> UdpEndpointEffects for Arc<T> {
+impl<T: UdpEndpointEffects + Send + Sync + ?Sized> UdpEndpointEffects for Arc<T> {
     async fn set_broadcast(&self, enabled: bool) -> Result<(), NetworkError> {
         (**self).set_broadcast(enabled).await
     }
@@ -303,7 +303,7 @@ pub trait NetworkChangeEffects: Send + Sync {
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl<T: NetworkChangeEffects + ?Sized> NetworkChangeEffects for Arc<T> {
+impl<T: NetworkChangeEffects + Send + Sync + ?Sized> NetworkChangeEffects for Arc<T> {
     async fn subscribe_network_changes(
         &self,
     ) -> Result<Box<dyn NetworkChangeStream>, NetworkError> {
@@ -387,10 +387,9 @@ pub trait NetworkExtendedEffects: NetworkCoreEffects + Send + Sync {
 pub trait NetworkEffects: NetworkCoreEffects + NetworkExtendedEffects {}
 
 impl<T: NetworkCoreEffects + NetworkExtendedEffects + ?Sized> NetworkEffects for T {}
-/// Blanket implementation for Arc<T> where T: NetworkCoreEffects
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl<T: NetworkCoreEffects + ?Sized> NetworkCoreEffects for std::sync::Arc<T> {
+impl<T: NetworkCoreEffects + Send + Sync + ?Sized> NetworkCoreEffects for Arc<T> {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         (**self).send_to_peer(peer_id, message).await
     }
@@ -404,10 +403,9 @@ impl<T: NetworkCoreEffects + ?Sized> NetworkCoreEffects for std::sync::Arc<T> {
     }
 }
 
-/// Blanket implementation for Arc<T> where T: NetworkExtendedEffects
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl<T: NetworkExtendedEffects + ?Sized> NetworkExtendedEffects for std::sync::Arc<T> {
+impl<T: NetworkExtendedEffects + Send + Sync + ?Sized> NetworkExtendedEffects for Arc<T> {
     async fn receive_from(&self, peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         (**self).receive_from(peer_id).await
     }

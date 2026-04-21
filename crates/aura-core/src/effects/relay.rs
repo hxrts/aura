@@ -264,12 +264,11 @@ pub trait RelaySelector: Send + Sync {
     fn select(&self, context: &RelayContext, candidates: &[RelayCandidate]) -> Vec<AuthorityId>;
 }
 
-/// Blanket implementation for Arc<T> where T: RelaySelector
-impl<T: RelaySelector + ?Sized> RelaySelector for std::sync::Arc<T> {
+impl_arc_effect!(RelaySelector {
     fn select(&self, context: &RelayContext, candidates: &[RelayCandidate]) -> Vec<AuthorityId> {
         (**self).select(context, candidates)
     }
-}
+});
 
 /// Blanket implementation for Box<T> where T: RelaySelector
 impl<T: RelaySelector + ?Sized> RelaySelector for Box<T> {

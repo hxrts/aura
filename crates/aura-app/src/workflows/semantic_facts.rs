@@ -1,3 +1,8 @@
+#![allow(dead_code)]
+// This module re-exports proof/test helpers consumed across workflow, macro,
+// and unit-test targets; strict all-target dead-code analysis does not see
+// every path consistently.
+
 mod lifecycle;
 mod owner;
 mod proofs;
@@ -41,7 +46,6 @@ pub(in crate::workflows) use publication::{
 };
 
 #[cfg(test)]
-#[allow(dead_code)]
 pub(crate) fn authoritative_status_for_instance(
     facts: &[AuthoritativeSemanticFact],
     operation_id: &OperationId,
@@ -61,7 +65,6 @@ pub(crate) fn authoritative_status_for_instance(
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
 pub(crate) fn assert_succeeded_with_postcondition(
     facts: &[AuthoritativeSemanticFact],
     operation_id: &OperationId,
@@ -80,7 +83,6 @@ pub(crate) fn assert_succeeded_with_postcondition(
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
 pub(crate) fn assert_terminal_failure_or_cancelled(
     facts: &[AuthoritativeSemanticFact],
     operation_id: &OperationId,

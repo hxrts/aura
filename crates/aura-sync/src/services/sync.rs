@@ -53,6 +53,9 @@ fn time_error_to_aura(err: TimeError) -> AuraError {
     AuraError::internal(format!("time error: {err}"))
 }
 
+const JOURNAL_SYNC_OPERATION_ID: &str = "journal_sync";
+const AUTO_SYNC_OPERATION_ID: &str = "auto_sync";
+
 pub use bookkeeping::SyncMaintenanceStats;
 pub use builder::SyncServiceBuilder;
 pub use health::SyncServiceHealth;
@@ -203,8 +206,13 @@ impl SyncService {
             return Ok(());
         }
 
-        // Implement full journal_sync protocol integration
-        tracing::info!("Starting journal sync with {} peers", peers.len());
+        let authority_id = effects.authority_id();
+        tracing::info!(
+            operation_id = JOURNAL_SYNC_OPERATION_ID,
+            authority_id = %authority_id,
+            peer_count = peers.len(),
+            "Starting journal sync"
+        );
 
         // 1. Check rate limits for each peer
         let allowed_peers = self.check_rate_limits(&peers, now_instant).await?;
@@ -236,7 +244,12 @@ impl SyncService {
         // 7. Clean up sessions
         self.cleanup_sync_sessions(&session_peers).await?;
 
-        tracing::info!("Completed journal sync with {} peers", sync_results.len());
+        tracing::info!(
+            operation_id = JOURNAL_SYNC_OPERATION_ID,
+            authority_id = %authority_id,
+            synced_peer_count = sync_results.len(),
+            "Completed journal sync"
+        );
         Ok(())
     }
 
@@ -253,13 +266,18 @@ impl SyncService {
     where
         E: SyncProtocolEffects,
     {
+        let authority_id = effects.authority_id();
         // Implement peer synchronization using journal_sync
 
         // 1. Discover available peers via peer_manager
         let available_peers = self.discover_available_peers().await?;
 
         if available_peers.is_empty() {
-            tracing::debug!("No suitable peers found for synchronization");
+            tracing::debug!(
+                operation_id = AUTO_SYNC_OPERATION_ID,
+                authority_id = %authority_id,
+                "No suitable peers found for synchronization"
+            );
             return Ok(());
         }
 
@@ -272,14 +290,21 @@ impl SyncService {
         .await?;
 
         if selected_peers.is_empty() {
-            tracing::debug!("No peers selected after scoring");
+            tracing::debug!(
+                operation_id = AUTO_SYNC_OPERATION_ID,
+                authority_id = %authority_id,
+                available_peer_count = available_peers.len(),
+                "No peers selected after scoring"
+            );
             return Ok(());
         }
 
         tracing::info!(
-            "Selected {} best peers from {} available for sync",
-            selected_peers.len(),
-            available_peers.len()
+            operation_id = AUTO_SYNC_OPERATION_ID,
+            authority_id = %authority_id,
+            selected_peer_count = selected_peers.len(),
+            available_peer_count = available_peers.len(),
+            "Selected best peers for sync"
         );
 
         // 3. Sync with selected peers using the full protocol integration
@@ -303,9 +328,15 @@ impl SyncService {
         E: SyncProtocolEffects,
     {
         let mut sync_results = Vec::new();
+        let authority_id = effects.authority_id();
 
         for &peer in peers {
-            tracing::debug!("Executing journal sync with peer {}", peer);
+            tracing::debug!(
+                operation_id = JOURNAL_SYNC_OPERATION_ID,
+                authority_id = %authority_id,
+                peer_id = %peer,
+                "Executing journal sync with peer"
+            );
 
             // Clone protocol state to avoid holding lock across await; write back after sync.
             let mut protocol_clone = { self.journal_sync.write().clone() };
@@ -316,13 +347,21 @@ impl SyncService {
                 Ok(synced_operations) => {
                     sync_results.push((peer, synced_operations));
                     tracing::info!(
-                        "Successfully synced {} operations with peer {}",
+                        operation_id = JOURNAL_SYNC_OPERATION_ID,
+                        authority_id = %authority_id,
+                        peer_id = %peer,
                         synced_operations,
-                        peer
+                        "Successfully synced operations with peer"
                     );
                 }
                 Err(e) => {
-                    tracing::error!("Failed to sync with peer {}: {}", peer, e);
+                    tracing::error!(
+                        operation_id = JOURNAL_SYNC_OPERATION_ID,
+                        authority_id = %authority_id,
+                        peer_id = %peer,
+                        error = %e,
+                        "Failed to sync with peer"
+                    );
                     sync_results.push((peer, 0));
                 }
             }

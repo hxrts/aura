@@ -376,6 +376,7 @@ async fn test_contacts_signal_contact_tracking() {
             is_online: true,
             read_receipt_policy: ReadReceiptPolicy::default(),
             relationship_state: aura_app::views::contacts::ContactRelationshipState::Contact,
+            invitation_code: None,
         });
 
         core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();

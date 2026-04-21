@@ -482,15 +482,14 @@ async fn start_and_monitor_runtime_device_removal(
         let controller = controller.clone();
         let app_core = app_core.clone();
         async move {
+            let policy = ceremony_workflows::CeremonyPollPolicy::for_kind(
+                status_handle.kind(),
+                std::time::Duration::from_millis(250),
+            );
             let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
                 &app_core,
                 &status_handle,
-                ceremony_workflows::CeremonyPollPolicy {
-                    interval: std::time::Duration::from_millis(250),
-                    max_attempts: 160,
-                    rollback_on_failure: true,
-                    refresh_settings_on_complete: true,
-                },
+                policy,
                 |_| {
                     controller.request_rerender();
                 },
@@ -945,13 +944,14 @@ async fn execute_semantic_intent(
                         nickname,
                         None,
                         None,
+                        None,
                         Some(handle.instance_id().clone()),
                     ),
                 )
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             controller.write_clipboard(&code);
-            controller.remember_invitation_code(&code);
+            controller.set_contact_invitation_code(receiver_authority_id, code.clone());
             controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
                 receiver_authority_id: Some(receiver_authority_id.to_string()),
                 source_operation: aura_app::ui::contract::OperationId::invitation_create(),
@@ -982,6 +982,7 @@ async fn execute_semantic_intent(
             let transfer_instance_id = transfer.instance_id().clone();
             let transfer_operation_id = transfer.operation_id().clone();
             let controller = controller.clone();
+            let accepted_code = code.clone();
             controller.inject_message("debug:accept_contact:spawn_enqueued");
             controller.push_log("debug:accept_contact:spawn_enqueued");
             spawn_background_semantic_task("accept_contact_invitation_failed", async move {
@@ -1083,6 +1084,7 @@ async fn execute_semantic_intent(
                             controller.complete_runtime_contact_invitation_acceptance(
                                 authority_id,
                                 display_name,
+                                Some(accepted_code),
                             );
                         },
                     );

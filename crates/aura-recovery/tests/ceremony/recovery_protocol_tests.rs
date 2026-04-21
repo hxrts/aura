@@ -5,7 +5,11 @@
 
 #![allow(clippy::expect_used, clippy::redundant_clone, clippy::useless_vec)]
 
-use aura_core::{types::identifiers::AuthorityId, Hash32, TrustLevel};
+use super::support::{
+    authority, guardian_ids, guardian_profile,
+    guardian_profile_with_label as support_guardian_profile_with_label, guardian_rotation_op, hash,
+};
+use aura_core::{Hash32, TrustLevel};
 use aura_recovery::{
     guardian_ceremony::{CeremonyId, CeremonyResponse, CeremonyStatus, GuardianRotationOp},
     types::{GuardianProfile, GuardianSet},
@@ -29,8 +33,8 @@ fn recovery_protocol_choreography_is_coherent_and_orphan_free() {
 
 #[test]
 fn ceremony_id_is_deterministic() {
-    let prestate = Hash32([1u8; 32]);
-    let operation = Hash32([2u8; 32]);
+    let prestate = hash(1);
+    let operation = hash(2);
     let nonce = 42u64;
 
     let id1 = CeremonyId::new(prestate, operation, nonce);
@@ -41,9 +45,9 @@ fn ceremony_id_is_deterministic() {
 
 #[test]
 fn ceremony_id_varies_with_prestate() {
-    let prestate1 = Hash32([1u8; 32]);
-    let prestate2 = Hash32([2u8; 32]);
-    let operation = Hash32([3u8; 32]);
+    let prestate1 = hash(1);
+    let prestate2 = hash(2);
+    let operation = hash(3);
     let nonce = 1u64;
 
     let id1 = CeremonyId::new(prestate1, operation, nonce);
@@ -54,9 +58,9 @@ fn ceremony_id_varies_with_prestate() {
 
 #[test]
 fn ceremony_id_varies_with_operation() {
-    let prestate = Hash32([1u8; 32]);
-    let operation1 = Hash32([2u8; 32]);
-    let operation2 = Hash32([3u8; 32]);
+    let prestate = hash(1);
+    let operation1 = hash(2);
+    let operation2 = hash(3);
     let nonce = 1u64;
 
     let id1 = CeremonyId::new(prestate, operation1, nonce);
@@ -67,8 +71,8 @@ fn ceremony_id_varies_with_operation() {
 
 #[test]
 fn ceremony_id_varies_with_nonce() {
-    let prestate = Hash32([1u8; 32]);
-    let operation = Hash32([2u8; 32]);
+    let prestate = hash(1);
+    let operation = hash(2);
 
     let id1 = CeremonyId::new(prestate, operation, 1);
     let id2 = CeremonyId::new(prestate, operation, 2);
@@ -94,16 +98,7 @@ fn ceremony_id_display_format() {
 
 #[test]
 fn guardian_rotation_op_hash_is_deterministic() {
-    let op = GuardianRotationOp {
-        threshold_k: 2,
-        total_n: 3,
-        guardian_ids: vec![
-            AuthorityId::new_from_entropy([1u8; 32]),
-            AuthorityId::new_from_entropy([2u8; 32]),
-            AuthorityId::new_from_entropy([3u8; 32]),
-        ],
-        new_epoch: 5,
-    };
+    let op = guardian_rotation_op(2, &[1, 2, 3], 5);
 
     let hash1 = op.compute_hash();
     let hash2 = op.compute_hash();
@@ -113,11 +108,7 @@ fn guardian_rotation_op_hash_is_deterministic() {
 
 #[test]
 fn guardian_rotation_op_hash_varies_with_threshold() {
-    let base_ids = vec![
-        AuthorityId::new_from_entropy([1u8; 32]),
-        AuthorityId::new_from_entropy([2u8; 32]),
-        AuthorityId::new_from_entropy([3u8; 32]),
-    ];
+    let base_ids = guardian_ids(&[1, 2, 3]);
 
     let op1 = GuardianRotationOp {
         threshold_k: 2,
@@ -138,25 +129,12 @@ fn guardian_rotation_op_hash_varies_with_threshold() {
 
 #[test]
 fn guardian_rotation_op_hash_varies_with_guardians() {
-    let op1 = GuardianRotationOp {
-        threshold_k: 2,
-        total_n: 3,
-        guardian_ids: vec![
-            AuthorityId::new_from_entropy([1u8; 32]),
-            AuthorityId::new_from_entropy([2u8; 32]),
-            AuthorityId::new_from_entropy([3u8; 32]),
-        ],
-        new_epoch: 1,
-    };
+    let op1 = guardian_rotation_op(2, &[1, 2, 3], 1);
 
     let op2 = GuardianRotationOp {
         threshold_k: 2,
         total_n: 3,
-        guardian_ids: vec![
-            AuthorityId::new_from_entropy([1u8; 32]),
-            AuthorityId::new_from_entropy([2u8; 32]),
-            AuthorityId::new_from_entropy([4u8; 32]), // Different guardian
-        ],
+        guardian_ids: guardian_ids(&[1, 2, 4]), // Different guardian
         new_epoch: 1,
     };
 
@@ -165,22 +143,19 @@ fn guardian_rotation_op_hash_varies_with_guardians() {
 
 #[test]
 fn guardian_rotation_op_hash_varies_with_epoch() {
-    let guardian_ids = vec![
-        AuthorityId::new_from_entropy([1u8; 32]),
-        AuthorityId::new_from_entropy([2u8; 32]),
-    ];
+    let guardians = guardian_ids(&[1, 2]);
 
     let op1 = GuardianRotationOp {
         threshold_k: 2,
         total_n: 2,
-        guardian_ids: guardian_ids.clone(),
+        guardian_ids: guardians.clone(),
         new_epoch: 1,
     };
 
     let op2 = GuardianRotationOp {
         threshold_k: 2,
         total_n: 2,
-        guardian_ids,
+        guardian_ids: guardians,
         new_epoch: 2,
     };
 
@@ -257,7 +232,7 @@ fn ceremony_status_aborted() {
 
 #[test]
 fn guardian_profile_creation_with_new() {
-    let authority_id = AuthorityId::new_from_entropy([42u8; 32]);
+    let authority_id = authority(42);
     let profile = GuardianProfile::new(authority_id);
 
     assert_eq!(profile.authority_id, authority_id);
@@ -268,8 +243,8 @@ fn guardian_profile_creation_with_new() {
 
 #[test]
 fn guardian_profile_with_label() {
-    let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
-    let profile = GuardianProfile::with_label(authority_id, "Test Guardian");
+    let authority_id = authority(1);
+    let profile = support_guardian_profile_with_label(1, "Test Guardian");
 
     assert_eq!(profile.authority_id, authority_id);
     assert_eq!(profile.label, Some("Test Guardian".to_string()));
@@ -278,7 +253,7 @@ fn guardian_profile_with_label() {
 
 #[test]
 fn guardian_profile_custom_construction() {
-    let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
+    let authority_id = authority(1);
     let profile = GuardianProfile {
         authority_id,
         label: Some("Custom".to_string()),
@@ -297,9 +272,9 @@ fn guardian_profile_custom_construction() {
 
 #[test]
 fn guardian_set_creation() {
-    let g1 = GuardianProfile::new(AuthorityId::new_from_entropy([1u8; 32]));
-    let g2 = GuardianProfile::new(AuthorityId::new_from_entropy([2u8; 32]));
-    let g3 = GuardianProfile::new(AuthorityId::new_from_entropy([3u8; 32]));
+    let g1 = guardian_profile(1);
+    let g2 = guardian_profile(2);
+    let g3 = guardian_profile(3);
 
     let set = GuardianSet::new(vec![g1, g2, g3]);
 
@@ -317,8 +292,8 @@ fn guardian_set_empty() {
 
 #[test]
 fn guardian_set_iteration() {
-    let g1 = GuardianProfile::new(AuthorityId::new_from_entropy([1u8; 32]));
-    let g2 = GuardianProfile::new(AuthorityId::new_from_entropy([2u8; 32]));
+    let g1 = guardian_profile(1);
+    let g2 = guardian_profile(2);
 
     let set = GuardianSet::new(vec![g1.clone(), g2.clone()]);
 
@@ -398,21 +373,14 @@ fn ceremony_id_collision_resistance() {
     let mut ids = std::collections::HashSet::new();
 
     for nonce in 0..1000u64 {
-        let id = CeremonyId::new(Hash32([0u8; 32]), Hash32([1u8; 32]), nonce);
+        let id = CeremonyId::new(hash(0), hash(1), nonce);
         assert!(ids.insert(id), "Collision detected at nonce {nonce}");
     }
 }
 
 #[test]
 fn guardian_rotation_op_serialization_roundtrip() {
-    let op = GuardianRotationOp {
-        threshold_k: 3,
-        total_n: 5,
-        guardian_ids: (0..5)
-            .map(|i| AuthorityId::new_from_entropy([i as u8; 32]))
-            .collect(),
-        new_epoch: 42,
-    };
+    let op = guardian_rotation_op(3, &[0, 1, 2, 3, 4], 42);
 
     // Serialize and deserialize
     let serialized = serde_json::to_string(&op).expect("serialization should succeed");
@@ -447,9 +415,9 @@ fn threshold_must_be_positive() {
 
 #[test]
 fn recovery_requires_unique_guardians() {
-    let g1 = AuthorityId::new_from_entropy([1u8; 32]);
-    let g2 = AuthorityId::new_from_entropy([2u8; 32]);
-    let g3 = AuthorityId::new_from_entropy([3u8; 32]);
+    let g1 = authority(1);
+    let g2 = authority(2);
+    let g3 = authority(3);
 
     let guardians = vec![g1, g2, g3];
     let unique_count = {

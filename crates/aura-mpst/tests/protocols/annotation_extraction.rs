@@ -2,13 +2,9 @@
 //! extracted completely and in document order. If annotations are lost
 //! or reordered, guard checks may be skipped or run in the wrong sequence.
 
-use aura_mpst::upstream::language::compile_choreography;
-use aura_mpst::{lower_aura_effects, AuraEffect, RoleId};
+use aura_mpst::{AuraEffect, RoleId};
 
-fn compile_and_lower(choreography: &str) -> Result<Vec<AuraEffect>, Box<dyn std::error::Error>> {
-    let compiled = compile_choreography(choreography)?;
-    Ok(lower_aura_effects(&compiled)?)
-}
+use crate::support::compile_and_lower;
 
 /// guard_capability annotation produces GuardCapability effect with the
 /// correct capability string and role — if lost, the guard chain skips

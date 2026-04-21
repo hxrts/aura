@@ -106,9 +106,7 @@ pub trait TimeEffects: PhysicalTimeEffects {
     }
 }
 
-/// Blanket implementation for Arc<T> where T: PhysicalTimeEffects
-#[async_trait]
-impl<T: PhysicalTimeEffects + ?Sized> PhysicalTimeEffects for std::sync::Arc<T> {
+impl_arc_effect!(PhysicalTimeEffects {
     async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
         (**self).physical_time().await
     }
@@ -116,11 +114,9 @@ impl<T: PhysicalTimeEffects + ?Sized> PhysicalTimeEffects for std::sync::Arc<T> 
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         (**self).sleep_ms(ms).await
     }
-}
+});
 
-/// Blanket implementation for Arc<T> where T: LogicalClockEffects
-#[async_trait]
-impl<T: LogicalClockEffects + ?Sized> LogicalClockEffects for std::sync::Arc<T> {
+impl_arc_effect!(LogicalClockEffects {
     async fn logical_advance(
         &self,
         observed: Option<&crate::time::VectorClock>,
@@ -131,19 +127,15 @@ impl<T: LogicalClockEffects + ?Sized> LogicalClockEffects for std::sync::Arc<T> 
     async fn logical_now(&self) -> Result<crate::time::LogicalTime, TimeError> {
         (**self).logical_now().await
     }
-}
+});
 
-/// Blanket implementation for Arc<T> where T: OrderClockEffects
-#[async_trait]
-impl<T: OrderClockEffects + ?Sized> OrderClockEffects for std::sync::Arc<T> {
+impl_arc_effect!(OrderClockEffects {
     async fn order_time(&self) -> Result<OrderTime, TimeError> {
         (**self).order_time().await
     }
-}
+});
 
-/// Blanket implementation for Arc<T> where T: TimeComparison
-#[async_trait]
-impl<T: TimeComparison + ?Sized> TimeComparison for std::sync::Arc<T> {
+impl_arc_effect!(TimeComparison {
     async fn compare(
         &self,
         a: &crate::time::TimeStamp,
@@ -151,4 +143,4 @@ impl<T: TimeComparison + ?Sized> TimeComparison for std::sync::Arc<T> {
     ) -> Result<TimeOrdering, TimeError> {
         (**self).compare(a, b).await
     }
-}
+});

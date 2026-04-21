@@ -38,7 +38,3 @@ pub const INVITATION_GUARD_CANDIDATES: &[InvitationCapability] = &[
 pub fn evaluation_candidates_for_invitation_guard() -> &'static [InvitationCapability] {
     INVITATION_GUARD_CANDIDATES
 }
-
-pub fn evaluation_candidates_for_invitation_protocol() -> &'static [InvitationCapability] {
-    InvitationCapability::declared_names()
-}

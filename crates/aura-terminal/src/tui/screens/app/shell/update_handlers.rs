@@ -31,6 +31,23 @@ pub(super) async fn process_ui_update_match(
     let tui_selected_for_updates = &ctx.tui_selected_for_updates;
     let ready_join_channel_instances_for_updates = &ctx.ready_join_channel_instances_for_updates;
 
+    fn notification_runtime_fact_count(facts: &[RuntimeFact]) -> usize {
+        facts
+            .iter()
+            .filter(|fact| {
+                matches!(
+                    fact,
+                    RuntimeFact::InvitationAccepted {
+                        invitation_kind: aura_app::ui_contract::InvitationFactKind::Contact,
+                        operation_state: Some(OperationState::Succeeded),
+                        ..
+                    } | RuntimeFact::GuardianInvitationAccepted { .. }
+                        | RuntimeFact::DeviceEnrollmentAccepted { .. }
+                )
+            })
+            .count()
+    }
+
     macro_rules! enqueue_toast {
         ($msg:expr, $level:expr) => {{
             tui.with_mut(|state| {
@@ -1005,15 +1022,19 @@ pub(super) async fn process_ui_update_match(
         UiUpdate::NotificationsCountChanged(count) => {
             let needs_update = {
                 let state = tui.read_clone();
-                state.notifications.item_count != count
+                let total = count + state.notifications.runtime_item_count;
+                state.notifications.base_item_count != count
+                    || state.notifications.item_count != total
                     || state.notifications.selected_index
-                        != clamp_list_index(state.notifications.selected_index, count)
+                        != clamp_list_index(state.notifications.selected_index, total)
             };
             if needs_update {
                 tui.with_mut(|state| {
-                    state.notifications.item_count = count;
+                    let total = count + state.notifications.runtime_item_count;
+                    state.notifications.base_item_count = count;
+                    state.notifications.item_count = total;
                     state.notifications.selected_index =
-                        clamp_list_index(state.notifications.selected_index, count);
+                        clamp_list_index(state.notifications.selected_index, total);
                 });
             }
         }
@@ -1035,6 +1056,27 @@ pub(super) async fn process_ui_update_match(
         } => {
             tui.with_mut(|state| {
                 state.apply_runtime_facts_update(revision, replace_kinds, facts);
+                state.notifications.runtime_item_count =
+                    notification_runtime_fact_count(&state.runtime_facts);
+                state.notifications.item_count =
+                    state.notifications.base_item_count + state.notifications.runtime_item_count;
+                state.notifications.selected_index = clamp_list_index(
+                    state.notifications.selected_index,
+                    state.notifications.item_count,
+                );
+            });
+        }
+        UiUpdate::RuntimeFactObserved(fact) => {
+            tui.with_mut(|state| {
+                state.upsert_runtime_fact(fact);
+                state.notifications.runtime_item_count =
+                    notification_runtime_fact_count(&state.runtime_facts);
+                state.notifications.item_count =
+                    state.notifications.base_item_count + state.notifications.runtime_item_count;
+                state.notifications.selected_index = clamp_list_index(
+                    state.notifications.selected_index,
+                    state.notifications.item_count,
+                );
             });
         }
         UiUpdate::NicknameUpdated {

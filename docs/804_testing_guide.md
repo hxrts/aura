@@ -165,7 +165,11 @@ Browser harness failures surface explicit publication-state diagnostics through 
 
 `submitSemanticCommand` follows that rule directly. After bounded same-page recovery it must fail closed instead of replaying the semantic request through a fresh browser session. The browser publication owner classifies diagnostics by typed publication status, binding mode, and reliability before serializing them to page globals. Compatibility-sensitive waits keep one canonical publication path instead of ad hoc string assembly.
 
+Browser semantic navigation follows the same separation. Page-owned navigation helpers such as `navigate_screen` and settings-section opening may publish the target `UiSnapshot` before the browser finishes painting the new screen. Harness navigation success must therefore wait for both the target semantic screen and the matching post-render `RenderHeartbeat` or equivalent render-convergence proof before treating the control activation as complete. DOM selectors remain diagnostic corroboration only; they must not replace the semantic-plus-render contract.
+
 Browser-owned semantic snapshot publication should flow through one helper aligned with `UiController::publish_ui_snapshot`. Browser-owned maintenance polling should share one bounded helper for sleep, cancellation, and pause reporting so those paths stay uniform and clearly non-semantic. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
+
+Browser-owned async account/bootstrap flows must also fail closed on shell-state publication. If a Dioxus signal write collides with an unmounting or busy component, the browser shell may retry on the next browser tick for the active generation, but it must not silently drop the state transition.
 
 ### Shared-Flow Coverage Anchors
 
@@ -185,6 +189,8 @@ invitation acceptance, and `workflows/messaging/{channel_refs,channels,send}.rs`
 for chat navigation, join, and message-send paths. The `aura-app::ui_contract`
 facade remains the canonical export surface for that coverage metadata.
 
+Harness-mode timing exceptions remain narrowly allowlisted. The current shared allowlist includes the browser maintenance cadence plus the runtime and workflow instrumentation hooks that feed observed-shell timing helpers; those branches may tune observation cadence only and must not change business-flow semantics.
+
 Shared pending-invitation acceptance has an additional invariant now:
 `SemanticOperationKind::AcceptPendingChannelInvitation` entry points must not
 strand the authoritative semantic lifecycle at
@@ -198,6 +204,8 @@ for that browser shared-channel receive parity.
 Note-to-self is a real AMP channel provisioned at account bootstrap, not a display-only entry. It appears as a first-class channel backed by the runtime from first use, with its own context, deterministic channel ID, and standard message delivery. Channel creation parity coverage must not treat "has at least one contact" as a prerequisite for opening chat creation. TUI and web shells should expose the same semantic create-channel path when the only available participant is self, and scenario coverage should keep that path distinct from pairwise or group-member invitation flows.
 
 The notifications shared-flow anchor remains navigation-only. Parity coverage for notifications navigation requires the TUI and web shells to expose the same semantic screen transition and detail-view contract, but notification empty-state copy is informational only and must not introduce parity-critical invitation or recovery actions outside the canonical shared workflows.
+
+Native invitation and device-enrollment exports have an additional transport contract now. In non-wasm runs, `sender_hint` is a transport hint and must use the canonical `tcp://host:port` form rather than websocket-style `ws://` or `wss://` URLs. LAN integration and harness assertions should treat that field as a native direct-transport hint, not as a browser transport endpoint. When the runtime has both a stored rendezvous descriptor and a LAN-discovered descriptor for the same peer, invitation seeding should prefer the discovered descriptor if it adds a `TcpDirect` transport hint that the stored descriptor lacks so native shared-flow tests continue to exercise the direct LAN path.
 
 ### Shared Semantic Ownership Inventory
 

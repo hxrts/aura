@@ -597,12 +597,14 @@ pub trait RuntimeBridge: Send + Sync {
     /// # Arguments
     /// * `receiver` - Authority to invite as contact
     /// * `nickname` - Optional nickname for the contact
+    /// * `receiver_nickname` - Optional sender-local nickname for the invitee
     /// * `message` - Optional message to include
     /// * `ttl_ms` - Optional time-to-live in milliseconds
     async fn create_contact_invitation(
         &self,
         receiver: AuthorityId,
         nickname: Option<String>,
+        receiver_nickname: Option<String>,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError>;

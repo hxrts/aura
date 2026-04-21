@@ -8,6 +8,7 @@ mod contracts;
 mod display_clock;
 mod nav_status;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,9 +23,10 @@ use aura_app::ui::signals::{
     DISCOVERED_PEERS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
     NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
 };
+use aura_app::ui::types::EffectiveName;
 use aura_app::ui::workflows::time as time_workflows;
 use aura_app::ui_contract::{
-    bridged_operation_statuses, AuthoritativeSemanticFact, RuntimeEventKind,
+    bridged_operation_statuses, AuthoritativeSemanticFact, RuntimeEventKind, RuntimeFact,
 };
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
@@ -55,6 +57,10 @@ pub use nav_status::{
 
 fn bump_projection_version(version: &mut State<usize>) {
     version.set(version.get().wrapping_add(1));
+}
+
+fn display_contact_name(contact: &Contact) -> String {
+    contact.effective_name()
 }
 
 fn authoritative_runtime_replace_kinds() -> Vec<RuntimeEventKind> {
@@ -191,11 +197,15 @@ pub fn use_contacts_subscription(
     let shared_contacts: SharedContacts = shared_contacts_ref.read().clone();
     let last_contact_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
     let last_contact_count = last_contact_count_ref.read().clone();
+    let known_guardians_ref =
+        hooks.use_ref(|| Arc::new(RwLock::new(None::<HashMap<String, String>>)));
+    let known_guardians = known_guardians_ref.read().clone();
     let tasks = app_ctx.tasks();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
+        let update_tx = update_tx;
         let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         let mut projection_version = projection_version.clone();
         async move {
@@ -207,8 +217,46 @@ pub fn use_contacts_subscription(
                         contacts_state.all_contacts().map(Contact::from).collect();
                     let new_count = contact_list.len();
 
+                    let current_guardians = contact_list
+                        .iter()
+                        .filter(|contact| contact.is_guardian)
+                        .map(|contact| (contact.id.clone(), display_contact_name(contact)))
+                        .collect::<HashMap<_, _>>();
+                    let new_guardians = {
+                        let mut known = known_guardians.write();
+                        let added = known
+                            .as_ref()
+                            .map(|existing| {
+                                current_guardians
+                                    .iter()
+                                    .filter(|(authority_id, _)| {
+                                        !existing.contains_key(*authority_id)
+                                    })
+                                    .map(|(authority_id, guardian_name)| {
+                                        RuntimeFact::GuardianInvitationAccepted {
+                                            authority_id: Some(authority_id.clone()),
+                                            guardian_name: Some(guardian_name.clone()),
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        *known = Some(current_guardians);
+                        added
+                    };
                     *contacts.write() = contact_list;
                     bump_projection_version(&mut projection_version);
+
+                    if let Some(ref tx) = update_tx {
+                        for fact in new_guardians {
+                            spawn_ui_update(
+                                &tasks,
+                                tx,
+                                UiUpdate::RuntimeFactObserved(fact),
+                                UiUpdatePublication::RequiredUnordered,
+                            );
+                        }
+                    }
 
                     // Send contact count update for keyboard navigation
                     if let Some(ref tx) = update_tx {
@@ -260,6 +308,9 @@ pub fn use_devices_subscription(
 ) -> SharedDevices {
     let shared_devices_ref = hooks.use_ref(SharedDevices::new);
     let shared_devices: SharedDevices = shared_devices_ref.read().clone();
+    let known_devices_ref =
+        hooks.use_ref(|| Arc::new(RwLock::new(None::<HashMap<String, String>>)));
+    let known_devices = known_devices_ref.read().clone();
     let tasks = app_ctx.tasks();
 
     hooks.use_future({
@@ -283,8 +334,43 @@ pub fn use_devices_subscription(
                             last_seen: d.last_seen,
                         })
                         .collect();
+                    let current_devices = list
+                        .iter()
+                        .map(|device| (device.id.clone(), device.name.clone()))
+                        .collect::<HashMap<_, _>>();
+                    let new_devices = {
+                        let mut known = known_devices.write();
+                        let added = known
+                            .as_ref()
+                            .map(|existing| {
+                                current_devices
+                                    .iter()
+                                    .filter(|(device_id, _)| !existing.contains_key(*device_id))
+                                    .map(|(device_id, device_name)| {
+                                        RuntimeFact::DeviceEnrollmentAccepted {
+                                            device_id: Some(device_id.clone()),
+                                            device_name: Some(device_name.clone()),
+                                            device_count: Some(list.len()),
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        *known = Some(current_devices);
+                        added
+                    };
                     *devices.write() = list.clone();
                     bump_projection_version(&mut projection_version);
+                    if let Some(tx) = update_tx.as_ref() {
+                        for fact in new_devices {
+                            spawn_ui_update(
+                                &tasks,
+                                tx,
+                                UiUpdate::RuntimeFactObserved(fact),
+                                UiUpdatePublication::RequiredUnordered,
+                            );
+                        }
+                    }
                     if list.len() >= 2 {
                         if let Some(tx) = update_tx.as_ref() {
                             spawn_ui_update(

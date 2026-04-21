@@ -1,0 +1,264 @@
+# Mixed-runtime contact invite acceptance notifications:
+#
+# Flow 1:
+# 1. Alice uses the TUI to create a contact invite for Bob on web.
+# 2. Bob accepts via the shared contacts accept flow.
+# 3. Alice opens notifications and the contact-acceptance notification is present.
+#
+# Flow 2:
+# 1. Carol uses the web app to create a contact invite for Dave on TUI.
+# 2. Dave accepts via the shared contacts accept flow.
+# 3. Carol opens notifications and the contact-acceptance notification is present.
+#
+# Success criteria: both invite directions execute on mixed frontends and
+# the creator-side notifications page materializes the contact acceptance item.
+
+id = "mixed-contact-invite-notification-roundtrip"
+goal = "Validate mixed TUI/web contact invite creation and acceptance in both directions, including creator-side contact acceptance notifications on the notifications screen."
+
+[[steps]]
+id = "launch"
+action = "launch_actors"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-onboarding-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-onboarding-visible"
+action = "screen_is"
+actor = "bob"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "carol-onboarding-visible"
+action = "screen_is"
+actor = "carol"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "dave-onboarding-visible"
+action = "screen_is"
+actor = "dave"
+screen_id = "onboarding"
+timeout_ms = 60000
+
+[[steps]]
+id = "alice-create-account"
+action = "create_account"
+actor = "alice"
+value = "AliceTui"
+timeout_ms = 4000
+
+[[steps]]
+id = "bob-create-account"
+action = "create_account"
+actor = "bob"
+value = "BobWeb"
+timeout_ms = 4000
+
+[[steps]]
+id = "carol-create-account"
+action = "create_account"
+actor = "carol"
+value = "CarolWeb"
+timeout_ms = 4000
+
+[[steps]]
+id = "dave-create-account"
+action = "create_account"
+actor = "dave"
+value = "DaveTui"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-neighborhood-ready"
+action = "readiness_is"
+actor = "alice"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "bob-neighborhood-ready"
+action = "readiness_is"
+actor = "bob"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "carol-neighborhood-ready"
+action = "readiness_is"
+actor = "carol"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "dave-neighborhood-ready"
+action = "readiness_is"
+actor = "dave"
+readiness = "ready"
+timeout_ms = 120000
+
+[[steps]]
+id = "alice-open-contacts"
+action = "open_screen"
+actor = "alice"
+screen_id = "contacts"
+timeout_ms = 4000
+
+[[steps]]
+id = "bob-open-contacts"
+action = "open_screen"
+actor = "bob"
+screen_id = "contacts"
+timeout_ms = 4000
+
+[[steps]]
+id = "carol-open-contacts"
+action = "open_screen"
+actor = "carol"
+screen_id = "contacts"
+timeout_ms = 4000
+
+[[steps]]
+id = "dave-open-contacts"
+action = "open_screen"
+actor = "dave"
+screen_id = "contacts"
+timeout_ms = 4000
+
+[[steps]]
+id = "capture-alice-authority-id"
+action = "capture_current_authority_id"
+actor = "alice"
+name = "alice_authority_id"
+timeout_ms = 4000
+
+[[steps]]
+id = "capture-bob-authority-id"
+action = "capture_current_authority_id"
+actor = "bob"
+name = "bob_authority_id"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-create-contact-invitation"
+action = "create_contact_invitation"
+actor = "alice"
+value = "${bob_authority_id}"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-invitation-code-ready"
+action = "runtime_event_occurred"
+actor = "alice"
+runtime_event_kind = "invitation_code_ready"
+name = "alice_to_bob_invite_code"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-accept-contact-invitation"
+action = "accept_contact_invitation"
+actor = "bob"
+value = "${alice_to_bob_invite_code}"
+timeout_ms = 15000
+
+[[steps]]
+id = "bob-contact-link-ready"
+action = "runtime_event_occurred"
+actor = "bob"
+runtime_event_kind = "contact_link_ready"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-open-notifications"
+action = "open_screen"
+actor = "alice"
+screen_id = "notifications"
+timeout_ms = 4000
+
+[[steps]]
+id = "alice-notifications-visible"
+action = "screen_is"
+actor = "alice"
+screen_id = "notifications"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-contact-acceptance-notification-visible"
+action = "list_contains"
+actor = "alice"
+list_id = "notifications"
+item_id = "contact-accepted:${bob_authority_id}"
+timeout_ms = 120000
+
+[[steps]]
+id = "capture-dave-authority-id"
+action = "capture_current_authority_id"
+actor = "dave"
+name = "dave_authority_id"
+timeout_ms = 4000
+
+[[steps]]
+id = "carol-create-contact-invitation"
+action = "create_contact_invitation"
+actor = "carol"
+value = "${dave_authority_id}"
+timeout_ms = 30000
+
+[[steps]]
+id = "carol-invitation-code-ready"
+action = "runtime_event_occurred"
+actor = "carol"
+runtime_event_kind = "invitation_code_ready"
+name = "carol_to_dave_invite_code"
+timeout_ms = 30000
+
+[[steps]]
+id = "dave-reopen-contacts"
+action = "open_screen"
+actor = "dave"
+screen_id = "contacts"
+timeout_ms = 4000
+
+[[steps]]
+id = "dave-accept-contact-invitation"
+action = "accept_contact_invitation"
+actor = "dave"
+value = "${carol_to_dave_invite_code}"
+timeout_ms = 15000
+
+[[steps]]
+id = "dave-contact-link-ready"
+action = "runtime_event_occurred"
+actor = "dave"
+runtime_event_kind = "contact_link_ready"
+timeout_ms = 30000
+
+[[steps]]
+id = "carol-open-notifications"
+action = "open_screen"
+actor = "carol"
+screen_id = "notifications"
+timeout_ms = 4000
+
+[[steps]]
+id = "carol-notifications-visible"
+action = "screen_is"
+actor = "carol"
+screen_id = "notifications"
+timeout_ms = 30000
+
+[[steps]]
+id = "carol-contact-acceptance-notification-visible"
+action = "list_contains"
+actor = "carol"
+list_id = "notifications"
+item_id = "contact-accepted:${dave_authority_id}"
+timeout_ms = 120000

@@ -24,6 +24,21 @@ use aura_core::tree::TreeCommitment;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::sync::Arc;
 
+fn compatibility_signature(shares: &[RecoveryShare]) -> ThresholdSignature {
+    shares
+        .first()
+        .map(|first_share| {
+            ThresholdSignature::new(
+                first_share.partial_signature.clone(),
+                1,
+                vec![0],
+                Vec::new(),
+                0,
+            )
+        })
+        .unwrap_or_else(|| ThresholdSignature::new(vec![0u8; 64], 0, Vec::new(), Vec::new(), 0))
+}
+
 /// Base trait for all recovery coordinators.
 ///
 /// Coordinators are stateless - they derive state from facts in the journal.
@@ -120,18 +135,7 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
         // Use first valid signature as the "aggregate" for backward compatibility.
         // In practice, verification checks each guardian's individual signature
         // against their own public key.
-        let signature = if let Some(first_share) = shares.first() {
-            // Reconstruct a ThresholdSignature from the stored bytes
-            ThresholdSignature::new(
-                first_share.partial_signature.clone(),
-                1,
-                vec![0],
-                Vec::new(), // public key would need to be looked up
-                0,
-            )
-        } else {
-            ThresholdSignature::new(vec![0u8; 64], 0, Vec::new(), Vec::new(), 0)
-        };
+        let signature = compatibility_signature(&shares);
         RecoveryResponse::success(key_material, shares, evidence, signature)
     }
 

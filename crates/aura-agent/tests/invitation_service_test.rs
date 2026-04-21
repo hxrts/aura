@@ -84,6 +84,7 @@ async fn test_invite_as_contact_via_agent() -> TestResult {
         .invite_as_contact(
             receiver_id,
             Some("alice".to_string()),
+            None,
             Some("Hi Alice!".to_string()),
             None,
         )
@@ -208,7 +209,7 @@ async fn test_accept_invitation_via_agent() -> TestResult {
     let receiver_invitations = receiver.invitations()?;
     let receiver_id = receiver.authority_id();
     let invitation = sender_invitations
-        .invite_as_contact(receiver_id, None, None, None)
+        .invite_as_contact(receiver_id, None, None, None, None)
         .await?;
     let code = sender_invitations
         .export_code(&invitation.invitation_id)
@@ -231,7 +232,7 @@ async fn test_decline_invitation_via_agent_succeeds_despite_followup_failure() -
     let receiver_invitations = receiver.invitations()?;
     let receiver_id = receiver.authority_id();
     let invitation = sender_invitations
-        .invite_as_contact(receiver_id, None, None, None)
+        .invite_as_contact(receiver_id, None, None, None, None)
         .await?;
     let code = sender_invitations
         .export_code(&invitation.invitation_id)
@@ -254,7 +255,7 @@ async fn test_cancel_invitation_via_agent() -> TestResult {
 
     let receiver_id = AuthorityId::new_from_entropy([245u8; 32]);
     let invitation = invitations
-        .invite_as_contact(receiver_id, None, None, None)
+        .invite_as_contact(receiver_id, None, None, None, None)
         .await?;
 
     // Verify it's pending
@@ -278,15 +279,33 @@ async fn test_list_pending_via_agent() -> TestResult {
 
     // Create 3 invitations with distinct deterministic IDs
     let inv1 = invitations
-        .invite_as_contact(AuthorityId::new_from_entropy([247u8; 32]), None, None, None)
+        .invite_as_contact(
+            AuthorityId::new_from_entropy([247u8; 32]),
+            None,
+            None,
+            None,
+            None,
+        )
         .await?;
 
     let inv2 = invitations
-        .invite_as_contact(AuthorityId::new_from_entropy([248u8; 32]), None, None, None)
+        .invite_as_contact(
+            AuthorityId::new_from_entropy([248u8; 32]),
+            None,
+            None,
+            None,
+            None,
+        )
         .await?;
 
     let _inv3 = invitations
-        .invite_as_contact(AuthorityId::new_from_entropy([249u8; 32]), None, None, None)
+        .invite_as_contact(
+            AuthorityId::new_from_entropy([249u8; 32]),
+            None,
+            None,
+            None,
+            None,
+        )
         .await?;
 
     // All 3 should be pending
@@ -317,6 +336,7 @@ async fn test_get_invitation_via_agent() -> TestResult {
         .invite_as_contact(
             receiver_id,
             Some("bob".to_string()),
+            None,
             Some("Hello Bob!".to_string()),
             None,
         )

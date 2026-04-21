@@ -22,6 +22,7 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 | Consumes | `aura-app` | `AppCore`, `Intent`, `ViewState`, `ui_contract`, `workflows::semantic_facts`, shared frontend primitives (`frontend_primitives`) |
 | Consumes | `aura-agent` | `AuraAgent`, `EffectContext`, services |
 | Consumes | `aura-core` | Types only: errors, identifiers, execution modes |
+| Consumes | `aura-macros` | Ownership declaration macros |
 | Produces | — | CLI handlers, TUI screens, terminal rendering |
 
 ## Invariants

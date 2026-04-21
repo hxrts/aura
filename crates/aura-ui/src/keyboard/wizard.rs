@@ -130,7 +130,7 @@ pub(super) fn handle_add_device_modal_char(
 ) {
     match model.active_modal.as_mut() {
         Some(ActiveModal::AddDevice(state)) if matches!(state.step, AddDeviceWizardStep::Name) => {
-            state.name_input.push(ch);
+            state.push_draft_name_char(ch);
         }
         Some(ActiveModal::AddDevice(state))
             if matches!(
@@ -284,7 +284,7 @@ pub(super) fn parse_wizard_value(value: &str, fallback: u8) -> u8 {
 }
 
 pub(super) fn available_device_count(model: &UiModel) -> u8 {
-    if model.has_secondary_device {
+    if model.has_secondary_device() {
         2
     } else {
         1

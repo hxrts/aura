@@ -1,3 +1,4 @@
+use super::error_boundary::{bridge_internal, bridge_validation, bridge_validation_message};
 use super::AgentRuntimeBridge;
 use aura_app::IntentError;
 use aura_core::threshold::ParticipantIdentity;
@@ -17,11 +18,11 @@ pub(super) async fn respond_to_guardian_ceremony(
     let ceremony_state = tracker
         .get(ceremony_id)
         .await
-        .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
+        .map_err(|e| bridge_validation("Ceremony not found", e))?;
     let _status = runner
         .status(ceremony_id)
         .await
-        .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
+        .map_err(|e| bridge_validation("Ceremony not found", e))?;
 
     if accept {
         // Record acceptance in ceremony tracker
@@ -31,9 +32,7 @@ pub(super) async fn respond_to_guardian_ceremony(
                 ParticipantIdentity::guardian(bridge.agent.authority_id()),
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to record guardian acceptance: {}", e))
-            })?;
+            .map_err(|e| bridge_internal("Record guardian acceptance failed", e))?;
     } else {
         // Mark ceremony as failed due to decline
         runner
@@ -42,18 +41,15 @@ pub(super) async fn respond_to_guardian_ceremony(
                 Some("Guardian declined invitation".to_string()),
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to record guardian decline: {}", e))
-            })?;
+            .map_err(|e| bridge_internal("Record guardian decline failed", e))?;
     }
 
     let protocol_ceremony_id = {
         let hex_str = ceremony_state.ceremony_id.as_str();
-        let decoded = hex::decode(hex_str).map_err(|e| {
-            IntentError::validation_failed(format!("Invalid ceremony id format: {e}"))
-        })?;
+        let decoded =
+            hex::decode(hex_str).map_err(|e| bridge_validation("Invalid ceremony id format", e))?;
         if decoded.len() != 32 {
-            return Err(IntentError::validation_failed(format!(
+            return Err(bridge_validation_message(format!(
                 "Invalid ceremony id length: {}",
                 decoded.len()
             )));
@@ -83,7 +79,7 @@ pub(super) async fn respond_to_guardian_ceremony(
         .iter()
         .position(|id| *id == my_authority_id)
         .ok_or_else(|| {
-            IntentError::validation_failed(format!(
+            bridge_validation_message(format!(
                 "Current authority {} not found in ceremony guardians",
                 my_authority_id
             ))
@@ -92,7 +88,7 @@ pub(super) async fn respond_to_guardian_ceremony(
     let recovery_service = bridge
         .agent
         .recovery()
-        .map_err(|e| IntentError::internal_error(format!("recovery_service unavailable: {e}")))?;
+        .map_err(|e| bridge_internal("Recovery service unavailable", e))?;
     let response = if accept {
         CeremonyResponse::Accept
     } else {
@@ -106,9 +102,7 @@ pub(super) async fn respond_to_guardian_ceremony(
             role_index,
         )
         .await
-        .map_err(|e| {
-            IntentError::internal_error(format!("Guardian ceremony choreography failed: {e}"))
-        })?;
+        .map_err(|e| bridge_internal("Guardian ceremony choreography failed", e))?;
 
     Ok(())
 }

@@ -72,6 +72,8 @@ pub struct InvitationInfo {
     pub expires_at_ms: Option<u64>,
     /// Optional message from sender.
     pub message: Option<String>,
+    /// Optional sender-local nickname for the invitee on sent invitations.
+    pub receiver_nickname: Option<String>,
 }
 
 /// Canonical runtime-owned channel binding.

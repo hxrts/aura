@@ -503,6 +503,45 @@ pub fn run_ownership_workflow_tag_ratchet() -> Result<()> {
     Ok(())
 }
 
+pub fn run_ignored_test_count_ratchet() -> Result<()> {
+    const MAX_IGNORED_TEST_ANNOTATIONS: usize = 47;
+
+    let repo_root = repo_root()?;
+    let ignore_hits = rg_lines(&vec![
+        "-n".into(),
+        r#"^\s*#\[ignore(?:\s*=\s*"[^"]+")?\]"#.into(),
+        repo_relative(repo_root.join("crates")),
+        "-g".into(),
+        "*.rs".into(),
+    ])?;
+    let current_count = ignore_hits.len();
+
+    if current_count > MAX_IGNORED_TEST_ANNOTATIONS {
+        eprintln!(
+            "ignored-test-count-ratchet: current count {} exceeds baseline {}",
+            current_count, MAX_IGNORED_TEST_ANNOTATIONS
+        );
+        for hit in ignore_hits {
+            eprintln!("{hit}");
+        }
+        bail!("ignored-test-count-ratchet: ignored test count increased");
+    }
+
+    if current_count < MAX_IGNORED_TEST_ANNOTATIONS {
+        println!(
+            "ignored-test-count-ratchet: clean (current {} < baseline {}; lower the baseline)",
+            current_count, MAX_IGNORED_TEST_ANNOTATIONS
+        );
+    } else {
+        println!(
+            "ignored-test-count-ratchet: clean ({} ignored test annotations)",
+            current_count
+        );
+    }
+
+    Ok(())
+}
+
 pub fn run_protocol_device_enrollment_contract() -> Result<()> {
     let repo_root = repo_root()?;
     let targets = [

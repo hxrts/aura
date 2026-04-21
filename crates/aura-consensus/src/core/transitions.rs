@@ -64,6 +64,17 @@ impl TransitionResult {
     }
 }
 
+fn not_enabled(reason: impl Into<String>) -> TransitionResult {
+    TransitionResult::NotEnabled(reason.into())
+}
+
+fn assert_transition_invariants(state: &ConsensusState, label: &'static str) {
+    debug_assert!(
+        check_all_invariants(state),
+        "{label}: invariant violation after transition"
+    );
+}
+
 /// Start a new consensus instance.
 ///
 /// Quint: `startConsensus(cid, initiator, op, pHash, witnesses, threshold)`
@@ -85,7 +96,7 @@ pub fn start_consensus(
 ) -> TransitionResult {
     // Quint: witnesses.size() >= threshold
     if witnesses.len() < threshold.as_usize() {
-        return TransitionResult::NotEnabled(format!(
+        return not_enabled(format!(
             "insufficient witnesses: {} < {}",
             witnesses.len(),
             threshold.get()
@@ -103,10 +114,7 @@ pub fn start_consensus(
     );
 
     // Quint: WellFormedState invariant after startConsensus
-    debug_assert!(
-        check_all_invariants(&state),
-        "start_consensus: invariant violation on new state"
-    );
+    assert_transition_invariants(&state, "start_consensus");
 
     TransitionResult::Ok(state)
 }
@@ -128,28 +136,22 @@ pub fn start_consensus(
 pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> TransitionResult {
     // Quint: isWitness = inst.witnesses.contains(witness)
     if !state.witnesses.contains(&proposal.witness) {
-        return TransitionResult::NotEnabled(format!(
-            "witness {} not in witness set",
-            proposal.witness
-        ));
+        return not_enabled(format!("witness {} not in witness set", proposal.witness));
     }
 
     // Quint: notVoted = not(hasProposal(inst.proposals, witness))
     if state.has_proposal(&proposal.witness) {
-        return TransitionResult::NotEnabled(format!("witness {} already voted", proposal.witness));
+        return not_enabled(format!("witness {} already voted", proposal.witness));
     }
 
     // Quint: isActive = inst.phase == FastPathActive or inst.phase == FallbackActive
     if !state.is_active() {
-        return TransitionResult::NotEnabled(format!("consensus not active: {:?}", state.phase));
+        return not_enabled(format!("consensus not active: {:?}", state.phase));
     }
 
     // Quint: not(inst.equivocators.contains(witness))
     if state.equivocators.contains(&proposal.witness) {
-        return TransitionResult::NotEnabled(format!(
-            "witness {} is known equivocator",
-            proposal.witness
-        ));
+        return not_enabled(format!("witness {} is known equivocator", proposal.witness));
     }
 
     let mut new_state = state.clone();
@@ -177,13 +179,6 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
 
         // Create commit fact
         if let Some(rid) = new_state.majority_result() {
-            let attesters: BTreeSet<AuthorityId> = new_state
-                .proposals
-                .iter()
-                .filter(|p| p.result_id == rid)
-                .map(|p| p.witness)
-                .collect();
-
             new_state.commit_fact = Some(PureCommitFact {
                 cid: new_state.cid,
                 result_id: rid,
@@ -194,10 +189,7 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
     }
 
     // Quint: InvariantEquivocatorsExcluded, InvariantCommitRequiresThreshold
-    debug_assert!(
-        check_all_invariants(&new_state),
-        "apply_share: invariant violation after share application"
-    );
+    assert_transition_invariants(&new_state, "apply_share");
 
     TransitionResult::Ok(new_state)
 }
@@ -215,7 +207,7 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
 pub fn trigger_fallback(state: &ConsensusState) -> TransitionResult {
     // Quint: isFastPath = inst.phase == FastPathActive
     if state.phase != ConsensusPhase::FastPathActive {
-        return TransitionResult::NotEnabled(format!("not in fast path: {:?}", state.phase));
+        return not_enabled(format!("not in fast path: {:?}", state.phase));
     }
 
     let mut new_state = state.clone();
@@ -223,10 +215,7 @@ pub fn trigger_fallback(state: &ConsensusState) -> TransitionResult {
     new_state.fallback_timer_active = true;
 
     // Quint: WellFormedState invariant after triggerFallback
-    debug_assert!(
-        check_all_invariants(&new_state),
-        "trigger_fallback: invariant violation after phase transition"
-    );
+    assert_transition_invariants(&new_state, "trigger_fallback");
 
     TransitionResult::Ok(new_state)
 }
@@ -245,7 +234,7 @@ pub fn trigger_fallback(state: &ConsensusState) -> TransitionResult {
 pub fn gossip_shares(state: &ConsensusState, shares: Vec<ShareProposal>) -> TransitionResult {
     // Quint: isFallback = inst.phase == FallbackActive
     if state.phase != ConsensusPhase::FallbackActive {
-        return TransitionResult::NotEnabled(format!("not in fallback: {:?}", state.phase));
+        return not_enabled(format!("not in fallback: {:?}", state.phase));
     }
 
     // Filter valid shares
@@ -261,7 +250,7 @@ pub fn gossip_shares(state: &ConsensusState, shares: Vec<ShareProposal>) -> Tran
 
     // Quint: validShares.size() >= 1
     if valid_shares.is_empty() {
-        return TransitionResult::NotEnabled("no valid shares to add".to_string());
+        return not_enabled("no valid shares to add");
     }
 
     let mut new_state = state.clone();
@@ -275,10 +264,7 @@ pub fn gossip_shares(state: &ConsensusState, shares: Vec<ShareProposal>) -> Tran
     }
 
     // Quint: WellFormedState invariant after gossipShares
-    debug_assert!(
-        check_all_invariants(&new_state),
-        "gossip_shares: invariant violation after share gossip"
-    );
+    assert_transition_invariants(&new_state, "gossip_shares");
 
     TransitionResult::Ok(new_state)
 }
@@ -297,13 +283,13 @@ pub fn gossip_shares(state: &ConsensusState, shares: Vec<ShareProposal>) -> Tran
 pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &Hash32) -> TransitionResult {
     // Quint: isFallback = inst.phase == FallbackActive
     if state.phase != ConsensusPhase::FallbackActive {
-        return TransitionResult::NotEnabled(format!("not in fallback: {:?}", state.phase));
+        return not_enabled(format!("not in fallback: {:?}", state.phase));
     }
 
     // Quint: reachedThreshold = matchingCount >= inst.threshold
     let matching_count = state.count_proposals_for_result(winning_rid);
     if matching_count < state.threshold.as_usize() {
-        return TransitionResult::NotEnabled(format!(
+        return not_enabled(format!(
             "insufficient shares for {}: {} < {}",
             winning_rid,
             matching_count,
@@ -315,13 +301,6 @@ pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &Hash32) -> Tr
     new_state.phase = ConsensusPhase::Committed;
 
     // Create commit fact
-    let attesters: BTreeSet<AuthorityId> = state
-        .proposals
-        .iter()
-        .filter(|p| p.result_id == *winning_rid)
-        .map(|p| p.witness)
-        .collect();
-
     new_state.commit_fact = Some(PureCommitFact {
         cid: state.cid,
         result_id: *winning_rid,
@@ -330,10 +309,7 @@ pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &Hash32) -> Tr
     });
 
     // Quint: InvariantCommitRequiresThreshold, InvariantCommittedHasCommitFact
-    debug_assert!(
-        check_all_invariants(&new_state),
-        "complete_via_fallback: invariant violation after commit"
-    );
+    assert_transition_invariants(&new_state, "complete_via_fallback");
 
     TransitionResult::Ok(new_state)
 }
@@ -351,22 +327,19 @@ pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &Hash32) -> Tr
 pub fn fail_consensus(state: &ConsensusState) -> TransitionResult {
     // Quint: notCommitted = inst.phase != ConsensusCommitted
     if state.phase == ConsensusPhase::Committed {
-        return TransitionResult::NotEnabled("already committed".to_string());
+        return not_enabled("already committed");
     }
 
     // Quint: notFailed = inst.phase != ConsensusFailed
     if state.phase == ConsensusPhase::Failed {
-        return TransitionResult::NotEnabled("already failed".to_string());
+        return not_enabled("already failed");
     }
 
     let mut new_state = state.clone();
     new_state.phase = ConsensusPhase::Failed;
 
     // Quint: WellFormedState invariant after failConsensus
-    debug_assert!(
-        check_all_invariants(&new_state),
-        "fail_consensus: invariant violation after failure"
-    );
+    assert_transition_invariants(&new_state, "fail_consensus");
 
     TransitionResult::Ok(new_state)
 }

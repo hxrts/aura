@@ -66,17 +66,23 @@ pub struct TextModalState {
 
 #[derive(Debug, Clone)]
 pub struct CreateInvitationModalState {
+    pub nickname: String,
+    pub receiver_nickname: String,
     pub message: String,
     pub ttl_hours: u64,
     pub active_field: FieldId,
+    pub generated_code: Option<String>,
 }
 
 impl Default for CreateInvitationModalState {
     fn default() -> Self {
         Self {
+            nickname: String::new(),
+            receiver_nickname: String::new(),
             message: String::new(),
             ttl_hours: 24,
-            active_field: FieldId::InvitationMessage,
+            active_field: FieldId::Nickname,
+            generated_code: None,
         }
     }
 }
@@ -138,6 +144,47 @@ impl Default for AddDeviceModalState {
             error_message: None,
             name_input: String::new(),
         }
+    }
+}
+
+impl AddDeviceModalState {
+    #[must_use]
+    pub const fn accepts_name_input(&self) -> bool {
+        matches!(self.step, AddDeviceWizardStep::Name)
+    }
+
+    #[must_use]
+    pub fn draft_name(&self) -> Option<&str> {
+        self.accepts_name_input()
+            .then_some(self.name_input.as_str())
+    }
+
+    pub fn set_draft_name(&mut self, value: String) {
+        if self.accepts_name_input() {
+            self.name_input = value;
+        }
+    }
+
+    pub fn push_draft_name_char(&mut self, ch: char) {
+        if self.accepts_name_input() {
+            self.name_input.push(ch);
+        }
+    }
+
+    #[must_use]
+    pub fn commit_draft_name(&mut self) -> Option<String> {
+        if !self.accepts_name_input() {
+            return None;
+        }
+
+        let name = self.name_input.trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+
+        self.device_name = name.clone();
+        self.name_input.clear();
+        Some(name)
     }
 }
 

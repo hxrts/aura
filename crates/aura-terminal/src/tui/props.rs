@@ -24,6 +24,7 @@ use crate::tui::state::{
     GuardianSetupStep, NeighborhoodMode, QueuedModal, TuiState,
 };
 use crate::tui::types::{AccessLevel, Contact, Device};
+use aura_app::ui_contract::RuntimeFact;
 use aura_core::threshold::AgreementMode;
 use tracing::warn;
 
@@ -224,6 +225,8 @@ pub struct ContactsImportModalViewProps {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ContactsCreateModalViewProps {
     pub visible: bool,
+    pub nickname: String,
+    pub receiver_nickname: String,
     pub message: String,
     pub ttl_hours: u64,
     pub focused_field: CreateInvitationField,
@@ -310,13 +313,31 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         _ => (false, String::new(), false),
     };
 
-    let (create_visible, create_message, create_ttl, create_focused_field) =
-        match state.modal_queue.current() {
-            Some(QueuedModal::ContactsCreate(s)) => {
-                (true, s.message.clone(), s.ttl_hours, s.focused_field)
-            }
-            _ => (false, String::new(), 24, CreateInvitationField::Message),
-        };
+    let (
+        create_visible,
+        create_nickname,
+        create_receiver_nickname,
+        create_message,
+        create_ttl,
+        create_focused_field,
+    ) = match state.modal_queue.current() {
+        Some(QueuedModal::ContactsCreate(s)) => (
+            true,
+            s.nickname.clone(),
+            s.receiver_nickname.clone(),
+            s.message.clone(),
+            s.ttl_hours,
+            s.focused_field,
+        ),
+        _ => (
+            false,
+            String::new(),
+            String::new(),
+            String::new(),
+            24,
+            CreateInvitationField::Nickname,
+        ),
+    };
 
     let (code_visible, code_invitation_id, code_code, code_loading, code_copied) =
         match state.modal_queue.current() {
@@ -404,6 +425,8 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
             },
             create_invitation: ContactsCreateModalViewProps {
                 visible: create_visible,
+                nickname: create_nickname,
+                receiver_nickname: create_receiver_nickname,
                 message: create_message,
                 ttl_hours: create_ttl,
                 focused_field: create_focused_field,
@@ -444,10 +467,28 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
 // ============================================================================
 
 /// View state extracted from TuiState for NotificationsScreen
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct NotificationsViewProps {
     pub focus: crate::tui::navigation::TwoPanelFocus,
     pub selected_index: usize,
+    pub runtime_facts: Vec<RuntimeFact>,
+    pub dismissed_ids: std::collections::HashSet<String>,
+    /// Shared write-back for the visible notification IDs (same Arc as
+    /// `TuiState.notifications.visible_ids`). The screen component
+    /// populates this after sorting and filtering.
+    pub visible_ids_sink: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl Default for NotificationsViewProps {
+    fn default() -> Self {
+        Self {
+            focus: crate::tui::navigation::TwoPanelFocus::default(),
+            selected_index: 0,
+            runtime_facts: Vec::new(),
+            dismissed_ids: std::collections::HashSet::new(),
+            visible_ids_sink: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
 }
 
 /// Extract NotificationsScreen view props from TuiState
@@ -455,6 +496,9 @@ pub fn extract_notifications_view_props(state: &TuiState) -> NotificationsViewPr
     NotificationsViewProps {
         focus: state.notifications.focus,
         selected_index: state.notifications.selected_index,
+        runtime_facts: state.runtime_facts.clone(),
+        dismissed_ids: state.notifications.dismissed_ids.clone(),
+        visible_ids_sink: state.notifications.visible_ids.clone(),
     }
 }
 

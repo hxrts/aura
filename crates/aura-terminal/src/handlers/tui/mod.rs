@@ -37,6 +37,10 @@ use futures::FutureExt;
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
 use crate::demo::{spawn_amp_inbox_listener, DemoHints, DemoSimulator, EchoPeer};
+use crate::env::{
+    bootstrap_broker_override as bootstrap_broker_env_override,
+    harness_lan_discovery_override as harness_lan_discovery_env_override,
+};
 use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
 use crate::tui::{
     context::{InitializedAppCore, IoContext, ShellExitIntent},
@@ -272,11 +276,7 @@ pub fn resolve_storage_path(explicit_override: Option<&str>, mode: TuiMode) -> P
         return PathBuf::from(path);
     }
 
-    let aura_path = env::var("AURA_PATH")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let aura_path = aura_agent::core::config::aura_storage_root();
 
     match mode {
         TuiMode::Production => aura_path.join(".aura"),
@@ -285,42 +285,43 @@ pub fn resolve_storage_path(explicit_override: Option<&str>, mode: TuiMode) -> P
 }
 
 fn harness_lan_discovery_override(current: &mut aura_agent::core::config::AgentConfig) {
-    let enabled = std::env::var("AURA_HARNESS_LAN_DISCOVERY_ENABLED")
-        .ok()
-        .and_then(|value| value.parse::<bool>().ok());
-    let Some(enabled) = enabled else {
+    let Some(override_env) = harness_lan_discovery_env_override() else {
         return;
     };
-    let bind_addr = std::env::var("AURA_HARNESS_LAN_DISCOVERY_BIND_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0".to_string());
-    let broadcast_addr = std::env::var("AURA_HARNESS_LAN_DISCOVERY_BROADCAST_ADDR")
-        .unwrap_or_else(|_| "255.255.255.255".to_string());
-    let port = std::env::var("AURA_HARNESS_LAN_DISCOVERY_PORT")
-        .ok()
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(current.lan_discovery.port);
 
-    current.lan_discovery.enabled = enabled;
-    current.lan_discovery.bind_addr = bind_addr;
-    current.lan_discovery.broadcast_addr = broadcast_addr;
-    current.lan_discovery.port = port;
+    current.lan_discovery.enabled = override_env.enabled;
+    current.lan_discovery.bind_addr = override_env.bind_addr;
+    current.lan_discovery.broadcast_addr = override_env.broadcast_addr;
+    current.lan_discovery.port = override_env.port.unwrap_or(current.lan_discovery.port);
+
+    tracing::info!(
+        enabled = current.lan_discovery.enabled,
+        bind_addr = %current.lan_discovery.bind_addr,
+        broadcast_addr = %current.lan_discovery.broadcast_addr,
+        port = current.lan_discovery.port,
+        "Applied harness LAN discovery overrides from environment"
+    );
 }
 
 fn bootstrap_broker_override(current: &mut aura_agent::core::config::AgentConfig) {
-    let bind_addr = std::env::var("AURA_BOOTSTRAP_BROKER_BIND").ok();
-    let base_url = std::env::var("AURA_BOOTSTRAP_BROKER_URL").ok();
-    if bind_addr.is_none() && base_url.is_none() {
+    let Some(override_env) = bootstrap_broker_env_override() else {
         return;
-    }
+    };
 
     let mut broker = BootstrapBrokerConfig::default().enabled(true);
-    if let Some(bind_addr) = bind_addr {
+    if let Some(bind_addr) = override_env.bind_addr {
         broker = broker.with_bind_addr(bind_addr);
     }
-    if let Some(base_url) = base_url {
+    if let Some(base_url) = override_env.base_url {
         broker = broker.with_base_url(base_url);
     }
     current.bootstrap_broker = broker;
+
+    tracing::info!(
+        bind_addr = ?current.bootstrap_broker.bind_addr,
+        base_url = ?current.bootstrap_broker.base_url,
+        "Applied bootstrap broker overrides from environment"
+    );
 }
 
 fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
@@ -368,7 +369,11 @@ fn build_demo_io_context(
 ) -> crate::error::TerminalResult<IoContext> {
     let seed = match launch.mode {
         TuiMode::Demo { seed } => seed,
-        TuiMode::Production => unreachable!("demo context builder only handles demo launches"),
+        TuiMode::Production => {
+            return Err(crate::error::TerminalError::Config(
+                "demo context builder cannot be used for production launches".to_string(),
+            ));
+        }
     };
     let hints = DemoHints::new(seed);
     let mut builder = IoContext::builder()

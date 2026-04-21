@@ -965,7 +965,7 @@ fn test_social_graph_flow_state_extraction() {
 
 /// Generative test: replay flow trace from tui_flows.qnt
 #[test]
-#[ignore] // Run with: cargo test --ignored
+#[ignore = "requires generated Quint trace input; re-enable after regenerating verification/quint/traces/tui_flows_trace.itf.json for the current flow spec"]
 fn test_replay_flow_trace() {
     let trace_path = "../../verification/quint/traces/tui_flows_trace.itf.json";
 
@@ -1003,7 +1003,7 @@ fn test_replay_flow_trace() {
 
 /// Generate and replay flow traces
 #[test]
-#[ignore] // Run with: cargo test test_generative_flow_replay -- --ignored --nocapture
+#[ignore = "spawns Quint to generate traces; re-enable when the local Quint toolchain and tui_flows.qnt scenario entry points are being validated"]
 fn test_generative_flow_replay() {
     use std::process::Command;
 
@@ -1067,7 +1067,7 @@ fn test_generative_flow_replay() {
 
 /// Multi-scenario generative test
 #[test]
-#[ignore] // Run with: cargo test test_multi_scenario_generative -- --ignored --nocapture
+#[ignore = "long-running Quint scenario sweep; re-enable when replaying the full multi-scenario verification suite against current TUI flows"]
 fn test_multi_scenario_generative() {
     use std::process::Command;
 

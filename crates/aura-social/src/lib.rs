@@ -114,9 +114,11 @@ pub use error::SocialError;
 pub use facts::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
 pub use home::Home;
 pub use moderation::{
-    is_user_banned, is_user_muted, query_current_bans, query_current_mutes, query_kick_history,
+    is_user_banned, is_user_muted, query_current_bans, query_current_bans_in_live_channels,
+    query_current_mutes, query_current_mutes_in_live_channels, query_kick_history,
     register_moderation_facts, BanStatus, HomeBanFact, HomeGrantModeratorFact, HomeKickFact,
-    HomeMuteFact, HomeRevokeModeratorFact, HomeUnbanFact, HomeUnmuteFact, KickRecord, MuteStatus,
+    HomeMuteFact, HomeRevokeModeratorFact, HomeUnbanFact, HomeUnmuteFact, KickRecord,
+    ModerationScopeKey, MuteStatus,
 };
 pub use neighborhood::Neighborhood;
 pub use relay::{ReachabilityChecker, RelayCandidateBuilder};

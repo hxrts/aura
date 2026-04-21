@@ -135,6 +135,15 @@ impl ComposableDelta for InvitationDelta {
     }
 
     fn try_merge(&mut self, other: Self) -> bool {
+        fn replace_if_newer(current_timestamp: &mut u64, candidate_timestamp: u64) -> bool {
+            if candidate_timestamp >= *current_timestamp {
+                *current_timestamp = candidate_timestamp;
+                true
+            } else {
+                false
+            }
+        }
+
         match (self, other) {
             (
                 InvitationDelta::InvitationAdded {
@@ -158,8 +167,7 @@ impl ComposableDelta for InvitationDelta {
                     message,
                 },
             ) => {
-                if other_ts >= *created_at {
-                    *created_at = other_ts;
+                if replace_if_newer(created_at, other_ts) {
                     *id = invitation_id;
                     *dir = direction;
                     *other_id = other_party_id;
@@ -184,8 +192,7 @@ impl ComposableDelta for InvitationDelta {
                     new_status,
                 },
             ) => {
-                if other_ts >= *changed_at {
-                    *changed_at = other_ts;
+                if replace_if_newer(changed_at, other_ts) {
                     *id = invitation_id;
                     *old = old_status;
                     *new = new_status;
@@ -216,8 +223,7 @@ impl ComposableDelta for InvitationDelta {
                     reversion_risk,
                 },
             ) => {
-                if other_ts >= *timestamp_ms {
-                    *timestamp_ms = other_ts;
+                if replace_if_newer(timestamp_ms, other_ts) {
                     *id = ceremony_id;
                     *st = status;
                     *rsn = reason;
@@ -236,6 +242,40 @@ impl ComposableDelta for InvitationDelta {
 ///
 /// Transforms `InvitationFact` instances into `InvitationDelta` view updates.
 pub struct InvitationViewReducer;
+
+impl InvitationViewReducer {
+    fn invitation_direction(
+        own_authority: Option<AuthorityId>,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+    ) -> (InvitationDirection, AuthorityId) {
+        match own_authority {
+            Some(own) if sender_id == own => (InvitationDirection::Outbound, receiver_id),
+            Some(own) if receiver_id == own => (InvitationDirection::Inbound, sender_id),
+            Some(_) => (InvitationDirection::Observed, receiver_id),
+            None => (InvitationDirection::Outbound, receiver_id),
+        }
+    }
+
+    fn ceremony_status_delta(
+        ceremony_id: CeremonyId,
+        status: CeremonyViewStatus,
+        reason: Option<String>,
+        relationship_id: Option<CeremonyRelationshipId>,
+        agreement_mode: Option<AgreementMode>,
+        timestamp_ms: u64,
+    ) -> InvitationDelta {
+        InvitationDelta::CeremonyStatusChanged {
+            ceremony_id,
+            status,
+            reason,
+            relationship_id,
+            reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
+            agreement_mode,
+            timestamp_ms,
+        }
+    }
+}
 
 impl ViewDeltaReducer for InvitationViewReducer {
     fn handles_type(&self) -> &'static str {
@@ -267,20 +307,8 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 message,
                 ..
             } => {
-                // Determine direction based on whether we sent or received the invitation
-                let (direction, other_party_id) = if let Some(own) = own_authority {
-                    if sender_id == own {
-                        (InvitationDirection::Outbound, receiver_id)
-                    } else if receiver_id == own {
-                        (InvitationDirection::Inbound, sender_id)
-                    } else {
-                        // Neither sender nor receiver - this is a third-party observation
-                        (InvitationDirection::Observed, receiver_id)
-                    }
-                } else {
-                    // No authority context - default to outbound for Sent facts
-                    (InvitationDirection::Outbound, receiver_id)
-                };
+                let (direction, other_party_id) =
+                    Self::invitation_direction(own_authority, sender_id, receiver_id);
 
                 Some(InvitationDelta::InvitationAdded {
                     invitation_id,
@@ -322,58 +350,54 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 agreement_mode,
                 timestamp_ms,
                 ..
-            } => Some(InvitationDelta::CeremonyStatusChanged {
+            } => Some(Self::ceremony_status_delta(
                 ceremony_id,
-                status: CeremonyViewStatus::Initiated,
-                reason: None,
-                relationship_id: None,
-                reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
+                CeremonyViewStatus::Initiated,
+                None,
+                None,
                 agreement_mode,
                 timestamp_ms,
-            }),
+            )),
             InvitationFact::CeremonyAcceptanceReceived {
                 ceremony_id,
                 agreement_mode,
                 timestamp_ms,
                 ..
-            } => Some(InvitationDelta::CeremonyStatusChanged {
+            } => Some(Self::ceremony_status_delta(
                 ceremony_id,
-                status: CeremonyViewStatus::AcceptanceReceived,
-                reason: None,
-                relationship_id: None,
-                reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
+                CeremonyViewStatus::AcceptanceReceived,
+                None,
+                None,
                 agreement_mode,
                 timestamp_ms,
-            }),
+            )),
             InvitationFact::CeremonyCommitted {
                 ceremony_id,
                 relationship_id,
                 agreement_mode,
                 timestamp_ms,
                 ..
-            } => Some(InvitationDelta::CeremonyStatusChanged {
+            } => Some(Self::ceremony_status_delta(
                 ceremony_id,
-                status: CeremonyViewStatus::Committed,
-                reason: None,
-                relationship_id: Some(relationship_id),
-                reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
+                CeremonyViewStatus::Committed,
+                None,
+                Some(relationship_id),
                 agreement_mode,
                 timestamp_ms,
-            }),
+            )),
             InvitationFact::CeremonyAborted {
                 ceremony_id,
                 reason,
                 timestamp_ms,
                 ..
-            } => Some(InvitationDelta::CeremonyStatusChanged {
+            } => Some(Self::ceremony_status_delta(
                 ceremony_id,
-                status: CeremonyViewStatus::Aborted,
-                reason: Some(reason),
-                relationship_id: None,
-                reversion_risk: true,
-                agreement_mode: None,
+                CeremonyViewStatus::Aborted,
+                Some(reason),
+                None,
+                None,
                 timestamp_ms,
-            }),
+            )),
             InvitationFact::CeremonySuperseded {
                 superseded_ceremony_id,
                 superseding_ceremony_id,
@@ -383,15 +407,14 @@ impl ViewDeltaReducer for InvitationViewReducer {
             } => {
                 let superseded_reason =
                     format!("{reason} (superseded by {superseding_ceremony_id})");
-                Some(InvitationDelta::CeremonyStatusChanged {
-                    ceremony_id: superseded_ceremony_id,
-                    status: CeremonyViewStatus::Superseded,
-                    reason: Some(superseded_reason),
-                    relationship_id: None,
-                    reversion_risk: true,
-                    agreement_mode: None,
+                Some(Self::ceremony_status_delta(
+                    superseded_ceremony_id,
+                    CeremonyViewStatus::Superseded,
+                    Some(superseded_reason),
+                    None,
+                    None,
                     timestamp_ms,
-                })
+                ))
             }
         };
 

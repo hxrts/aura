@@ -20,6 +20,7 @@ Neighborhood-plane topology and moderation layer providing home management, neig
 |-----------|-------|------|
 | Incoming | aura-core | Effect traits, identifiers |
 | Incoming | aura-journal | Fact infrastructure, social facts from journal |
+| Incoming | aura-macros | Domain fact derive macros |
 | Outgoing | — | `SocialFact`, `SocialFactReducer` for social state facts |
 | Outgoing | — | `Home`, `Neighborhood` for social graph structure |
 | Outgoing | — | `SocialTopology`, `DiscoveryLayer` for graph traversal |

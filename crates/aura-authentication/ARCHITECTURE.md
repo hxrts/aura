@@ -21,6 +21,7 @@ End-to-end authentication protocol including challenge-response flows, session m
 | Incoming | aura-authorization | Biscuit tokens, capabilities |
 | Incoming | aura-signature | Session types, identity verification |
 | Incoming | aura-guards | Guard evaluation, Biscuit integration |
+| Incoming | aura-macros | Domain fact and choreography macros |
 | Outgoing | — | `AuthFact`, `AuthFactReducer`, `AuthFactDelta` for journal integration |
 | Outgoing | — | `AuthService` for session ticket issuance and validation |
 | Outgoing | — | `AuthGuards` for recovery operation authorization |

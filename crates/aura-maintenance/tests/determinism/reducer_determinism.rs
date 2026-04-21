@@ -16,6 +16,14 @@ fn authority(seed: u8) -> AuthorityId {
     AuthorityId::new_from_entropy([seed; 32])
 }
 
+fn hash(seed: u8) -> Hash32 {
+    Hash32([seed; 32])
+}
+
+fn uuid(seed: u128) -> Uuid {
+    Uuid::from_bytes(seed.to_be_bytes())
+}
+
 fn assert_delta_eq(left: &MaintenanceFactDelta, right: &MaintenanceFactDelta) {
     assert_eq!(left.snapshot_proposals, right.snapshot_proposals);
     assert_eq!(left.snapshot_completions, right.snapshot_completions);
@@ -32,9 +40,9 @@ fn reducer_apply_is_deterministic_and_order_independent() {
     let reducer = MaintenanceFactReducer;
     let fact_a = MaintenanceFact::SnapshotProposed(SnapshotProposed::new(
         authority(1),
-        Uuid::from_bytes(2u128.to_be_bytes()),
+        uuid(2),
         Epoch::new(3),
-        Hash32([4u8; 32]),
+        hash(4),
     ));
     let fact_b = MaintenanceFact::CacheInvalidated(CacheInvalidated::new(
         authority(2),
@@ -67,13 +75,13 @@ fn reducer_apply_is_deterministic_and_order_independent() {
 #[test]
 fn fact_envelope_roundtrip() {
     let metadata = UpgradeProposalMetadata {
-        package_id: Uuid::from_bytes(7u128.to_be_bytes()),
+        package_id: uuid(7),
         version: SemanticVersion::new(1, 2, 3),
-        artifact_hash: Hash32([8u8; 32]),
+        artifact_hash: hash(8),
     };
     let fact = MaintenanceFact::UpgradeActivated(UpgradeActivated::new(
         authority(4),
-        Uuid::from_bytes(6u128.to_be_bytes()),
+        uuid(6),
         SemanticVersion::new(2, 0, 0),
         IdentityEpochFence::new(aura_core::AccountId::from_bytes([5u8; 32]), Epoch::new(10)),
         metadata,
@@ -107,13 +115,13 @@ fn fact_envelope_roundtrip() {
 fn snapshot_proposal_then_completion_lifecycle() {
     let reducer = MaintenanceFactReducer;
     let auth = authority(10);
-    let proposal_id = Uuid::from_bytes(20u128.to_be_bytes());
+    let proposal_id = uuid(20);
 
     let proposal = MaintenanceFact::SnapshotProposed(SnapshotProposed::new(
         auth,
         proposal_id,
         Epoch::new(5),
-        Hash32([11u8; 32]),
+        hash(11),
     ));
 
     let snapshot = aura_core::tree::Snapshot::new(
@@ -184,26 +192,26 @@ fn upgrade_activations_counted_independently() {
         IdentityEpochFence::new(aura_core::AccountId::from_bytes([50u8; 32]), Epoch::new(1));
 
     let v1_metadata = UpgradeProposalMetadata {
-        package_id: Uuid::from_bytes(60u128.to_be_bytes()),
+        package_id: uuid(60),
         version: SemanticVersion::new(1, 0, 0),
-        artifact_hash: Hash32([61u8; 32]),
+        artifact_hash: hash(61),
     };
     let v2_metadata = UpgradeProposalMetadata {
-        package_id: Uuid::from_bytes(70u128.to_be_bytes()),
+        package_id: uuid(70),
         version: SemanticVersion::new(2, 0, 0),
-        artifact_hash: Hash32([71u8; 32]),
+        artifact_hash: hash(71),
     };
 
     let upgrade_v1 = MaintenanceFact::UpgradeActivated(UpgradeActivated::new(
         auth,
-        Uuid::from_bytes(60u128.to_be_bytes()),
+        uuid(60),
         SemanticVersion::new(1, 0, 0),
         fence,
         v1_metadata,
     ));
     let upgrade_v2 = MaintenanceFact::UpgradeActivated(UpgradeActivated::new(
         auth,
-        Uuid::from_bytes(70u128.to_be_bytes()),
+        uuid(70),
         SemanticVersion::new(2, 0, 0),
         fence,
         v2_metadata,

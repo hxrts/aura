@@ -51,9 +51,10 @@ impl SyncService {
                 allowed_peers.push(peer);
             } else if let Some(retry_after) = result.retry_after() {
                 tracing::debug!(
-                    "Rate limit exceeded for peer {}, retry after {:?}",
-                    peer,
-                    retry_after
+                    operation_id = JOURNAL_SYNC_OPERATION_ID,
+                    peer_id = %peer,
+                    retry_after_ms = retry_after.as_millis(),
+                    "Rate limit exceeded for peer"
                 );
             }
         }
@@ -90,9 +91,18 @@ impl SyncService {
 
         for &peer in peers {
             if let Err(e) = session_manager.close_session(peer) {
-                tracing::warn!("Failed to clean up session for peer {}: {}", peer, e);
+                tracing::warn!(
+                    operation_id = JOURNAL_SYNC_OPERATION_ID,
+                    peer_id = %peer,
+                    error = %e,
+                    "Failed to clean up session for peer"
+                );
             } else {
-                tracing::debug!("Cleaned up sync session for peer {}", peer);
+                tracing::debug!(
+                    operation_id = JOURNAL_SYNC_OPERATION_ID,
+                    peer_id = %peer,
+                    "Cleaned up sync session for peer"
+                );
             }
         }
 
@@ -111,8 +121,9 @@ impl SyncService {
         }
 
         tracing::debug!(
-            "Discovered {} available peers for sync",
-            available_peers.len()
+            operation_id = AUTO_SYNC_OPERATION_ID,
+            available_peer_count = available_peers.len(),
+            "Discovered available peers for sync"
         );
         Ok(available_peers)
     }
@@ -179,15 +190,21 @@ impl SyncService {
         let mut manager = session_manager.write();
         for &peer in peers {
             match manager.create_session(vec![peer], &now) {
-                Ok(_session_id) => {
+                Ok(session_id) => {
                     session_peers.push(peer);
-                    tracing::debug!("Created auto-sync session for peer {}", peer);
+                    tracing::debug!(
+                        operation_id = JOURNAL_SYNC_OPERATION_ID,
+                        session_id = %session_id,
+                        peer_id = %peer,
+                        "Created auto-sync session for peer"
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "Failed to create auto-sync session for peer {}: {}",
-                        peer,
-                        e
+                        operation_id = JOURNAL_SYNC_OPERATION_ID,
+                        peer_id = %peer,
+                        error = %e,
+                        "Failed to create auto-sync session for peer"
                     );
                 }
             }

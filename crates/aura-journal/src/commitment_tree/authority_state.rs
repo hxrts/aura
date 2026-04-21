@@ -168,7 +168,6 @@ impl AuthorityTreeState {
         self.active_leaves.insert(leaf_id);
 
         self.refresh_after_structural_change();
-        debug_assert!(self.assert_topology_invariants().is_ok());
 
         leaf_id
     }
@@ -197,24 +196,17 @@ impl AuthorityTreeState {
         public_key: Vec<u8>,
     ) -> Result<(), aura_core::AuraError> {
         if !self.active_leaves.contains(&leaf_id) {
-            return Err(aura_core::AuraError::not_found(format!(
-                "Leaf {} not found or inactive",
-                leaf_id.0
-            )));
+            return Err(Self::leaf_inactive(leaf_id));
         }
 
-        let leaf = self.leaves.get_mut(&leaf_id).ok_or_else(|| {
-            aura_core::AuraError::not_found(format!("Leaf {} not found", leaf_id.0))
-        })?;
+        let leaf = self
+            .leaves
+            .get_mut(&leaf_id)
+            .ok_or_else(|| Self::leaf_not_found(leaf_id))?;
         leaf.public_key = public_key;
 
         self.refresh_leaf_commitment(leaf_id);
-        self.update_branch_policies();
-        self.mark_dirty_from_leaf(leaf_id);
-        self.recompute_subtree_commitment();
-        self.update_merkle_proof_paths();
-
-        debug_assert!(self.assert_topology_invariants().is_ok());
+        self.refresh_from_leaf_change(leaf_id);
         Ok(())
     }
 
@@ -223,9 +215,7 @@ impl AuthorityTreeState {
         let leaf_id = LeafId(leaf_index);
 
         if !self.active_leaves.contains(&leaf_id) {
-            return Err(aura_core::AuraError::not_found(format!(
-                "Leaf {leaf_index} not found or already removed"
-            )));
+            return Err(Self::leaf_missing_or_removed(leaf_index));
         }
 
         self.active_leaves.remove(&leaf_id);
@@ -235,7 +225,6 @@ impl AuthorityTreeState {
         self.pending_dkg_devices.remove(&leaf_id);
 
         self.refresh_after_structural_change();
-        debug_assert!(self.assert_topology_invariants().is_ok());
 
         Ok(())
     }
@@ -243,13 +232,11 @@ impl AuthorityTreeState {
     /// Update threshold policy.
     pub fn update_threshold(&mut self, new_threshold: u16) -> Result<(), aura_core::AuraError> {
         if new_threshold == 0 {
-            return Err(aura_core::AuraError::invalid(
-                "Threshold cannot be zero".to_string(),
-            ));
+            return Err(Self::invalid_tree_update("Threshold cannot be zero"));
         }
 
         if new_threshold as usize > self.active_leaves.len() {
-            return Err(aura_core::AuraError::invalid(format!(
+            return Err(Self::invalid_tree_update(format!(
                 "Threshold {} exceeds number of active leaves {}",
                 new_threshold,
                 self.active_leaves.len()
@@ -257,12 +244,7 @@ impl AuthorityTreeState {
         }
 
         self.threshold = new_threshold;
-        self.update_branch_policies();
-        self.mark_all_branches_dirty();
-        self.recompute_subtree_commitment();
-        self.update_merkle_proof_paths();
-
-        debug_assert!(self.assert_topology_invariants().is_ok());
+        self.refresh_nonstructural_commitments();
         Ok(())
     }
 
@@ -273,12 +255,7 @@ impl AuthorityTreeState {
 
         // Epoch is part of all commitments; all branches are affected.
         self.refresh_leaf_commitments_for_active();
-        self.update_branch_policies();
-        self.mark_all_branches_dirty();
-        self.recompute_subtree_commitment();
-        self.update_merkle_proof_paths();
-
-        debug_assert!(self.assert_topology_invariants().is_ok());
+        self.refresh_nonstructural_commitments();
         Ok(())
     }
 
@@ -412,11 +389,44 @@ impl AuthorityTreeState {
     fn refresh_after_structural_change(&mut self) {
         self.rebuild_topology_from_active_leaves();
         self.refresh_leaf_commitments_for_active();
+        self.invalidate_cached_key_shares();
+        self.refresh_nonstructural_commitments();
+    }
+
+    fn refresh_from_leaf_change(&mut self, leaf_id: LeafId) {
+        self.update_branch_policies();
+        self.mark_dirty_from_leaf(leaf_id);
+        self.recompute_subtree_commitment();
+        self.update_merkle_proof_paths();
+        self.assert_topology_invariants_debug();
+    }
+
+    fn refresh_nonstructural_commitments(&mut self) {
         self.update_branch_policies();
         self.mark_all_branches_dirty();
         self.recompute_subtree_commitment();
-        self.invalidate_cached_key_shares();
         self.update_merkle_proof_paths();
+        self.assert_topology_invariants_debug();
+    }
+
+    fn leaf_not_found(leaf_id: LeafId) -> aura_core::AuraError {
+        aura_core::AuraError::not_found(format!("Leaf {} not found", leaf_id.0))
+    }
+
+    fn leaf_inactive(leaf_id: LeafId) -> aura_core::AuraError {
+        aura_core::AuraError::not_found(format!("Leaf {} not found or inactive", leaf_id.0))
+    }
+
+    fn leaf_missing_or_removed(leaf_index: u32) -> aura_core::AuraError {
+        aura_core::AuraError::not_found(format!("Leaf {leaf_index} not found or already removed"))
+    }
+
+    fn invalid_tree_update(message: impl Into<String>) -> aura_core::AuraError {
+        aura_core::AuraError::invalid(message.into())
+    }
+
+    fn assert_topology_invariants_debug(&self) {
+        debug_assert!(self.assert_topology_invariants().is_ok());
     }
 
     fn refresh_leaf_commitment(&mut self, leaf_id: LeafId) {

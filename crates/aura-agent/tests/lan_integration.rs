@@ -235,13 +235,13 @@ async fn test_device_enrollment_export_includes_sender_hint() -> TestResult {
 
     assert!(
         sender_hint.is_some(),
-        "device enrollment export should include a sender websocket hint"
+        "device enrollment export should include a sender transport hint"
     );
     assert!(
         sender_hint
             .as_deref()
-            .is_some_and(|addr| addr.starts_with("ws://") || addr.starts_with("wss://")),
-        "sender hint should be a websocket address: {sender_hint:?}"
+            .is_some_and(|addr| addr.starts_with("tcp://")),
+        "sender hint should be a native tcp address: {sender_hint:?}"
     );
 
     Ok(())
@@ -500,6 +500,7 @@ async fn setup_lan_group_channel_pair(
         &app_a,
         agent_b.authority_id(),
         None,
+        None,
         Some("lan strong-command coverage".to_string()),
         None,
     )
@@ -702,6 +703,7 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         &app_a,
         agent_b.authority_id(),
         None,
+        None,
         Some("e2e lan invite".to_string()),
         None,
     )
@@ -875,6 +877,7 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
     let invite = invitation_workflow::create_contact_invitation(
         &app_a,
         agent_b.authority_id(),
+        None,
         None,
         Some("e2e lan invite without descriptor wait".to_string()),
         None,

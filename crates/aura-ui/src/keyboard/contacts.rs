@@ -1,14 +1,17 @@
 use super::wizard::open_guardian_setup_wizard;
 use crate::model::{ActiveModal, CreateInvitationModalState, ScreenId, TextModalState, UiModel};
-
 pub(super) fn handle_contacts_char(model: &mut UiModel, ch: char) {
     match ch {
         'n' => {
             model.modal_hint = "Invite Contacts".to_string();
+            model.clear_current_invitation_code();
             model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
+                nickname: model.profile_nickname.trim().to_string(),
+                receiver_nickname: String::new(),
                 message: String::new(),
                 ttl_hours: 24,
-                active_field: aura_app::ui::contract::FieldId::InvitationMessage,
+                active_field: aura_app::ui::contract::FieldId::Nickname,
+                generated_code: None,
             }));
         }
         'a' => {

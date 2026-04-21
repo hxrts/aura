@@ -93,14 +93,7 @@ pub struct HandlerContext {
 }
 
 impl HandlerContext {
-    fn deterministic_operation_id(
-        authority_id: AuthorityId,
-        context_id: ContextId,
-        execution_mode: ExecutionMode,
-    ) -> Uuid {
-        let mut seed = Vec::with_capacity(33);
-        seed.extend_from_slice(&authority_id.to_bytes());
-        seed.extend_from_slice(&context_id.to_bytes());
+    fn append_execution_mode_seed(seed: &mut Vec<u8>, execution_mode: ExecutionMode) {
         match execution_mode {
             ExecutionMode::Testing => seed.push(0),
             ExecutionMode::Production => seed.push(1),
@@ -109,6 +102,30 @@ impl HandlerContext {
                 seed.extend_from_slice(&sim_seed.to_le_bytes());
             }
         }
+    }
+
+    fn deterministic_seed(
+        prefix: Option<&[u8]>,
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Vec<u8> {
+        let mut seed = Vec::with_capacity(41);
+        if let Some(prefix) = prefix {
+            seed.extend_from_slice(prefix);
+        }
+        seed.extend_from_slice(&authority_id.to_bytes());
+        seed.extend_from_slice(&context_id.to_bytes());
+        Self::append_execution_mode_seed(&mut seed, execution_mode);
+        seed
+    }
+
+    fn deterministic_operation_id(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Uuid {
+        let seed = Self::deterministic_seed(None, authority_id, context_id, execution_mode);
         let digest = hash::hash(&seed);
         let mut op_bytes = [0u8; 16];
         op_bytes.copy_from_slice(&digest[..16]);
@@ -120,18 +137,12 @@ impl HandlerContext {
         context_id: ContextId,
         execution_mode: ExecutionMode,
     ) -> OperationSessionId {
-        let mut seed = Vec::with_capacity(41);
-        seed.extend_from_slice(b"aura-session");
-        seed.extend_from_slice(&authority_id.to_bytes());
-        seed.extend_from_slice(&context_id.to_bytes());
-        match execution_mode {
-            ExecutionMode::Testing => seed.push(0),
-            ExecutionMode::Production => seed.push(1),
-            ExecutionMode::Simulation { seed: sim_seed } => {
-                seed.push(2);
-                seed.extend_from_slice(&sim_seed.to_le_bytes());
-            }
-        }
+        let seed = Self::deterministic_seed(
+            Some(b"aura-session"),
+            authority_id,
+            context_id,
+            execution_mode,
+        );
         OperationSessionId::new(SessionId::new_from_entropy(hash::hash(&seed)))
     }
 
@@ -729,6 +740,30 @@ impl RegistryCapabilities {
 mod tests {
     use super::*;
 
+    fn testing_registry() -> EffectRegistry {
+        EffectRegistry::new(ExecutionMode::Testing)
+    }
+
+    fn mock_handler(
+        effect_type: EffectType,
+        operations: Vec<&str>,
+        execution_mode: ExecutionMode,
+    ) -> Box<MockRegistrableHandler> {
+        Box::new(MockRegistrableHandler::new(
+            effect_type,
+            operations,
+            execution_mode,
+        ))
+    }
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_context(seed: u8) -> ContextId {
+        ContextId::new_from_entropy([seed; 32])
+    }
+
     // Mock registrable handler for testing
     struct MockRegistrableHandler {
         effect_type: EffectType,
@@ -843,7 +878,7 @@ mod tests {
     /// Fresh registry has the requested mode and no registered handlers.
     #[test]
     fn test_registry_creation() {
-        let registry = EffectRegistry::new(ExecutionMode::Testing);
+        let registry = testing_registry();
         assert_eq!(registry.execution_mode(), ExecutionMode::Testing);
         assert!(registry.registered_effect_types().is_empty());
     }
@@ -851,13 +886,13 @@ mod tests {
     /// Registering a handler makes its effect type discoverable in the registry.
     #[test]
     fn test_handler_registration() {
-        let mut registry = EffectRegistry::new(ExecutionMode::Testing);
+        let mut registry = testing_registry();
 
-        let handler = Box::new(MockRegistrableHandler::new(
+        let handler = mock_handler(
             EffectType::Crypto,
             vec!["hash", "sign", "verify"],
             ExecutionMode::Testing,
-        ));
+        );
 
         // Register handler
         registry
@@ -876,13 +911,13 @@ mod tests {
     /// handler declared.
     #[test]
     fn test_operation_support() {
-        let mut registry = EffectRegistry::new(ExecutionMode::Testing);
+        let mut registry = testing_registry();
 
-        let handler = Box::new(MockRegistrableHandler::new(
+        let handler = mock_handler(
             EffectType::Crypto,
             vec!["hash", "sign", "verify"],
             ExecutionMode::Testing,
-        ));
+        );
 
         registry
             .register_handler(EffectType::Crypto, handler)
@@ -906,19 +941,19 @@ mod tests {
     /// across multiple registered handlers.
     #[test]
     fn test_capability_summary() {
-        let mut registry = EffectRegistry::new(ExecutionMode::Testing);
+        let mut registry = testing_registry();
 
         // Register multiple handlers
-        let crypto_handler = Box::new(MockRegistrableHandler::new(
+        let crypto_handler = mock_handler(
             EffectType::Crypto,
             vec!["hash", "sign"],
             ExecutionMode::Testing,
-        ));
-        let network_handler = Box::new(MockRegistrableHandler::new(
+        );
+        let network_handler = mock_handler(
             EffectType::Network,
             vec!["send", "receive", "broadcast"],
             ExecutionMode::Production,
-        ));
+        );
 
         registry
             .register_handler(EffectType::Crypto, crypto_handler)
@@ -950,8 +985,8 @@ mod tests {
     /// changing any input produces a different one.
     #[test]
     fn test_handler_context_operation_id_deterministic() {
-        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
-        let context_id = ContextId::new_from_entropy([2u8; 32]);
+        let authority_id = test_authority(1);
+        let context_id = test_context(2);
         let ctx1 = HandlerContext::new(authority_id, context_id, ExecutionMode::Testing);
         let ctx2 = HandlerContext::new(authority_id, context_id, ExecutionMode::Testing);
 
@@ -959,7 +994,7 @@ mod tests {
         assert_eq!(ctx1.operation_id, ctx2.operation_id);
 
         // Different inputs produce different operation_ids
-        let different_authority = AuthorityId::new_from_entropy([3u8; 32]);
+        let different_authority = test_authority(3);
         let ctx3 = HandlerContext::new(different_authority, context_id, ExecutionMode::Testing);
         assert_ne!(ctx1.operation_id, ctx3.operation_id);
 
@@ -974,18 +1009,18 @@ mod tests {
     /// behavior so any change is caught.
     #[test]
     fn test_duplicate_registration_replaces_handler() {
-        let mut registry = EffectRegistry::new(ExecutionMode::Testing);
+        let mut registry = testing_registry();
 
-        let handler1 = Box::new(MockRegistrableHandler::new(
+        let handler1 = mock_handler(
             EffectType::Crypto,
             vec!["hash", "sign"],
             ExecutionMode::Testing,
-        ));
-        let handler2 = Box::new(MockRegistrableHandler::new(
+        );
+        let handler2 = mock_handler(
             EffectType::Crypto,
             vec!["hash", "sign", "verify", "encrypt"],
             ExecutionMode::Testing,
-        ));
+        );
 
         registry
             .register_handler(EffectType::Crypto, handler1)

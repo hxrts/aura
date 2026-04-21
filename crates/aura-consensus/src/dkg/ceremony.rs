@@ -14,6 +14,10 @@ use aura_core::{AuraError, ContextId, Prestate, Result};
 use aura_journal::fact::DkgTranscriptCommit;
 use std::collections::BTreeSet;
 
+fn invalid_dkg(reason: &'static str) -> AuraError {
+    AuraError::invalid(reason)
+}
+
 /// Aggregate a DKG transcript from validated dealer packages.
 pub fn aggregate_dkg_transcript(
     config: &DkgConfig,
@@ -72,34 +76,28 @@ pub async fn run_consensus_dkg<S: DkgTranscriptStore + ?Sized>(
 
 fn validate_config(config: &DkgConfig) -> Result<()> {
     if config.participants.is_empty() {
-        return Err(AuraError::invalid(
-            "DKG config requires explicit participants",
-        ));
+        return Err(invalid_dkg("DKG config requires explicit participants"));
     }
     if config.threshold == 0 {
-        return Err(AuraError::invalid("DKG threshold must be non-zero"));
+        return Err(invalid_dkg("DKG threshold must be non-zero"));
     }
     if config.threshold as usize > config.participants.len() {
-        return Err(AuraError::invalid(
-            "DKG threshold exceeds participant count",
-        ));
+        return Err(invalid_dkg("DKG threshold exceeds participant count"));
     }
     if config.max_signers as usize > config.participants.len() {
-        return Err(AuraError::invalid(
-            "DKG max_signers exceeds participant count",
-        ));
+        return Err(invalid_dkg("DKG max_signers exceeds participant count"));
     }
     Ok(())
 }
 
 fn validate_packages(config: &DkgConfig, packages: &[DealerPackage]) -> Result<()> {
     if packages.len() < config.threshold as usize {
-        return Err(AuraError::invalid(
+        return Err(invalid_dkg(
             "DKG ceremony requires at least threshold packages",
         ));
     }
     if packages.len() > config.max_signers as usize {
-        return Err(AuraError::invalid(
+        return Err(invalid_dkg(
             "DKG ceremony exceeds max_signers package count",
         ));
     }
@@ -107,14 +105,12 @@ fn validate_packages(config: &DkgConfig, packages: &[DealerPackage]) -> Result<(
     let mut seen = BTreeSet::new();
     for package in packages {
         if !seen.insert(package.dealer) {
-            return Err(AuraError::invalid("Duplicate dealer package detected"));
+            return Err(invalid_dkg("Duplicate dealer package detected"));
         }
 
         for participant in &config.participants {
             if !package.encrypted_shares.contains_key(participant) {
-                return Err(AuraError::invalid(
-                    "Dealer package missing participant share",
-                ));
+                return Err(invalid_dkg("Dealer package missing participant share"));
             }
         }
     }

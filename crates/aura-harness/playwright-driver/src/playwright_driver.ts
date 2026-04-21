@@ -864,6 +864,136 @@ function waitForDomState(session, predicate, timeoutMs, label) {
   });
 }
 
+async function waitForRenderedScreenConvergence(
+  session,
+  instanceId,
+  targetScreen,
+  targetSnapshot,
+  timeoutMs,
+  reason,
+) {
+  const normalizedTarget = normalizeScreenText(targetScreen).toLowerCase();
+  const expectedDomId =
+    expectedScreenDomId({ screen: normalizedTarget, open_modal: null }) ?? null;
+  const requiredRenderSeq = Math.max(1, uiSnapshotRenderRevision(targetSnapshot));
+
+  await ensureDiagnosticDomObserver(
+    session,
+    `${reason}:screen=${normalizedTarget}`,
+  );
+
+  const renderConverged = (activeSession) => {
+    const heartbeat = activeSession.renderHeartbeat;
+    return (
+      heartbeat &&
+      normalizeScreenText(String(heartbeat.screen ?? "")).toLowerCase() ===
+        normalizedTarget &&
+      Number(heartbeat.render_seq ?? 0) >= requiredRenderSeq
+    );
+  };
+
+  const domConverged = (activeSession) =>
+    !expectedDomId || domStateHasId(activeSession, expectedDomId);
+
+  if (renderConverged(session) && domConverged(session)) {
+    return;
+  }
+
+  const deadlineMs = Date.now() + timeoutMs;
+  while (Date.now() < deadlineMs) {
+    const remainingMs = Math.max(1, deadlineMs - Date.now());
+    try {
+      await readStructuredUiState(
+        session,
+        instanceId,
+        `${reason}:heartbeat`,
+        Math.min(remainingMs, 400),
+        { storeResult: false, skipPushWait: true },
+      );
+    } catch {
+      // A fresh structured read is best-effort here; the authoritative
+      // semantic screen transition has already been observed above.
+    }
+
+    if (renderConverged(session) && domConverged(session)) {
+      return;
+    }
+
+    if (expectedDomId && !domConverged(session)) {
+      try {
+        await waitForDomState(
+          session,
+          (activeSession) =>
+            renderConverged(activeSession) && domConverged(activeSession),
+          Math.min(remainingMs, 250),
+          `${reason}:dom`,
+        );
+        return;
+      } catch {
+        // Keep looping until the global deadline expires so we can refresh the
+        // heartbeat and collect richer final diagnostics.
+      }
+    } else {
+      await delay(Math.min(remainingMs, 25));
+    }
+  }
+
+  throw new Error(
+    `${reason}_render_convergence_failed screen=${targetScreen} required_render_seq=${requiredRenderSeq} observed_heartbeat=${JSON.stringify(
+      session.renderHeartbeat ?? null,
+    )} expected_dom_id=${expectedDomId ?? "none"} observed_dom_ids=${JSON.stringify(
+      domStateIdsByPrefix(session, "aura-screen-"),
+    )}`,
+  );
+}
+
+async function waitForTargetScreenUiState(
+  session,
+  instanceId,
+  targetScreen,
+  timeoutMs,
+) {
+  const normalizedTarget = normalizeScreenText(targetScreen).toLowerCase();
+  const matchesTargetScreen = (snapshot) =>
+    normalizeScreenText(String(snapshot?.screen ?? "")).toLowerCase() ===
+    normalizedTarget;
+
+  if (matchesTargetScreen(session.uiStateCache)) {
+    return session.uiStateCache;
+  }
+
+  let afterVersion = uiObservationVersion(session);
+  const deadlineMs = Date.now() + timeoutMs;
+
+  while (Date.now() < deadlineMs) {
+    const remainingMs = Math.max(1, deadlineMs - Date.now());
+    try {
+      const result = await waitForUiStateVersion(
+        session,
+        afterVersion,
+        Math.min(remainingMs, 1000),
+      );
+      afterVersion = result.version;
+      if (matchesTargetScreen(result.snapshot)) {
+        return result.snapshot;
+      }
+    } catch (error) {
+      if (!isUiStateWaitTimeout(error) && !isUiStateRecoveryCandidate(error)) {
+        throw error;
+      }
+      const recovered = await uiState({ instance_id: instanceId });
+      if (matchesTargetScreen(recovered)) {
+        return recovered;
+      }
+    }
+  }
+
+  const latestSnapshot = await uiState({ instance_id: instanceId }).catch(() => null);
+  throw new Error(
+    `navigate_screen_failed screen=${targetScreen} observed=${latestSnapshot?.screen ?? "unknown"}`,
+  );
+}
+
 function normalizeInstanceId(params) {
   const instanceId = params?.instance_id;
   if (!instanceId || typeof instanceId !== "string") {
@@ -1091,6 +1221,14 @@ function runSelfTest() {
     String(readStructuredUiState).includes("renderHeartbeatJsonKey") &&
       String(readStructuredUiState).includes("session.renderHeartbeat = heartbeat;"),
     "structured browser observation must refresh the page-owned render heartbeat alongside ui_state so stale driver-side heartbeat cache cannot veto a newer authoritative snapshot",
+  );
+  assert(
+    String(navigateScreen).includes("waitForRenderedScreenConvergence("),
+    "navigate_screen should wait for post-render convergence instead of returning after semantic ui_state alone",
+  );
+  assert(
+    String(openSettingsSection).includes("waitForRenderedScreenConvergence("),
+    "open_settings_section should wait for post-render convergence instead of returning after enqueue",
   );
   assert(
     OBSERVATION_METHODS.has("ui_state") &&
@@ -3936,6 +4074,20 @@ async function navigateScreen(params) {
       `navigate_screen_failed screen=${screen} reason=${result?.reason ?? "unknown"}`,
     );
   }
+  const targetSnapshot = await waitForTargetScreenUiState(
+    session,
+    instanceId,
+    screen,
+    4000,
+  );
+  await waitForRenderedScreenConvergence(
+    session,
+    instanceId,
+    screen,
+    targetSnapshot,
+    4000,
+    "navigate_screen",
+  );
   return { status: "navigated", screen };
 }
 
@@ -3989,6 +4141,20 @@ async function openSettingsSection(params) {
       `open_settings_section_failed section=${section} reason=${result?.reason ?? "unknown"}`,
     );
   }
+  const targetSnapshot = await waitForTargetScreenUiState(
+    session,
+    instanceId,
+    "settings",
+    4000,
+  );
+  await waitForRenderedScreenConvergence(
+    session,
+    instanceId,
+    "settings",
+    targetSnapshot,
+    4000,
+    "open_settings_section",
+  );
   return { status: "opened", section };
 }
 

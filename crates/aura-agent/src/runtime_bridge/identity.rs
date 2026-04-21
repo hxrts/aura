@@ -1,4 +1,5 @@
-use super::{service_unavailable_with_detail, AgentRuntimeBridge};
+use super::error_boundary::{bridge_internal, bridge_service_unavailable_with_detail};
+use super::AgentRuntimeBridge;
 use aura_app::runtime_bridge::{
     AuthenticationStatus, BridgeAuthorityInfo, BridgeDeviceInfo, SettingsBridgeState,
 };
@@ -47,7 +48,7 @@ pub(super) async fn get_settings(
     let contact_count = bridge
         .agent
         .invitations()
-        .map_err(|e| service_unavailable_with_detail("invitation_service", e))?
+        .map_err(|e| bridge_service_unavailable_with_detail("invitation_service", e))?
         .list_with_storage()
         .await
         .iter()
@@ -88,9 +89,10 @@ pub(super) async fn list_devices(
     let _ = RUNTIME_BRIDGE_IDENTITY_DEVICE_QUERY_CAPABILITY;
     let effects = bridge.agent.runtime().effects();
     let current_device = bridge.agent.context().device_id();
-    let state = effects.get_current_state().await.map_err(|e| {
-        IntentError::internal_error(format!("Failed to read current device list: {e}"))
-    })?;
+    let state = effects
+        .get_current_state()
+        .await
+        .map_err(|e| bridge_internal("Read current device list failed", e))?;
 
     let mut devices: Vec<BridgeDeviceInfo> = state
         .leaves
@@ -163,20 +165,18 @@ pub(super) async fn list_authorities(
     let keys = effects
         .list_keys(Some(authority_key_prefix()))
         .await
-        .map_err(|error| {
-            IntentError::internal_error(format!("Failed to list stored authorities: {error}"))
-        })?;
+        .map_err(|error| bridge_internal("List stored authorities failed", error))?;
 
     for key in keys {
         let Some(bytes) = effects.retrieve(&key).await.map_err(|error| {
-            IntentError::internal_error(format!("Failed to read authority record {key}: {error}"))
+            bridge_internal("Read authority record failed", format!("{key}: {error}"))
         })?
         else {
             continue;
         };
 
         let record = deserialize_authority(&bytes).map_err(|error| {
-            IntentError::internal_error(format!("Failed to decode authority record {key}: {error}"))
+            bridge_internal("Decode authority record failed", format!("{key}: {error}"))
         })?;
 
         if !seen.insert(record.authority_id) {
@@ -240,7 +240,7 @@ pub(super) async fn current_time_ms(bridge: &AgentRuntimeBridge) -> Result<u64, 
     let time = effects
         .physical_time()
         .await
-        .map_err(|e| service_unavailable_with_detail("physical_time", e))?;
+        .map_err(|e| bridge_service_unavailable_with_detail("physical_time", e))?;
     Ok(time.ts_ms)
 }
 
@@ -267,11 +267,11 @@ pub(super) async fn authentication_status(
     let auth_service = bridge
         .agent
         .auth()
-        .map_err(|error| IntentError::internal_error(error.to_string()))?;
+        .map_err(|error| bridge_internal("Authentication service unavailable", error))?;
     let status = auth_service
         .authentication_status()
         .await
-        .map_err(|error| IntentError::internal_error(error.to_string()))?;
+        .map_err(|error| bridge_internal("Read authentication status failed", error))?;
     Ok(AuthenticationStatus::Authenticated {
         authority_id: status.authority_id,
         device_id: status.device_id,

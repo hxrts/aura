@@ -7,6 +7,7 @@
 //! This aligns with the authority-centric identity model where authorities
 //! represent cryptographic actors that hide their internal device structure.
 
+use crate::verification_common::verify_ed25519_signature;
 use crate::{AuthenticationError, Result};
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
@@ -25,7 +26,7 @@ pub struct SessionTicket {
 }
 
 /// Scope of operations a session ticket authorizes
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SessionScope {
     /// Ticket authorizes DKD operations
     Dkd { app_id: String, context: String },
@@ -59,40 +60,26 @@ pub fn verify_session_ticket(
     issuer_public_key: &Ed25519VerifyingKey,
     current_time: u64,
 ) -> Result<()> {
-    // Check if ticket has expired
     if current_time > ticket.expires_at {
-        return Err(AuthenticationError::InvalidSessionTicket {
-            details: format!(
-                "Session ticket expired: current_time={}, expires_at={}",
-                current_time, ticket.expires_at
-            ),
-        });
+        return Err(expired_ticket_error(current_time, ticket.expires_at));
     }
 
-    // Check if ticket is not yet valid
     if current_time < ticket.issued_at {
-        return Err(AuthenticationError::InvalidSessionTicket {
-            details: format!(
-                "Session ticket not yet valid: current_time={}, issued_at={}",
-                current_time, ticket.issued_at
-            ),
-        });
+        return Err(not_yet_valid_ticket_error(current_time, ticket.issued_at));
     }
 
-    // Serialize the ticket for signature verification
     let ticket_bytes = serialize_session_ticket(ticket)?;
-
-    // Verify the signature
-    let valid = aura_core::ed25519_verify(&ticket_bytes, ticket_signature, issuer_public_key)
-        .map_err(|e| AuthenticationError::InvalidSessionTicket {
-            details: format!("Session ticket signature verification failed: {e}"),
-        })?;
-
-    if !valid {
-        return Err(AuthenticationError::InvalidSessionTicket {
-            details: "Session ticket signature invalid".to_string(),
-        });
-    }
+    verify_ed25519_signature(
+        &ticket_bytes,
+        ticket_signature,
+        issuer_public_key,
+        |details| {
+            invalid_session_ticket(format!(
+                "Session ticket signature verification failed: {details}"
+            ))
+        },
+        || invalid_session_ticket("Session ticket signature invalid"),
+    )?;
 
     tracing::debug!(
         session_id = %ticket.session_id,
@@ -135,51 +122,39 @@ pub fn verify_session_authorization(
 
 /// Check if a ticket scope matches the required scope
 fn scope_matches(ticket_scope: &SessionScope, required_scope: &SessionScope) -> bool {
-    match (ticket_scope, required_scope) {
-        (
-            SessionScope::Dkd {
-                app_id: t_app,
-                context: t_ctx,
-            },
-            SessionScope::Dkd {
-                app_id: r_app,
-                context: r_ctx,
-            },
-        ) => t_app == r_app && t_ctx == r_ctx,
-        (
-            SessionScope::Recovery { recovery_id: t_id },
-            SessionScope::Recovery { recovery_id: r_id },
-        ) => t_id == r_id,
-        (
-            SessionScope::Resharing {
-                new_threshold: t_threshold,
-            },
-            SessionScope::Resharing {
-                new_threshold: r_threshold,
-            },
-        ) => t_threshold == r_threshold,
-        (
-            SessionScope::Protocol {
-                protocol_type: t_type,
-            },
-            SessionScope::Protocol {
-                protocol_type: r_type,
-            },
-        ) => t_type == r_type,
-        _ => false,
-    }
+    // Session authorization is intentionally structural: a ticket authorizes
+    // exactly one serialized scope value, not a broader class of operations.
+    ticket_scope == required_scope
 }
 
 /// Serialize a session ticket for signature verification
 fn serialize_session_ticket(ticket: &SessionTicket) -> Result<Vec<u8>> {
-    serde_json::to_vec(ticket).map_err(|e| AuthenticationError::InvalidSessionTicket {
-        details: format!("Failed to serialize session ticket: {e}"),
-    })
+    serde_json::to_vec(ticket)
+        .map_err(|e| invalid_session_ticket(format!("Failed to serialize session ticket: {e}")))
+}
+
+fn invalid_session_ticket(details: impl Into<String>) -> AuthenticationError {
+    AuthenticationError::InvalidSessionTicket {
+        details: details.into(),
+    }
+}
+
+fn expired_ticket_error(current_time: u64, expires_at: u64) -> AuthenticationError {
+    invalid_session_ticket(format!(
+        "Session ticket expired: current_time={current_time}, expires_at={expires_at}"
+    ))
+}
+
+fn not_yet_valid_ticket_error(current_time: u64, issued_at: u64) -> AuthenticationError {
+    invalid_session_ticket(format!(
+        "Session ticket not yet valid: current_time={current_time}, issued_at={issued_at}"
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::crypto::ed25519::Ed25519SigningKey;
     use uuid::Uuid;
 
     fn create_test_ticket() -> SessionTicket {
@@ -196,23 +171,19 @@ mod tests {
         }
     }
 
+    fn sign_ticket(ticket: &SessionTicket, seed: u8) -> (Ed25519Signature, Ed25519VerifyingKey) {
+        let signing_key = Ed25519SigningKey::from_bytes([seed; 32]);
+        let verifying_key = signing_key.verifying_key().unwrap();
+        let ticket_bytes = serialize_session_ticket(ticket).unwrap();
+        let signature = signing_key.sign(&ticket_bytes).unwrap();
+        (signature, verifying_key)
+    }
+
     /// Valid ticket within time window verifies — the happy path.
     #[test]
     fn test_verify_session_ticket_success() {
         let ticket = create_test_ticket();
-
-        // Generate a key pair using aura-core wrappers with deterministic seed
-        use aura_core::crypto::ed25519::Ed25519SigningKey;
-
-        // Use deterministic seed bytes for reproducible tests
-        let seed: [u8; 32] = [42u8; 32];
-        let signing_key = Ed25519SigningKey::from_bytes(seed);
-        let verifying_key = signing_key.verifying_key().unwrap();
-
-        // Sign the ticket using aura-core wrapper
-        let ticket_bytes = serialize_session_ticket(&ticket).unwrap();
-        let signature = signing_key.sign(&ticket_bytes).unwrap();
-
+        let (signature, verifying_key) = sign_ticket(&ticket, 42);
         let current_time = 1500; // Between issued_at and expires_at
 
         let result = verify_session_ticket(&ticket, &signature, &verifying_key, current_time);
@@ -224,22 +195,25 @@ mod tests {
     #[test]
     fn test_verify_session_ticket_expired() {
         let ticket = create_test_ticket();
-
-        // Generate a key pair using aura-core wrappers with deterministic seed
-        use aura_core::crypto::ed25519::Ed25519SigningKey;
-
-        // Use different seed for this test
-        let seed: [u8; 32] = [137u8; 32];
-        let signing_key = Ed25519SigningKey::from_bytes(seed);
-        let verifying_key = signing_key.verifying_key().unwrap();
-
-        // Sign the ticket using aura-core wrapper
-        let ticket_bytes = serialize_session_ticket(&ticket).unwrap();
-        let signature = signing_key.sign(&ticket_bytes).unwrap();
-
+        let (signature, verifying_key) = sign_ticket(&ticket, 137);
         let current_time = 3000; // After expires_at
 
         let result = verify_session_ticket(&ticket, &signature, &verifying_key, current_time);
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AuthenticationError::InvalidSessionTicket { .. }
+        ));
+    }
+
+    /// Ticket before issued_at must be rejected — prevents preplay.
+    #[test]
+    fn test_verify_session_ticket_not_yet_valid() {
+        let ticket = create_test_ticket();
+        let (signature, verifying_key) = sign_ticket(&ticket, 88);
+
+        let result = verify_session_ticket(&ticket, &signature, &verifying_key, 999);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -309,5 +283,13 @@ mod tests {
         // Different recovery IDs should not match
         assert!(!scope_matches(&recovery_scope1, &recovery_scope2));
         assert!(!scope_matches(&dkd_scope1, &recovery_scope1));
+
+        let protocol_scope = SessionScope::Protocol {
+            protocol_type: "resharing".to_string(),
+        };
+        assert!(scope_matches(&protocol_scope, &protocol_scope));
+
+        let resharing_scope = SessionScope::Resharing { new_threshold: 3 };
+        assert!(scope_matches(&resharing_scope, &resharing_scope));
     }
 }

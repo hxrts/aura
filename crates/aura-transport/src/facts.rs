@@ -5,7 +5,8 @@
 
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
-    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactSchemaCompatibility,
+    MAX_FACT_PAYLOAD_BYTES,
 };
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
@@ -14,6 +15,15 @@ use serde::{Deserialize, Serialize};
 use crate::context_transport::TransportProtocol;
 
 aura_core::define_fact_type_id!(transport, "transport/v1", 1);
+/// Oldest transport fact schema version this decoder still accepts.
+pub const TRANSPORT_FACT_MIN_SUPPORTED_SCHEMA_VERSION: u16 = TRANSPORT_FACT_SCHEMA_VERSION;
+
+fn physical_time_ms(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
+    }
+}
 
 /// Transport domain facts for state changes.
 ///
@@ -195,10 +205,7 @@ impl TransportFact {
             local_authority,
             remote_authority,
             protocol,
-            established_at: PhysicalTime {
-                ts_ms: established_at_ms,
-                uncertainty: None,
-            },
+            established_at: physical_time_ms(established_at_ms),
         }
     }
 
@@ -213,10 +220,7 @@ impl TransportFact {
             session_id,
             context_id,
             reason,
-            closed_at: PhysicalTime {
-                ts_ms: closed_at_ms,
-                uncertainty: None,
-            },
+            closed_at: physical_time_ms(closed_at_ms),
         }
     }
 
@@ -235,10 +239,7 @@ impl TransportFact {
             message_hash,
             size_bytes,
             flow_cost,
-            sent_at: PhysicalTime {
-                ts_ms: sent_at_ms,
-                uncertainty: None,
-            },
+            sent_at: physical_time_ms(sent_at_ms),
         }
     }
 
@@ -257,10 +258,7 @@ impl TransportFact {
             message_hash,
             size_bytes,
             sender,
-            received_at: PhysicalTime {
-                ts_ms: received_at_ms,
-                uncertainty: None,
-            },
+            received_at: physical_time_ms(received_at_ms),
         }
     }
 
@@ -275,10 +273,7 @@ impl TransportFact {
             context_id,
             authority_id,
             protocols,
-            discovered_at: PhysicalTime {
-                ts_ms: discovered_at_ms,
-                uncertainty: None,
-            },
+            discovered_at: physical_time_ms(discovered_at_ms),
         }
     }
 
@@ -293,10 +288,7 @@ impl TransportFact {
             context_id,
             target_authority,
             reason,
-            failed_at: PhysicalTime {
-                ts_ms: failed_at_ms,
-                uncertainty: None,
-            },
+            failed_at: physical_time_ms(failed_at_ms),
         }
     }
 
@@ -313,10 +305,7 @@ impl TransportFact {
             authority_id,
             amount,
             spent_after,
-            charged_at: PhysicalTime {
-                ts_ms: charged_at_ms,
-                uncertainty: None,
-            },
+            charged_at: physical_time_ms(charged_at_ms),
         }
     }
 
@@ -335,10 +324,7 @@ impl TransportFact {
             local_authority,
             remote_authority,
             success,
-            completed_at: PhysicalTime {
-                ts_ms: completed_at_ms,
-                uncertainty: None,
-            },
+            completed_at: physical_time_ms(completed_at_ms),
         }
     }
 
@@ -353,10 +339,7 @@ impl TransportFact {
             context_id,
             fact_id,
             acknowledger,
-            acked_at: PhysicalTime {
-                ts_ms: acked_at_ms,
-                uncertainty: None,
-            },
+            acked_at: physical_time_ms(acked_at_ms),
         }
     }
 
@@ -413,12 +396,11 @@ impl TransportFact {
             });
         }
 
-        if envelope.schema_version != TRANSPORT_FACT_SCHEMA_VERSION {
-            return Err(FactError::VersionMismatch {
-                expected: TRANSPORT_FACT_SCHEMA_VERSION,
-                actual: envelope.schema_version,
-            });
-        }
+        FactSchemaCompatibility::range(
+            TRANSPORT_FACT_MIN_SUPPORTED_SCHEMA_VERSION,
+            TRANSPORT_FACT_SCHEMA_VERSION,
+        )
+        .ensure_supported(envelope.schema_version)?;
 
         let fact = match envelope.encoding {
             FactEncoding::DagCbor => from_slice(&envelope.payload)?,

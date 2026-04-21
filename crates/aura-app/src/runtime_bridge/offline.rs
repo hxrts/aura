@@ -731,6 +731,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         &self,
         _receiver: AuthorityId,
         _nickname: Option<String>,
+        _receiver_nickname: Option<String>,
         _message: Option<String>,
         _ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {

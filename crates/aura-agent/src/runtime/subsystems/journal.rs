@@ -65,7 +65,7 @@ pub struct JournalSubsystem {
 
 impl JournalSubsystem {
     /// Create a new journal subsystem with the given capacity
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained for tests and local builders until all construction flows use from_parts.
     pub fn new(capacity: u64, fact_registry: Arc<FactRegistry>) -> Self {
         Self {
             indexed_journal: Arc::new(IndexedJournalHandler::with_capacity(capacity)),
@@ -172,13 +172,13 @@ impl JournalSubsystem {
     }
 
     /// Set the journal policy
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained for local builder wiring until policy injection is centralized.
     pub fn set_journal_policy(&mut self, policy: (Biscuit, BiscuitAuthorizationBridge)) {
         self.journal_policy = Some(policy);
     }
 
     /// Set the journal verifying key
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained for local builder wiring until verifying-key injection is centralized.
     pub fn set_journal_verifying_key(&mut self, key: Vec<u8>) {
         self.journal_verifying_key = Some(key);
     }
@@ -192,7 +192,7 @@ impl JournalSubsystem {
     }
 
     /// Detach the fact sink
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained until every fact publication path routes through an attached reactive sink.
     pub fn detach_fact_sink(&self) {
         *self.shared.fact_publish_tx.lock() = None;
     }
@@ -206,7 +206,7 @@ impl JournalSubsystem {
     ///
     /// Returns Ok(()) if publication succeeded or no sink is attached.
     /// Returns Err if the sink channel is closed.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained for direct sink publication tests and staged reactive integration.
     pub async fn publish_facts(&self, source: FactSource) -> Result<(), JournalSubsystemError> {
         let tx = self.shared.fact_publish_tx.lock().clone();
         if let Some(tx) = tx {
@@ -237,14 +237,14 @@ impl JournalSubsystem {
     }
 
     /// Check if view update subscription is available
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained until every view wait path attaches the sender explicitly before use.
     pub fn has_view_update_sender(&self) -> bool {
         self.shared.view_update_tx.lock().is_some()
     }
 }
 
 /// Errors from journal subsystem operations
-#[allow(dead_code)]
+#[allow(dead_code)] // Retained for direct subsystem tests and staged sink integration failures.
 #[derive(Debug, thiserror::Error)]
 pub enum JournalSubsystemError {
     #[error("Fact publication sink is closed")]

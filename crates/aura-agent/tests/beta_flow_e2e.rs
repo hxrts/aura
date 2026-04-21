@@ -119,6 +119,7 @@ async fn test_two_agent_invitation_flow() -> TestResult {
         .invite_as_contact(
             authority_b,
             Some("bob".to_string()),
+            None,
             Some("Hey Bob, let's connect!".to_string()),
             None,
         )
@@ -310,7 +311,7 @@ async fn test_complete_beta_flow() -> TestResult {
     let alice_invitations = agent_alice.invitations()?;
 
     let invitation = alice_invitations
-        .invite_as_contact(bob_id, Some("bob".to_string()), None, None)
+        .invite_as_contact(bob_id, Some("bob".to_string()), None, None, None)
         .await?;
 
     // === Step 2: Alice exports invite code ===
@@ -460,7 +461,7 @@ async fn test_invitation_decline() -> TestResult {
 
     // Create invitation
     let invitation = invitations
-        .invite_as_contact(invitee, None, None, None)
+        .invite_as_contact(invitee, None, None, None, None)
         .await?;
 
     // Verify it's pending
@@ -486,7 +487,7 @@ async fn test_invitation_cancel() -> TestResult {
 
     // Create invitation
     let invitation = invitations
-        .invite_as_contact(invitee, None, None, None)
+        .invite_as_contact(invitee, None, None, None, None)
         .await?;
 
     // Verify pending

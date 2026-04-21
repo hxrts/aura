@@ -10,6 +10,10 @@
 # Notifications coverage is intentionally navigation-only: empty-state copy and
 # detail copy may vary cosmetically, but shared parity must not depend on
 # frontend-specific invitation or recovery affordances on this screen.
+#
+# Canonical shared-flow coverage anchor:
+# - navigate notifications
+# - switch authority
 
 id = "shared-notifications-and-authority"
 goal = "Validate shared semantic notifications navigation and switch-authority command handling without frontend-specific notifications actions."

@@ -380,6 +380,15 @@ impl<'a> InvitationContactHandler<'a> {
                     .await?;
                     effects.await_next_view_update().await;
 
+                    // Derive the shareable code from the originating
+                    // invitation so the contact record persists the code
+                    // that was exported for this invitation.
+                    let invitation_code =
+                        crate::handlers::invitation::shareable::ShareableInvitation::from(
+                            &invitation,
+                        )
+                        .to_code()
+                        .ok();
                     let contact_fact = ContactFact::Added {
                         context_id,
                         owner_id: self.handler.context.authority.authority_id(),
@@ -389,6 +398,7 @@ impl<'a> InvitationContactHandler<'a> {
                             ts_ms: now_ms,
                             uncertainty: None,
                         },
+                        invitation_code,
                     };
 
                     effects
@@ -569,40 +579,40 @@ impl<'a> InvitationContactHandler<'a> {
                         )
                         .await?;
                         self.handler.invitation_cache.cache_invitation(updated.clone()).await;
-                        match &updated.invitation_type {
-                            InvitationType::Channel {
-                                home_id,
-                                nickname_suggestion,
-                                ..
-                            } => {
-                                let home_name = require_channel_invitation_name(
-                                    *home_id,
-                                    nickname_suggestion.clone(),
-                                )?;
-                                self.publish_channel_acceptance_chat_projection(
-                                    effects.as_ref(),
-                                    updated.context_id,
-                                    *home_id,
-                                    &home_name,
-                                    updated.sender_id,
-                                    updated.receiver_id,
-                                )
-                                .await?;
-                                crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
-                                    &reactive,
-                                    *home_id,
-                                    &home_name,
-                                    updated.sender_id,
-                                    updated.receiver_id,
-                                    updated.context_id,
-                                    now_ms,
-                                )
-                                .await
-                                .map_err(AgentError::runtime)?;
-                                home_name
-                            }
-                            _ => unreachable!("non-channel invitation filtered above"),
-                        }
+                        let InvitationType::Channel {
+                            home_id,
+                            nickname_suggestion,
+                            ..
+                        } = &updated.invitation_type
+                        else {
+                            return Err(AgentError::internal(
+                                "channel invitation acceptance persisted a non-channel invitation"
+                                    .to_string(),
+                            ));
+                        };
+                        let home_name =
+                            require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
+                        self.publish_channel_acceptance_chat_projection(
+                            effects.as_ref(),
+                            updated.context_id,
+                            *home_id,
+                            &home_name,
+                            updated.sender_id,
+                            updated.receiver_id,
+                        )
+                        .await?;
+                        crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                            &reactive,
+                            *home_id,
+                            &home_name,
+                            updated.sender_id,
+                            updated.receiver_id,
+                            updated.context_id,
+                            now_ms,
+                        )
+                        .await
+                        .map_err(AgentError::runtime)?;
+                        home_name
                     } else {
                         let resolved_home_name = acceptance
                             .channel_name
@@ -725,12 +735,23 @@ impl<'a> InvitationContactHandler<'a> {
                         continue;
                     }
 
+                    tracing::info!(
+                        authority = %self.handler.context.authority.authority_id(),
+                        invitation_code_len = code.len(),
+                        "Processing inbound invitation envelope"
+                    );
+
                     match self
                         .handler
                         .import_invitation_code(effects.as_ref(), code)
                         .await
                     {
                         Ok(_invitation) => {
+                            tracing::info!(
+                                authority = %self.handler.context.authority.authority_id(),
+                                invitation_id = %_invitation.invitation_id,
+                                "Imported inbound invitation envelope"
+                            );
                             processed = processed.saturating_add(1);
                         }
                         Err(error) => {
@@ -779,7 +800,7 @@ impl<'a> InvitationContactHandler<'a> {
         &self,
         effects: &AuraEffectSystem,
         invitation_id: &InvitationId,
-    ) -> AgentResult<Option<(AuthorityId, String)>> {
+    ) -> AgentResult<Option<(AuthorityId, String, Option<String>)>> {
         let own_id = self.handler.context.authority.authority_id();
 
         tracing::debug!(
@@ -807,12 +828,16 @@ impl<'a> InvitationContactHandler<'a> {
                     inv.sender_id
                 };
                 let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
+                let code = crate::handlers::invitation::shareable::ShareableInvitation::from(&inv)
+                    .to_code()
+                    .ok();
                 tracing::debug!(
                     contact_id = %other,
                     nickname = %nickname,
+                    has_code = code.is_some(),
                     "resolve_contact_invitation: resolved from cache"
                 );
-                return Ok(Some((other, nickname)));
+                return Ok(Some((other, nickname, code)));
             }
         } else {
             tracing::debug!(
@@ -831,16 +856,18 @@ impl<'a> InvitationContactHandler<'a> {
                 sender_id = %shareable.sender_id,
                 "resolve_contact_invitation: found in persisted store"
             );
-            if let InvitationType::Contact { nickname } = shareable.invitation_type {
+            if let InvitationType::Contact { nickname } = &shareable.invitation_type {
                 if shareable.sender_id != own_id {
                     let other = shareable.sender_id;
-                    let nickname = nickname.unwrap_or_else(|| other.to_string());
+                    let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
+                    let code = shareable.to_code().ok();
                     tracing::debug!(
                         contact_id = %other,
                         nickname = %nickname,
+                        has_code = code.is_some(),
                         "resolve_contact_invitation: resolved from persisted store"
                     );
-                    return Ok(Some((other, nickname)));
+                    return Ok(Some((other, nickname, code)));
                 }
             }
         } else {
@@ -902,7 +929,11 @@ impl<'a> InvitationContactHandler<'a> {
                 })
                 .unwrap_or_else(|| sender_id.to_string());
 
-            return Ok(Some((sender_id, nickname)));
+            // No code available via the fact-level fallback path — the
+            // invitation fact does not carry the exported code string.
+            // The cache and persisted-store paths above already returned
+            // with a code when one was derivable.
+            return Ok(Some((sender_id, nickname, None)));
         }
 
         Ok(None)

@@ -550,8 +550,7 @@ fn generate_vm_projection_artifacts(
         })
         .collect::<Vec<_>>();
     let mut required_theorem_packs = choreography.required_theorem_packs();
-    required_theorem_packs.sort();
-    required_theorem_packs.dedup();
+    sort_dedup_strings(&mut required_theorem_packs);
     let mut required_theorem_pack_capabilities = theorem_packs
         .iter()
         .filter(|pack| {
@@ -561,8 +560,7 @@ fn generate_vm_projection_artifacts(
         })
         .flat_map(|pack| pack.capabilities.iter().cloned())
         .collect::<Vec<_>>();
-    required_theorem_pack_capabilities.sort();
-    required_theorem_pack_capabilities.dedup();
+    sort_dedup_strings(&mut required_theorem_pack_capabilities);
     let mut guard_capabilities = annotations
         .iter()
         .filter_map(|annotation| match annotation {
@@ -706,6 +704,11 @@ fn hoist_choice_blocks(tokens: TokenStream) -> TokenStream {
     out.extend(quote! { #(#items)* });
     out.extend(transformed);
     out
+}
+
+fn sort_dedup_strings(values: &mut Vec<String>) {
+    values.sort();
+    values.dedup();
 }
 
 fn transform_token_stream(tokens: TokenStream) -> (TokenStream, BTreeMap<String, TokenStream>) {

@@ -6,9 +6,9 @@ use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_app::frontend_primitives::{
-    dropped_owner_error, CeremonyMonitorHandoffSubmission, LocalTerminalSubmission,
-    SubmittedOperationPublisher, SubmittedOperationWorkflowError, WorkflowHandoffRelease,
-    WorkflowHandoffSubmission,
+    dropped_owner_error, run_frontend_sync_boundary, CeremonyMonitorHandoffSubmission,
+    LocalTerminalSubmission, SubmittedOperationPublisher, SubmittedOperationWorkflowError,
+    WorkflowHandoffRelease, WorkflowHandoffSubmission,
 };
 use aura_app::ui::types::AppCore;
 use aura_app::ui_contract::{
@@ -17,7 +17,6 @@ use aura_app::ui_contract::{
     SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
     WorkflowTerminalOutcome, WorkflowTerminalStatus,
 };
-use futures::executor::block_on;
 use std::future::Future;
 
 static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
@@ -231,6 +230,29 @@ impl SubmittedOperationPublisher for TuiSubmittedOperationPublisher {
     }
 }
 
+impl TuiSubmittedOperationPublisher {
+    fn publish_dispatched_sync(
+        &self,
+        operation_id: &OperationId,
+        instance_id: &OperationInstanceId,
+        kind: SemanticOperationKind,
+    ) {
+        let submission = authoritative_operation_status_update(
+            operation_id.clone(),
+            Some(instance_id.clone()),
+            None,
+            SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched),
+        );
+        if !send_ui_update_required_blocking(&self.tx, submission) {
+            tracing::warn!(
+                operation_id = %operation_id.0,
+                instance_id = %instance_id.0,
+                "terminal submission delivery failed: UI update channel closed"
+            );
+        }
+    }
+}
+
 struct SubmittedLocalOperationOwner(LocalTerminalSubmission<TuiSubmittedOperationPublisher>);
 struct SubmittedWorkflowOperationOwner(WorkflowHandoffSubmission<TuiSubmittedOperationPublisher>);
 
@@ -256,12 +278,51 @@ impl SubmittedLocalOperationOwner {
         kind: SemanticOperationKind,
     ) -> Self {
         let publisher = TuiSubmittedOperationPublisher { tx };
-        Self(block_on(LocalTerminalSubmission::submit(
-            publisher,
-            operation_id,
-            kind,
-            next_owned_operation_instance_id,
-        )))
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let dispatched = publisher.clone();
+            let submission = LocalTerminalSubmission::submit_unpublished(
+                publisher,
+                operation_id,
+                kind,
+                next_owned_operation_instance_id,
+            );
+            dispatched.publish_dispatched_sync(
+                submission.operation_id(),
+                submission.instance_id(),
+                submission.kind(),
+            );
+            Self(submission)
+        } else {
+            Self(run_frontend_sync_boundary(
+                "LocalTerminalOperationOwner::submit",
+                LocalTerminalSubmission::submit(
+                    publisher,
+                    operation_id,
+                    kind,
+                    next_owned_operation_instance_id,
+                ),
+            ))
+        }
+    }
+
+    #[cfg(test)]
+    async fn submit_for_test(
+        _app_core: Arc<RwLock<AppCore>>,
+        _tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        let publisher = TuiSubmittedOperationPublisher { tx };
+        Self(
+            LocalTerminalSubmission::submit(
+                publisher,
+                operation_id,
+                kind,
+                next_owned_operation_instance_id,
+            )
+            .await,
+        )
     }
 
     async fn succeed(self) {
@@ -295,12 +356,51 @@ impl SubmittedWorkflowOperationOwner {
         kind: SemanticOperationKind,
     ) -> Self {
         let publisher = TuiSubmittedOperationPublisher { tx };
-        Self(block_on(WorkflowHandoffSubmission::submit(
-            publisher,
-            operation_id,
-            kind,
-            next_owned_operation_instance_id,
-        )))
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let dispatched = publisher.clone();
+            let submission = WorkflowHandoffSubmission::submit_unpublished(
+                publisher,
+                operation_id,
+                kind,
+                next_owned_operation_instance_id,
+            );
+            dispatched.publish_dispatched_sync(
+                submission.operation_id(),
+                submission.instance_id(),
+                submission.kind(),
+            );
+            Self(submission)
+        } else {
+            Self(run_frontend_sync_boundary(
+                "WorkflowHandoffOperationOwner::submit",
+                WorkflowHandoffSubmission::submit(
+                    publisher,
+                    operation_id,
+                    kind,
+                    next_owned_operation_instance_id,
+                ),
+            ))
+        }
+    }
+
+    #[cfg(test)]
+    async fn submit_for_test(
+        _app_core: Arc<RwLock<AppCore>>,
+        _tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        let publisher = TuiSubmittedOperationPublisher { tx };
+        Self(
+            WorkflowHandoffSubmission::submit(
+                publisher,
+                operation_id,
+                kind,
+                next_owned_operation_instance_id,
+            )
+            .await,
+        )
     }
 
     fn handoff_to_app_workflow(
@@ -340,13 +440,32 @@ impl SubmittedCeremonyOwner {
         kind: SemanticOperationKind,
     ) -> Self {
         let publisher = TuiSubmittedOperationPublisher { tx };
-        Self {
-            inner: block_on(CeremonyMonitorHandoffSubmission::submit(
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let dispatched = publisher.clone();
+            let submission = CeremonyMonitorHandoffSubmission::submit_unpublished(
                 publisher,
                 operation_id,
                 kind,
                 next_owned_operation_instance_id,
-            )),
+            );
+            dispatched.publish_dispatched_sync(
+                submission.operation_id(),
+                submission.instance_id(),
+                submission.kind(),
+            );
+            Self { inner: submission }
+        } else {
+            Self {
+                inner: run_frontend_sync_boundary(
+                    "CeremonySubmissionOwner::submit",
+                    CeremonyMonitorHandoffSubmission::submit(
+                        publisher,
+                        operation_id,
+                        kind,
+                        next_owned_operation_instance_id,
+                    ),
+                ),
+            }
         }
     }
 
@@ -631,13 +750,14 @@ mod tests {
         init_signals_for_test(&app_core).await;
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, rx) = mpsc::channel(8);
-        let owner = SubmittedLocalOperationOwner::submit(
+        let owner = SubmittedLocalOperationOwner::submit_for_test(
             app_core.clone(),
             tasks.clone(),
             tx,
             (case.operation_id)(),
             case.kind,
-        );
+        )
+        .await;
         (app_core, tasks, rx, owner)
     }
 
@@ -655,13 +775,14 @@ mod tests {
         init_signals_for_test(&app_core).await;
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, rx) = mpsc::channel(8);
-        let owner = SubmittedWorkflowOperationOwner::submit(
+        let owner = SubmittedWorkflowOperationOwner::submit_for_test(
             app_core.clone(),
             tasks.clone(),
             tx,
             (case.operation_id)(),
             case.kind,
-        );
+        )
+        .await;
         (app_core, tasks, rx, owner)
     }
 
@@ -785,13 +906,14 @@ mod tests {
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
-        let owner = SubmittedWorkflowOperationOwner::submit(
+        let owner = SubmittedWorkflowOperationOwner::submit_for_test(
             app_core.clone(),
             tasks.clone(),
             tx,
             OperationId::account_create(),
             SemanticOperationKind::CreateAccount,
-        );
+        )
+        .await;
 
         drop(owner);
 
@@ -850,13 +972,14 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(8);
         let tx_best_effort = tx.clone();
 
-        let owner = SubmittedLocalOperationOwner::submit(
+        let owner = SubmittedLocalOperationOwner::submit_for_test(
             app_core,
             tasks.clone(),
             tx,
             OperationId::account_create(),
             SemanticOperationKind::CreateAccount,
-        );
+        )
+        .await;
 
         // Publish terminal success.
         owner.succeed().await;
@@ -934,13 +1057,14 @@ mod tests {
         let operation_id = OperationId::invitation_accept_channel();
 
         // First owner: submit and handoff to app workflow.
-        let first_owner = SubmittedWorkflowOperationOwner::submit(
+        let first_owner = SubmittedWorkflowOperationOwner::submit_for_test(
             app_core.clone(),
             tasks.clone(),
             tx.clone(),
             operation_id.clone(),
             SemanticOperationKind::AcceptPendingChannelInvitation,
-        );
+        )
+        .await;
         let first_instance_id = first_owner.instance_id().clone();
         let _transfer = first_owner.handoff_to_app_workflow(
             SemanticOperationTransferScope::AcceptPendingChannelInvitation,
@@ -964,13 +1088,14 @@ mod tests {
         }
 
         // Second owner: same operation_id but gets a different instance_id.
-        let second_owner = SubmittedWorkflowOperationOwner::submit(
+        let second_owner = SubmittedWorkflowOperationOwner::submit_for_test(
             app_core,
             tasks.clone(),
             tx,
             operation_id,
             SemanticOperationKind::AcceptPendingChannelInvitation,
-        );
+        )
+        .await;
         let second_instance_id = second_owner.instance_id().clone();
 
         // The two submissions must have distinct instance_ids.
@@ -1041,13 +1166,14 @@ mod tests {
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
-        let owner = SubmittedWorkflowOperationOwner::submit(
+        let owner = SubmittedWorkflowOperationOwner::submit_for_test(
             app_core,
             tasks.clone(),
             tx,
             OperationId::invitation_accept_contact(),
             SemanticOperationKind::AcceptContactInvitation,
-        );
+        )
+        .await;
 
         let transfer =
             owner.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
@@ -1092,13 +1218,14 @@ mod tests {
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
-        SubmittedLocalOperationOwner::submit(
+        SubmittedLocalOperationOwner::submit_for_test(
             app_core.clone(),
             tasks.clone(),
             tx,
             OperationId::account_create(),
             SemanticOperationKind::CreateAccount,
         )
+        .await
         .succeed()
         .await;
 

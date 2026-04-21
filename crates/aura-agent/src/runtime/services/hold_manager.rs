@@ -282,8 +282,10 @@ struct StoredHeldObject {
     held_object: aura_core::HeldObject,
     retention: HoldRetentionMetadata,
     #[allow(dead_code)]
+    /* TODO(2026-07): remove once hold handoff auditing is either surfaced or deleted. */
     handoff: Option<aura_core::MoveToHoldHandoff>,
     #[allow(dead_code)]
+    /* TODO(2026-07): remove once maintenance-epoch enforcement consumes the stored value. */
     maintenance_epoch: MaintenanceEpoch,
     selectors: Vec<SelectorRecord>,
     selected_holders: Vec<AuthorityId>,
@@ -296,8 +298,10 @@ struct StoredHeldObject {
 #[derive(Debug, Clone)]
 struct ReplyBlockRecord {
     #[allow(dead_code)]
+    /* TODO(2026-07): remove once reply-block invalidation reports surface the scope. */
     scope: ContextId,
     #[allow(dead_code)]
+    /* TODO(2026-07): remove once reply-block diagnostics surface the witness kind. */
     kind: AccountabilityWitnessKind,
     command_scope: [u8; 32],
     valid_until: u64,

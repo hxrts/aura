@@ -3,6 +3,10 @@
 //! Implements data availability for blocks. All members replicate all
 //! home-level shared data.
 
+use super::{
+    is_stored_locally, retrieve_stored_locally, serialize_retrieve_request, storage_key,
+    verified_response_content,
+};
 use crate::facts::HomeId;
 use crate::home::Home;
 use crate::storage::StorageService;
@@ -100,11 +104,6 @@ where
         }
         Ok(())
     }
-
-    /// Convert hash to storage key.
-    fn hash_to_key(hash: &Hash32) -> String {
-        format!("content:{hash}")
-    }
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -121,13 +120,13 @@ where
     }
 
     async fn is_locally_available(&self, _unit: Self::UnitId, hash: &Hash32) -> bool {
-        let key = Self::hash_to_key(hash);
-        self.storage.exists(&key).await.unwrap_or(false)
+        let key = storage_key("content", hash);
+        is_stored_locally(self.storage.as_ref(), &key).await
     }
 
     async fn retrieve_local(&self, _unit: Self::UnitId, hash: &Hash32) -> Option<Vec<u8>> {
-        let key = Self::hash_to_key(hash);
-        self.storage.retrieve(&key).await.ok().flatten()
+        let key = storage_key("content", hash);
+        retrieve_stored_locally(self.storage.as_ref(), &key).await
     }
 
     async fn retrieve(
@@ -149,26 +148,15 @@ where
             peers_tried += 1;
 
             // Request from peer
-            let request = RetrieveRequest { hash: *hash };
-            let serialized = aura_core::util::serialization::to_vec(&request)
-                .map_err(|e| AvailabilityError::NetworkError(e.to_string()))?;
+            let serialized = serialize_retrieve_request(hash)?;
 
             match self.network.send_to_peer(peer.uuid(), serialized).await {
                 Ok(()) => {
                     // Wait for response (simplified - real impl would use request/response)
                     match self.network.receive_from(peer.uuid()).await {
                         Ok(response) => {
-                            if let Ok(data) = aura_core::util::serialization::from_slice::<
-                                RetrieveResponse,
-                            >(&response)
-                            {
-                                if let Some(content) = data.content {
-                                    // Verify hash
-                                    let computed = Hash32::from_bytes(&content);
-                                    if computed == *hash {
-                                        return Ok(content);
-                                    }
-                                }
+                            if let Some(content) = verified_response_content(hash, &response) {
+                                return Ok(content);
                             }
                         }
                         Err(_) => continue,
@@ -197,7 +185,7 @@ where
 
         // Compute hash
         let hash = Hash32::from_bytes(content);
-        let key = Self::hash_to_key(&hash);
+        let key = storage_key("content", &hash);
 
         // Store locally
         self.storage
@@ -207,18 +195,6 @@ where
 
         Ok(hash)
     }
-}
-
-/// Request message for data retrieval.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct RetrieveRequest {
-    hash: Hash32,
-}
-
-/// Response message for data retrieval.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct RetrieveResponse {
-    content: Option<Vec<u8>>,
 }
 
 #[cfg(test)]

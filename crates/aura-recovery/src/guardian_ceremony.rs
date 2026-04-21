@@ -29,7 +29,10 @@
 //! are inert. Only the committed epoch is used for signing. This eliminates the
 //! need for explicit rollback - simply not committing is sufficient.
 
-use crate::{effects::RecoveryEffects, RecoveryError, RecoveryResult};
+use crate::{
+    effects::RecoveryEffects, utils::workflow::current_physical_time_or_zero, RecoveryError,
+    RecoveryResult,
+};
 use aura_core::{
     effects::{JournalEffects, PhysicalTimeEffects},
     hash,
@@ -228,48 +231,37 @@ pub struct CeremonyState {
 }
 
 impl CeremonyState {
+    fn response_count(&self, response: CeremonyResponse) -> usize {
+        self.responses.values().filter(|r| **r == response).count()
+    }
+
+    fn guardians_with_response(&self, response: CeremonyResponse) -> Vec<AuthorityId> {
+        self.responses
+            .iter()
+            .filter_map(|(guardian_id, current)| (*current == response).then_some(*guardian_id))
+            .collect()
+    }
+
     /// Check if enough guardians have accepted
     pub fn has_threshold(&self) -> bool {
-        let accepted = self
-            .responses
-            .values()
-            .filter(|r| **r == CeremonyResponse::Accept)
-            .count();
-        accepted >= self.operation.threshold_k as usize
+        self.response_count(CeremonyResponse::Accept) >= self.operation.threshold_k as usize
     }
 
     /// Check if any guardian has declined
     pub fn has_decline(&self) -> bool {
-        self.responses
-            .values()
-            .any(|r| *r == CeremonyResponse::Decline)
+        self.response_count(CeremonyResponse::Decline) > 0
     }
 
     /// Check if all guardians have responded
     pub fn all_responded(&self) -> bool {
-        !self
-            .responses
-            .values()
-            .any(|r| *r == CeremonyResponse::Pending)
+        self.response_count(CeremonyResponse::Pending) == 0
     }
 
     /// Get count of responses by type
     pub fn response_counts(&self) -> (usize, usize, usize) {
-        let accepted = self
-            .responses
-            .values()
-            .filter(|r| **r == CeremonyResponse::Accept)
-            .count();
-        let declined = self
-            .responses
-            .values()
-            .filter(|r| **r == CeremonyResponse::Decline)
-            .count();
-        let pending = self
-            .responses
-            .values()
-            .filter(|r| **r == CeremonyResponse::Pending)
-            .count();
+        let accepted = self.response_count(CeremonyResponse::Accept);
+        let declined = self.response_count(CeremonyResponse::Decline);
+        let pending = self.response_count(CeremonyResponse::Pending);
         (accepted, declined, pending)
     }
 }
@@ -524,6 +516,31 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         Ok(())
     }
 
+    async fn current_time_or_zero(&self) -> PhysicalTime {
+        current_physical_time_or_zero(self.effects.as_ref()).await
+    }
+
+    fn insufficient_acceptances_reason(state: &CeremonyState) -> CeremonyAbortReason {
+        CeremonyAbortReason::InsufficientAcceptances {
+            accepted: state.response_count(CeremonyResponse::Accept) as u16,
+            required: state.operation.threshold_k,
+        }
+    }
+
+    async fn emit_aborted_fact(
+        &self,
+        ceremony_id: CeremonyId,
+        reason: &CeremonyAbortReason,
+        aborted_at: PhysicalTime,
+    ) -> RecoveryResult<()> {
+        self.emit_fact(CeremonyFact::Aborted {
+            ceremony_id: ceremony_id.0,
+            reason: reason.to_string(),
+            aborted_at,
+        })
+        .await
+    }
+
     /// Get current guardian state for prestate computation
     pub async fn get_current_guardian_state(
         &self,
@@ -666,10 +683,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
             responses.insert(*guardian_id, CeremonyResponse::Pending);
         }
 
-        let now = self.effects.physical_time().await.unwrap_or(PhysicalTime {
-            ts_ms: 0,
-            uncertainty: None,
-        });
+        let now = self.current_time_or_zero().await;
 
         // Emit initiated fact
         self.emit_fact(CeremonyFact::Initiated {
@@ -722,10 +736,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         // Record the response
         state.responses.insert(guardian_id, response);
 
-        let now = self.effects.physical_time().await.unwrap_or(PhysicalTime {
-            ts_ms: 0,
-            uncertainty: None,
-        });
+        let now = self.current_time_or_zero().await;
 
         // Emit response fact
         self.emit_fact(CeremonyFact::GuardianResponded {
@@ -766,10 +777,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         state: &mut CeremonyState,
         authority_id: &AuthorityId,
     ) -> RecoveryResult<bool> {
-        let now = self.effects.physical_time().await.unwrap_or(PhysicalTime {
-            ts_ms: 0,
-            uncertainty: None,
-        });
+        let now = self.current_time_or_zero().await;
 
         // Check if any guardian declined
         if state.has_decline() {
@@ -779,13 +787,8 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
             };
             state.completed_at = Some(now.clone());
 
-            // Emit abort fact
-            self.emit_fact(CeremonyFact::Aborted {
-                ceremony_id: state.ceremony_id.0,
-                reason: reason.to_string(),
-                aborted_at: now,
-            })
-            .await?;
+            self.emit_aborted_fact(state.ceremony_id, &reason, now)
+                .await?;
 
             // Note: No explicit rollback needed - the new epoch keys are simply never activated
             tracing::info!(
@@ -800,25 +803,14 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         if !state.has_threshold() {
             if state.all_responded() {
                 // All responded but didn't reach threshold
-                let reason = CeremonyAbortReason::InsufficientAcceptances {
-                    accepted: state
-                        .responses
-                        .values()
-                        .filter(|r| **r == CeremonyResponse::Accept)
-                        .count() as u16,
-                    required: state.operation.threshold_k,
-                };
+                let reason = Self::insufficient_acceptances_reason(state);
                 state.status = CeremonyStatus::Aborted {
                     reason: reason.clone(),
                 };
                 state.completed_at = Some(now.clone());
 
-                self.emit_fact(CeremonyFact::Aborted {
-                    ceremony_id: state.ceremony_id.0,
-                    reason: reason.to_string(),
-                    aborted_at: now,
-                })
-                .await?;
+                self.emit_aborted_fact(state.ceremony_id, &reason, now)
+                    .await?;
 
                 tracing::info!(
                     ceremony_id = %state.ceremony_id,
@@ -857,12 +849,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         }
 
         // Get participants who accepted
-        let participants: Vec<AuthorityId> = state
-            .responses
-            .iter()
-            .filter(|(_, r)| **r == CeremonyResponse::Accept)
-            .map(|(id, _)| *id)
-            .collect();
+        let participants = state.guardians_with_response(CeremonyResponse::Accept);
 
         state.status = CeremonyStatus::Committed { new_epoch };
         state.completed_at = Some(now.clone());
@@ -895,10 +882,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         state: &mut CeremonyState,
         reason: String,
     ) -> RecoveryResult<()> {
-        let now = self.effects.physical_time().await.unwrap_or(PhysicalTime {
-            ts_ms: 0,
-            uncertainty: None,
-        });
+        let now = self.current_time_or_zero().await;
 
         let abort_reason = CeremonyAbortReason::Manual {
             reason: reason.clone(),
@@ -908,13 +892,8 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         };
         state.completed_at = Some(now.clone());
 
-        // Emit abort fact
-        self.emit_fact(CeremonyFact::Aborted {
-            ceremony_id: state.ceremony_id.0,
-            reason: abort_reason.to_string(),
-            aborted_at: now,
-        })
-        .await?;
+        self.emit_aborted_fact(state.ceremony_id, &abort_reason, now)
+            .await?;
 
         // Note: The new epoch keys are simply orphaned, not explicitly deleted
         // This is the "epoch isolation" property - uncommitted epochs are inert
