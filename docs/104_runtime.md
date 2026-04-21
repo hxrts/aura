@@ -33,6 +33,8 @@ Adaptive privacy policy is runtime-owned local state, not shared truth.
 - `SelectionManagerService` fuses those inputs with local health and budget signals
   into runtime-local `LocalSelectionProfile` and `SelectionState`
 - `LocalHealthObserverService` owns smoothing, hysteresis, and local health snapshots
+- `MoveManager` owns bounded movement queues, replay windows, flush scheduling, congestion state, and the current routing profile used for `MoveEnvelope` delivery
+- `HoldManager` owns held-object custody, selector rotation, bounded holder residency, local Hold GC, verified witness handling, and neighborhood-scoped provider scoring
 - `AnonymousPathManager` owns reusable anonymous established-path lifecycle and
   protected encrypted establish-session state
 - `CoverTrafficGeneratorService` owns cover-floor planning and reserved cover budget
@@ -45,6 +47,10 @@ This split is strict:
 - retrieval, cover, accountability replies, and ordinary movement share one
   `MoveEnvelope` family where applicable rather than regaining separate
   transport families
+
+The production adaptive policy is fixed by deployment rather than user configuration. The current fixed policy uses path-diversity floor `2`, cover floor `2` packets per second, delay gain denominator `3`, neighborhood hold retention window `120s`, and retrieval-capability rotation beginning `10s` before expiry. Development and simulation may tune those values, but production nodes do not expose per-user privacy knobs.
+
+`LocalRoutingProfile::passthrough()` remains the pre-privacy baseline. It uses mixing depth `0`, delay `0`, cover rate `0`, and path diversity `1`. `Hold` remains active under passthrough because custody and selector retrieval are availability services rather than privacy-profile parameters.
 
 ### Transparent Onion Quarantine
 
@@ -489,7 +495,7 @@ This diagram shows the AppCore architecture. Frontends import UI-facing types fr
 
 AppCore supports two construction modes: demo/offline mode (no runtime bridge, for development and testing) and production mode (wired to a concrete `RuntimeBridge` for full effect system capabilities).
 
-See [Getting Started Guide](801_hello_world_guide.md) for AppCore usage.
+See [Hello World Guide](801_hello_world_guide.md) for AppCore usage.
 
 ### Reactive Flow
 

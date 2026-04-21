@@ -12,12 +12,9 @@ Rendezvous does not establish global identity. All operations are scoped to a `C
 
 Rendezvous descriptor exchange can run in provisional (A1) or soft-safe (A2) modes to enable rapid connectivity under poor network conditions, but durable channel epochs and membership changes must be finalized via consensus (A3). Soft-safe flows should emit convergence and reversion facts so participants can reason about reversion risk while channels are warming.
 
-Bootstrap discovery is a separate concern. First-run startup may surface same-machine or same-LAN
-`bootstrap candidates` before any enrollment or acceptance has completed. Those candidates are not
-ordinary rendezvous peers, must not inflate ordinary peer counts, and must not be treated as
-context-scoped descriptor participants yet. Browser runtimes cannot join the native UDP LAN path,
-so browser-involved startup uses a real bootstrap broker path that publishes ephemeral bootstrap
-descriptors and then hands control back to the existing invitation/device-enrollment flow.
+Bootstrap discovery is a separate concern. First-run startup may surface same-machine or same-LAN `bootstrap candidates` before any enrollment or acceptance has completed. Those candidates are not ordinary rendezvous peers. They must not inflate ordinary peer counts or become context-scoped descriptor participants before enrollment or acceptance completes.
+
+Browser runtimes cannot join the native UDP LAN path. Browser-involved startup uses a bootstrap broker path that publishes ephemeral bootstrap descriptors and then hands control back to the existing invitation or device-enrollment flow.
 
 ### 1.1 Secure‑Channel Lifecycle (A1/A2/A3)
 
@@ -57,33 +54,22 @@ Rendezvous descriptors carry two kinds of information. One surface describes con
 
 Connectivity endpoints describe how a peer may be reached. Service advertisements describe what the peer is willing to provide. Runtime policy combines both surfaces with local permit state, health, and trust evidence. Descriptor publication itself does not commit the final route choice.
 
-The current implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data. That compatibility layer is explicitly quarantined. Owner: `adaptive_privacy_phase6`. Removal condition: encrypted `EstablishedPath` rollout and invitation bootstrap no longer need the legacy hint bridge. New code should consume `LinkEndpoint`, `ServiceDescriptor`, `EstablishPath`, `MovePath`, and `HoldDescriptor` views rather than treating transport hints as final routing policy.
+The implementation still derives split connectivity and service-surface views from legacy `TransportHint` compatibility data in some descriptor and invitation paths. That compatibility bridge is quarantined. Owner: `adaptive_privacy_runtime`. Removal condition: descriptor publication and invitation bootstrap no longer need the legacy hint bridge. New code should consume `LinkEndpoint`, `ServiceDescriptor`, `EstablishPath`, `MovePath`, and `HoldDescriptor` views rather than treating transport hints as final routing policy.
 
 ### 3.1 Bootstrap Discovery Plane
 
-Aura now uses two distinct discovery planes during startup:
+Aura uses two distinct discovery planes during startup:
 
 1. Native rendezvous/LAN discovery for native-to-native startup on the same LAN.
-2. Broker-backed bootstrap discovery for any startup shape that involves the browser, including
-   same-machine TUI <-> Web and same-LAN TUI <-> Web or Web <-> Web.
+2. Broker-backed bootstrap discovery for any startup shape that involves the browser, including same-machine TUI to Web and same-LAN TUI to Web or Web to Web.
 
-The bootstrap broker publishes ephemeral bootstrap descriptors only. It exists to help first-run
-instances discover one another and exchange invitation/device-enrollment material through the
-existing enrollment path. It does not create an ordinary rendezvous relationship on its own.
+The bootstrap broker publishes ephemeral bootstrap descriptors only. It exists to help first-run instances discover one another and exchange invitation or device-enrollment material through the existing enrollment path. It does not create an ordinary rendezvous relationship on its own.
 
-Bootstrap and stale-node re-entry remain distributed surfaces. Aura does not define a singleton
-bootstrap registry. Instead, runtime code may combine remembered direct contacts, neighborhood
-discovery-board publications, bounded bootstrap introductions, and broker-backed ephemeral startup
-descriptors. `aura-rendezvous` owns schema validation for bootstrap contact hints and neighborhood
-re-entry hints, but it does not own final route choice or a global bootstrap cache.
+Bootstrap and stale-node re-entry remain distributed surfaces. Aura does not define a singleton bootstrap registry. Runtime code may combine remembered direct contacts, neighborhood discovery-board publications, bounded bootstrap introductions, and broker-backed ephemeral startup descriptors. `aura-rendezvous` owns schema validation for bootstrap contact hints and neighborhood re-entry hints, but it does not own final route choice or a global bootstrap cache.
 
-Operationally, browser/native first-run startup may become bootstrap-visible only after the first
-native account runtime exists and begins hosting the broker automatically. For example, in a TUI +
-Web startup, the user may create the web account first and the TUI account second; once the TUI
-runtime is live, both instances should surface one another as bootstrap candidates without any
-extra user setup steps.
+Operationally, browser and native first-run startup may become bootstrap-visible only after the first native account runtime exists and begins hosting the broker automatically. For example, in a TUI plus Web startup, the user may create the web account first and the TUI account second. Once the TUI runtime is live, both instances should surface one another as bootstrap candidates without extra user setup steps.
 
-### 3.1 Holepunching and Upgrade Policy
+### 3.2 Holepunching and Upgrade Policy
 
 Aura uses a relay-first, direct-upgrade model for NAT traversal:
 
@@ -188,6 +174,8 @@ pub struct MovePath {
 `LinkEndpoint` answers how a peer may be reached. `ServiceDescriptor` answers what service family is being advertised. Runtime-owned selection state combines these views with local policy and social inputs. The selected provider should observe only the generic service action, not the social reason it was chosen.
 
 `EstablishPath` and `MovePath` are the explicit path objects consumed by current bootstrap and movement flows. They are derived from descriptor views plus runtime-local policy, but they remain socially neutral: home, neighborhood, guardian, friend, and similar provider roles must not appear in the path schema itself.
+
+Anonymous path establishment uses the same `Establish` family boundary. `aura-rendezvous` validates path objects and descriptor inputs. `aura-agent` owns reusable anonymous path lifecycle, route choice, and path reuse policy.
 
 ## 5. MPST Choreographies
 

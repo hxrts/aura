@@ -124,7 +124,17 @@ Category B operations use proposal/approval state. Category C operations use cer
 
 See [Operation Categories](109_operation_categories.md) for the full consistency metadata type definitions. See [Effects and Handlers Guide](802_effects_guide.md) for delivery tracking patterns.
 
-### 10.1 AMP Channel Epoch Data Plane
+### 10.1 Adaptive Privacy Movement
+
+`MoveEnvelope` is the shared accountable movement boundary for relay traffic, retrieval traffic, held-object deposit and retrieval, accountability replies, and cover traffic where those flows use the adaptive privacy substrate. These flows do not regain separate mailbox, retrieval, relay, or cache-specific transport families.
+
+Movement runs over an explicit path. The path may be a direct established path in passthrough mode, or an anonymous `EstablishedPath` in privacy mode. `Move` does not smuggle route setup back into the envelope.
+
+The runtime schedules movement through three classes. Sync-blended traffic rides anti-entropy windows when deadlines allow it. Bounded-deadline replies carry accountability and control traffic that needs shorter latency. Synthetic cover fills the remaining cover floor after application traffic and sync-blended retrieval are counted.
+
+Accountability replies share the same movement substrate, but the first deployment measures them separately. They do not reduce the synthetic cover floor. This prevents mandatory witness traffic from being mistaken for discretionary cover.
+
+### 10.2 AMP Channel Epoch Data Plane
 
 AMP message acceptance is subordinate to reducer-derived channel epoch state.
 The ratchet consumes the reduced control-plane view from the relational
@@ -153,7 +163,7 @@ subtractive and cryptoshred transitions, and allow only minimal old-epoch grace
 for quarantine transitions. Emergency suspect exclusions are enforced at AMP
 send boundaries and do not imply authority-root membership changes.
 
-### 10.2 Emergency AMP Policies
+### 10.3 Emergency AMP Policies
 
 AMP emergency transitions are control-plane epoch transitions, not informal
 warning messages.

@@ -10,7 +10,7 @@ Formal verification of these properties uses Quint model checking (`verification
 
 The contract applies to the following aspects of the system.
 
-Effect handlers and protocols operate within the 8-layer architecture described in [Aura System Architecture](001_system_architecture.md). Journals and reducers are covered by this contract. The journal specification appears in [Authority and Identity](102_authority_and_identity.md) and [Journal](105_journal.md). Aura Consensus is documented in [Consensus](108_consensus.md).
+Effect handlers and protocols operate within the 8-layer architecture described in [System Architecture](001_system_architecture.md). Journals and reducers are covered by this contract. The journal specification appears in [Authority and Identity](102_authority_and_identity.md) and [Journal](105_journal.md). Aura Consensus is documented in [Consensus](108_consensus.md).
 
 Relational contexts and rendezvous flows fall under this contract. Relational contexts are specified in [Relational Contexts](114_relational_contexts.md). Transport semantics appear in [Transport and Information Flow](111_transport_and_information_flow.md). Rendezvous flows are detailed in [Rendezvous Architecture](113_rendezvous.md).
 Shared notation appears in [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation).
@@ -140,11 +140,19 @@ Onion-routed accountability must preserve anonymous reverse delivery of bounded 
 
 Verifier roles are explicit and local. Local runtime consequences such as scoring, reciprocal budget, and admission preference apply only after verification succeeds.
 
+Accountability return paths use typed single-use reply blocks. `MoveReceiptReplyBlock`, `HoldDepositReplyBlock`, `HoldRetrievalReplyBlock`, and `HoldAuditReplyBlock` are scoped proof-return capabilities. They are not generic reverse channels.
+
+Witness traffic must return through the shared movement substrate when onion routing is active. Direct callback assumptions are not part of the privacy-mode contract.
+
 ### 2.12 Hold Service Profiles
 
 `Hold` is a shared custody service surface. Profile-specific retrieval or retention semantics are allowed.
 
 All `Hold` services must preserve the common custody invariants. Custody remains opaque, non-authoritative, selector-driven, and best-effort.
+
+`DeferredDeliveryHold` and `CacheReplicaHold` are named profiles over one custody substrate. `DeferredDeliveryHold` uses retrieve-once semantics and re-deposit on miss. `CacheReplicaHold` uses retention-window-governed replica semantics.
+
+Applications that need durable truth must use journals, consensus, or another authoritative replicated state path. `Hold` does not provide durable custody.
 
 ## 3. Protocol-Specific Guarantees
 
@@ -212,6 +220,8 @@ Liveness requires that each authority eventually receives messages from its imme
 `Hold` availability is neighborhood-scoped and selector-driven. It is not a guarantee that any specific holder remains available.
 
 Liveness for `Hold` requires that the runtime can find some admissible holder within the neighborhood-scoped provider set. Retrieval miss and re-deposit are expected recovery behaviors. They are not contract violations by themselves.
+
+The runtime may choose a bounded rotating subset of holders inside the wider neighborhood-scoped provider set. This bounded operational set does not narrow the interface scope. Retention treatment must remain uniform across neighborhood deposits.
 
 ## 5. Time System
 
@@ -308,7 +318,7 @@ Local-only failure:
 
 ## 10. References
 
-[Aura System Architecture](001_system_architecture.md) describes runtime layering.
+[System Architecture](001_system_architecture.md) describes runtime layering.
 
 [Authorization](106_authorization.md) describes authorization and budgeting ordering.
 

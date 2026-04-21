@@ -67,6 +67,8 @@ Traditional privacy systems offer only complete isolation or complete exposure. 
 - Consensual disclosure: Joining a group or establishing a relationship implies consent to share coordination information
 - Contextual identity: Deterministic Key Derivation presents different identities in different contexts, and only relationship parties can link them
 - Neighborhood visibility: Gossip neighbors observe encrypted envelope metadata, bounded by flow budgets and context isolation
+- Service trust is social: social planes may admit or weight providers, but provider trust must not become visible service shape
+- Communication privacy is envelope-level: descriptors, routes, retrieval, and retention behavior must remain socially neutral at the network boundary
 
 ### 2.2 Privacy Layers
 
@@ -79,6 +81,12 @@ Traditional privacy systems offer only complete isolation or complete exposure. 
 | Metadata | Exposure stays budgeted by observer class | Unbounded metadata leakage |
 | Retrieval | Parity-critical retrieval is not identity-addressed | Mailbox-identity disclosure on retrieval paths |
 | Custody | Custody remains opaque and non-authoritative | Treating custody as replicated truth |
+
+### 2.3 Service-Family Boundary
+
+`Establish`, `Move`, and `Hold` are the privacy-relevant service families. They describe service behavior, not social role. A provider may be admitted because of neighborhood membership, direct friendship, bounded introduction evidence, or descriptor fallback, but the service interface must not reveal which reason dominated.
+
+Trust evidence may affect `Permit` and runtime-local weighting. It must not appear as route shape, descriptor kind, retrieval shape, retention tier, or wire-visible policy class. Coarse selection tiers are local runtime derivations and are not canonical shared state.
 
 ## 3. Budgeted Send Invariant
 
@@ -272,7 +280,7 @@ Basic availability deployments do not claim those stronger bounds. Routing and b
 
 [Theoretical Model](002_theoretical_model.md) covers the formal calculus and semilattice laws.
 
-[Aura System Architecture](001_system_architecture.md) describes runtime layering and the guard chain.
+[System Architecture](001_system_architecture.md) describes runtime layering and the guard chain.
 
 [Authorization](106_authorization.md) covers authorization, budgeting, and Biscuit integration.
 

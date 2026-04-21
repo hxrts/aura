@@ -289,9 +289,9 @@ Coverage status uses three classes:
 | Cross-context isolation | `Verified` | `Aura.Proofs.ContextIsolation`, `transport.qnt` |
 | Physical vs logical time privacy boundary | `Verified` | `time_system.qnt`, `Aura.Proofs.TimeSystem` |
 | Error-channel privacy boundary | `Specified only` | No direct proof or conformance mapping recorded here |
-| Retrieval not identity-addressed | `Specified only` | No direct proof or conformance mapping recorded here |
-| Custody remains opaque and non-authoritative | `Specified only` | No direct proof or conformance mapping recorded here |
-| Accountability evidence verified before local consequences | `Specified only` | No direct proof or conformance mapping recorded here |
+| Retrieval not identity-addressed | `Conformance-backed` | `crates/aura-simulator/tests/adaptive_privacy_phase_six.rs`, selector-based `Hold` retrieval scenarios |
+| Custody remains opaque and non-authoritative | `Conformance-backed` | `crates/aura-simulator/tests/adaptive_privacy_phase_six.rs`, `Hold` custody and cache-replica validation |
+| Accountability evidence verified before local consequences | `Conformance-backed` | `crates/aura-simulator/tests/adaptive_privacy_phase_six.rs`, reply-block accountability control-plane lanes |
 | External observer protection level varies by deployment mode | `Specified only` | No direct proof or conformance mapping recorded here |
 
 ### Distributed Systems Contract Coverage
@@ -311,8 +311,8 @@ Coverage status uses three classes:
 | Cross-protocol deadlock freedom | `Verified` | `interaction.qnt` |
 | Operation-scoped and journal consistency model | `Verified` | `journal/core.qnt`, `journal/anti_entropy.qnt`, `consensus/core.qnt` |
 | Runtime conformance against formal artifacts | `Conformance-backed` | ITF trace replay, Telltale parity, conformance fixtures |
-| Onion accountability witness return and verification | `Specified only` | No direct proof or conformance mapping recorded here |
-| Hold availability and custody-failure boundaries | `Specified only` | No direct proof or conformance mapping recorded here |
+| Onion accountability witness return and verification | `Conformance-backed` | Simulator Telltale parity and `reply_block_accountability` control-plane scenarios |
+| Hold availability and custody-failure boundaries | `Conformance-backed` | `crates/aura-simulator/tests/adaptive_privacy_phase_six.rs`, weak-connectivity and sparse-sync `Hold` scenarios |
 | Failure-class boundaries and local-only failure | `Specified only` | No direct proof or conformance mapping recorded here |
 | Error-channel privacy requirements | `Specified only` | No direct proof or conformance mapping recorded here |
 

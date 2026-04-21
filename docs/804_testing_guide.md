@@ -50,7 +50,7 @@ Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::n
 
 ### Shared UX Contract and Determinism
 
-The shared UX contract is defined in [CLI and Terminal User Interface](117_user_interface.md). The `aura-app::ui_contract` module is the canonical authority for parity-critical UI identity, readiness semantics, and typed observation payloads. The shared semantic scenario contract remains `aura-app::scenario_contract`; its root may delegate contract families such as submission, actions, expectations, and values into `scenario_contract/*` modules without changing the public harness contract.
+The shared UX contract is defined in [User Interface](117_user_interface.md). The `aura-app::ui_contract` module is the canonical authority for parity-critical UI identity, readiness semantics, and typed observation payloads. The shared semantic scenario contract remains `aura-app::scenario_contract`. Its root may delegate contract families such as submission, actions, expectations, and values into `scenario_contract/*` modules without changing the public harness contract.
 
 Shared scenarios must submit typed semantic commands through the frontend bridge. They must not use raw PTY keys, raw selector clicks, raw label matching, or incidental focus stepping as primary mechanics. Frontend-specific UI I/O belongs in frontend-conformance coverage rather than the main shared semantic lane. Unsupported semantic commands must fail closed and diagnostically.
 
@@ -211,17 +211,9 @@ Note-to-self is a real AMP channel provisioned at account bootstrap, not a displ
 
 The notifications shared-flow anchor remains navigation-only. Parity coverage for notifications navigation requires the TUI and web shells to expose the same semantic screen transition and detail-view contract, but notification empty-state copy is informational only and must not introduce parity-critical invitation or recovery actions outside the canonical shared workflows.
 
-AMP channel transition frontend coverage uses the same semantic observation
-lane. Transition state, live successor/finalization state, conflict evidence,
-emergency quarantine, cryptoshred status, and suspect exclusion must be
-asserted through `RuntimeFact::AmpChannelTransitionUpdated` entries in
-`UiSnapshot.runtime_events` plus shared notification list ids. Web and TUI
-frontends may render local affordances for emergency alarm, quarantine
-approval, cryptoshred approval, conflict evidence, and finalization status, but
-the controls and operation ids must come from `aura-app::ui_contract`. Tests
-must not infer AMP send/receive authority from local message-ratchet state or
-frontend-specific text; destructive cryptoshred affordances must surface an
-explicit confirmation label and the loss of pre-emergency readability.
+AMP channel transition frontend coverage uses the same semantic observation lane. Transition state, live successor and finalization state, conflict evidence, emergency quarantine, cryptoshred status, and suspect exclusion must be asserted through `RuntimeFact::AmpChannelTransitionUpdated` entries in `UiSnapshot.runtime_events` plus shared notification list ids.
+
+Web and TUI frontends may render local affordances for emergency alarm, quarantine approval, cryptoshred approval, conflict evidence, and finalization status, but the controls and operation ids must come from `aura-app::ui_contract`. Tests must not infer AMP send or receive authority from local message-ratchet state or frontend-specific text. Destructive cryptoshred affordances must surface an explicit confirmation label and the loss of pre-emergency readability.
 
 Native invitation and device-enrollment exports have an additional transport contract now. In non-wasm runs, `sender_hint` is a transport hint and must use the canonical `tcp://host:port` form rather than websocket-style `ws://` or `wss://` URLs. LAN integration and harness assertions should treat that field as a native direct-transport hint, not as a browser transport endpoint. When the runtime has both a stored rendezvous descriptor and a LAN-discovered descriptor for the same peer, invitation seeding should prefer the discovered descriptor if it adds a `TcpDirect` transport hint that the stored descriptor lacks so native shared-flow tests continue to exercise the direct LAN path.
 
@@ -642,8 +634,11 @@ These requests query screen state, send key sequences, and wait for patterns to 
 just ci-harness-build
 just ci-harness-contract
 just ci-harness-replay
+just ci-harness-matrix
 just ci-shared-flow-policy
 ```
+
+These commands build the harness, validate the contract, replay recorded coverage, run the full shared frontend matrix, and enforce shared-flow policy.
 
 `just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent. It verifies that every fully shared flow has explicit parity-scenario coverage and that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics. The shared-flow aggregate now calls Aura policy code for the adaptive-privacy runtime-locality and legacy-sweep gates through `toolkit/xtask`, while the remaining shared-flow checks stay as thin shell orchestration around harness governance and targeted contract tests.
 
@@ -653,16 +648,9 @@ The shared-flow policy scripts target the published Cargo package names for rena
 
 When shared flows export data through runtime events, the event payload is part of the contract. Invitation and device-enrollment code capture should come from `RuntimeFact` payloads in `UiSnapshot.runtime_events`, not clipboard scraping or frontend-local heuristics. Shared chat waits should bind to semantic selection state so the harness targets the single shared channel instead of falling back to incidental render order.
 
-AMP transition waits follow that runtime-event rule. Shared scenarios for
-normal transition, delayed/offline witnesses, conflicting `A2` certificates,
-subtractive membership, emergency quarantine, cryptoshred, rejected emergency
-attempts, cooldowns, duplicate-signing evidence, recovery replay, and
-authority-governance non-removal should wait on
-`RuntimeEventKind::AmpChannelTransitionUpdated`, parity snapshots, operation
-lifecycle, quiescence, and final reduced channel state. They must stay
-actor-based and semantic-only; raw DOM selectors, PTY keys, compatibility
-steps, and label-only assertions are diagnostic or frontend-conformance tools,
-not shared AMP evidence.
+AMP transition waits follow that runtime-event rule. Shared scenarios for normal transition, delayed or offline witnesses, conflicting `A2` certificates, subtractive membership, emergency quarantine, cryptoshred, rejected emergency attempts, cooldowns, duplicate-signing evidence, recovery replay, and authority-governance non-removal should wait on `RuntimeEventKind::AmpChannelTransitionUpdated`, parity snapshots, operation lifecycle, quiescence, and final reduced channel state.
+
+These scenarios must stay actor-based and semantic-only. Raw DOM selectors, PTY keys, compatibility steps, and label-only assertions are diagnostic or frontend-conformance tools. They are not shared AMP evidence.
 
 Use `just ci-ui-parity-contract` for the narrower parity gate. That lane validates shared screen and module mappings, shared-flow scenario coverage, and parity-manifest consistency without running a full scenario matrix.
 
@@ -817,4 +805,4 @@ For mixed-runtime debugging, inspect `runtime_events` before logs when a code ex
 
 - [Test Infrastructure Reference](118_testkit.md) for infrastructure details
 - [Simulation Guide](805_simulation_guide.md) for fault injection testing
-- [Verification Guide](806_verification_guide.md) for formal methods
+- [Verification and MBT Guide](806_verification_guide.md) for formal methods
