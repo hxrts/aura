@@ -187,6 +187,71 @@ Domain-specific facts use `Generic { context_id, binding_type, binding_data }` a
 
 Reduction verifies that relational facts reference valid authority commitments and applies them in dependency order.
 
+### 6.1 AMP Channel Epoch Transition Reduction
+
+AMP channel epoch transition reduction is fact-only and deterministic. It
+refines the existing A1/A2/A3 operation model for channel epoch state without
+changing authority-root membership or account commitment tree rules.
+
+Every AMP transition proposal, certificate, commit, abort, conflict, or
+supersession fact binds the same canonical `transition_id` when it refers to
+the same transition. The identity is the typed digest over:
+
+- `context_id`
+- `channel_id`
+- `parent_epoch`
+- `parent_commitment`
+- `successor_epoch`
+- `successor_commitment`
+- `membership_commitment`
+- `transition_policy`
+
+Reducers group transition facts by `(context_id, channel_id, parent_epoch,
+parent_commitment)` and validate all facts in the group before exposing live
+state. Reducer validation covers parent binding, successor epoch validity,
+membership commitment validity, witness committee validity, A2 certificate
+thresholds, A3 commit evidence, and abort/conflict/supersession evidence.
+
+For each parent group, reduction exposes one of:
+
+| State | Live successor exposed? | Meaning |
+|---|---:|---|
+| `Observed` | No | One or more syntactically valid proposals exist without a live certificate. |
+| `A2Live` | Yes | Exactly one valid unsuppressed AMP-certified successor exists. |
+| `A2Conflict` | No | Multiple conflicting valid certificates or unresolved equivocation evidence exist. |
+| `A3Finalized` | Yes | Consensus-backed commit finalizes one successor. |
+| `A3Conflict` | No | Multiple conflicting durable commits or unresolved durable-commit evidence exist. |
+| `Aborted` | No | Explicit abort evidence suppresses live use. |
+| `Superseded` | Depends on successor | Authorized supersession replaces the earlier transition path. |
+
+If exactly one valid unsuppressed A3 commit exists, that transition is both the
+durable and live successor. Otherwise, if exactly one valid unsuppressed A2
+certificate exists, that transition is the live successor but remains
+non-durable. If conflicting valid A2 certificates exist and facts do not
+resolve the conflict, reduction exposes no live successor and marks the parent
+state conflict-tainted.
+
+Reducers must not use local wall-clock time, network connectivity, operator
+preference, arrival order, or hash tie-breaking between conflicting valid A2
+certificates to choose a live successor. Single-winner exposure must come from
+fact validation: a valid AMP certificate, a valid A3 commit, explicit
+equivocation evidence, abort evidence, or supersession evidence.
+
+The reduced channel view distinguishes:
+
+- `stable_epoch`: last durable committed epoch
+- `live_successor`: optional A2-certified successor for the stable epoch
+- `durable_successor`: optional A3-finalized successor
+- `transition_state`: one of the states above
+- `conflict_evidence`: optional witness or transition evidence when
+  conflict-tainted
+- emergency policy fields such as suspect authority, quarantine epoch, and
+  prune-before epoch when an emergency transition is active
+
+The AMP message ratchet consumes this reducer output. It does not author
+membership truth, choose between transitions, or repair missing control-plane
+facts.
+
 ## 7. Flow Budgets
 
 Flow budgets track message sending allowances between authorities. The `FlowBudget` structure uses semilattice semantics for distributed convergence:

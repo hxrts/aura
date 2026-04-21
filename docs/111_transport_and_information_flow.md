@@ -124,6 +124,55 @@ Category B operations use proposal/approval state. Category C operations use cer
 
 See [Operation Categories](109_operation_categories.md) for the full consistency metadata type definitions. See [Effects and Handlers Guide](802_effects_guide.md) for delivery tracking patterns.
 
+### 10.1 AMP Channel Epoch Data Plane
+
+AMP message acceptance is subordinate to reducer-derived channel epoch state.
+The ratchet consumes the reduced control-plane view from the relational
+context journal; it does not decide membership truth or choose among competing
+successor epochs.
+
+A received AMP message is accepted only when all of the following hold:
+
+- the message epoch is the stable epoch or the single reducer-exposed
+  `A2Live` successor epoch
+- the sender is a member of that exact epoch's membership commitment
+- the generation is within the configured skip window or acceptance horizon
+- cryptographic validation succeeds
+
+Dual-epoch acceptance is policy-limited. Additive and non-removal transitions
+may permit bounded old-epoch receive overlap. Subtractive, removal, revocation,
+and emergency transitions require stricter old-epoch handling so removed or
+suspected participants cannot keep sending indefinitely while the network is
+slow.
+
+### 10.2 Emergency AMP Policies
+
+AMP emergency transitions are control-plane epoch transitions, not informal
+warning messages.
+
+`EmergencyQuarantineTransition` excludes the suspect from the successor epoch
+once the A2 certificate makes the successor live. New application sends cut
+over to the successor epoch immediately. Old-epoch receive grace is minimal and
+must be explicitly authorized by the transition policy. Implementations erase
+old sender keys, receiver chain keys, skipped-message key caches, staged epoch
+material, and channel-adjacent access material aggressively, subject to local
+retention policy.
+
+`EmergencyCryptoshredTransition` is the strongest channel-scoped emergency
+mode. When its successor becomes `A2Live`, ordinary pre-emergency readable
+state is destroyed immediately according to local cryptoshredding policy. A3
+finalization later durably commits the already-live successor; it does not
+delay cryptoshredding.
+
+Emergency transitions protect future traffic and reduce future at-rest
+exposure on honest devices. They do not retroactively protect data already
+seen, decrypted, or exfiltrated before cutover.
+
+Channel emergency facts do not automatically remove authority-root membership
+or recovery/governance rights. Recovery suspension, governance suspension, and
+durable structural removal are separate authority-scoped governance actions
+with their own thresholds.
+
 ## 11. Anti-Entropy Sync Protocol
 
 Anti-entropy implements journal synchronization between peers. The protocol exchanges digests, plans reconciliation, and transfers operations.
