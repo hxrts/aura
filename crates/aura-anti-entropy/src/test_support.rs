@@ -23,7 +23,7 @@ pub fn create_test_op(commitment: Hash32) -> AttestedOp {
             },
             version: 1,
         },
-        agg_sig: vec![],
+        agg_sig: vec![7u8; 64],
         signer_count: 1,
     }
 }

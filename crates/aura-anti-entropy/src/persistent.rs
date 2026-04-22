@@ -7,7 +7,9 @@
 //! `aura_journal::commitment_tree::storage`, ensuring both handlers operate on
 //! the same source of truth for tree operations.
 
-use super::effects::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
+use super::effects::{
+    validate_remote_attested_op, BloomDigest, SyncEffects, SyncError, SyncMetrics,
+};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::storage::StorageEffects;
@@ -207,8 +209,17 @@ impl SyncEffects for PersistentSyncHandler {
 
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
         self.ensure_initialized_for("merge_remote_ops").await?;
+        let mut known_parent_commitments = {
+            let store = self.ops_cache.read().await;
+            store
+                .iter()
+                .map(|op| Hash32::from(op.op.parent_commitment))
+                .collect::<BTreeSet<_>>()
+        };
 
         for op in ops {
+            validate_remote_attested_op(&op, &known_parent_commitments, None)?;
+
             let op_hash =
                 tree_storage::op_hash(&op).map_err(|e| SyncError::VerificationFailed {
                     target: "persisted_op_hash",
@@ -224,6 +235,7 @@ impl SyncEffects for PersistentSyncHandler {
             };
 
             if !already {
+                known_parent_commitments.insert(Hash32::from(op.op.parent_commitment));
                 // Add to cache
                 {
                     let mut store = self.ops_cache.write().await;

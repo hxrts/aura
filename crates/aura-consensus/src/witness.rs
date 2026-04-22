@@ -14,7 +14,7 @@ use aura_core::{
 use serde::{Deserialize, Serialize};
 // use rand_chacha::rand_core::SeedableRng; // Used in tests
 use async_lock::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Set of witnesses participating in consensus
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -83,6 +83,11 @@ impl NonEmptyWitnessSet {
     /// Iterate over witnesses
     pub fn iter(&self) -> std::slice::Iter<'_, AuthorityId> {
         self.witnesses.iter()
+    }
+
+    /// Check whether an authority is a configured witness.
+    pub fn contains(&self, witness: &AuthorityId) -> bool {
+        self.witnesses.contains(witness)
     }
 
     /// Number of witnesses
@@ -158,6 +163,11 @@ impl WitnessSet {
     /// Check if we have sufficient witnesses for consensus
     pub fn has_quorum(&self) -> bool {
         self.witnesses.len() >= self.threshold as usize
+    }
+
+    /// Check whether an authority is a configured witness.
+    pub fn contains(&self, witness: &AuthorityId) -> bool {
+        self.witnesses.contains(witness)
     }
 
     /// Get or create witness state for a given authority
@@ -395,6 +405,9 @@ pub struct WitnessTracker {
     /// Threshold for this consensus
     threshold: u32,
 
+    /// Optional membership gate for externally submitted witness data.
+    allowed_witnesses: Option<HashSet<AuthorityId>>,
+
     /// Primary result_id (first one seen) for backward compatibility
     primary_result_id: Option<Hash32>,
 
@@ -426,6 +439,7 @@ impl WitnessTracker {
             nonce_commitments: HashMap::new(),
             share_collector: crate::shares::ShareCollector::new(threshold),
             threshold,
+            allowed_witnesses: None,
             primary_result_id: None,
             conflict_reporters: HashMap::new(),
             equivocation_detector: crate::core::validation::EquivocationDetector::new(),
@@ -433,9 +447,32 @@ impl WitnessTracker {
         }
     }
 
+    /// Create a witness tracker constrained to a configured witness set.
+    pub fn with_witnesses(
+        threshold: u32,
+        witnesses: impl IntoIterator<Item = AuthorityId>,
+    ) -> Self {
+        let mut tracker = Self::with_threshold(threshold);
+        tracker.allowed_witnesses = Some(witnesses.into_iter().collect());
+        tracker
+    }
+
+    fn ensure_allowed(&self, witness: AuthorityId) -> Result<()> {
+        if let Some(allowed) = &self.allowed_witnesses {
+            if !allowed.contains(&witness) {
+                return Err(aura_core::AuraError::permission_denied(format!(
+                    "Authority {witness} is not in consensus witness set"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Add a nonce commitment
-    pub fn add_nonce(&mut self, witness: AuthorityId, commitment: NonceCommitment) {
+    pub fn add_nonce(&mut self, witness: AuthorityId, commitment: NonceCommitment) -> Result<()> {
+        self.ensure_allowed(witness)?;
         self.nonce_commitments.insert(witness, commitment);
+        Ok(())
     }
 
     /// Add a partial signature for a given result_id
@@ -448,6 +485,8 @@ impl WitnessTracker {
         signature: PartialSignature,
         result_id: Hash32,
     ) -> Result<Option<crate::shares::ThresholdShareSet>> {
+        self.ensure_allowed(witness)?;
+
         // Track primary result_id (first one seen)
         if self.primary_result_id.is_none() {
             self.primary_result_id = Some(result_id);
@@ -463,8 +502,10 @@ impl WitnessTracker {
     }
 
     /// Add a conflict report
-    pub fn add_conflict(&mut self, witness: AuthorityId, conflicts: Vec<Hash32>) {
+    pub fn add_conflict(&mut self, witness: AuthorityId, conflicts: Vec<Hash32>) -> Result<()> {
+        self.ensure_allowed(witness)?;
         self.conflict_reporters.insert(witness, conflicts);
+        Ok(())
     }
 
     /// Check if we have enough nonces for threshold
@@ -634,20 +675,24 @@ mod tests {
         let result_id = Hash32::new([0u8; 32]);
 
         // Add nonces
-        tracker.add_nonce(
-            witness1,
-            NonceCommitment {
-                signer: 1,
-                commitment: vec![1u8; 32],
-            },
-        );
-        tracker.add_nonce(
-            witness2,
-            NonceCommitment {
-                signer: 2,
-                commitment: vec![2u8; 32],
-            },
-        );
+        tracker
+            .add_nonce(
+                witness1,
+                NonceCommitment {
+                    signer: 1,
+                    commitment: vec![1u8; 32],
+                },
+            )
+            .unwrap();
+        tracker
+            .add_nonce(
+                witness2,
+                NonceCommitment {
+                    signer: 2,
+                    commitment: vec![2u8; 32],
+                },
+            )
+            .unwrap();
 
         assert!(tracker.has_nonce_threshold(2));
         assert!(!tracker.has_signature_threshold(2));
@@ -672,5 +717,41 @@ mod tests {
 
         assert!(tracker.has_signature_threshold(2));
         assert_eq!(tracker.get_participants().len(), 2);
+    }
+
+    #[test]
+    fn witness_tracker_rejects_non_witness_signature_without_growth() {
+        let witness = AuthorityId::new_from_entropy([1u8; 32]);
+        let attacker = AuthorityId::new_from_entropy([9u8; 32]);
+        let result_id = Hash32::new([7u8; 32]);
+        let mut tracker = WitnessTracker::with_witnesses(1, [witness]);
+
+        for index in 0u8..100 {
+            let err = tracker
+                .add_signature(
+                    AuthorityId::new_from_entropy([index.saturating_add(10); 32]),
+                    PartialSignature {
+                        signer: u16::from(index) + 1,
+                        signature: vec![index; 64],
+                    },
+                    result_id,
+                )
+                .expect_err("fabricated witness must be rejected");
+            assert!(matches!(err, aura_core::AuraError::PermissionDenied { .. }));
+        }
+
+        let err = tracker
+            .add_nonce(
+                attacker,
+                NonceCommitment {
+                    signer: 9,
+                    commitment: vec![9u8; 32],
+                },
+            )
+            .expect_err("fabricated nonce witness must be rejected");
+        assert!(matches!(err, aura_core::AuraError::PermissionDenied { .. }));
+
+        assert_eq!(tracker.get_participants().len(), 0);
+        assert_eq!(tracker.nonce_commitments.len(), 0);
     }
 }

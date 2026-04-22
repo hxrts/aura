@@ -121,7 +121,7 @@ impl BiscuitAuthorizationBridge {
         Ok(AuthorizationResult {
             authorized,
             delegation_depth: self.extract_delegation_depth_from_token(token),
-            token_facts: self.extract_token_facts_from_blocks(token),
+            token_facts: self.extract_token_facts_from_blocks(token, current_time_seconds),
         })
     }
 
@@ -179,13 +179,16 @@ impl BiscuitAuthorizationBridge {
     }
 
     /// Extract readable token facts from token blocks
-    pub fn extract_token_facts_from_blocks(&self, token: &Biscuit) -> Vec<String> {
+    pub fn extract_token_facts_from_blocks(
+        &self,
+        token: &Biscuit,
+        current_time_seconds: u64,
+    ) -> Vec<String> {
         let mut facts = Vec::new();
 
         // Add basic verification metadata
         facts.push(format!("authority(\"{}\")", self.authority_id));
-        let now = 0u64;
-        facts.push(format!("verified_at({})", now));
+        facts.push(format!("verified_at({current_time_seconds})"));
 
         // Try to extract facts from token using an authorizer
         if let Ok(authorizer) = token.authorizer() {
@@ -206,10 +209,6 @@ impl BiscuitAuthorizationBridge {
         if facts.len() <= 2 {
             let count = token.block_count();
             facts.push(format!("block_count({})", count));
-
-            // Add standard capabilities that are typically in device tokens
-            facts.push("capability(\"read\")".to_string());
-            facts.push("capability(\"write\")".to_string());
         }
 
         facts

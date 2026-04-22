@@ -27,6 +27,7 @@ use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::time::PhysicalTime;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::{CapabilityName, DeviceId};
+use aura_guards::types;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
@@ -37,6 +38,12 @@ enum InvitationGuardError {
     MessageLengthOverflow { length: u64 },
     #[error("Expiration timestamp overflow: now={now_ms}, expires_in={expires_in_ms}")]
     ExpirationOverflow { now_ms: u64, expires_in_ms: u64 },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LifecycleTransitionActor {
+    Sender,
+    Receiver,
 }
 
 // =============================================================================
@@ -326,13 +333,74 @@ impl InvitationService {
         &self,
         snapshot: &GuardSnapshot,
         required_capability: &CapabilityName,
+        invitation_id: &InvitationId,
+        actor: LifecycleTransitionActor,
         fact: InvitationFact,
     ) -> GuardOutcome {
         if let Some(outcome) = check_capability(snapshot, required_capability) {
             return outcome;
         }
 
+        if let Some(outcome) = Self::check_lifecycle(snapshot, invitation_id, actor) {
+            return outcome;
+        }
+
         GuardOutcome::allowed(vec![EffectCommand::JournalAppend { fact }])
+    }
+
+    fn check_lifecycle(
+        snapshot: &GuardSnapshot,
+        invitation_id: &InvitationId,
+        actor: LifecycleTransitionActor,
+    ) -> Option<GuardOutcome> {
+        let lifecycle = match snapshot.invitation_lifecycle.as_ref() {
+            Some(lifecycle) => lifecycle,
+            None => {
+                return Some(Self::deny_lifecycle(
+                    "invitation lifecycle state is required for lifecycle transitions",
+                ));
+            }
+        };
+
+        if &lifecycle.invitation_id != invitation_id {
+            return Some(Self::deny_lifecycle("invitation lifecycle id mismatch"));
+        }
+
+        if lifecycle.context_id != snapshot.context_id {
+            return Some(Self::deny_lifecycle(
+                "invitation lifecycle context mismatch",
+            ));
+        }
+
+        if !lifecycle.is_pending() {
+            return Some(Self::deny_lifecycle(
+                "invitation lifecycle transition requires pending status",
+            ));
+        }
+
+        if lifecycle.is_expired(snapshot.now_ms) {
+            return Some(Self::deny_lifecycle(
+                "invitation lifecycle transition requires non-expired invitation",
+            ));
+        }
+
+        let expected_actor = match actor {
+            LifecycleTransitionActor::Sender => lifecycle.sender_id,
+            LifecycleTransitionActor::Receiver => lifecycle.receiver_id,
+        };
+        if snapshot.authority_id != expected_actor {
+            return Some(Self::deny_lifecycle(
+                "authority is not permitted to perform this invitation lifecycle transition",
+            ));
+        }
+
+        None
+    }
+
+    fn deny_lifecycle(message: &'static str) -> GuardOutcome {
+        GuardOutcome::denied(types::GuardViolation::other(format!(
+            "[invitation:lifecycle-invalid] {message}"
+        )))
     }
 
     /// Create a new invitation service
@@ -469,6 +537,8 @@ impl InvitationService {
         self.prepare_lifecycle_transition(
             snapshot,
             &InvitationCapability::Accept.as_name(),
+            invitation_id,
+            LifecycleTransitionActor::Receiver,
             InvitationFact::Accepted {
                 context_id: Some(snapshot.context_id),
                 invitation_id: invitation_id.clone(),
@@ -493,6 +563,8 @@ impl InvitationService {
         self.prepare_lifecycle_transition(
             snapshot,
             &InvitationCapability::Decline.as_name(),
+            invitation_id,
+            LifecycleTransitionActor::Receiver,
             InvitationFact::Declined {
                 context_id: Some(snapshot.context_id),
                 invitation_id: invitation_id.clone(),
@@ -517,6 +589,8 @@ impl InvitationService {
         self.prepare_lifecycle_transition(
             snapshot,
             &InvitationCapability::Cancel.as_name(),
+            invitation_id,
+            LifecycleTransitionActor::Sender,
             InvitationFact::Cancelled {
                 context_id: Some(snapshot.context_id),
                 invitation_id: invitation_id.clone(),
@@ -534,6 +608,7 @@ impl InvitationService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::guards::{InvitationLifecycleSnapshot, InvitationLifecycleStatus};
     use aura_core::FlowCost;
 
     fn test_authority() -> AuthorityId {
@@ -567,6 +642,26 @@ mod tests {
             full_capabilities(),
             1,
             1000,
+        )
+    }
+
+    fn receiver_lifecycle(invitation_id: InvitationId) -> InvitationLifecycleSnapshot {
+        InvitationLifecycleSnapshot::pending(
+            invitation_id,
+            test_context(),
+            test_receiver(),
+            test_authority(),
+            Some(2_000),
+        )
+    }
+
+    fn sender_lifecycle(invitation_id: InvitationId) -> InvitationLifecycleSnapshot {
+        InvitationLifecycleSnapshot::pending(
+            invitation_id,
+            test_context(),
+            test_authority(),
+            test_receiver(),
+            Some(2_000),
         )
     }
 
@@ -674,8 +769,9 @@ mod tests {
     #[test]
     fn test_prepare_accept_invitation_success() {
         let service = InvitationService::new(test_authority(), InvitationConfig::default());
-        let snapshot = test_snapshot();
         let invitation_id = InvitationId::new("inv-123");
+        let snapshot =
+            test_snapshot().with_invitation_lifecycle(receiver_lifecycle(invitation_id.clone()));
 
         let outcome = service.prepare_accept_invitation(&snapshot, &invitation_id);
 
@@ -686,8 +782,9 @@ mod tests {
     #[test]
     fn test_prepare_decline_invitation_success() {
         let service = InvitationService::new(test_authority(), InvitationConfig::default());
-        let snapshot = test_snapshot();
         let invitation_id = InvitationId::new("inv-123");
+        let snapshot =
+            test_snapshot().with_invitation_lifecycle(receiver_lifecycle(invitation_id.clone()));
 
         let outcome = service.prepare_decline_invitation(&snapshot, &invitation_id);
 
@@ -698,13 +795,63 @@ mod tests {
     #[test]
     fn test_prepare_cancel_invitation_success() {
         let service = InvitationService::new(test_authority(), InvitationConfig::default());
-        let snapshot = test_snapshot();
         let invitation_id = InvitationId::new("inv-123");
+        let snapshot =
+            test_snapshot().with_invitation_lifecycle(sender_lifecycle(invitation_id.clone()));
 
         let outcome = service.prepare_cancel_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 1);
+    }
+
+    #[test]
+    fn test_prepare_accept_invitation_requires_lifecycle_snapshot() {
+        let service = InvitationService::new(test_authority(), InvitationConfig::default());
+        let snapshot = test_snapshot();
+        let invitation_id = InvitationId::new("inv-123");
+
+        let outcome = service.prepare_accept_invitation(&snapshot, &invitation_id);
+
+        assert!(outcome.is_denied());
+    }
+
+    #[test]
+    fn test_prepare_accept_invitation_rejects_terminal_state() {
+        let service = InvitationService::new(test_authority(), InvitationConfig::default());
+        let invitation_id = InvitationId::new("inv-123");
+        let mut lifecycle = receiver_lifecycle(invitation_id.clone());
+        lifecycle.status = InvitationLifecycleStatus::Accepted;
+        let snapshot = test_snapshot().with_invitation_lifecycle(lifecycle);
+
+        let outcome = service.prepare_accept_invitation(&snapshot, &invitation_id);
+
+        assert!(outcome.is_denied());
+    }
+
+    #[test]
+    fn test_prepare_decline_invitation_rejects_expired_state() {
+        let service = InvitationService::new(test_authority(), InvitationConfig::default());
+        let invitation_id = InvitationId::new("inv-123");
+        let lifecycle = receiver_lifecycle(invitation_id.clone());
+        let mut snapshot = test_snapshot().with_invitation_lifecycle(lifecycle);
+        snapshot.now_ms = 2_000;
+
+        let outcome = service.prepare_decline_invitation(&snapshot, &invitation_id);
+
+        assert!(outcome.is_denied());
+    }
+
+    #[test]
+    fn test_prepare_cancel_invitation_rejects_receiver_actor() {
+        let service = InvitationService::new(test_authority(), InvitationConfig::default());
+        let invitation_id = InvitationId::new("inv-123");
+        let snapshot =
+            test_snapshot().with_invitation_lifecycle(receiver_lifecycle(invitation_id.clone()));
+
+        let outcome = service.prepare_cancel_invitation(&snapshot, &invitation_id);
+
+        assert!(outcome.is_denied());
     }
 
     #[test]

@@ -44,9 +44,12 @@ fn biscuit_bridge_extracts_token_facts() {
         .unwrap_or_else(|err| panic!("failed to build empty biscuit token: {err:?}"));
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), common::authority_id(2));
 
-    let facts = bridge.extract_token_facts_from_blocks(&token);
+    let facts = bridge.extract_token_facts_from_blocks(&token, 1_234);
     assert!(!facts.is_empty());
     assert!(facts.iter().any(|f| f.contains("authority(")));
+    assert!(facts.iter().any(|f| f == "verified_at(1234)"));
+    assert!(!facts.iter().any(|f| f == "capability(\"read\")"));
+    assert!(!facts.iter().any(|f| f == "capability(\"write\")"));
 }
 
 /// Namespaced capabilities with `:` remain valid Biscuit capability tokens.

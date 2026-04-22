@@ -303,12 +303,14 @@ fn test_consensus_result_equivocation_proofs() {
         prestate_hash,
         Hash32::new([30u8; 32]),
         vec![1, 2, 3],
+        aura_core::types::Epoch::from(1),
         ThresholdSignature {
             signature: vec![0u8; 64],
             signers: vec![1],
         },
         None,
         vec![witness_honest],
+        vec![witness_honest, witness_evil],
         2,
         false,
         ProvenancedTime {

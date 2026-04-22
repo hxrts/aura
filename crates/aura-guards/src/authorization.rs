@@ -321,13 +321,9 @@ impl BiscuitAuthorizationBridge {
         }
 
         // If we couldn't extract detailed facts, provide basic token info
-        if facts.len() <= 2 {
+        if facts.len() <= 3 {
             let count = token.block_count();
             facts.push(format!("block_count({count})"));
-
-            // Add standard capabilities that are typically in device tokens
-            facts.push("capability(\"read\")".to_string());
-            facts.push("capability(\"write\")".to_string());
         }
 
         facts

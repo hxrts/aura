@@ -9,8 +9,8 @@ use crate::support;
 use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::util::test_utils::test_authority_id;
 use aura_invitation::{
-    capabilities::InvitationCapability, guards::GuardSnapshot, InvitationConfig, InvitationService,
-    InvitationType,
+    capabilities::InvitationCapability, guards::GuardSnapshot, InvitationConfig,
+    InvitationLifecycleSnapshot, InvitationService, InvitationType,
 };
 
 fn snapshot_with_caps(
@@ -46,7 +46,14 @@ fn invitation_send_and_accept_end_to_end() {
     assert!(outcome.is_allowed(), "send should be allowed");
 
     // Receiver prepares to accept
-    let accept_snapshot = snapshot_with_caps(receiver, ctx, &[InvitationCapability::Accept]);
+    let accept_snapshot = snapshot_with_caps(receiver, ctx, &[InvitationCapability::Accept])
+        .with_invitation_lifecycle(InvitationLifecycleSnapshot::pending(
+            invitation_id.clone(),
+            ctx,
+            sender,
+            receiver,
+            Some(61_000),
+        ));
     let accept_outcome =
         receiver_service.prepare_accept_invitation(&accept_snapshot, &invitation_id);
     assert!(
@@ -57,14 +64,21 @@ fn invitation_send_and_accept_end_to_end() {
 
 #[test]
 fn invitation_decline_flow_marks_status() {
-    let _sender = test_authority_id(3);
+    let sender = test_authority_id(3);
     let receiver = test_authority_id(4);
     let ctx = support::test_context(2);
 
     let svc = InvitationService::new(receiver, InvitationConfig::default());
     let invitation_id = InvitationId::new("inv-decline");
 
-    let snapshot = snapshot_with_caps(receiver, ctx, &[InvitationCapability::Decline]);
+    let snapshot = snapshot_with_caps(receiver, ctx, &[InvitationCapability::Decline])
+        .with_invitation_lifecycle(InvitationLifecycleSnapshot::pending(
+            invitation_id.clone(),
+            ctx,
+            sender,
+            receiver,
+            Some(2_000),
+        ));
     let outcome = svc.prepare_decline_invitation(&snapshot, &invitation_id);
     assert!(
         outcome.is_allowed(),

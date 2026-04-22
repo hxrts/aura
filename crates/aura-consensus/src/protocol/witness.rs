@@ -10,6 +10,7 @@ use super::{
 use crate::{
     core::{ConsensusState as CoreState, PathSelection},
     messages::{ConsensusMessage, ConsensusPhase},
+    types::consensus_signing_bytes,
     witness::WitnessTracker,
     ConsensusId,
 };
@@ -93,7 +94,10 @@ impl ConsensusProtocol {
                         coordinator,
                         my_share: my_share.clone(),
                     },
-                    tracker: WitnessTracker::new(),
+                    tracker: WitnessTracker::with_witnesses(
+                        self.config.threshold() as u32,
+                        self.config.witness_set.iter().copied(),
+                    ),
                     phase: ConsensusPhase::Execute,
                     start_time_ms: time
                         .physical_time()
@@ -133,7 +137,6 @@ impl ConsensusProtocol {
                 self.generate_signature_response(
                     consensus_id,
                     coordinator,
-                    &instance.operation_bytes,
                     aggregated_nonces,
                     &my_share,
                     random,
@@ -200,7 +203,6 @@ impl ConsensusProtocol {
         &self,
         consensus_id: ConsensusId,
         coordinator: AuthorityId,
-        message: &[u8],
         aggregated_nonces: Vec<NonceCommitment>,
         share: &Share,
         random: &(impl RandomEffects + ?Sized),
@@ -222,13 +224,21 @@ impl ConsensusProtocol {
             // Fallback: generate a fresh nonce and append its commitment
             let (commitment, nonce_token) =
                 self.generate_fresh_nonce_commitment(share, random).await?;
-            instance.tracker.add_nonce(self.authority_id, commitment);
+            instance.tracker.add_nonce(self.authority_id, commitment)?;
             nonce_token
         };
 
+        let signing_bytes = consensus_signing_bytes(
+            consensus_id,
+            instance.prestate_hash,
+            instance.operation_hash,
+            &instance.operation_bytes,
+            self.config.epoch,
+        )?;
+
         // Sign using FROST with provided aggregated nonces
         let signature = self.frost_orchestrator.sign_with_nonce(
-            message,
+            &signing_bytes,
             share,
             &nonce_token,
             &aggregated_nonces,

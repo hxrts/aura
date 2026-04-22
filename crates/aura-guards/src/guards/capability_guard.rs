@@ -75,6 +75,21 @@ impl CapabilityGuard {
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
     ) -> Result<bool> {
+        let _ = (authority_id, operation, token, flow_budget);
+        Err(AuraError::permission_denied(
+            "CapabilityGuard requires explicit current_time_seconds".to_string(),
+        ))
+    }
+
+    /// Evaluate an authority operation with explicit physical time in seconds.
+    pub async fn evaluate_authority_op_at(
+        &self,
+        authority_id: &AuthorityId,
+        operation: &AuthorityOp,
+        token: Option<&Biscuit>,
+        flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
+    ) -> Result<bool> {
         let scope = ResourceScope::Authority {
             authority_id: *authority_id,
             operation: operation.clone(),
@@ -82,7 +97,14 @@ impl CapabilityGuard {
         let flow_cost = Self::authority_op_flow_cost(operation);
         let capability =
             CapabilityId::try_from(operation.as_str()).expect("authority ops use valid names");
-        self.evaluate_scope_bool(token, capability, scope, flow_cost, flow_budget)
+        self.evaluate_scope_bool(
+            token,
+            capability,
+            scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        )
     }
 
     /// Get flow cost for an authority operation
@@ -106,6 +128,7 @@ impl CapabilityGuard {
         operation: &AuthorityOp,
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<(bool, GuardResult)> {
         let scope = ResourceScope::Authority {
             authority_id: *authority_id,
@@ -114,7 +137,14 @@ impl CapabilityGuard {
         let flow_cost = Self::authority_op_flow_cost(operation);
         let capability =
             CapabilityId::try_from(operation.as_str()).expect("authority ops use valid names");
-        self.evaluate_scope_with_result(token, capability, scope, flow_cost, flow_budget)
+        self.evaluate_scope_with_result(
+            token,
+            capability,
+            scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        )
     }
 
     /// Evaluate a context operation
@@ -125,6 +155,21 @@ impl CapabilityGuard {
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
     ) -> Result<bool> {
+        let _ = (context_id, operation, token, flow_budget);
+        Err(AuraError::permission_denied(
+            "CapabilityGuard requires explicit current_time_seconds".to_string(),
+        ))
+    }
+
+    /// Evaluate a context operation with explicit physical time in seconds.
+    pub async fn evaluate_context_op_at(
+        &self,
+        context_id: &ContextId,
+        operation: &ContextOp,
+        token: Option<&Biscuit>,
+        flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
+    ) -> Result<bool> {
         let scope = ResourceScope::Context {
             context_id: *context_id,
             operation: operation.clone(),
@@ -132,7 +177,14 @@ impl CapabilityGuard {
         let flow_cost = Self::context_op_flow_cost(operation);
         let capability =
             CapabilityId::try_from(operation.as_str()).expect("context ops use valid names");
-        self.evaluate_scope_bool(token, capability, scope, flow_cost, flow_budget)
+        self.evaluate_scope_bool(
+            token,
+            capability,
+            scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        )
     }
 
     /// Get flow cost for a context operation
@@ -173,12 +225,17 @@ impl CapabilityGuard {
         scope: ResourceScope,
         flow_cost: FlowCost,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<(bool, GuardResult)> {
         let token = self.require_token(token)?;
-        match self
-            .evaluator
-            .evaluate_guard(token, &capability, &scope, flow_cost, flow_budget, 0)
-        {
+        match self.evaluator.evaluate_guard(
+            token,
+            &capability,
+            &scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        ) {
             Ok(result) => Ok((true, result)),
             Err(super::GuardError::MissingCapability { .. }) => Ok((false, Self::denied_result())),
             Err(error) => Err(Self::map_guard_error(error)),
@@ -192,9 +249,17 @@ impl CapabilityGuard {
         scope: ResourceScope,
         flow_cost: FlowCost,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<bool> {
-        self.evaluate_scope_with_result(token, capability, scope, flow_cost, flow_budget)
-            .map(|(authorized, _)| authorized)
+        self.evaluate_scope_with_result(
+            token,
+            capability,
+            scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        )
+        .map(|(authorized, _)| authorized)
     }
 }
 
@@ -209,6 +274,16 @@ pub trait CapabilityGuardExt {
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
     ) -> Result<GuardResult>;
+
+    /// Evaluate with guard result and explicit physical time in seconds.
+    async fn evaluate_with_result_at(
+        &self,
+        authority_id: &AuthorityId,
+        operation: &AuthorityOp,
+        token: Option<&Biscuit>,
+        flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
+    ) -> Result<GuardResult>;
 }
 
 impl CapabilityGuardExt for CapabilityGuard {
@@ -219,8 +294,28 @@ impl CapabilityGuardExt for CapabilityGuard {
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
     ) -> Result<GuardResult> {
+        let _ = (authority_id, operation, token, flow_budget);
+        Err(AuraError::permission_denied(
+            "CapabilityGuard requires explicit current_time_seconds".to_string(),
+        ))
+    }
+
+    async fn evaluate_with_result_at(
+        &self,
+        authority_id: &AuthorityId,
+        operation: &AuthorityOp,
+        token: Option<&Biscuit>,
+        flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
+    ) -> Result<GuardResult> {
         let (authorized, result) = self
-            .evaluate_authority_op_with_result(authority_id, operation, token, flow_budget)
+            .evaluate_authority_op_with_result(
+                authority_id,
+                operation,
+                token,
+                flow_budget,
+                current_time_seconds,
+            )
             .await?;
 
         // The result already contains the correct values from the evaluator

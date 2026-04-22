@@ -9,6 +9,7 @@ use aura_core::{
     frost::{PublicKeyPackage, ThresholdSignature},
     time::ProvenancedTime,
     types::Epoch,
+    util::serialization,
     AuraError, AuthorityId, Hash32, Result,
 };
 use frost_ed25519;
@@ -39,6 +40,35 @@ impl fmt::Display for ConsensusId {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct ConsensusSigningPayload<'a> {
+    domain: &'static str,
+    consensus_id: ConsensusId,
+    prestate_hash: Hash32,
+    operation_hash: Hash32,
+    operation_bytes: &'a [u8],
+    epoch: Epoch,
+}
+
+/// Build the canonical, domain-separated payload signed by consensus witnesses.
+pub fn consensus_signing_bytes(
+    consensus_id: ConsensusId,
+    prestate_hash: Hash32,
+    operation_hash: Hash32,
+    operation_bytes: &[u8],
+    epoch: Epoch,
+) -> Result<Vec<u8>> {
+    serialization::to_vec(&ConsensusSigningPayload {
+        domain: "aura.consensus.commit.v1",
+        consensus_id,
+        prestate_hash,
+        operation_hash,
+        operation_bytes,
+        epoch,
+    })
+    .map_err(AuraError::from)
+}
+
 /// Immutable fact representing successful consensus
 ///
 /// This is the primary output of the Aura Consensus protocol. It contains
@@ -58,6 +88,10 @@ pub struct CommitFact {
     /// The actual operation (serialized)
     pub operation_bytes: Vec<u8>,
 
+    /// Epoch in which witnesses signed this consensus result.
+    #[serde(default)]
+    pub epoch: Epoch,
+
     /// Threshold signature from witnesses
     pub threshold_signature: ThresholdSignature,
 
@@ -66,6 +100,10 @@ pub struct CommitFact {
 
     /// List of authorities that participated
     pub participants: Vec<AuthorityId>,
+
+    /// Configured witness authorities for this consensus instance.
+    #[serde(default)]
+    pub witness_set: Vec<AuthorityId>,
 
     /// Threshold that was required
     pub threshold: u16,
@@ -89,9 +127,11 @@ impl CommitFact {
         prestate_hash: Hash32,
         operation_hash: Hash32,
         operation_bytes: Vec<u8>,
+        epoch: Epoch,
         threshold_signature: ThresholdSignature,
         group_public_key: Option<PublicKeyPackage>,
         participants: Vec<AuthorityId>,
+        witness_set: Vec<AuthorityId>,
         threshold: u16,
         fast_path: bool,
         timestamp: ProvenancedTime,
@@ -101,9 +141,11 @@ impl CommitFact {
             prestate_hash,
             operation_hash,
             operation_bytes,
+            epoch,
             threshold_signature,
             group_public_key,
             participants,
+            witness_set,
             threshold,
             timestamp,
             fast_path,
@@ -135,6 +177,32 @@ impl CommitFact {
             return Err(AuraError::invalid("Duplicate participants"));
         }
 
+        if self.threshold == 0 {
+            return Err(AuraError::invalid("Consensus threshold must be >= 1"));
+        }
+
+        if !self.witness_set.is_empty() {
+            if self.witness_set.len() < self.threshold as usize {
+                return Err(AuraError::invalid(
+                    "Consensus threshold exceeds witness set",
+                ));
+            }
+
+            for participant in &self.participants {
+                if !self.witness_set.contains(participant) {
+                    return Err(AuraError::permission_denied(format!(
+                        "Participant {participant} is not in consensus witness set"
+                    )));
+                }
+            }
+        }
+
+        if self.operation_hash != crate::hash_operation(&self.operation_bytes)? {
+            return Err(AuraError::invalid(
+                "CommitFact operation_hash does not match operation_bytes",
+            ));
+        }
+
         // Verify threshold signature against provided group public key
         let group_pkg = self
             .group_public_key
@@ -146,9 +214,17 @@ impl CommitFact {
                 AuraError::invalid(format!("Invalid group public key package: {e}"))
             })?;
 
+        let signing_bytes = consensus_signing_bytes(
+            self.consensus_id,
+            self.prestate_hash,
+            self.operation_hash,
+            &self.operation_bytes,
+            self.epoch,
+        )?;
+
         frost_verify_aggregate(
             frost_pkg.verifying_key(),
-            &self.operation_bytes,
+            &signing_bytes,
             &self.threshold_signature.signature,
         )
         .map_err(|e| AuraError::crypto(format!("Threshold signature verification failed: {e}")))?;

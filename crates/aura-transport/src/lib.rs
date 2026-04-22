@@ -128,7 +128,7 @@ pub use messages::{
 };
 
 // Re-export AMP types
-pub use amp::{AmpError, AmpHeader, AmpRatchetState, RatchetDerivation};
+pub use amp::{AmpError, AmpHeader, AmpMessageId, AmpRatchetState, RatchetDerivation};
 
 // Re-export fact types
 pub use facts::{TransportFact, TransportFactDelta, TransportFactReducer, TRANSPORT_FACT_TYPE_ID};

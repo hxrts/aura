@@ -16,6 +16,7 @@ use crate::runtime::{
 use aura_chat::capabilities::evaluation_candidates_for_chat_guard;
 use aura_chat::guards::{
     plan_local_commit_execution, ChatEffectExecutionPlan, GuardOutcome, GuardSnapshot,
+    MembershipSnapshot,
 };
 use aura_chat::types::{ChatMember, ChatRole};
 use aura_chat::{
@@ -36,8 +37,8 @@ use aura_guards::GuardContextProvider;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{
-    commit_bump_with_consensus, emit_proposed_bump, get_channel_state, AmpChannelCoordinator,
-    AmpJournalEffects,
+    commit_bump_with_consensus, emit_proposed_bump, get_channel_state, list_channel_participants,
+    AmpChannelCoordinator, AmpJournalEffects,
 };
 use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_protocol::effects::TreeEffects;
@@ -374,14 +375,32 @@ impl ChatServiceApi {
             channel_id.as_ref(),
         );
 
-        Ok(GuardSnapshot::new(
+        let mut snapshot = GuardSnapshot::new(
             authority_id,
             context_id,
             aura_core::FlowCost::new(u32::MAX),
             capabilities,
             now.ts_ms,
         )
-        .with_moderation_status(sender_is_banned, sender_is_muted))
+        .with_moderation_status(sender_is_banned, sender_is_muted);
+
+        if let Some(channel_id) = channel_id {
+            let participants =
+                list_channel_participants(self.effects.as_ref(), context_id, channel_id)
+                    .await
+                    .map_err(|e| {
+                        AgentError::effects(format!("AMP channel membership lookup failed: {e}"))
+                    })?;
+            snapshot = snapshot.with_membership_snapshot(MembershipSnapshot::new(
+                context_id,
+                channel_id,
+                authority_id,
+                participants.contains(&authority_id),
+                now.ts_ms,
+            ));
+        }
+
+        Ok(snapshot)
     }
 
     async fn execute_outcome(&self, outcome: GuardOutcome) -> AgentResult<()> {
@@ -776,10 +795,15 @@ impl ChatServiceApi {
         })
         .await
         .map_err(|e| AgentError::effects(format!("AMP channel creation failed: {e}")))?;
+        amp.join_channel(ChannelJoinParams {
+            context: context_id,
+            channel: channel_id,
+            participant: creator_id,
+        })
+        .await
+        .map_err(|e| AgentError::effects(format!("AMP channel creator join failed: {e}")))?;
 
-        let snapshot = self
-            .build_snapshot(creator_id, context_id, Some(channel_id))
-            .await?;
+        let snapshot = self.build_snapshot(creator_id, context_id, None).await?;
         let outcome =
             self.facts
                 .prepare_create_channel(&snapshot, channel_id, name.to_string(), None, false);

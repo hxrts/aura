@@ -2,13 +2,93 @@
 
 use super::constants::*;
 use super::fact_types::*;
+use crate::error::SocialError;
+use crate::facts::ModeratorCapability;
+use crate::home::Home;
 use aura_core::types::facts::FactEnvelope;
-use aura_core::types::identifiers::ContextId;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer, FactRegistry,
 };
 use std::marker::PhantomData;
+
+/// State-aware authorization context for moderator grant/revoke facts.
+///
+/// This validator is evaluated against the materialized home state immediately
+/// before the fact's emission epoch. The envelope signer must be supplied by
+/// the journal/attestation layer because `FactEnvelope` deliberately contains
+/// only the canonical domain payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModeratorChangeAuthority {
+    /// Authority that signed or otherwise attested the fact envelope.
+    pub envelope_signer: AuthorityId,
+    /// Home owner/creator authority, which may grant or revoke moderators.
+    pub owner_authority: AuthorityId,
+}
+
+fn validate_moderator_change_authority(
+    home: &Home,
+    authority: ModeratorChangeAuthority,
+    actor_authority: AuthorityId,
+    target_authority: AuthorityId,
+) -> Result<(), SocialError> {
+    if authority.envelope_signer != actor_authority {
+        return Err(SocialError::MissingCapability(
+            "moderator fact signer must match actor_authority".to_string(),
+        ));
+    }
+
+    if !home.is_member(&target_authority) {
+        return Err(SocialError::not_member(home.home_id));
+    }
+
+    if actor_authority == authority.owner_authority {
+        return Ok(());
+    }
+
+    if home.has_moderator_capability(&actor_authority, ModeratorCapability::GrantModerator) {
+        return Ok(());
+    }
+
+    Err(SocialError::MissingCapability(
+        "moderator GrantModerator capability required".to_string(),
+    ))
+}
+
+/// Validate a moderator grant fact against pre-emission home state.
+pub fn validate_moderator_grant_fact(
+    home: &Home,
+    authority: ModeratorChangeAuthority,
+    fact: &HomeGrantModeratorFact,
+) -> Result<(), SocialError> {
+    validate_moderator_change_authority(
+        home,
+        authority,
+        fact.actor_authority,
+        fact.target_authority,
+    )
+}
+
+/// Validate a moderator revoke fact against pre-emission home state.
+pub fn validate_moderator_revoke_fact(
+    home: &Home,
+    authority: ModeratorChangeAuthority,
+    fact: &HomeRevokeModeratorFact,
+) -> Result<(), SocialError> {
+    validate_moderator_change_authority(
+        home,
+        authority,
+        fact.actor_authority,
+        fact.target_authority,
+    )?;
+
+    if !home.is_moderator(&fact.target_authority) {
+        return Err(SocialError::not_moderator(home.home_id));
+    }
+
+    Ok(())
+}
 
 fn reduce_moderation_envelope<T: DomainFact>(
     context_id: ContextId,

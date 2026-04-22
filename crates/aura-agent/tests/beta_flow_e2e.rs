@@ -114,6 +114,7 @@ async fn test_two_agent_invitation_flow() -> TestResult {
 
     // User A creates an invitation for User B
     let invitation_service_a = agent_a.invitations()?;
+    let invitation_service_b = agent_b.invitations()?;
 
     let invitation = invitation_service_a
         .invite_as_contact(
@@ -143,10 +144,10 @@ async fn test_two_agent_invitation_flow() -> TestResult {
         Some("Hey Bob, let's connect!".to_string())
     );
 
-    // User A accepts the invitation (simulating what would happen after B receives it)
-    let accept_result = invitation_service_a
-        .accept(&invitation.invitation_id)
-        .await?;
+    let imported = invitation_service_b.import_and_cache(&code).await?;
+
+    // User B accepts the invitation.
+    let accept_result = invitation_service_b.accept(&imported.invitation_id).await?;
 
     assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
     Ok(())
@@ -212,13 +213,13 @@ async fn test_chat_group_flow() -> TestResult {
     assert_eq!(message1.content, "Hello, world!");
     assert_eq!(message1.sender_id, authority);
 
-    // Simulate Bob replying (within same agent state for testing)
+    // Send another local message.
     let message2 = chat
-        .send_message(&group.id, other_user, "Hi Alice!".to_string())
+        .send_message(&group.id, authority, "Second local message".to_string())
         .await?;
 
-    assert_eq!(message2.content, "Hi Alice!");
-    assert_eq!(message2.sender_id, other_user);
+    assert_eq!(message2.content, "Second local message");
+    assert_eq!(message2.sender_id, authority);
 
     // Get message history - should have at least our 2 messages
     let history = chat.get_history(&group.id, Some(10), None).await?;
@@ -231,7 +232,7 @@ async fn test_chat_group_flow() -> TestResult {
     );
     let messages: Vec<&str> = history.iter().map(|m| m.content.as_str()).collect();
     assert!(messages.contains(&"Hello, world!"));
-    assert!(messages.contains(&"Hi Alice!"));
+    assert!(messages.contains(&"Second local message"));
     Ok(())
 }
 
@@ -302,10 +303,10 @@ async fn test_rendezvous_channel_established_finalized() -> TestResult {
 async fn test_complete_beta_flow() -> TestResult {
     // === Setup: Create two agents ===
     let agent_alice = create_test_agent(100).await?;
-    let _agent_bob = create_test_agent(200).await?;
+    let agent_bob = create_test_agent(200).await?;
 
     let alice_id = agent_alice.authority_id();
-    let bob_id = AuthorityId::new_from_entropy([200u8; 32]); // Bob's authority ID
+    let bob_id = agent_bob.authority_id();
 
     // === Step 1: Alice creates an invitation ===
     let alice_invitations = agent_alice.invitations()?;
@@ -322,9 +323,11 @@ async fn test_complete_beta_flow() -> TestResult {
     // === Step 3: Bob imports the code (out-of-band transfer simulation) ===
     let shareable = InvitationServiceApi::import_code(&code)?;
     assert_eq!(shareable.sender_id, alice_id);
+    let bob_invitations = agent_bob.invitations()?;
+    let imported = bob_invitations.import_and_cache(&code).await?;
 
-    // === Step 4: Alice accepts (simulating invitation acknowledgment) ===
-    let result = alice_invitations.accept(&invitation.invitation_id).await?;
+    // === Step 4: Bob accepts ===
+    let result = bob_invitations.accept(&imported.invitation_id).await?;
     assert_eq!(result.new_status, InvitationStatus::Accepted);
 
     // === Step 5: Chat operations (single-agent for testing) ===
@@ -343,13 +346,13 @@ async fn test_complete_beta_flow() -> TestResult {
     assert_eq!(msg1.content, "Hi Bob!");
     assert_eq!(msg1.sender_id, alice_id);
 
-    // Simulate Bob's reply (within Alice's local state for testing)
+    // Send another local message.
     let msg2 = alice_chat
-        .send_message(&group.id, bob_id, "Hi Alice!".to_string())
+        .send_message(&group.id, alice_id, "Second local message".to_string())
         .await?;
 
-    assert_eq!(msg2.content, "Hi Alice!");
-    assert_eq!(msg2.sender_id, bob_id);
+    assert_eq!(msg2.content, "Second local message");
+    assert_eq!(msg2.sender_id, alice_id);
 
     // Verify message history
     let history = alice_chat.get_history(&group.id, Some(10), None).await?;
@@ -364,7 +367,7 @@ async fn test_complete_beta_flow() -> TestResult {
     // Messages should be present
     let messages: Vec<&str> = history.iter().map(|m| m.content.as_str()).collect();
     assert!(messages.contains(&"Hi Bob!"));
-    assert!(messages.contains(&"Hi Alice!"));
+    assert!(messages.contains(&"Second local message"));
     Ok(())
 }
 
@@ -455,7 +458,7 @@ async fn test_channel_invitation() -> TestResult {
 #[tokio::test]
 async fn test_invitation_decline() -> TestResult {
     let agent = create_test_agent(70).await?;
-    let invitee = AuthorityId::new_from_entropy([71u8; 32]);
+    let invitee = agent.authority_id();
 
     let invitations = agent.invitations()?;
 

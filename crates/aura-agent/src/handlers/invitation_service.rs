@@ -1170,7 +1170,7 @@ mod tests {
         let effects = effects_for(&authority_context);
         let service = service_for(authority_context, effects);
 
-        let receiver_id = AuthorityId::new_from_entropy([118u8; 32]);
+        let receiver_id = service.handler.authority_context().authority_id();
 
         // Create two invitations
         let inv1 = service
@@ -1179,7 +1179,7 @@ mod tests {
             .unwrap();
         let inv2 = service
             .invite_as_contact(
-                AuthorityId::new_from_entropy([119u8; 32]),
+                service.handler.authority_context().authority_id(),
                 None,
                 None,
                 None,
@@ -1207,7 +1207,7 @@ mod tests {
         let effects = effects_for(&authority_context);
         let service = service_for(authority_context, effects);
 
-        let receiver_id = AuthorityId::new_from_entropy([121u8; 32]);
+        let receiver_id = service.handler.authority_context().authority_id();
         let invitation = service
             .invite_as_contact(receiver_id, None, None, None, None)
             .await

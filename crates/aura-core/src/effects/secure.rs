@@ -372,6 +372,18 @@ impl SecureStorageLocation {
             bootstrap_id.to_hex(),
         )
     }
+
+    /// Create a location for storing an AMP channel epoch master key.
+    ///
+    /// Epoch keys are secret ratchet material. Public AMP headers identify the
+    /// epoch, but AEAD message keys must be derived from this stored secret.
+    pub fn amp_epoch_key(context: &ContextId, channel: &ChannelId, chan_epoch: u64) -> Self {
+        Self::with_sub_key(
+            "amp_epoch_keys",
+            format!("{context}:{channel}"),
+            chan_epoch.to_string(),
+        )
+    }
 }
 
 #[cfg(test)]

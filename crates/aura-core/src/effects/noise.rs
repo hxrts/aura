@@ -55,6 +55,15 @@ pub trait NoiseEffects: Send + Sync {
         message: &[u8],
     ) -> Result<(Vec<u8>, HandshakeState), NoiseError>;
 
+    /// Return the remote static public key learned by the handshake, if exposed
+    /// by the implementation.
+    async fn remote_static_public_key(
+        &self,
+        _state: &HandshakeState,
+    ) -> Result<Option<[u8; 32]>, NoiseError> {
+        Ok(None)
+    }
+
     /// Transition to transport mode (Split).
     /// Returns the TransportState representing the secure channel pair.
     #[allow(clippy::wrong_self_convention)]

@@ -4,7 +4,7 @@
 //! peers, with guard chain enforcement for authorization and flow budgets.
 
 use super::config::AntiEntropyRuntimeConfig;
-use super::effects::{AntiEntropyConfig, BloomDigest, SyncError};
+use super::effects::{validate_remote_attested_op, AntiEntropyConfig, BloomDigest, SyncError};
 use super::pure;
 use async_lock::RwLock;
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -115,12 +115,16 @@ impl AntiEntropyHandler {
     /// 1. Valid aggregate signature (FROST)
     /// 2. Parent binding exists in local tree
     /// 3. Operation is well-formed
-    fn verify_operation(&self, _op: &AttestedOp) -> Result<(), SyncError> {
-        // In real implementation:
-        // 1. frost::verify_aggregate_signature(op.signatures, op.op)?
-        // 2. Check op.op.parent_commitment exists in local tree state
-        // 3. Validate operation constraints (e.g., threshold values)
-        Ok(())
+    fn verify_operation_with_known_parents(
+        &self,
+        op: &AttestedOp,
+        known_parent_commitments: &BTreeSet<Hash32>,
+    ) -> Result<(), SyncError> {
+        validate_remote_attested_op(
+            op,
+            known_parent_commitments,
+            self.config.remote_signing_witness.as_ref(),
+        )
     }
 
     /// Add peer to known peer set
@@ -167,11 +171,17 @@ impl AntiEntropyHandler {
     /// Merge remote operations into the local OpLog.
     pub async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
         let mut state = self.state.write().await;
+        let mut known_parent_commitments: BTreeSet<Hash32> = state
+            .oplog
+            .iter()
+            .map(|op| Hash32::from(op.op.parent_commitment))
+            .collect();
         for op in ops {
             // Verify before merging
-            self.verify_operation(&op)?;
+            self.verify_operation_with_known_parents(&op, &known_parent_commitments)?;
 
             // Add to local OpLog
+            known_parent_commitments.insert(Hash32::from(op.op.parent_commitment));
             state.oplog.push(op);
         }
 
@@ -665,13 +675,67 @@ mod tests {
         let context_id = test_context(5);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
-        let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
-        let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
+        let op1 = create_test_op(aura_core::Hash32::default());
+        let op2 = create_test_op(aura_core::Hash32::default());
 
         handler.merge_remote_ops(vec![op1, op2]).await.unwrap();
 
         let ops = handler.get_ops().await;
         assert_eq!(ops.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_merge_remote_ops_rejects_forged_signature() {
+        let context_id = test_context(55);
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
+
+        let mut op = create_test_op(aura_core::Hash32::default());
+        op.agg_sig.clear();
+
+        let result = handler.merge_remote_ops(vec![op]).await;
+        assert!(matches!(result, Err(SyncError::VerificationFailed { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_merge_remote_ops_verifies_frost_signature_with_known_group_key() {
+        let context_id = test_context(58);
+        let config = AntiEntropyConfig {
+            remote_signing_witness: Some(aura_core::tree::SigningWitness::new(
+                [0xCC; 32],
+                1,
+                aura_core::Epoch::new(1),
+            )),
+            ..Default::default()
+        };
+        let handler = AntiEntropyHandler::new(config, context_id);
+
+        let op = create_test_op(aura_core::Hash32::default());
+
+        let result = handler.merge_remote_ops(vec![op]).await;
+        assert!(matches!(result, Err(SyncError::VerificationFailed { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_merge_remote_ops_rejects_unknown_parent() {
+        let context_id = test_context(56);
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
+
+        let op = create_test_op(aura_core::Hash32([9u8; 32]));
+
+        let result = handler.merge_remote_ops(vec![op]).await;
+        assert!(matches!(result, Err(SyncError::VerificationFailed { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_merge_remote_ops_rejects_zero_signer_count() {
+        let context_id = test_context(57);
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
+
+        let mut op = create_test_op(aura_core::Hash32::default());
+        op.signer_count = 0;
+
+        let result = handler.merge_remote_ops(vec![op]).await;
+        assert!(matches!(result, Err(SyncError::VerificationFailed { .. })));
     }
 
     #[tokio::test]

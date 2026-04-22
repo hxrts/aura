@@ -7,7 +7,7 @@ use super::{
     messages::{
         ConsensusError, ConsensusMessage, ConsensusPhase, ConsensusRequest, ConsensusResponse,
     },
-    types::{CommitFact, ConsensusConfig, ConsensusId},
+    types::{consensus_signing_bytes, CommitFact, ConsensusConfig, ConsensusId},
     witness::{WitnessSet, WitnessTracker},
 };
 use async_lock::RwLock;
@@ -59,6 +59,13 @@ struct ConsensusInstance {
 }
 
 impl FrostConsensusOrchestrator {
+    fn witness_tracker(&self) -> WitnessTracker {
+        WitnessTracker::with_witnesses(
+            self.config.threshold() as u32,
+            self.config.witness_set.iter().copied(),
+        )
+    }
+
     /// Create a new FROST consensus orchestrator
     pub fn new(
         config: ConsensusConfig,
@@ -188,7 +195,7 @@ impl FrostConsensusOrchestrator {
             prestate_hash: request.prestate_hash,
             operation_hash: request.operation_hash,
             operation_bytes: request.operation_bytes.clone(),
-            tracker: WitnessTracker::new(),
+            tracker: self.witness_tracker(),
             phase: ConsensusPhase::Execute,
             fast_path: true,
             start_time_ms: time
@@ -205,9 +212,9 @@ impl FrostConsensusOrchestrator {
             cached_commitments.values().cloned().collect();
 
         // Sign with each witness
-        let mut tracker = WitnessTracker::new();
+        let mut tracker = self.witness_tracker();
         for (witness_id, commitment) in cached_commitments.iter() {
-            tracker.add_nonce(*witness_id, commitment.clone());
+            tracker.add_nonce(*witness_id, commitment.clone())?;
         }
 
         // Generate signatures
@@ -220,15 +227,23 @@ impl FrostConsensusOrchestrator {
                     .await;
                 if let Some((commitment, token)) = witness_state.take_nonce(self.config.epoch) {
                     // Generate partial signature
-                    let signature = self.sign_with_nonce(
+                    let signing_bytes = consensus_signing_bytes(
+                        consensus_id,
+                        request.prestate_hash,
+                        request.operation_hash,
                         &request.operation_bytes,
-                        share,
-                        &token,
-                        &aggregated_nonces,
+                        self.config.epoch,
                     )?;
+                    let signature =
+                        self.sign_with_nonce(&signing_bytes, share, &token, &aggregated_nonces)?;
 
                     // Use operation_hash as result_id (deterministic execution assumption)
-                    let _ = tracker.add_signature(*witness_id, signature, request.operation_hash);
+                    if tracker
+                        .add_signature(*witness_id, signature, request.operation_hash)?
+                        .is_some()
+                    {
+                        break;
+                    }
 
                     // Generate and cache next round commitment for pipelining
                     let (next_commitment, next_token) = self.generate_nonce(share, random).await?;
@@ -254,7 +269,7 @@ impl FrostConsensusOrchestrator {
             prestate_hash: request.prestate_hash,
             operation_hash: request.operation_hash,
             operation_bytes: request.operation_bytes.clone(),
-            tracker: WitnessTracker::new(),
+            tracker: self.witness_tracker(),
             phase: ConsensusPhase::Execute,
             fast_path: false,
             start_time_ms: time
@@ -267,13 +282,13 @@ impl FrostConsensusOrchestrator {
         self.instances.write().await.insert(consensus_id, instance);
 
         // Phase 1: Generate and collect nonce commitments
-        let mut tracker = WitnessTracker::new();
+        let mut tracker = self.witness_tracker();
         let mut nonce_tokens = HashMap::new();
 
         for witness_id in self.config.witness_set.iter() {
             if let Some(share) = self.key_packages.get(witness_id) {
                 let (commitment, token) = self.generate_nonce(share, random).await?;
-                tracker.add_nonce(*witness_id, commitment);
+                tracker.add_nonce(*witness_id, commitment)?;
                 nonce_tokens.insert(*witness_id, token);
             }
         }
@@ -287,15 +302,23 @@ impl FrostConsensusOrchestrator {
 
         for (witness_id, token) in nonce_tokens {
             if let Some(share) = self.key_packages.get(&witness_id) {
-                let signature = self.sign_with_nonce(
+                let signing_bytes = consensus_signing_bytes(
+                    consensus_id,
+                    request.prestate_hash,
+                    request.operation_hash,
                     &request.operation_bytes,
-                    share,
-                    &token,
-                    &aggregated_nonces,
+                    self.config.epoch,
                 )?;
+                let signature =
+                    self.sign_with_nonce(&signing_bytes, share, &token, &aggregated_nonces)?;
 
                 // Use operation_hash as result_id (deterministic execution assumption)
-                let _ = tracker.add_signature(witness_id, signature, request.operation_hash);
+                if tracker
+                    .add_signature(witness_id, signature, request.operation_hash)?
+                    .is_some()
+                {
+                    break;
+                }
 
                 // Generate and cache next round commitment for future pipelining
                 let (next_commitment, next_token) = self.generate_nonce(share, random).await?;
@@ -335,7 +358,14 @@ impl FrostConsensusOrchestrator {
         // Aggregate signatures
         let participants = tracker.get_participants();
 
-        let threshold_signature = self.aggregate_signatures(&tracker, &instance.operation_bytes)?;
+        let signing_bytes = consensus_signing_bytes(
+            consensus_id,
+            instance.prestate_hash,
+            instance.operation_hash,
+            &instance.operation_bytes,
+            self.config.epoch,
+        )?;
+        let threshold_signature = self.aggregate_signatures(&tracker, &signing_bytes)?;
 
         // Create commit fact
         let timestamp = ProvenancedTime {
@@ -356,9 +386,11 @@ impl FrostConsensusOrchestrator {
             instance.prestate_hash,
             instance.operation_hash,
             instance.operation_bytes,
+            self.config.epoch,
             threshold_signature,
             Some(self.group_public_key.clone()),
             participants,
+            self.config.witnesses().to_vec(),
             self.config.threshold(),
             instance.fast_path,
             timestamp,
@@ -497,14 +529,17 @@ impl FrostConsensusOrchestrator {
                 AuraError::crypto(format!("Invalid group public key package: {e}"))
             })?;
 
-        // Build commitment map for aggregation
+        let partials = tracker.get_signatures();
+        let signers: std::collections::BTreeSet<_> = partials.iter().map(|s| s.signer).collect();
+
+        // Build commitment map for the signers that actually contributed shares.
         let mut commitments = BTreeMap::new();
         for commitment in tracker.nonce_commitments.values() {
-            commitments.insert(commitment.signer, commitment.clone());
+            if signers.contains(&commitment.signer) {
+                commitments.insert(commitment.signer, commitment.clone());
+            }
         }
-
-        let partials = tracker.get_signatures();
-        let signers = partials.iter().map(|s| s.signer).collect();
+        let signers = signers.into_iter().collect();
 
         let signature = frost_aggregate(&partials, message, &commitments, &frost_group_pkg)
             .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {e}")))?;
@@ -580,6 +615,7 @@ mod tests {
     use super::*;
     use aura_core::types::Epoch;
     use aura_core::AuthorityId;
+    use std::collections::BTreeMap;
 
     fn authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
@@ -628,5 +664,100 @@ mod tests {
                 .has_fast_path_quorum(Epoch::from(2))
                 .await
         );
+    }
+
+    #[tokio::test]
+    async fn commit_fact_verify_rejects_mutated_prestate_hash() {
+        let witnesses = vec![authority(1), authority(2), authority(3)];
+        let threshold = 2;
+        let mut rng = rand::rngs::StdRng::from_seed([11u8; 32]);
+        let (secret_shares, public_key_package) = frost_ed25519::keys::generate_with_dealer(
+            witnesses.len() as u16,
+            threshold,
+            frost_ed25519::keys::IdentifierList::Default,
+            &mut rng,
+        )
+        .unwrap();
+        let key_packages = secret_shares
+            .into_iter()
+            .map(|(identifier, secret_share)| {
+                (
+                    identifier,
+                    frost_ed25519::keys::KeyPackage::try_from(secret_share).unwrap(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let operation_bytes = b"prestate-bound-operation".to_vec();
+        let consensus_id = ConsensusId::new(
+            Hash32([3u8; 32]),
+            crate::hash_operation(&operation_bytes).unwrap(),
+            42,
+        );
+        let operation_hash = crate::hash_operation(&operation_bytes).unwrap();
+        let signing_bytes = consensus_signing_bytes(
+            consensus_id,
+            Hash32([3u8; 32]),
+            operation_hash,
+            &operation_bytes,
+            Epoch::from(1),
+        )
+        .unwrap();
+
+        let mut nonces = BTreeMap::new();
+        let mut commitments = BTreeMap::new();
+        for (identifier, key_package) in key_packages.iter().take(threshold as usize) {
+            let (nonce, commitment) =
+                frost_ed25519::round1::commit(key_package.signing_share(), &mut rng);
+            nonces.insert(*identifier, nonce);
+            commitments.insert(*identifier, commitment);
+        }
+
+        let signing_package = frost_ed25519::SigningPackage::new(commitments, &signing_bytes);
+        let mut signature_shares = BTreeMap::new();
+        for (identifier, key_package) in key_packages.iter().take(threshold as usize) {
+            let signature = frost_ed25519::round2::sign(
+                &signing_package,
+                nonces.get(identifier).unwrap(),
+                key_package,
+            )
+            .unwrap();
+            signature_shares.insert(*identifier, signature);
+        }
+        let group_signature =
+            frost_ed25519::aggregate(&signing_package, &signature_shares, &public_key_package)
+                .unwrap();
+
+        let mut commit = CommitFact::new(
+            consensus_id,
+            Hash32([3u8; 32]),
+            operation_hash,
+            operation_bytes,
+            Epoch::from(1),
+            ThresholdSignature {
+                signature: group_signature.serialize().as_ref().to_vec(),
+                signers: vec![1, 2],
+            },
+            Some(PublicKeyPackage::from(public_key_package)),
+            witnesses[..threshold as usize].to_vec(),
+            witnesses.clone(),
+            threshold,
+            false,
+            ProvenancedTime {
+                stamp: TimeStamp::PhysicalClock(PhysicalTime {
+                    ts_ms: 1_000,
+                    uncertainty: None,
+                }),
+                proofs: vec![],
+                origin: None,
+            },
+        );
+        commit.verify().expect("original commit verifies");
+
+        commit.prestate_hash = Hash32([4u8; 32]);
+        let error = commit
+            .verify()
+            .expect_err("mutated prestate must invalidate signature");
+        assert!(error.to_string().contains("signature verification failed"));
     }
 }

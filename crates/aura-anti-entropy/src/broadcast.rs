@@ -3,7 +3,9 @@
 //! Implements operation broadcast with rate limiting, back pressure handling,
 //! and configurable eager push to neighbors and lazy pull on request.
 
-use super::effects::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
+use super::effects::{
+    validate_remote_attested_op, BloomDigest, SyncEffects, SyncError, SyncMetrics,
+};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::NetworkEffects;
@@ -18,6 +20,10 @@ use std::sync::Arc;
 pub struct BroadcastConfig {
     /// Maximum operations to push per peer per interval
     pub max_ops_per_peer: usize,
+    /// Maximum total operation pushes across all peers per interval
+    pub max_global_fanout_per_interval: usize,
+    /// Egress threshold that activates backoff until rate limits reset.
+    pub backoff_fanout_threshold_per_interval: usize,
     /// Maximum pending announcements before applying back pressure
     pub max_pending_announcements: usize,
     /// Enable eager push to immediate neighbors
@@ -32,6 +38,8 @@ impl Default for BroadcastConfig {
     fn default() -> Self {
         Self {
             max_ops_per_peer: 100,
+            max_global_fanout_per_interval: 1_000,
+            backoff_fanout_threshold_per_interval: 800,
             max_pending_announcements: 1000,
             eager_push_enabled: true,
             lazy_pull_enabled: true,
@@ -68,6 +76,10 @@ struct BroadcasterState {
     pending_announcements: BTreeMap<Hash32, BTreeSet<DeviceId>>,
     /// Rate limiting: peer -> count of ops pushed in current interval
     rate_limits: BTreeMap<DeviceId, usize>,
+    /// Global egress fanout used in the current interval
+    global_fanout_used: usize,
+    /// Whether adaptive egress backoff is active for the current interval
+    fanout_backoff_active: bool,
 }
 
 impl BroadcasterState {
@@ -101,13 +113,30 @@ impl BroadcasterState {
         self.pending_announcements.len() >= max_pending_announcements
     }
 
-    fn eligible_peers(&mut self, peers: Vec<DeviceId>, max_ops_per_peer: usize) -> Vec<DeviceId> {
+    fn eligible_peers(
+        &mut self,
+        peers: Vec<DeviceId>,
+        max_ops_per_peer: usize,
+        max_global_fanout_per_interval: usize,
+        backoff_fanout_threshold_per_interval: usize,
+    ) -> Vec<DeviceId> {
         let mut eligible_peers = Vec::new();
+        if self.fanout_backoff_active {
+            return eligible_peers;
+        }
         for peer in peers {
+            if self.global_fanout_used >= max_global_fanout_per_interval {
+                break;
+            }
             let count = self.rate_limits.entry(peer).or_insert(0);
             if *count < max_ops_per_peer {
                 eligible_peers.push(peer);
                 *count += 1;
+                self.global_fanout_used += 1;
+                if self.global_fanout_used >= backoff_fanout_threshold_per_interval {
+                    self.fanout_backoff_active = true;
+                    break;
+                }
             }
         }
         eligible_peers
@@ -162,7 +191,12 @@ impl BroadcasterHandler {
         // Apply rate limiting per peer
         let eligible_peers = {
             let mut state = self.state.write().await;
-            state.eligible_peers(peers, self.config.max_ops_per_peer)
+            state.eligible_peers(
+                peers,
+                self.config.max_ops_per_peer,
+                self.config.max_global_fanout_per_interval,
+                self.config.backoff_fanout_threshold_per_interval,
+            )
         };
 
         if !eligible_peers.is_empty() {
@@ -210,6 +244,8 @@ impl BroadcasterHandler {
     pub async fn reset_rate_limits(&self) {
         let mut state = self.state.write().await;
         state.rate_limits.clear();
+        state.global_fanout_used = 0;
+        state.fanout_backoff_active = false;
     }
 
     /// Get pending announcements count (for monitoring)
@@ -275,8 +311,15 @@ impl SyncEffects for BroadcasterHandler {
 
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
         let mut state = self.state.write().await;
+        let mut known_parent_commitments = state
+            .oplog
+            .values()
+            .map(|op| Hash32::from(op.op.parent_commitment))
+            .collect::<BTreeSet<_>>();
 
         for op in ops {
+            validate_remote_attested_op(&op, &known_parent_commitments, None)?;
+            known_parent_commitments.insert(Hash32::from(op.op.parent_commitment));
             state.merge_op_bounded(op, self.config.max_oplog_entries);
         }
 
@@ -519,17 +562,13 @@ mod tests {
         let context_id = test_context(8);
         let handler = BroadcasterHandler::new(BroadcastConfig::default(), context_id);
 
-        let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
-        let op1_dup = create_test_op(aura_core::Hash32([1u8; 32]));
-        let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
+        let op1 = create_test_op(aura_core::Hash32::default());
+        let op1_dup = create_test_op(aura_core::Hash32::default());
 
-        handler
-            .merge_remote_ops(vec![op1, op1_dup, op2])
-            .await
-            .unwrap();
+        handler.merge_remote_ops(vec![op1, op1_dup]).await.unwrap();
 
         let state = handler.state.read().await;
-        assert_eq!(state.oplog.len(), 2); // Only 2 unique operations
+        assert_eq!(state.oplog.len(), 1); // Duplicate parent commitment is deduplicated
     }
 
     #[tokio::test]
@@ -553,5 +592,52 @@ mod tests {
         handler.reset_rate_limits().await;
         let result = handler.eager_push_to_neighbors(op).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_global_fanout_limit_caps_eligible_peers() {
+        let config = BroadcastConfig {
+            max_ops_per_peer: 100,
+            max_global_fanout_per_interval: 2,
+            ..Default::default()
+        };
+        let context_id = test_context(10);
+        let handler = BroadcasterHandler::new(config, context_id);
+
+        handler.add_peer(test_device(1)).await;
+        handler.add_peer(test_device(2)).await;
+        handler.add_peer(test_device(3)).await;
+
+        let op = create_test_op(aura_core::Hash32([1u8; 32]));
+        handler.eager_push_to_neighbors(op).await.unwrap();
+
+        let state = handler.state.read().await;
+        assert_eq!(state.global_fanout_used, 2);
+        assert_eq!(state.rate_limits.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_adaptive_backoff_queues_after_threshold() {
+        let config = BroadcastConfig {
+            max_ops_per_peer: 100,
+            max_global_fanout_per_interval: 10,
+            backoff_fanout_threshold_per_interval: 1,
+            ..Default::default()
+        };
+        let context_id = test_context(11);
+        let handler = BroadcasterHandler::new(config, context_id);
+
+        handler.add_peer(test_device(1)).await;
+        handler.add_peer(test_device(2)).await;
+
+        let first = create_test_op(aura_core::Hash32([1u8; 32]));
+        handler.eager_push_to_neighbors(first).await.unwrap();
+        let second = create_test_op(aura_core::Hash32([2u8; 32]));
+        handler.eager_push_to_neighbors(second).await.unwrap();
+
+        let state = handler.state.read().await;
+        assert!(state.fanout_backoff_active);
+        assert_eq!(state.global_fanout_used, 1);
+        assert_eq!(state.pending_announcements.len(), 1);
     }
 }

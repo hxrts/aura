@@ -48,7 +48,8 @@ use serde::{Deserialize, Serialize};
 use crate::capabilities::SyncCapability;
 use crate::core::{
     binary_serialize, exchange_json_with_peer, json_serialize, send_bytes_to_peer,
-    sync_biscuit_guard_error, sync_serialization_error, sync_session_error, SyncResult,
+    sync_authorization_error, sync_biscuit_guard_error, sync_serialization_error,
+    sync_session_error, SyncResult,
 };
 use crate::infrastructure::RetryPolicy;
 use aura_authorization::BiscuitTokenManager;
@@ -491,9 +492,9 @@ impl AntiEntropyProtocol {
     }
 
     /// Check if the current token authorizes sync operations with a peer
-    fn check_sync_authorization<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<()>
+    async fn check_sync_authorization<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<()>
     where
-        E: JournalEffects + NetworkEffects + GuardContextProvider,
+        E: JournalEffects + NetworkEffects + PhysicalTimeEffects + GuardContextProvider,
     {
         if let (Some(ref token_manager), Some(ref evaluator)) =
             (&self.token_manager, &self.guard_evaluator)
@@ -507,12 +508,23 @@ impl AntiEntropyProtocol {
             let mut flow_budget = FlowBudget::new(1000, Epoch::new(0)); // Standard sync budget
 
             let capability = SyncCapability::RequestDigest.as_name();
-            match evaluator.evaluate_guard_default_time(
+            let now_secs = effects
+                .physical_time()
+                .await
+                .map_err(|e| {
+                    sync_authorization_error(format!(
+                        "time unavailable for sync authorization: {e}"
+                    ))
+                })?
+                .ts_ms
+                / 1000;
+            match evaluator.evaluate_guard(
                 token,
                 &capability,
                 &resource,
                 FlowCost::new(100),
                 &mut flow_budget,
+                now_secs,
             ) {
                 Ok(guard_result) if guard_result.authorized => {
                     tracing::debug!(
@@ -590,7 +602,7 @@ impl AntiEntropyProtocol {
     {
         let authority_id = effects.authority_id();
         // Check authorization before starting sync
-        self.check_sync_authorization(effects, peer)?;
+        self.check_sync_authorization(effects, peer).await?;
         tracing::info!(
             operation_id = ANTI_ENTROPY_OPERATION_ID,
             authority_id = %authority_id,

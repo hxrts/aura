@@ -54,17 +54,20 @@ fn journal_merge() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot merge journals from different namespaces")]
 fn journal_merge_different_namespaces() {
-    use aura_core::semilattice::JoinSemilattice;
-
     let journal1 = FactJournal::new(JournalNamespace::Authority(AuthorityId::new_from_entropy(
         [11u8; 32],
     )));
     let journal2 = FactJournal::new(JournalNamespace::Authority(AuthorityId::new_from_entropy(
         [12u8; 32],
     )));
-    let _ = journal1.join(&journal2);
+
+    let err = journal1
+        .try_join(&journal2)
+        .expect_err("cross-namespace remote merge must return a typed error");
+
+    assert_eq!(err.left, journal1.namespace);
+    assert_eq!(err.right, journal2.namespace);
 }
 
 #[test]

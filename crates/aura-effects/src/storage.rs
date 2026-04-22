@@ -181,6 +181,37 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
         Ok(out)
     }
 
+    async fn append(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        if key.is_empty() {
+            return Err(StorageError::InvalidKey {
+                reason: "Key cannot be empty".to_string(),
+            });
+        }
+
+        let file_path = self.base_path.join(format!("{key}.dat"));
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).await.map_err(|e| {
+                StorageError::WriteFailed(format!("Failed to create directory: {e}"))
+            })?;
+        }
+
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&file_path)
+            .await
+            .map_err(|e| StorageError::WriteFailed(format!("Failed to open append file: {e}")))?;
+
+        use tokio::io::AsyncWriteExt;
+        file.write_all(&value)
+            .await
+            .map_err(|e| StorageError::WriteFailed(format!("Failed to append file: {e}")))?;
+        file.flush()
+            .await
+            .map_err(|e| StorageError::WriteFailed(format!("Failed to flush append file: {e}")))?;
+        Ok(())
+    }
+
     async fn clear_all(&self) -> Result<(), StorageError> {
         match fs::remove_dir_all(&self.base_path).await {
             Ok(()) => {}

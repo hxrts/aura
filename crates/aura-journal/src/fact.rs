@@ -36,6 +36,16 @@ pub enum JournalNamespace {
     Context(ContextId),
 }
 
+/// Error returned when attempting to merge journals from different namespaces.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("Cannot merge journals from different namespaces: left={left:?}, right={right:?}")]
+pub struct NamespaceMismatch {
+    /// Namespace of the left/current journal.
+    pub left: JournalNamespace,
+    /// Namespace of the right/remote journal.
+    pub right: JournalNamespace,
+}
+
 /// Fact-based journal structure
 ///
 /// The journal is a join-semilattice CRDT that uses set union for merging.
@@ -108,6 +118,32 @@ impl JoinSemilattice for Journal {
 }
 
 impl Journal {
+    fn namespace_mismatch(&self, other: &Self) -> NamespaceMismatch {
+        NamespaceMismatch {
+            left: self.namespace.clone(),
+            right: other.namespace.clone(),
+        }
+    }
+
+    /// Fallible join operation for untrusted or remote journal inputs.
+    ///
+    /// This returns a typed namespace error instead of panicking when a peer or
+    /// sync boundary presents a journal from a different namespace.
+    pub fn try_join(&self, other: &Self) -> std::result::Result<Self, NamespaceMismatch> {
+        if self.namespace != other.namespace {
+            return Err(self.namespace_mismatch(other));
+        }
+
+        let mut merged = Self::new(self.namespace.clone());
+        for fact in self.facts.iter().cloned() {
+            let _ = merged.insert_fact_deduplicated(fact);
+        }
+        for fact in other.facts.iter().cloned() {
+            let _ = merged.insert_fact_deduplicated(fact);
+        }
+        Ok(merged)
+    }
+
     /// In-place join operation that consumes the other journal
     ///
     /// Takes ownership of `other` to avoid cloning facts during merge.
@@ -119,6 +155,20 @@ impl Journal {
         for fact in other.facts {
             let _ = self.insert_fact_deduplicated(fact);
         }
+    }
+
+    /// Fallible in-place join operation for untrusted or remote journal inputs.
+    pub fn try_join_assign(&mut self, other: Self) -> std::result::Result<(), NamespaceMismatch> {
+        if self.namespace != other.namespace {
+            return Err(NamespaceMismatch {
+                left: self.namespace.clone(),
+                right: other.namespace,
+            });
+        }
+        for fact in other.facts {
+            let _ = self.insert_fact_deduplicated(fact);
+        }
+        Ok(())
     }
 
     /// Add a fact with options

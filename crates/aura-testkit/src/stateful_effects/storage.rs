@@ -114,6 +114,12 @@ impl StorageExtendedEffects for MemoryStorageHandler {
         Ok(result)
     }
 
+    async fn append(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        let mut data = self.data.write().await;
+        data.entry(key.to_string()).or_default().extend(value);
+        Ok(())
+    }
+
     async fn clear_all(&self) -> Result<(), StorageError> {
         let mut data = self.data.write().await;
         data.clear();

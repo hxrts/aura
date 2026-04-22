@@ -24,17 +24,19 @@
 //!
 //! ## Execution Modes
 //!
-//! - **Pessimistic** (default): Execute operation first, then apply and persist journal
-//!   changes. Journal is only persisted if the operation succeeds.
+//! - **Pessimistic** (default): Apply and persist journal changes first, then
+//!   execute the operation. Operation failure is returned to the caller without
+//!   rolling back monotonic journal facts.
 //!
 //! - **Optimistic**: Apply and persist journal changes first, then execute operation.
 //!   Journal changes remain even if operation fails (safe due to CRDT monotonicity).
 //!
 //! ## Persistence Contract
 //!
-//! All journal changes are persisted via `JournalEffects::persist_journal()` after
-//! being computed. This module does NOT rely on callers to persist - it handles
-//! persistence internally to maintain the charge-before-send invariant.
+//! All journal changes are persisted via `JournalEffects::persist_journal()`
+//! after being computed and before operation execution. This module does NOT
+//! rely on callers to persist - it handles persistence internally to maintain
+//! the charge-before-send invariant.
 //!
 //! The JournalCoupler implements the formal model's "journal coupling" semantics
 //! where protocol operations atomically update both local state and distributed
@@ -128,7 +130,7 @@ impl JournalCoupler {
     pub fn new() -> Self {
         Self {
             annotations: HashMap::new(),
-            optimistic_application: false, // Default to pessimistic for safety
+            optimistic_application: false, // Default path persists before executing.
             max_retry_attempts: 3,
         }
     }
@@ -160,12 +162,11 @@ impl JournalCoupler {
         self
     }
 
-    /// Execute a protocol operation with journal coupling
+    /// Execute a protocol operation with journal coupling.
     ///
-    /// This method implements the complete journal coupling semantics:
-    /// 1. Execute the protocol operation
-    /// 2. On success, apply journal annotations atomically
-    /// 3. Return both the operation result and journal coupling result
+    /// This method persists any configured journal annotations before running
+    /// the operation closure, so callers may place externally observable work
+    /// such as transport sends inside the closure without bypassing accounting.
     ///
     /// Timing is captured via the tracing span (subscriber handles `Instant::now()`).
     #[instrument(skip(self, effect_system, operation), fields(optimistic = self.optimistic_application))]
@@ -301,7 +302,7 @@ impl JournalCoupler {
         }
     }
 
-    /// Execute with pessimistic journal application (apply deltas after operation succeeds)
+    /// Execute with pessimistic journal application.
     ///
     /// Timing is captured via the tracing span (subscriber handles `Instant::now()`).
     #[instrument(skip(self, effect_system, operation, initial_journal))]
@@ -317,16 +318,14 @@ impl JournalCoupler {
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
-        // Phase 1: Execute the protocol operation first
-        let execution_result = operation(effect_system).await?;
-
-        // Phase 2: Apply journal annotations only after success
+        // Phase 1: Apply journal annotations before any operation side effects.
         let (updated_journal, journal_ops) = self
             .apply_annotations(operation_id, effect_system, &initial_journal)
             .await?;
 
-        // Phase 3: Persist journal changes atomically
-        // This ensures charge-before-send invariant: journal commit happens before transport
+        // Phase 2: Persist journal changes before running the operation.
+        // This enforces charge-before-send for operation closures that emit
+        // transport or other externally observable effects.
         if !journal_ops.is_empty() {
             effect_system
                 .persist_journal(&updated_journal)
@@ -335,11 +334,11 @@ impl JournalCoupler {
                     error!(
                         operation_id = %operation_id,
                         error = %e,
-                        "Failed to persist journal changes - operation succeeded but journal not committed"
+                        "Failed to persist journal changes - operation blocked before side effects"
                     );
                     aura_core::AuraError::internal(format!(
                         "Journal persistence failed for operation '{operation_id}': {e}. \
-                         Operation completed but journal state is inconsistent."
+                         Operation was not executed."
                     ))
                 })?;
 
@@ -349,6 +348,9 @@ impl JournalCoupler {
                 "Journal changes persisted successfully"
             );
         }
+
+        // Phase 3: Execute the protocol operation after journal persistence.
+        let execution_result = operation(effect_system).await?;
 
         info!(
             operation_id = %operation_id,
@@ -650,9 +652,17 @@ impl ProtocolGuard {
             "Executing protocol guard with journal coupling integration"
         );
 
-        // Phase 1: Evaluate authorization guards (using existing guard evaluation)
-        use crate::guards::execution::evaluate_guard;
-        let guard_result = evaluate_guard(self).await?;
+        // Phase 1: Evaluate authorization guards with explicit physical time.
+        use crate::guards::execution::evaluate_guard_at;
+        let now_secs = effect_system
+            .physical_time()
+            .await
+            .map_err(|e| {
+                aura_core::AuraError::permission_denied(format!("Guard time unavailable: {e}"))
+            })?
+            .ts_ms
+            / 1000;
+        let guard_result = evaluate_guard_at(self, now_secs).await?;
 
         if !guard_result.passed {
             warn!(
@@ -725,5 +735,226 @@ impl JournalCouplerBuilder {
 impl Default for JournalCouplerBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::{
+        effects::{
+            authorization::AuthorizationError, storage::StorageError, AuthorizationEffects,
+            FlowBudgetEffects, JournalEffects, LeakageBudget, LeakageEffects, LeakageEvent,
+            ObserverClass, PhysicalTimeEffects, RandomCoreEffects, StorageCoreEffects,
+            StorageExtendedEffects,
+        },
+        time::PhysicalTime,
+        types::{
+            epochs::Epoch,
+            flow::{FlowCost, Receipt},
+            identifiers::{AuthorityId, ContextId},
+            scope::{AuthorizationOp, ResourceScope},
+        },
+        AuraError, Cap, FlowBudget,
+    };
+
+    struct TestEffects {
+        journal: Journal,
+        fail_persist: bool,
+        operation_calls: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl JournalEffects for TestEffects {
+        async fn merge_facts(
+            &self,
+            target: Journal,
+            _delta: Journal,
+        ) -> Result<Journal, AuraError> {
+            Ok(target)
+        }
+
+        async fn refine_caps(
+            &self,
+            target: Journal,
+            _refinement: Journal,
+        ) -> Result<Journal, AuraError> {
+            Ok(target)
+        }
+
+        async fn get_journal(&self) -> Result<Journal, AuraError> {
+            Ok(self.journal.clone())
+        }
+
+        async fn persist_journal(&self, _journal: &Journal) -> Result<(), AuraError> {
+            if self.fail_persist {
+                Err(AuraError::storage("forced persist failure"))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn get_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+        ) -> Result<FlowBudget, AuraError> {
+            Ok(FlowBudget::new(1_000, Epoch::new(0)))
+        }
+
+        async fn update_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+            budget: &FlowBudget,
+        ) -> Result<FlowBudget, AuraError> {
+            Ok(*budget)
+        }
+
+        async fn charge_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+            _cost: FlowCost,
+        ) -> Result<FlowBudget, AuraError> {
+            Ok(FlowBudget::new(1_000, Epoch::new(0)))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageCoreEffects for TestEffects {
+        async fn store(&self, _key: &str, _value: Vec<u8>) -> Result<(), StorageError> {
+            Ok(())
+        }
+
+        async fn retrieve(&self, _key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+            Ok(None)
+        }
+
+        async fn remove(&self, _key: &str) -> Result<bool, StorageError> {
+            Ok(false)
+        }
+
+        async fn list_keys(&self, _prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageExtendedEffects for TestEffects {
+        async fn append(&self, _key: &str, _value: Vec<u8>) -> Result<(), StorageError> {
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FlowBudgetEffects for TestEffects {
+        async fn charge_flow(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+            _cost: FlowCost,
+        ) -> AuraResult<Receipt> {
+            Err(AuraError::internal("unused in journal coupler test"))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for TestEffects {
+        async fn physical_time(&self) -> Result<PhysicalTime, aura_core::effects::time::TimeError> {
+            Ok(PhysicalTime::exact(1_000))
+        }
+
+        async fn sleep_ms(&self, _ms: u64) -> Result<(), aura_core::effects::time::TimeError> {
+            Ok(())
+        }
+    }
+
+    impl TimeEffects for TestEffects {}
+
+    #[async_trait::async_trait]
+    impl RandomCoreEffects for TestEffects {
+        async fn random_bytes(&self, len: usize) -> Vec<u8> {
+            vec![0; len]
+        }
+
+        async fn random_bytes_32(&self) -> [u8; 32] {
+            [0; 32]
+        }
+
+        async fn random_u64(&self) -> u64 {
+            0
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AuthorizationEffects for TestEffects {
+        async fn verify_capability(
+            &self,
+            _capabilities: &Cap,
+            _operation: AuthorizationOp,
+            _scope: &ResourceScope,
+        ) -> Result<bool, AuthorizationError> {
+            Ok(true)
+        }
+
+        async fn delegate_capabilities(
+            &self,
+            source_capabilities: &Cap,
+            _requested_capabilities: &Cap,
+            _target_authority: &AuthorityId,
+        ) -> Result<Cap, AuthorizationError> {
+            Ok(source_capabilities.clone())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LeakageEffects for TestEffects {
+        async fn record_leakage(&self, _event: LeakageEvent) -> AuraResult<()> {
+            Ok(())
+        }
+
+        async fn get_leakage_budget(&self, _context_id: ContextId) -> AuraResult<LeakageBudget> {
+            Ok(LeakageBudget::zero())
+        }
+
+        async fn check_leakage_budget(
+            &self,
+            _context_id: ContextId,
+            _observer: ObserverClass,
+            _amount: u64,
+        ) -> AuraResult<bool> {
+            Ok(true)
+        }
+
+        async fn get_leakage_history(
+            &self,
+            _context_id: ContextId,
+            _since_timestamp: Option<&PhysicalTime>,
+        ) -> AuraResult<Vec<LeakageEvent>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_persist_blocks_operation_side_effects() {
+        let operation_id = GuardOperationId::Custom("send".to_string());
+        let mut coupler = JournalCoupler::new();
+        coupler.add_annotation(operation_id.clone(), JournalAnnotation::add_facts("charge"));
+        let mut effects = TestEffects {
+            journal: Journal::new(),
+            fail_persist: true,
+            operation_calls: 0,
+        };
+
+        let result = coupler
+            .execute_with_coupling(&operation_id, &mut effects, |effects| {
+                effects.operation_calls += 1;
+                async { Ok::<(), AuraError>(()) }
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(effects.operation_calls, 0);
     }
 }

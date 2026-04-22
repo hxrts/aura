@@ -4,7 +4,7 @@
 //! Guard evaluation is pure and synchronous over a prepared `GuardSnapshot`,
 //! producing an explicit list of `EffectCommand` values for an async interpreter.
 
-use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::FlowCost;
 pub use aura_guards::types;
 
@@ -24,6 +24,9 @@ pub mod costs {
     /// Flow cost for sending a message.
     pub const CHAT_MESSAGE_SEND_COST: FlowCost = FlowCost::new(1);
 }
+
+/// Maximum accepted age for a prepared membership snapshot used by send guards.
+pub const CHAT_MEMBERSHIP_SNAPSHOT_MAX_AGE_MS: u64 = 30_000;
 
 // =============================================================================
 // Guard Snapshot
@@ -52,6 +55,9 @@ pub struct GuardSnapshot {
 
     /// Sender is currently muted in this context/channel.
     pub sender_is_muted: bool,
+
+    /// Authoritative membership state for the channel being messaged.
+    pub membership: Option<MembershipSnapshot>,
 }
 
 impl GuardSnapshot {
@@ -71,6 +77,7 @@ impl GuardSnapshot {
             now_ms,
             sender_is_banned: false,
             sender_is_muted: false,
+            membership: None,
         }
     }
 
@@ -82,9 +89,51 @@ impl GuardSnapshot {
         self
     }
 
+    /// Attach authoritative membership state for the channel being messaged.
+    #[must_use]
+    pub fn with_membership_snapshot(mut self, membership: MembershipSnapshot) -> Self {
+        self.membership = Some(membership);
+        self
+    }
+
     /// Returns `true` if the snapshot contains the given capability.
     pub fn has_capability(&self, cap: &types::CapabilityId) -> bool {
         self.capabilities.iter().any(|c| c == cap)
+    }
+}
+
+/// Guard-visible channel membership snapshot prepared by the caller.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MembershipSnapshot {
+    /// Context the channel belongs to.
+    pub context_id: ContextId,
+    /// Channel whose membership was observed.
+    pub channel_id: ChannelId,
+    /// Sender whose membership was observed.
+    pub sender_id: AuthorityId,
+    /// Whether the sender is currently a member.
+    pub sender_is_member: bool,
+    /// Local timestamp when this membership was observed.
+    pub observed_at_ms: u64,
+}
+
+impl MembershipSnapshot {
+    /// Construct a membership snapshot for chat send authorization.
+    #[must_use]
+    pub fn new(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        sender_id: AuthorityId,
+        sender_is_member: bool,
+        observed_at_ms: u64,
+    ) -> Self {
+        Self {
+            context_id,
+            channel_id,
+            sender_id,
+            sender_is_member,
+            observed_at_ms,
+        }
     }
 }
 
@@ -227,6 +276,45 @@ pub fn check_moderation(snapshot: &GuardSnapshot) -> Option<GuardOutcome> {
             "authoritative moderation denied chat operation: sender is muted",
         )));
     }
+    None
+}
+
+/// Deny message sends unless the caller supplied a fresh, channel-bound
+/// membership snapshot showing the sender is a current member.
+pub fn check_membership(snapshot: &GuardSnapshot, channel_id: ChannelId) -> Option<GuardOutcome> {
+    let membership = match snapshot.membership.as_ref() {
+        Some(membership) => membership,
+        None => {
+            return Some(GuardOutcome::denied(types::GuardViolation::other(
+                "authoritative membership denied chat operation: membership snapshot missing",
+            )));
+        }
+    };
+
+    if membership.context_id != snapshot.context_id
+        || membership.channel_id != channel_id
+        || membership.sender_id != snapshot.authority_id
+    {
+        return Some(GuardOutcome::denied(types::GuardViolation::other(
+            "authoritative membership denied chat operation: membership snapshot mismatch",
+        )));
+    }
+
+    if !membership.sender_is_member {
+        return Some(GuardOutcome::denied(types::GuardViolation::other(
+            "authoritative membership denied chat operation: sender is not a channel member",
+        )));
+    }
+
+    if membership.observed_at_ms > snapshot.now_ms
+        || snapshot.now_ms.saturating_sub(membership.observed_at_ms)
+            > CHAT_MEMBERSHIP_SNAPSHOT_MAX_AGE_MS
+    {
+        return Some(GuardOutcome::denied(types::GuardViolation::other(
+            "authoritative membership denied chat operation: membership snapshot stale",
+        )));
+    }
+
     None
 }
 

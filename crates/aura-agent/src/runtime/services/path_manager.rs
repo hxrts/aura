@@ -57,6 +57,12 @@ pub struct AnonymousPathManagerConfig {
     pub replay_window_entries: usize,
     /// Maximum control-plane lifetime for one anonymous-establish attempt.
     pub establish_timeout: Duration,
+    /// Maximum serialized reply layer frame accepted before deserialization.
+    pub max_reply_layer_frame_bytes: usize,
+    /// Maximum encrypted reply layer payload accepted before AEAD decrypt.
+    pub max_reply_layer_ciphertext_bytes: usize,
+    /// Maximum decrypted reply layer payload accepted after AEAD decrypt.
+    pub max_reply_layer_plaintext_bytes: usize,
 }
 
 impl Default for AnonymousPathManagerConfig {
@@ -66,6 +72,9 @@ impl Default for AnonymousPathManagerConfig {
             cleanup_interval: Duration::from_secs(10),
             replay_window_entries: 256,
             establish_timeout: Duration::from_secs(5),
+            max_reply_layer_frame_bytes: 1024 * 1024,
+            max_reply_layer_ciphertext_bytes: 1024 * 1024,
+            max_reply_layer_plaintext_bytes: 1024 * 1024,
         }
     }
 }
@@ -78,6 +87,9 @@ impl_service_config_profiles!(AnonymousPathManagerConfig {
             cleanup_interval: Duration::from_millis(25),
             replay_window_entries: 16,
             establish_timeout: Duration::from_millis(75),
+            max_reply_layer_frame_bytes: 64 * 1024,
+            max_reply_layer_ciphertext_bytes: 64 * 1024,
+            max_reply_layer_plaintext_bytes: 64 * 1024,
         }
     }
 });
@@ -169,6 +181,20 @@ pub enum AnonymousPathManagerError {
         control: Box<AnonymousPathEstablishControl>,
     },
     #[error(
+        "anonymous reply replay rejected for path {path_id} hop {hop_index} counter {counter}"
+    )]
+    ReplyReplayRejected {
+        path_id: String,
+        hop_index: u16,
+        counter: u64,
+    },
+    #[error("anonymous reply layer {kind} too large: {actual} > {max} bytes")]
+    ReplyLayerTooLarge {
+        kind: &'static str,
+        actual: usize,
+        max: usize,
+    },
+    #[error(
         "anonymous establish control session {session_id} timed out at {deadline_ms}, now {now_ms}"
     )]
     EstablishTimedOut {
@@ -199,6 +225,12 @@ struct EncryptedSetupPayload {
     next: Option<Box<EncryptedAnonymousSetupLayer>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct EncryptedReplyLayerFrame {
+    counter: u64,
+    ciphertext: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AnonymousPathControlSessionState {
     session_id: u64,
@@ -215,6 +247,7 @@ struct PathState {
     established_paths: HashMap<[u8; 32], EstablishedPath>,
     replay_seen: HashSet<[u8; 32]>,
     replay_order: VecDeque<[u8; 32]>,
+    reply_counters: HashMap<[u8; 32], u64>,
     control_sessions: HashMap<u64, AnonymousPathControlSessionState>,
     next_control_session_id: u64,
     next_control_witness_id: u64,
@@ -229,6 +262,7 @@ impl Default for PathState {
             established_paths: HashMap::new(),
             replay_seen: HashSet::new(),
             replay_order: VecDeque::new(),
+            reply_counters: HashMap::new(),
             control_sessions: HashMap::new(),
             next_control_session_id: 1,
             next_control_witness_id: 1,
@@ -840,15 +874,42 @@ impl AnonymousPathManager {
         path: &EstablishedPath,
         terminal_payload: &[u8],
     ) -> Result<Vec<u8>, AnonymousPathManagerError> {
+        ensure_reply_layer_size(
+            "plaintext",
+            terminal_payload.len(),
+            self.config.max_reply_layer_plaintext_bytes,
+        )?;
+        let counter = self.next_reply_counter(path.path_id).await?;
         let mut current = terminal_payload.to_vec();
         for index in (0..path.backward_hop_keys.len()).rev() {
-            let nonce = reply_layer_nonce(index as u16);
-            let aad = reply_layer_aad(path.path_id, index as u16)?;
-            current = self
+            ensure_reply_layer_size(
+                "plaintext",
+                current.len(),
+                self.config.max_reply_layer_plaintext_bytes,
+            )?;
+            let hop_index = index as u16;
+            let nonce = reply_layer_nonce(hop_index, counter);
+            let aad = reply_layer_aad(path.path_id, hop_index, counter)?;
+            let ciphertext = self
                 .route_crypto
                 .encrypt_hop_layer(path.backward_hop_keys[index], nonce, &aad, &current)
                 .await
                 .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
+            ensure_reply_layer_size(
+                "ciphertext",
+                ciphertext.len(),
+                self.config.max_reply_layer_ciphertext_bytes,
+            )?;
+            current = serialization::to_vec(&EncryptedReplyLayerFrame {
+                counter,
+                ciphertext,
+            })
+            .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))?;
+            ensure_reply_layer_size(
+                "frame",
+                current.len(),
+                self.config.max_reply_layer_frame_bytes,
+            )?;
         }
         Ok(current)
     }
@@ -859,12 +920,65 @@ impl AnonymousPathManager {
         hop_index: usize,
         layer: &[u8],
     ) -> Result<Vec<u8>, AnonymousPathManagerError> {
-        let nonce = reply_layer_nonce(hop_index as u16);
-        let aad = reply_layer_aad(path.path_id, hop_index as u16)?;
-        self.route_crypto
-            .decrypt_hop_layer(path.backward_hop_keys[hop_index], nonce, &aad, layer)
+        ensure_reply_layer_size(
+            "frame",
+            layer.len(),
+            self.config.max_reply_layer_frame_bytes,
+        )?;
+        let frame = serialization::from_slice::<EncryptedReplyLayerFrame>(layer)
+            .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))?;
+        ensure_reply_layer_size(
+            "ciphertext",
+            frame.ciphertext.len(),
+            self.config.max_reply_layer_ciphertext_bytes,
+        )?;
+        let hop_index_u16 = hop_index as u16;
+        let marker = reply_replay_marker(path.path_id, hop_index_u16, frame.counter)?;
+        {
+            let state = self.state.read().await;
+            if state.replay_seen.contains(&marker) {
+                return Err(AnonymousPathManagerError::ReplyReplayRejected {
+                    path_id: hex::encode(path.path_id),
+                    hop_index: hop_index_u16,
+                    counter: frame.counter,
+                });
+            }
+        }
+
+        let nonce = reply_layer_nonce(hop_index_u16, frame.counter);
+        let aad = reply_layer_aad(path.path_id, hop_index_u16, frame.counter)?;
+        let plaintext = self
+            .route_crypto
+            .decrypt_hop_layer(
+                path.backward_hop_keys[hop_index],
+                nonce,
+                &aad,
+                &frame.ciphertext,
+            )
             .await
-            .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))
+            .map_err(|error| AnonymousPathManagerError::RouteCrypto(error.to_string()))?;
+        ensure_reply_layer_size(
+            "plaintext",
+            plaintext.len(),
+            self.config.max_reply_layer_plaintext_bytes,
+        )?;
+
+        let mut state = self.state.write().await;
+        remember_replay_marker(&mut state, marker, self.config.replay_window_entries);
+        Ok(plaintext)
+    }
+
+    async fn next_reply_counter(
+        &self,
+        path_id: [u8; 32],
+    ) -> Result<u64, AnonymousPathManagerError> {
+        let mut state = self.state.write().await;
+        let counter = state.reply_counters.entry(path_id).or_insert(0);
+        let current = *counter;
+        *counter = counter.checked_add(1).ok_or_else(|| {
+            AnonymousPathManagerError::RouteCrypto("reply counter overflow".to_string())
+        })?;
+        Ok(current)
     }
 
     fn spawn_cleanup_task(
@@ -1200,10 +1314,11 @@ fn setup_layer_nonce(hop_index: u16) -> [u8; 12] {
     nonce
 }
 
-fn reply_layer_nonce(hop_index: u16) -> [u8; 12] {
+fn reply_layer_nonce(hop_index: u16, counter: u64) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     nonce[..2].copy_from_slice(&hop_index.to_le_bytes());
-    nonce[2..].copy_from_slice(b"reply-hop-");
+    nonce[2..10].copy_from_slice(&counter.to_le_bytes());
+    nonce[10..].copy_from_slice(b"rp");
     nonce
 }
 
@@ -1234,9 +1349,31 @@ fn setup_peel_context(
 fn reply_layer_aad(
     path_id: [u8; 32],
     hop_index: u16,
+    counter: u64,
 ) -> Result<Vec<u8>, AnonymousPathManagerError> {
-    serialization::to_vec(&(b"aura.reply.layer.v1", path_id, hop_index))
+    serialization::to_vec(&(b"aura.reply.layer.v2", path_id, hop_index, counter))
         .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))
+}
+
+fn reply_replay_marker(
+    path_id: [u8; 32],
+    hop_index: u16,
+    counter: u64,
+) -> Result<[u8; 32], AnonymousPathManagerError> {
+    let material = serialization::to_vec(&(b"aura.reply.replay.v1", path_id, hop_index, counter))
+        .map_err(|error| AnonymousPathManagerError::Serialization(error.to_string()))?;
+    Ok(hash(&material))
+}
+
+fn ensure_reply_layer_size(
+    kind: &'static str,
+    actual: usize,
+    max: usize,
+) -> Result<(), AnonymousPathManagerError> {
+    if actual > max {
+        return Err(AnonymousPathManagerError::ReplyLayerTooLarge { kind, actual, max });
+    }
+    Ok(())
 }
 
 fn remember_replay_marker(state: &mut PathState, marker: [u8; 32], max_entries: usize) {
@@ -1534,6 +1671,125 @@ mod tests {
             .await
             .expect("second backward peel");
         assert_eq!(terminal, b"terminal-reply");
+    }
+
+    #[tokio::test]
+    async fn reply_layers_use_fresh_counters_for_reused_paths() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let manager =
+            AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let random = TestRandom::single(4);
+        let route = route_for(&manager).await;
+
+        let (path, _) = manager
+            .establish_path(context(1), authority(9), route, &random, 100)
+            .await
+            .expect("establish encrypted path");
+        let first = manager
+            .wrap_reply_payload(&path, b"first-reply")
+            .await
+            .expect("wrap first reply");
+        let second = manager
+            .wrap_reply_payload(&path, b"second-reply")
+            .await
+            .expect("wrap second reply");
+
+        assert_ne!(first, second);
+    }
+
+    #[tokio::test]
+    async fn reply_layers_reject_replayed_frames() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let manager =
+            AnonymousPathManager::new(AnonymousPathManagerConfig::for_testing(), registry);
+        let random = TestRandom::single(4);
+        let route = route_for(&manager).await;
+
+        let (path, _) = manager
+            .establish_path(context(1), authority(9), route, &random, 100)
+            .await
+            .expect("establish encrypted path");
+        let wrapped = manager
+            .wrap_reply_payload(&path, b"terminal-reply")
+            .await
+            .expect("wrap backward reply");
+
+        let _ = manager
+            .peel_reply_layer(&path, 0, &wrapped)
+            .await
+            .expect("first peel succeeds");
+        let replay = manager
+            .peel_reply_layer(&path, 0, &wrapped)
+            .await
+            .expect_err("replayed reply frame must be rejected");
+
+        assert!(matches!(
+            replay,
+            AnonymousPathManagerError::ReplyReplayRejected { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn reply_layers_reject_oversized_ciphertext_before_decrypt() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let mut config = AnonymousPathManagerConfig::for_testing();
+        config.max_reply_layer_frame_bytes = 512;
+        config.max_reply_layer_ciphertext_bytes = 16;
+        let manager = AnonymousPathManager::new(config, registry);
+        let random = TestRandom::single(4);
+        let route = route_for(&manager).await;
+
+        let (path, _) = manager
+            .establish_path(context(1), authority(9), route, &random, 100)
+            .await
+            .expect("establish encrypted path");
+        let oversized = serialization::to_vec(&EncryptedReplyLayerFrame {
+            counter: 1,
+            ciphertext: vec![0; 17],
+        })
+        .expect("serialize oversized frame");
+
+        let err = manager
+            .peel_reply_layer(&path, 0, &oversized)
+            .await
+            .expect_err("oversized reply ciphertext must be rejected before decrypt");
+
+        assert!(matches!(
+            err,
+            AnonymousPathManagerError::ReplyLayerTooLarge {
+                kind: "ciphertext",
+                actual: 17,
+                max: 16
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn reply_layers_reject_oversized_terminal_payload_before_encrypt() {
+        let registry = Arc::new(ServiceRegistry::new());
+        let mut config = AnonymousPathManagerConfig::for_testing();
+        config.max_reply_layer_plaintext_bytes = 4;
+        let manager = AnonymousPathManager::new(config, registry);
+        let random = TestRandom::single(4);
+        let route = route_for(&manager).await;
+
+        let (path, _) = manager
+            .establish_path(context(1), authority(9), route, &random, 100)
+            .await
+            .expect("establish encrypted path");
+        let err = manager
+            .wrap_reply_payload(&path, b"too-large")
+            .await
+            .expect_err("oversized terminal payload must be rejected before encrypt");
+
+        assert!(matches!(
+            err,
+            AnonymousPathManagerError::ReplyLayerTooLarge {
+                kind: "plaintext",
+                actual: 9,
+                max: 4
+            }
+        ));
     }
 
     #[tokio::test]

@@ -312,11 +312,9 @@ async fn test_list_pending_via_agent() -> TestResult {
     let pending = invitations.list_pending().await;
     assert_eq!(pending.len(), 3);
 
-    // Accept one
-    invitations.accept(&inv1.invitation_id).await?;
-
-    // Decline another
-    invitations.decline(&inv2.invitation_id).await?;
+    // Cancel two sender-owned invitations.
+    invitations.cancel(&inv1.invitation_id).await?;
+    invitations.cancel(&inv2.invitation_id).await?;
 
     // Only 1 should remain pending
     let pending = invitations.list_pending().await;

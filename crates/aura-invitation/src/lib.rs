@@ -217,7 +217,7 @@ pub use invitation_ceremony::{
 // Re-export guard types
 pub use guards::{
     check_capability, check_flow_budget, EffectCommand, GuardDecision, GuardOutcome, GuardRequest,
-    GuardSnapshot,
+    GuardSnapshot, InvitationLifecycleSnapshot, InvitationLifecycleStatus,
 };
 
 // Re-export service types

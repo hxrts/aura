@@ -620,6 +620,25 @@ mod tests {
         AuthorityContext::new(authority_id)
     }
 
+    fn test_channel_psk(
+        context_id: ContextId,
+        initiator: AuthorityId,
+        responder: AuthorityId,
+    ) -> [u8; 32] {
+        let mut a = initiator.to_bytes();
+        let mut b = responder.to_bytes();
+        if a > b {
+            std::mem::swap(&mut a, &mut b);
+        }
+
+        let mut material = Vec::with_capacity(32 + 16 + 16 + 24);
+        material.extend_from_slice(b"AURA_RENDEZVOUS_PSK_V1");
+        material.extend_from_slice(context_id.as_bytes());
+        material.extend_from_slice(&a);
+        material.extend_from_slice(&b);
+        hash(&material)
+    }
+
     #[tokio::test]
     async fn test_service_creation() {
         let authority_context = create_test_authority(60);
@@ -681,6 +700,7 @@ mod tests {
     #[tokio::test]
     async fn test_channel_workflow() {
         let authority_context = create_test_authority(64);
+        let local = authority_context.authority_id();
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
 
@@ -695,7 +715,7 @@ mod tests {
             device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("10.0.0.2:8443").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
+            handshake_psk_commitment: hash(&test_channel_psk(context_id, local, peer)),
             public_key: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,

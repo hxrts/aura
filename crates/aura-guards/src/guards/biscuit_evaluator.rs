@@ -23,8 +23,11 @@ impl BiscuitGuardEvaluator {
         self.bridge.authority_id()
     }
 
-    /// Backwards compatible wrapper for evaluate_guard without explicit time
-    /// Uses default time value for testing/mock scenarios
+    /// Backwards compatible test wrapper for evaluate_guard without explicit time.
+    ///
+    /// Production guard paths must pass an explicit physical timestamp and fail
+    /// closed if no time source is available.
+    #[cfg(test)]
     pub fn evaluate_guard_default_time(
         &self,
         token: &Biscuit,
@@ -36,8 +39,11 @@ impl BiscuitGuardEvaluator {
         self.evaluate_guard(token, guard_capability, resource, flow_cost, budget, 0)
     }
 
-    /// Backwards compatible wrapper for check_guard without explicit time
-    /// Uses default time value for testing/mock scenarios
+    /// Backwards compatible test wrapper for check_guard without explicit time.
+    ///
+    /// Production guard paths must pass an explicit physical timestamp and fail
+    /// closed if no time source is available.
+    #[cfg(test)]
     pub fn check_guard_default_time(
         &self,
         token: &Biscuit,

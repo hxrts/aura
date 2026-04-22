@@ -53,7 +53,9 @@ use aura_core::{
 };
 use aura_guards::types::CapabilityId;
 use aura_invitation::capabilities::evaluation_candidates_for_invitation_guard;
-use aura_invitation::guards::GuardSnapshot;
+use aura_invitation::guards::{
+    GuardSnapshot, InvitationLifecycleSnapshot, InvitationLifecycleStatus,
+};
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
 #[cfg(not(feature = "choreo-backend-telltale-machine"))]
@@ -590,10 +592,38 @@ impl InvitationHandler {
         )
     }
 
-    /// Build a guard snapshot from the handler's default context.
-    async fn build_snapshot(&self, effects: &AuraEffectSystem) -> GuardSnapshot {
-        self.build_snapshot_for_context(effects, self.context.effect_context.context_id())
+    fn lifecycle_status(status: &InvitationStatus) -> InvitationLifecycleStatus {
+        match status {
+            InvitationStatus::Pending => InvitationLifecycleStatus::Pending,
+            InvitationStatus::Accepted => InvitationLifecycleStatus::Accepted,
+            InvitationStatus::Declined => InvitationLifecycleStatus::Declined,
+            InvitationStatus::Cancelled => InvitationLifecycleStatus::Cancelled,
+            InvitationStatus::Expired => InvitationLifecycleStatus::Expired,
+        }
+    }
+
+    async fn build_snapshot_for_invitation_lifecycle(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<GuardSnapshot> {
+        let invitation = self
+            .load_invitation_for_choreography(effects, invitation_id)
             .await
+            .ok_or_else(|| AgentError::invalid("Invitation not found for lifecycle guard"))?;
+        let lifecycle = InvitationLifecycleSnapshot {
+            invitation_id: invitation.invitation_id.clone(),
+            context_id: invitation.context_id,
+            sender_id: invitation.sender_id,
+            receiver_id: invitation.receiver_id,
+            status: Self::lifecycle_status(&invitation.status),
+            expires_at_ms: invitation.expires_at,
+        };
+
+        Ok(self
+            .build_snapshot_for_context(effects, invitation.context_id)
+            .await
+            .with_invitation_lifecycle(lifecycle))
     }
 
     async fn refresh_channel_context_index(
@@ -1045,7 +1075,9 @@ impl InvitationHandler {
             "accept_invitation_prepare",
             INVITATION_ACCEPT_PREPARE_STAGE_TIMEOUT_MS,
             async {
-                let snapshot = self.build_snapshot(effects.as_ref()).await;
+                let snapshot = self
+                    .build_snapshot_for_invitation_lifecycle(effects.as_ref(), invitation_id)
+                    .await?;
                 Ok(self
                     .service
                     .prepare_accept_invitation(&snapshot, invitation_id))
@@ -1854,7 +1886,9 @@ impl InvitationHandler {
         .await?;
 
         // Build snapshot and prepare through service
-        let snapshot = self.build_snapshot(effects.as_ref()).await;
+        let snapshot = self
+            .build_snapshot_for_invitation_lifecycle(effects.as_ref(), invitation_id)
+            .await?;
         let outcome = self
             .service
             .prepare_decline_invitation(&snapshot, invitation_id);
@@ -1924,7 +1958,9 @@ impl InvitationHandler {
         .await?;
 
         // Build snapshot and prepare through service
-        let snapshot = self.build_snapshot(effects.as_ref()).await;
+        let snapshot = self
+            .build_snapshot_for_invitation_lifecycle(effects.as_ref(), invitation_id)
+            .await?;
         let outcome = self
             .service
             .prepare_cancel_invitation(&snapshot, invitation_id);

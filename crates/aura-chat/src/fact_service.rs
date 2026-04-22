@@ -8,8 +8,8 @@ use aura_core::types::identifiers::ChannelId;
 use crate::capabilities::ChatCapability;
 use crate::facts::ChatFact;
 use crate::guards::{
-    check_capability, check_flow_budget, check_moderation, costs, EffectCommand, GuardOutcome,
-    GuardSnapshot,
+    check_capability, check_flow_budget, check_membership, check_moderation, costs, EffectCommand,
+    GuardOutcome, GuardSnapshot,
 };
 
 /// Guard-compatible fact-first chat operations.
@@ -77,6 +77,9 @@ impl ChatFactService {
         if let Some(outcome) = check_moderation(snapshot) {
             return outcome;
         }
+        if let Some(outcome) = check_membership(snapshot, channel_id) {
+            return outcome;
+        }
         if let Some(outcome) = check_flow_budget(snapshot, costs::CHAT_MESSAGE_SEND_COST) {
             return outcome;
         }
@@ -101,7 +104,21 @@ impl ChatFactService {
 mod tests {
     use super::*;
     use crate::test_support::{test_channel_id, test_guard_snapshot};
+    use crate::{guards::MembershipSnapshot, guards::CHAT_MEMBERSHIP_SNAPSHOT_MAX_AGE_MS};
     use aura_core::FlowCost;
+
+    fn current_membership_snapshot(
+        snapshot: &GuardSnapshot,
+        channel_id: ChannelId,
+    ) -> MembershipSnapshot {
+        MembershipSnapshot::new(
+            snapshot.context_id,
+            channel_id,
+            snapshot.authority_id,
+            true,
+            snapshot.now_ms,
+        )
+    }
 
     /// Channel creation denied without required capability — chat operations
     /// are capability-gated.
@@ -135,10 +152,13 @@ mod tests {
             vec![ChatCapability::MessageSend.as_name()],
             123,
         );
+        let channel_id = test_channel_id(0);
+        let membership = current_membership_snapshot(&snapshot, channel_id);
+        let snapshot = snapshot.with_membership_snapshot(membership);
 
         let out = service.prepare_send_message_sealed(
             &snapshot,
-            test_channel_id(0),
+            channel_id,
             "msg-1".to_string(),
             "Alice".to_string(),
             vec![1, 2, 3],
@@ -182,5 +202,105 @@ mod tests {
             crate::guards::GuardDecision::Deny { .. }
         ));
         assert!(out.effects.is_empty());
+    }
+
+    #[test]
+    fn send_denied_without_membership_snapshot() {
+        let service = ChatFactService::new();
+        let snapshot = test_guard_snapshot(
+            1,
+            2,
+            FlowCost::new(10),
+            vec![ChatCapability::MessageSend.as_name()],
+            123,
+        );
+
+        let out = service.prepare_send_message_sealed(
+            &snapshot,
+            test_channel_id(0),
+            "msg-1".to_string(),
+            "Alice".to_string(),
+            vec![1, 2, 3],
+            None,
+            None,
+        );
+
+        assert!(matches!(
+            out.decision,
+            crate::guards::GuardDecision::Deny { .. }
+        ));
+    }
+
+    #[test]
+    fn send_denied_when_membership_snapshot_is_stale() {
+        let service = ChatFactService::new();
+        let snapshot = test_guard_snapshot(
+            1,
+            2,
+            FlowCost::new(10),
+            vec![ChatCapability::MessageSend.as_name()],
+            100_000,
+        );
+        let channel_id = test_channel_id(0);
+        let stale_observed_at = snapshot.now_ms - CHAT_MEMBERSHIP_SNAPSHOT_MAX_AGE_MS - 1;
+        let membership = MembershipSnapshot::new(
+            snapshot.context_id,
+            channel_id,
+            snapshot.authority_id,
+            true,
+            stale_observed_at,
+        );
+        let snapshot = snapshot.with_membership_snapshot(membership);
+
+        let out = service.prepare_send_message_sealed(
+            &snapshot,
+            channel_id,
+            "msg-1".to_string(),
+            "Alice".to_string(),
+            vec![1, 2, 3],
+            None,
+            None,
+        );
+
+        assert!(matches!(
+            out.decision,
+            crate::guards::GuardDecision::Deny { .. }
+        ));
+    }
+
+    #[test]
+    fn send_denied_when_sender_is_not_channel_member() {
+        let service = ChatFactService::new();
+        let snapshot = test_guard_snapshot(
+            1,
+            2,
+            FlowCost::new(10),
+            vec![ChatCapability::MessageSend.as_name()],
+            123,
+        );
+        let channel_id = test_channel_id(0);
+        let membership = MembershipSnapshot::new(
+            snapshot.context_id,
+            channel_id,
+            snapshot.authority_id,
+            false,
+            snapshot.now_ms,
+        );
+        let snapshot = snapshot.with_membership_snapshot(membership);
+
+        let out = service.prepare_send_message_sealed(
+            &snapshot,
+            channel_id,
+            "msg-1".to_string(),
+            "Alice".to_string(),
+            vec![1, 2, 3],
+            None,
+            None,
+        );
+
+        assert!(matches!(
+            out.decision,
+            crate::guards::GuardDecision::Deny { .. }
+        ));
     }
 }

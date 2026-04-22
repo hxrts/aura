@@ -79,6 +79,11 @@ pub struct GuardSnapshot {
 
     /// Current timestamp in milliseconds
     pub now_ms: u64,
+
+    /// Current lifecycle state for the invitation being transitioned.
+    ///
+    /// Lifecycle transitions fail closed when this snapshot is absent.
+    pub invitation_lifecycle: Option<InvitationLifecycleSnapshot>,
 }
 
 impl GuardSnapshot {
@@ -98,6 +103,7 @@ impl GuardSnapshot {
             capabilities,
             epoch,
             now_ms,
+            invitation_lifecycle: None,
         }
     }
 
@@ -109,6 +115,82 @@ impl GuardSnapshot {
     /// Check if snapshot has sufficient flow budget
     pub fn has_budget(&self, cost: FlowCost) -> bool {
         self.flow_budget_remaining >= cost
+    }
+
+    /// Attach authoritative lifecycle state for the invitation being updated.
+    #[must_use]
+    pub fn with_invitation_lifecycle(mut self, lifecycle: InvitationLifecycleSnapshot) -> Self {
+        self.invitation_lifecycle = Some(lifecycle);
+        self
+    }
+}
+
+/// Lifecycle status needed by pure invitation guard checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvitationLifecycleStatus {
+    /// Invitation is still pending.
+    Pending,
+    /// Invitation was accepted.
+    Accepted,
+    /// Invitation was declined.
+    Declined,
+    /// Invitation was cancelled.
+    Cancelled,
+    /// Invitation expired.
+    Expired,
+}
+
+/// Guard-visible invitation lifecycle state prepared by the caller.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvitationLifecycleSnapshot {
+    /// Invitation being transitioned.
+    pub invitation_id: InvitationId,
+    /// Context that owns the invitation.
+    pub context_id: ContextId,
+    /// Authority that sent the invitation.
+    pub sender_id: AuthorityId,
+    /// Authority that may accept or decline the invitation.
+    pub receiver_id: AuthorityId,
+    /// Current lifecycle status.
+    pub status: InvitationLifecycleStatus,
+    /// Expiration timestamp in milliseconds, if any.
+    pub expires_at_ms: Option<u64>,
+}
+
+impl InvitationLifecycleSnapshot {
+    /// Construct a pending lifecycle snapshot.
+    #[must_use]
+    pub fn pending(
+        invitation_id: InvitationId,
+        context_id: ContextId,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+        expires_at_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            invitation_id,
+            context_id,
+            sender_id,
+            receiver_id,
+            status: InvitationLifecycleStatus::Pending,
+            expires_at_ms,
+        }
+    }
+
+    /// Whether the snapshot represents a pending invitation.
+    #[must_use]
+    pub fn is_pending(&self) -> bool {
+        matches!(self.status, InvitationLifecycleStatus::Pending)
+    }
+
+    /// Whether the invitation has expired at the supplied time.
+    #[must_use]
+    pub fn is_expired(&self, now_ms: u64) -> bool {
+        matches!(self.status, InvitationLifecycleStatus::Expired)
+            || self
+                .expires_at_ms
+                .map(|expires_at| now_ms >= expires_at)
+                .unwrap_or(false)
     }
 }
 

@@ -27,16 +27,44 @@ pub struct AmpRatchetState {
     pub pending_epoch: Option<u64>,
 }
 
-/// Derived ratchet state and message key
+/// Public AMP message identifier derived from wire-visible header fields.
 ///
-/// Result of deriving the ratchet state for a message. Contains the header,
-/// derived message key, and the next generation counter to advance to.
+/// This is not secret key material and must never be used as an AEAD key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AmpMessageId(pub Hash32);
+
+/// Derived ratchet state and public message identifier
+///
+/// Result of deriving the ratchet state for a message. Contains the header, a
+/// public message identifier, and the next generation counter to advance to.
+///
+/// The derivation intentionally does not expose AEAD key material. Message
+/// encryption keys must be derived by the protocol layer from secure channel
+/// epoch or bootstrap secrets.
+///
+/// ```compile_fail
+/// # use aura_core::effects::amp::AmpHeader;
+/// # use aura_core::types::identifiers::{ChannelId, ContextId};
+/// # use aura_core::Hash32;
+/// # use aura_transport::amp::{AmpMessageId, RatchetDerivation};
+/// # let derivation = RatchetDerivation {
+/// #     header: AmpHeader {
+/// #         context: ContextId::new_from_entropy([1u8; 32]),
+/// #         channel: ChannelId::from_bytes([2u8; 32]),
+/// #         chan_epoch: 0,
+/// #         ratchet_gen: 0,
+/// #     },
+/// #     message_id: AmpMessageId(Hash32::default()),
+/// #     next_gen: 1,
+/// # };
+/// let _aead_key = derivation.message_key;
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RatchetDerivation {
     /// The derived AMP header for this message
     pub header: AmpHeader,
-    /// The derived message key for AEAD encryption/decryption
-    pub message_key: Hash32,
+    /// Public message identifier derived from the header. Not an AEAD key.
+    pub message_id: AmpMessageId,
     /// The next generation counter to advance to after this message
     pub next_gen: u64,
 }
@@ -63,7 +91,7 @@ aura_error_types! {
 /// Calculate the valid generation window for message acceptance
 pub fn window_bounds(last_checkpoint: u64, skip_window: u64) -> (u64, u64) {
     let min_gen = last_checkpoint;
-    let max_gen = last_checkpoint + (2 * skip_window);
+    let max_gen = last_checkpoint.saturating_add(skip_window.saturating_mul(2));
     (min_gen, max_gen)
 }
 
@@ -95,13 +123,13 @@ pub fn derive_for_send(
         ratchet_gen,
     };
 
-    // Derive message key from header components
-    let message_key = derive_message_key(&header);
+    // Derive public message identifier from header components.
+    let message_id = derive_message_id(&header);
 
     Ok(RatchetDerivation {
         header,
-        message_key,
-        next_gen: ratchet_gen + 1,
+        message_id,
+        next_gen: ratchet_gen.saturating_add(1),
     })
 }
 
@@ -135,30 +163,29 @@ pub fn derive_for_recv(
         });
     }
 
-    // Derive message key
-    let message_key = derive_message_key(&header);
+    // Derive public message identifier
+    let message_id = derive_message_id(&header);
 
     Ok(RatchetDerivation {
         header,
-        message_key,
-        next_gen: header.ratchet_gen + 1,
+        message_id,
+        next_gen: header.ratchet_gen.saturating_add(1),
     })
 }
 
-/// Derive message key from AMP header
+/// Derive a public message identifier from AMP header
 ///
-/// Pure cryptographic function that derives AEAD keys from message metadata.
-/// Uses a deterministic KDF based on the header components.
-fn derive_message_key(header: &AmpHeader) -> Hash32 {
-    // Construct key material from header components
+/// This identifier is deterministic and public. It is useful for deduplication
+/// and tracing, but it is not secret key material.
+fn derive_message_id(header: &AmpHeader) -> AmpMessageId {
+    // Construct identifier material from header components
     let mut material = Vec::with_capacity(16 + 32 + 8 + 8);
     material.extend_from_slice(&header.context.to_bytes());
     material.extend_from_slice(header.channel.as_bytes());
     material.extend_from_slice(&header.chan_epoch.to_le_bytes());
     material.extend_from_slice(&header.ratchet_gen.to_le_bytes());
 
-    // Hash the material to derive the key
-    Hash32::from_bytes(&material)
+    AmpMessageId(Hash32::from_bytes(&material))
 }
 
 #[cfg(test)]
@@ -256,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn test_message_key_derivation_deterministic() {
+    fn test_message_id_derivation_deterministic() {
         let header = AmpHeader {
             context: ContextId::new_from_entropy([2u8; 32]),
             channel: ChannelId::from_bytes([1u8; 32]),
@@ -264,8 +291,8 @@ mod tests {
             ratchet_gen: 1,
         };
 
-        let key1 = derive_message_key(&header);
-        let key2 = derive_message_key(&header);
-        assert_eq!(key1, key2);
+        let id1 = derive_message_id(&header);
+        let id2 = derive_message_id(&header);
+        assert_eq!(id1, id2);
     }
 }

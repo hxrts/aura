@@ -348,8 +348,18 @@ impl RendezvousService {
             return Ok(outcome);
         }
 
+        if snapshot.context_id != context_id {
+            return Err(AuraError::invalid(
+                "Guard snapshot context does not match channel context",
+            ));
+        }
         if peer_descriptor.authority_id != peer {
             return Err(AuraError::invalid("Peer descriptor does not match peer"));
+        }
+        if peer_descriptor.context_id != context_id {
+            return Err(AuraError::invalid(
+                "Peer descriptor context does not match channel context",
+            ));
         }
         if !peer_descriptor.is_valid(now_ms) {
             return Err(AuraError::invalid(
@@ -370,6 +380,11 @@ impl RendezvousService {
 
         // Compute PSK commitment
         let psk_commitment = compute_psk_commitment(psk);
+        if peer_descriptor.handshake_psk_commitment != psk_commitment {
+            return Err(AuraError::invalid(
+                "Peer descriptor PSK commitment does not match channel PSK",
+            ));
+        }
 
         // Initialize handshaker
         let handshake_config = HandshakeConfig {
@@ -451,7 +466,8 @@ impl RendezvousService {
         initiator: AuthorityId,
         init_message: NoiseHandshake,
         psk: &[u8; 32],
-        local_private_key: &[u8], // Ed25519 seed
+        local_private_key: &[u8],    // Ed25519 seed
+        initiator_public_key: &[u8], // Ed25519 public key from initiator descriptor
         effects: &E,
     ) -> AuraResult<(GuardOutcome, Option<SecureChannel>)> {
         if let Some(outcome) = Self::check_capability_and_budget(
@@ -487,6 +503,7 @@ impl RendezvousService {
                 &init_message.noise_message,
                 init_message.epoch,
                 local_private_key,
+                initiator_public_key,
                 effects,
             )
             .await?;
@@ -819,7 +836,7 @@ mod tests {
             device_id: None,
             context_id: test_context(),
             transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
+            handshake_psk_commitment: compute_psk_commitment(&psk),
             public_key: [0u8; 32],
             valid_from: 0,
             valid_until: 10000,
@@ -921,7 +938,7 @@ mod tests {
             device_id: None,
             context_id: test_context(),
             transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
+            handshake_psk_commitment: compute_psk_commitment(&psk),
             public_key: [0u8; 32],
             valid_from: 0,
             valid_until: 10000,

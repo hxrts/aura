@@ -85,32 +85,14 @@ impl<S: StorageEffects> ProductionLeakageHandler<S> {
         }
     }
 
-    /// Append an event to storage (read-modify-write pattern)
+    /// Append an event to storage using the storage append primitive.
     async fn append_event(&self, context_id: ContextId, event: &LeakageEvent) -> Result<()> {
         let key = Self::storage_key(context_id);
 
-        // Read existing content
-        let existing = match self.storage.retrieve(&key).await {
-            Ok(Some(data)) => {
-                String::from_utf8(data).map_err(|e| AuraError::serialization(e.to_string()))?
-            }
-            Ok(None) => String::new(),
-            Err(e) => return Err(AuraError::storage(e.to_string())),
-        };
-
-        // Serialize new event
         let line = to_string(event).map_err(|e| AuraError::serialization(e.to_string()))?;
-
-        // Append new line
-        let updated = if existing.is_empty() {
-            format!("{line}\n")
-        } else {
-            format!("{existing}{line}\n")
-        };
-
-        // Write back
+        let record = format!("{line}\n").into_bytes();
         self.storage
-            .store(&key, updated.into_bytes())
+            .append(&key, record)
             .await
             .map_err(|e| AuraError::storage(e.to_string()))?;
 
@@ -263,6 +245,16 @@ mod tests {
                 }
             }
             Ok(result)
+        }
+
+        async fn append(
+            &self,
+            key: &str,
+            value: Vec<u8>,
+        ) -> std::result::Result<(), aura_core::effects::StorageError> {
+            let mut data = self.data.write().await;
+            data.entry(key.to_string()).or_default().extend(value);
+            Ok(())
         }
 
         async fn clear_all(&self) -> std::result::Result<(), aura_core::effects::StorageError> {
@@ -427,5 +419,39 @@ mod tests {
         assert_eq!(budget.external_consumed, 0);
         assert_eq!(budget.neighbor_consumed, 0);
         assert_eq!(budget.in_group_consumed, 0);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_leakage_records_are_all_retained() {
+        let storage = Arc::new(TestStorage::new());
+        let handler = Arc::new(ProductionLeakageHandler::with_storage(storage));
+        let context = ContextId::new_from_entropy([9u8; 32]);
+        let source = AuthorityId::new_from_entropy([2u8; 32]);
+        let target = AuthorityId::new_from_entropy([3u8; 32]);
+
+        let writes = (0..100u64).map(|i| {
+            let handler = Arc::clone(&handler);
+            async move {
+                let event = LeakageEvent::with_timestamp_ms(
+                    source,
+                    target,
+                    context,
+                    1,
+                    ObserverClass::External,
+                    format!("race_{i}"),
+                    i,
+                );
+                handler.record_leakage(event).await
+            }
+        });
+
+        for result in futures::future::join_all(writes).await {
+            result.unwrap();
+        }
+
+        let history = handler.get_leakage_history(context, None).await.unwrap();
+        assert_eq!(history.len(), 100);
+        let budget = handler.get_leakage_budget(context).await.unwrap();
+        assert_eq!(budget.external_consumed, 100);
     }
 }

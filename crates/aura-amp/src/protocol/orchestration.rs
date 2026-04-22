@@ -31,6 +31,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::instrument;
 
+const AMP_SEND_COUPLING_OPERATION: &str = "send_coupling";
+
 // AmpHeader is now unified — defined in aura-core, re-exported by aura-transport.
 // No conversion functions needed.
 
@@ -95,7 +97,6 @@ fn build_amp_send_guard(
     config: &AmpRuntimeConfig,
 ) -> aura_guards::chain::SendGuardChain {
     use aura_guards::chain::create_send_guard_op;
-    use aura_guards::journal::JournalCoupler;
 
     create_send_guard_op(
         GuardOperation::AmpSend,
@@ -104,7 +105,19 @@ fn build_amp_send_guard(
         config.default_flow_cost,
     )
     .with_operation_id(GuardOperationId::AmpSend)
-    .with_journal_coupler(JournalCoupler::new())
+    .with_journal_coupler(amp_send_journal_coupler())
+}
+
+fn amp_send_journal_coupler() -> aura_guards::journal::JournalCoupler {
+    use aura_guards::journal::JournalCouplerBuilder;
+    use aura_mpst::journal::JournalAnnotation;
+
+    JournalCouplerBuilder::new()
+        .with_annotation(
+            GuardOperationId::Custom(AMP_SEND_COUPLING_OPERATION.to_string()),
+            JournalAnnotation::add_facts("AMP send authorization and flow receipt"),
+        )
+        .build()
 }
 
 fn latest_transcript_ref_from_context(
@@ -159,6 +172,44 @@ async fn derive_bootstrap_message_key<E: SecureStorageEffects>(
         header.ratchet_gen,
     )
     .map_err(|e| AuraError::crypto(format!("AMP bootstrap KDF failed: {e}")))
+}
+
+async fn derive_epoch_message_key<E: SecureStorageEffects>(
+    effects: &E,
+    context: ContextId,
+    channel: ChannelId,
+    header: &AmpHeader,
+) -> Result<aura_core::Hash32> {
+    let location = SecureStorageLocation::amp_epoch_key(&context, &channel, header.chan_epoch);
+    let key_bytes = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await
+        .map_err(|e| {
+            AuraError::crypto(format!(
+                "Failed to read AMP channel epoch key for {context}/{channel}/{}: {e}",
+                header.chan_epoch
+            ))
+        })?;
+
+    if key_bytes.len() != 32 {
+        return Err(AuraError::invalid(format!(
+            "AMP channel epoch key has invalid length: {}",
+            key_bytes.len()
+        )));
+    }
+
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&key_bytes);
+    let master_key = aura_core::Hash32::new(key);
+
+    aura_core::crypto::amp::derive_message_key(
+        &master_key,
+        context.as_bytes(),
+        channel.as_bytes(),
+        header.chan_epoch,
+        header.ratchet_gen,
+    )
+    .map_err(|e| AuraError::crypto(format!("AMP epoch KDF failed: {e}")))
 }
 
 // ============================================================================
@@ -314,10 +365,14 @@ where
             )
             .await
             .map_err(|e| return_send_failure(context, channel, e))?,
-            None => deriv.message_key,
+            None => derive_epoch_message_key(effects, context, channel, &header)
+                .await
+                .map_err(|e| return_send_failure(context, channel, e))?,
         }
     } else {
-        deriv.message_key
+        derive_epoch_message_key(effects, context, channel, &header)
+            .await
+            .map_err(|e| return_send_failure(context, channel, e))?
     };
     let key = message_key.0;
     let nonce = nonce_from_header(&header);
@@ -443,10 +498,38 @@ where
                     e,
                 )
             })?,
-            None => deriv.message_key,
+            None => derive_epoch_message_key(
+                effects,
+                context,
+                transport_header.channel,
+                &transport_header,
+            )
+            .await
+            .map_err(|e| {
+                return_receive_failure(
+                    context,
+                    Some(&transport_header),
+                    Some(&window_validation),
+                    e,
+                )
+            })?,
         }
     } else {
-        deriv.message_key
+        derive_epoch_message_key(
+            effects,
+            context,
+            transport_header.channel,
+            &transport_header,
+        )
+        .await
+        .map_err(|e| {
+            return_receive_failure(
+                context,
+                Some(&transport_header),
+                Some(&window_validation),
+                e,
+            )
+        })?
     };
     let key = message_key.0;
     let nonce = nonce_from_header(&transport_header);
@@ -524,4 +607,177 @@ where
         receipt: msg.receipt(),
         payload: msg.payload,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::effects::CryptoExtendedEffects;
+    use aura_effects::crypto::RealCryptoHandler;
+    use aura_transport::amp::AmpRatchetState;
+    use futures::lock::Mutex;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn old_public_header_key_cannot_decrypt_epoch_ciphertext() {
+        let context = ContextId::new_from_entropy([7u8; 32]);
+        let channel = ChannelId::from_bytes([8u8; 32]);
+        let state = AmpRatchetState {
+            chan_epoch: 3,
+            last_checkpoint_gen: 0,
+            skip_window: 8,
+            pending_epoch: None,
+        };
+        let deriv = derive_for_send(context, channel, &state, 4)
+            .expect("ratchet derivation should succeed");
+        let header = deriv.header;
+        let master_key = aura_core::Hash32([0x42u8; 32]);
+        let epoch_key = aura_core::crypto::amp::derive_message_key(
+            &master_key,
+            context.as_bytes(),
+            channel.as_bytes(),
+            header.chan_epoch,
+            header.ratchet_gen,
+        )
+        .expect("secret epoch key derivation should succeed");
+        let old_public_key: [u8; 32] = (deriv.message_id.0).0;
+        let nonce = nonce_from_header(&header);
+        let crypto = RealCryptoHandler::new();
+        let ciphertext = crypto
+            .aes_gcm_encrypt(b"confidential", &epoch_key.0, &nonce)
+            .await
+            .expect("encryption should succeed");
+
+        let old_key_result = crypto
+            .aes_gcm_decrypt(&ciphertext, &old_public_key, &nonce)
+            .await;
+
+        assert!(old_key_result.is_err());
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingSendEffects {
+        events: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl aura_core::JournalEffects for RecordingSendEffects {
+        async fn merge_facts(
+            &self,
+            mut target: aura_core::Journal,
+            delta: aura_core::Journal,
+        ) -> std::result::Result<aura_core::Journal, aura_core::AuraError> {
+            target.merge_facts(delta.facts);
+            Ok(target)
+        }
+
+        async fn refine_caps(
+            &self,
+            target: aura_core::Journal,
+            _refinement: aura_core::Journal,
+        ) -> std::result::Result<aura_core::Journal, aura_core::AuraError> {
+            Ok(target)
+        }
+
+        async fn get_journal(
+            &self,
+        ) -> std::result::Result<aura_core::Journal, aura_core::AuraError> {
+            Ok(aura_core::Journal::new())
+        }
+
+        async fn persist_journal(
+            &self,
+            _journal: &aura_core::Journal,
+        ) -> std::result::Result<(), aura_core::AuraError> {
+            self.events.lock().await.push("persist");
+            Ok(())
+        }
+
+        async fn get_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &aura_core::AuthorityId,
+        ) -> std::result::Result<aura_core::FlowBudget, aura_core::AuraError> {
+            Ok(aura_core::FlowBudget::new(1_000, aura_core::Epoch::new(0)))
+        }
+
+        async fn update_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &aura_core::AuthorityId,
+            budget: &aura_core::FlowBudget,
+        ) -> std::result::Result<aura_core::FlowBudget, aura_core::AuraError> {
+            Ok(*budget)
+        }
+
+        async fn charge_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &aura_core::AuthorityId,
+            _cost: aura_core::FlowCost,
+        ) -> std::result::Result<aura_core::FlowBudget, aura_core::AuraError> {
+            Ok(aura_core::FlowBudget::new(1_000, aura_core::Epoch::new(0)))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl aura_core::PhysicalTimeEffects for RecordingSendEffects {
+        async fn physical_time(
+            &self,
+        ) -> std::result::Result<aura_core::PhysicalTime, aura_core::effects::time::TimeError>
+        {
+            Ok(aura_core::PhysicalTime::exact(1_000))
+        }
+
+        async fn sleep_ms(
+            &self,
+            _duration_ms: u64,
+        ) -> std::result::Result<(), aura_core::effects::time::TimeError> {
+            Ok(())
+        }
+    }
+
+    impl aura_core::TimeEffects for RecordingSendEffects {}
+
+    #[async_trait::async_trait]
+    impl aura_core::effects::NetworkCoreEffects for RecordingSendEffects {
+        async fn send_to_peer(
+            &self,
+            _peer_id: uuid::Uuid,
+            _message: Vec<u8>,
+        ) -> std::result::Result<(), aura_core::effects::NetworkError> {
+            Ok(())
+        }
+
+        async fn broadcast(
+            &self,
+            _message: Vec<u8>,
+        ) -> std::result::Result<(), aura_core::effects::NetworkError> {
+            self.events.lock().await.push("broadcast");
+            Ok(())
+        }
+
+        async fn receive(
+            &self,
+        ) -> std::result::Result<(uuid::Uuid, Vec<u8>), aura_core::effects::NetworkError> {
+            Err(aura_core::effects::NetworkError::NoMessage)
+        }
+    }
+
+    #[tokio::test]
+    async fn amp_send_coupler_persists_required_annotation_before_broadcast() {
+        let effects = RecordingSendEffects::default();
+        let coupler = amp_send_journal_coupler();
+
+        let metrics = coupler
+            .couple_with_send(&effects, &None)
+            .await
+            .expect("AMP send coupler should persist annotation");
+        aura_core::effects::NetworkCoreEffects::broadcast(&effects, vec![1, 2, 3])
+            .await
+            .expect("broadcast should be recorded");
+
+        assert_eq!(metrics.operations_applied, 1);
+        assert_eq!(*effects.events.lock().await, vec!["persist", "broadcast"]);
+    }
 }

@@ -98,6 +98,28 @@ impl NoiseEffects for RealNoiseHandler {
         Ok((payload, HandshakeState(inner_state)))
     }
 
+    async fn remote_static_public_key(
+        &self,
+        state: &HandshakeState,
+    ) -> Result<Option<[u8; 32]>, NoiseError> {
+        let inner_state = state
+            .0
+            .downcast_ref::<snow::HandshakeState>()
+            .ok_or_else(|| AuraError::internal("Invalid handshake state type"))?;
+
+        inner_state
+            .get_remote_static()
+            .map(|key| {
+                key.try_into().map_err(|_| {
+                    AuraError::crypto(format!(
+                        "Invalid Noise remote static key length: {}",
+                        key.len()
+                    ))
+                })
+            })
+            .transpose()
+    }
+
     async fn into_transport_mode(
         &self,
         state: HandshakeState,

@@ -9,8 +9,8 @@ use crate::support;
 use aura_core::types::identifiers::InvitationId;
 use aura_core::util::test_utils::test_authority_id;
 use aura_invitation::{
-    capabilities::InvitationCapability, GuardSnapshot, InvitationConfig, InvitationService,
-    InvitationType,
+    capabilities::InvitationCapability, GuardSnapshot, InvitationConfig,
+    InvitationLifecycleSnapshot, InvitationService, InvitationType,
 };
 
 fn snapshot_with_caps(caps: &[InvitationCapability]) -> GuardSnapshot {
@@ -56,6 +56,13 @@ fn prepare_accept_invitation_requires_capability() {
     );
 
     let snap_ok = snapshot_with_caps(&[InvitationCapability::Accept]);
+    let snap_ok = snap_ok.with_invitation_lifecycle(InvitationLifecycleSnapshot::pending(
+        invitation_id.clone(),
+        support::test_context(20),
+        test_authority_id(11),
+        test_authority_id(10),
+        Some(1_000),
+    ));
     let outcome_ok = svc.prepare_accept_invitation(&snap_ok, &invitation_id);
     assert!(
         outcome_ok.is_allowed(),

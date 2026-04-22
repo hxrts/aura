@@ -449,7 +449,7 @@ async fn invitation_can_be_declined() {
     let effects = effects_for(&authority_context);
     let handler = InvitationHandler::new(authority_context).unwrap();
 
-    let receiver_id = AuthorityId::new_from_entropy([97u8; 32]);
+    let receiver_id = handler.authority_context().authority_id();
     let context_id = ContextId::new_from_entropy([98u8; 32]);
     let home_id = canonical_home_id(11);
 
@@ -918,7 +918,17 @@ async fn importing_and_accepting_contact_invitation_commits_contact_fact() {
             continue;
         }
 
-        found = ContactFact::from_envelope(&envelope);
+        let contact_fact = ContactFact::from_envelope(&envelope);
+        if matches!(
+            contact_fact,
+            Some(ContactFact::Added {
+                owner_id,
+                contact_id,
+                ..
+            }) if owner_id == own_authority && contact_id == sender_id
+        ) {
+            found = contact_fact;
+        }
     }
 
     if found.is_none() {
@@ -2862,10 +2872,11 @@ async fn list_pending_shows_only_pending() {
     let handler = InvitationHandler::new(authority_context).unwrap();
 
     // Create 3 invitations
+    let own_id = handler.authority_context().authority_id();
     let inv1 = handler
         .create_invitation(
             effects.clone(),
-            AuthorityId::new_from_entropy([101u8; 32]),
+            own_id,
             InvitationType::Contact { nickname: None },
             None,
             None,

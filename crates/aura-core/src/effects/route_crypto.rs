@@ -47,6 +47,13 @@ pub trait RouteCryptoEffects: Send + Sync {
     ) -> Result<RouteHopKeyMaterial, RouteCryptoError>;
 
     /// Encrypt one hop layer with associated authenticated data and an explicit nonce.
+    ///
+    /// The caller MUST supply a nonce that is unique for this AEAD key and
+    /// direction. Reusing a nonce with the same hop key can break
+    /// confidentiality and integrity. Fresh random nonces, monotonic counters,
+    /// or deterministic nonces derived from per-message unique key material are
+    /// acceptable; deterministic per-hop constants are not sufficient when a
+    /// hop key can protect more than one message.
     async fn encrypt_hop_layer(
         &self,
         key: [u8; 32],
@@ -56,6 +63,10 @@ pub trait RouteCryptoEffects: Send + Sync {
     ) -> Result<Vec<u8>, RouteCryptoError>;
 
     /// Decrypt one hop layer with associated authenticated data and an explicit nonce.
+    ///
+    /// Decryption must use the nonce carried or otherwise authenticated by the
+    /// wire format for the corresponding ciphertext. It must not invent a
+    /// fallback nonce when decoding fails.
     async fn decrypt_hop_layer(
         &self,
         key: [u8; 32],

@@ -34,6 +34,15 @@ impl NoiseEffects for AuraEffectSystem {
         RealNoiseHandler::new().read_message(state, message).await
     }
 
+    async fn remote_static_public_key(
+        &self,
+        state: &HandshakeState,
+    ) -> Result<Option<[u8; 32]>, NoiseError> {
+        RealNoiseHandler::new()
+            .remote_static_public_key(state)
+            .await
+    }
+
     async fn into_transport_mode(
         &self,
         state: HandshakeState,

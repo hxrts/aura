@@ -35,7 +35,7 @@
 //! The differential testing in `crates/aura-testkit/tests/lean_differential.rs`
 //! validates that Rust and Lean produce equivalent results.
 
-use crate::fact::Journal;
+use crate::fact::{Journal, NamespaceMismatch};
 use aura_core::semilattice::JoinSemilattice;
 
 /// Pure journal merge function.
@@ -61,10 +61,22 @@ pub fn journal_join(j1: &Journal, j2: &Journal) -> Journal {
     j1.join(j2)
 }
 
+/// Fallible journal merge for remote or otherwise untrusted inputs.
+#[inline]
+pub fn try_journal_join(j1: &Journal, j2: &Journal) -> Result<Journal, NamespaceMismatch> {
+    j1.try_join(j2)
+}
+
 /// In-place journal merge.
 ///
 /// More efficient version that modifies `j1` in place by consuming `j2`.
 #[inline]
 pub fn journal_join_assign(j1: &mut Journal, j2: Journal) {
     j1.join_assign(j2);
+}
+
+/// Fallible in-place journal merge for remote or otherwise untrusted inputs.
+#[inline]
+pub fn try_journal_join_assign(j1: &mut Journal, j2: Journal) -> Result<(), NamespaceMismatch> {
+    j1.try_join_assign(j2)
 }

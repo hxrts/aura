@@ -11,7 +11,11 @@
 //! - **Verification**: All received operations verified before storage
 
 use async_trait::async_trait;
-use aura_core::{types::identifiers::DeviceId, AttestedOp, Hash32};
+use aura_core::{
+    tree::{verify_attested_op, BranchSigningKey, SigningWitness},
+    types::identifiers::DeviceId,
+    AttestedOp, Hash32,
+};
 use aura_journal::algebra::OpLog;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -119,6 +123,63 @@ pub enum SyncError {
         operation: &'static str,
         detail: String,
     },
+}
+
+/// Perform local fail-closed validation before accepting a remote attested op.
+///
+/// When the caller supplies a signing witness, this performs FROST aggregate
+/// signature verification against the known group public key and threshold for
+/// the parent state. Callers without a witness still get strict shape and parent
+/// checks, but must thread authoritative tree state before accepting remote ops
+/// in production sync paths.
+pub fn validate_remote_attested_op(
+    op: &AttestedOp,
+    known_parent_commitments: &BTreeSet<Hash32>,
+    signing_witness: Option<&SigningWitness>,
+) -> Result<(), SyncError> {
+    if op.signer_count == 0 {
+        return Err(SyncError::VerificationFailed {
+            target: "signer_count",
+            detail: "attested operation has no signers".to_string(),
+        });
+    }
+
+    if op.agg_sig.len() != 64 {
+        return Err(SyncError::VerificationFailed {
+            target: "aggregate_signature",
+            detail: format!(
+                "expected 64-byte FROST aggregate signature, got {} bytes",
+                op.agg_sig.len()
+            ),
+        });
+    }
+
+    if op.op.version == 0 {
+        return Err(SyncError::VerificationFailed {
+            target: "operation_version",
+            detail: "tree operation version must be non-zero".to_string(),
+        });
+    }
+
+    let parent = Hash32::from(op.op.parent_commitment);
+    if parent != Hash32::default() && !known_parent_commitments.contains(&parent) {
+        return Err(SyncError::VerificationFailed {
+            target: "parent_commitment",
+            detail: format!("unknown parent commitment {parent}"),
+        });
+    }
+
+    if let Some(witness) = signing_witness {
+        let signing_key = BranchSigningKey::new(witness.group_public_key, witness.key_epoch);
+        verify_attested_op(op, &signing_key, witness.threshold, witness.key_epoch).map_err(
+            |error| SyncError::VerificationFailed {
+                target: "aggregate_signature",
+                detail: format!("FROST aggregate signature verification failed: {error}"),
+            },
+        )?;
+    }
+
+    Ok(())
 }
 
 impl aura_core::ProtocolErrorCode for SyncError {
@@ -241,6 +302,13 @@ pub struct AntiEntropyConfig {
 
     /// Timeout for sync operations (milliseconds)
     pub sync_timeout_ms: NonZeroU64,
+
+    /// Signing witness used to verify remote FROST aggregate signatures.
+    ///
+    /// This is runtime state derived from the local authority tree, so it is not
+    /// serialized with static configuration.
+    #[serde(skip, default)]
+    pub remote_signing_witness: Option<SigningWitness>,
 }
 
 impl Default for AntiEntropyConfig {
@@ -252,6 +320,7 @@ impl Default for AntiEntropyConfig {
             max_concurrent_syncs: NonZeroU32::new(5)
                 .expect("max concurrent syncs should be non-zero"),
             sync_timeout_ms: NonZeroU64::new(10_000).expect("sync timeout should be non-zero"),
+            remote_signing_witness: None,
         }
     }
 }

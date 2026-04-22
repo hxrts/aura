@@ -102,8 +102,11 @@ impl Journal {
         self.account_state = self.account_state.join(&other.account_state);
         self.op_log = self.op_log.join(&other.op_log);
 
-        // Merge fact journals - takes ownership to avoid cloning
-        self.fact_journal.join_assign(other.fact_journal);
+        // Merge fact journals through the fallible path because this API can
+        // be reached by imported journal state.
+        self.fact_journal
+            .try_join_assign(other.fact_journal)
+            .map_err(|e| AuraError::invalid(e.to_string()))?;
 
         Ok(())
     }

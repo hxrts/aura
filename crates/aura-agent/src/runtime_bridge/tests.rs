@@ -214,8 +214,8 @@ async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_f
         "peer channel initiation should fail explicitly when prerequisites are unavailable",
     );
     assert!(
-        error.to_string().contains("service unavailable"),
-        "expected service-unavailable boundary, got: {error}"
+        error.to_string().contains("Peer descriptor not found"),
+        "expected context-bound descriptor lookup failure, got: {error}"
     );
 }
 
@@ -273,7 +273,7 @@ async fn resolve_amp_channel_context_finds_registered_amp_checkpoint_context() {
 #[tokio::test]
 async fn amp_list_channel_participants_includes_accepted_channel_invitees() {
     let authority = AuthorityId::new_from_entropy([10u8; 32]);
-    let receiver = AuthorityId::new_from_entropy([11u8; 32]);
+    let receiver = authority;
     let build_context = EffectContext::new(
         authority,
         ContextId::new_from_entropy([12u8; 32]),

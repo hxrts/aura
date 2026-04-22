@@ -13,7 +13,7 @@ use aura_core::{
     frost::{PublicKeyPackage, Share},
     relational::ConsensusProof,
     types::Epoch,
-    AuthorityId, ContextId, Prestate, Result,
+    AuraError, AuthorityId, ContextId, Prestate, Result,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -157,6 +157,7 @@ pub async fn run_consensus_with_effects<T: Serialize>(
         epoch: config.epoch,
     };
     let commit_fact = run_protocol_consensus(prestate, operation, params, random, time).await?;
+    verify_commit_prestate(prestate, &commit_fact)?;
 
     // Convert CommitFact to ConsensusProof for relational contexts
     commit_fact_to_consensus_proof(commit_fact)
@@ -182,9 +183,20 @@ pub async fn run_consensus_with_effects_and_commit<T: Serialize>(
         epoch: config.epoch,
     };
     let commit_fact = run_protocol_consensus(prestate, operation, params, random, time).await?;
+    verify_commit_prestate(prestate, &commit_fact)?;
     let proof = commit_fact_to_consensus_proof(commit_fact.clone())?;
 
     Ok((proof, commit_fact))
+}
+
+fn verify_commit_prestate(prestate: &Prestate, fact: &CommitFact) -> Result<()> {
+    let expected = prestate.compute_hash();
+    if fact.prestate_hash != expected {
+        return Err(AuraError::invalid(
+            "Consensus commit prestate does not match local prestate",
+        ));
+    }
+    Ok(())
 }
 
 /// Convert a CommitFact to a ConsensusProof

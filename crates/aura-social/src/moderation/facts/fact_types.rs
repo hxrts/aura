@@ -345,6 +345,11 @@ impl HomeUnpinFact {
 }
 
 /// Fact representing granting moderator (admin) privileges to a user.
+///
+/// Validation invariant: the journal/attestation signer for this fact must
+/// equal `actor_authority`, and the pre-emission home state must show that the
+/// actor is either the home owner or a current moderator with
+/// `GrantModerator`. The target must already be a home member.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-grant-moderator",
@@ -385,6 +390,11 @@ impl HomeGrantModeratorFact {
 }
 
 /// Fact representing revoking moderator (admin) privileges from a user.
+///
+/// Validation invariant: the journal/attestation signer for this fact must
+/// equal `actor_authority`, and the pre-emission home state must show that the
+/// actor is either the home owner or a current moderator with
+/// `GrantModerator`. The target must already be a current moderator.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-revoke-moderator",

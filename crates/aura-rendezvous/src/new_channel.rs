@@ -553,6 +553,26 @@ impl Handshaker {
         Ok(())
     }
 
+    async fn assert_remote_static_key<E: NoiseEffects>(
+        &self,
+        expected_remote_static_key: [u8; 32],
+        effects: &E,
+    ) -> AuraResult<()> {
+        let Some(state) = self.noise_state.as_ref() else {
+            return Err(AuraError::internal("Noise handshake state missing"));
+        };
+
+        if let Some(actual_remote_static_key) = effects.remote_static_public_key(state).await? {
+            if actual_remote_static_key != expected_remote_static_key {
+                return Err(AuraError::permission_denied(
+                    "Noise initiator static key does not match rendezvous descriptor",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Get the channel ID (if generated)
     pub fn channel_id(&self) -> Option<[u8; 32]> {
         self.channel_id
@@ -591,6 +611,7 @@ impl Handshaker {
         self.channel_id = Some(generate_channel_id(
             &self.config.local,
             &self.config.remote,
+            self.config.context_id,
             epoch,
         ));
         self.noise_state = Some(noise_state);
@@ -608,6 +629,7 @@ impl Handshaker {
         message: &[u8],
         epoch: u64,
         local_private_key: &[u8], // Ed25519 seed
+        remote_public_key: &[u8], // Expected initiator Ed25519 public key from descriptor
         effects: &E,
     ) -> AuraResult<()> {
         if self.state != HandshakeStatus::Initial {
@@ -618,16 +640,9 @@ impl Handshaker {
         let x25519_local = effects
             .convert_ed25519_to_x25519_private(local_private_key)
             .await?;
-        // Note: remote public key not needed for responder in IK pattern initially?
-        // But NoiseParams expects it.
-        // If we don't know it, we might need a different NoiseParams or allow placeholder.
-        // However, for IK, the responder usually learns identity.
-        // BUT `Noise_IKpsk2` assumes static key exchange.
-        // Snow builder `build_responder` documentation says `remote_public_key` is optional if it will be received.
-        // I'll assume we can pass all-zeros if unknown, or Snow handles it.
-        // Wait, Snow's builder methods might panic if key missing when required?
-        // I'll use a placeholder for now, assuming responder learns it.
-        let x25519_remote = [0u8; 32];
+        let x25519_remote = effects
+            .convert_ed25519_to_x25519_public(remote_public_key)
+            .await?;
 
         let params = NoiseParams {
             local_private_key: x25519_local,
@@ -642,12 +657,14 @@ impl Handshaker {
         self.channel_id = Some(generate_channel_id(
             &self.config.remote, // Remote is the initiator
             &self.config.local,
+            self.config.context_id,
             epoch,
         ));
         self.noise_state = Some(noise_state);
 
         self.read_noise_message(message, HandshakeStatus::InitReceived, effects)
-            .await
+            .await?;
+        self.assert_remote_static_key(x25519_remote, effects).await
     }
 
     /// Create response message (responder)
@@ -734,6 +751,7 @@ impl Handshaker {
 fn generate_channel_id(
     authority_a: &AuthorityId,
     authority_b: &AuthorityId,
+    context_id: ContextId,
     epoch: u64,
 ) -> [u8; 32] {
     // Sort authorities for determinism
@@ -747,6 +765,7 @@ fn generate_channel_id(
 
     let mut hasher = hash::hasher();
     hasher.update(b"CHANNEL_ID_V1");
+    hasher.update(context_id.as_bytes());
     hasher.update(&first);
     hasher.update(&second);
     hasher.update(&epoch.to_le_bytes());
@@ -808,5 +827,18 @@ mod tests {
                 state: HandshakePhase::Initial,
             })
         );
+    }
+
+    #[test]
+    fn channel_id_is_bound_to_context_and_commutative_authorities() {
+        let (local, remote, context) = test_participants();
+        let other_context = ContextId::new_from_entropy([9u8; 32]);
+
+        let first = generate_channel_id(&local, &remote, context, 7);
+        let reversed = generate_channel_id(&remote, &local, context, 7);
+        let other = generate_channel_id(&local, &remote, other_context, 7);
+
+        assert_eq!(first, reversed);
+        assert_ne!(first, other);
     }
 }

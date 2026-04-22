@@ -321,15 +321,9 @@ impl RendezvousHandler {
         peer: AuthorityId,
     ) -> Option<RendezvousDescriptor> {
         if let Some(manager) = self.rendezvous_manager.as_ref() {
-            match manager.get_descriptor(context_id, peer).await {
-                Some(descriptor) => Some(descriptor),
-                None => manager.get_any_descriptor_for_authority(peer).await,
-            }
+            manager.get_descriptor(context_id, peer).await
         } else {
-            match self.registry.get_descriptor(context_id, peer).await {
-                Some(descriptor) => Some(descriptor),
-                None => self.registry.get_any_descriptor_for_authority(peer).await,
-            }
+            self.registry.get_descriptor(context_id, peer).await
         }
     }
 
@@ -689,6 +683,19 @@ impl RendezvousHandler {
 
         let keys = retrieve_identity_keys(&*effects, &self.context.authority.authority_id()).await;
         let (local_private_key, _) = keys.unwrap_or(([0u8; 32], [0u8; 32]));
+        let initiator_descriptor = self
+            .get_peer_descriptor(context_id, initiator)
+            .await
+            .ok_or_else(|| {
+                AgentError::invalid(
+                    "Initiator descriptor not found for Noise static key verification",
+                )
+            })?;
+        if initiator_descriptor.public_key == [0u8; 32] {
+            return Err(AgentError::invalid(
+                "Initiator descriptor has no Noise static public key",
+            ));
+        }
 
         let (outcome, _channel) = self
             .service
@@ -699,6 +706,7 @@ impl RendezvousHandler {
                 init.handshake,
                 &psk,
                 &local_private_key,
+                &initiator_descriptor.public_key,
                 &*effects,
             )
             .await
@@ -1376,12 +1384,13 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([55u8; 32]);
 
         // First cache the peer's descriptor
+        let psk = derive_channel_psk(context_id, authority_context.authority_id(), peer);
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
             device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
+            handshake_psk_commitment: hash(&psk),
             public_key: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,

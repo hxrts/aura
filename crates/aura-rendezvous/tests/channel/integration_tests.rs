@@ -60,7 +60,7 @@ fn test_descriptor(authority: AuthorityId, context: ContextId) -> RendezvousDesc
         authority_id: authority,
         context_id: context,
         transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
-        handshake_psk_commitment: [42u8; 32],
+        handshake_psk_commitment: aura_core::hash::hash(&[42u8; 32]),
         public_key: [0u8; 32],
         device_id: None,
         valid_from: 0,
@@ -177,6 +177,135 @@ impl CryptoExtendedEffects for MockNoise {
 }
 // Note: CryptoEffects has a blanket impl, so we don't need to impl it explicitly
 
+struct MismatchedRemoteStaticNoise;
+
+#[async_trait]
+impl NoiseEffects for MismatchedRemoteStaticNoise {
+    async fn create_handshake_state(
+        &self,
+        params: NoiseParams,
+    ) -> Result<HandshakeState, NoiseError> {
+        MockNoise.create_handshake_state(params).await
+    }
+    async fn write_message(
+        &self,
+        state: HandshakeState,
+        payload: &[u8],
+    ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+        MockNoise.write_message(state, payload).await
+    }
+    async fn read_message(
+        &self,
+        state: HandshakeState,
+        message: &[u8],
+    ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+        MockNoise.read_message(state, message).await
+    }
+    async fn remote_static_public_key(
+        &self,
+        _state: &HandshakeState,
+    ) -> Result<Option<[u8; 32]>, NoiseError> {
+        Ok(Some([9u8; 32]))
+    }
+    async fn into_transport_mode(
+        &self,
+        state: HandshakeState,
+    ) -> Result<TransportState, NoiseError> {
+        MockNoise.into_transport_mode(state).await
+    }
+    async fn encrypt_transport_message(
+        &self,
+        state: &mut TransportState,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, NoiseError> {
+        MockNoise.encrypt_transport_message(state, payload).await
+    }
+    async fn decrypt_transport_message(
+        &self,
+        state: &mut TransportState,
+        message: &[u8],
+    ) -> Result<Vec<u8>, NoiseError> {
+        MockNoise.decrypt_transport_message(state, message).await
+    }
+}
+
+#[async_trait]
+impl RandomCoreEffects for MismatchedRemoteStaticNoise {
+    async fn random_bytes(&self, len: usize) -> Vec<u8> {
+        MockNoise.random_bytes(len).await
+    }
+    async fn random_bytes_32(&self) -> [u8; 32] {
+        MockNoise.random_bytes_32().await
+    }
+    async fn random_u64(&self) -> u64 {
+        MockNoise.random_u64().await
+    }
+}
+
+#[async_trait]
+impl CryptoCoreEffects for MismatchedRemoteStaticNoise {
+    async fn kdf_derive(
+        &self,
+        input_key_material: &[u8],
+        salt: &[u8],
+        info: &[u8],
+        length: u32,
+    ) -> Result<Vec<u8>, CryptoError> {
+        MockNoise
+            .kdf_derive(input_key_material, salt, info, length)
+            .await
+    }
+    async fn derive_key(
+        &self,
+        input: &[u8],
+        context: &aura_core::effects::crypto::KeyDerivationContext,
+    ) -> Result<Vec<u8>, CryptoError> {
+        MockNoise.derive_key(input, context).await
+    }
+    async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+        MockNoise.ed25519_generate_keypair().await
+    }
+    async fn ed25519_sign(
+        &self,
+        private_key: &[u8],
+        message: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        MockNoise.ed25519_sign(private_key, message).await
+    }
+    async fn ed25519_verify(
+        &self,
+        public_key: &[u8],
+        message: &[u8],
+        signature: &[u8],
+    ) -> Result<bool, CryptoError> {
+        MockNoise
+            .ed25519_verify(public_key, message, signature)
+            .await
+    }
+    fn is_simulated(&self) -> bool {
+        MockNoise.is_simulated()
+    }
+    fn crypto_capabilities(&self) -> Vec<String> {
+        MockNoise.crypto_capabilities()
+    }
+    fn constant_time_eq(&self, left: &[u8], right: &[u8]) -> bool {
+        MockNoise.constant_time_eq(left, right)
+    }
+    fn secure_zero(&self, data: &mut [u8]) {
+        MockNoise.secure_zero(data)
+    }
+}
+
+#[async_trait]
+impl CryptoExtendedEffects for MismatchedRemoteStaticNoise {
+    async fn convert_ed25519_to_x25519_public(&self, key: &[u8]) -> Result<[u8; 32], CryptoError> {
+        MockNoise.convert_ed25519_to_x25519_public(key).await
+    }
+    async fn convert_ed25519_to_x25519_private(&self, key: &[u8]) -> Result<[u8; 32], CryptoError> {
+        MockNoise.convert_ed25519_to_x25519_private(key).await
+    }
+}
+
 // =============================================================================
 // Descriptor Publication Tests
 // =============================================================================
@@ -268,7 +397,7 @@ async fn test_channel_establishment_flow() {
 }
 
 #[tokio::test]
-async fn test_channel_establishment_uses_explicit_context_over_descriptor_context() {
+async fn test_channel_establishment_rejects_descriptor_context_mismatch() {
     let alice = test_authority(1);
     let bob = test_authority(2);
     let context = test_context(100);
@@ -302,20 +431,7 @@ async fn test_channel_establishment_uses_explicit_context_over_descriptor_contex
         )
         .await;
 
-    let outcome = match result {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            panic!("peer descriptor remains valid for channel establishment: {error}")
-        }
-    };
-    assert!(matches!(outcome.decision, GuardDecision::Allow));
-    assert!(
-        outcome
-            .effects
-            .iter()
-            .any(|effect| matches!(effect, EffectCommand::SendHandshake { .. })),
-        "establish channel should still issue a handshake send effect"
-    );
+    assert!(result.is_err());
 }
 
 #[tokio::test]
@@ -399,7 +515,7 @@ async fn test_handshake_initiator_responder_flow() {
 
     // Step 2: Bob processes init
     bob_handshaker
-        .process_init(&init_msg, epoch, &[0u8; 32], &mock_effects)
+        .process_init(&init_msg, epoch, &[0u8; 32], &[0u8; 32], &mock_effects)
         .await
         .unwrap();
 
@@ -430,6 +546,47 @@ async fn test_handshake_initiator_responder_flow() {
     assert_eq!(alice_result.channel_id, bob_result.channel_id);
     assert!(alice_result.is_initiator);
     assert!(!bob_result.is_initiator);
+}
+
+#[tokio::test]
+async fn test_handshake_rejects_mismatched_initiator_static_key() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
+    let psk = [42u8; 32];
+    let epoch = 1u64;
+    let mock_effects = MockNoise;
+    let mismatch_effects = MismatchedRemoteStaticNoise;
+
+    let mut alice_handshaker = Handshaker::new(HandshakeConfig {
+        local: alice,
+        remote: bob,
+        context_id: context,
+        psk,
+        timeout_ms: 5000,
+    });
+    let mut bob_handshaker = Handshaker::new(HandshakeConfig {
+        local: bob,
+        remote: alice,
+        context_id: context,
+        psk,
+        timeout_ms: 5000,
+    });
+
+    let init_msg = alice_handshaker
+        .create_init_message(epoch, &[0u8; 32], &[0u8; 32], &mock_effects)
+        .await
+        .unwrap();
+
+    let error = bob_handshaker
+        .process_init(&init_msg, epoch, &[0u8; 32], &[0u8; 32], &mismatch_effects)
+        .await
+        .expect_err("mismatched initiator static key must be rejected");
+
+    assert!(matches!(
+        error,
+        aura_core::AuraError::PermissionDenied { .. }
+    ));
 }
 
 #[tokio::test]
@@ -465,6 +622,7 @@ async fn test_handshake_psk_mismatch_detection() {
             alice,
             handshake,
             &expected_psk,
+            &[0u8; 32],
             &[0u8; 32],
             &mock_effects,
         )
@@ -702,7 +860,7 @@ async fn test_complete_discovery_to_channel_flow() {
         .await
         .unwrap();
     bob_handshaker
-        .process_init(&init, epoch, &[0u8; 32], &mock_effects)
+        .process_init(&init, epoch, &[0u8; 32], &[0u8; 32], &mock_effects)
         .await
         .unwrap();
     let response = bob_handshaker

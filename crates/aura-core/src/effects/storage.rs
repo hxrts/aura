@@ -175,6 +175,13 @@ pub trait StorageExtendedEffects: StorageCoreEffects + Send + Sync {
         })
     }
 
+    /// Append bytes to an existing value atomically with respect to this key.
+    async fn append(&self, _key: &str, _value: Vec<u8>) -> Result<(), StorageError> {
+        Err(StorageError::ConfigurationError {
+            reason: "Storage append() not supported".to_string(),
+        })
+    }
+
     /// Clear all stored data
     async fn clear_all(&self) -> Result<(), StorageError> {
         Err(StorageError::ConfigurationError {
@@ -227,6 +234,10 @@ impl_arc_effect!(StorageExtendedEffects {
         keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
         (**self).retrieve_batch(keys).await
+    }
+
+    async fn append(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        (**self).append(key, value).await
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {

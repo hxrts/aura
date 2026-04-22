@@ -535,21 +535,15 @@ impl PeerManager {
             operation: aura_core::types::scope::AuthorityOp::UpdateTree,
         };
 
-        // Check if the token grants sync capability using the guard evaluator
+        // Check if the token grants sync capability using the guard evaluator.
+        // PeerManager has no time effect, so validation fails closed instead
+        // of evaluating Biscuit checks at a synthetic timestamp.
         let capability = SyncCapability::RequestDigest.as_name();
-        match evaluator.check_guard_default_time(&biscuit_token, &capability, &sync_resource) {
-            Ok(has_permission) => {
-                tracing::debug!(
-                    has_sync_capability = has_permission,
-                    "Biscuit token validation completed"
-                );
-                Ok(has_permission)
-            }
-            Err(e) => {
-                tracing::debug!("Biscuit token capability check failed: {}", e);
-                Ok(false)
-            }
-        }
+        let _ = (evaluator, biscuit_token, capability, sync_resource);
+        tracing::debug!(
+            "Biscuit token validation requires an explicit time source; failing closed"
+        );
+        Ok(false)
     }
 
     /// Get the root public key for Biscuit token validation

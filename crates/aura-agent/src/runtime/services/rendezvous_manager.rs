@@ -863,10 +863,9 @@ impl RendezvousManager {
         let descriptor = self.get_descriptor(context_id, peer).await;
         let descriptor = match descriptor {
             Some(value) => value,
-            None => self
-                .get_any_descriptor_for_authority(peer)
-                .await
-                .ok_or(RendezvousManagerError::PeerDescriptorNotFound { peer })?,
+            None => {
+                return Err(RendezvousManagerError::PeerDescriptorNotFound { peer });
+            }
         };
         if Self::descriptor_has_placeholder_crypto(&descriptor) {
             return Err(RendezvousManagerError::PlaceholderDescriptorCrypto {

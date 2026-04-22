@@ -161,11 +161,11 @@ async fn test_adversarial_duplicate_commitments() {
     };
 
     // Add first commitment
-    tracker.add_nonce(witness, commitment1);
+    assert!(tracker.add_nonce(witness, commitment1).is_ok());
     assert_eq!(tracker.nonce_commitments.len(), 1);
 
     // Add second commitment from same witness (should replace, not add)
-    tracker.add_nonce(witness, commitment2.clone());
+    assert!(tracker.add_nonce(witness, commitment2.clone()).is_ok());
     assert_eq!(
         tracker.nonce_commitments.len(),
         1,
@@ -280,23 +280,27 @@ async fn test_witness_tracker_threshold() {
     assert!(!tracker.has_signature_threshold(threshold));
 
     // Add first witness
-    tracker.add_nonce(
-        authority(1),
-        NonceCommitment {
-            signer: 1,
-            commitment: vec![1u8; 32],
-        },
-    );
+    assert!(tracker
+        .add_nonce(
+            authority(1),
+            NonceCommitment {
+                signer: 1,
+                commitment: vec![1u8; 32],
+            },
+        )
+        .is_ok());
     assert!(!tracker.has_nonce_threshold(threshold));
 
     // Add second witness - now at threshold
-    tracker.add_nonce(
-        authority(2),
-        NonceCommitment {
-            signer: 2,
-            commitment: vec![2u8; 32],
-        },
-    );
+    assert!(tracker
+        .add_nonce(
+            authority(2),
+            NonceCommitment {
+                signer: 2,
+                commitment: vec![2u8; 32],
+            },
+        )
+        .is_ok());
     assert!(tracker.has_nonce_threshold(threshold));
 
     // Add signatures
