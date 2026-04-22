@@ -134,6 +134,7 @@ pub fn compute_dealer_transcript_hash(
 
 /// Real crypto handler using actual cryptographic operations.
 /// Can be seeded for deterministic testing or use OS entropy in production.
+// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md optional seed is simulation/test-only configuration; production constructors use OS entropy.
 #[derive(Debug, Clone)]
 pub struct RealCryptoHandler {
     /// Optional seed for deterministic randomness in testing

@@ -231,7 +231,7 @@ impl BiscuitAuthorizationEffects for JournalBiscuitAuthorizationHandler {
         let now = self.time_handler.physical_time_now_ms() / 1000;
         let result = self
             .bridge
-            .authorize_verified_with_time(&token, operation, scope, Some(now))
+            .authorize_with_time(&token, operation, scope, Some(now))
             .map_err(|error| AuthorizationError::InvalidToken {
                 reason: error.to_string(),
             })?;
@@ -261,15 +261,17 @@ impl AuraEffectSystem {
         START.call_once(|| {
             std::thread::Builder::new()
                 .name("aura-deadlock-detector".to_string())
-                .spawn(|| loop {
-                    std::thread::park_timeout(Duration::from_secs(10));
-                    let deadlocks = parking_lot::deadlock::check_deadlock();
-                    if !deadlocks.is_empty() {
-                        // Note: DeadlockedThread doesn't implement Debug, so we log count only
-                        tracing::error!(
-                            count = deadlocks.len(),
-                            "Detected parking_lot deadlock(s)"
-                        );
+                .spawn(|| {
+                    loop {
+                        std::thread::park_timeout(Duration::from_secs(10));
+                        let deadlocks = parking_lot::deadlock::check_deadlock();
+                        if !deadlocks.is_empty() {
+                            // Note: DeadlockedThread doesn't implement Debug, so we log count only
+                            tracing::error!(
+                                count = deadlocks.len(),
+                                "Detected parking_lot deadlock(s)"
+                            );
+                        }
                     }
                 })
                 .expect("failed to spawn deadlock detector thread");
@@ -372,7 +374,7 @@ impl AuraEffectSystem {
         );
         let encrypted_storage_config = {
             let mut cfg = EncryptedStorageConfig::default()
-                .with_encryption_enabled(config.storage.encryption_enabled);
+                .with_encryption_mode(config.storage.encryption_policy.into());
             if config.storage.opaque_names {
                 cfg = cfg.with_opaque_names();
             }
@@ -418,8 +420,8 @@ impl AuraEffectSystem {
             indexed_journal,
             fact_registry,
             None, // fact_publish_tx attached later via attach_fact_sink
-            journal_policy,
-            journal_verifying_key,
+            Some(journal_policy),
+            Some(journal_verifying_key),
         );
 
         // Pre-populate Biscuit cache so the guard chain works immediately.
@@ -1611,37 +1613,27 @@ impl AuraEffectSystem {
     /// Build a permissive Biscuit policy/bridge pair for journal enforcement.
     fn init_journal_policy(
         authority_id: AuthorityId,
-    ) -> (
-        Option<(Biscuit, BiscuitAuthorizationBridge)>,
-        Option<Vec<u8>>,
-    ) {
+    ) -> ((Biscuit, BiscuitAuthorizationBridge), Vec<u8>) {
         let issuer = aura_authorization::TokenAuthority::new(authority_id);
-        let token = issuer.create_token(
-            authority_id,
-            crate::token_profiles::TokenCapabilityProfile::StandardDevice,
-        );
-
-        match token {
-            Ok(token) => {
-                let bridge =
-                    BiscuitAuthorizationBridge::new(issuer.root_public_key(), authority_id);
-                let verifying_key = issuer.root_public_key().to_bytes().to_vec();
-                (Some((token, bridge)), Some(verifying_key))
-            }
-            Err(_) => (None, None),
-        }
+        let token = issuer
+            .create_token(
+                authority_id,
+                crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+            )
+            .expect("journal authorization policy token creation must succeed");
+        let bridge = BiscuitAuthorizationBridge::new(issuer.root_public_key(), authority_id);
+        let verifying_key = issuer.root_public_key().to_bytes().to_vec();
+        ((token, bridge), verifying_key)
     }
 
     /// Build the Biscuit-backed authorization handler.
     fn init_authorization_handler(
         authority: AuthorityId,
         crypto_handler: &RealCryptoHandler,
-        verifying_key: &Option<Vec<u8>>,
+        verifying_key: &[u8],
         time_handler: &PhysicalTimeHandler,
     ) -> aura_authorization::effects::WotAuthorizationHandler<RealCryptoHandler> {
-        let public_key = verifying_key
-            .as_ref()
-            .and_then(|bytes| PublicKey::from_bytes(bytes).ok())
+        let public_key = PublicKey::from_bytes(verifying_key)
             .expect("Biscuit authorization requires a configured root public key");
         let handler = aura_authorization::effects::WotAuthorizationHandler::new(
             crypto_handler.clone(),
@@ -1662,27 +1654,34 @@ impl AuraEffectSystem {
         >,
         JournalBiscuitAuthorizationHandler,
     > {
-        let authorization = self.journal.journal_policy().and_then(|(token, bridge)| {
-            token.to_vec().ok().map(|bytes| {
-                (
-                    bytes,
-                    JournalBiscuitAuthorizationHandler {
-                        bridge: BiscuitAuthorizationBridge::new(
-                            bridge.root_public_key(),
-                            bridge.authority_id(),
-                        ),
-                        time_handler: PhysicalTimeHandler::new(),
-                    },
-                )
-            })
-        });
+        let (token, bridge) = self
+            .journal
+            .journal_policy()
+            .expect("journal handler requires a Biscuit authorization policy");
+        let authorization = (
+            token
+                .to_vec()
+                .expect("journal authorization policy token must serialize"),
+            JournalBiscuitAuthorizationHandler {
+                bridge: BiscuitAuthorizationBridge::new(
+                    bridge.root_public_key(),
+                    bridge.authority_id(),
+                ),
+                time_handler: PhysicalTimeHandler::new(),
+            },
+        );
 
         aura_journal::JournalHandlerFactory::create(
             self.authority_id,
             self.crypto.handler().clone(),
             self.storage_handler.clone(),
             authorization,
-            self.journal.journal_verifying_key().map(|s| s.to_vec()),
+            Some(
+                self.journal
+                    .journal_verifying_key()
+                    .expect("journal handler requires a verifying key")
+                    .to_vec(),
+            ),
             None, // Fact registry is accessed via AuraEffectSystem::fact_registry() instead
         )
     }

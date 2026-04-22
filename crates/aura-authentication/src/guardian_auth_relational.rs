@@ -5,9 +5,10 @@
 
 use aura_core::crypto::ed25519::{Ed25519Signature, Ed25519VerifyingKey};
 use aura_core::relational::GuardianBinding;
-use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
+use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result, TrustedKeyResolver};
 use aura_macros::tell;
 use aura_relational::RelationalContext;
+use aura_signature::SecurityTranscript;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -42,6 +43,36 @@ pub enum GuardianOperation {
         /// New recovery delay
         recovery_delay_seconds: u64,
     },
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GuardianAuthTranscriptPayload {
+    context_id: aura_core::types::identifiers::ContextId,
+    guardian_id: AuthorityId,
+    account_id: AuthorityId,
+    operation: GuardianOperation,
+    issued_at: u64,
+}
+
+struct GuardianAuthTranscript<'a> {
+    request: &'a GuardianAuthRequest,
+    issued_at: u64,
+}
+
+impl SecurityTranscript for GuardianAuthTranscript<'_> {
+    type Payload = GuardianAuthTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.authentication.guardian-auth";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        GuardianAuthTranscriptPayload {
+            context_id: self.request.context_id,
+            guardian_id: self.request.guardian_id,
+            account_id: self.request.account_id,
+            operation: self.request.operation.clone(),
+            issued_at: self.issued_at,
+        }
+    }
 }
 
 /// Guardian authentication proof
@@ -86,9 +117,13 @@ fn authorized_response() -> GuardianAuthResponse {
     }
 }
 
-fn serialize_operation(operation: &GuardianOperation) -> Result<Vec<u8>> {
-    aura_core::util::serialization::to_vec(operation)
-        .map_err(|e| AuraError::serialization(e.to_string()))
+fn guardian_auth_transcript_bytes(
+    request: &GuardianAuthRequest,
+    issued_at: u64,
+) -> Result<Vec<u8>> {
+    GuardianAuthTranscript { request, issued_at }
+        .transcript_bytes()
+        .map_err(|e| AuraError::crypto(format!("guardian auth transcript failed: {e}")))
 }
 
 async fn current_time_ms<T: aura_core::effects::PhysicalTimeEffects>(time_effects: &T) -> u64 {
@@ -119,17 +154,17 @@ pub async fn authenticate_guardian<T: aura_core::effects::PhysicalTimeEffects>(
         .get_guardian_binding(guardian_authority.authority_id())
         .ok_or_else(|| AuraError::not_found("Guardian binding not found"))?;
 
-    // Sign the operation
-    let operation_bytes = serialize_operation(&request.operation)?;
-
-    let signature = guardian_authority.sign_operation(&operation_bytes).await?;
+    // Sign the domain-separated guardian authentication transcript.
+    let issued_at = current_time_ms(time_effects).await;
+    let transcript_bytes = guardian_auth_transcript_bytes(request, issued_at)?;
+    let signature = guardian_authority.sign_operation(&transcript_bytes).await?;
 
     Ok(GuardianAuthProof {
         context_id: context.context_id,
         guardian_id: guardian_authority.authority_id(),
         binding_proof: binding.consensus_proof.clone(),
         operation_signature: signature.to_bytes().to_vec(),
-        issued_at: current_time_ms(time_effects).await,
+        issued_at,
     })
 }
 
@@ -139,6 +174,7 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
     request: &GuardianAuthRequest,
     proof: &GuardianAuthProof,
     time_effects: &T,
+    key_resolver: &impl TrustedKeyResolver,
 ) -> Result<GuardianAuthResponse> {
     // Verify context ID matches
     if context.context_id != proof.context_id {
@@ -168,9 +204,8 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
         }
     }
 
-    // Serialize the operation and verify the guardian's signature
-    let operation_bytes = serialize_operation(&request.operation)
-        .map_err(|e| AuraError::serialization(format!("Failed to serialize operation: {e}")))?;
+    // Rebuild the signed guardian authentication transcript.
+    let transcript_bytes = guardian_auth_transcript_bytes(request, proof.issued_at)?;
 
     // Ensure signature length is valid
     let sig_bytes: [u8; 64] = proof
@@ -179,17 +214,24 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
         .try_into()
         .map_err(|_| AuraError::crypto("Invalid guardian signature length"))?;
 
-    // Derive verifying key from guardian commitment (the binding commits to the guardian's root key)
-    let verifying_key_bytes: [u8; 32] = binding.guardian_commitment.0;
+    // Resolve trusted guardian key material from local state. The relational
+    // binding may identify the guardian, but it does not supply verifier keys.
+    let trusted_key = key_resolver
+        .resolve_guardian_key(proof.guardian_id)
+        .map_err(|e| AuraError::crypto(format!("guardian key resolution failed: {e}")))?;
+    let verifying_key_bytes: [u8; 32] = trusted_key
+        .bytes()
+        .try_into()
+        .map_err(|_| AuraError::crypto("trusted guardian key must be exactly 32 bytes"))?;
     let verifying_key = Ed25519VerifyingKey::from_bytes(verifying_key_bytes).map_err(|e| {
         AuraError::crypto(format!(
-            "Invalid guardian commitment (pubkey decode failed): {e}"
+            "Invalid trusted guardian key (pubkey decode failed): {e}"
         ))
     })?;
 
     // Verify signature
     let signature = Ed25519Signature::try_from_slice(&sig_bytes)?;
-    if let Err(err) = verifying_key.verify(&operation_bytes, &signature) {
+    if let Err(err) = verifying_key.verify(&transcript_bytes, &signature) {
         return Ok(denied_response(format!(
             "Invalid guardian signature: {err}"
         )));
@@ -290,13 +332,16 @@ impl GuardianAuthHandler {
         request: GuardianAuthRequest,
         guardian: Arc<dyn Authority>,
         time_effects: &T,
+        key_resolver: &impl TrustedKeyResolver,
     ) -> Result<GuardianAuthResponse> {
         // Authenticate guardian
         let proof =
             authenticate_guardian(&self.context, guardian.as_ref(), &request, time_effects).await?;
 
         // Verify proof
-        let verified = verify_guardian_proof(&self.context, &request, &proof, time_effects).await?;
+        let verified =
+            verify_guardian_proof(&self.context, &request, &proof, time_effects, key_resolver)
+                .await?;
 
         // Record request for delay enforcement
         record_recovery_request(

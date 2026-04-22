@@ -132,7 +132,7 @@ pub use console::RealConsoleHandler;
 pub use context::{EffectContext, StandardContextHandler};
 pub use crypto::RealCryptoHandler;
 pub use database::query::{AuraQuery, FactTerm, QueryError, QueryResult};
-pub use encrypted_storage::{EncryptedStorage, EncryptedStorageConfig};
+pub use encrypted_storage::{EncryptedStorage, EncryptedStorageConfig, StorageEncryptionMode};
 pub use error::Layer3Error;
 pub use guard_interpreter::ProductionEffectInterpreter;
 pub use identifiers::{

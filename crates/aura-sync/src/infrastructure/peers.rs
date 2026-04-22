@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capabilities::SyncCapability;
 use crate::core::{physical_time_from_ms, sync_config_error, sync_peer_error, SyncResult};
+use aura_authorization::VerifiedBiscuitToken;
 use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
 
@@ -522,8 +523,8 @@ impl PeerManager {
         // Get the root public key from configuration or authority context
         let root_public_key = self.get_root_public_key().await?;
 
-        // Parse the Biscuit token using the root public key
-        let biscuit_token = match biscuit_auth::Biscuit::from(token_bytes, root_public_key) {
+        // Verify the Biscuit token using the root public key.
+        let biscuit_token = match VerifiedBiscuitToken::from_bytes(token_bytes, root_public_key) {
             Ok(token) => token,
             Err(e) => {
                 tracing::debug!("Failed to parse Biscuit token: {}", e);

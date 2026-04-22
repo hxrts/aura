@@ -51,10 +51,10 @@ pub struct DeviceEpochRotationInitRequest {
     #[zeroize(skip)]
     pub participant_device_id: DeviceId,
     /// Security-sensitive serialized key package. Zeroized on drop.
-    // aura-security: raw-secret-field-justified runtime-local ceremony handoff until request envelopes move to SigningShareBytes.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md runtime-local ceremony handoff until request envelopes move to SigningShareBytes.
     pub key_package: Vec<u8>,
     /// Security-sensitive serialized threshold configuration. Zeroized on drop.
-    // aura-security: raw-secret-field-justified runtime-local ceremony handoff until request envelopes move to SecretBytes.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md runtime-local ceremony handoff until request envelopes move to SecretBytes.
     pub threshold_config: Vec<u8>,
     /// Device-epoch public key package retained with the secret material and
     /// cleared on drop with the rest of the ceremony payload.

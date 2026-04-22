@@ -62,12 +62,7 @@ impl<J: JournalEffects> JournalBackedFlowBudgetHandler<J> {
                         ))
                     })?;
                 let result = bridge
-                    .authorize_verified_with_time(
-                        &token,
-                        AuthorizationOp::FlowCharge,
-                        scope,
-                        Some(now),
-                    )
+                    .authorize_with_time(&token, AuthorizationOp::FlowCharge, scope, Some(now))
                     .map_err(|e| {
                         AuraError::permission_denied(format!("flow budget policy failed: {e}"))
                     })?;

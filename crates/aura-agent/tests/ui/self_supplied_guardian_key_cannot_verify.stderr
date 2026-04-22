@@ -1,0 +1,54 @@
+error[E0277]: the trait bound `[u8; 32]: TrustedKeyResolver` is not satisfied
+  --> tests/ui/self_supplied_guardian_key_cannot_verify.rs:22:9
+   |
+17 |     let _ = verify_guardian_proof(
+   |             --------------------- required by a bound introduced by this call
+...
+22 |         &self_supplied_key,
+   |         ^^^^^^^^^^^^^^^^^^ the trait `TrustedKeyResolver` is not implemented for `[u8; 32]`
+   |
+note: required by a bound in `verify_guardian_proof`
+  --> $WORKSPACE/crates/aura-authentication/src/guardian_auth_relational.rs
+   |
+   | pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
+   |              --------------------- required by a bound in this function
+...
+   |     key_resolver: &impl TrustedKeyResolver,
+   |                         ^^^^^^^^^^^^^^^^^^ required by this bound in `verify_guardian_proof`
+
+error[E0277]: the trait bound `[u8; 32]: TrustedKeyResolver` is not satisfied
+  --> tests/ui/self_supplied_guardian_key_cannot_verify.rs:17:13
+   |
+17 |       let _ = verify_guardian_proof(
+   |  _____________^
+18 | |         &context,
+19 | |         &request,
+20 | |         &proof,
+21 | |         time_effects,
+22 | |         &self_supplied_key,
+23 | |     )
+   | |_____^ the trait `TrustedKeyResolver` is not implemented for `[u8; 32]`
+   |
+note: required by a bound in `verify_guardian_proof`
+  --> $WORKSPACE/crates/aura-authentication/src/guardian_auth_relational.rs
+   |
+   | pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
+   |              --------------------- required by a bound in this function
+...
+   |     key_resolver: &impl TrustedKeyResolver,
+   |                         ^^^^^^^^^^^^^^^^^^ required by this bound in `verify_guardian_proof`
+
+error[E0277]: the trait bound `[u8; 32]: TrustedKeyResolver` is not satisfied
+  --> tests/ui/self_supplied_guardian_key_cannot_verify.rs:24:6
+   |
+24 |     .await;
+   |      ^^^^^ the trait `TrustedKeyResolver` is not implemented for `[u8; 32]`
+   |
+note: required by a bound in `verify_guardian_proof`
+  --> $WORKSPACE/crates/aura-authentication/src/guardian_auth_relational.rs
+   |
+   | pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
+   |              --------------------- required by a bound in this function
+...
+   |     key_resolver: &impl TrustedKeyResolver,
+   |                         ^^^^^^^^^^^^^^^^^^ required by this bound in `verify_guardian_proof`

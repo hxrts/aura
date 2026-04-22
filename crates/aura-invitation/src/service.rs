@@ -101,6 +101,7 @@ impl InvitationPolicy {
 // =============================================================================
 
 /// Type of invitation
+// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md device-enrollment variant carries encrypted setup payloads for transfer; field-level justifications track migration to secret wrappers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvitationType {
     /// Invitation to join a home/channel
@@ -144,10 +145,12 @@ pub enum InvitationType {
         /// Pending epoch created during prepare
         pending_epoch: u64,
         /// Encrypted/opaque key package for the invited device
+        // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md encrypted enrollment payload; plaintext key packages must use secret wrappers before wrapping.
         key_package: Vec<u8>,
         /// Serialized threshold config metadata for the pending epoch
+        // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md enrollment ceremony metadata until envelope payloads move to SecretBytes.
         threshold_config: Vec<u8>,
-        /// Public key package for the pending epoch
+        /// Untrusted key material: pending-epoch enrollment payload; authentication must resolve expected keys from trusted authority/device state.
         public_key_package: Vec<u8>,
         /// Baseline attested tree operations for the current authority state.
         ///

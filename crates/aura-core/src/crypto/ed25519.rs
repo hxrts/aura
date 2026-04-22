@@ -104,6 +104,7 @@ impl TryFrom<Vec<u8>> for Ed25519Signature {
 }
 
 /// Basic Ed25519 signing key wrapper.
+// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md transitional Ed25519 signing-key ABI; finding 40 tracks migration to PrivateKeyBytes with redacted Debug and zeroization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ed25519SigningKey(pub [u8; 32]);
 

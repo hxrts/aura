@@ -123,8 +123,8 @@ pub use authorization::{
 pub use availability::{AvailabilityError, DataAvailability};
 pub use biometric::{
     BiometricCapability, BiometricConfig, BiometricEffects, BiometricEnrollmentResult,
-    BiometricError, BiometricSecurityLevel, BiometricStatistics, BiometricType,
-    BiometricVerificationResult,
+    BiometricError, BiometricFallbackPolicy, BiometricSecurityLevel, BiometricStatistics,
+    BiometricType, BiometricVerificationResult,
 };
 pub use bloom::{BloomConfig, BloomError, BloomFilter};
 pub use capability::{

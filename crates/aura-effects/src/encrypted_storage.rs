@@ -36,10 +36,8 @@ type MasterKeyMaterial = Arc<Zeroizing<[u8; 32]>>;
 /// Configuration for encrypted storage behavior
 #[derive(Debug, Clone)]
 pub struct EncryptedStorageConfig {
-    /// Enable encryption (and master-key management) for all operations.
-    ///
-    /// This exists primarily for testing and bring-up. Production should keep this `true`.
-    pub enabled: bool,
+    /// Encryption policy for all operations.
+    pub encryption: StorageEncryptionMode,
     /// Use opaque (hashed) file names instead of semantic names
     pub opaque_names: bool,
     /// Custom namespace for master key in secure storage
@@ -48,10 +46,31 @@ pub struct EncryptedStorageConfig {
     pub key_id: Option<String>,
 }
 
+/// Explicit encrypted storage mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageEncryptionMode {
+    /// Encrypt all records and reject plaintext blobs.
+    Required,
+    /// Test-only plaintext passthrough for storage bring-up.
+    PlaintextForTests,
+}
+
+impl StorageEncryptionMode {
+    fn encrypts(self) -> bool {
+        matches!(self, Self::Required)
+    }
+}
+
+impl Default for StorageEncryptionMode {
+    fn default() -> Self {
+        Self::Required
+    }
+}
+
 impl Default for EncryptedStorageConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            encryption: StorageEncryptionMode::Required,
             opaque_names: false,
             key_namespace: None,
             key_id: None,
@@ -71,9 +90,9 @@ impl EncryptedStorageConfig {
         self
     }
 
-    /// Enable or disable encryption.
-    pub fn with_encryption_enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
+    /// Set the encryption policy.
+    pub fn with_encryption_mode(mut self, mode: StorageEncryptionMode) -> Self {
+        self.encryption = mode;
         self
     }
 
@@ -265,7 +284,7 @@ where
 
     /// Get the storage key to use (opaque or semantic)
     async fn storage_key(&self, key: &str) -> Result<String, StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return Ok(key.to_string());
         }
         if self.config.opaque_names {
@@ -399,7 +418,7 @@ where
     Sec: SecureStorageEffects + Send + Sync,
 {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return self.inner.store(key, value).await;
         }
         let storage_key = self.storage_key(key).await?;
@@ -408,7 +427,7 @@ where
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return self.inner.retrieve(key).await;
         }
         let storage_key = self.storage_key(key).await?;
@@ -429,7 +448,7 @@ where
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return self.inner.remove(key).await;
         }
         let storage_key = self.storage_key(key).await?;
@@ -437,7 +456,7 @@ where
     }
 
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return self.inner.list_keys(prefix).await;
         }
         // If using opaque names, we can't filter by prefix effectively
@@ -459,7 +478,7 @@ where
     Sec: SecureStorageEffects + Send + Sync,
 {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return self.inner.exists(key).await;
         }
         let storage_key = self.storage_key(key).await?;
@@ -467,7 +486,7 @@ where
     }
 
     async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return self.inner.store_batch(pairs).await;
         }
         // Encrypt each value
@@ -484,7 +503,7 @@ where
         &self,
         keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return self.inner.retrieve_batch(keys).await;
         }
         // Map semantic keys to storage keys
@@ -512,14 +531,14 @@ where
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return self.inner.clear_all().await;
         }
         self.inner.clear_all().await
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
-        if !self.config.enabled {
+        if !self.config.encryption.encrypts() {
             return self.inner.stats().await;
         }
         let mut stats = self.inner.stats().await?;
@@ -1168,7 +1187,8 @@ mod tests {
         let crypto = Arc::new(MockCrypto);
         let secure = Arc::new(MockSecureStorage::new());
 
-        let config = EncryptedStorageConfig::default().with_encryption_enabled(false);
+        let config = EncryptedStorageConfig::default()
+            .with_encryption_mode(StorageEncryptionMode::PlaintextForTests);
         let encrypted = EncryptedStorage::new(storage, crypto, secure, config);
 
         let value = b"raw-data".to_vec();

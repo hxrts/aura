@@ -134,7 +134,7 @@ impl ChatServiceApi {
             .iter()
             .filter_map(|capability| {
                 let capability_name = capability.as_name();
-                match bridge.has_verified_capability_with_time(
+                match bridge.has_capability_with_time(
                     &token,
                     capability_name.as_str(),
                     current_time_seconds,

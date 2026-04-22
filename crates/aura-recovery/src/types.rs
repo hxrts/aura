@@ -182,7 +182,7 @@ pub struct RecoveryResponse {
     /// Error message if failed
     pub error: Option<String>,
     /// Recovered key material (for key recovery operations)
-    // aura-security: raw-secret-field-justified recovery API payload until result envelopes move to SecretBytes.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md recovery API payload until result envelopes move to SecretBytes.
     pub key_material: Option<Vec<u8>>,
     /// Guardian shares collected
     pub guardian_shares: Vec<RecoveryShare>,

@@ -9,7 +9,7 @@ use aura_core::types::scope::{ResourceScope, StoragePath};
 use aura_core::{AuthorityId, FlowBudget, FlowCost};
 use biscuit_auth::{
     macros::{fact, policy, rule},
-    Authorizer, Biscuit, PublicKey,
+    Authorizer, PublicKey,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -112,7 +112,7 @@ impl BiscuitStorageEvaluator {
     /// Evaluate storage access using a Biscuit token
     pub fn evaluate_access(
         &self,
-        token: &Biscuit,
+        token: &VerifiedBiscuitToken,
         resource: &StorageResource,
         permission: &StoragePermission,
         budget: &mut FlowBudget,
@@ -158,7 +158,7 @@ impl BiscuitStorageEvaluator {
     /// Check authorization without budget enforcement (for read-only checks)
     pub fn check_access(
         &self,
-        token: &Biscuit,
+        token: &VerifiedBiscuitToken,
         resource: &StorageResource,
         permission: &StoragePermission,
     ) -> Result<bool, BiscuitStorageError> {
@@ -210,11 +210,11 @@ impl BiscuitStorageEvaluator {
     /// Check Biscuit token authorization using Authorizer
     fn check_biscuit_authorization(
         &self,
-        token: &Biscuit,
+        token: &VerifiedBiscuitToken,
         resource_scope: &ResourceScope,
         operation: &str,
     ) -> Result<bool, BiscuitStorageError> {
-        // Token signature verification happens when Biscuit is constructed from bytes.
+        // Token signature verification is captured in VerifiedBiscuitToken.
         // Here we enforce scope, capability, and authority binding using Datalog rules
         // that mirror the authority-centric model in docs/106_authorization.md.
         let mut authorizer = self.authorizer_with_token(token)?;
@@ -238,16 +238,14 @@ impl BiscuitStorageEvaluator {
     /// tokens before storage operations or for audit logging.
     pub fn verify_token_authority(
         &self,
-        token: &Biscuit,
+        token: &VerifiedBiscuitToken,
         expected_authority: &AuthorityId,
     ) -> Result<bool, BiscuitStorageError> {
         // Extract authority_id from token by creating an Authorizer and querying facts
         // Biscuit tokens should contain an "authority_id" fact in the authority block
         // Format: authority_id(<uuid>)
 
-        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)
-            .map_err(|e| BiscuitStorageError::TokenVerification(e.to_string()))?;
-        let mut authorizer = verified_token
+        let mut authorizer = token
             .authorizer()
             .map_err(|e| BiscuitStorageError::TokenVerification(e.to_string()))?;
 
@@ -315,10 +313,11 @@ impl BiscuitStorageEvaluator {
         ])
     }
 
-    fn authorizer_with_token(&self, token: &Biscuit) -> Result<Authorizer, BiscuitStorageError> {
-        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)
-            .map_err(|e| BiscuitStorageError::TokenVerification(e.to_string()))?;
-        verified_token
+    fn authorizer_with_token(
+        &self,
+        token: &VerifiedBiscuitToken,
+    ) -> Result<Authorizer, BiscuitStorageError> {
+        token
             .authorizer()
             .map_err(|e| BiscuitStorageError::TokenVerification(e.to_string()))
     }
@@ -464,12 +463,13 @@ impl BiscuitAccessRequest {
     }
 
     /// Deserialize the Biscuit token
-    pub fn deserialize_token(&self, root_key: &PublicKey) -> Result<Biscuit, BiscuitStorageError> {
-        VerifiedBiscuitToken::from_bytes(&self.token, *root_key)
-            .map(|verified| verified.token().clone())
-            .map_err(|e| {
-                BiscuitStorageError::Biscuit(format!("Token deserialization failed: {}", e))
-            })
+    pub fn deserialize_token(
+        &self,
+        root_key: &PublicKey,
+    ) -> Result<VerifiedBiscuitToken, BiscuitStorageError> {
+        VerifiedBiscuitToken::from_bytes(&self.token, *root_key).map_err(|e| {
+            BiscuitStorageError::Biscuit(format!("Token deserialization failed: {}", e))
+        })
     }
 }
 
@@ -558,7 +558,7 @@ pub struct AuthorizedStorageHandler<S: StorageCoreEffects + StorageExtendedEffec
     /// Biscuit authorization evaluator
     evaluator: BiscuitStorageEvaluator,
     /// Biscuit token for authorization.
-    token: RwLock<Option<Biscuit>>,
+    token: RwLock<Option<VerifiedBiscuitToken>>,
     /// Flow budget for operations.
     budget: RwLock<FlowBudget>,
 }
@@ -579,7 +579,7 @@ impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S>
     pub fn with_token(
         inner: S,
         evaluator: BiscuitStorageEvaluator,
-        token: Biscuit,
+        token: VerifiedBiscuitToken,
         budget: FlowBudget,
     ) -> Self {
         Self {
@@ -591,7 +591,7 @@ impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S>
     }
 
     /// Set the Biscuit token for authorization
-    pub fn set_token(&self, token: Biscuit) -> Result<(), StorageError> {
+    pub fn set_token(&self, token: VerifiedBiscuitToken) -> Result<(), StorageError> {
         let mut guard = self.token.write().map_err(|_| {
             StorageError::WriteFailed("authorized storage token lock poisoned".into())
         })?;
@@ -876,7 +876,7 @@ mod tests {
         let deserialized_token = request
             .deserialize_token(&authority.root_public_key())
             .unwrap();
-        assert_eq!(deserialized_token.to_vec().unwrap(), request.token);
+        assert_eq!(deserialized_token.token().to_vec().unwrap(), request.token);
     }
 
     /// Permission → operation string mapping must be stable — Biscuit Datalog
@@ -1018,6 +1018,7 @@ mod tests {
         let token = authority
             .create_token(recipient, storage_test_capabilities())
             .unwrap();
+        let token = VerifiedBiscuitToken::from_token(&token, authority.root_public_key()).unwrap();
         let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
         let budget = FlowBudget::new(10000, Epoch::initial());
 
@@ -1069,6 +1070,7 @@ mod tests {
         let token = authority
             .create_token(recipient, storage_test_capabilities())
             .unwrap();
+        let token = VerifiedBiscuitToken::from_token(&token, authority.root_public_key()).unwrap();
         let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
         let budget = FlowBudget::new(1000, Epoch::initial());
 

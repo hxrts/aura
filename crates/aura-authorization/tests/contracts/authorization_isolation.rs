@@ -5,7 +5,7 @@
 //! budget exhaustion must be enforced.
 
 use super::common;
-use aura_authorization::biscuit_evaluator::BiscuitAuthorizationBridge;
+use aura_authorization::biscuit_evaluator::{BiscuitAuthorizationBridge, VerifiedBiscuitToken};
 use aura_authorization::{BiscuitTokenManager, TokenAuthority};
 use aura_core::types::scope::AuthorizationOp;
 
@@ -35,7 +35,11 @@ fn cross_authority_token_rejected() {
     let scope = common::context_scope(10);
 
     // Authorization must fail — token signed by A's key, verified against B's key
-    let result = bridge_b.authorize_with_time(&token, AuthorizationOp::Read, &scope, Some(1_000));
+    let result = VerifiedBiscuitToken::from_token(&token, authority_b.root_public_key()).and_then(
+        |verified| {
+            bridge_b.authorize_with_time(&verified, AuthorizationOp::Read, &scope, Some(1_000))
+        },
+    );
     assert!(
         result.is_err(),
         "token from authority A must be rejected by authority B's evaluator"
@@ -64,11 +68,12 @@ fn token_without_capability_denied() {
         .unwrap_or_else(|err| panic!("failed to build capability-less token: {err:?}"));
 
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
+    let verified = common::verified_token(&token, keypair.public());
     let scope = common::context_scope(6);
 
     // Write requires capability("write") — token doesn't have it
     let result = bridge
-        .authorize_with_time(&token, AuthorizationOp::Write, &scope, Some(1_000))
+        .authorize_with_time(&verified, AuthorizationOp::Write, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("evaluation should succeed even if denied: {err:?}"));
     assert!(
         !result.authorized,
@@ -92,15 +97,16 @@ fn read_capability_does_not_imply_write() {
         .unwrap_or_else(|err| panic!("failed to build read-capability token: {err:?}"));
 
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
+    let verified = common::verified_token(&token, keypair.public());
     let scope = common::context_scope(8);
 
     let read_result = bridge
-        .authorize_with_time(&token, AuthorizationOp::Read, &scope, Some(1_000))
+        .authorize_with_time(&verified, AuthorizationOp::Read, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("read authorization evaluation failed: {err:?}"));
     assert!(read_result.authorized, "read capability should allow read");
 
     let write_result = bridge
-        .authorize_with_time(&token, AuthorizationOp::Write, &scope, Some(1_000))
+        .authorize_with_time(&verified, AuthorizationOp::Write, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("write authorization evaluation failed: {err:?}"));
     assert!(
         !write_result.authorized,
@@ -133,9 +139,15 @@ fn double_attenuation_cannot_restore_capabilities() {
     // Verify write is blocked
     let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
     let scope = common::context_scope(22);
+    let read_only_verified = common::verified_token(&read_only, authority.root_public_key());
 
     let write_check = bridge
-        .authorize_with_time(&read_only, AuthorizationOp::Write, &scope, Some(1_000))
+        .authorize_with_time(
+            &read_only_verified,
+            AuthorizationOp::Write,
+            &scope,
+            Some(1_000),
+        )
         .unwrap_or_else(|err| panic!("write evaluation for read-only token failed: {err:?}"));
     assert!(!write_check.authorized, "read-only token must block write");
 
@@ -144,10 +156,12 @@ fn double_attenuation_cannot_restore_capabilities() {
     let double_attenuated = manager2
         .attenuate_read("/")
         .unwrap_or_else(|err| panic!("failed to attenuate read-only token again: {err:?}"));
+    let double_attenuated_verified =
+        common::verified_token(&double_attenuated, authority.root_public_key());
 
     let write_check2 = bridge
         .authorize_with_time(
-            &double_attenuated,
+            &double_attenuated_verified,
             AuthorizationOp::Write,
             &scope,
             Some(1_000),
@@ -177,12 +191,15 @@ fn authority_epoch_rotation_revokes_previous_tokens() {
     let rotated_bridge =
         BiscuitAuthorizationBridge::new(rotated_epoch.root_public_key(), authority_id);
 
-    let result = rotated_bridge.authorize_with_time(
-        &token,
-        AuthorizationOp::Read,
-        &common::context_scope(32),
-        Some(1_000),
-    );
+    let result = VerifiedBiscuitToken::from_token(&token, rotated_epoch.root_public_key())
+        .and_then(|verified| {
+            rotated_bridge.authorize_with_time(
+                &verified,
+                AuthorizationOp::Read,
+                &common::context_scope(32),
+                Some(1_000),
+            )
+        });
     assert!(
         result.is_err(),
         "rotated authority key must reject tokens issued before the epoch change"

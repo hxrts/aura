@@ -217,9 +217,9 @@ pub struct CeremonyState {
     /// Responses from each guardian
     pub responses: HashMap<AuthorityId, CeremonyResponse>,
     /// Encrypted key packages for each guardian (after key generation)
-    // aura-security: raw-secret-field-justified encrypted ceremony wire payloads; plaintext packages must use secret wrappers before wrapping.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md encrypted ceremony wire payloads; plaintext packages must use secret wrappers before wrapping.
     pub key_packages: Vec<Vec<u8>>,
-    /// Public key package for the new configuration
+    /// Untrusted key material: proposed ceremony configuration; verification must resolve expected authority/epoch key separately.
     pub public_key_package: Vec<u8>,
     /// Current status
     pub status: CeremonyStatus,
@@ -394,11 +394,11 @@ pub struct CeremonyProposal {
     /// The proposed operation
     pub operation: GuardianRotationOp,
     /// Encrypted key package for this specific guardian
-    // aura-security: raw-secret-field-justified encrypted ceremony wire payload; plaintext package must use secret wrappers before wrapping.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md encrypted ceremony wire payload; plaintext package must use secret wrappers before wrapping.
     pub encrypted_key_package: Vec<u8>,
     /// Nonce for decryption
     pub encryption_nonce: [u8; 12],
-    /// Ephemeral public key for key agreement
+    /// Untrusted key material: ephemeral agreement key carried by the remote ceremony payload.
     pub ephemeral_public_key: Vec<u8>,
 }
 

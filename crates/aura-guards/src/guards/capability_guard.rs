@@ -8,9 +8,8 @@
 
 use super::{BiscuitGuardEvaluator, CapabilityId, GuardResult};
 use crate::authorization::BiscuitAuthorizationBridge;
-use aura_authorization::{AuthorityOp, ContextOp, ResourceScope};
+use aura_authorization::{AuthorityOp, ContextOp, ResourceScope, VerifiedBiscuitToken};
 use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, FlowCost, Result};
-use biscuit_auth::Biscuit;
 
 /// Guard for evaluating capability-based authorization
 ///
@@ -72,7 +71,7 @@ impl CapabilityGuard {
         &self,
         authority_id: &AuthorityId,
         operation: &AuthorityOp,
-        token: Option<&Biscuit>,
+        token: Option<&VerifiedBiscuitToken>,
         flow_budget: &mut FlowBudget,
         current_time_seconds: u64,
     ) -> Result<bool> {
@@ -112,7 +111,7 @@ impl CapabilityGuard {
         &self,
         authority_id: &AuthorityId,
         operation: &AuthorityOp,
-        token: Option<&Biscuit>,
+        token: Option<&VerifiedBiscuitToken>,
         flow_budget: &mut FlowBudget,
         current_time_seconds: u64,
     ) -> Result<(bool, GuardResult)> {
@@ -138,7 +137,7 @@ impl CapabilityGuard {
         &self,
         context_id: &ContextId,
         operation: &ContextOp,
-        token: Option<&Biscuit>,
+        token: Option<&VerifiedBiscuitToken>,
         flow_budget: &mut FlowBudget,
         current_time_seconds: u64,
     ) -> Result<bool> {
@@ -180,7 +179,10 @@ impl CapabilityGuard {
         }
     }
 
-    fn require_token<'a>(&self, token: Option<&'a Biscuit>) -> Result<&'a Biscuit> {
+    fn require_token<'a>(
+        &self,
+        token: Option<&'a VerifiedBiscuitToken>,
+    ) -> Result<&'a VerifiedBiscuitToken> {
         token.ok_or_else(|| {
             AuraError::permission_denied("No authorization token provided".to_string())
         })
@@ -192,7 +194,7 @@ impl CapabilityGuard {
 
     fn evaluate_scope_with_result(
         &self,
-        token: Option<&Biscuit>,
+        token: Option<&VerifiedBiscuitToken>,
         capability: CapabilityId,
         scope: ResourceScope,
         flow_cost: FlowCost,
@@ -216,7 +218,7 @@ impl CapabilityGuard {
 
     fn evaluate_scope_bool(
         &self,
-        token: Option<&Biscuit>,
+        token: Option<&VerifiedBiscuitToken>,
         capability: CapabilityId,
         scope: ResourceScope,
         flow_cost: FlowCost,
@@ -243,7 +245,7 @@ pub trait CapabilityGuardExt {
         &self,
         authority_id: &AuthorityId,
         operation: &AuthorityOp,
-        token: Option<&Biscuit>,
+        token: Option<&VerifiedBiscuitToken>,
         flow_budget: &mut FlowBudget,
         current_time_seconds: u64,
     ) -> Result<GuardResult>;
@@ -254,7 +256,7 @@ impl CapabilityGuardExt for CapabilityGuard {
         &self,
         authority_id: &AuthorityId,
         operation: &AuthorityOp,
-        token: Option<&Biscuit>,
+        token: Option<&VerifiedBiscuitToken>,
         flow_budget: &mut FlowBudget,
         current_time_seconds: u64,
     ) -> Result<GuardResult> {

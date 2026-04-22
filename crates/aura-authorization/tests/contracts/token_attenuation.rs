@@ -24,19 +24,31 @@ fn attenuated_read_token_blocks_write() {
 
     let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
     let scope = common::context_scope(3);
+    let token_verified = common::verified_token(&token, authority.root_public_key());
+    let attenuated_verified = common::verified_token(&attenuated, authority.root_public_key());
 
     let base_write = bridge
-        .authorize_with_time(&token, AuthorizationOp::Write, &scope, Some(1_000))
+        .authorize_with_time(&token_verified, AuthorizationOp::Write, &scope, Some(1_000))
         .unwrap_or_else(|err| panic!("base token authorization should evaluate: {err:?}"));
     assert!(base_write.authorized);
 
     let read_result = bridge
-        .authorize_with_time(&attenuated, AuthorizationOp::Read, &scope, Some(1_000))
+        .authorize_with_time(
+            &attenuated_verified,
+            AuthorizationOp::Read,
+            &scope,
+            Some(1_000),
+        )
         .unwrap_or_else(|err| panic!("attenuated read authorization should evaluate: {err:?}"));
     assert!(read_result.authorized);
 
     let write_result = bridge
-        .authorize_with_time(&attenuated, AuthorizationOp::Write, &scope, Some(1_000))
+        .authorize_with_time(
+            &attenuated_verified,
+            AuthorizationOp::Write,
+            &scope,
+            Some(1_000),
+        )
         .unwrap_or_else(|err| panic!("attenuated write authorization should evaluate: {err:?}"));
     assert!(!write_result.authorized);
 }

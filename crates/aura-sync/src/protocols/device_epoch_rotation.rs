@@ -26,10 +26,11 @@ pub struct DeviceEpochProposal {
     pub pending_epoch: u64,
     pub initiator_device_id: DeviceId,
     pub participant_device_id: DeviceId,
-    // aura-security: raw-secret-field-justified choreography wire payload; producer must wrap/export with key-wrapping context before serialization.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md choreography wire payload; producer must wrap/export with key-wrapping context before serialization.
     pub key_package: Vec<u8>,
-    // aura-security: raw-secret-field-justified choreography wire payload; producer must wrap/export with key-wrapping context before serialization.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md choreography wire payload; producer must wrap/export with key-wrapping context before serialization.
     pub threshold_config: Vec<u8>,
+    /// Untrusted key material: pending-epoch ceremony payload; authentication must resolve expected keys from trusted authority/device state.
     pub public_key_package: Vec<u8>,
 }
 

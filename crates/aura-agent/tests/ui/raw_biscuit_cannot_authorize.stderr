@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/raw_biscuit_cannot_authorize.rs:14:40
+   |
+14 |     let _ = bridge.authorize_with_time(&raw_token, operation, &resource, Some(1));
+   |                    ------------------- ^^^^^^^^^^ expected `&VerifiedBiscuitToken`, found `&Biscuit`
+   |                    |
+   |                    arguments to this method are incorrect
+   |
+   = note: expected reference `&VerifiedBiscuitToken`
+              found reference `&aura_authorization::Biscuit`
+note: method defined here
+  --> $WORKSPACE/crates/aura-authorization/src/biscuit_evaluator.rs
+   |
+   |     pub fn authorize_with_time(
+   |            ^^^^^^^^^^^^^^^^^^^

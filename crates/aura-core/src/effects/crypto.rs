@@ -49,7 +49,7 @@ pub struct KeyDerivationContext {
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct FrostKeyGenResult {
     /// Security-sensitive key packages for each participant. Zeroized on drop.
-    // aura-security: raw-secret-field-justified core crypto effect ABI pending SigningShareBytes migration; generic serde export is disabled.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md core crypto effect ABI pending SigningShareBytes migration; generic serde export is disabled.
     pub key_packages: Vec<Vec<u8>>,
     /// Group public key package needed for signature aggregation and verification
     pub public_key_package: Vec<u8>,
@@ -103,7 +103,7 @@ pub struct SigningKeyGenResult {
     ///
     /// For single-signer: contains one `SingleSignerKeyPackage` serialized.
     /// For threshold: contains FROST `KeyPackage` for each participant.
-    // aura-security: raw-secret-field-justified core crypto effect ABI pending SigningShareBytes migration; generic serde export is disabled.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md core crypto effect ABI pending SigningShareBytes migration; generic serde export is disabled.
     pub key_packages: Vec<Vec<u8>>,
 
     /// Public key package for verification.

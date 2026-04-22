@@ -216,17 +216,32 @@ impl HandlerContext {
 /// Options for bulk registering default handlers.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RegisterAllOptions {
-    /// Allow registering impure handlers that touch OS resources.
-    ///
-    /// Impure handlers include: Console, Random, Crypto, Storage, Time,
-    /// Network (TCP), Trace, and System logging handlers.
-    pub allow_impure: bool,
+    /// Policy for registering handlers that touch OS resources.
+    pub impure_handlers: ImpureHandlerRegistration,
+}
+
+/// Explicit policy for registering impure handlers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImpureHandlerRegistration {
+    /// Reject OS-backed handlers.
+    #[default]
+    Deny,
+    /// Allow OS-backed handlers.
+    Allow,
+}
+
+impl ImpureHandlerRegistration {
+    fn allows_impure(self) -> bool {
+        matches!(self, Self::Allow)
+    }
 }
 
 impl RegisterAllOptions {
     /// Explicit opt-in for impure default handlers.
     pub fn allow_impure() -> Self {
-        Self { allow_impure: true }
+        Self {
+            impure_handlers: ImpureHandlerRegistration::Allow,
+        }
     }
 }
 
@@ -497,12 +512,12 @@ impl EffectRegistry {
     ///
     /// Intended for runtime assembly in `aura-agent` only.
     pub fn register_all(&mut self, options: RegisterAllOptions) -> Result<(), RegistryError> {
-        if !options.allow_impure {
+        if !options.impure_handlers.allows_impure() {
             return Err(RegistryError::registration_failed(
                 EffectType::System,
                 std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
-                    "register_all requires allow_impure=true for OS-backed handlers",
+                    "register_all requires ImpureHandlerRegistration::Allow for OS-backed handlers",
                 ),
             ));
         }

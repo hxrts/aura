@@ -28,12 +28,12 @@ use aura_core::{
 };
 
 // Re-export key types for easier use by macro-generated code
-use aura_authorization::ResourceScope;
+use aura_authorization::{ResourceScope, VerifiedBiscuitToken};
 pub use aura_core::effects::guard::{
     EffectCommand as ChoreographyCommand, EffectResult as ChoreographyResult,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use biscuit_auth::{Biscuit, PublicKey};
+use biscuit_auth::PublicKey;
 use std::{collections::HashMap, sync::Arc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -377,7 +377,7 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
             }
         };
 
-        // Decode standard base64 to raw bytes, then parse the Biscuit token.
+        // Decode standard base64 to raw bytes, then verify the Biscuit token.
         // (BiscuitCache stores standard base64; Biscuit::from_base64 expects URL-safe.)
         let token_bytes = match BASE64.decode(&token_b64) {
             Ok(bytes) => bytes,
@@ -390,7 +390,7 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
                 return false;
             }
         };
-        let token = match Biscuit::from(&token_bytes, |_| Ok(root_pk)) {
+        let token = match VerifiedBiscuitToken::from_bytes(&token_bytes, root_pk) {
             Ok(token) => token,
             Err(err) => {
                 warn!(

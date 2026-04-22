@@ -52,7 +52,7 @@
 
 use crate::core::binary_serialize;
 use crate::protocols::journal_apply::JournalApplyService;
-use crate::verification::{MerkleComparison, MerkleVerifier, VerificationResult};
+use crate::verification::{MerkleComparison, MerkleVerifier};
 use aura_core::domain::journal::FactValue;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -71,21 +71,55 @@ use std::sync::Arc;
 pub struct FactSyncConfig {
     /// Maximum facts to sync per batch
     pub max_batch_size: u32,
-    /// Enable Merkle verification (should always be true in production)
-    pub verify_merkle: bool,
+    /// Merkle verification policy for incoming facts.
+    pub merkle_verification: MerkleVerificationPolicy,
     /// Enable Bloom filter optimization
     pub use_bloom_filter: bool,
-    /// Skip sync if roots match (optimization)
-    pub skip_on_root_match: bool,
+    /// Behavior when local and peer Merkle roots already match.
+    pub root_match_policy: RootMatchPolicy,
+}
+
+/// Explicit Merkle verification policy for fact sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MerkleVerificationPolicy {
+    /// Incoming facts must verify against peer Merkle evidence.
+    Required,
+}
+
+impl Default for MerkleVerificationPolicy {
+    fn default() -> Self {
+        Self::Required
+    }
+}
+
+/// Explicit policy for handling peers whose Merkle roots already match ours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RootMatchPolicy {
+    /// Return early when roots match.
+    SkipWhenInSync,
+    /// Continue reconciliation even when roots match.
+    ReconcileWhenInSync,
+}
+
+impl RootMatchPolicy {
+    fn skips_when_in_sync(self) -> bool {
+        matches!(self, Self::SkipWhenInSync)
+    }
+}
+
+impl Default for RootMatchPolicy {
+    fn default() -> Self {
+        Self::SkipWhenInSync
+    }
 }
 
 impl Default for FactSyncConfig {
     fn default() -> Self {
         Self {
             max_batch_size: 1000,
-            verify_merkle: true,
+            merkle_verification: MerkleVerificationPolicy::Required,
             use_bloom_filter: true,
-            skip_on_root_match: true,
+            root_match_policy: RootMatchPolicy::SkipWhenInSync,
         }
     }
 }
@@ -112,9 +146,9 @@ impl FactSyncConfig {
     pub fn debug() -> Self {
         Self {
             max_batch_size: 50,
-            verify_merkle: true,
+            merkle_verification: MerkleVerificationPolicy::Required,
             use_bloom_filter: false,
-            skip_on_root_match: false,
+            root_match_policy: RootMatchPolicy::ReconcileWhenInSync,
         }
     }
 }
@@ -263,7 +297,7 @@ impl FactSyncProtocol {
         let comparison = self.verifier.compare_roots(peer_root).await?;
 
         match comparison {
-            MerkleComparison::InSync if self.config.skip_on_root_match => {
+            MerkleComparison::InSync if self.config.root_match_policy.skips_when_in_sync() => {
                 // Already in sync, nothing to do
                 tracing::debug!("Merkle roots match - skipping sync");
                 let local_root = self.verifier.local_merkle_root().await?;
@@ -274,17 +308,12 @@ impl FactSyncProtocol {
             }
         }
 
-        // Step 2: Verify incoming facts if Merkle verification is enabled
-        let verification = if self.config.verify_merkle {
-            self.verifier
-                .verify_incoming_facts(incoming_facts.clone(), peer_root)
-                .await?
-        } else {
-            // Accept all facts without verification (not recommended)
-            VerificationResult {
-                verified: incoming_facts,
-                rejected: vec![],
-                merkle_root: self.verifier.local_merkle_root().await?,
+        // Step 2: Verify incoming facts against Merkle evidence before apply.
+        let verification = match self.config.merkle_verification {
+            MerkleVerificationPolicy::Required => {
+                self.verifier
+                    .verify_incoming_facts(incoming_facts.clone(), peer_root)
+                    .await?
             }
         };
         let verified_facts =
@@ -685,30 +714,6 @@ mod tests {
     }
 
     #[aura_macros::aura_test]
-    async fn test_sync_with_verification_disabled() {
-        let local_root = [1u8; 32];
-        let remote_root = [2u8; 32];
-        let journal = Arc::new(MockIndexedJournal::new(local_root));
-        let time = MockTimeEffects::new(TEST_TIME_MS);
-
-        let config = FactSyncConfig {
-            verify_merkle: false,
-            ..Default::default()
-        };
-        let protocol = FactSyncProtocol::new(config, journal, time);
-
-        let incoming = vec![create_test_fact(1)];
-        let (result, _) = protocol
-            .sync_with_peer(verified_peer_data(remote_root, Vec::new(), incoming))
-            .await
-            .unwrap();
-
-        // Without verification, all facts are accepted
-        assert_eq!(result.facts_verified, 1);
-        assert_eq!(result.facts_rejected, 0);
-    }
-
-    #[aura_macros::aura_test]
     async fn test_batch_size_limit() {
         let root = [1u8; 32];
         let remote_root = [2u8; 32];
@@ -762,17 +767,29 @@ mod tests {
     #[aura_macros::aura_test]
     async fn test_config_presets() {
         let production = FactSyncConfig::production();
-        assert!(production.verify_merkle);
+        assert_eq!(
+            production.merkle_verification,
+            MerkleVerificationPolicy::Required
+        );
         assert!(production.use_bloom_filter);
         assert_eq!(production.max_batch_size, 1000);
 
         let testing = FactSyncConfig::for_testing();
-        assert!(testing.verify_merkle);
+        assert_eq!(
+            testing.merkle_verification,
+            MerkleVerificationPolicy::Required
+        );
         assert_eq!(testing.max_batch_size, 100);
 
         let debug = FactSyncConfig::debug();
-        assert!(debug.verify_merkle);
+        assert_eq!(
+            debug.merkle_verification,
+            MerkleVerificationPolicy::Required
+        );
         assert!(!debug.use_bloom_filter);
-        assert!(!debug.skip_on_root_match);
+        assert_eq!(
+            debug.root_match_policy,
+            RootMatchPolicy::ReconcileWhenInSync
+        );
     }
 }

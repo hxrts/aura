@@ -3,6 +3,7 @@
 //! Provides token issuance, attenuation, and serialization using the authority
 //! model where authorities are the cryptographic actors managing tokens.
 
+use crate::biscuit_evaluator::VerifiedBiscuitToken;
 use aura_core::{types::identifiers::AuthorityId, CapabilityName};
 use biscuit_auth::{builder::BiscuitBuilder, macros::*, Biscuit, KeyPair, PublicKey};
 use serde::{Deserialize, Serialize};
@@ -190,7 +191,7 @@ impl BiscuitTokenManager {
 
     /// Deserialize a token from bytes.
     pub fn deserialize_token(bytes: &[u8], root_key: &PublicKey) -> Result<Biscuit, BiscuitError> {
-        Biscuit::from(bytes, *root_key).map_err(BiscuitError::BiscuitLib)
+        VerifiedBiscuitToken::from_bytes(bytes, *root_key).map(|token| token.token().clone())
     }
 }
 
@@ -265,8 +266,10 @@ impl<'de> Deserialize<'de> for SerializableBiscuit {
 
         // Extract token bytes from remaining data
         let token_bytes = &all_bytes[32..];
-        let biscuit =
-            Biscuit::from(token_bytes, root_key).map_err(|e| D::Error::custom(e.to_string()))?;
+        let biscuit = VerifiedBiscuitToken::from_bytes(token_bytes, root_key)
+            .map_err(|e| D::Error::custom(e.to_string()))?
+            .token()
+            .clone();
 
         Ok(SerializableBiscuit::new(biscuit, root_key))
     }

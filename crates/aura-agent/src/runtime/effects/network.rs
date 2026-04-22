@@ -1,5 +1,6 @@
 use super::AuraEffectSystem;
 use crate::core::default_context_id_for_authority;
+use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use async_trait::async_trait;
 use aura_core::effects::network::PeerEventStream;
 #[cfg(not(target_arch = "wasm32"))]
@@ -119,7 +120,7 @@ impl NetworkCoreEffects for AuraEffectSystem {
             receipt: None,
         };
 
-        TransportEffects::send_envelope(self, envelope)
+        send_guarded_transport_envelope(self, envelope)
             .await
             .map_err(|e| NetworkError::SendFailed {
                 peer_id: Some(peer_id),
@@ -186,7 +187,7 @@ impl NetworkCoreEffects for AuraEffectSystem {
             Err(e) => {
                 return Err(NetworkError::ReceiveFailed {
                     reason: e.to_string(),
-                })
+                });
             }
         };
 
@@ -215,7 +216,7 @@ impl NetworkExtendedEffects for AuraEffectSystem {
             Err(e) => {
                 return Err(NetworkError::ReceiveFailed {
                     reason: e.to_string(),
-                })
+                });
             }
         };
 

@@ -7,13 +7,10 @@ use crate::runtime::services::bootstrap_broker::BootstrapBrokerConfig;
 use crate::runtime::services::rendezvous_manager::RendezvousManagerConfig;
 use aura_core::hash;
 use aura_core::DeviceId;
+use aura_effects::StorageEncryptionMode;
 use aura_rendezvous::LanDiscoveryConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
-fn default_true() -> bool {
-    true
-}
 
 /// Resolve the default storage path for Aura agents.
 ///
@@ -73,11 +70,9 @@ pub struct StorageConfig {
     /// Base storage directory
     pub base_path: PathBuf,
 
-    /// Enable encrypted-at-rest storage.
-    ///
-    /// This should remain `true` in production. Disabling is intended for tests/bring-up only.
-    #[serde(default = "default_true")]
-    pub encryption_enabled: bool,
+    /// Encrypted-at-rest storage policy.
+    #[serde(default)]
+    pub encryption_policy: StorageEncryptionPolicy,
 
     /// Enable opaque storage key names (metadata minimization).
     ///
@@ -96,10 +91,34 @@ impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             base_path: default_storage_path(),
-            encryption_enabled: true,
+            encryption_policy: StorageEncryptionPolicy::Required,
             opaque_names: false,
             cache_size: 50 * 1024 * 1024,
             enable_compression: true,
+        }
+    }
+}
+
+/// Explicit encrypted-at-rest policy for agent storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StorageEncryptionPolicy {
+    /// Production storage must be encrypted at rest.
+    Required,
+    /// Test-only plaintext storage for focused runtime tests.
+    PlaintextForTests,
+}
+
+impl Default for StorageEncryptionPolicy {
+    fn default() -> Self {
+        Self::Required
+    }
+}
+
+impl From<StorageEncryptionPolicy> for StorageEncryptionMode {
+    fn from(policy: StorageEncryptionPolicy) -> Self {
+        match policy {
+            StorageEncryptionPolicy::Required => StorageEncryptionMode::Required,
+            StorageEncryptionPolicy::PlaintextForTests => StorageEncryptionMode::PlaintextForTests,
         }
     }
 }

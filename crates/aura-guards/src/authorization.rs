@@ -23,7 +23,7 @@
 use aura_authorization::{BiscuitError, ResourceScope, VerifiedBiscuitToken};
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::CapabilityName;
-use biscuit_auth::{macros::*, Authorizer, AuthorizerLimits, Biscuit, PublicKey};
+use biscuit_auth::{macros::*, Authorizer, AuthorizerLimits, PublicKey};
 use std::time::Duration;
 
 const GUARD_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
@@ -176,29 +176,21 @@ impl BiscuitAuthorizationBridge {
         self.authority_id
     }
 
+    /// Get the root public key used to verify Biscuit tokens for this bridge.
+    pub fn root_public_key(&self) -> PublicKey {
+        self.root_public_key
+    }
+
     /// Production Biscuit authorization with cryptographic verification and Datalog policy evaluation
     /// Requires current time for deterministic behavior - use PhysicalTimeEffects in callers
     pub fn authorize(
         &self,
-        token: &Biscuit,
+        token: &VerifiedBiscuitToken,
         operation: &str,
         resource: &ResourceScope,
         current_time_seconds: u64,
     ) -> Result<AuthorizationResult, BiscuitError> {
-        self.authorize_with_time(token, operation, resource, current_time_seconds)
-    }
-
-    /// Internal implementation of Biscuit authorization with explicit time
-    fn authorize_with_time(
-        &self,
-        token: &Biscuit,
-        operation: &str,
-        resource: &ResourceScope,
-        current_time_seconds: u64,
-    ) -> Result<AuthorizationResult, BiscuitError> {
-        // Phase 1: Verify token signature with the configured root public key.
-        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)?;
-        let mut authorizer = verified_token.authorizer()?;
+        let mut authorizer = token.authorizer()?;
 
         // Phase 2: Add ambient facts for authorization context
         self.add_authorize_ambient_facts(&mut authorizer, operation, current_time_seconds)?;
@@ -227,7 +219,7 @@ impl BiscuitAuthorizationBridge {
         Ok(AuthorizationResult {
             authorized,
             delegation_depth: self.extract_delegation_depth_from_token(token),
-            token_facts: self.extract_diagnostic_token_facts(&verified_token, current_time_seconds),
+            token_facts: self.extract_diagnostic_token_facts(token, current_time_seconds),
         })
     }
 
@@ -235,17 +227,7 @@ impl BiscuitAuthorizationBridge {
     /// Requires current time for deterministic behavior - use PhysicalTimeEffects in callers
     pub fn has_capability(
         &self,
-        token: &Biscuit,
-        capability: &str,
-        current_time_seconds: u64,
-    ) -> Result<bool, BiscuitError> {
-        self.has_capability_with_time(token, capability, current_time_seconds)
-    }
-
-    /// Internal implementation of capability check with explicit time
-    fn has_capability_with_time(
-        &self,
-        token: &Biscuit,
+        token: &VerifiedBiscuitToken,
         capability: &str,
         current_time_seconds: u64,
     ) -> Result<bool, BiscuitError> {
@@ -254,9 +236,7 @@ impl BiscuitAuthorizationBridge {
             .map_err(|error| BiscuitError::InvalidCapability(error.to_string()))?;
         let capability = capability_name.as_str();
 
-        // Create authorizer only after root-key verification.
-        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)?;
-        let mut authorizer = verified_token.authorizer()?;
+        let mut authorizer = token.authorizer()?;
 
         // Add ambient facts for capability check
         self.add_authority_fact(&mut authorizer)?;
@@ -279,10 +259,10 @@ impl BiscuitAuthorizationBridge {
     }
 
     /// Extract delegation depth from token structure
-    fn extract_delegation_depth_from_token(&self, token: &Biscuit) -> Option<u32> {
+    fn extract_delegation_depth_from_token(&self, token: &VerifiedBiscuitToken) -> Option<u32> {
         // Count the number of blocks beyond the authority block
         // Authority block (0) + N delegation blocks = depth N
-        let count = token.block_count();
+        let count = token.token().block_count();
         if count > 0 {
             // Home count includes authority block, so delegation depth is count - 1
             Some((count - 1) as u32)
@@ -341,7 +321,7 @@ mod tests {
     use super::*;
     use aura_core::{capability_name, types::identifiers::AuthorityId};
 
-    fn test_bridge() -> (BiscuitAuthorizationBridge, Biscuit) {
+    fn test_bridge() -> (BiscuitAuthorizationBridge, VerifiedBiscuitToken) {
         let authority_id = AuthorityId::new_from_entropy([42u8; 32]);
         let authority = aura_authorization::TokenAuthority::new(authority_id);
         let token = authority
@@ -354,6 +334,8 @@ mod tests {
             )
             .unwrap_or_else(|err| panic!("failed to create token: {err:?}"));
         let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), authority_id);
+        let token = VerifiedBiscuitToken::from_token(&token, authority.root_public_key())
+            .unwrap_or_else(|err| panic!("failed to verify token: {err:?}"));
         (bridge, token)
     }
 

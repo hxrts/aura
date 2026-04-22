@@ -52,7 +52,7 @@ use crate::core::{
 };
 use crate::infrastructure::RetryPolicy;
 use crate::protocols::journal_apply::{JournalApplyService, RemoteCoreJournalDelta};
-use aura_authorization::BiscuitTokenManager;
+use aura_authorization::{BiscuitTokenManager, VerifiedBiscuitToken};
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::types::scope::ResourceScope;
 use aura_core::types::Epoch;
@@ -510,7 +510,15 @@ impl AntiEntropyProtocol {
         if let (Some(ref token_manager), Some(ref evaluator)) =
             (&self.token_manager, &self.guard_evaluator)
         {
-            let token = token_manager.current_token();
+            let token = VerifiedBiscuitToken::from_token(
+                token_manager.current_token(),
+                evaluator.root_public_key(),
+            )
+            .map_err(|error| {
+                AuraError::permission_denied(format!(
+                    "sync Biscuit token verification failed: {error}"
+                ))
+            })?;
             let resource = ResourceScope::Authority {
                 authority_id: effects.authority_id(),
                 operation: aura_core::types::scope::AuthorityOp::UpdateTree, // Sync requires authority access
@@ -528,7 +536,7 @@ impl AntiEntropyProtocol {
                 .ts_ms
                 / 1000;
             match evaluator.evaluate_guard(
-                token,
+                &token,
                 &capability,
                 &resource,
                 FlowCost::new(100),

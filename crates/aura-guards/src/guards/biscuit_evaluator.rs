@@ -5,9 +5,9 @@
 
 use crate::authorization::BiscuitAuthorizationBridge;
 use crate::guards::types::CapabilityId;
-use aura_authorization::{BiscuitError, ResourceScope};
+use aura_authorization::{BiscuitError, ResourceScope, VerifiedBiscuitToken};
 use aura_core::{AuthorityId, FlowBudget, FlowCost};
-use biscuit_auth::Biscuit;
+use biscuit_auth::{Biscuit, PublicKey};
 
 pub struct BiscuitGuardEvaluator {
     bridge: BiscuitAuthorizationBridge,
@@ -23,9 +23,19 @@ impl BiscuitGuardEvaluator {
         self.bridge.authority_id()
     }
 
+    /// Get the Biscuit root public key used by this evaluator.
+    pub fn root_public_key(&self) -> PublicKey {
+        self.bridge.root_public_key()
+    }
+
+    /// Verify a raw Biscuit token against this evaluator's configured root key.
+    pub fn verify_token(&self, token: &Biscuit) -> Result<VerifiedBiscuitToken, BiscuitError> {
+        VerifiedBiscuitToken::from_token(token, self.root_public_key())
+    }
+
     pub fn evaluate_guard(
         &self,
-        token: &Biscuit,
+        token: &VerifiedBiscuitToken,
         guard_capability: &CapabilityId,
         resource: &ResourceScope,
         flow_cost: FlowCost,
@@ -73,7 +83,7 @@ impl BiscuitGuardEvaluator {
 
     pub fn check_guard(
         &self,
-        token: &Biscuit,
+        token: &VerifiedBiscuitToken,
         guard_capability: &CapabilityId,
         resource: &ResourceScope,
         current_time_seconds: u64,

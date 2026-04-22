@@ -360,15 +360,30 @@ impl RecoveryCeremonyFact {
 pub struct RecoveryCeremonyConfig {
     /// Default timeout for ceremony completion (ms)
     pub default_timeout_ms: u64,
-    /// Whether to allow emergency bypass (single guardian for EmergencyFreeze)
-    pub allow_emergency_bypass: bool,
+    /// Policy for emergency freeze quorum handling.
+    pub emergency_bypass_policy: EmergencyBypassPolicy,
+}
+
+/// Explicit emergency bypass policy for recovery ceremonies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EmergencyBypassPolicy {
+    /// Emergency freeze still requires the configured recovery quorum.
+    RequireConfiguredQuorum,
+    /// A single guardian may authorize EmergencyFreeze.
+    AllowSingleGuardianEmergencyFreeze,
+}
+
+impl Default for EmergencyBypassPolicy {
+    fn default() -> Self {
+        Self::RequireConfiguredQuorum
+    }
 }
 
 impl Default for RecoveryCeremonyConfig {
     fn default() -> Self {
         Self {
             default_timeout_ms: 24 * 60 * 60 * 1000, // 24 hours
-            allow_emergency_bypass: false,
+            emergency_bypass_policy: EmergencyBypassPolicy::RequireConfiguredQuorum,
         }
     }
 }

@@ -31,6 +31,7 @@ hex = { workspace = true }
 async-trait = { workspace = true }
 rand_chacha = { workspace = true }
 proptest = { workspace = true }
+tokio = { workspace = true }
 
 [[bench]]
 name = "authority_tree_incremental"

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct HpkePublicKey(pub Vec<u8>);
 
+// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md transitional HPKE private-key wrapper; finding 40 tracks migration to PrivateKeyBytes with redacted Debug and zeroization.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct HpkePrivateKey(pub Vec<u8>);
 

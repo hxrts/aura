@@ -317,10 +317,10 @@ pub struct TransparentAnonymousSetupLayer {
     /// Replay-window binding visible to this hop.
     pub replay_window_id: [u8; 32],
     /// Forward path-key material for this hop.
-    // aura-security: raw-secret-field-justified transparent debug/simulation payload; production encrypted path objects must not expose these bytes.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md transparent debug/simulation payload; production encrypted path objects must not expose these bytes.
     pub forward_path_secret: [u8; 32],
     /// Backward path-key material for this hop.
-    // aura-security: raw-secret-field-justified transparent debug/simulation payload; production encrypted path objects must not expose these bytes.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md transparent debug/simulation payload; production encrypted path objects must not expose these bytes.
     pub backward_path_secret: [u8; 32],
     /// Inner setup material for the next hop.
     #[serde(default)]
@@ -387,10 +387,10 @@ pub struct AnonymousHopView {
     /// Replay-window binding visible to this hop.
     pub replay_window_id: [u8; 32],
     /// Forward path-key material for this hop.
-    // aura-security: raw-secret-field-justified transparent debug/simulation observation payload; production encrypted path objects must not expose these bytes.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md transparent debug/simulation observation payload; production encrypted path objects must not expose these bytes.
     pub forward_path_secret: [u8; 32],
     /// Backward path-key material for this hop.
-    // aura-security: raw-secret-field-justified transparent debug/simulation observation payload; production encrypted path objects must not expose these bytes.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md transparent debug/simulation observation payload; production encrypted path objects must not expose these bytes.
     pub backward_path_secret: [u8; 32],
 }
 

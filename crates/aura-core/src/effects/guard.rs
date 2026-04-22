@@ -36,6 +36,7 @@ use std::collections::HashMap;
 /// This contains all data that guards are allowed to inspect during evaluation.
 /// It's prepared asynchronously before guard evaluation and remains immutable
 /// during the synchronous guard chain execution.
+// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md guard snapshot is an in-memory evaluation input; rng_seed has a field-level raw-secret justification until the guard ABI moves to SecretBytes.
 #[derive(Debug, Clone)]
 pub struct GuardSnapshot {
     /// Current timestamp
@@ -47,6 +48,7 @@ pub struct GuardSnapshot {
     /// Key-value metadata for guard decisions
     pub metadata: MetadataView,
     /// Pre-allocated randomness for deterministic nonce generation
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md guard evaluation seed is consumed within the guard boundary and must not be serialized.
     pub rng_seed: [u8; 32],
 }
 

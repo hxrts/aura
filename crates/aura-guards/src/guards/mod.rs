@@ -127,13 +127,14 @@ pub use journal::{
 pub use traits::GuardContextProvider;
 pub use types::{CapabilityId, GuardOperation, GuardOperationId};
 
+use aura_authorization::VerifiedBiscuitToken;
 use aura_core::effects::{
     AuthorizationEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
     StorageEffects,
 };
 use aura_core::AuraResult;
 use aura_core::AuthorityId;
-use biscuit_auth::{Biscuit, PublicKey};
+use biscuit_auth::PublicKey;
 use std::future::Future;
 
 /// Composite effect requirements for guard evaluation/execution.
@@ -175,7 +176,7 @@ pub struct ProtocolGuard {
     /// Observer classes that can see this operation
     pub observable_by: Vec<AdversaryClass>,
     /// Required Biscuit authorization tokens for this operation
-    pub required_tokens: Vec<Biscuit>,
+    pub required_tokens: Vec<VerifiedBiscuitToken>,
     /// Facts to be merged into the journal after successful execution
     pub delta_facts: Vec<serde_json::Value>, // JSON-encoded facts until typed fact system
     /// Privacy leakage budget for this operation
@@ -254,13 +255,13 @@ impl ProtocolGuard {
     }
 
     /// Add a required authorization token to this guard
-    pub fn require_token(mut self, token: Biscuit) -> Self {
+    pub fn require_token(mut self, token: VerifiedBiscuitToken) -> Self {
         self.required_tokens.push(token);
         self
     }
 
     /// Add multiple required authorization tokens to this guard
-    pub fn require_tokens(mut self, tokens: Vec<Biscuit>) -> Self {
+    pub fn require_tokens(mut self, tokens: Vec<VerifiedBiscuitToken>) -> Self {
         self.required_tokens.extend(tokens);
         self
     }

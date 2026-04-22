@@ -119,6 +119,7 @@ pub struct AcknowledgeSubShareMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinalizeResharingMessage {
     pub session_id: SessionId,
+    /// Untrusted key material: proposed resharing output; authentication must resolve expected keys from trusted authority/device state.
     pub new_group_public_key: Vec<u8>,
     pub new_threshold: u16,
     pub test_signature: Vec<u8>, // Proof that new shares work
@@ -182,6 +183,7 @@ pub struct RollbackResharingMessage {
 pub struct ResharingProtocolResult {
     pub session_id: SessionId,
     pub success: bool,
+    /// Untrusted key material: proposed resharing output; authentication must resolve expected keys from trusted authority/device state.
     pub new_group_public_key: Option<Vec<u8>>,
     pub new_threshold: Option<u16>,
     pub new_participants: Vec<DeviceId>,

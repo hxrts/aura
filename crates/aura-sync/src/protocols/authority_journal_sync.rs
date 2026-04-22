@@ -26,8 +26,21 @@ pub struct AuthorityJournalSyncConfig {
     pub timeout: Duration,
     /// Retry policy for failed syncs
     pub retry_policy: RetryPolicy,
-    /// Whether to verify fact signatures
-    pub verify_signatures: bool,
+    /// Signature verification policy for incoming facts.
+    pub signature_policy: AuthorityJournalSignaturePolicy,
+}
+
+/// Explicit signature verification policy for authority journal sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuthorityJournalSignaturePolicy {
+    /// Incoming facts must carry valid authority signatures.
+    Required,
+}
+
+impl Default for AuthorityJournalSignaturePolicy {
+    fn default() -> Self {
+        Self::Required
+    }
 }
 
 impl Default for AuthorityJournalSyncConfig {
@@ -36,7 +49,7 @@ impl Default for AuthorityJournalSyncConfig {
             batch_size: 1000,
             timeout: Duration::from_secs(30),
             retry_policy: RetryPolicy::default(),
-            verify_signatures: true,
+            signature_policy: AuthorityJournalSignaturePolicy::Required,
         }
     }
 }
@@ -441,6 +454,9 @@ mod tests {
         let config = AuthorityJournalSyncConfig::default();
         assert_eq!(config.batch_size, 1000);
         assert_eq!(config.timeout, Duration::from_secs(30));
-        assert!(config.verify_signatures);
+        assert_eq!(
+            config.signature_policy,
+            AuthorityJournalSignaturePolicy::Required
+        );
     }
 }

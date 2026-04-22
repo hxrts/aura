@@ -92,7 +92,7 @@ pub struct CommitFact {
     /// Threshold signature from witnesses
     pub threshold_signature: ThresholdSignature,
 
-    /// Group public key used to verify the threshold signature (if available)
+    /// Untrusted key material: historical consensus evidence; verification must resolve the expected authority/epoch key from trusted state.
     pub group_public_key: Option<PublicKeyPackage>,
 
     /// List of authorities that participated

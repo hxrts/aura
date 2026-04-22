@@ -258,9 +258,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                     .map_err(execution_failed)?;
                 serialize_operation_result(effect_type, operation, &result)
             }
-            "frost_rotate_keys" => {
-                Err(Self::secret_material_result_error(effect_type, operation))
-            }
+            "frost_rotate_keys" => Err(Self::secret_material_result_error(effect_type, operation)),
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,
                 operation: operation.to_string(),

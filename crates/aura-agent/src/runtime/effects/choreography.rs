@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 use crate::runtime::subsystems::choreography::RuntimeChoreographySessionId;
 use crate::runtime::subsystems::choreography::SessionStartError;
+use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 
 fn current_session_snapshot(
     effects: &AuraEffectSystem,
@@ -188,7 +189,7 @@ impl ChoreographicEffects for AuraEffectSystem {
             receipt: transport_receipt,
         };
 
-        TransportEffects::send_envelope(self, envelope)
+        send_guarded_transport_envelope(self, envelope)
             .await
             .map_err(|e| ChoreographyError::Transport {
                 source: Box::new(e),
@@ -1084,8 +1085,16 @@ mod tests {
         assert_eq!(
             identities,
             vec![
-                ("msg-2".to_string(), "replay-2".to_string(), b"second".to_vec()),
-                ("msg-1".to_string(), "replay-1".to_string(), b"first".to_vec()),
+                (
+                    "msg-2".to_string(),
+                    "replay-2".to_string(),
+                    b"second".to_vec()
+                ),
+                (
+                    "msg-1".to_string(),
+                    "replay-1".to_string(),
+                    b"first".to_vec()
+                ),
             ],
             "host ingress reordering may change arrival order, but communication identity must survive unchanged"
         );

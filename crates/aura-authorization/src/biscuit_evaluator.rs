@@ -91,37 +91,8 @@ impl BiscuitAuthorizationBridge {
         Self::test_bridge()
     }
 
-    /// Production Biscuit authorization with cryptographic verification and Datalog policy evaluation
-    ///
-    /// Callers must supply time via `authorize_with_time`; omitting it fails closed.
-    pub fn authorize(
-        &self,
-        token: &Biscuit,
-        operation: AuthorizationOp,
-        resource: &ResourceScope,
-    ) -> Result<AuthorizationResult, BiscuitError> {
-        self.authorize_with_time(token, operation, resource, None)
-    }
-
-    /// Production Biscuit authorization with explicit time for deterministic testing and expiry checks.
+    /// Production Biscuit authorization with explicit time and pre-verified token evidence.
     pub fn authorize_with_time(
-        &self,
-        token: &Biscuit,
-        operation: AuthorizationOp,
-        resource: &ResourceScope,
-        current_time_seconds: Option<u64>,
-    ) -> Result<AuthorizationResult, BiscuitError> {
-        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)?;
-        self.authorize_verified_with_time(
-            &verified_token,
-            operation,
-            resource,
-            current_time_seconds,
-        )
-    }
-
-    /// Authorize a token that has already passed root-key verification.
-    pub fn authorize_verified_with_time(
         &self,
         token: &VerifiedBiscuitToken,
         operation: AuthorizationOp,
@@ -162,26 +133,8 @@ impl BiscuitAuthorizationBridge {
         })
     }
 
-    /// Check if token has specific capability through Datalog evaluation
-    ///
-    /// Callers must supply time via `has_capability_with_time`; omitting it fails closed.
-    pub fn has_capability(&self, token: &Biscuit, capability: &str) -> Result<bool, BiscuitError> {
-        self.has_capability_with_time(token, capability, None)
-    }
-
-    /// Check if token has specific capability through Datalog evaluation with explicit time
-    pub fn has_capability_with_time(
-        &self,
-        token: &Biscuit,
-        capability: &str,
-        current_time_seconds: Option<u64>,
-    ) -> Result<bool, BiscuitError> {
-        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)?;
-        self.has_verified_capability_with_time(&verified_token, capability, current_time_seconds)
-    }
-
     /// Check if a verified token has a specific capability through Datalog evaluation.
-    pub fn has_verified_capability_with_time(
+    pub fn has_capability_with_time(
         &self,
         token: &VerifiedBiscuitToken,
         capability: &str,

@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use aura_core::threshold::{SigningContext, ThresholdSignature};
 use aura_core::tree::TreeCommitment;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::TrustedKeyResolver;
 use aura_signature::verify_threshold_signing_context_transcript;
 use std::sync::Arc;
 
@@ -161,23 +162,22 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
     /// Verify a guardian's signature over a recovery approval.
     ///
     /// Verifies that the signature was produced by the guardian's authority
-    /// over the specified recovery operation.
+    /// over the specified recovery operation using trusted authority/epoch key material.
     pub async fn verify_guardian_signature(
         &self,
         guardian_authority: &AuthorityId,
+        guardian_epoch: u64,
         target_authority: &AuthorityId,
         new_tree_root: &TreeCommitment,
         session_id: &str,
         signature: &[u8],
+        key_resolver: &impl TrustedKeyResolver,
     ) -> crate::RecoveryResult<bool> {
-        // Get the guardian's public key package
-        let public_key = self
-            .effect_system
-            .public_key_package(guardian_authority)
-            .await
-            .ok_or_else(|| {
+        let trusted_key = key_resolver
+            .resolve_authority_threshold_key(*guardian_authority, guardian_epoch)
+            .map_err(|e| {
                 crate::RecoveryError::not_found(format!(
-                    "No public key for guardian: {guardian_authority:?}"
+                    "No trusted threshold key for guardian {guardian_authority:?} at epoch {guardian_epoch}: {e}"
                 ))
             })?;
 
@@ -191,9 +191,9 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
         verify_threshold_signing_context_transcript(
             self.effect_system.as_ref(),
             &signing_context,
-            0,
+            guardian_epoch,
             signature,
-            &public_key,
+            trusted_key.bytes(),
         )
         .await
         .map_err(|e| crate::RecoveryError::internal(format!("Signature verification failed: {e}")))

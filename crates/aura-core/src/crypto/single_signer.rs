@@ -84,6 +84,7 @@ impl std::fmt::Display for SigningMode {
 /// - Stored via `SecureStorageEffects`
 /// - Zeroized when no longer needed
 /// - Never logged or transmitted
+// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md transitional single-signer package; finding 40 tracks migration to PrivateKeyBytes with redacted Debug and zeroization.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SingleSignerKeyPackage {
     /// 32-byte Ed25519 signing key (private).

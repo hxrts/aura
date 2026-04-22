@@ -46,11 +46,11 @@ pub struct EncryptedKeyShare {
     /// FROST participant index (1-based)
     pub signer_index: u16,
     /// Encrypted key package bytes (ChaCha20-Poly1305)
-    // aura-security: raw-secret-field-justified encrypted recovery wire payload; plaintext share must use secret wrappers before encryption.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md encrypted recovery wire payload; plaintext share must use secret wrappers before encryption.
     pub encrypted_share: Vec<u8>,
     /// Nonce used for encryption
     pub nonce: [u8; 12],
-    /// Ephemeral public key for key agreement (X25519 style using Ed25519)
+    /// Untrusted key material: ephemeral agreement key carried by the remote setup payload.
     pub ephemeral_public_key: Vec<u8>,
 }
 
@@ -78,7 +78,7 @@ pub struct GuardianAcceptance {
     pub setup_id: String,
     /// Whether the guardian accepted
     pub accepted: bool,
-    /// Guardian's public key for this relationship
+    /// Untrusted key material: claimed guardian relationship key; verification must resolve expected guardian state separately.
     pub public_key: Vec<u8>,
     /// Timestamp of acceptance
     pub timestamp: TimeStamp,
@@ -115,7 +115,7 @@ pub struct SetupCompletion {
     pub threshold: u16,
     /// Encrypted key shares for each guardian
     pub encrypted_shares: Vec<EncryptedKeyShare>,
-    /// Public key package for the recovery authority
+    /// Untrusted key material: setup completion payload; verification must resolve expected recovery authority key separately.
     pub public_key_package: Vec<u8>,
 }
 

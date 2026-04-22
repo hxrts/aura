@@ -100,8 +100,8 @@ pub struct BiometricConfig {
     pub biometric_type: BiometricType,
     /// Require liveness detection during verification
     pub liveness_detection: bool,
-    /// Allow fallback to alternative authentication if biometric fails
-    pub allow_fallback: bool,
+    /// Fallback policy when biometric verification fails.
+    pub fallback_policy: BiometricFallbackPolicy,
     /// Timeout for biometric capture (milliseconds)
     pub capture_timeout_ms: u32,
     /// Number of retry attempts allowed
@@ -110,13 +110,29 @@ pub struct BiometricConfig {
     pub minimum_quality: f32,
 }
 
+/// Explicit fallback policy for biometric verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BiometricFallbackPolicy {
+    /// Do not allow fallback authentication after biometric failure.
+    DenyFallbackAuthentication,
+    /// Allow an explicitly configured fallback authentication path.
+    AllowFallbackAuthentication,
+}
+
+impl BiometricFallbackPolicy {
+    /// Whether fallback authentication is permitted by this policy.
+    pub fn allows_fallback(self) -> bool {
+        matches!(self, Self::AllowFallbackAuthentication)
+    }
+}
+
 impl BiometricConfig {
     /// Create a high-security configuration for the given biometric type
     pub fn high_security(biometric_type: BiometricType) -> Self {
         Self {
             biometric_type,
             liveness_detection: true,
-            allow_fallback: false,
+            fallback_policy: BiometricFallbackPolicy::DenyFallbackAuthentication,
             capture_timeout_ms: 10000, // 10 seconds
             max_retry_attempts: 3,
             minimum_quality: 0.8,
@@ -128,7 +144,7 @@ impl BiometricConfig {
         Self {
             biometric_type,
             liveness_detection: true,
-            allow_fallback: true,
+            fallback_policy: BiometricFallbackPolicy::AllowFallbackAuthentication,
             capture_timeout_ms: 15000, // 15 seconds
             max_retry_attempts: 5,
             minimum_quality: 0.6,
@@ -140,7 +156,7 @@ impl BiometricConfig {
         Self {
             biometric_type,
             liveness_detection: false,
-            allow_fallback: true,
+            fallback_policy: BiometricFallbackPolicy::AllowFallbackAuthentication,
             capture_timeout_ms: 30000, // 30 seconds
             max_retry_attempts: 10,
             minimum_quality: 0.4,
@@ -456,12 +472,15 @@ mod tests {
     fn test_biometric_config_presets() {
         let high_sec = BiometricConfig::high_security(BiometricType::Face);
         assert!(high_sec.liveness_detection);
-        assert!(!high_sec.allow_fallback);
+        assert_eq!(
+            high_sec.fallback_policy,
+            BiometricFallbackPolicy::DenyFallbackAuthentication
+        );
         assert!(high_sec.minimum_quality >= 0.8);
 
         let user_friendly = BiometricConfig::user_friendly(BiometricType::Fingerprint);
         assert!(!user_friendly.liveness_detection);
-        assert!(user_friendly.allow_fallback);
+        assert!(user_friendly.fallback_policy.allows_fallback());
         assert!(user_friendly.max_retry_attempts >= 10);
     }
 

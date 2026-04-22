@@ -100,7 +100,7 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
         })?();
         let result = self
             .biscuit_bridge
-            .authorize_verified_with_time(&token, operation, scope, Some(now))
+            .authorize_with_time(&token, operation, scope, Some(now))
             .map_err(|e| AuthorizationError::InvalidToken {
                 reason: e.to_string(),
             })?;

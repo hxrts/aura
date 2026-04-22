@@ -22,13 +22,14 @@ fn biscuit_bridge_authorizes_basic_token() {
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build read-capability token: {err:?}"));
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), common::authority_id(1));
+    let verified = common::verified_token(&token, keypair.public());
     let scope = ResourceScope::Authority {
         authority_id: common::authority_id(70),
         operation: AuthorityOp::UpdateTree,
     };
 
     let result = bridge
-        .authorize_with_time(&token, AuthorizationOp::Read, &scope, Some(500))
+        .authorize_with_time(&verified, AuthorizationOp::Read, &scope, Some(500))
         .unwrap_or_else(|err| panic!("bridge authorization failed unexpectedly: {err:?}"));
     assert!(result.authorized);
 }
@@ -79,9 +80,10 @@ fn biscuit_bridge_accepts_namespaced_capability_tokens() {
         .create_token(recipient, vec![capability_name!("invitation:decline")])
         .unwrap_or_else(|err| panic!("failed to build invitation-capability token: {err:?}"));
     let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
+    let verified = common::verified_token(&token, authority.root_public_key());
 
     let allowed = bridge
-        .has_capability_with_time(&token, "invitation:decline", Some(1_000))
+        .has_capability_with_time(&verified, "invitation:decline", Some(1_000))
         .unwrap_or_else(|err| panic!("namespaced capability lookup failed unexpectedly: {err:?}"));
     assert!(allowed);
 }
@@ -107,6 +109,7 @@ fn biscuit_bridge_default_member_token_carries_guard_chain_send_capabilities() {
         )
         .unwrap_or_else(|err| panic!("failed to build default member token: {err:?}"));
     let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
+    let verified = common::verified_token(&token, authority.root_public_key());
 
     for capability in [
         "flow_charge",
@@ -119,7 +122,7 @@ fn biscuit_bridge_default_member_token_carries_guard_chain_send_capabilities() {
         "chat:message:send",
     ] {
         let allowed = bridge
-            .has_capability_with_time(&token, capability, Some(1_000))
+            .has_capability_with_time(&verified, capability, Some(1_000))
             .unwrap_or_else(|err| {
                 panic!("default member token lookup failed for {capability}: {err:?}")
             });
@@ -140,9 +143,15 @@ fn biscuit_bridge_requires_explicit_time() {
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build read-capability token: {err:?}"));
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), common::authority_id(5));
+    let verified = common::verified_token(&token, keypair.public());
 
-    let error = match bridge.authorize(&token, AuthorizationOp::Read, &common::context_scope(11)) {
-        Ok(_) => panic!("authorize() without time must fail closed"),
+    let error = match bridge.authorize_with_time(
+        &verified,
+        AuthorizationOp::Read,
+        &common::context_scope(11),
+        None,
+    ) {
+        Ok(_) => panic!("authorization without time must fail closed"),
         Err(error) => error,
     };
 
@@ -165,15 +174,16 @@ fn biscuit_bridge_rejects_expired_token_with_explicit_time() {
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build expiring token: {err:?}"));
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), common::authority_id(6));
+    let verified = common::verified_token(&token, keypair.public());
     let scope = common::context_scope(12);
 
     let before_expiry = bridge
-        .authorize_with_time(&token, AuthorizationOp::Read, &scope, Some(999))
+        .authorize_with_time(&verified, AuthorizationOp::Read, &scope, Some(999))
         .unwrap_or_else(|err| panic!("pre-expiry authorization failed unexpectedly: {err:?}"));
     assert!(before_expiry.authorized);
 
     let after_expiry = bridge
-        .authorize_with_time(&token, AuthorizationOp::Read, &scope, Some(1_500))
+        .authorize_with_time(&verified, AuthorizationOp::Read, &scope, Some(1_500))
         .unwrap_or_else(|err| panic!("post-expiry authorization failed unexpectedly: {err:?}"));
     assert!(!after_expiry.authorized);
 }

@@ -3,7 +3,9 @@
 #![allow(clippy::disallowed_types)]
 
 use async_trait::async_trait;
-use aura_authorization::{BiscuitAuthorizationBridge, ContextOp, ResourceScope};
+use aura_authorization::{
+    BiscuitAuthorizationBridge, ContextOp, ResourceScope, VerifiedBiscuitToken,
+};
 use aura_core::effects::FlowBudgetEffects;
 use aura_core::types::flow::{FlowBudget, FlowBudgetKey, FlowCost, FlowNonce, Receipt, ReceiptSig};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
@@ -21,7 +23,7 @@ pub struct FlowBudgetHandler {
     default_limit: u64,
     budgets: Arc<Mutex<BTreeMap<FlowBudgetKey, FlowBudget>>>,
     scope_overrides: Arc<Mutex<BTreeMap<ContextId, ResourceScope>>>,
-    policy_token: Option<Biscuit>,
+    policy_token: Option<VerifiedBiscuitToken>,
     policy_bridge: Option<BiscuitAuthorizationBridge>,
     time_provider: Arc<dyn Fn() -> u64 + Send + Sync>,
 }
@@ -61,7 +63,9 @@ impl FlowBudgetHandler {
 
     /// Attach a Biscuit policy token and bridge for resource-scope enforcement.
     pub fn with_policy(mut self, token: Biscuit, bridge: BiscuitAuthorizationBridge) -> Self {
-        self.policy_token = Some(token);
+        let verified = VerifiedBiscuitToken::from_token(&token, bridge.root_public_key())
+            .unwrap_or_else(|error| panic!("invalid test flow-budget Biscuit policy: {error}"));
+        self.policy_token = Some(verified);
         self.policy_bridge = Some(bridge);
         self
     }

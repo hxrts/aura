@@ -129,7 +129,7 @@ pub struct GuardianApproval {
     /// with any embedded recovery share bytes.
     pub signature: Vec<u8>,
     /// Optional encrypted share data. Zeroized on drop.
-    // aura-security: raw-secret-field-justified verified recovery API payload until approval envelopes move to EncryptedSecretBlob.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md verified recovery API payload until approval envelopes move to EncryptedSecretBlob.
     pub share_data: Option<Vec<u8>>,
     #[zeroize(skip)]
     /// Approval timestamp
@@ -168,7 +168,7 @@ pub struct RecoveryResult {
     /// Final state
     pub state: RecoveryState,
     /// Recovered key material (if applicable). Zeroized on drop.
-    // aura-security: raw-secret-field-justified recovery API payload until result envelopes move to SecretBytes.
+    // aura-security: raw-secret-field-justified owner=security-refactor expires=before-release remediation=work/2.md recovery API payload until result envelopes move to SecretBytes.
     pub key_material: Option<Vec<u8>>,
     /// Guardian approvals received
     pub approvals: Vec<GuardianApproval>,

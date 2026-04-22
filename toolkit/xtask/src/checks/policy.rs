@@ -42,7 +42,9 @@ pub fn run_service_registry_ownership() -> Result<()> {
         for hit in legacy_hits {
             eprintln!("{hit}");
         }
-        bail!("service-registry-ownership: legacy duplicate rendezvous cache ownership paths are still present");
+        bail!(
+            "service-registry-ownership: legacy duplicate rendezvous cache ownership paths are still present"
+        );
     }
 
     let duplicate_stores = rg_lines(&vec![
@@ -62,7 +64,9 @@ pub fn run_service_registry_ownership() -> Result<()> {
         for hit in duplicates {
             eprintln!("{hit}");
         }
-        bail!("service-registry-ownership: duplicate runtime descriptor stores detected outside service_registry/rendezvous_manager");
+        bail!(
+            "service-registry-ownership: duplicate runtime descriptor stores detected outside service_registry/rendezvous_manager"
+        );
     }
 
     println!("service-registry-ownership: ok");
@@ -86,7 +90,9 @@ pub fn run_runtime_error_boundary() -> Result<()> {
         for hit in violations {
             eprintln!("{hit}");
         }
-        bail!("typed-error-boundary: parity-critical workflow/runtime paths still use stringly primary error construction");
+        bail!(
+            "typed-error-boundary: parity-critical workflow/runtime paths still use stringly primary error construction"
+        );
     }
     println!("typed error boundary: clean");
     Ok(())
@@ -320,7 +326,9 @@ pub fn run_ownership_category_declarations() -> Result<()> {
         for entry in missing_arch {
             eprintln!("{entry}");
         }
-        bail!("ownership-category-declarations: crates are missing required ARCHITECTURE.md ownership declarations");
+        bail!(
+            "ownership-category-declarations: crates are missing required ARCHITECTURE.md ownership declarations"
+        );
     }
     if !violations.is_empty() {
         for violation in violations {
@@ -421,7 +429,9 @@ pub fn run_ownership_annotation_ratchet(args: &[String]) -> Result<()> {
     }
 
     if diff.trim().is_empty() {
-        println!("ownership-annotation-ratchet({mode}): no diff in scope; completeness clean (0 named exclusions)");
+        println!(
+            "ownership-annotation-ratchet({mode}): no diff in scope; completeness clean (0 named exclusions)"
+        );
     } else {
         println!("ownership-annotation-ratchet({mode}): clean (0 named exclusions)");
     }
@@ -654,7 +664,9 @@ pub fn run_runtime_shutdown_order() -> Result<()> {
     let lifecycle = first_match_line(&target, "lifecycle_manager.shutdown(ctx).await")?
         .context("runtime-shutdown-order: missing lifecycle shutdown step")?;
     if reactive >= task_tree {
-        bail!("runtime-shutdown-order: reactive pipeline must shut down before task tree cancellation");
+        bail!(
+            "runtime-shutdown-order: reactive pipeline must shut down before task tree cancellation"
+        );
     }
     if task_tree >= stop_services {
         bail!("runtime-shutdown-order: runtime task tree must cancel before service teardown");
@@ -728,21 +740,27 @@ pub fn run_privacy_runtime_locality() -> Result<()> {
         r#"authoritative = ".*LocalSelectionProfile"#.into(),
         repo_relative(&selection_manager),
     ])? {
-        bail!("adaptive-privacy-runtime-locality: LocalSelectionProfile must remain runtime-local, not an authoritative service-surface object");
+        bail!(
+            "adaptive-privacy-runtime-locality: LocalSelectionProfile must remain runtime-local, not an authoritative service-surface object"
+        );
     }
     if !rg_exists(&vec![
         "-n".into(),
         r#"authoritative = """#.into(),
         repo_relative(&selection_manager),
     ])? {
-        bail!("adaptive-privacy-runtime-locality: selection_manager service_surface must declare an empty authoritative set");
+        bail!(
+            "adaptive-privacy-runtime-locality: selection_manager service_surface must declare an empty authoritative set"
+        );
     }
     if !rg_exists(&vec![
         "-n".into(),
         r#"runtime_local = ".*selection_profiles.*""#.into(),
         repo_relative(&selection_manager),
     ])? {
-        bail!("adaptive-privacy-runtime-locality: selection_manager service_surface must declare selection profiles as runtime-local state");
+        bail!(
+            "adaptive-privacy-runtime-locality: selection_manager service_surface must declare selection profiles as runtime-local state"
+        );
     }
 
     let uses = rg_lines(&vec![
@@ -768,14 +786,18 @@ pub fn run_privacy_runtime_locality() -> Result<()> {
         for hit in leaked {
             eprintln!("{hit}");
         }
-        bail!("adaptive-privacy-runtime-locality: LocalSelectionProfile must not escape the runtime-owned selection service surface");
+        bail!(
+            "adaptive-privacy-runtime-locality: LocalSelectionProfile must not escape the runtime-owned selection service surface"
+        );
     }
     if !rg_exists(&vec![
         "-n".into(),
         "SelectionState".into(),
         repo_relative(&registry),
     ])? {
-        bail!("adaptive-privacy-runtime-locality: service_registry must store SelectionState snapshots for sanctioned runtime-local queries");
+        bail!(
+            "adaptive-privacy-runtime-locality: service_registry must store SelectionState snapshots for sanctioned runtime-local queries"
+        );
     }
     let agent_arch_contents = read(&agent_arch)?;
     if !agent_arch_contents.contains(
@@ -784,7 +806,9 @@ pub fn run_privacy_runtime_locality() -> Result<()> {
         bail!("adaptive-privacy-runtime-locality: aura-agent ARCHITECTURE.md must document the adaptive privacy runtime-owned service set");
     }
     if !agent_arch_contents.contains("`LocalSelectionProfile` is runtime-local") {
-        bail!("adaptive-privacy-runtime-locality: aura-agent ARCHITECTURE.md must state that LocalSelectionProfile is runtime-local");
+        bail!(
+            "adaptive-privacy-runtime-locality: aura-agent ARCHITECTURE.md must state that LocalSelectionProfile is runtime-local"
+        );
     }
     println!("adaptive-privacy-runtime-locality: ok");
     Ok(())
@@ -806,7 +830,9 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
         for hit in legacy_hits {
             eprintln!("{hit}");
         }
-        bail!("adaptive-privacy-phase5-legacy-sweep: legacy non-runtime selection ownership paths must be removed");
+        bail!(
+            "adaptive-privacy-phase5-legacy-sweep: legacy non-runtime selection ownership paths must be removed"
+        );
     }
 
     if rg_exists(&vec![
@@ -814,7 +840,9 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
         "upcoming runtime/app integration|upcoming.*land".into(),
         repo_relative(repo_root.join("crates/aura-agent/src/runtime/services/mod.rs")),
     ])? {
-        bail!("adaptive-privacy-phase5-legacy-sweep: transitional transparent-envelope scaffolding comments must be removed from runtime service exports");
+        bail!(
+            "adaptive-privacy-phase5-legacy-sweep: transitional transparent-envelope scaffolding comments must be removed from runtime service exports"
+        );
     }
 
     let setup_hits = rg_lines(&vec![
@@ -834,7 +862,9 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
         for hit in setup_violations {
             eprintln!("{hit}");
         }
-        bail!("adaptive-privacy-phase5-legacy-sweep: transparent anonymous setup objects must stay scoped to aura-core service types and the runtime path manager");
+        bail!(
+            "adaptive-privacy-phase5-legacy-sweep: transparent anonymous setup objects must stay scoped to aura-core service types and the runtime path manager"
+        );
     }
 
     let service_file = repo_root.join("crates/aura-core/src/service.rs");
@@ -848,16 +878,22 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
             &service_file,
             &format!("TransparentMoveTrafficClass::{traffic_class}"),
         )? {
-            bail!("adaptive-privacy-phase5-legacy-sweep: shared transparent move envelope must carry {traffic_class} traffic");
+            bail!(
+                "adaptive-privacy-phase5-legacy-sweep: shared transparent move envelope must carry {traffic_class} traffic"
+            );
         }
     }
 
     let cover = repo_root.join("crates/aura-agent/src/runtime/services/cover_traffic_generator.rs");
     if !contains(&cover, "MoveEnvelope::opaque")? {
-        bail!("adaptive-privacy-phase5-legacy-sweep: cover traffic planning must stay on the shared Move envelope substrate");
+        bail!(
+            "adaptive-privacy-phase5-legacy-sweep: cover traffic planning must stay on the shared Move envelope substrate"
+        );
     }
     if contains(&cover, "TransportEnvelope")? {
-        bail!("adaptive-privacy-phase5-legacy-sweep: cover traffic planning must not bypass the shared Move envelope substrate");
+        bail!(
+            "adaptive-privacy-phase5-legacy-sweep: cover traffic planning must not bypass the shared Move envelope substrate"
+        );
     }
 
     let runtime_hits = rg_lines(&vec![
@@ -875,7 +911,9 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
         for hit in runtime_hits {
             eprintln!("{hit}");
         }
-        bail!("adaptive-privacy-phase5-legacy-sweep: runtime adaptive-privacy services must not reintroduce implicit route setup or direct transport fallback");
+        bail!(
+            "adaptive-privacy-phase5-legacy-sweep: runtime adaptive-privacy services must not reintroduce implicit route setup or direct transport fallback"
+        );
     }
 
     for legacy_pattern in [
@@ -890,7 +928,9 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
             repo_relative(repo_root.join("crates/aura-core/src/service.rs")),
         ])?;
         if !hits.is_empty() {
-            bail!("adaptive-privacy-phase5-legacy-sweep: runtime adaptive-privacy services still reference legacy transport assumption: {legacy_pattern}");
+            bail!(
+                "adaptive-privacy-phase5-legacy-sweep: runtime adaptive-privacy services still reference legacy transport assumption: {legacy_pattern}"
+            );
         }
     }
 
@@ -916,7 +956,9 @@ pub fn run_harness_typed_semantic_errors() -> Result<()> {
         for hit in violations {
             eprintln!("{hit}");
         }
-        bail!("harness-typed-semantic-errors: parity-critical shared semantic paths still rely on stringly error construction");
+        bail!(
+            "harness-typed-semantic-errors: parity-critical shared semantic paths still rely on stringly error construction"
+        );
     }
     println!("harness typed semantic errors: clean");
     Ok(())
@@ -940,7 +982,9 @@ pub fn run_harness_typed_json_boundary() -> Result<()> {
         for hit in violations {
             eprintln!("{hit}");
         }
-        bail!("harness-typed-json-boundary: shared semantic core still relies on raw serde_json::Value plumbing");
+        bail!(
+            "harness-typed-json-boundary: shared semantic core still relies on raw serde_json::Value plumbing"
+        );
     }
     println!("harness typed json boundary: clean");
     Ok(())
@@ -961,7 +1005,9 @@ pub fn run_harness_authoritative_fact_boundary() -> Result<()> {
         for hit in violations {
             eprintln!("{hit}");
         }
-        bail!("harness-authoritative-fact-boundary: frontend-facing modules are handling authoritative semantic facts outside approved boundaries");
+        bail!(
+            "harness-authoritative-fact-boundary: frontend-facing modules are handling authoritative semantic facts outside approved boundaries"
+        );
     }
     println!("harness authoritative fact boundary: clean");
     Ok(())
@@ -1012,7 +1058,9 @@ pub fn run_observed_layer_boundaries() -> Result<()> {
         for hit in ui_violations {
             eprintln!("{hit}");
         }
-        bail!("observed-layer-authorship: observed UI modules may not author authoritative semantic truth");
+        bail!(
+            "observed-layer-authorship: observed UI modules may not author authoritative semantic truth"
+        );
     }
     println!("observed layer authorship: clean");
     Ok(())
@@ -1145,23 +1193,33 @@ pub fn run_browser_restart_boundary() -> Result<()> {
     if contents.contains("pending_semantic_payload")
         || contents.contains("pending_runtime_stage_payload")
     {
-        bail!("browser semantic restart boundary: legacy restart seed payload plumbing is still present in the Playwright driver");
+        bail!(
+            "browser semantic restart boundary: legacy restart seed payload plumbing is still present in the Playwright driver"
+        );
     }
     let submit_body = extract_ts_function(&contents, "async function submitSemanticCommand(params)")
         .context("browser semantic restart boundary: could not locate submitSemanticCommand in Playwright driver")?;
     let runtime_body = extract_ts_function(&contents, "async function stageRuntimeIdentity(params)")
         .context("browser semantic restart boundary: could not locate stageRuntimeIdentity in Playwright driver")?;
     if submit_body.contains("restartPageSession(") {
-        bail!("browser semantic restart boundary: submitSemanticCommand must fail closed instead of replaying through restartPageSession");
+        bail!(
+            "browser semantic restart boundary: submitSemanticCommand must fail closed instead of replaying through restartPageSession"
+        );
     }
     if !submit_body.contains("submit_semantic_command_enqueue_failed_closed") {
-        bail!("browser semantic restart boundary: submitSemanticCommand no longer exposes an explicit fail-closed semantic enqueue path");
+        bail!(
+            "browser semantic restart boundary: submitSemanticCommand no longer exposes an explicit fail-closed semantic enqueue path"
+        );
     }
     if runtime_body.contains("restartPageSession(") {
-        bail!("browser semantic restart boundary: stageRuntimeIdentity must fail closed instead of replaying through restartPageSession");
+        bail!(
+            "browser semantic restart boundary: stageRuntimeIdentity must fail closed instead of replaying through restartPageSession"
+        );
     }
     if !runtime_body.contains("stage_runtime_identity_enqueue_failed_closed") {
-        bail!("browser semantic restart boundary: stageRuntimeIdentity no longer exposes an explicit fail-closed runtime-stage enqueue path");
+        bail!(
+            "browser semantic restart boundary: stageRuntimeIdentity no longer exposes an explicit fail-closed runtime-stage enqueue path"
+        );
     }
     println!("browser semantic restart boundary: clean");
     Ok(())
@@ -1390,11 +1448,17 @@ pub fn run_ownership_policy() -> Result<()> {
     run_ownership_workflow_tag_ratchet()?;
     run_observed_layer_boundaries()?;
     run_remote_ingress_boundary()?;
+    run_canonical_remote_apply_boundary()?;
+    run_journal_authorization_wiring_boundary()?;
     run_raw_transport_send_boundary()?;
     run_invitation_legacy_fallback_boundary()?;
     run_biscuit_verifier_boundary()?;
+    run_signed_transcript_boundary()?;
+    run_trusted_key_resolution_boundary()?;
     run_security_bypass_symbols()?;
     run_secret_field_wrappers()?;
+    run_security_exception_metadata()?;
+    run_security_boolean_escape_hatch_boundary()?;
     run_harness_ownership_policy()?;
     run_browser_restart_boundary()?;
     run_testing_exception_boundary()?;
@@ -1404,11 +1468,17 @@ pub fn run_ownership_policy() -> Result<()> {
 
 pub fn run_security_boundary_policy() -> Result<()> {
     run_remote_ingress_boundary()?;
+    run_canonical_remote_apply_boundary()?;
+    run_journal_authorization_wiring_boundary()?;
     run_biscuit_verifier_boundary()?;
+    run_signed_transcript_boundary()?;
+    run_trusted_key_resolution_boundary()?;
     run_raw_transport_send_boundary()?;
     run_invitation_legacy_fallback_boundary()?;
     run_security_bypass_symbols()?;
     run_secret_field_wrappers()?;
+    run_security_exception_metadata()?;
+    run_security_boolean_escape_hatch_boundary()?;
     println!("security boundary policy: clean");
     Ok(())
 }
@@ -1427,7 +1497,15 @@ pub fn run_biscuit_verifier_boundary() -> Result<()> {
             if is_test_path || line_is_test_scoped(&lines, idx) {
                 continue;
             }
-            let local_window = lines[idx.saturating_sub(8)..=idx].join("\n");
+            let local_window = lines[idx.saturating_sub(16)..=idx].join("\n");
+            if (line.contains("Biscuit::from(") || line.contains("biscuit_auth::Biscuit::from("))
+                && !rel.ends_with("crates/aura-authorization/src/biscuit_evaluator.rs")
+            {
+                violations.push(format!(
+                    "{rel}:{} parses raw Biscuit bytes outside VerifiedBiscuitToken::from_bytes",
+                    idx + 1
+                ));
+            }
             if line.contains(".authorizer()")
                 && !(rel.ends_with("crates/aura-authorization/src/biscuit_evaluator.rs")
                     && line.contains("self.token.authorizer()"))
@@ -1442,9 +1520,33 @@ pub fn run_biscuit_verifier_boundary() -> Result<()> {
                     idx + 1
                 ));
             }
+            if starts_security_critical_biscuit_api(line) {
+                let signature = signature_window(&lines, idx);
+                if signature.contains("Biscuit") && !signature.contains("VerifiedBiscuitToken") {
+                    violations.push(format!(
+                        "{rel}:{} exposes a security-critical Biscuit API without VerifiedBiscuitToken evidence",
+                        idx + 1
+                    ));
+                }
+            }
             if line.contains("NoopBiscuitAuthorizationHandler") {
                 violations.push(format!(
                     "{rel}:{} reintroduces a production no-op Biscuit authorization handler",
+                    idx + 1
+                ));
+            }
+            let lowered = line.to_ascii_lowercase();
+            if (lowered.contains("fn new_noop")
+                || lowered.contains("fn noop")
+                || lowered.contains("diagnostic fallback")
+                || lowered.contains("unverified capability")
+                || lowered.contains("unverified authorization"))
+                && (local_window.contains("Biscuit")
+                    || local_window.contains("Authorization")
+                    || local_window.contains("capability"))
+            {
+                violations.push(format!(
+                    "{rel}:{} exposes a production fallback/unverified authorization path",
                     idx + 1
                 ));
             }
@@ -1473,6 +1575,441 @@ pub fn run_biscuit_verifier_boundary() -> Result<()> {
 
     println!("biscuit verifier boundary policy: clean");
     Ok(())
+}
+
+fn starts_security_critical_biscuit_api(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    [
+        "pub fn authorize(",
+        "pub fn authorize_with_time(",
+        "pub async fn authorize(",
+        "pub async fn authorize_with_time(",
+        "fn authorize(",
+        "fn authorize_with_time(",
+        "async fn authorize(",
+        "async fn authorize_with_time(",
+        "pub fn has_capability",
+        "fn has_capability",
+        "pub fn evaluate_access",
+        "fn evaluate_access",
+        "pub fn check_access",
+        "fn check_access",
+        "pub fn verify_token_authority",
+        "fn verify_token_authority",
+        "fn check_biscuit_authorization",
+        "fn authorizer_with_token",
+        "pub async fn evaluate_authority_op",
+        "async fn evaluate_authority_op",
+        "pub async fn evaluate_context_op",
+        "async fn evaluate_context_op",
+        "fn evaluate_scope",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
+}
+
+fn signature_window(lines: &[String], start: usize) -> String {
+    let mut signature = String::new();
+    for line in lines.iter().skip(start).take(24) {
+        signature.push_str(line);
+        signature.push('\n');
+        if line.contains('{') || line.trim_end().ends_with(';') {
+            break;
+        }
+    }
+    signature
+}
+
+pub fn run_signed_transcript_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let crates_dir = repo_root.join("crates");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&crates_dir) {
+        let rel = repo_relative(&path);
+        if !is_security_critical_protocol_file(&rel) || is_approved_crypto_boundary(&rel) {
+            continue;
+        }
+        let lines = read_lines(&path)?;
+        let is_test_path = rel.contains("/tests/") || rel.ends_with("/tests.rs");
+
+        for (idx, line) in lines.iter().enumerate() {
+            if is_test_path || line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") || trimmed.starts_with("///") || trimmed.starts_with("//!")
+            {
+                continue;
+            }
+            let local_window = lines[idx.saturating_sub(12)..=idx].join("\n");
+            let has_transcript_context = local_window.contains("SecurityTranscript")
+                || local_window.contains("transcript_bytes")
+                || local_window.contains("encode_transcript")
+                || local_window.contains("sign_ed25519_transcript")
+                || local_window.contains("verify_ed25519_transcript")
+                || local_window.contains("verify_frost_transcript")
+                || local_window.contains("verify_threshold_signing_context_transcript")
+                || local_window.contains("SigningContext");
+
+            if (line.contains(".ed25519_sign(")
+                || line.contains(".ed25519_verify(")
+                || line.contains(".frost_verify(")
+                || line.contains("ed25519_verify(")
+                || line.contains("frost_verify("))
+                && !has_transcript_context
+            {
+                violations.push(format!(
+                    "{rel}:{} calls a low-level signing/verification primitive without a typed transcript",
+                    idx + 1
+                ));
+            }
+
+            if line.contains(".sign_operation(") && !has_transcript_context {
+                violations.push(format!(
+                    "{rel}:{} signs raw operation bytes without a typed transcript",
+                    idx + 1
+                ));
+            }
+
+            if line.contains(".verify(")
+                && line.contains("signature")
+                && !has_transcript_context
+                && !line.contains(".verify(evidence)")
+            {
+                violations.push(format!(
+                    "{rel}:{} verifies a signature without typed transcript evidence",
+                    idx + 1
+                ));
+            }
+
+            if starts_security_critical_signature_api(line) {
+                let signature = signature_window(&lines, idx);
+                if (signature.contains("message: &[u8]")
+                    || signature.contains("payload: &[u8]")
+                    || signature.contains("bytes: &[u8]")
+                    || signature.contains("operation: &[u8]"))
+                    && !signature.contains("SecurityTranscript")
+                    && !signature.contains("SigningContext")
+                {
+                    violations.push(format!(
+                        "{rel}:{} exposes a signature API over raw bytes instead of a typed transcript",
+                        idx + 1
+                    ));
+                }
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!("signed-transcript-boundary:\n{}", violations.join("\n"));
+    }
+
+    println!("signed transcript boundary policy: clean");
+    Ok(())
+}
+
+fn is_security_critical_protocol_file(rel: &str) -> bool {
+    [
+        "crates/aura-agent/src/handlers/",
+        "crates/aura-authentication/src/",
+        "crates/aura-consensus/src/",
+        "crates/aura-invitation/src/",
+        "crates/aura-protocol/src/",
+        "crates/aura-recovery/src/",
+        "crates/aura-sync/src/protocols/",
+        "crates/aura-sync/src/services/",
+    ]
+    .iter()
+    .any(|prefix| rel.contains(prefix))
+}
+
+fn is_approved_crypto_boundary(rel: &str) -> bool {
+    [
+        "crates/aura-signature/src/transcript.rs",
+        "crates/aura-core/src/crypto/",
+        "crates/aura-core/src/effects/crypto.rs",
+        "crates/aura-core/src/effects/threshold.rs",
+        "crates/aura-agent/src/runtime/effects/crypto.rs",
+        "crates/aura-consensus/src/frost.rs",
+    ]
+    .iter()
+    .any(|allowed| rel.ends_with(allowed) || rel.contains(allowed))
+}
+
+fn starts_security_critical_signature_api(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    [
+        "pub fn sign_",
+        "pub async fn sign_",
+        "fn sign_",
+        "async fn sign_",
+        "pub fn verify_",
+        "pub async fn verify_",
+        "fn verify_",
+        "async fn verify_",
+        "pub fn validate_",
+        "pub async fn validate_",
+        "fn validate_",
+        "async fn validate_",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
+        && trimmed.contains("signature")
+}
+
+pub fn run_trusted_key_resolution_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let crates_dir = repo_root.join("crates");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&crates_dir) {
+        let rel = repo_relative(&path);
+        if !is_security_critical_protocol_file(&rel) || is_approved_crypto_boundary(&rel) {
+            continue;
+        }
+        let lines = read_lines(&path)?;
+        let is_test_path = rel.contains("/tests/") || rel.ends_with("/tests.rs");
+
+        for (idx, line) in lines.iter().enumerate() {
+            if is_test_path || line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") || trimmed.starts_with("///") || trimmed.starts_with("//!")
+            {
+                continue;
+            }
+
+            let local_window = lines[idx.saturating_sub(16)..=idx].join("\n");
+            if is_signature_verification_call(line)
+                && !has_trusted_key_resolution_context(&local_window)
+            {
+                violations.push(format!(
+                    "{rel}:{} verifies a signature without nearby trusted key resolution",
+                    idx + 1
+                ));
+            }
+
+            if starts_signature_verification_api(line) {
+                let signature = signature_window(&lines, idx);
+                if signature.contains("public_key")
+                    && !signature.contains("TrustedKeyResolver")
+                    && !signature.contains("TrustedPublicKey")
+                    && !signature.contains("key_resolver")
+                {
+                    violations.push(format!(
+                        "{rel}:{} exposes a verification API with raw public-key input instead of trusted key resolution",
+                        idx + 1
+                    ));
+                }
+            }
+
+            if line.contains("Deserialize") && line.contains("derive") {
+                if let Some((struct_line, block)) = deserializable_item_block(&lines, idx) {
+                    if item_carries_identity_and_key_material(&block)
+                        && !block
+                            .to_ascii_lowercase()
+                            .contains("untrusted key material")
+                    {
+                        violations.push(format!(
+                            "{rel}:{} deserializable remote item carries identity and key material without an `untrusted key material` annotation",
+                            struct_line + 1
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!(
+            "trusted-key-resolution-boundary:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    println!("trusted key resolution boundary policy: clean");
+    Ok(())
+}
+
+fn is_signature_verification_call(line: &str) -> bool {
+    line.contains("verify_ed25519_transcript(")
+        || line.contains("verify_frost_transcript(")
+        || line.contains("verify_threshold_signing_context_transcript(")
+        || line.contains(".ed25519_verify(")
+        || line.contains(".frost_verify(")
+        || line.contains("ed25519_verify(")
+        || line.contains("frost_verify(")
+        || line.contains("Ed25519VerifyingKey::from_bytes(")
+}
+
+fn has_trusted_key_resolution_context(window: &str) -> bool {
+    window.contains("TrustedKeyResolver")
+        || window.contains("TrustedPublicKey")
+        || window.contains("trusted_key")
+        || window.contains("key_resolver")
+        || window.contains("resolve_authority_threshold_key")
+        || window.contains("resolve_device_key")
+        || window.contains("resolve_guardian_key")
+        || window.contains("resolve_release_key")
+}
+
+fn starts_signature_verification_api(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    [
+        "pub fn verify_",
+        "pub async fn verify_",
+        "fn verify_",
+        "async fn verify_",
+        "pub fn validate_",
+        "pub async fn validate_",
+        "fn validate_",
+        "async fn validate_",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
+        && trimmed.contains("signature")
+}
+
+fn deserializable_item_block(lines: &[String], derive_idx: usize) -> Option<(usize, String)> {
+    let mut item_start = None;
+    for idx in derive_idx..lines.len().min(derive_idx + 8) {
+        let trimmed = lines[idx].trim_start();
+        if trimmed.starts_with("pub struct ")
+            || trimmed.starts_with("struct ")
+            || trimmed.starts_with("pub enum ")
+            || trimmed.starts_with("enum ")
+        {
+            item_start = Some(idx);
+            break;
+        }
+    }
+    let item_start = item_start?;
+    let mut block = lines[derive_idx..=item_start].join("\n");
+    let mut brace_depth = 0i32;
+    let mut saw_open = false;
+    for line in lines.iter().skip(item_start).take(80) {
+        block.push('\n');
+        block.push_str(line);
+        for ch in line.chars() {
+            match ch {
+                '{' => {
+                    saw_open = true;
+                    brace_depth += 1;
+                }
+                '}' => brace_depth -= 1,
+                _ => {}
+            }
+        }
+        if saw_open && brace_depth <= 0 {
+            break;
+        }
+    }
+    Some((item_start, block))
+}
+
+fn item_carries_identity_and_key_material(block: &str) -> bool {
+    let lower = block.to_ascii_lowercase();
+    let has_key = [
+        "public_key:",
+        "verifying_key:",
+        "group_public_key:",
+        "recovery_public_key:",
+        "route_layer_public_key:",
+        "public_key_package:",
+        "new_group_public_key:",
+        "device_public_key:",
+        "new_public_key:",
+        "ephemeral_public_key:",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+
+    let has_identity = [
+        "authority_id",
+        "guardian_id",
+        "device_id",
+        "account_id",
+        "signer",
+        "issuer",
+        "participant",
+        "from_authority",
+        "to_authority",
+        "proposer",
+        "responder",
+        "peer_id",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+
+    has_key && has_identity
+}
+
+fn rust_workspace_manifests(repo_root: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let mut manifests = vec![repo_root.join("Cargo.toml")];
+    let crates_dir = repo_root.join("crates");
+    for entry in crates_dir.read_dir().context("reading crates/")? {
+        let entry = entry?;
+        let manifest = entry.path().join("Cargo.toml");
+        if manifest.exists() {
+            manifests.push(manifest);
+        }
+    }
+    Ok(manifests)
+}
+
+fn default_feature_list(manifest: &str) -> Option<Vec<String>> {
+    let mut in_features = false;
+    let mut default_expr = String::new();
+    let mut collecting = false;
+
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            if collecting {
+                break;
+            }
+            in_features = trimmed == "[features]";
+            continue;
+        }
+        if !in_features {
+            continue;
+        }
+
+        if collecting {
+            default_expr.push_str(trimmed);
+            if trimmed.contains(']') {
+                break;
+            }
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("default") {
+            let rest = rest.trim_start();
+            if let Some(expr) = rest.strip_prefix('=') {
+                default_expr.push_str(expr.trim());
+                collecting = !expr.contains(']');
+                if !collecting {
+                    break;
+                }
+            }
+        }
+    }
+
+    if default_expr.is_empty() {
+        return None;
+    }
+
+    Some(
+        default_expr
+            .split(['[', ']', ','])
+            .filter_map(|part| {
+                let feature = part.trim().trim_matches('"');
+                (!feature.is_empty()).then(|| feature.to_string())
+            })
+            .collect(),
+    )
 }
 
 pub fn run_remote_ingress_boundary() -> Result<()> {
@@ -1523,13 +2060,33 @@ pub fn run_security_bypass_symbols() -> Result<()> {
     let repo_root = repo_root()?;
     let crates_dir = repo_root.join("crates");
     let mut violations = Vec::new();
-    let symbol_re = Regex::new(r"\b(Noop|Mock)[A-Za-z0-9_]*").expect("valid symbol regex");
+    let symbol_re =
+        Regex::new(r"\b(Noop|Mock)[A-Za-z0-9_]*|\bnew_mock\b").expect("valid symbol regex");
+
+    for manifest in rust_workspace_manifests(&repo_root)? {
+        let rel = repo_relative(&manifest);
+        let contents = read(&manifest)?;
+        if let Some(default_features) = default_feature_list(&contents) {
+            for feature in default_features {
+                let feature_lower = feature.to_ascii_lowercase();
+                if ["demo", "mock", "test", "harness", "simulation", "insecure"]
+                    .iter()
+                    .any(|forbidden| feature_lower.contains(forbidden))
+                {
+                    violations.push(format!(
+                        "{rel}: default feature `{feature}` enables a production bypass/test/simulation surface"
+                    ));
+                }
+            }
+        }
+    }
 
     for path in rust_files_under(&crates_dir) {
         let rel = repo_relative(&path);
         if rel.contains("crates/aura-testkit/")
             || rel.contains("crates/aura-simulator/")
             || rel.contains("crates/aura-harness/")
+            || rel.contains("crates/aura-quint/")
             || rel.contains("crates/aura-macros/")
             || rel.contains("crates/aura-terminal/src/demo/")
             || rel.contains("/tests/")
@@ -1580,6 +2137,11 @@ pub fn run_security_bypass_symbols() -> Result<()> {
                 "threshold_signature: vec![]",
                 "vote_signature: Vec::new()",
                 "vote_signature: vec![]",
+                "proof: Vec::new()",
+                "proof: vec![]",
+                "placeholder_signature",
+                "placeholder_proof",
+                "EvidenceDelta::empty(",
                 "verify_signatures: false",
             ] {
                 if line.contains(forbidden) && !line.contains("partial_signature") {
@@ -1624,17 +2186,20 @@ pub fn run_secret_field_wrappers() -> Result<()> {
     let repo_root = repo_root()?;
     let crates_dir = repo_root.join("crates");
     let field_re = Regex::new(r"\bpub(?:\s*\([^)]*\))?\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^,]+)")?;
-    let raw_bytes_re =
-        Regex::new(r"(^|[<(\s])(?:Vec\s*<\s*u8\s*>|\[\s*u8\s*;\s*[A-Za-z0-9_]+\s*\])")?;
+    let raw_bytes_re = Regex::new(
+        r"(^|[<(\s])(?:Vec\s*<\s*u8\s*>|Box\s*<\s*\[\s*u8\s*\]\s*>|\[\s*u8\s*;\s*[A-Za-z0-9_]+\s*\])",
+    )?;
     let wrapper_re =
         Regex::new(r"\b(SecretBytes|PrivateKeyBytes|SigningShareBytes|EncryptedSecretBlob)\b")?;
     let mut violations = Vec::new();
+    validate_secret_wrapper_contracts(&repo_root, &mut violations)?;
 
     for path in rust_files_under(&crates_dir) {
         let rel = repo_relative(&path);
         if rel.contains("crates/aura-testkit/")
             || rel.contains("crates/aura-simulator/")
             || rel.contains("crates/aura-harness/")
+            || rel.contains("crates/aura-quint/")
             || rel.contains("crates/aura-macros/")
             || rel.contains("crates/aura-terminal/src/demo/")
             || rel.contains("/tests/")
@@ -1653,6 +2218,24 @@ pub fn run_secret_field_wrappers() -> Result<()> {
                 || line_is_test_scoped(&lines, idx)
             {
                 continue;
+            }
+
+            if line.contains("derive") && line.contains('(') && forbidden_secret_derives(line) {
+                if let Some((item_line, block)) = deserializable_item_block(&lines, idx) {
+                    let justification_window = lines[idx.saturating_sub(8)..=idx].join("\n");
+                    if secret_bearing_type_or_block(&block)
+                        && !block.contains("aura-security: raw-secret-field-justified")
+                        && !block.contains("aura-security: secret-derive-justified")
+                        && !justification_window
+                            .contains("aura-security: raw-secret-field-justified")
+                        && !justification_window.contains("aura-security: secret-derive-justified")
+                    {
+                        violations.push(format!(
+                            "{rel}:{} secret-bearing type derives logging/cloning/serde/equality traits without an explicit aura-security justification",
+                            item_line + 1
+                        ));
+                    }
+                }
             }
 
             let Some(captures) = field_re.captures(line) else {
@@ -1689,14 +2272,327 @@ pub fn run_secret_field_wrappers() -> Result<()> {
     Ok(())
 }
 
-pub fn run_raw_transport_send_boundary() -> Result<()> {
+pub fn run_security_boolean_escape_hatch_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let crates_dir = repo_root.join("crates");
+    let bool_decl_re = Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*:\s*bool\b")?;
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&crates_dir) {
+        let rel = repo_relative(&path);
+        if rel.contains("crates/aura-testkit/")
+            || rel.contains("crates/aura-simulator/")
+            || rel.contains("crates/aura-harness/")
+            || rel.contains("crates/aura-quint/")
+            || rel.contains("crates/aura-macros/")
+            || rel.contains("crates/aura-terminal/src/demo/")
+            || rel.contains("/tests/")
+            || rel.ends_with("/tests.rs")
+            || rel.ends_with("/test_support.rs")
+        {
+            continue;
+        }
+
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("#[cfg(test)]")
+                || line_is_test_scoped(&lines, idx)
+            {
+                continue;
+            }
+
+            if let Some(captures) = bool_decl_re.captures(line) {
+                let name = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+                if security_boolean_name_requires_policy(name) {
+                    let preceding = lines[idx.saturating_sub(8)..=idx].join("\n");
+                    let signature_window =
+                        lines[idx.saturating_sub(6)..lines.len().min(idx + 7)].join("\n");
+                    let public_field = trimmed.starts_with("pub ")
+                        || trimmed.starts_with("pub(")
+                        || trimmed.starts_with("pub(crate)");
+                    let config_field = enclosing_struct_name(&lines, idx)
+                        .is_some_and(|name| name.ends_with("Config") || name.ends_with("Options"));
+                    let public_parameter = signature_window.contains("pub fn ")
+                        || signature_window.contains("pub async fn ");
+                    if security_sensitive_context(&rel, &preceding)
+                        && ((public_field && config_field) || public_parameter)
+                        && !preceding.contains("aura-security: security-boolean-justified")
+                    {
+                        violations.push(format!(
+                            "{rel}:{} security-critical boolean `{name}: bool` must be modeled as an explicit policy enum, typestate, or capability object",
+                            idx + 1
+                        ));
+                    }
+                }
+            }
+
+            if fail_open_security_evidence_pattern(&lines, idx)
+                && !lines[idx.saturating_sub(8)..=idx]
+                    .join("\n")
+                    .contains("aura-security: fail-open-justified")
+            {
+                violations.push(format!(
+                    "{rel}:{} appears to continue or default-success after missing security evidence; fail closed with a typed error or explicit policy object",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!(
+            "security-boolean-escape-hatch-boundary:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    println!("security boolean escape-hatch boundary: clean");
+    Ok(())
+}
+
+pub fn run_security_exception_metadata() -> Result<()> {
     let repo_root = repo_root()?;
     let crates_dir = repo_root.join("crates");
     let mut violations = Vec::new();
 
     for path in rust_files_under(&crates_dir) {
         let rel = repo_relative(&path);
-        if rel.contains("crates/aura-agent/src/runtime/")
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if !line.contains("aura-security:") {
+                continue;
+            }
+            if line.contains("owner=") && line.contains("expires=") && line.contains("remediation=")
+            {
+                continue;
+            }
+            violations.push(format!(
+                "{rel}:{} aura-security exception must include owner=, expires=, and remediation= metadata",
+                idx + 1
+            ));
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!("security-exception-metadata:\n{}", violations.join("\n"));
+    }
+
+    println!("security exception metadata: clean");
+    Ok(())
+}
+
+fn validate_secret_wrapper_contracts(repo_root: &Path, violations: &mut Vec<String>) -> Result<()> {
+    let rel = "crates/aura-core/src/secrets.rs";
+    let path = repo_root.join(rel);
+    let contents = read(&path)?;
+    for required in [
+        "impl fmt::Debug for SecretBytes",
+        ".field(\"bytes\", &\"<redacted>\")",
+        "impl Zeroize for SecretBytes",
+        "impl ZeroizeOnDrop for SecretBytes",
+        "impl Drop for SecretBytes",
+        "pub fn import(bytes: Vec<u8>) -> Self",
+        "pub fn import_from_slice(bytes: &[u8]) -> Self",
+        "pub fn export_secret(mut self, _context: SecretExportContext) -> Vec<u8>",
+        "export_private_key,",
+        "export_signing_share,",
+        "export_encrypted_secret_blob,",
+    ] {
+        if !contents.contains(required) {
+            violations.push(format!(
+                "{rel}: secret wrapper contract missing required surface `{required}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn forbidden_secret_derives(line: &str) -> bool {
+    [
+        "Debug",
+        "Clone",
+        "Serialize",
+        "Deserialize",
+        "PartialEq",
+        "Eq",
+    ]
+    .iter()
+    .any(|derive| line.contains(derive))
+}
+
+fn secret_bearing_type_or_block(block: &str) -> bool {
+    let lower = block.to_ascii_lowercase();
+    let item_name_is_secret = lower.lines().any(|line| {
+        let trimmed = line.trim_start();
+        (trimmed.starts_with("pub struct ")
+            || trimmed.starts_with("struct ")
+            || trimmed.starts_with("pub enum ")
+            || trimmed.starts_with("enum "))
+            && !trimmed.contains("secretexport")
+            && [
+                "privatekey",
+                "private_key",
+                "ed25519signingkey",
+                "single_signer_key_package",
+                "singlesignerkeypackage",
+            ]
+            .iter()
+            .any(|needle| trimmed.contains(needle))
+    });
+    if item_name_is_secret {
+        return true;
+    }
+
+    let field_re =
+        Regex::new(r"\b(?:pub(?:\s*\([^)]*\))?\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^,]+)")
+            .expect("valid field regex");
+    let raw_bytes_re =
+        Regex::new(r"(^|[<(\s])(?:Vec\s*<\s*u8\s*>|Box\s*<\s*\[\s*u8\s*\]\s*>|\[\s*u8\s*;\s*[A-Za-z0-9_]+\s*\])")
+            .expect("valid raw bytes regex");
+    block.lines().any(|line| {
+        let Some(captures) = field_re.captures(line) else {
+            return false;
+        };
+        let field_name = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+        let field_ty = captures.get(2).map(|m| m.as_str()).unwrap_or_default();
+        raw_bytes_re.is_match(field_ty) && secret_field_name_requires_wrapper(field_name)
+    })
+}
+
+fn security_boolean_name_requires_policy(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with("skip_")
+        || lower.starts_with("disable_")
+        || lower.starts_with("allow_")
+        || lower.starts_with("verify_")
+        || lower.starts_with("optional_")
+        || (lower.ends_with("_enabled")
+            && [
+                "auth",
+                "capability",
+                "crypto",
+                "encrypt",
+                "guard",
+                "key",
+                "merkle",
+                "proof",
+                "receipt",
+                "signature",
+                "storage",
+                "transport",
+            ]
+            .iter()
+            .any(|keyword| lower.contains(keyword)))
+}
+
+fn security_sensitive_context(rel: &str, window: &str) -> bool {
+    let lower = format!("{}\n{}", rel, window).to_ascii_lowercase();
+    [
+        "auth",
+        "authorization",
+        "biscuit",
+        "capability",
+        "crypto",
+        "encrypt",
+        "guard",
+        "journal",
+        "key",
+        "merkle",
+        "proof",
+        "receipt",
+        "recovery",
+        "signature",
+        "sync",
+        "transport",
+    ]
+    .iter()
+    .any(|keyword| lower.contains(keyword))
+}
+
+fn enclosing_struct_name(lines: &[String], idx: usize) -> Option<String> {
+    let struct_re =
+        Regex::new(r"\b(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)").expect("valid struct regex");
+    for start in (0..=idx).rev() {
+        let line = lines[start].trim_start();
+        if line.starts_with('}') {
+            return None;
+        }
+        let Some(captures) = struct_re.captures(line) else {
+            continue;
+        };
+        let block = lines[start..=idx].join("\n");
+        let opens = block.matches('{').count();
+        let closes = block.matches('}').count();
+        if opens > closes {
+            return captures.get(1).map(|m| m.as_str().to_string());
+        }
+    }
+    None
+}
+
+fn fail_open_security_evidence_pattern(lines: &[String], idx: usize) -> bool {
+    let line = lines[idx].trim();
+    let lower_window = lines[idx.saturating_sub(8)..lines.len().min(idx + 4)]
+        .join("\n")
+        .to_ascii_lowercase();
+    let security_evidence_context = [
+        "missing verification",
+        "without verification",
+        "missing authorization",
+        "missing receipt",
+        "missing key",
+        "missing proof",
+        "missing encryption",
+        "verification failed",
+        "authorization failed",
+    ]
+    .iter()
+    .any(|needle| lower_window.contains(needle));
+    if security_evidence_context
+        && (line == "continue;"
+            || line.starts_with("return Ok(true")
+            || line.starts_with("return None")
+            || line.contains("valid: true")
+            || line.contains("unwrap_or(true)")
+            || line.contains("unwrap_or(Ok(true"))
+    {
+        return true;
+    }
+
+    lower_window.contains("verify")
+        && (line.contains("unwrap_or(true)") || line.contains("unwrap_or_else(|_| true)"))
+}
+
+pub fn run_raw_transport_send_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let crates_dir = repo_root.join("crates");
+    let mut violations = Vec::new();
+    let boundary = read(&repo_root.join("crates/aura-agent/src/runtime/transport_boundary.rs"))?;
+    if !boundary.contains("struct GuardChainSendReceipt")
+        || !boundary.contains("fn send_raw_transport_envelope")
+        || !boundary.contains("send_guarded_transport_envelope")
+    {
+        violations.push(
+            "crates/aura-agent/src/runtime/transport_boundary.rs:1 guarded send boundary must keep GuardChainSendReceipt, private raw send, and guarded send API".to_string(),
+        );
+    }
+    if boundary.contains("pub fn send_raw_transport_envelope")
+        || boundary.contains("pub(crate) fn send_raw_transport_envelope")
+        || boundary.contains("pub async fn send_raw_transport_envelope")
+        || boundary.contains("pub(crate) async fn send_raw_transport_envelope")
+    {
+        violations.push(
+            "crates/aura-agent/src/runtime/transport_boundary.rs:1 raw transport send helper must remain private".to_string(),
+        );
+    }
+
+    for path in rust_files_under(&crates_dir) {
+        let rel = repo_relative(&path);
+        if rel.ends_with("crates/aura-agent/src/runtime/transport_boundary.rs")
+            || rel.ends_with("crates/aura-agent/src/runtime/effects/transport.rs")
             || rel.contains("crates/aura-effects/src/transport/")
             || rel.contains("crates/aura-testkit/")
             || rel.contains("crates/aura-simulator/")
@@ -1736,6 +2632,107 @@ pub fn run_raw_transport_send_boundary() -> Result<()> {
     }
 
     println!("raw transport send boundary: clean");
+    Ok(())
+}
+
+pub fn run_canonical_remote_apply_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let crates_dir = repo_root.join("crates");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&crates_dir) {
+        let rel = repo_relative(&path);
+        if rel.ends_with("crates/aura-sync/src/protocols/journal_apply.rs")
+            || rel.contains("crates/aura-testkit/")
+            || rel.contains("crates/aura-simulator/")
+            || rel.contains("crates/aura-harness/")
+            || rel.contains("/tests/")
+            || rel.ends_with("/tests.rs")
+            || rel.ends_with("/test_support.rs")
+        {
+            continue;
+        }
+
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("#[cfg(test)]")
+                || line_is_test_scoped(&lines, idx)
+            {
+                continue;
+            }
+
+            if line.contains(".apply_verified_delta(")
+                || line.contains(".accept_verified_relational_facts(")
+            {
+                let window = lines[idx.saturating_sub(3)..=idx].join("\n");
+                if !window.contains("JournalApplyService::new()") {
+                    violations.push(format!(
+                        "{rel}:{} remote journal apply must go through JournalApplyService",
+                        idx + 1
+                    ));
+                }
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!(
+            "canonical-remote-apply-boundary:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    println!("canonical remote apply boundary: clean");
+    Ok(())
+}
+
+pub fn run_journal_authorization_wiring_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let runtime_rel = "crates/aura-agent/src/runtime/effects.rs";
+    let journal_rel = "crates/aura-journal/src/effects.rs";
+    let runtime = read(repo_root.join(runtime_rel))?;
+    let journal = read(repo_root.join(journal_rel))?;
+    let mut violations = Vec::new();
+
+    for required in [
+        "struct JournalBiscuitAuthorizationHandler",
+        "VerifiedBiscuitToken::from_bytes",
+        "expect(\"journal handler requires a Biscuit authorization policy\")",
+        "expect(\"journal authorization policy token must serialize\")",
+    ] {
+        if !runtime.contains(required) {
+            violations.push(format!(
+                "{runtime_rel}: journal runtime wiring missing required fail-closed surface `{required}`"
+            ));
+        }
+    }
+    for forbidden in [
+        "NoopBiscuitAuthorizationHandler",
+        "JournalHandlerFactory::create(\n            self.authority_id,\n            self.crypto.handler().clone(),\n            self.storage_handler.clone(),\n            None",
+    ] {
+        if runtime.contains(forbidden) {
+            violations.push(format!(
+                "{runtime_rel}: journal runtime wiring contains forbidden optional/no-op authorization pattern `{forbidden}`"
+            ));
+        }
+    }
+    if journal.contains("authorization: Option<(Vec<u8>, A)>") {
+        violations.push(format!(
+            "{journal_rel}: JournalHandlerFactory::create must require authorization instead of accepting Option"
+        ));
+    }
+
+    if !violations.is_empty() {
+        bail!(
+            "journal-authorization-wiring-boundary:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    println!("journal authorization wiring boundary: clean");
     Ok(())
 }
 
@@ -1814,6 +2811,8 @@ fn secret_field_name_requires_wrapper(name: &str) -> bool {
         "path_secret",
         "master_key",
         "token_bytes",
+        "seed",
+        "recovery_material",
     ]
     .iter()
     .any(|keyword| lower.contains(keyword))
@@ -1903,7 +2902,9 @@ fn run_privacy_onion_quarantine() -> Result<()> {
         for hit in lane_hits {
             eprintln!("{hit}");
         }
-        bail!("transparent-onion-quarantine: harness and shared-flow lanes must not enable or depend on transparent_onion");
+        bail!(
+            "transparent-onion-quarantine: harness and shared-flow lanes must not enable or depend on transparent_onion"
+        );
     }
     let source_hits = rg_lines(&vec![
         "-n".into(),
@@ -1933,7 +2934,9 @@ fn run_privacy_onion_quarantine() -> Result<()> {
         for hit in source_violations {
             eprintln!("{hit}");
         }
-        bail!("transparent-onion-quarantine: transparent debug surfaces must remain quarantined to the explicit allowlist");
+        bail!(
+            "transparent-onion-quarantine: transparent debug surfaces must remain quarantined to the explicit allowlist"
+        );
     }
     println!("transparent-onion-quarantine: ok");
     Ok(())
@@ -2409,7 +3412,9 @@ pub fn run_browser_cache_owner() -> Result<()> {
             .unwrap_or(0);
         if line_num < start || line_num >= end {
             eprintln!("{hit}");
-            bail!("harness-browser-cache-owner: browser cache reset logic must stay inside resetUiObservationState");
+            bail!(
+                "harness-browser-cache-owner: browser cache reset logic must stay inside resetUiObservationState"
+            );
         }
     }
 
@@ -2503,7 +3508,9 @@ pub fn run_browser_driver_contract_sync() -> Result<()> {
     ts_semantic.sort();
 
     if rust_semantic != ts_semantic {
-        bail!("browser-driver-contract-sync: Semantic queue payload fields differ between Rust and TS contracts");
+        bail!(
+            "browser-driver-contract-sync: Semantic queue payload fields differ between Rust and TS contracts"
+        );
     }
 
     // Check RuntimeStageQueuePayload fields
@@ -2532,7 +3539,9 @@ pub fn run_browser_driver_contract_sync() -> Result<()> {
     ts_runtime.sort();
 
     if rust_runtime != ts_runtime {
-        bail!("browser-driver-contract-sync: Runtime-stage queue payload fields differ between Rust and TS contracts");
+        bail!(
+            "browser-driver-contract-sync: Runtime-stage queue payload fields differ between Rust and TS contracts"
+        );
     }
 
     // Check raw driver names against allowlist
@@ -2568,7 +3577,9 @@ pub fn run_browser_driver_contract_sync() -> Result<()> {
 
     if !raw_names.is_empty() {
         eprintln!("Unexpected raw TS driver names: {raw_names:?}");
-        bail!("browser-driver-contract-sync: TS driver contains raw __AURA_DRIVER_* literals outside the sanctioned contract set");
+        bail!(
+            "browser-driver-contract-sync: TS driver contains raw __AURA_DRIVER_* literals outside the sanctioned contract set"
+        );
     }
 
     // Verify TS driver doesn't hand-build queue payload JSON
@@ -2582,7 +3593,9 @@ pub fn run_browser_driver_contract_sync() -> Result<()> {
     if driver_src.contains(
         r#"JSON.stringify({ command_id: commandId, runtime_identity_json: runtimeIdentityJson, })"#,
     ) {
-        bail!("browser-driver-contract-sync: TS driver still hand-builds runtime-stage queue payload JSON");
+        bail!(
+            "browser-driver-contract-sync: TS driver still hand-builds runtime-stage queue payload JSON"
+        );
     }
 
     println!("browser-driver-contract-sync: clean");
@@ -2644,7 +3657,9 @@ pub fn run_browser_driver_types() -> Result<()> {
     if !contains(&wrapper, "ensureCompiledDriverFresh")?
         || !contains(&wrapper, "pathToFileURL(compiledDriver).href")?
     {
-        bail!("harness-browser-driver-types: stable wrapper does not load the compiled TS driver through the freshness loader");
+        bail!(
+            "harness-browser-driver-types: stable wrapper does not load the compiled TS driver through the freshness loader"
+        );
     }
 
     println!("harness-browser-driver-types: clean");
@@ -2696,7 +3711,9 @@ pub fn run_browser_observation_recovery() -> Result<()> {
     if ui_state_body.contains("readStructuredUiStateWithNavigationRecovery")
         || ui_state_body.contains("resetObservationState(")
     {
-        bail!("harness browser observation recovery: ui_state may not perform implicit browser recovery");
+        bail!(
+            "harness browser observation recovery: ui_state may not perform implicit browser recovery"
+        );
     }
 
     if !contains(
@@ -2716,7 +3733,9 @@ pub fn run_browser_observation_recovery() -> Result<()> {
         let obs_src = read(&observation_module)?;
         if obs_src.contains("recover") || obs_src.contains("retry") || obs_src.contains("fallback")
         {
-            bail!("harness browser observation recovery: browser observation module must stay passive and recovery-free");
+            bail!(
+                "harness browser observation recovery: browser observation module must stay passive and recovery-free"
+            );
         }
     }
 
@@ -2730,7 +3749,9 @@ pub fn run_browser_observation_recovery() -> Result<()> {
         "selectorToFallbackLabel",
     ] {
         if driver_src.contains(forbidden) {
-            bail!("harness browser observation recovery: legacy implicit browser fallback remains in driver: {forbidden}");
+            bail!(
+                "harness browser observation recovery: legacy implicit browser fallback remains in driver: {forbidden}"
+            );
         }
     }
 
@@ -2761,34 +3782,44 @@ pub fn run_harness_action_preconditions() -> Result<()> {
     let mut args = vec!["ActionPrecondition::Quiescence".into()];
     args.extend(sc_paths);
     if !rg_exists(&args)? {
-        bail!("harness-action-preconditions: shared action contracts must declare quiescence preconditions");
+        bail!(
+            "harness-action-preconditions: shared action contracts must declare quiescence preconditions"
+        );
     }
 
     if !rg_exists(&[
         "fn enforce_action_preconditions".into(),
         executor.to_string_lossy().into_owned(),
     ])? {
-        bail!("harness-action-preconditions: executor is missing typed action precondition enforcement");
+        bail!(
+            "harness-action-preconditions: executor is missing typed action precondition enforcement"
+        );
     }
     if !rg_exists(&[
         "-F".into(),
         "enforce_action_preconditions(step, tool_api, context, &intent".into(),
         executor.to_string_lossy().into_owned(),
     ])? {
-        bail!("harness-action-preconditions: shared action execution does not enforce preconditions before issue");
+        bail!(
+            "harness-action-preconditions: shared action execution does not enforce preconditions before issue"
+        );
     }
     if !rg_exists(&[
         "fn wait_for_contract_barriers".into(),
         executor.to_string_lossy().into_owned(),
     ])? {
-        bail!("harness-action-preconditions: executor is missing typed post-operation convergence enforcement");
+        bail!(
+            "harness-action-preconditions: executor is missing typed post-operation convergence enforcement"
+        );
     }
     if !rg_exists(&[
         "-F".into(),
         "wait_for_contract_barriers(".into(),
         executor.to_string_lossy().into_owned(),
     ])? {
-        bail!("harness-action-preconditions: shared action execution does not enforce post-operation convergence before the next intent");
+        bail!(
+            "harness-action-preconditions: shared action execution does not enforce post-operation convergence before the next intent"
+        );
     }
 
     run_ok(
@@ -2866,7 +3897,9 @@ pub fn run_harness_backend_contract() -> Result<()> {
         "fn submit_send_chat_message",
     ] {
         if trait_body.contains(forbidden) {
-            bail!("harness-backend-contract: InstanceBackend still carries forbidden surface: {forbidden}");
+            bail!(
+                "harness-backend-contract: InstanceBackend still carries forbidden surface: {forbidden}"
+            );
         }
     }
 
@@ -2881,12 +3914,16 @@ pub fn run_harness_backend_contract() -> Result<()> {
     }
 
     if backend_src.contains("impl<T: InstanceBackend + ?Sized> SharedSemanticBackend for T") {
-        bail!("harness-backend-contract: blanket SharedSemanticBackend impl keeps fallback-heavy semantic execution alive");
+        bail!(
+            "harness-backend-contract: blanket SharedSemanticBackend impl keeps fallback-heavy semantic execution alive"
+        );
     }
 
     let local_pty = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
     if !contains(&local_pty, "impl SharedSemanticBackend for LocalPtyBackend")? {
-        bail!("harness-backend-contract: local PTY backend must explicitly implement SharedSemanticBackend");
+        bail!(
+            "harness-backend-contract: local PTY backend must explicitly implement SharedSemanticBackend"
+        );
     }
 
     let playwright = repo_root.join("crates/aura-harness/src/backend/playwright_browser.rs");
@@ -2894,7 +3931,9 @@ pub fn run_harness_backend_contract() -> Result<()> {
         &playwright,
         "impl SharedSemanticBackend for PlaywrightBrowserBackend",
     )? {
-        bail!("harness-backend-contract: Playwright backend must explicitly implement SharedSemanticBackend");
+        bail!(
+            "harness-backend-contract: Playwright backend must explicitly implement SharedSemanticBackend"
+        );
     }
 
     println!("harness backend contract: clean");
@@ -2931,7 +3970,9 @@ pub fn run_harness_boundary_policy() -> Result<()> {
         for hit in &contract_real_hits {
             eprintln!("{hit}");
         }
-        bail!("harness-boundary-policy: semantic scenario contract contains frontend-specific mechanics");
+        bail!(
+            "harness-boundary-policy: semantic scenario contract contains frontend-specific mechanics"
+        );
     }
 
     // Check that Quint/verification code doesn't reference frontend mechanics
@@ -2960,7 +4001,9 @@ pub fn run_harness_boundary_policy() -> Result<()> {
         for hit in &quint_real_hits {
             eprintln!("{hit}");
         }
-        bail!("harness-boundary-policy: Quint or verification code references frontend-driving mechanics");
+        bail!(
+            "harness-boundary-policy: Quint or verification code references frontend-driving mechanics"
+        );
     }
 
     // Check referenced scenarios are present and not legacy
@@ -2994,13 +4037,17 @@ pub fn run_harness_boundary_policy() -> Result<()> {
     for scenario in &referenced {
         let path = repo_root.join(scenario);
         if !path.exists() {
-            bail!("harness-boundary-policy: active entry point references missing scenario: {scenario}");
+            bail!(
+                "harness-boundary-policy: active entry point references missing scenario: {scenario}"
+            );
         }
         let src = read(&path)?;
         for key in &legacy_keys {
             let pat = format!("{key} =");
             if src.contains(&pat) {
-                bail!("harness-boundary-policy: active entry point references legacy harness scenario: {scenario}");
+                bail!(
+                    "harness-boundary-policy: active entry point references legacy harness scenario: {scenario}"
+                );
             }
         }
     }
@@ -3351,17 +4398,26 @@ pub fn run_harness_conformance_gate() -> Result<()> {
     if workflow.exists() {
         let src = read(&workflow)?;
         if !src.contains("  conformance:") {
-            bail!("harness-conformance-gate: Missing 'conformance' job in {}. Add job 'conformance' that runs 'nix develop --command just ci-conformance'.", repo_relative(&workflow));
+            bail!(
+                "harness-conformance-gate: Missing 'conformance' job in {}. Add job 'conformance' that runs 'nix develop --command just ci-conformance'.",
+                repo_relative(&workflow)
+            );
         }
         if !src.contains("just ci-conformance-policy") {
-            bail!("harness-conformance-gate: Conformance workflow must execute 'just ci-conformance-policy'.");
+            bail!(
+                "harness-conformance-gate: Conformance workflow must execute 'just ci-conformance-policy'."
+            );
         }
         if !src.contains("just ci-conformance") {
-            bail!("harness-conformance-gate: Conformance workflow must execute 'just ci-conformance'.");
+            bail!(
+                "harness-conformance-gate: Conformance workflow must execute 'just ci-conformance'."
+            );
         }
         check_triggers(&workflow)?;
         if !src.contains("upload-artifact@v4") || !src.contains("artifacts/conformance") {
-            bail!("harness-conformance-gate: Conformance workflow must upload conformance traces/diffs as artifacts. Add actions/upload-artifact@v4 step for artifacts/conformance.");
+            bail!(
+                "harness-conformance-gate: Conformance workflow must upload conformance traces/diffs as artifacts. Add actions/upload-artifact@v4 step for artifacts/conformance."
+            );
         }
         println!(
             "[conformance-gate] OK: conformance gate wiring is present in {}",
@@ -3380,14 +4436,19 @@ pub fn run_harness_conformance_gate() -> Result<()> {
 
     let legacy_src = read(&legacy_workflow)?;
     if !legacy_src.contains("  conformance-gate:") {
-        bail!("harness-conformance-gate: Missing 'conformance-gate' job in {}. Add job 'conformance-gate' that runs 'nix develop --command just ci-conformance'.", repo_relative(&legacy_workflow));
+        bail!(
+            "harness-conformance-gate: Missing 'conformance-gate' job in {}. Add job 'conformance-gate' that runs 'nix develop --command just ci-conformance'.",
+            repo_relative(&legacy_workflow)
+        );
     }
     if !legacy_src.contains("just ci-conformance") {
         bail!("harness-conformance-gate: Conformance gate job must execute 'just ci-conformance'.");
     }
     check_triggers(&legacy_workflow)?;
     if !legacy_src.contains("upload-artifact@v4") || !legacy_src.contains("artifacts/conformance") {
-        bail!("harness-conformance-gate: Conformance gate must upload conformance traces/diffs as artifacts. Add actions/upload-artifact@v4 step for artifacts/conformance.");
+        bail!(
+            "harness-conformance-gate: Conformance gate must upload conformance traces/diffs as artifacts. Add actions/upload-artifact@v4 step for artifacts/conformance."
+        );
     }
 
     println!(
@@ -3436,7 +4497,9 @@ pub fn run_harness_export_override_policy() -> Result<()> {
         for hit in &filtered {
             eprintln!("{hit}");
         }
-        bail!("harness-export-override-policy: new parity-critical export helpers may not depend on override caches outside the quarantined TUI harness export module");
+        bail!(
+            "harness-export-override-policy: new parity-critical export helpers may not depend on override caches outside the quarantined TUI harness export module"
+        );
     }
 
     println!("harness export override policy: clean");
@@ -3661,7 +4724,9 @@ pub fn run_harness_mode_allowlist() -> Result<()> {
 
     let web_main = repo_root.join("crates/aura-web/src/main.rs");
     if web_main.exists() && contains(&web_main, "reset_harness_bootstrap_storage_once")? {
-        bail!("harness-mode-allowlist: web frontend may not carry harness-only bootstrap reset shortcuts");
+        bail!(
+            "harness-mode-allowlist: web frontend may not carry harness-only bootstrap reset shortcuts"
+        );
     }
 
     run_ok(
@@ -3724,7 +4789,9 @@ pub fn run_harness_observation_determinism() -> Result<()> {
     let rust_hits = command_stdout("rg", &rust_args).unwrap_or_default();
     if !rust_hits.trim().is_empty() {
         eprintln!("{rust_hits}");
-        bail!("harness-observation-determinism: parity-critical observation paths may not read wall clock time, unseeded randomness, or nondeterministic ids");
+        bail!(
+            "harness-observation-determinism: parity-critical observation paths may not read wall clock time, unseeded randomness, or nondeterministic ids"
+        );
     }
 
     let driver_mjs = repo_root.join("crates/aura-harness/playwright-driver/playwright_driver.mjs");
@@ -3741,7 +4808,9 @@ pub fn run_harness_observation_determinism() -> Result<()> {
         .unwrap_or_default();
         if !js_hits.trim().is_empty() {
             eprintln!("{js_hits}");
-            bail!("harness-observation-determinism: browser observation path may not use JS randomness in parity-critical observation code");
+            bail!(
+                "harness-observation-determinism: browser observation path may not use JS randomness in parity-critical observation code"
+            );
         }
     }
 
@@ -3830,13 +4899,17 @@ pub fn run_harness_onboarding_contract() -> Result<()> {
         let mut args = vec!["ScreenId::Onboarding".into()];
         args.extend(ui_paths);
         if !rg_exists(&args)? {
-            bail!("harness-onboarding-contract: onboarding must be declared in the shared snapshot model");
+            bail!(
+                "harness-onboarding-contract: onboarding must be declared in the shared snapshot model"
+            );
         }
     }
 
     let web_main = repo_root.join("crates/aura-web/src/main.rs");
     if web_main.exists() && !contains(&web_main, "controller.set_account_setup_state(")? {
-        bail!("harness-onboarding-contract: web onboarding must publish through the canonical controller snapshot pipeline");
+        bail!(
+            "harness-onboarding-contract: web onboarding must publish through the canonical controller snapshot pipeline"
+        );
     }
 
     for (dir, label) in [
@@ -3858,12 +4931,16 @@ pub fn run_harness_onboarding_contract() -> Result<()> {
         .unwrap_or_default();
         if !hits.trim().is_empty() {
             eprintln!("{hits}");
-            bail!("harness-onboarding-contract: onboarding must not introduce bespoke publication or recovery hooks (found in {label})");
+            bail!(
+                "harness-onboarding-contract: onboarding must not introduce bespoke publication or recovery hooks (found in {label})"
+            );
         }
     }
 
     if web_main.exists() && contains(&web_main, "reset_harness_bootstrap_storage_once")? {
-        bail!("harness-onboarding-contract: web onboarding may not carry harness-only bootstrap reset shortcuts");
+        bail!(
+            "harness-onboarding-contract: web onboarding may not carry harness-only bootstrap reset shortcuts"
+        );
     }
 
     println!("harness onboarding contract: clean");
@@ -3875,25 +4952,33 @@ pub fn run_harness_onboarding_publication() -> Result<()> {
 
     let web_main = repo_root.join("crates/aura-web/src/main.rs");
     if web_main.exists() && contains(&web_main, "publish_onboarding_snapshot")? {
-        bail!("harness-onboarding-publication: web onboarding may not publish through a bespoke snapshot path");
+        bail!(
+            "harness-onboarding-publication: web onboarding may not publish through a bespoke snapshot path"
+        );
     }
 
     let harness_bridge = repo_root.join("crates/aura-web/src/harness_bridge.rs");
     if harness_bridge.exists() && contains(&harness_bridge, "stale_onboarding_publish")? {
-        bail!("harness-onboarding-publication: browser harness bridge may not carry stale-onboarding publication recovery");
+        bail!(
+            "harness-onboarding-publication: browser harness bridge may not carry stale-onboarding publication recovery"
+        );
     }
 
     let driver_mjs = repo_root.join("crates/aura-harness/playwright-driver/playwright_driver.mjs");
     if driver_mjs.exists() {
         let src = read(&driver_mjs)?;
         if src.contains("staleOnboardingCache") || src.contains("stale_onboarding_") {
-            bail!("harness-onboarding-publication: playwright driver may not carry stale-onboarding recovery heuristics");
+            bail!(
+                "harness-onboarding-publication: playwright driver may not carry stale-onboarding recovery heuristics"
+            );
         }
     }
 
     let local_pty = repo_root.join("crates/aura-harness/src/backend/local_pty.rs");
     if local_pty.exists() && contains(&local_pty, "synthetic_onboarding_snapshot")? {
-        bail!("harness-onboarding-publication: local PTY backend may not fabricate onboarding snapshots");
+        bail!(
+            "harness-onboarding-publication: local PTY backend may not fabricate onboarding snapshots"
+        );
     }
 
     run_ok(
@@ -4236,11 +5321,15 @@ pub fn run_harness_runtime_events_authoritative() -> Result<()> {
             r"RuntimeFact::(ContactLinkReady|PendingHomeInvitationReady|ChannelMembershipReady|RecipientPeersResolved|MessageDeliveryReady)",
         )?;
         if fact_variant_re.is_match(&production_source) {
-            bail!("harness-runtime-events-authoritative: TUI snapshot export may not synthesize parity-critical runtime facts");
+            bail!(
+                "harness-runtime-events-authoritative: TUI snapshot export may not synthesize parity-critical runtime facts"
+            );
         }
 
         if production_source.contains("runtime_events.push(RuntimeEventSnapshot") {
-            bail!("harness-runtime-events-authoritative: TUI snapshot export may not append runtime events heuristically");
+            bail!(
+                "harness-runtime-events-authoritative: TUI snapshot export may not append runtime events heuristically"
+            );
         }
     }
 
@@ -4323,7 +5412,9 @@ pub fn run_harness_scenario_config_boundary() -> Result<()> {
 
     if !forbidden_ids.trim().is_empty() {
         eprintln!("{forbidden_ids}");
-        bail!("harness-scenario-config-boundary: config instance ids must remain actor-based and frontend-neutral");
+        bail!(
+            "harness-scenario-config-boundary: config instance ids must remain actor-based and frontend-neutral"
+        );
     }
 
     // Check that mode bindings are declared
@@ -4340,7 +5431,9 @@ pub fn run_harness_scenario_config_boundary() -> Result<()> {
     .unwrap_or_default();
 
     if mode_hits.trim().is_empty() {
-        bail!("harness-scenario-config-boundary: expected config frontend/runtime bindings declared via instance.mode");
+        bail!(
+            "harness-scenario-config-boundary: expected config frontend/runtime bindings declared via instance.mode"
+        );
     }
 
     println!("harness scenario/config boundary: clean");
@@ -4559,7 +5652,9 @@ pub fn run_harness_wait_contract() -> Result<()> {
             executor_path.clone(),
         ])?;
     if !has_modal_wait {
-        bail!("harness-wait-contract: shared semantic execution must route modal waits through the typed wait contract");
+        bail!(
+            "harness-wait-contract: shared semantic execution must route modal waits through the typed wait contract"
+        );
     }
 
     // Runtime event wait check
@@ -4573,7 +5668,9 @@ pub fn run_harness_wait_contract() -> Result<()> {
         executor_path.clone(),
     ])?;
     if !has_runtime_event_wait {
-        bail!("harness-wait-contract: shared semantic execution must route runtime-event waits through the typed wait contract");
+        bail!(
+            "harness-wait-contract: shared semantic execution must route runtime-event waits through the typed wait contract"
+        );
     }
 
     // Semantic state wait check
@@ -4587,7 +5684,9 @@ pub fn run_harness_wait_contract() -> Result<()> {
         executor_path.clone(),
     ])?;
     if !has_semantic_state_wait {
-        bail!("harness-wait-contract: shared semantic execution must route semantic waits through the typed wait contract");
+        bail!(
+            "harness-wait-contract: shared semantic execution must route semantic waits through the typed wait contract"
+        );
     }
 
     if !rg_exists(&[
@@ -4595,7 +5694,9 @@ pub fn run_harness_wait_contract() -> Result<()> {
         "snapshot.operation_state(".into(),
         executor_path,
     ])? {
-        bail!("harness-wait-contract: typed wait contracts must read operation state through the shared snapshot surface");
+        bail!(
+            "harness-wait-contract: typed wait contracts must read operation state through the shared snapshot surface"
+        );
     }
 
     run_ok(
@@ -4846,7 +5947,9 @@ pub fn run_protocol_device_id_legacy(args: &[String]) -> Result<()> {
             }
 
             if violations > 0 {
-                bail!("device-id-legacy: found {violations} legacy authority/device coercion pattern(s); use derive_legacy_authority_from_device(...) only, with explicit metadata");
+                bail!(
+                    "device-id-legacy: found {violations} legacy authority/device coercion pattern(s); use derive_legacy_authority_from_device(...) only, with explicit metadata"
+                );
             }
             println!("device-id-legacy: clean");
         }
@@ -4893,7 +5996,9 @@ pub fn run_protocol_device_id_legacy(args: &[String]) -> Result<()> {
             }
 
             if violations > 0 {
-                bail!("device-id-legacy audit: found {violations} live authority/device derivation pattern(s)");
+                bail!(
+                    "device-id-legacy audit: found {violations} live authority/device derivation pattern(s)"
+                );
             }
             println!("device-id-legacy audit: clean");
         }
@@ -4964,7 +6069,9 @@ pub fn run_protocol_device_id_legacy(args: &[String]) -> Result<()> {
             }
 
             if violations > 0 {
-                bail!("device-id-legacy runtime audit: found {violations} runtime authority/device derivation pattern(s)");
+                bail!(
+                    "device-id-legacy runtime audit: found {violations} runtime authority/device derivation pattern(s)"
+                );
             }
             println!("device-id-legacy runtime audit: clean");
         }
@@ -5013,7 +6120,9 @@ pub fn run_runtime_bootstrap_guardrails() -> Result<()> {
         "preset builder creates authority directly instead of requiring explicit bootstrap identity",
         r"AuthorityId::new_from_entropy\(|new_authority_id\(",
         &repo_root.join("crates/aura-agent/src/builder"),
-    )? { violations += 1; }
+    )? {
+        violations += 1;
+    }
 
     if check(
         "terminal main still hard-codes synthetic startup authority/context",
@@ -5120,7 +6229,9 @@ pub fn run_shared_intent_flow() -> Result<()> {
         if src.contains("SHARED_INTENT_UI_BYPASS_ALLOWLIST")
             || src.contains("TemporaryHarnessBridgeShortcut")
         {
-            bail!("harness-shared-intent-ui-flow: legacy shared intent UI bypass allowlist machinery must be removed");
+            bail!(
+                "harness-shared-intent-ui-flow: legacy shared intent UI bypass allowlist machinery must be removed"
+            );
         }
     }
 
@@ -5135,7 +6246,9 @@ pub fn run_shared_intent_flow() -> Result<()> {
     )
     .unwrap_or_default();
     if !backend_hits.trim().is_empty() {
-        bail!("harness-shared-intent-ui-flow: backend implementations must not call app-internal workflow shortcuts directly");
+        bail!(
+            "harness-shared-intent-ui-flow: backend implementations must not call app-internal workflow shortcuts directly"
+        );
     }
 
     run_ok(
@@ -5223,7 +6336,9 @@ pub fn run_shared_raw_quarantine() -> Result<()> {
         ".click_target(",
     ] {
         if semantic_fn.contains(forbidden) {
-            bail!("harness-shared-raw-ui-quarantine: shared semantic execution still reaches raw helper: {forbidden}");
+            bail!(
+                "harness-shared-raw-ui-quarantine: shared semantic execution still reaches raw helper: {forbidden}"
+            );
         }
     }
 
@@ -5243,7 +6358,10 @@ pub fn run_shared_semantic_dedup() -> Result<()> {
             if src.contains("submit_accept_contact_invitation_via_shared_ui")
                 || src.contains("submit_invite_actor_to_channel_via_shared_ui")
             {
-                bail!("harness-shared-semantic-dedup: legacy shared semantic UI helper shortcuts must be removed (in {})", repo_relative(path));
+                bail!(
+                    "harness-shared-semantic-dedup: legacy shared semantic UI helper shortcuts must be removed (in {})",
+                    repo_relative(path)
+                );
             }
         }
     }
@@ -5263,7 +6381,9 @@ pub fn run_shared_semantic_dedup() -> Result<()> {
         "HarnessUiCommand::SelectChannel",
     ] {
         if !local_src.contains(command) {
-            bail!("harness-shared-semantic-dedup: local backend must route {command} through typed harness commands");
+            bail!(
+                "harness-shared-semantic-dedup: local backend must route {command} through typed harness commands"
+            );
         }
     }
 
@@ -5272,19 +6392,25 @@ pub fn run_shared_semantic_dedup() -> Result<()> {
         if contract_src.contains("SHARED_INTENT_UI_BYPASS_ALLOWLIST")
             || contract_src.contains("TemporaryHarnessBridgeShortcut")
         {
-            bail!("harness-shared-semantic-dedup: shared semantic browser bridge migration should remove the old bypass allowlist machinery");
+            bail!(
+                "harness-shared-semantic-dedup: shared semantic browser bridge migration should remove the old bypass allowlist machinery"
+            );
         }
     }
 
     if browser_backend.exists() {
         let browser_src = read(&browser_backend)?;
         if !browser_src.contains("fn submit_semantic_command(") {
-            bail!("harness-shared-semantic-dedup: browser backend must route supported semantic submissions through the typed bridge");
+            bail!(
+                "harness-shared-semantic-dedup: browser backend must route supported semantic submissions through the typed bridge"
+            );
         }
         if browser_src.contains("submit_accept_contact_invitation_via_shared_ui")
             || browser_src.contains("submit_invite_actor_to_channel_via_shared_ui")
         {
-            bail!("harness-shared-semantic-dedup: browser backend should not keep local-only shared UI helper shortcuts");
+            bail!(
+                "harness-shared-semantic-dedup: browser backend should not keep local-only shared UI helper shortcuts"
+            );
         }
     }
 
@@ -5319,7 +6445,9 @@ pub fn run_tui_observation_channel() -> Result<()> {
                 "SNAPSHOT_WAIT_ATTEMPTS",
             ] {
                 if body.contains(forbidden) {
-                    bail!("harness-tui-observation-channel: local PTY ui_snapshot may not poll the filesystem or sleep (found: {forbidden})");
+                    bail!(
+                        "harness-tui-observation-channel: local PTY ui_snapshot may not poll the filesystem or sleep (found: {forbidden})"
+                    );
                 }
             }
         }
@@ -5336,12 +6464,16 @@ pub fn run_tui_observation_channel() -> Result<()> {
 
         if let Some(body) = wait_body {
             if body.contains("thread::sleep") {
-                bail!("harness-tui-observation-channel: local PTY wait_for_ui_snapshot_event must use the event channel, not sleeps");
+                bail!(
+                    "harness-tui-observation-channel: local PTY wait_for_ui_snapshot_event must use the event channel, not sleeps"
+                );
             }
         }
 
         if !backend_src.contains("AURA_TUI_UI_STATE_SOCKET") {
-            bail!("harness-tui-observation-channel: local PTY backend must provision the TUI snapshot socket");
+            bail!(
+                "harness-tui-observation-channel: local PTY backend must provision the TUI snapshot socket"
+            );
         }
     }
 
@@ -5359,7 +6491,9 @@ pub fn run_tui_observation_channel() -> Result<()> {
 
         if let Some(body) = bootstrap_body {
             if body.contains("thread::sleep") || body.contains("std::thread::sleep") {
-                bail!("harness-tui-observation-channel: home bootstrap wait must not use raw sleep polling");
+                bail!(
+                    "harness-tui-observation-channel: home bootstrap wait must not use raw sleep polling"
+                );
             }
         }
     }
@@ -5395,7 +6529,9 @@ pub fn run_tui_product_path() -> Result<()> {
 
     if shell.exists() {
         if contains(&shell, "AURA_HARNESS_MODE")? {
-            bail!("harness-tui-product-path: TUI product action dispatch may not branch on AURA_HARNESS_MODE");
+            bail!(
+                "harness-tui-product-path: TUI product action dispatch may not branch on AURA_HARNESS_MODE"
+            );
         }
         let shell_src = read(&shell)?;
         for pattern in [
@@ -5405,7 +6541,9 @@ pub fn run_tui_product_path() -> Result<()> {
             "runtime.accept_invitation(",
         ] {
             if shell_src.contains(pattern) {
-                bail!("harness-tui-product-path: TUI product action dispatch may not call runtime invitation shortcuts directly");
+                bail!(
+                    "harness-tui-product-path: TUI product action dispatch may not call runtime invitation shortcuts directly"
+                );
             }
         }
     }
@@ -5445,7 +6583,9 @@ pub fn run_tui_selection_contract() -> Result<()> {
         if !shell_src.contains("SharedCommittedChannelSelection")
             && !shell_src.contains("None::<CommittedChannelSelection>")
         {
-            bail!("harness-tui-selection-contract: shared TUI channel selection must be tracked by canonical committed channel identity");
+            bail!(
+                "harness-tui-selection-contract: shared TUI channel selection must be tracked by canonical committed channel identity"
+            );
         }
     }
 
@@ -5455,7 +6595,9 @@ pub fn run_tui_selection_contract() -> Result<()> {
             subscriptions.to_string_lossy().into_owned(),
         ])?
     {
-        bail!("harness-tui-selection-contract: message subscription may not fall back to first channel");
+        bail!(
+            "harness-tui-selection-contract: message subscription may not fall back to first channel"
+        );
     }
 
     run_ok(
@@ -5512,14 +6654,18 @@ pub fn run_tui_semantic_snapshot() -> Result<()> {
         let static_re =
             Regex::new(r"^static (CONTACTS_OVERRIDE|DEVICES_OVERRIDE|MESSAGES_OVERRIDE)")?;
         if src.lines().any(|l| static_re.is_match(l)) {
-            bail!("harness-tui-semantic-snapshot: parity-critical TUI exporter may not use contact/device/message override caches");
+            bail!(
+                "harness-tui-semantic-snapshot: parity-critical TUI exporter may not use contact/device/message override caches"
+            );
         }
 
         let pub_fn_re = Regex::new(
             r"^pub fn (publish_contacts_list_export|publish_devices_list_export|publish_messages_export)",
         )?;
         if src.lines().any(|l| pub_fn_re.is_match(l)) {
-            bail!("harness-tui-semantic-snapshot: parity-critical TUI exporter may not declare contact/device/message publish overrides");
+            bail!(
+                "harness-tui-semantic-snapshot: parity-critical TUI exporter may not declare contact/device/message publish overrides"
+            );
         }
 
         if !src.contains("pub struct TuiSemanticInputs") {
@@ -5537,7 +6683,9 @@ pub fn run_tui_semantic_snapshot() -> Result<()> {
         }
 
         if !src.contains("exported_runtime_events") {
-            bail!("harness-tui-semantic-snapshot: TUI exporter must consume runtime facts from owned state");
+            bail!(
+                "harness-tui-semantic-snapshot: TUI exporter must consume runtime facts from owned state"
+            );
         }
     }
 
@@ -5559,7 +6707,9 @@ pub fn run_tui_semantic_snapshot() -> Result<()> {
         )
         .unwrap_or_default();
         if !hits.trim().is_empty() {
-            bail!("harness-tui-semantic-snapshot: parity-critical TUI exporter may not depend on contact/device/message publish overrides");
+            bail!(
+                "harness-tui-semantic-snapshot: parity-critical TUI exporter may not depend on contact/device/message publish overrides"
+            );
         }
     }
 
@@ -5646,7 +6796,9 @@ pub fn run_user_flow_guidance_sync() -> Result<()> {
         triggered += 1;
         if !changed.contains("docs/804_testing_guide.md") {
             eprintln!("✖ testing_guide_sync: missing required updates");
-            eprintln!("  Shared UX contract, determinism, and parity-surface changes must update the testing guide.");
+            eprintln!(
+                "  Shared UX contract, determinism, and parity-surface changes must update the testing guide."
+            );
             eprintln!("  - docs/804_testing_guide.md");
             violations += 1;
         } else {
@@ -5658,7 +6810,9 @@ pub fn run_user_flow_guidance_sync() -> Result<()> {
         triggered += 1;
         if !changed.contains("docs/997_flow_coverage.md") {
             eprintln!("✖ coverage_report_sync: missing required updates");
-            eprintln!("  Shared-flow coverage, scenario inventory, and parity classification changes must update the user flow coverage report.");
+            eprintln!(
+                "  Shared-flow coverage, scenario inventory, and parity classification changes must update the user flow coverage report."
+            );
             eprintln!("  - docs/997_flow_coverage.md");
             violations += 1;
         } else {
@@ -5727,7 +6881,9 @@ pub fn run_user_flow_guidance_sync() -> Result<()> {
                 }
             } else {
                 // All skill files are gitignored — cannot enforce via git diff.
-                println!("• skills_guidance_sync: skill files are untracked (gitignored); update manually");
+                println!(
+                    "• skills_guidance_sync: skill files are untracked (gitignored); update manually"
+                );
             }
         }
     }
@@ -5809,7 +6965,9 @@ pub fn run_user_flow_policy_guardrails() -> Result<()> {
             eprintln!("✖ {file}: missing allowlisted harness-mode design-note reference");
             violations += 1;
         } else if !repo_root.join(design_ref).exists() {
-            eprintln!("✖ {file}: allowlisted harness-mode design-note reference does not exist: {design_ref}");
+            eprintln!(
+                "✖ {file}: allowlisted harness-mode design-note reference does not exist: {design_ref}"
+            );
             violations += 1;
         }
     }
@@ -5838,11 +6996,15 @@ pub fn run_user_flow_policy_guardrails() -> Result<()> {
     });
     if bridge_changed {
         if !diff_names.contains("crates/aura-web/ARCHITECTURE.md") {
-            eprintln!("✖ browser harness bridge compatibility changes require crates/aura-web/ARCHITECTURE.md updates");
+            eprintln!(
+                "✖ browser harness bridge compatibility changes require crates/aura-web/ARCHITECTURE.md updates"
+            );
             violations += 1;
         }
         if !diff_names.contains("docs/804_testing_guide.md") {
-            eprintln!("✖ browser harness bridge compatibility changes require docs/804_testing_guide.md updates");
+            eprintln!(
+                "✖ browser harness bridge compatibility changes require docs/804_testing_guide.md updates"
+            );
             violations += 1;
         }
     }
@@ -5964,7 +7126,9 @@ pub fn run_user_flow_policy_guardrails() -> Result<()> {
                 || text.contains("POLL_INTERVAL")
                 || text.contains("poll_interval"))
         {
-            eprintln!("✖ {current_file}:{new_line}: new sleep/polling helper in parity-critical harness or export path");
+            eprintln!(
+                "✖ {current_file}:{new_line}: new sleep/polling helper in parity-critical harness or export path"
+            );
             violations += 1;
         }
 
@@ -5992,7 +7156,9 @@ pub fn run_user_flow_policy_guardrails() -> Result<()> {
                 || text.contains(r#"RuntimeEventId(""#)
                 || text.contains(r#"ToastId(""#))
         {
-            eprintln!("✖ {current_file}:{new_line}: new stringly-typed parity identifier outside aura-app::ui_contract");
+            eprintln!(
+                "✖ {current_file}:{new_line}: new stringly-typed parity identifier outside aura-app::ui_contract"
+            );
             violations += 1;
         }
 
@@ -6002,7 +7168,9 @@ pub fn run_user_flow_policy_guardrails() -> Result<()> {
                 || text.contains("selected_by_index")
                 || text.contains("selected_channel_index"))
         {
-            eprintln!("✖ {current_file}:{new_line}: new row-index selection/addressing in parity-critical export or contract code");
+            eprintln!(
+                "✖ {current_file}:{new_line}: new row-index selection/addressing in parity-critical export or contract code"
+            );
             violations += 1;
         }
 
@@ -6013,7 +7181,9 @@ pub fn run_user_flow_policy_guardrails() -> Result<()> {
                 || trimmed.starts_with("execution_mode ")
                 || trimmed.starts_with("required_capabilities ")
             {
-                eprintln!("✖ {current_file}:{new_line}: new legacy scenario-dialect field in scenarios/harness");
+                eprintln!(
+                    "✖ {current_file}:{new_line}: new legacy scenario-dialect field in scenarios/harness"
+                );
                 violations += 1;
             }
         }
@@ -6027,7 +7197,9 @@ pub fn run_user_flow_policy_guardrails() -> Result<()> {
                 || text.contains("cargo run -p aura-harness --bin aura-harness")
                 || text.contains("window.__AURA_HARNESS__"))
         {
-            eprintln!("✖ {current_file}:{new_line}: new frontend-driving harness entry point outside approved owner files");
+            eprintln!(
+                "✖ {current_file}:{new_line}: new frontend-driving harness entry point outside approved owner files"
+            );
             violations += 1;
         }
 
@@ -6041,7 +7213,9 @@ pub fn run_user_flow_policy_guardrails() -> Result<()> {
                 || text.contains("list_id: String")
                 || text.contains("operation_id: String"))
         {
-            eprintln!("✖ {current_file}:{new_line}: new parity-critical TUI surface uses raw String identifier");
+            eprintln!(
+                "✖ {current_file}:{new_line}: new parity-critical TUI surface uses raw String identifier"
+            );
             violations += 1;
         }
 
@@ -6415,7 +7589,9 @@ pub fn run_verification_coverage() -> Result<()> {
 
     println!();
     if mismatches > 0 {
-        bail!("verification-coverage: {mismatches} check(s) failed. Update docs/998_verification_coverage.md to match actual counts.");
+        bail!(
+            "verification-coverage: {mismatches} check(s) failed. Update docs/998_verification_coverage.md to match actual counts."
+        );
     }
 
     println!("verification-coverage: PASSED");

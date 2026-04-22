@@ -5,6 +5,7 @@
 #![allow(missing_docs)]
 
 use super::support::test_authority;
+use aura_authorization::VerifiedBiscuitToken;
 use aura_core::types::scope::{AuthorityOp, ResourceScope};
 use aura_core::CapabilityName;
 use aura_guards::authorization::BiscuitAuthorizationBridge;
@@ -103,7 +104,7 @@ fn test_scope() -> ResourceScope {
     }
 }
 
-fn bridge_with_caps(capabilities: &[&str]) -> (BiscuitAuthorizationBridge, biscuit_auth::Biscuit) {
+fn bridge_with_caps(capabilities: &[&str]) -> (BiscuitAuthorizationBridge, VerifiedBiscuitToken) {
     let keypair = biscuit_auth::KeyPair::new();
     let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
     for cap in capabilities {
@@ -116,6 +117,8 @@ fn bridge_with_caps(capabilities: &[&str]) -> (BiscuitAuthorizationBridge, biscu
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build token: {err:?}"));
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), test_authority(42));
+    let token = VerifiedBiscuitToken::from_token(&token, keypair.public())
+        .unwrap_or_else(|err| panic!("failed to verify token: {err:?}"));
     (bridge, token)
 }
 
@@ -124,7 +127,7 @@ fn bridge_with_caps_owned(
 ) -> (
     biscuit_auth::KeyPair,
     BiscuitAuthorizationBridge,
-    biscuit_auth::Biscuit,
+    VerifiedBiscuitToken,
 ) {
     let keypair = biscuit_auth::KeyPair::new();
     let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
@@ -138,6 +141,8 @@ fn bridge_with_caps_owned(
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build token: {err:?}"));
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), test_authority(42));
+    let token = VerifiedBiscuitToken::from_token(&token, keypair.public())
+        .unwrap_or_else(|err| panic!("failed to verify token: {err:?}"));
     (keypair, bridge, token)
 }
 

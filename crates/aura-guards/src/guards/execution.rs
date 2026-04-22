@@ -14,7 +14,7 @@ use super::{
 };
 use crate::authorization::BiscuitAuthorizationBridge;
 use crate::guards::types::CapabilityId;
-use aura_authorization::{AuthorityOp, ResourceScope};
+use aura_authorization::{AuthorityOp, ResourceScope, VerifiedBiscuitToken};
 use aura_core::{types::Epoch, AuraError, AuraResult, FlowBudget, FlowCost};
 use std::future::Future;
 use tracing::{debug, error, info, instrument, warn};
@@ -71,7 +71,7 @@ pub async fn evaluate_guard(
     for (idx, token) in guard.required_tokens.iter().enumerate() {
         debug!(token_idx = idx, "Evaluating Biscuit token requirement");
 
-        // Evaluate token directly with proper Biscuit verification
+        // Evaluate already-verified token evidence through the guard policy.
         match verify_biscuit_token(token, &evaluator, &mut context, current_time_seconds) {
             Ok(result) => {
                 debug!(
@@ -157,7 +157,7 @@ impl GuardVerificationContext {
 
 /// Verify Biscuit token against an explicit capability/scope context.
 fn verify_biscuit_token(
-    token: &biscuit_auth::Biscuit,
+    token: &VerifiedBiscuitToken,
     evaluator: &BiscuitGuardEvaluator,
     context: &mut GuardVerificationContext,
     current_time_seconds: u64,
