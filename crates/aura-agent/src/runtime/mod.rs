@@ -55,6 +55,7 @@ pub mod errors;
 pub mod instrumentation;
 pub mod reliability;
 pub mod session_ingress;
+pub mod transport_boundary;
 
 // Choreography integration
 #[cfg(not(target_arch = "wasm32"))]

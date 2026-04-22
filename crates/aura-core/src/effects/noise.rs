@@ -20,6 +20,7 @@ pub struct TransportState(pub Box<dyn Any + Send + Sync>);
 #[derive(Debug, Clone)]
 pub struct NoiseParams {
     /// Local private key (32 bytes) - usually derived from Ed25519 identity
+    // aura-security: raw-secret-field-justified Noise effect ABI still uses fixed arrays; boundary must migrate to PrivateKeyBytes.
     pub local_private_key: [u8; 32],
     /// Remote public key (32 bytes) - usually derived from Ed25519 identity
     pub remote_public_key: [u8; 32],

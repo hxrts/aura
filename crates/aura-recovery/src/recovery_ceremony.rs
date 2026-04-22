@@ -751,16 +751,16 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         guardian: AuthorityId,
         approved: bool,
         rejection_reason: Option<String>,
+        signature: ThresholdSignature,
     ) -> AuraResult<RecoveryApproval> {
         let prestate_hash = self.compute_prestate_hash().await?;
         let approved_at_ms = self.current_timestamp_ms().await?;
 
-        // Create signature (placeholder)
-        let signature = ThresholdSignature::single_signer(
-            vec![0u8; 64], // Placeholder
-            vec![0u8; 32], // Placeholder
-            0,
-        );
+        if signature.signature_bytes().is_empty() || signature.signers.is_empty() {
+            return Err(AuraError::invalid(
+                "recovery approval requires a non-empty guardian signature",
+            ));
+        }
 
         Ok(RecoveryApproval {
             ceremony_id,

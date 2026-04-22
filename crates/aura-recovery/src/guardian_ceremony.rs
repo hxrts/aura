@@ -217,6 +217,7 @@ pub struct CeremonyState {
     /// Responses from each guardian
     pub responses: HashMap<AuthorityId, CeremonyResponse>,
     /// Encrypted key packages for each guardian (after key generation)
+    // aura-security: raw-secret-field-justified encrypted ceremony wire payloads; plaintext packages must use secret wrappers before wrapping.
     pub key_packages: Vec<Vec<u8>>,
     /// Public key package for the new configuration
     pub public_key_package: Vec<u8>,
@@ -393,6 +394,7 @@ pub struct CeremonyProposal {
     /// The proposed operation
     pub operation: GuardianRotationOp,
     /// Encrypted key package for this specific guardian
+    // aura-security: raw-secret-field-justified encrypted ceremony wire payload; plaintext package must use secret wrappers before wrapping.
     pub encrypted_key_package: Vec<u8>,
     /// Nonce for decryption
     pub encryption_nonce: [u8; 12],
@@ -1056,6 +1058,54 @@ mod tests {
         assert!(state.has_threshold()); // 2-of-3 met
         assert!(!state.has_decline());
         assert!(!state.all_responded()); // One still pending
+    }
+
+    #[test]
+    fn guardian_rotation_transcript_binds_epoch_and_response() {
+        let proposal = CeremonyProposal {
+            ceremony_id: CeremonyId(Hash32([1u8; 32])),
+            initiator_id: test_authority(1),
+            prestate_hash: Hash32([2u8; 32]),
+            operation: GuardianRotationOp {
+                threshold_k: 2,
+                total_n: 3,
+                guardian_ids: vec![test_authority(2), test_authority(3), test_authority(4)],
+                new_epoch: 10,
+            },
+            encrypted_key_package: vec![5],
+            encryption_nonce: [6u8; 12],
+            ephemeral_public_key: vec![7],
+        };
+        let mut different_epoch = proposal.clone();
+        different_epoch.operation.new_epoch = 11;
+
+        let accept = CeremonyResponseMsg {
+            ceremony_id: proposal.ceremony_id,
+            guardian_id: test_authority(2),
+            response: CeremonyResponse::Accept,
+            signature: vec![8],
+        };
+        let mut decline = accept.clone();
+        decline.response = CeremonyResponse::Decline;
+
+        let proposal_bytes =
+            aura_signature::encode_transcript("aura.guardian-rotation.proposal", 1, &proposal)
+                .unwrap();
+        let epoch_bytes = aura_signature::encode_transcript(
+            "aura.guardian-rotation.proposal",
+            1,
+            &different_epoch,
+        )
+        .unwrap();
+        let accept_bytes =
+            aura_signature::encode_transcript("aura.guardian-rotation.response", 1, &accept)
+                .unwrap();
+        let decline_bytes =
+            aura_signature::encode_transcript("aura.guardian-rotation.response", 1, &decline)
+                .unwrap();
+
+        assert_ne!(proposal_bytes, epoch_bytes);
+        assert_ne!(accept_bytes, decline_bytes);
     }
 
     #[tokio::test]

@@ -49,6 +49,7 @@ pub mod messages;
 pub(crate) mod registry;
 pub mod session;
 pub mod threshold;
+pub mod transcript;
 mod verification_common;
 
 // Re-export commonly used types
@@ -56,6 +57,11 @@ pub use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 
 // Re-export session verification
 pub use session::verify_session_ticket;
+pub use transcript::{
+    encode_transcript, sign_ed25519_transcript, threshold_signing_context_transcript_bytes,
+    verify_ed25519_transcript, verify_frost_transcript,
+    verify_threshold_signing_context_transcript, SecurityTranscript, TranscriptEnvelope,
+};
 
 // Re-export identity validation functions
 pub use event_validation::{
@@ -122,6 +128,10 @@ aura_error_types! {
         #[category = "crypto"]
         CryptoError { details: String } =>
             "Crypto error: {details}",
+
+        #[category = "crypto"]
+        TranscriptEncoding { details: String } =>
+            "Transcript encoding error: {details}",
     }
 }
 

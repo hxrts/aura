@@ -27,7 +27,7 @@ use crate::runtime::subsystems::{
 use crate::runtime::time_handler::EnhancedTimeHandler;
 use async_trait::async_trait;
 use aura_app::ReactiveHandler;
-use aura_authorization::BiscuitAuthorizationBridge;
+use aura_authorization::{BiscuitAuthorizationBridge, VerifiedBiscuitToken};
 use aura_composition::{CompositeHandlerAdapter, RegisterAllOptions};
 use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::transport::TransportEnvelope;
@@ -210,30 +210,47 @@ struct EffectApiLedgerState {
     subscribers: Vec<futures::channel::mpsc::Sender<aura_protocol::effects::EffectApiEvent>>,
 }
 
-#[derive(Clone, Default)]
-struct NoopBiscuitAuthorizationHandler;
+#[derive(Clone)]
+struct JournalBiscuitAuthorizationHandler {
+    bridge: BiscuitAuthorizationBridge,
+    time_handler: PhysicalTimeHandler,
+}
 
 #[async_trait]
-impl BiscuitAuthorizationEffects for NoopBiscuitAuthorizationHandler {
+impl BiscuitAuthorizationEffects for JournalBiscuitAuthorizationHandler {
     async fn authorize_biscuit(
         &self,
-        _token_data: &[u8],
-        _operation: AuthorizationOp,
-        _scope: &aura_core::types::scope::ResourceScope,
+        token_data: &[u8],
+        operation: AuthorizationOp,
+        scope: &aura_core::types::scope::ResourceScope,
     ) -> Result<AuthorizationDecision, AuthorizationError> {
+        let token = VerifiedBiscuitToken::from_bytes(token_data, self.bridge.root_public_key())
+            .map_err(|error| AuthorizationError::InvalidToken {
+                reason: error.to_string(),
+            })?;
+        let now = self.time_handler.physical_time_now_ms() / 1000;
+        let result = self
+            .bridge
+            .authorize_verified_with_time(&token, operation, scope, Some(now))
+            .map_err(|error| AuthorizationError::InvalidToken {
+                reason: error.to_string(),
+            })?;
         Ok(AuthorizationDecision {
-            authorized: true,
-            reason: None,
+            authorized: result.authorized,
+            reason: (!result.authorized).then(|| "Biscuit policy denied operation".to_string()),
         })
     }
 
     async fn authorize_fact(
         &self,
-        _token_data: &[u8],
+        token_data: &[u8],
         _fact_type: &str,
-        _scope: &aura_core::types::scope::ResourceScope,
+        scope: &aura_core::types::scope::ResourceScope,
     ) -> Result<bool, AuthorizationError> {
-        Ok(true)
+        Ok(self
+            .authorize_biscuit(token_data, AuthorizationOp::Update, scope)
+            .await?
+            .authorized)
     }
 }
 
@@ -328,7 +345,7 @@ impl AuraEffectSystem {
 
         // === Build CryptoSubsystem ===
         let crypto_handler = match crypto_seed {
-            Some(seed) => RealCryptoHandler::seeded(seed),
+            Some(seed) => RealCryptoHandler::for_simulation_seed(seed),
             None => RealCryptoHandler::new(),
         };
         let random_rng = match crypto_seed {
@@ -1615,29 +1632,22 @@ impl AuraEffectSystem {
         }
     }
 
-    /// Build the Biscuit-backed authorization handler. Falls back to mock when no key is available.
+    /// Build the Biscuit-backed authorization handler.
     fn init_authorization_handler(
         authority: AuthorityId,
         crypto_handler: &RealCryptoHandler,
         verifying_key: &Option<Vec<u8>>,
         time_handler: &PhysicalTimeHandler,
     ) -> aura_authorization::effects::WotAuthorizationHandler<RealCryptoHandler> {
-        if let Some(bytes) = verifying_key {
-            if let Ok(public_key) = PublicKey::from_bytes(bytes) {
-                let handler = aura_authorization::effects::WotAuthorizationHandler::new(
-                    crypto_handler.clone(),
-                    public_key,
-                    authority,
-                );
-                let time_handler = time_handler.clone();
-                return handler.with_time_provider(Arc::new(move || {
-                    time_handler.physical_time_now_ms() / 1000
-                }));
-            }
-        }
-
-        let handler =
-            aura_authorization::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
+        let public_key = verifying_key
+            .as_ref()
+            .and_then(|bytes| PublicKey::from_bytes(bytes).ok())
+            .expect("Biscuit authorization requires a configured root public key");
+        let handler = aura_authorization::effects::WotAuthorizationHandler::new(
+            crypto_handler.clone(),
+            public_key,
+            authority,
+        );
         let time_handler = time_handler.clone();
         handler.with_time_provider(Arc::new(move || time_handler.physical_time_now_ms() / 1000))
     }
@@ -1650,13 +1660,22 @@ impl AuraEffectSystem {
         Arc<
             EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
         >,
-        NoopBiscuitAuthorizationHandler,
+        JournalBiscuitAuthorizationHandler,
     > {
-        let authorization = self
-            .journal
-            .journal_policy()
-            .and_then(|(token, _bridge)| token.to_vec().ok())
-            .map(|bytes| (bytes, NoopBiscuitAuthorizationHandler));
+        let authorization = self.journal.journal_policy().and_then(|(token, bridge)| {
+            token.to_vec().ok().map(|bytes| {
+                (
+                    bytes,
+                    JournalBiscuitAuthorizationHandler {
+                        bridge: BiscuitAuthorizationBridge::new(
+                            bridge.root_public_key(),
+                            bridge.authority_id(),
+                        ),
+                        time_handler: PhysicalTimeHandler::new(),
+                    },
+                )
+            })
+        });
 
         aura_journal::JournalHandlerFactory::create(
             self.authority_id,

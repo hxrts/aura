@@ -14,6 +14,7 @@ use aura_core::effects::storage::StorageEffects;
 use aura_core::tree::AttestedOp;
 use aura_core::types::identifiers::DeviceId;
 use aura_core::Hash32;
+use aura_guards::VerifiedIngress;
 use aura_journal::commitment_tree::storage as tree_storage;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -205,8 +206,12 @@ impl SyncEffects for PersistentSyncHandler {
         Ok(Vec::new())
     }
 
-    async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
+    async fn merge_remote_ops(
+        &self,
+        ops: VerifiedIngress<Vec<AttestedOp>>,
+    ) -> Result<(), SyncError> {
         self.ensure_initialized_for("merge_remote_ops").await?;
+        let (ops, _) = ops.into_parts();
 
         for op in ops {
             let op_hash =

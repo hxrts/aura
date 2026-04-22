@@ -152,11 +152,10 @@ impl RealCryptoHandler {
         Self { seed: None }
     }
 
-    /// Create a seeded crypto handler for deterministic testing
+    /// Create a deterministic crypto handler for simulation or tests.
     ///
-    /// When seeded, all randomness will be deterministic based on the provided seed.
-    /// This is useful for reproducible tests and simulations.
-    pub fn seeded(seed: [u8; 32]) -> Self {
+    /// Production runtime construction must use `RealCryptoHandler::new()`.
+    pub fn for_simulation_seed(seed: [u8; 32]) -> Self {
         Self { seed: Some(seed) }
     }
 
@@ -957,7 +956,7 @@ mod frost_tests {
         use crate::crypto::RealCryptoHandler;
 
         // Use deterministic seed so FROST dealer generation is stable in tests
-        let crypto = RealCryptoHandler::seeded([0xA5; 32]);
+        let crypto = RealCryptoHandler::for_simulation_seed([0xA5; 32]);
 
         // Test simple 2-of-3 threshold
         let threshold = 2;
@@ -1020,7 +1019,7 @@ mod frost_tests {
         // 3. Test that different key generation runs produce different keys
         // Use a distinct deterministic seed to ensure output changes while
         // keeping the test reproducible.
-        let crypto_alt = RealCryptoHandler::seeded([0xA6; 32]);
+        let crypto_alt = RealCryptoHandler::for_simulation_seed([0xA6; 32]);
         let key_gen_result2 = generate(&crypto_alt, threshold, max_signers).await;
 
         assert_eq!(
@@ -1342,7 +1341,7 @@ mod key_conversion_tests {
                 .build()
                 .unwrap();
             runtime.block_on(async {
-                let handler = RealCryptoHandler::seeded(seed);
+                let handler = RealCryptoHandler::for_simulation_seed(seed);
 
                 // 1. Generate Ed25519 keypair
                 let (ed_priv, ed_pub) = handler.ed25519_generate_keypair().await.unwrap();

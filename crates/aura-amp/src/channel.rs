@@ -2,10 +2,9 @@
 //!
 //! Provides an implementation of `aura_core::effects::AmpChannelEffects` that
 //! persists AMP channel facts to the context journal via `AmpJournalEffects`.
-//! Encryption uses a deterministic stream mask derived from channel header +
-//! sender to keep Layer 4 transport non-plaintext without introducing a
-//! ratchet/AEAD dependency here. This is sufficient for simulation/demo;
-//! production AEAD can replace the mask while preserving the interface.
+//! Production message encryption is handled by the high-level
+//! `protocol::orchestration::amp_send` path, which derives ratchet keys and
+//! seals payloads with AEAD before transport.
 
 use aura_core::effects::amp::{
     AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, ChannelCloseParams,
@@ -237,9 +236,11 @@ where
             ratchet_gen: state.current_gen,
         };
 
-        let ciphertext = mask_ciphertext(&header, &params.sender, &params.plaintext);
-
-        Ok(AmpCiphertext { header, ciphertext })
+        let _ = header;
+        Err(AmpChannelError::Crypto(
+            "legacy AMP channel coordinator cannot emit ciphertext; use amp_send AEAD path"
+                .to_string(),
+        ))
     }
 }
 
@@ -355,50 +356,4 @@ async fn persist_channel_membership_event<E: AmpJournalEffects>(
     effects
         .insert_relational_fact(membership.to_generic())
         .await
-}
-
-// ============================================================================
-// Demo Encryption (feature-gated)
-// ============================================================================
-
-/// Derive a deterministic keystream from header + sender and XOR-mask the payload.
-///
-/// # Security Warning
-///
-/// This is a **demo-only** encryption scheme using XOR with a hash-derived keystream.
-/// It provides NO real security guarantees and MUST NOT be used in production.
-/// Production deployments should disable the `demo-crypto` feature and use
-/// proper AEAD encryption via `CryptoEffects`.
-#[cfg(feature = "demo-crypto")]
-fn mask_ciphertext(header: &AmpHeader, sender: &AuthorityId, plaintext: &[u8]) -> Vec<u8> {
-    let mut key_material = Vec::new();
-    key_material.extend_from_slice(header.channel.as_bytes());
-    key_material.extend_from_slice(&header.chan_epoch.to_le_bytes());
-    key_material.extend_from_slice(&header.ratchet_gen.to_le_bytes());
-    key_material.extend_from_slice(sender.0.as_bytes());
-
-    let mut keystream = Vec::with_capacity(plaintext.len());
-    let mut counter: u64 = 0;
-    while keystream.len() < plaintext.len() {
-        let mut block_input = key_material.clone();
-        block_input.extend_from_slice(&counter.to_le_bytes());
-        let block = hash(&block_input);
-        keystream.extend_from_slice(&block);
-        counter += 1;
-    }
-
-    plaintext
-        .iter()
-        .zip(keystream)
-        .map(|(p, k)| p ^ k)
-        .collect()
-}
-
-/// Placeholder when demo-crypto is disabled - panics to prevent accidental use.
-#[cfg(not(feature = "demo-crypto"))]
-fn mask_ciphertext(_header: &AmpHeader, _sender: &AuthorityId, _plaintext: &[u8]) -> Vec<u8> {
-    panic!(
-        "Demo encryption is disabled. Enable the `demo-crypto` feature for testing, \
-         or use `amp_send` with proper AEAD encryption for production."
-    );
 }

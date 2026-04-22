@@ -20,7 +20,7 @@
     clippy::disallowed_methods, // Guard chain coordinates time/random effects
     deprecated // Deprecated time/random functions used intentionally for effect coordination
 )]
-use aura_authorization::{BiscuitError, ResourceScope};
+use aura_authorization::{BiscuitError, ResourceScope, VerifiedBiscuitToken};
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::CapabilityName;
 use biscuit_auth::{macros::*, Authorizer, AuthorizerLimits, Biscuit, PublicKey};
@@ -196,11 +196,9 @@ impl BiscuitAuthorizationBridge {
         resource: &ResourceScope,
         current_time_seconds: u64,
     ) -> Result<AuthorizationResult, BiscuitError> {
-        // Phase 1: Verify token signature with root public key
-        let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
-
-        // Verify the token signature is valid for our root key
-        // The authorizer creation already verifies the signature chain
+        // Phase 1: Verify token signature with the configured root public key.
+        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)?;
+        let mut authorizer = verified_token.authorizer()?;
 
         // Phase 2: Add ambient facts for authorization context
         self.add_authorize_ambient_facts(&mut authorizer, operation, current_time_seconds)?;
@@ -229,7 +227,7 @@ impl BiscuitAuthorizationBridge {
         Ok(AuthorizationResult {
             authorized,
             delegation_depth: self.extract_delegation_depth_from_token(token),
-            token_facts: self.extract_token_facts_from_blocks(token, current_time_seconds),
+            token_facts: self.extract_diagnostic_token_facts(&verified_token, current_time_seconds),
         })
     }
 
@@ -256,8 +254,9 @@ impl BiscuitAuthorizationBridge {
             .map_err(|error| BiscuitError::InvalidCapability(error.to_string()))?;
         let capability = capability_name.as_str();
 
-        // Create authorizer and verify token signature
-        let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
+        // Create authorizer only after root-key verification.
+        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)?;
+        let mut authorizer = verified_token.authorizer()?;
 
         // Add ambient facts for capability check
         self.add_authority_fact(&mut authorizer)?;
@@ -292,10 +291,10 @@ impl BiscuitAuthorizationBridge {
         }
     }
 
-    /// Extract readable token facts from token blocks
-    fn extract_token_facts_from_blocks(
+    /// Extract readable token facts from a verified token for diagnostics only.
+    fn extract_diagnostic_token_facts(
         &self,
-        token: &Biscuit,
+        token: &VerifiedBiscuitToken,
         current_time_seconds: u64,
     ) -> Vec<String> {
         let mut facts = Vec::new();
@@ -305,7 +304,7 @@ impl BiscuitAuthorizationBridge {
         facts.push(format!("extracted_at({current_time_seconds})"));
         facts.push("extracted_from_token".to_string());
 
-        // Try to extract facts from token using an authorizer
+        // Try to extract facts from the verified token using an authorizer.
         if let Ok(authorizer) = token.authorizer() {
             // Get the world facts which include facts from all token blocks
             let (world_facts, world_rules, _world_checks, _world_policies) = authorizer.dump();
@@ -322,12 +321,8 @@ impl BiscuitAuthorizationBridge {
 
         // If we couldn't extract detailed facts, provide basic token info
         if facts.len() <= 2 {
-            let count = token.block_count();
+            let count = token.token().block_count();
             facts.push(format!("block_count({count})"));
-
-            // Add standard capabilities that are typically in device tokens
-            facts.push("capability(\"read\")".to_string());
-            facts.push("capability(\"write\")".to_string());
         }
 
         facts

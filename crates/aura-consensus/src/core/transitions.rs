@@ -35,7 +35,7 @@ use super::state::{
 };
 use super::validation::check_all_invariants;
 use crate::types::ConsensusId;
-use aura_core::{AuthorityId, Hash32, OperationId};
+use aura_core::{hash, AuthorityId, Hash32, OperationId};
 
 /// Result of a state transition.
 ///
@@ -73,6 +73,14 @@ fn assert_transition_invariants(state: &ConsensusState, label: &'static str) {
         check_all_invariants(state),
         "{label}: invariant violation after transition"
     );
+}
+
+fn abstract_commit_signature(cid: ConsensusId, result_id: Hash32, prestate_hash: Hash32) -> String {
+    let mut bytes = Vec::with_capacity(96);
+    bytes.extend_from_slice(&cid.0 .0);
+    bytes.extend_from_slice(&result_id.0);
+    bytes.extend_from_slice(&prestate_hash.0);
+    format!("pure-consensus:{}", hex::encode(hash::hash(&bytes)))
 }
 
 /// Start a new consensus instance.
@@ -182,7 +190,7 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
             new_state.commit_fact = Some(PureCommitFact {
                 cid: new_state.cid,
                 result_id: rid,
-                signature: "agg_sig_placeholder".to_string(),
+                signature: abstract_commit_signature(new_state.cid, rid, new_state.prestate_hash),
                 prestate_hash: new_state.prestate_hash,
             });
         }
@@ -304,7 +312,7 @@ pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &Hash32) -> Tr
     new_state.commit_fact = Some(PureCommitFact {
         cid: state.cid,
         result_id: *winning_rid,
-        signature: "agg_sig_fallback".to_string(),
+        signature: abstract_commit_signature(state.cid, *winning_rid, state.prestate_hash),
         prestate_hash: state.prestate_hash,
     });
 

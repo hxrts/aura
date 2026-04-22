@@ -26,7 +26,7 @@ use crate::task_registry::TaskSupervisionError;
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::effects::time::PhysicalTimeEffects;
 #[cfg(not(target_arch = "wasm32"))]
-use aura_core::effects::transport::TransportEnvelope;
+use aura_core::effects::transport::{TransportEnvelope, MAX_TRANSPORT_SIGNATURE_BYTES};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
 use aura_core::types::identifiers::AuthorityId;
@@ -45,7 +45,14 @@ use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::DomainFact;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_protocol::amp::get_channel_state;
+#[cfg(not(target_arch = "wasm32"))]
+use aura_protocol::{
+    DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
+    VerifiedIngressMetadata,
+};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+#[cfg(not(target_arch = "wasm32"))]
+use aura_sync::protocols::journal_apply::JournalApplyService;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::{SinkExt, StreamExt};
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -1039,6 +1046,15 @@ async fn handle_inbound_transport_envelope(
     effects: Arc<AuraEffectSystem>,
     envelope: TransportEnvelope,
 ) -> Option<TransportEnvelope> {
+    let ingress = match verify_lan_transport_ingress(envelope) {
+        Ok(ingress) => ingress,
+        Err(error) => {
+            tracing::debug!(error = %error, "rejected LAN transport envelope before runtime handling");
+            return None;
+        }
+    };
+    let envelope = ingress.payload();
+
     if envelope
         .metadata
         .get("content-type")
@@ -1102,10 +1118,22 @@ async fn handle_inbound_transport_envelope(
         );
         match from_slice::<RelationalFact>(&envelope.payload) {
             Ok(fact) => {
+                let fact = match DecodedIngress::new(fact, ingress.evidence().metadata().clone())
+                    .verify(ingress.evidence().clone())
+                {
+                    Ok(fact) => fact,
+                    Err(error) => {
+                        tracing::warn!(
+                            error = %error,
+                            "LAN transport failed to promote chat fact ingress"
+                        );
+                        return None;
+                    }
+                };
                 if let RelationalFact::Generic {
                     envelope: chat_envelope,
                     ..
-                } = &fact
+                } = fact.payload()
                 {
                     if chat_envelope.type_id.as_str() == CHAT_FACT_TYPE_ID {
                         if let Some(ChatFact::ChannelCreated {
@@ -1113,7 +1141,7 @@ async fn handle_inbound_transport_envelope(
                             channel_id,
                             creator_id,
                             ..
-                        }) = ChatFact::from_envelope(chat_envelope)
+                        }) = ChatFact::from_envelope(&chat_envelope)
                         {
                             let local_authority = envelope.destination;
                             if get_channel_state(effects.as_ref(), context_id, channel_id)
@@ -1170,6 +1198,17 @@ async fn handle_inbound_transport_envelope(
                     }
                 }
 
+                let fact = match JournalApplyService::new().accept_verified_relational_facts(fact) {
+                    Ok(fact) => fact,
+                    Err(error) => {
+                        tracing::debug!(
+                            error = %error,
+                            "LAN transport failed verified apply boundary for incoming chat fact"
+                        );
+                        return None;
+                    }
+                };
+                let (fact, _) = fact.into_parts();
                 if let Err(err) = effects.commit_relational_facts(vec![fact]).await {
                     tracing::debug!(
                         error = %err,
@@ -1188,8 +1227,115 @@ async fn handle_inbound_transport_envelope(
         }
     }
 
+    let (envelope, _) = ingress.into_parts();
     effects.requeue_envelope(envelope);
     None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, thiserror::Error)]
+enum LanTransportIngressError {
+    #[error("missing guard-chain receipt")]
+    MissingReceipt,
+    #[error("receipt does not match envelope routing metadata")]
+    ReceiptRouteMismatch,
+    #[error("receipt signature is empty")]
+    EmptyReceiptSignature,
+    #[error("receipt signature exceeds transport limit")]
+    OversizedReceiptSignature,
+    #[error("receipt nonce is zero")]
+    EmptyReceiptNonce,
+    #[error("missing content-type metadata")]
+    MissingContentType,
+    #[error("invalid ingress evidence: {0}")]
+    Evidence(#[from] aura_protocol::IngressVerificationError),
+    #[error("ingress promotion failed: {0}")]
+    Promotion(String),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn verify_lan_transport_ingress(
+    envelope: TransportEnvelope,
+) -> Result<VerifiedIngress<TransportEnvelope>, LanTransportIngressError> {
+    let receipt = envelope
+        .receipt
+        .as_ref()
+        .ok_or(LanTransportIngressError::MissingReceipt)?;
+
+    if receipt.src != envelope.source
+        || receipt.dst != envelope.destination
+        || receipt.context != envelope.context
+    {
+        return Err(LanTransportIngressError::ReceiptRouteMismatch);
+    }
+
+    if receipt.sig.is_empty() {
+        return Err(LanTransportIngressError::EmptyReceiptSignature);
+    }
+
+    if receipt.sig.len() > MAX_TRANSPORT_SIGNATURE_BYTES {
+        return Err(LanTransportIngressError::OversizedReceiptSignature);
+    }
+
+    if receipt.nonce == 0 {
+        return Err(LanTransportIngressError::EmptyReceiptNonce);
+    }
+
+    if !envelope.metadata.contains_key("content-type") {
+        return Err(LanTransportIngressError::MissingContentType);
+    }
+
+    let schema_version = envelope
+        .metadata
+        .get("wire-format-version")
+        .and_then(|version| version.parse::<u16>().ok())
+        .unwrap_or(aura_protocol::messages::WIRE_FORMAT_VERSION);
+    let metadata = VerifiedIngressMetadata::new(
+        IngressSource::Authority(envelope.source),
+        envelope.context,
+        None,
+        aura_core::Hash32::from_bytes(&envelope.payload),
+        schema_version,
+    );
+    let evidence = IngressVerificationEvidence::builder(metadata)
+        .peer_identity(
+            receipt.src == envelope.source,
+            "receipt source must match envelope source",
+        )?
+        .envelope_authenticity(
+            !receipt.sig.is_empty() && receipt.sig.len() <= MAX_TRANSPORT_SIGNATURE_BYTES,
+            "guard-chain receipt signature must be present and bounded",
+        )?
+        .capability_authorization(
+            envelope.receipt.is_some(),
+            "guard-chain receipt is required before LAN ingress",
+        )?
+        .namespace_scope(
+            receipt.context == envelope.context
+                && receipt.dst == envelope.destination
+                && envelope.metadata.contains_key("content-type"),
+            "receipt route and content-type must match the envelope scope",
+        )?
+        .schema_version(
+            schema_version <= aura_protocol::messages::WIRE_FORMAT_VERSION,
+            "unsupported LAN envelope schema version",
+        )?
+        .replay_freshness(receipt.nonce != 0, "receipt nonce must be non-zero")?
+        .signer_membership(
+            receipt.src == envelope.source,
+            "LAN receipt signer must match source authority",
+        )?
+        .proof_evidence(
+            !receipt.sig.is_empty(),
+            "guard-chain receipt signature evidence must be present",
+        )?
+        .build()?;
+
+    DecodedIngress::new(envelope, evidence.metadata().clone())
+        .verify(evidence)
+        .map_err(|error| {
+            LanTransportIngressError::Promotion(format!("promote LAN transport ingress: {error}"))
+        })
 }
 
 pub(crate) async fn publish_lan_descriptor_with(

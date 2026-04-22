@@ -12,6 +12,7 @@ Provide the guard chain that enforces authorization, flow budgets, leakage budge
 | GuardSnapshot preparation and decision types | Effect execution (happens via interpreters) |
 | EffectCommands describing required side effects | Time/random access (only via effect traits in interpreter layer) |
 | GuardDecision with optional receipt metadata | Runtime composition or lifecycle management |
+| Verified remote-ingress typestate boundary | Decoded peer messages mutating state directly |
 
 ## Dependencies
 
@@ -39,6 +40,8 @@ Provide the guard chain that enforces authorization, flow budgets, leakage budge
 ## Invariants
 
 - Charge-before-send: no transport side effects without successful guard evaluation.
+- Peer-originated data must carry verified ingress evidence before it can be
+  accepted by state-mutating APIs.
 - Authorization precedes budgeting: CapGuard runs before FlowGuard.
 - Journal coupling is atomic with budget charge.
 - Leakage accounting is recorded as journal facts (RelationalFact::LeakageEvent).
@@ -82,6 +85,7 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 | Surface | Category | Notes |
 |---------|----------|-------|
 | `guards/pure.rs`, `guards/chain.rs`, `guards/types.rs`, `guards/policy.rs` | `Pure` | Canonical guard ordering, policy, and typed guard results. |
+| `ingress.rs` verified remote-ingress boundary | `MoveOwned`, capability-gated | Sealed typestate wrapper for peer-originated data admitted by protocol/runtime verifiers. |
 | `guards/biscuit_evaluator.rs`, `guards/capability_guard.rs`, `guards/flow.rs`, `guards/journal.rs` | `Pure`, `MoveOwned` | Guard inputs/results remain explicit values; no hidden ownership transfer or fail-open mutation. |
 | `guards/executor.rs` | effectful orchestrator | Applies effect commands without becoming a long-lived semantic owner. |
 | Actor-owned runtime state | none | Guard chain ownership stays outside this crate. |
@@ -119,6 +123,7 @@ just check-arch
 | Choreography guard integration | `tests/chain/choreography_guards.rs` | Covered |
 | GuardPlan drifts from choreography | `tests/chain/guard_plan_golden.rs` | Covered |
 | Policy defaults incorrect | `src/guards/policy.rs` (inline) | Covered |
+| Decoded peer data is treated as verified ingress | `src/ingress.rs` (inline) | Initial typestate coverage |
 
 ## References
 

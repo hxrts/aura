@@ -20,12 +20,18 @@ use aura_core::tree::metadata::DeviceLeafMetadata;
 use aura_core::tree::LeafRole;
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::util::serialization::{from_slice, to_vec};
-use aura_core::{hash, AttestedOp, AuthorityId, DeviceId, LeafId, LeafNode, NodeIndex, TreeOp};
+use aura_core::{
+    hash, AttestedOp, AuthorityId, ContextId, DeviceId, LeafId, LeafNode, NodeIndex, TreeOp,
+};
 use aura_protocol::effects::{ChoreographicRole, RoleIndex, TreeEffects};
+use aura_protocol::{
+    DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
+    VerifiedIngressMetadata,
+};
 use aura_sync::protocols::{
     DeviceEpochAcceptance, DeviceEpochCommit, DeviceEpochProposal, DeviceEpochRotationKind,
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -34,7 +40,7 @@ const COMMIT_STORAGE_NAMESPACE: &str = "device_epoch_rotation_commit";
 const COMMIT_STATUS_POLL_MS: u64 = 100;
 const COMMIT_STATUS_TIMEOUT_MS: u64 = 10_000;
 
-#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct DeviceEpochRotationInitRequest {
     #[zeroize(skip)]
     pub ceremony_id: CeremonyId,
@@ -45,12 +51,30 @@ pub struct DeviceEpochRotationInitRequest {
     #[zeroize(skip)]
     pub participant_device_id: DeviceId,
     /// Security-sensitive serialized key package. Zeroized on drop.
+    // aura-security: raw-secret-field-justified runtime-local ceremony handoff until request envelopes move to SigningShareBytes.
     pub key_package: Vec<u8>,
     /// Security-sensitive serialized threshold configuration. Zeroized on drop.
+    // aura-security: raw-secret-field-justified runtime-local ceremony handoff until request envelopes move to SecretBytes.
     pub threshold_config: Vec<u8>,
     /// Device-epoch public key package retained with the secret material and
     /// cleared on drop with the rest of the ceremony payload.
     pub public_key_package: Vec<u8>,
+}
+
+impl fmt::Debug for DeviceEpochRotationInitRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeviceEpochRotationInitRequest")
+            .field("ceremony_id", &self.ceremony_id)
+            .field("kind", &self.kind)
+            .field("pending_epoch", &self.pending_epoch)
+            .field("participant_device_id", &self.participant_device_id)
+            .field("key_package_len", &self.key_package.len())
+            .field("key_package", &"<redacted>")
+            .field("threshold_config_len", &self.threshold_config.len())
+            .field("threshold_config", &"<redacted>")
+            .field("public_key_package_len", &self.public_key_package.len())
+            .finish()
+    }
 }
 
 #[derive(Clone)]
@@ -127,7 +151,7 @@ impl DeviceEpochRotationService {
         .map_err(map_session_error)?;
         session.queue_send_bytes(to_vec(&proposal).map_err(map_encode_error)?);
 
-        let mut acceptance: Option<DeviceEpochAcceptance> = None;
+        let mut acceptance: Option<VerifiedIngress<DeviceEpochAcceptance>> = None;
         loop {
             let round = session
                 .advance_round("Initiator", &peer_roles)
@@ -137,12 +161,16 @@ impl DeviceEpochRotationService {
             if let Some(blocked) = round.blocked_receive {
                 let decoded: DeviceEpochAcceptance =
                     from_slice(&blocked.payload).map_err(map_decode_error)?;
-                acceptance = Some(decoded.clone());
+                let verified_acceptance = verified_device_epoch_acceptance(&request, decoded)?;
+                acceptance = Some(verified_acceptance.clone());
                 let threshold_reached = self
                     .ceremony_runner
-                    .record_response(
+                    .record_verified_response(
                         &request.ceremony_id,
-                        ParticipantIdentity::device(decoded.acceptor_device_id),
+                        ParticipantIdentity::device(
+                            verified_acceptance.payload().acceptor_device_id,
+                        ),
+                        &verified_acceptance,
                     )
                     .await
                     .map_err(map_internal_error)?;
@@ -192,6 +220,8 @@ impl DeviceEpochRotationService {
                 break;
             }
 
+            let envelope = verified_device_epoch_envelope(envelope)?;
+
             processed += 1;
             if self.execute_participant_from_envelope(envelope).await? {
                 completed += 1;
@@ -203,8 +233,9 @@ impl DeviceEpochRotationService {
 
     async fn execute_participant_from_envelope(
         &self,
-        envelope: TransportEnvelope,
+        envelope: VerifiedIngress<TransportEnvelope>,
     ) -> AgentResult<bool> {
+        let (envelope, _) = envelope.into_parts();
         let session_uuid = envelope_session_uuid(&envelope)?;
         let initiator_device_id = envelope_source_device_id(&envelope)?;
         let participant_device_id = self.effects.device_id();
@@ -662,6 +693,144 @@ fn envelope_source_device_id(envelope: &TransportEnvelope) -> AgentResult<Device
             AgentError::internal("missing aura-source-device-id on device epoch rotation envelope")
         })?;
     source.parse().map_err(map_internal_error)
+}
+
+fn device_epoch_acceptance_context(ceremony_id: &CeremonyId) -> ContextId {
+    ContextId::new_from_entropy(hash::hash(ceremony_id.to_string().as_bytes()))
+}
+
+fn verified_device_epoch_acceptance(
+    request: &DeviceEpochRotationInitRequest,
+    acceptance: DeviceEpochAcceptance,
+) -> AgentResult<VerifiedIngress<DeviceEpochAcceptance>> {
+    let payload_hash = aura_core::Hash32::from_value(&acceptance)
+        .map_err(|error| AgentError::internal(format!("hash device epoch acceptance: {error}")))?;
+    let metadata = VerifiedIngressMetadata::new(
+        IngressSource::Device(acceptance.acceptor_device_id),
+        device_epoch_acceptance_context(&request.ceremony_id),
+        None,
+        payload_hash,
+        1,
+    );
+    let decoded = DecodedIngress::new(acceptance, metadata.clone());
+    let evidence = IngressVerificationEvidence::builder(metadata)
+        .peer_identity(
+            decoded.payload().acceptor_device_id == request.participant_device_id,
+            "device epoch acceptance must come from the requested participant",
+        )
+        .and_then(|builder| {
+            builder.envelope_authenticity(
+                decoded.payload().ceremony_id == request.ceremony_id,
+                "device epoch acceptance must bind the ceremony id",
+            )
+        })
+        .and_then(|builder| {
+            builder.capability_authorization(
+                decoded.payload().acceptor_device_id == request.participant_device_id,
+                "device epoch acceptor must be the ceremony participant",
+            )
+        })
+        .and_then(|builder| builder.namespace_scope(true, "device epoch acceptance context"))
+        .and_then(|builder| builder.schema_version(true, "device epoch acceptance schema v1"))
+        .and_then(|builder| {
+            builder.replay_freshness(
+                decoded.payload().ceremony_id == request.ceremony_id,
+                "device epoch acceptance ceremony id is the session freshness scope",
+            )
+        })
+        .and_then(|builder| {
+            builder.signer_membership(
+                decoded.payload().acceptor_device_id == request.participant_device_id,
+                "device epoch acceptor must be a participant",
+            )
+        })
+        .and_then(|builder| {
+            builder.proof_evidence(
+                decoded.payload().ceremony_id == request.ceremony_id,
+                "device epoch acceptance proof binds the expected ceremony",
+            )
+        })
+        .and_then(|builder| builder.build())
+        .map_err(|error| {
+            AgentError::internal(format!("verify device epoch acceptance: {error}"))
+        })?;
+    decoded
+        .verify(evidence)
+        .map_err(|error| AgentError::internal(format!("promote device epoch acceptance: {error}")))
+}
+
+fn verified_device_epoch_envelope(
+    envelope: TransportEnvelope,
+) -> AgentResult<VerifiedIngress<TransportEnvelope>> {
+    let source = envelope_source_device_id(&envelope)?;
+    let session_id = envelope_session_uuid(&envelope)?;
+    let schema_version = envelope
+        .metadata
+        .get("wire-format-version")
+        .and_then(|version| version.parse::<u16>().ok())
+        .unwrap_or(aura_protocol::messages::WIRE_FORMAT_VERSION);
+    let metadata = VerifiedIngressMetadata::new(
+        IngressSource::Device(source),
+        envelope.context,
+        Some(aura_core::SessionId::from_uuid(session_id)),
+        aura_core::Hash32::from_bytes(&envelope.payload),
+        schema_version,
+    );
+    let evidence = IngressVerificationEvidence::builder(metadata)
+        .peer_identity(
+            envelope.metadata.contains_key("aura-source-device-id"),
+            "device epoch envelope must carry source device identity",
+        )
+        .and_then(|builder| {
+            builder.envelope_authenticity(
+                !envelope.payload.is_empty(),
+                "device epoch envelope payload must be present",
+            )
+        })
+        .and_then(|builder| {
+            builder.capability_authorization(
+                is_device_epoch_rotation_envelope(&envelope),
+                "device epoch envelope must use the device epoch protocol namespace",
+            )
+        })
+        .and_then(|builder| {
+            builder.namespace_scope(
+                envelope
+                    .metadata
+                    .get("protocol-id")
+                    .is_some_and(|value| value == PROTOCOL_ID),
+                "device epoch protocol id must match",
+            )
+        })
+        .and_then(|builder| {
+            builder.schema_version(
+                schema_version <= aura_protocol::messages::WIRE_FORMAT_VERSION,
+                "unsupported device epoch schema",
+            )
+        })
+        .and_then(|builder| {
+            builder.replay_freshness(
+                envelope.metadata.contains_key("session-id"),
+                "device epoch envelope must carry session freshness",
+            )
+        })
+        .and_then(|builder| {
+            builder.signer_membership(
+                envelope.metadata.contains_key("aura-source-device-id"),
+                "device epoch envelope must carry participant device evidence",
+            )
+        })
+        .and_then(|builder| {
+            builder.proof_evidence(
+                envelope.metadata.contains_key("session-id") && !envelope.payload.is_empty(),
+                "device epoch envelope must bind session and payload evidence",
+            )
+        })
+        .and_then(|builder| builder.build())
+        .map_err(|error| AgentError::internal(format!("verify device epoch ingress: {error}")))?;
+    DecodedIngress::new(envelope, evidence.metadata().clone())
+        .verify(evidence)
+        .map_err(|error| AgentError::internal(format!("promote device epoch ingress: {error}")))
 }
 
 fn map_internal_error(error: impl std::fmt::Display) -> AgentError {

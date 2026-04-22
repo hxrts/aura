@@ -4,9 +4,34 @@
 //! recovery operations, proving guardian identity.
 
 use crate::verification_common::verify_ed25519_signature;
-use crate::{AuthenticationError, Result};
+use crate::{AuthenticationError, Result, SecurityTranscript};
 use aura_core::GuardianId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct RecoveryApprovalTranscriptPayload {
+    guardian_id: GuardianId,
+    recovery_request_hash: [u8; 32],
+}
+
+struct RecoveryApprovalTranscript {
+    guardian_id: GuardianId,
+    recovery_request_hash: [u8; 32],
+}
+
+impl SecurityTranscript for RecoveryApprovalTranscript {
+    type Payload = RecoveryApprovalTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.recovery.guardian-approval";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        RecoveryApprovalTranscriptPayload {
+            guardian_id: self.guardian_id,
+            recovery_request_hash: self.recovery_request_hash,
+        }
+    }
+}
 
 /// Verify that a guardian signed a message
 ///
@@ -73,7 +98,7 @@ pub fn verify_recovery_approval(
     guardian_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
     // Create the approval message that should have been signed
-    let approval_message = create_recovery_approval_message(guardian_id, recovery_request_hash);
+    let approval_message = create_recovery_approval_message(guardian_id, recovery_request_hash)?;
 
     // Verify the signature against the approval message
     verify_guardian_signature(
@@ -91,11 +116,15 @@ pub fn verify_recovery_approval(
 fn create_recovery_approval_message(
     guardian_id: GuardianId,
     recovery_request_hash: &[u8; 32],
-) -> Vec<u8> {
-    let mut message = Vec::with_capacity(48); // 16 + 32 bytes
-    message.extend_from_slice(guardian_id.0.as_bytes());
-    message.extend_from_slice(recovery_request_hash);
-    message
+) -> Result<Vec<u8>> {
+    RecoveryApprovalTranscript {
+        guardian_id,
+        recovery_request_hash: *recovery_request_hash,
+    }
+    .transcript_bytes()
+    .map_err(|error| AuthenticationError::InvalidGuardianSignature {
+        details: format!("failed to encode recovery approval transcript: {error}"),
+    })
 }
 
 #[cfg(test)]
@@ -151,7 +180,7 @@ mod tests {
         let recovery_request_hash = [42u8; 32];
 
         let approval_message =
-            create_recovery_approval_message(guardian_id, &recovery_request_hash);
+            create_recovery_approval_message(guardian_id, &recovery_request_hash).unwrap();
         let (signature, verifying_key) = signing_material(61, &approval_message);
 
         let result = verify_recovery_approval(
@@ -170,15 +199,31 @@ mod tests {
         let guardian_id = guardian_id(4);
         let recovery_request_hash = [1u8; 32];
 
-        let message = create_recovery_approval_message(guardian_id, &recovery_request_hash);
+        let message = create_recovery_approval_message(guardian_id, &recovery_request_hash)
+            .expect("transcript encodes");
+        let repeated = create_recovery_approval_message(guardian_id, &recovery_request_hash)
+            .expect("transcript encodes");
 
-        // Should be guardian_id (16 bytes) + recovery_request_hash (32 bytes) = 48 bytes
-        assert_eq!(message.len(), 48);
+        assert_eq!(message, repeated);
+        assert!(!message.is_empty());
+    }
 
-        // First 16 bytes should be guardian_id
-        assert_eq!(&message[0..16], guardian_id.0.as_bytes());
+    #[test]
+    fn recovery_approval_domain_separates_signature_input() {
+        let guardian_id = guardian_id(5);
+        let recovery_request_hash = [1u8; 32];
+        let approval = create_recovery_approval_message(guardian_id, &recovery_request_hash)
+            .expect("transcript encodes");
+        let other = crate::encode_transcript(
+            "aura.recovery.other",
+            1,
+            &RecoveryApprovalTranscriptPayload {
+                guardian_id,
+                recovery_request_hash,
+            },
+        )
+        .expect("transcript encodes");
 
-        // Last 32 bytes should be recovery_request_hash
-        assert_eq!(&message[16..48], &recovery_request_hash);
+        assert_ne!(approval, other);
     }
 }

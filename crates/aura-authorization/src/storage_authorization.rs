@@ -4,6 +4,7 @@
 //! to avoid improper domain coupling. Storage access control is fundamentally an
 //! authorization concern and belongs in the authorization domain (aura-authorization).
 
+use crate::biscuit_evaluator::VerifiedBiscuitToken;
 use aura_core::types::scope::{ResourceScope, StoragePath};
 use aura_core::{AuthorityId, FlowBudget, FlowCost};
 use biscuit_auth::{
@@ -244,10 +245,11 @@ impl BiscuitStorageEvaluator {
         // Biscuit tokens should contain an "authority_id" fact in the authority block
         // Format: authority_id(<uuid>)
 
-        let mut authorizer = Authorizer::new();
-        authorizer.add_token(token).map_err(|e| {
-            BiscuitStorageError::TokenVerification(format!("Failed to add token: {}", e))
-        })?;
+        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)
+            .map_err(|e| BiscuitStorageError::TokenVerification(e.to_string()))?;
+        let mut authorizer = verified_token
+            .authorizer()
+            .map_err(|e| BiscuitStorageError::TokenVerification(e.to_string()))?;
 
         // Allow tokens that carry either authority_id(<uuid>) or account(<uuid>) that
         // matches the expected authority UUID (authority IDs are UUID-wrapped).
@@ -314,11 +316,11 @@ impl BiscuitStorageEvaluator {
     }
 
     fn authorizer_with_token(&self, token: &Biscuit) -> Result<Authorizer, BiscuitStorageError> {
-        let mut authorizer = Authorizer::new();
-        authorizer.add_token(token).map_err(|e| {
-            BiscuitStorageError::TokenVerification(format!("Failed to add token: {}", e))
-        })?;
-        Ok(authorizer)
+        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)
+            .map_err(|e| BiscuitStorageError::TokenVerification(e.to_string()))?;
+        verified_token
+            .authorizer()
+            .map_err(|e| BiscuitStorageError::TokenVerification(e.to_string()))
     }
 
     fn add_authorization_facts(
@@ -463,9 +465,11 @@ impl BiscuitAccessRequest {
 
     /// Deserialize the Biscuit token
     pub fn deserialize_token(&self, root_key: &PublicKey) -> Result<Biscuit, BiscuitStorageError> {
-        Biscuit::from(&self.token, *root_key).map_err(|e| {
-            BiscuitStorageError::Biscuit(format!("Token deserialization failed: {}", e))
-        })
+        VerifiedBiscuitToken::from_bytes(&self.token, *root_key)
+            .map(|verified| verified.token().clone())
+            .map_err(|e| {
+                BiscuitStorageError::Biscuit(format!("Token deserialization failed: {}", e))
+            })
     }
 }
 

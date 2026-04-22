@@ -25,6 +25,7 @@ aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version 
 aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.2.0" }
 aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.2.0" }
 aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.2.0" }
+aura-signature = { package = "hxrts-aura-signature", path = "../aura-signature", version = "=0.2.0" }
 telltale = { workspace = true }
 
 frost-ed25519 = { workspace = true }

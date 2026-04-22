@@ -1,5 +1,6 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
+use aura_authorization::VerifiedBiscuitToken;
 use aura_core::effects::{FlowBudgetEffects, JournalEffects};
 use aura_core::types::scope::{AuthorizationOp, ContextOp, ResourceScope};
 use aura_core::{AuraError, AuthorityId, ContextId, FlowCost, FlowNonce, Hash32, ReceiptSig};
@@ -19,8 +20,19 @@ impl FlowBudgetEffects for AuraEffectSystem {
                 operation: ContextOp::UpdateParams,
             };
             let now = self.time_handler.current_timestamp().await?;
+            let token =
+                VerifiedBiscuitToken::from_token(token, bridge.root_public_key()).map_err(|e| {
+                    AuraError::permission_denied(format!(
+                        "flow budget policy token verification failed: {e}"
+                    ))
+                })?;
             let decision = bridge
-                .authorize_with_time(token, AuthorizationOp::FlowCharge, &scope, Some(now))
+                .authorize_verified_with_time(
+                    &token,
+                    AuthorizationOp::FlowCharge,
+                    &scope,
+                    Some(now),
+                )
                 .map_err(|e| {
                     AuraError::permission_denied(format!("flow budget policy failed: {e}"))
                 })?;

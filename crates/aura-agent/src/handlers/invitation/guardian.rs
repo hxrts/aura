@@ -128,6 +128,19 @@ impl<'a> InvitationGuardianHandler<'a> {
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
     ) -> AgentResult<()> {
+        let _ = (effects, invitation);
+        Err(AgentError::internal(
+            "guardian invitation acceptance requires signed guardian recovery key material; placeholder acceptances are disabled",
+        ))
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    async fn execute_guardian_invitation_guardian_unsigned_for_tests(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
         let authority_id = self.handler.context.authority.authority_id();
         let accept = GuardianInvitationAccept(GuardianAccept {
             invitation_id: invitation.invitation_id.clone(),

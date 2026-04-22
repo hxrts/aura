@@ -315,7 +315,7 @@ impl RendezvousServiceApi {
         let ceremony_id = self.ensure_rendezvous_ceremony(context_id, peer).await?;
         let _ = self
             .ceremony_runner
-            .record_response(
+            .record_local_response(
                 &ceremony_id,
                 aura_core::threshold::ParticipantIdentity::guardian(
                     self.handler.authority_context().authority_id(),

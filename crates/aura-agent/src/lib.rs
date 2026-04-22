@@ -268,6 +268,11 @@ pub use reconfiguration::{CoherenceStatus, ReconfigurationError, SessionFootprin
 pub use runtime::services::ThresholdSigningService;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{
+    KeyResolutionError, TrustedKeyDomain, TrustedKeyResolutionService, TrustedKeyStatus,
+    TrustedPublicKey,
+};
+#[cfg(feature = "choreo-backend-telltale-machine")]
+pub use runtime::services::{
     ReconfigurationManager, ReconfigurationManagerError, SessionDelegationOutcome,
     SessionDelegationTransfer,
 };

@@ -231,8 +231,6 @@ fn test_receipt_verification_protocol_creation() {
     // Verify protocol is created successfully by checking the original config
     // Note: config is private, so we verify using the original config values
     assert!(config.max_chain_depth > 0);
-    // Field exists - verify_signatures is accessible
-    let _ = config.verify_signatures;
 }
 
 #[test]
@@ -246,12 +244,10 @@ fn test_receipt_verification_configuration() {
     let custom_config = ReceiptVerificationConfig {
         max_chain_depth: 10,
         require_chronological: true,
-        verify_signatures: true,
         require_consensus_finalization: false,
     };
     assert_eq!(custom_config.max_chain_depth, 10);
     assert!(custom_config.require_chronological);
-    assert!(custom_config.verify_signatures);
 }
 
 #[test]

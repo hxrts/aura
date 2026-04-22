@@ -16,9 +16,7 @@ name = "aura_amp"
 workspace = true
 
 [features]
-default = ["demo-crypto"]
-# XOR-based encryption for simulation/testing only, not production
-demo-crypto = []
+default = []
 simulation = ["aura-core/simulation"]
 
 [dependencies]

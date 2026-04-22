@@ -12,9 +12,7 @@ use crate::runtime::{
     handle_owned_vm_round, open_owned_manifest_vm_session_admitted, AuraEffectSystem,
 };
 use aura_authentication::dkd::{DkdMessage, DkdSessionId};
-use aura_authentication::guardian_auth_relational::{
-    GuardianAuthProof, GuardianAuthRequest, GuardianAuthResponse,
-};
+use aura_authentication::guardian_auth_relational::{GuardianAuthProof, GuardianAuthRequest};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash;
 use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
@@ -68,28 +66,22 @@ impl AuthServiceApi {
     /// # Returns
     /// An `AuthResult` indicating whether authentication succeeded
     pub async fn verify(&self, response: &AuthResponse) -> AgentResult<AuthResult> {
-        self.handler.verify_response(&self.effects, response).await
+        let response = self.handler.build_response_ingress(response.clone())?;
+        self.handler.verify_response(&self.effects, &response).await
     }
 
     /// Authenticate using device key (convenience method)
     ///
-    /// Creates a challenge, signs it with the device key, and verifies.
-    /// This is primarily useful for self-authentication scenarios.
+    /// Production device-key authentication must be performed by a signer that
+    /// owns the enrolled device private key. This service verifies responses but
+    /// does not mint ephemeral signing keys.
     ///
     /// # Returns
     /// An `AuthResult` indicating whether authentication succeeded
     pub async fn authenticate_with_device_key(&self) -> AgentResult<AuthResult> {
-        // Create challenge
-        let challenge = self.handler.create_challenge(&self.effects).await?;
-
-        // Sign with device key
-        let response = self
-            .handler
-            .sign_challenge(&self.effects, &challenge)
-            .await?;
-
-        // Verify the response
-        self.handler.verify_response(&self.effects, &response).await
+        Err(AgentError::Aura(aura_core::AuraError::permission_denied(
+            "device-key authentication requires an enrolled private-key signer; ephemeral challenge signing is disabled",
+        )))
     }
 
     /// Query the explicit runtime-owned authentication status.
@@ -324,43 +316,10 @@ impl AuthServiceApi {
         context_id: ContextId,
         request: GuardianAuthRequest,
     ) -> AgentResult<()> {
-        let authority_id = self.handler.authority_context().authority_id();
-        let response = GuardianAuthResponse {
-            success: true,
-            authorized: true,
-            error: None,
-        };
-        let roles = vec![
-            Self::auth_role(account),
-            Self::auth_role(guardian),
-            Self::auth_role(authority_id),
-        ];
-        let peer_roles = BTreeMap::from([
-            ("Account".to_string(), Self::auth_role(account)),
-            ("Guardian".to_string(), Self::auth_role(guardian)),
-        ]);
-        let manifest = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::composition_manifest();
-        let global_type = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::global_type();
-        let local_types = aura_authentication::guardian_auth_relational::telltale_session_types_guardian_auth_relational::vm_artifacts::local_types();
-
-        self.run_vm_protocol(
-            guardian_auth_session_uuid(&context_id, &request),
-            roles,
-            peer_roles,
-            "Coordinator",
-            &manifest,
-            &global_type,
-            &local_types,
-            vec![
-                to_vec(&request).map_err(|error| {
-                    AgentError::internal(format!("guardian auth request encode failed: {error}"))
-                })?,
-                to_vec(&response).map_err(|error| {
-                    AgentError::internal(format!("guardian auth response encode failed: {error}"))
-                })?,
-            ],
-        )
-        .await
+        let _ = (account, guardian, context_id, request);
+        Err(AgentError::Aura(aura_core::AuraError::permission_denied(
+            "guardian auth coordinator VM requires a verified guardian proof; placeholder authorization responses are disabled",
+        )))
     }
 
     async fn execute_guardian_auth_as_guardian_vm(

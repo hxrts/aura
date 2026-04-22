@@ -5,7 +5,7 @@
 //! Layer 2 pattern where application effects are implemented in domain crates
 //! using business logic combined with infrastructure effect composition.
 
-use crate::biscuit_evaluator::BiscuitAuthorizationBridge;
+use crate::biscuit_evaluator::{BiscuitAuthorizationBridge, VerifiedBiscuitToken};
 use async_trait::async_trait;
 use aura_core::effects::{AuthorizationEffects, AuthorizationError, CryptoEffects};
 use aura_core::types::scope::{AuthorizationOp, ResourceScope};
@@ -49,7 +49,8 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
         )
     }
 
-    /// Create a mock handler for testing and development
+    /// Create a mock handler for tests.
+    #[cfg(test)]
     pub fn new_mock(crypto: C) -> Self {
         Self::with_bridge(crypto, BiscuitAuthorizationBridge::new_mock())
     }
@@ -88,6 +89,10 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
             .map_err(|e| AuthorizationError::InvalidToken {
                 reason: e.to_string(),
             })?;
+        let token = VerifiedBiscuitToken::from_token(&token, self.biscuit_bridge.root_public_key())
+            .map_err(|e| AuthorizationError::InvalidToken {
+                reason: e.to_string(),
+            })?;
         let now = self.time_provider.as_ref().ok_or_else(|| {
             AuthorizationError::SystemError(AuraError::invalid(
                 "authorization time provider not configured",
@@ -95,7 +100,7 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
         })?();
         let result = self
             .biscuit_bridge
-            .authorize_with_time(&token, operation, scope, Some(now))
+            .authorize_verified_with_time(&token, operation, scope, Some(now))
             .map_err(|e| AuthorizationError::InvalidToken {
                 reason: e.to_string(),
             })?;
@@ -200,6 +205,7 @@ impl<C: CryptoEffects> AuthorizationEffects for WotAuthorizationHandler<C> {
     }
 }
 
+#[cfg(test)]
 impl<C: CryptoEffects> Default for WotAuthorizationHandler<C>
 where
     C: Default,

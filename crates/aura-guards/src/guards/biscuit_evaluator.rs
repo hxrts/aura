@@ -23,30 +23,6 @@ impl BiscuitGuardEvaluator {
         self.bridge.authority_id()
     }
 
-    /// Backwards compatible wrapper for evaluate_guard without explicit time
-    /// Uses default time value for testing/mock scenarios
-    pub fn evaluate_guard_default_time(
-        &self,
-        token: &Biscuit,
-        guard_capability: &CapabilityId,
-        resource: &ResourceScope,
-        flow_cost: FlowCost,
-        budget: &mut FlowBudget,
-    ) -> Result<GuardResult, GuardError> {
-        self.evaluate_guard(token, guard_capability, resource, flow_cost, budget, 0)
-    }
-
-    /// Backwards compatible wrapper for check_guard without explicit time
-    /// Uses default time value for testing/mock scenarios
-    pub fn check_guard_default_time(
-        &self,
-        token: &Biscuit,
-        guard_capability: &CapabilityId,
-        resource: &ResourceScope,
-    ) -> Result<bool, GuardError> {
-        self.check_guard(token, guard_capability, resource, 0)
-    }
-
     pub fn evaluate_guard(
         &self,
         token: &Biscuit,

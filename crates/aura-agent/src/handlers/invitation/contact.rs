@@ -1,6 +1,10 @@
 use super::*;
 use aura_journal::fact::RelationalFact;
 use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
+use aura_protocol::{
+    DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
+    VerifiedIngressMetadata,
+};
 
 const CONTACT_INVITATION_ACCEPTANCE_PROCESS_TIMEOUT_MS: u64 = 20_000;
 const CONTACT_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS: usize = 6;
@@ -19,6 +23,93 @@ pub(super) struct InvitationContactHandler<'a> {
 impl<'a> InvitationContactHandler<'a> {
     pub(super) fn new(handler: &'a InvitationHandler) -> Self {
         Self { handler }
+    }
+
+    fn verified_invitation_payload<T>(
+        &self,
+        envelope: &TransportEnvelope,
+        payload: T,
+    ) -> AgentResult<VerifiedIngress<T>> {
+        let metadata = VerifiedIngressMetadata::new(
+            IngressSource::Authority(envelope.source),
+            envelope.context,
+            None,
+            aura_core::Hash32::from_bytes(&envelope.payload),
+            1,
+        );
+        let schema_version = envelope
+            .metadata
+            .get("wire-format-version")
+            .and_then(|version| version.parse::<u16>().ok())
+            .unwrap_or(aura_protocol::messages::WIRE_FORMAT_VERSION);
+        let content_type = envelope.metadata.get("content-type").map(String::as_str);
+        let known_acceptance_type = matches!(
+            content_type,
+            Some(CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE)
+                | Some(CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE)
+                | Some(CHAT_FACT_CONTENT_TYPE)
+        );
+        let evidence = IngressVerificationEvidence::builder(metadata)
+            .peer_identity(
+                envelope.source != self.handler.context.authority.authority_id(),
+                "invitation acceptance must come from a remote authority",
+            )
+            .and_then(|builder| {
+                builder.envelope_authenticity(
+                    !envelope.payload.is_empty(),
+                    "invitation acceptance payload must be present",
+                )
+            })
+            .and_then(|builder| {
+                builder.capability_authorization(
+                    envelope.receipt.is_some(),
+                    "invitation acceptance requires guard-chain receipt evidence",
+                )
+            })
+            .and_then(|builder| {
+                builder.namespace_scope(
+                    known_acceptance_type,
+                    "invitation acceptance content-type must match accepted namespaces",
+                )
+            })
+            .and_then(|builder| {
+                builder.schema_version(
+                    schema_version <= aura_protocol::messages::WIRE_FORMAT_VERSION,
+                    "unsupported invitation acceptance schema",
+                )
+            })
+            .and_then(|builder| {
+                builder.replay_freshness(
+                    envelope
+                        .receipt
+                        .as_ref()
+                        .is_some_and(|receipt| receipt.nonce != 0),
+                    "invitation acceptance receipt nonce must be non-zero",
+                )
+            })
+            .and_then(|builder| {
+                builder.signer_membership(
+                    envelope
+                        .receipt
+                        .as_ref()
+                        .is_some_and(|receipt| receipt.src == envelope.source),
+                    "invitation acceptance receipt signer must match source authority",
+                )
+            })
+            .and_then(|builder| {
+                builder.proof_evidence(
+                    envelope
+                        .receipt
+                        .as_ref()
+                        .is_some_and(|receipt| !receipt.sig.is_empty()),
+                    "invitation acceptance receipt signature evidence must be present",
+                )
+            })
+            .and_then(|builder| builder.build())
+            .map_err(|error| AgentError::internal(format!("verify invitation ingress: {error}")))?;
+        DecodedIngress::new(payload, evidence.metadata().clone())
+            .verify(evidence)
+            .map_err(|error| AgentError::internal(format!("promote invitation ingress: {error}")))
     }
 
     async fn publish_channel_acceptance_chat_projection(
@@ -308,6 +399,23 @@ impl<'a> InvitationContactHandler<'a> {
                         }
                         None => continue,
                     };
+                    let acceptance = match self.verified_invitation_payload(
+                        in_flight_envelope
+                            .as_ref()
+                            .expect("in-flight envelope exists while processing acceptance"),
+                        acceptance,
+                    ) {
+                        Ok(acceptance) => acceptance,
+                        Err(error) => {
+                            tracing::warn!(
+                                error = %error,
+                                "Rejected unverified contact invitation acceptance"
+                            );
+                            in_flight_envelope = None;
+                            continue;
+                        }
+                    };
+                    let acceptance = acceptance.payload();
 
                     if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
                         in_flight_envelope = None;
@@ -479,6 +587,23 @@ impl<'a> InvitationContactHandler<'a> {
                         }
                         None => continue,
                     };
+                    let acceptance = match self.verified_invitation_payload(
+                        in_flight_envelope
+                            .as_ref()
+                            .expect("in-flight envelope exists while processing acceptance"),
+                        acceptance,
+                    ) {
+                        Ok(acceptance) => acceptance,
+                        Err(error) => {
+                            tracing::warn!(
+                                error = %error,
+                                "Rejected unverified channel invitation acceptance"
+                            );
+                            in_flight_envelope = None;
+                            continue;
+                        }
+                    };
+                    let acceptance = acceptance.payload();
 
                     if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
                         in_flight_envelope = None;
@@ -697,13 +822,30 @@ impl<'a> InvitationContactHandler<'a> {
                         }
                         None => continue,
                     };
+                    let fact = match self.verified_invitation_payload(
+                        in_flight_envelope
+                            .as_ref()
+                            .expect("in-flight envelope exists while processing chat fact"),
+                        fact,
+                    ) {
+                        Ok(fact) => fact,
+                        Err(error) => {
+                            tracing::warn!(
+                                error = %error,
+                                "Rejected unverified inbound chat fact"
+                            );
+                            in_flight_envelope = None;
+                            continue;
+                        }
+                    };
+                    let fact = fact.payload();
 
                     super::channel::InvitationChannelHandler::new(self.handler)
-                        .provision_amp_channel_for_inbound_chat_fact(effects.as_ref(), &fact)
+                        .provision_amp_channel_for_inbound_chat_fact(effects.as_ref(), fact)
                         .await;
 
                     effects
-                        .commit_relational_facts(vec![fact])
+                        .commit_relational_facts(vec![fact.clone()])
                         .await
                         .map_err(|e| AgentError::effects(e.to_string()))?;
                     effects.await_next_view_update().await;
@@ -897,7 +1039,7 @@ impl<'a> InvitationContactHandler<'a> {
                 sender_id,
                 receiver_id,
                 invitation_type,
-                message,
+                message: _,
                 ..
             } = inv_fact
             else {
@@ -916,18 +1058,7 @@ impl<'a> InvitationContactHandler<'a> {
                 return Ok(None);
             }
 
-            let nickname = nickname
-                .or_else(|| {
-                    // Legacy fallback for older invite codes that only embedded a
-                    // human-readable message string. Remove this once all invite
-                    // codes carry the explicit `nickname` field end to end.
-                    message
-                        .as_deref()
-                        .and_then(|m| m.split("from ").nth(1))
-                        .and_then(|s| s.split_whitespace().next())
-                        .map(|s| s.to_string())
-                })
-                .unwrap_or_else(|| sender_id.to_string());
+            let nickname = nickname.unwrap_or_else(|| sender_id.to_string());
 
             // No code available via the fact-level fallback path — the
             // invitation fact does not carry the exported code string.

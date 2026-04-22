@@ -23,6 +23,7 @@ use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{hash, AuraError, Hash32};
 use aura_macros::tell;
+use aura_signature::SecurityTranscript;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -80,6 +81,60 @@ pub struct GuardianVote {
     pub rationale: String,
     /// Timestamp when the vote was cast
     pub timestamp: TimeStamp,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GuardianVoteTranscriptPayload {
+    change_id: String,
+    account_id: AuthorityId,
+    proposer_id: AuthorityId,
+    change: MembershipChange,
+    new_threshold: Option<u16>,
+    proposal_timestamp: TimeStamp,
+    guardian_id: AuthorityId,
+    approved: bool,
+}
+
+struct GuardianVoteTranscript<'a> {
+    proposal: &'a MembershipProposal,
+    guardian_id: AuthorityId,
+    approved: bool,
+}
+
+impl SecurityTranscript for GuardianVoteTranscript<'_> {
+    type Payload = GuardianVoteTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.recovery.guardian-membership-vote";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        GuardianVoteTranscriptPayload {
+            change_id: self.proposal.change_id.clone(),
+            account_id: self.proposal.account_id,
+            proposer_id: self.proposal.proposer_id,
+            change: self.proposal.change.clone(),
+            new_threshold: self.proposal.new_threshold,
+            proposal_timestamp: self.proposal.timestamp.clone(),
+            guardian_id: self.guardian_id,
+            approved: self.approved,
+        }
+    }
+}
+
+/// Derive the canonical vote-signature digest for a guardian membership change.
+pub fn guardian_vote_signature_digest(
+    proposal: &MembershipProposal,
+    guardian_id: AuthorityId,
+    approved: bool,
+) -> RecoveryResult<Vec<u8>> {
+    let transcript = GuardianVoteTranscript {
+        proposal,
+        guardian_id,
+        approved,
+    }
+    .transcript_bytes()
+    .map_err(|error| AuraError::crypto(format!("guardian vote transcript failed: {error}")))?;
+
+    Ok(hash::hash(&transcript).to_vec())
 }
 
 /// Membership change completion notification
@@ -372,12 +427,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
                 uncertainty: None,
             });
 
-        // Create vote signature
-        let mut sig_input = Vec::new();
-        sig_input.extend_from_slice(&guardian_id.to_bytes());
-        sig_input.extend_from_slice(proposal.change_id.as_bytes());
-        sig_input.push(approved as u8);
-        let vote_signature = hash::hash(&sig_input).to_vec();
+        let vote_signature = guardian_vote_signature_digest(&proposal, guardian_id, approved)?;
 
         // Emit MembershipVoteCast fact
         let context_id = context_id_from_operation_id(&proposal.change_id);
@@ -417,16 +467,13 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         let mut votes = Vec::new();
         for guardian in proposal.account_id.to_bytes().iter().take(2) {
             let guardian_id = AuthorityId::new_from_entropy(hash::hash(&[*guardian; 32]));
-            let mut sig_input = Vec::new();
-            sig_input.extend_from_slice(&guardian_id.to_bytes());
-            sig_input.extend_from_slice(proposal.change_id.as_bytes());
-            sig_input.push(1u8);
+            let vote_signature = guardian_vote_signature_digest(&proposal, guardian_id, true)?;
 
             votes.push(GuardianVote {
                 change_id: proposal.change_id.clone(),
                 guardian_id,
                 approved: true,
-                vote_signature: hash::hash(&sig_input).to_vec(),
+                vote_signature,
                 rationale: "Approved - change validated".to_string(),
                 timestamp: TimeStamp::PhysicalClock(physical_time.clone()),
             });
@@ -589,6 +636,37 @@ mod tests {
         let v = vote.unwrap();
         assert!(v.approved);
         assert_eq!(v.guardian_id, guardian_id);
+    }
+
+    #[test]
+    fn guardian_vote_signature_digest_binds_proposal_context() {
+        let base = MembershipProposal {
+            change_id: "test-change-123".to_string(),
+            account_id: test_authority_id(10),
+            proposer_id: test_authority_id(0),
+            change: MembershipChange::AddGuardian {
+                guardian: GuardianProfile::with_label(
+                    test_authority_id(4),
+                    "Guardian 4".to_string(),
+                ),
+            },
+            new_threshold: None,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1000,
+                uncertainty: None,
+            }),
+        };
+        let mut changed_threshold = base.clone();
+        changed_threshold.new_threshold = Some(3);
+        let guardian_id = test_authority_id(1);
+
+        let base_digest = guardian_vote_signature_digest(&base, guardian_id, true).unwrap();
+        let threshold_digest =
+            guardian_vote_signature_digest(&changed_threshold, guardian_id, true).unwrap();
+        let denied_digest = guardian_vote_signature_digest(&base, guardian_id, false).unwrap();
+
+        assert_ne!(base_digest, threshold_digest);
+        assert_ne!(base_digest, denied_digest);
     }
 
     #[test]

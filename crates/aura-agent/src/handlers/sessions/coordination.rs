@@ -8,14 +8,13 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::fact_types::{SESSION_CREATED_FACT_TYPE_ID, SESSION_INVITATION_SENT_FACT_TYPE_ID};
 use crate::handlers::shared::{build_string_metadata, HandlerUtilities};
 use crate::runtime::services::SessionManager;
+use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
 use crate::runtime::{
     open_owned_manifest_vm_session_admitted, AuraEffectSystem, RuntimeChoreographySessionId,
 };
 use aura_core::effects::transport::TransportEnvelope;
-use aura_core::effects::{
-    RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects, TransportError,
-};
+use aura_core::effects::{RandomExtendedEffects, SessionType, StorageCoreEffects, TransportError};
 use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
 use aura_core::util::serialization::to_vec;
 use aura_core::FlowCost;
@@ -456,7 +455,7 @@ impl SessionOperations {
                 receipt: None,
             };
 
-            match self.effects.send_envelope(envelope).await {
+            match send_guarded_transport_envelope(&self.effects, envelope).await {
                 Ok(()) => {}
                 Err(TransportError::DestinationUnreachable { destination }) => {
                     tracing::warn!(

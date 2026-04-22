@@ -124,6 +124,33 @@ pub struct AcceptanceProposal {
     pub signature: ThresholdSignature,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct InvitationAcceptanceTranscriptPayload {
+    invitation_id: InvitationId,
+    acceptor: AuthorityId,
+    prestate_hash: Hash32,
+    message: Option<String>,
+}
+
+fn invitation_acceptance_transcript_bytes(
+    invitation_id: InvitationId,
+    acceptor: AuthorityId,
+    prestate_hash: Hash32,
+    message: Option<String>,
+) -> AuraResult<Vec<u8>> {
+    aura_signature::encode_transcript(
+        "aura.invitation.acceptance",
+        1,
+        &InvitationAcceptanceTranscriptPayload {
+            invitation_id,
+            acceptor,
+            prestate_hash,
+            message,
+        },
+    )
+    .map_err(|error| AuraError::crypto(format!("Invitation acceptance transcript failed: {error}")))
+}
+
 /// Response to an acceptance proposal during consensus.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AcceptanceResponse {
@@ -655,14 +682,13 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let signing_context = SigningContext {
             authority: acceptor,
             operation: SignableOperation::Message {
-                domain: "invitation:acceptance".to_string(),
-                payload: format!(
-                    "{}:{}:{}",
-                    invitation.invitation_id,
-                    hex::encode(prestate_hash.as_bytes()),
-                    message.as_deref().unwrap_or("")
-                )
-                .into_bytes(),
+                domain: "aura.invitation.acceptance".to_string(),
+                payload: invitation_acceptance_transcript_bytes(
+                    invitation.invitation_id.clone(),
+                    acceptor,
+                    prestate_hash,
+                    message.clone(),
+                )?,
             },
             approval_context: ApprovalContext::SelfOperation,
         };
@@ -932,6 +958,46 @@ mod tests {
 
         assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert_eq!(restored.message, Some("Accepting".to_string()));
+    }
+
+    #[test]
+    fn acceptance_proposal_transcript_binds_acceptor_and_prestate() {
+        let proposal = AcceptanceProposal {
+            invitation_id: InvitationId::new("inv-123"),
+            acceptor: AuthorityId::new_from_entropy([42u8; 32]),
+            prestate_hash: Hash32([0u8; 32]),
+            message: Some("Accepting".to_string()),
+            signature: ThresholdSignature::single_signer(vec![1, 2, 3], vec![4, 5, 6], 0),
+        };
+        let mut different_acceptor = proposal.clone();
+        different_acceptor.acceptor = AuthorityId::new_from_entropy([43u8; 32]);
+        let mut different_prestate = proposal.clone();
+        different_prestate.prestate_hash = Hash32([9u8; 32]);
+
+        let base = invitation_acceptance_transcript_bytes(
+            proposal.invitation_id.clone(),
+            proposal.acceptor,
+            proposal.prestate_hash,
+            proposal.message.clone(),
+        )
+        .unwrap();
+        let acceptor = invitation_acceptance_transcript_bytes(
+            different_acceptor.invitation_id.clone(),
+            different_acceptor.acceptor,
+            different_acceptor.prestate_hash,
+            different_acceptor.message.clone(),
+        )
+        .unwrap();
+        let prestate = invitation_acceptance_transcript_bytes(
+            different_prestate.invitation_id.clone(),
+            different_prestate.acceptor,
+            different_prestate.prestate_hash,
+            different_prestate.message.clone(),
+        )
+        .unwrap();
+
+        assert_ne!(base, acceptor);
+        assert_ne!(base, prestate);
     }
 
     #[test]

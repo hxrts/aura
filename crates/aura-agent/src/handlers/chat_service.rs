@@ -89,7 +89,7 @@ impl ChatServiceApi {
         &self,
     ) -> AgentResult<
         Option<(
-            aura_authorization::Biscuit,
+            aura_authorization::VerifiedBiscuitToken,
             aura_authorization::BiscuitAuthorizationBridge,
         )>,
     > {
@@ -108,8 +108,11 @@ impl ChatServiceApi {
             aura_authorization::PublicKey::from_bytes(&root_pk_bytes).map_err(|error| {
                 AgentError::effects(format!("parse biscuit root public key cache: {error}"))
             })?;
-        let biscuit = aura_authorization::Biscuit::from(&token_bytes, root_public_key)
-            .map_err(|error| AgentError::effects(format!("parse biscuit token cache: {error}")))?;
+        let biscuit =
+            aura_authorization::VerifiedBiscuitToken::from_bytes(&token_bytes, root_public_key)
+                .map_err(|error| {
+                    AgentError::effects(format!("parse biscuit token cache: {error}"))
+                })?;
         let bridge = aura_authorization::BiscuitAuthorizationBridge::new(
             root_public_key,
             self.effects.authority_id(),
@@ -131,7 +134,7 @@ impl ChatServiceApi {
             .iter()
             .filter_map(|capability| {
                 let capability_name = capability.as_name();
-                match bridge.has_capability_with_time(
+                match bridge.has_verified_capability_with_time(
                     &token,
                     capability_name.as_str(),
                     current_time_seconds,

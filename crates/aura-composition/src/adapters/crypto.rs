@@ -60,6 +60,12 @@ impl CryptoHandlerAdapter {
                 operation: operation.to_string(),
             })
     }
+
+    fn secret_material_result_error(_effect_type: EffectType, operation: &str) -> HandlerError {
+        execution_failed(aura_core::AuraError::invalid(format!(
+            "operation {operation} returns private key material and is not available through the serialized composition adapter"
+        )))
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -137,14 +143,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                 serialize_operation_result(effect_type, operation, &result)
             }
             "generate_signing_keys" => {
-                let (threshold, max_signers): (u16, u16) =
-                    deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = self
-                    .extended_handler(effect_type, operation)?
-                    .generate_signing_keys(threshold, max_signers)
-                    .await
-                    .map_err(execution_failed)?;
-                serialize_operation_result(effect_type, operation, &result)
+                Err(Self::secret_material_result_error(effect_type, operation))
             }
             "sign_with_key" => {
                 let params: (Vec<u8>, Vec<u8>, SigningMode) =
@@ -167,14 +166,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                 serialize_operation_result(effect_type, operation, &result)
             }
             "frost_generate_keys" => {
-                let (threshold, max_signers): (u16, u16) =
-                    deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = self
-                    .extended_handler(effect_type, operation)?
-                    .frost_generate_keys(threshold, max_signers)
-                    .await
-                    .map_err(execution_failed)?;
-                serialize_operation_result(effect_type, operation, &result)
+                Err(Self::secret_material_result_error(effect_type, operation))
             }
             "frost_generate_nonces" => {
                 let key_package: Vec<u8> =
@@ -267,14 +259,7 @@ impl RegistrableHandler for CryptoHandlerAdapter {
                 serialize_operation_result(effect_type, operation, &result)
             }
             "frost_rotate_keys" => {
-                let params: (Vec<Vec<u8>>, u16, u16, u16) =
-                    deserialize_operation_params(effect_type, operation, parameters)?;
-                let result = self
-                    .extended_handler(effect_type, operation)?
-                    .frost_rotate_keys(&params.0, params.1, params.2, params.3)
-                    .await
-                    .map_err(execution_failed)?;
-                serialize_operation_result(effect_type, operation, &result)
+                Err(Self::secret_material_result_error(effect_type, operation))
             }
             _ => Err(HandlerError::UnknownOperation {
                 effect_type,

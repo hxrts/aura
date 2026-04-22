@@ -13,7 +13,7 @@
 
 use crate::BiscuitError;
 use aura_core::types::scope::{AuthorizationOp, ResourceScope};
-use aura_core::{hash::hash, types::identifiers::AuthorityId, CapabilityName, CapabilityNameError};
+use aura_core::{types::identifiers::AuthorityId, CapabilityName, CapabilityNameError};
 use biscuit_auth::{macros::*, AuthorizerLimits, Biscuit, PublicKey};
 use std::time::Duration;
 
@@ -22,6 +22,38 @@ const AURA_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
     max_iterations: 1_000,
     max_time: Duration::from_millis(50),
 };
+
+/// Biscuit token that has been reparsed under the configured authority root key.
+#[derive(Clone, Debug)]
+pub struct VerifiedBiscuitToken {
+    token: Biscuit,
+}
+
+impl VerifiedBiscuitToken {
+    /// Verify serialized Biscuit bytes against the configured root public key.
+    pub fn from_bytes(bytes: &[u8], root_public_key: PublicKey) -> Result<Self, BiscuitError> {
+        let token = Biscuit::from(bytes, root_public_key).map_err(BiscuitError::BiscuitLib)?;
+        Ok(Self { token })
+    }
+
+    /// Re-serialize and reparse an existing Biscuit under the configured root
+    /// public key before it can be used for authorization decisions.
+    pub fn from_token(token: &Biscuit, root_public_key: PublicKey) -> Result<Self, BiscuitError> {
+        let bytes = token.to_vec().map_err(BiscuitError::BiscuitLib)?;
+        Self::from_bytes(&bytes, root_public_key)
+    }
+
+    /// Borrow the verified Biscuit token.
+    #[must_use]
+    pub fn token(&self) -> &Biscuit {
+        &self.token
+    }
+
+    /// Create an authorizer from the verified token.
+    pub fn authorizer(&self) -> Result<biscuit_auth::Authorizer, BiscuitError> {
+        self.token.authorizer().map_err(BiscuitError::BiscuitLib)
+    }
+}
 
 // ============================================================================
 // Biscuit Authorization Bridge
@@ -41,23 +73,20 @@ impl BiscuitAuthorizationBridge {
         }
     }
 
+    #[cfg(test)]
     fn test_bridge() -> Self {
         use biscuit_auth::KeyPair;
         let keypair = KeyPair::new();
         Self {
             root_public_key: keypair.public(),
-            authority_id: AuthorityId::new_from_entropy(hash(&keypair.public().to_bytes())),
+            authority_id: AuthorityId::new_from_entropy(aura_core::hash::hash(
+                &keypair.public().to_bytes(),
+            )),
         }
     }
 
     /// Create a mock bridge for testing with a generated keypair
     #[cfg(test)]
-    pub fn new_mock() -> Self {
-        Self::test_bridge()
-    }
-
-    /// Create a mock bridge for testing (non-test builds for integration)
-    #[cfg(not(test))]
     pub fn new_mock() -> Self {
         Self::test_bridge()
     }
@@ -82,17 +111,25 @@ impl BiscuitAuthorizationBridge {
         resource: &ResourceScope,
         current_time_seconds: Option<u64>,
     ) -> Result<AuthorizationResult, BiscuitError> {
-        let current_time_seconds = require_time(current_time_seconds)?;
-        // Phase 1: Verify token signature against our root public key.
-        // Re-serialize and re-verify to ensure the token was issued by the
-        // trusted root, not by a different authority with a different key.
-        let token_bytes = token.to_vec().map_err(BiscuitError::BiscuitLib)?;
-        let verified_token =
-            Biscuit::from(&token_bytes, self.root_public_key).map_err(BiscuitError::BiscuitLib)?;
-        let mut authorizer = verified_token
-            .authorizer()
-            .map_err(BiscuitError::BiscuitLib)?;
+        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)?;
+        self.authorize_verified_with_time(
+            &verified_token,
+            operation,
+            resource,
+            current_time_seconds,
+        )
+    }
 
+    /// Authorize a token that has already passed root-key verification.
+    pub fn authorize_verified_with_time(
+        &self,
+        token: &VerifiedBiscuitToken,
+        operation: AuthorizationOp,
+        resource: &ResourceScope,
+        current_time_seconds: Option<u64>,
+    ) -> Result<AuthorizationResult, BiscuitError> {
+        let current_time_seconds = require_time(current_time_seconds)?;
+        let mut authorizer = token.authorizer()?;
         // Phase 2: Add ambient facts for authorization context
         let operation_name =
             CapabilityName::parse(operation.as_str()).map_err(invalid_capability_error)?;
@@ -120,8 +157,8 @@ impl BiscuitAuthorizationBridge {
 
         Ok(AuthorizationResult {
             authorized,
-            delegation_depth: self.extract_delegation_depth_from_token(token),
-            token_facts: self.extract_token_facts_from_blocks(token),
+            delegation_depth: self.extract_delegation_depth_from_token(token.token()),
+            token_facts: self.extract_diagnostic_token_facts(token),
         })
     }
 
@@ -139,12 +176,22 @@ impl BiscuitAuthorizationBridge {
         capability: &str,
         current_time_seconds: Option<u64>,
     ) -> Result<bool, BiscuitError> {
+        let verified_token = VerifiedBiscuitToken::from_token(token, self.root_public_key)?;
+        self.has_verified_capability_with_time(&verified_token, capability, current_time_seconds)
+    }
+
+    /// Check if a verified token has a specific capability through Datalog evaluation.
+    pub fn has_verified_capability_with_time(
+        &self,
+        token: &VerifiedBiscuitToken,
+        capability: &str,
+        current_time_seconds: Option<u64>,
+    ) -> Result<bool, BiscuitError> {
         let current_time_seconds = require_time(current_time_seconds)?;
         let capability_name =
             CapabilityName::parse(capability).map_err(invalid_capability_error)?;
         let capability = capability_name.as_str();
-        // Create authorizer and verify token signature
-        let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
+        let mut authorizer = token.authorizer()?;
 
         // Add ambient facts for capability check
         self.add_authority_and_time_facts(&mut authorizer, current_time_seconds)?;
@@ -179,7 +226,7 @@ impl BiscuitAuthorizationBridge {
     }
 
     /// Extract readable token facts from token blocks
-    pub fn extract_token_facts_from_blocks(&self, token: &Biscuit) -> Vec<String> {
+    pub fn extract_diagnostic_token_facts(&self, token: &VerifiedBiscuitToken) -> Vec<String> {
         let mut facts = Vec::new();
 
         // Add basic verification metadata
@@ -187,7 +234,7 @@ impl BiscuitAuthorizationBridge {
         let now = 0u64;
         facts.push(format!("verified_at({})", now));
 
-        // Try to extract facts from token using an authorizer
+        // Try to extract facts from the verified token using an authorizer.
         if let Ok(authorizer) = token.authorizer() {
             // Get the world facts which include facts from all token blocks
             let (world_facts, world_rules, _world_checks, _world_policies) = authorizer.dump();
@@ -204,12 +251,8 @@ impl BiscuitAuthorizationBridge {
 
         // If we couldn't extract detailed facts, provide basic token info
         if facts.len() <= 2 {
-            let count = token.block_count();
+            let count = token.token().block_count();
             facts.push(format!("block_count({})", count));
-
-            // Add standard capabilities that are typically in device tokens
-            facts.push("capability(\"read\")".to_string());
-            facts.push("capability(\"write\")".to_string());
         }
 
         facts
@@ -217,6 +260,10 @@ impl BiscuitAuthorizationBridge {
 
     pub fn root_public_key(&self) -> PublicKey {
         self.root_public_key
+    }
+
+    pub fn authority_id(&self) -> AuthorityId {
+        self.authority_id
     }
 
     fn add_operation_authority_time_facts(

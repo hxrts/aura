@@ -27,7 +27,7 @@ pub(super) async fn respond_to_guardian_ceremony(
     if accept {
         // Record acceptance in ceremony tracker
         runner
-            .record_response(
+            .record_local_response(
                 ceremony_id,
                 ParticipantIdentity::guardian(bridge.agent.authority_id()),
             )

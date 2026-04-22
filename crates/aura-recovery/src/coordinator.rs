@@ -19,9 +19,10 @@ use crate::effects::RecoveryEffects;
 use crate::types::{RecoveryEvidence, RecoveryResponse, RecoveryShare};
 use crate::RecoveryResult;
 use async_trait::async_trait;
-use aura_core::threshold::{SignableOperation, SigningContext, ThresholdSignature};
+use aura_core::threshold::{SigningContext, ThresholdSignature};
 use aura_core::tree::TreeCommitment;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_signature::verify_threshold_signing_context_transcript;
 use std::sync::Arc;
 
 fn compatibility_signature(shares: &[RecoveryShare]) -> ThresholdSignature {
@@ -166,17 +167,9 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
         guardian_authority: &AuthorityId,
         target_authority: &AuthorityId,
         new_tree_root: &TreeCommitment,
-        _session_id: &str,
+        session_id: &str,
         signature: &[u8],
     ) -> crate::RecoveryResult<bool> {
-        // Reconstruct the message that was signed
-        let operation = SignableOperation::RecoveryApproval {
-            target: *target_authority,
-            new_root: *new_tree_root,
-        };
-        let message = serde_json::to_vec(&operation)
-            .map_err(|e| crate::RecoveryError::internal(format!("Serialization failed: {e}")))?;
-
         // Get the guardian's public key package
         let public_key = self
             .effect_system
@@ -188,13 +181,22 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
                 ))
             })?;
 
-        // Verify the signature using CryptoEffects
-        self.effect_system
-            .frost_verify(&message, signature, &public_key)
-            .await
-            .map_err(|e| {
-                crate::RecoveryError::internal(format!("Signature verification failed: {e}"))
-            })
+        let signing_context = SigningContext::recovery_approval(
+            *guardian_authority,
+            *target_authority,
+            *new_tree_root,
+            session_id.to_string(),
+        );
+
+        verify_threshold_signing_context_transcript(
+            self.effect_system.as_ref(),
+            &signing_context,
+            0,
+            signature,
+            &public_key,
+        )
+        .await
+        .map_err(|e| crate::RecoveryError::internal(format!("Signature verification failed: {e}")))
     }
 }
 

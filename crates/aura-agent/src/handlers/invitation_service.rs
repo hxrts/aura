@@ -381,7 +381,7 @@ impl InvitationServiceApi {
         let fut = async move {
             let participant = aura_core::threshold::ParticipantIdentity::guardian(receiver_id);
             if let Err(error) = ceremony_runner
-                .record_response(&ceremony_id, participant)
+                .record_local_response(&ceremony_id, participant)
                 .await
             {
                 tracing::warn!(

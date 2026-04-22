@@ -10,6 +10,7 @@ use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
 };
 use aura_core::{AuraError, AuthorityId};
+use aura_signature::threshold_signing_context_transcript_bytes;
 
 // Implementation of RandomCoreEffects
 #[async_trait]
@@ -357,12 +358,12 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         &self,
         context: aura_core::threshold::SigningContext,
     ) -> Result<aura_core::threshold::ThresholdSignature, AuraError> {
-        // Serialize the operation for signing
-        let message = serde_json::to_vec(&context.operation)
-            .map_err(|e| AuraError::internal(format!("Failed to serialize operation: {}", e)))?;
-
         // Load key package from secure storage using tracked epoch
         let current_epoch = self.get_current_epoch(&context.authority).await;
+        let message =
+            threshold_signing_context_transcript_bytes(&context, current_epoch).map_err(|e| {
+                AuraError::internal(format!("Failed to encode signing context transcript: {e}"))
+            })?;
         let location = SecureStorageLocation::with_sub_key(
             "frost_keys",
             format!("{}/{}", context.authority, current_epoch),

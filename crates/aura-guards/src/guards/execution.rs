@@ -23,7 +23,10 @@ use tracing::{debug, error, info, instrument, warn};
 ///
 /// This function implements the `need(σ) ≤ C` checking from the formal model
 /// using Biscuit tokens for cryptographically verifiable authorization.
-pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResult, AuraError> {
+pub async fn evaluate_guard(
+    guard: &ProtocolGuard,
+    current_time_seconds: u64,
+) -> Result<GuardEvaluationResult, AuraError> {
     debug!(
         operation_id = %guard.operation_id,
         required_tokens = guard.required_tokens.len(),
@@ -31,10 +34,12 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
     );
 
     if guard.required_tokens.is_empty() {
-        debug!("No authorization tokens required, allowing operation");
+        warn!("No authorization tokens configured, denying guarded operation");
         return Ok(GuardEvaluationResult {
-            passed: true,
-            failed_requirements: Vec::new(),
+            passed: false,
+            failed_requirements: vec![
+                "guard has no Biscuit authorization tokens configured".to_string()
+            ],
             delegation_depth: None,
             flow_consumed: 0,
         });
@@ -67,7 +72,7 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
         debug!(token_idx = idx, "Evaluating Biscuit token requirement");
 
         // Evaluate token directly with proper Biscuit verification
-        match verify_biscuit_token(token, &evaluator, &mut context) {
+        match verify_biscuit_token(token, &evaluator, &mut context, current_time_seconds) {
             Ok(result) => {
                 debug!(
                     token_idx = idx,
@@ -155,13 +160,15 @@ fn verify_biscuit_token(
     token: &biscuit_auth::Biscuit,
     evaluator: &BiscuitGuardEvaluator,
     context: &mut GuardVerificationContext,
+    current_time_seconds: u64,
 ) -> Result<GuardResult, GuardError> {
-    evaluator.evaluate_guard_default_time(
+    evaluator.evaluate_guard(
         token,
         &context.capability,
         &context.resource_scope,
         context.flow_cost,
         &mut context.flow_budget,
+        current_time_seconds,
     )
 }
 
@@ -208,7 +215,13 @@ where
 
     // Phase 1: Evaluate capability guards (meet-guarded preconditions)
     // Evaluate capability guards using Biscuit authorization
-    let guard_result = evaluate_guard(guard).await?;
+    let current_time_seconds = effect_system
+        .physical_time()
+        .await
+        .map_err(|error| AuraError::internal(format!("guard time unavailable: {error}")))?
+        .ts_ms
+        / 1000;
+    let guard_result = evaluate_guard(guard, current_time_seconds).await?;
 
     // Guard result now comes from actual Biscuit evaluation
     if !guard_result.passed {
@@ -343,7 +356,13 @@ where
     let mut all_guard_results = Vec::new();
     for (guard, _) in &guards_and_operations {
         // Evaluate guard using Biscuit integration
-        let guard_result = evaluate_guard(guard).await?;
+        let current_time_seconds = effect_system
+            .physical_time()
+            .await
+            .map_err(|error| AuraError::internal(format!("guard time unavailable: {error}")))?
+            .ts_ms
+            / 1000;
+        let guard_result = evaluate_guard(guard, current_time_seconds).await?;
         if !guard_result.passed {
             warn!(
                 operation_id = %guard.operation_id,

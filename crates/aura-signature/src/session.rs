@@ -8,9 +8,10 @@
 //! represent cryptographic actors that hide their internal device structure.
 
 use crate::verification_common::verify_ed25519_signature;
-use crate::{AuthenticationError, Result};
+use crate::{AuthenticationError, Result, SecurityTranscript};
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
+use serde::Serialize;
 use uuid::Uuid;
 
 /// Session ticket that authorizes operations within a session
@@ -36,6 +37,37 @@ pub enum SessionScope {
     Resharing { new_threshold: u16 },
     /// Ticket authorizes general protocol operations
     Protocol { protocol_type: String },
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SessionTicketTranscriptPayload {
+    session_id: Uuid,
+    issuer_authority: AuthorityId,
+    issued_at: u64,
+    expires_at: u64,
+    scope: SessionScope,
+    nonce: [u8; 16],
+}
+
+struct SessionTicketTranscript<'a> {
+    ticket: &'a SessionTicket,
+}
+
+impl SecurityTranscript for SessionTicketTranscript<'_> {
+    type Payload = SessionTicketTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.signature.session-ticket";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        SessionTicketTranscriptPayload {
+            session_id: self.ticket.session_id,
+            issuer_authority: self.ticket.issuer_authority,
+            issued_at: self.ticket.issued_at,
+            expires_at: self.ticket.expires_at,
+            scope: self.ticket.scope.clone(),
+            nonce: self.ticket.nonce,
+        }
+    }
 }
 
 /// Verify that a session ticket is authentic and valid
@@ -129,8 +161,9 @@ fn scope_matches(ticket_scope: &SessionScope, required_scope: &SessionScope) -> 
 
 /// Serialize a session ticket for signature verification
 fn serialize_session_ticket(ticket: &SessionTicket) -> Result<Vec<u8>> {
-    serde_json::to_vec(ticket)
-        .map_err(|e| invalid_session_ticket(format!("Failed to serialize session ticket: {e}")))
+    SessionTicketTranscript { ticket }
+        .transcript_bytes()
+        .map_err(|e| invalid_session_ticket(format!("Failed to encode session transcript: {e}")))
 }
 
 fn invalid_session_ticket(details: impl Into<String>) -> AuthenticationError {

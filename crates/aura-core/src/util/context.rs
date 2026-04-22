@@ -414,6 +414,7 @@ pub struct ContextParams {
     /// Application label for DKD contexts
     pub app_label: Option<String>,
     /// Master key material
+    // aura-security: raw-secret-field-justified derivation parameter slated for SecretBytes; consumers must not log ContextParams.
     pub master_key: Option<[u8; 32]>,
     /// Additional context data
     pub additional_context: Option<Vec<u8>>,

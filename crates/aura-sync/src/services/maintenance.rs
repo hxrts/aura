@@ -58,7 +58,9 @@ use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
 use aura_core::types::Epoch;
-use aura_core::{tree::Snapshot, AccountId, AuraError, AuthorityId, Hash32, SemanticVersion};
+use aura_core::{
+    tree::Snapshot, AccountId, AuraError, AuthorityId, Hash32, SemanticVersion, TrustedKeyResolver,
+};
 use aura_maintenance::{
     CacheInvalidated, CacheKey, IdentityEpochFence, SnapshotCompleted, SnapshotProposed,
     UpgradeActivated, UpgradeProposalMetadata,
@@ -281,15 +283,16 @@ impl MaintenanceService {
         proposal: UpgradeProposal,
         account_id: AccountId,
         crypto_effects: &C,
+        key_resolver: &impl TrustedKeyResolver,
         threshold_signature: &[u8],
-        group_public_key: &[u8],
     ) -> SyncResult<UpgradeActivated> {
         // Verify threshold signature during maintenance
         self.verify_threshold_signature(
+            authority_id,
             &proposal,
             crypto_effects,
+            key_resolver,
             threshold_signature,
-            group_public_key,
         )
         .await?;
 

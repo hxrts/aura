@@ -11,7 +11,7 @@ use aura_core::{AuraError, AuraResult, Hash32};
 use biscuit_auth::Biscuit;
 use std::sync::Arc;
 
-use crate::{BiscuitAuthorizationBridge, ContextOp, ResourceScope};
+use crate::{BiscuitAuthorizationBridge, ContextOp, ResourceScope, VerifiedBiscuitToken};
 use aura_core::AuthorizationOp;
 
 /// Flow budget handler that persists budgets via JournalEffects.
@@ -55,8 +55,19 @@ impl<J: JournalEffects> JournalBackedFlowBudgetHandler<J> {
                 let now = self.time_provider.as_ref().ok_or_else(|| {
                     AuraError::invalid("flow budget time provider not configured")
                 })?();
+                let token = VerifiedBiscuitToken::from_token(token, bridge.root_public_key())
+                    .map_err(|e| {
+                        AuraError::permission_denied(format!(
+                            "flow budget policy token verification failed: {e}"
+                        ))
+                    })?;
                 let result = bridge
-                    .authorize_with_time(token, AuthorizationOp::FlowCharge, scope, Some(now))
+                    .authorize_verified_with_time(
+                        &token,
+                        AuthorizationOp::FlowCharge,
+                        scope,
+                        Some(now),
+                    )
                     .map_err(|e| {
                         AuraError::permission_denied(format!("flow budget policy failed: {e}"))
                     })?;

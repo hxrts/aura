@@ -117,13 +117,7 @@ pub fn run_ok_in_dir(program: &str, args: &[String], dir: impl AsRef<Path>) -> R
         .current_dir(dir)
         .args(args)
         .output()
-        .with_context(|| {
-            format!(
-                "starting {program} {} in {}",
-                args.join(" "),
-                dir.display()
-            )
-        })?;
+        .with_context(|| format!("starting {program} {} in {}", args.join(" "), dir.display()))?;
     if output.status.success() {
         return Ok(());
     }

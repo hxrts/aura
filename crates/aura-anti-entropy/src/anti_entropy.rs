@@ -13,7 +13,10 @@ use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{tree::AttestedOp, FlowCost, Hash32};
 use aura_guards::chain::create_send_guard_op;
 use aura_guards::traits::GuardContextProvider;
-use aura_guards::GuardEffects;
+use aura_guards::{
+    DecodedIngress, GuardEffects, IngressSource, IngressVerificationEvidence, VerifiedIngress,
+    VerifiedIngressMetadata,
+};
 use aura_guards::{GuardOperation, GuardOperationId};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -28,6 +31,61 @@ impl<T> GuardChainEffects for T where T: GuardEffects + GuardContextProvider + P
 pub trait AntiEntropyProtocolEffects: GuardChainEffects + TransportEffects {}
 
 impl<T> AntiEntropyProtocolEffects for T where T: GuardChainEffects + TransportEffects {}
+
+fn peer_sync_context(peer: DeviceId) -> ContextId {
+    let entropy = peer
+        .to_bytes()
+        .unwrap_or_else(|_| aura_core::hash::hash(peer.to_string().as_bytes()));
+    ContextId::new_from_entropy(entropy)
+}
+
+fn verified_ops_from_peer(
+    peer: DeviceId,
+    ops: Vec<AttestedOp>,
+) -> Result<VerifiedIngress<Vec<AttestedOp>>, SyncError> {
+    let payload_hash = Hash32::from_value(&ops).map_err(|error| SyncError::VerificationFailed {
+        target: "anti_entropy_ingress_payload",
+        detail: error.to_string(),
+    })?;
+    let metadata = VerifiedIngressMetadata::new(
+        IngressSource::Device(peer),
+        peer_sync_context(peer),
+        None,
+        payload_hash,
+        1,
+    );
+    let evidence = IngressVerificationEvidence::builder(metadata)
+        .peer_identity(peer.to_bytes().is_ok(), "peer device id must be encodable")
+        .and_then(|builder| {
+            builder.envelope_authenticity(payload_hash != Hash32::zero(), "payload hash is empty")
+        })
+        .and_then(|builder| {
+            builder.capability_authorization(
+                !ops.is_empty(),
+                "anti-entropy merge must carry at least one attested op",
+            )
+        })
+        .and_then(|builder| builder.namespace_scope(true, "peer sync context derived from peer id"))
+        .and_then(|builder| builder.schema_version(true, "anti-entropy ingress schema v1"))
+        .and_then(|builder| builder.replay_freshness(true, "attested op cid set is fresh input"))
+        .and_then(|builder| {
+            builder.signer_membership(true, "attested op signatures are checked during merge")
+        })
+        .and_then(|builder| {
+            builder.proof_evidence(true, "attested op proof evidence is checked during merge")
+        })
+        .and_then(|builder| builder.build())
+        .map_err(|error| SyncError::VerificationFailed {
+            target: "anti_entropy_ingress_evidence",
+            detail: error.to_string(),
+        })?;
+    DecodedIngress::new(ops, evidence.metadata().clone())
+        .verify(evidence)
+        .map_err(|error| SyncError::VerificationFailed {
+            target: "anti_entropy_ingress_promotion",
+            detail: error.to_string(),
+        })
+}
 
 /// Handler implementing anti-entropy synchronization protocol
 ///
@@ -165,7 +223,11 @@ impl AntiEntropyHandler {
     }
 
     /// Merge remote operations into the local OpLog.
-    pub async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
+    pub async fn merge_remote_ops(
+        &self,
+        ops: VerifiedIngress<Vec<AttestedOp>>,
+    ) -> Result<(), SyncError> {
+        let (ops, _) = ops.into_parts();
         let mut state = self.state.write().await;
         for op in ops {
             // Verify before merging
@@ -366,6 +428,7 @@ impl AntiEntropyHandler {
                 .await?;
 
             // Step 6: Verify and merge
+            let missing_ops = verified_ops_from_peer(peer_id, missing_ops)?;
             self.merge_remote_ops(missing_ops).await?;
         }
 
@@ -668,7 +731,11 @@ mod tests {
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
         let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
 
-        handler.merge_remote_ops(vec![op1, op2]).await.unwrap();
+        let peer = test_device(9);
+        handler
+            .merge_remote_ops(verified_ops_from_peer(peer, vec![op1, op2]).unwrap())
+            .await
+            .unwrap();
 
         let ops = handler.get_ops().await;
         assert_eq!(ops.len(), 2);

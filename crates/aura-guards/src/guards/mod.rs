@@ -87,16 +87,10 @@
 //! ```rust,ignore
 //! use crate::guards::{ProtocolGuard, GuardedExecution};
 //!
-//! // For development/testing, use deterministic test keys:
-//! let guard = ProtocolGuard::new_for_testing("complex_operation")
+//! let guard = ProtocolGuard::new(root_public_key, authority_id, "complex_operation")
+//!     .require_token(biscuit_token)
 //!     .delta_facts(vec![fact1, fact2])
 //!     .leakage_budget(LeakageBudget::new(1, 2, 0));
-//!
-//! // For production, use real keys:
-//! // let guard = ProtocolGuard::new(root_public_key, authority_id, "complex_operation")
-//! //     .require_token(biscuit_token)
-//! //     .delta_facts(vec![fact1, fact2])
-//! //     .leakage_budget(LeakageBudget::new(1, 2, 0));
 //!
 //! // Execute with guards
 //! let result = guard.execute_with_effects(effect_system, |effects| async move {
@@ -297,18 +291,9 @@ impl ProtocolGuard {
         execution::execute_guarded_operation(self, effect_system, operation).await
     }
 
-    /// Create a protocol guard with deterministic test keys for development/testing
-    ///
-    /// Uses a deterministic keypair and authority ID. This is useful for:
-    /// - Development and testing where real keys aren't available
-    /// - Macro-generated guards that don't have key context
-    /// - Scenarios where guard evaluation is bypassed or mocked
-    ///
-    /// # Security Warning
-    /// Production code should use `new()` with real key material from the
-    /// authority's Biscuit root key and actual AuthorityId.
+    /// Create a protocol guard with local test keys.
+    #[cfg(test)]
     pub fn new_for_testing(operation_id: impl Into<GuardOperationId>) -> Self {
-        // Use deterministic seed for reproducible behavior
         let keypair = biscuit_auth::KeyPair::new();
         let authority_id = AuthorityId::new_from_entropy([0u8; 32]);
 
@@ -373,9 +358,8 @@ impl LeakageBudget {
     }
 }
 
-/// Convenience macro for creating protocol guards with test keys
-///
-/// For production use with real keys, use `ProtocolGuard::new()` directly.
+/// Convenience macro for creating protocol guards in crate-local tests.
+#[cfg(test)]
 #[macro_export]
 macro_rules! guard {
     (

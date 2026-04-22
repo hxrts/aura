@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/decoded_ingress_cannot_apply_journal_delta.rs:18:70
+   |
+18 |     let _ = JournalApplyService::new().apply_verified_delta(journal, decoded);
+   |                                        --------------------          ^^^^^^^ expected `VerifiedIngress<RemoteJournalDelta>`, found `DecodedIngress<RemoteJournalDelta>`
+   |                                        |
+   |                                        arguments to this method are incorrect
+   |
+   = note: expected struct `VerifiedIngress<RemoteJournalDelta>`
+              found struct `DecodedIngress<RemoteJournalDelta>`
+note: method defined here
+  --> $WORKSPACE/crates/aura-sync/src/protocols/journal_apply.rs
+   |
+   |     pub fn apply_verified_delta(
+   |            ^^^^^^^^^^^^^^^^^^^^

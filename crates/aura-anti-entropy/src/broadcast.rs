@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use aura_core::effects::NetworkEffects;
 use aura_core::types::identifiers::{ContextId, DeviceId};
 use aura_core::{tree::AttestedOp, Hash32};
+use aura_guards::VerifiedIngress;
 use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -273,8 +274,12 @@ impl SyncEffects for BroadcasterHandler {
         Ok(result)
     }
 
-    async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
+    async fn merge_remote_ops(
+        &self,
+        ops: VerifiedIngress<Vec<AttestedOp>>,
+    ) -> Result<(), SyncError> {
         let mut state = self.state.write().await;
+        let (ops, _) = ops.into_parts();
 
         for op in ops {
             state.merge_op_bounded(op, self.config.max_oplog_entries);
@@ -372,6 +377,26 @@ impl SyncEffects for BroadcasterHandler {
 mod tests {
     use super::*;
     use crate::test_support::{create_test_op, test_context, test_device};
+    use aura_guards::{
+        DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
+        VerifiedIngressMetadata,
+    };
+
+    fn verified_ops(ops: Vec<AttestedOp>) -> VerifiedIngress<Vec<AttestedOp>> {
+        let metadata = VerifiedIngressMetadata::new(
+            IngressSource::Device(test_device(9)),
+            test_context(9),
+            None,
+            aura_core::Hash32::zero(),
+            1,
+        );
+        let evidence = IngressVerificationEvidence::new(
+            metadata.clone(),
+            aura_guards::REQUIRED_INGRESS_VERIFICATION_CHECKS,
+        )
+        .unwrap();
+        DecodedIngress::new(ops, metadata).verify(evidence).unwrap()
+    }
 
     #[tokio::test]
     async fn test_eager_push_enabled() {
@@ -524,7 +549,7 @@ mod tests {
         let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
 
         handler
-            .merge_remote_ops(vec![op1, op1_dup, op2])
+            .merge_remote_ops(verified_ops(vec![op1, op1_dup, op2]))
             .await
             .unwrap();
 

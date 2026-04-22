@@ -51,12 +51,17 @@ use crate::core::{
     sync_biscuit_guard_error, sync_serialization_error, sync_session_error, SyncResult,
 };
 use crate::infrastructure::RetryPolicy;
+use crate::protocols::journal_apply::{JournalApplyService, RemoteCoreJournalDelta};
 use aura_authorization::BiscuitTokenManager;
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::types::scope::ResourceScope;
 use aura_core::types::Epoch;
-use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, FlowCost, Journal};
-use aura_guards::{BiscuitGuardEvaluator, GuardContextProvider, GuardError};
+use aura_core::{
+    hash, AttestedOp, AuraError, AuraResult, ContextId, DeviceId, FlowBudget, FlowCost, Journal,
+};
+use aura_guards::{
+    BiscuitGuardEvaluator, DecodedIngress, GuardContextProvider, GuardError, VerifiedIngress,
+};
 
 const ANTI_ENTROPY_OPERATION_ID: &str = "anti_entropy";
 const ANTI_ENTROPY_AUTHZ_OPERATION_ID: &str = "anti_entropy.authorize";
@@ -68,6 +73,13 @@ const ANTI_ENTROPY_PROGRESS_OPERATION_ID: &str = "anti_entropy.progress";
 
 /// Unique fingerprint for an attested operation (cryptographic hash)
 pub type OperationFingerprint = [u8; 32];
+
+fn peer_sync_context(peer: DeviceId) -> ContextId {
+    let entropy = peer
+        .to_bytes()
+        .unwrap_or_else(|_| hash::hash(peer.to_string().as_bytes()));
+    ContextId::new_from_entropy(entropy)
+}
 
 /// Summary of a journal snapshot used for anti-entropy comparisons
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -491,9 +503,9 @@ impl AntiEntropyProtocol {
     }
 
     /// Check if the current token authorizes sync operations with a peer
-    fn check_sync_authorization<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<()>
+    async fn check_sync_authorization<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<()>
     where
-        E: JournalEffects + NetworkEffects + GuardContextProvider,
+        E: JournalEffects + NetworkEffects + GuardContextProvider + PhysicalTimeEffects,
     {
         if let (Some(ref token_manager), Some(ref evaluator)) =
             (&self.token_manager, &self.guard_evaluator)
@@ -507,12 +519,21 @@ impl AntiEntropyProtocol {
             let mut flow_budget = FlowBudget::new(1000, Epoch::new(0)); // Standard sync budget
 
             let capability = SyncCapability::RequestDigest.as_name();
-            match evaluator.evaluate_guard_default_time(
+            let current_time_seconds = effects
+                .physical_time()
+                .await
+                .map_err(|error| {
+                    AuraError::internal(format!("sync auth time unavailable: {error}"))
+                })?
+                .ts_ms
+                / 1000;
+            match evaluator.evaluate_guard(
                 token,
                 &capability,
                 &resource,
                 FlowCost::new(100),
                 &mut flow_budget,
+                current_time_seconds,
             ) {
                 Ok(guard_result) if guard_result.authorized => {
                     tracing::debug!(
@@ -590,7 +611,7 @@ impl AntiEntropyProtocol {
     {
         let authority_id = effects.authority_id();
         // Check authorization before starting sync
-        self.check_sync_authorization(effects, peer)?;
+        self.check_sync_authorization(effects, peer).await?;
         tracing::info!(
             operation_id = ANTI_ENTROPY_OPERATION_ID,
             authority_id = %authority_id,
@@ -815,23 +836,31 @@ impl AntiEntropyProtocol {
             )
             .await?;
 
+            let remote_ops = crate::protocols::ingress::verified_device_payload(
+                peer,
+                peer_sync_context(peer),
+                1,
+                remote_ops,
+            )?;
+
             tracing::debug!(
                 operation_id = ANTI_ENTROPY_OPERATION_ID,
                 peer_id = %peer,
-                remote_ops = remote_ops.len(),
+                remote_ops = remote_ops.payload().len(),
                 "Received operations from peer"
             );
 
             // Merge operations into local state
             let mut local_ops = vec![]; // In full implementation, get from journal
             let merge_chunk_size = self.merge_chunk_size();
-            let merge_batch_count = Self::merge_batch_count(remote_ops.len(), merge_chunk_size);
-            if remote_ops.len() > request.max_ops as usize {
+            let merge_batch_count =
+                Self::merge_batch_count(remote_ops.payload().len(), merge_chunk_size);
+            if remote_ops.payload().len() > request.max_ops as usize {
                 tracing::warn!(
                     operation_id = ANTI_ENTROPY_OPERATION_ID,
                     peer_id = %peer,
                     requested_max_ops = request.max_ops,
-                    received_ops = remote_ops.len(),
+                    received_ops = remote_ops.payload().len(),
                     merge_chunk_size,
                     merge_batch_count,
                     "Peer returned more operations than requested; applying in bounded chunks"
@@ -840,7 +869,7 @@ impl AntiEntropyProtocol {
                 tracing::debug!(
                     operation_id = ANTI_ENTROPY_OPERATION_ID,
                     peer_id = %peer,
-                    received_ops = remote_ops.len(),
+                    received_ops = remote_ops.payload().len(),
                     merge_chunk_size,
                     merge_batch_count,
                     "Applying received operations in bounded merge batches"
@@ -848,8 +877,14 @@ impl AntiEntropyProtocol {
             }
 
             let mut total_result = AntiEntropyResult::default();
-            for (chunk_index, chunk) in remote_ops.chunks(merge_chunk_size).enumerate() {
-                let merge_result = self.merge_batch(&mut local_ops, chunk.to_vec())?;
+            for (chunk_index, chunk) in remote_ops.payload().chunks(merge_chunk_size).enumerate() {
+                let verified_chunk = crate::protocols::ingress::verified_device_payload(
+                    peer,
+                    peer_sync_context(peer),
+                    1,
+                    chunk.to_vec(),
+                )?;
+                let merge_result = self.merge_batch(&mut local_ops, verified_chunk)?;
 
                 tracing::debug!(
                     operation_id = ANTI_ENTROPY_PROGRESS_OPERATION_ID,
@@ -891,15 +926,15 @@ impl AntiEntropyProtocol {
     }
 
     /// Convert applied operations to journal delta for persistence
-    async fn convert_operations_to_journal_delta<E>(
+    async fn convert_operations_to_remote_delta<E>(
         &self,
         _effects: &E,
         applied_ops: &[AttestedOp],
-    ) -> SyncResult<aura_core::Journal>
+    ) -> SyncResult<RemoteCoreJournalDelta>
     where
         E: JournalEffects + Send + Sync,
     {
-        let mut journal_delta = aura_core::Journal::new();
+        let mut facts_delta = aura_core::Fact::new();
 
         for op in applied_ops {
             let fp = fingerprint(op).map_err(|e| {
@@ -910,15 +945,13 @@ impl AntiEntropyProtocol {
             })?;
             let serialized = binary_serialize("op_serialize", "applied op", op)?;
 
-            let mut facts = aura_core::Fact::new();
-            facts.insert_with_context(
+            facts_delta.insert_with_context(
                 format!("attested_op:{}", hex::encode(fp)),
                 aura_core::FactValue::Bytes(serialized),
                 aura_core::ActorId::synthetic("anti-entropy"),
                 aura_core::FactTimestamp::new(0),
                 None,
             )?;
-            journal_delta.merge_facts(facts);
         }
 
         tracing::debug!(
@@ -927,7 +960,7 @@ impl AntiEntropyProtocol {
             "Created journal delta from applied operations"
         );
 
-        Ok(journal_delta)
+        Ok(RemoteCoreJournalDelta::from_facts(facts_delta))
     }
 
     async fn persist_applied_operations_chunk<E>(
@@ -939,8 +972,8 @@ impl AntiEntropyProtocol {
     where
         E: JournalEffects + Send + Sync,
     {
-        let journal_delta = self
-            .convert_operations_to_journal_delta(effects, applied_ops)
+        let remote_delta = self
+            .convert_operations_to_remote_delta(effects, applied_ops)
             .await
             .map_err(|e| {
                 tracing::error!(
@@ -957,19 +990,39 @@ impl AntiEntropyProtocol {
                 )
             })?;
 
-        let current_journal = effects.get_journal().await.unwrap_or_else(|e| {
-            tracing::warn!(
+        let current_journal = effects.get_journal().await.map_err(|e| {
+            tracing::error!(
                 operation_id = ANTI_ENTROPY_OPERATION_ID,
                 peer_id = %peer,
                 error = %e,
-                "Failed to get current journal; using empty journal"
+                "Failed to get current journal; refusing to merge remote data into empty state"
             );
-            aura_core::Journal::new()
-        });
+            crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                format!("Journal load failed before remote apply: {e}"),
+                peer,
+            )
+        })?;
 
-        let updated_journal = effects
-            .merge_facts(current_journal, journal_delta)
-            .await
+        let metadata = crate::protocols::ingress::verified_device_payload(
+            peer,
+            peer_sync_context(peer),
+            1,
+            remote_delta,
+        )?;
+        let (delta, evidence) = metadata.into_parts();
+        let verified_delta = DecodedIngress::new(delta, evidence.metadata().clone())
+            .verify(evidence)
+            .map_err(|e| {
+                crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!("Journal delta verification failed: {e}"),
+                    peer,
+                )
+            })?;
+
+        let (updated_journal, _outcome) = JournalApplyService::new()
+            .apply_verified_core_delta(current_journal, verified_delta)
             .map_err(|e| {
                 tracing::error!(
                     operation_id = ANTI_ENTROPY_OPERATION_ID,
@@ -1167,8 +1220,9 @@ impl AntiEntropyProtocol {
     pub fn merge_batch(
         &self,
         local_ops: &mut Vec<AttestedOp>,
-        incoming: Vec<AttestedOp>,
+        incoming: VerifiedIngress<Vec<AttestedOp>>,
     ) -> SyncResult<AntiEntropyResult> {
+        let (incoming, _) = incoming.into_parts();
         if incoming.is_empty() {
             return Ok(AntiEntropyResult::default());
         }
@@ -1362,6 +1416,14 @@ mod tests {
         let protocol = AntiEntropyProtocol::default();
         let mut local_ops = vec![sample_op(1)];
         let incoming = vec![sample_op(1), sample_op(2), sample_op(3)];
+        let peer = DeviceId::new_from_entropy([7u8; 32]);
+        let incoming = crate::protocols::ingress::verified_device_payload(
+            peer,
+            peer_sync_context(peer),
+            1,
+            incoming,
+        )
+        .unwrap();
 
         let result = protocol.merge_batch(&mut local_ops, incoming).unwrap();
 

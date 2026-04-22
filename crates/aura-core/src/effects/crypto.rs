@@ -18,6 +18,7 @@ use crate::effects::random::RandomCoreEffects;
 use crate::types::identifiers::DeviceId;
 use crate::{AccountId, AuraError};
 use async_trait::async_trait;
+use core::fmt;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -45,12 +46,23 @@ pub struct KeyDerivationContext {
 }
 
 /// FROST key generation result containing both individual key packages and the group public key
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct FrostKeyGenResult {
     /// Security-sensitive key packages for each participant. Zeroized on drop.
+    // aura-security: raw-secret-field-justified core crypto effect ABI pending SigningShareBytes migration; generic serde export is disabled.
     pub key_packages: Vec<Vec<u8>>,
     /// Group public key package needed for signature aggregation and verification
     pub public_key_package: Vec<u8>,
+}
+
+impl fmt::Debug for FrostKeyGenResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FrostKeyGenResult")
+            .field("key_package_count", &self.key_packages.len())
+            .field("key_packages", &"<redacted>")
+            .field("public_key_package_len", &self.public_key_package.len())
+            .finish()
+    }
 }
 
 impl FrostKeyGenResult {
@@ -85,12 +97,13 @@ pub use crate::crypto::single_signer::SigningMode;
 ///
 /// This type is returned by `generate_signing_keys()` and contains everything
 /// needed to store and use the generated keys.
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct SigningKeyGenResult {
     /// Security-sensitive key packages (one per participant). Zeroized on drop.
     ///
     /// For single-signer: contains one `SingleSignerKeyPackage` serialized.
     /// For threshold: contains FROST `KeyPackage` for each participant.
+    // aura-security: raw-secret-field-justified core crypto effect ABI pending SigningShareBytes migration; generic serde export is disabled.
     pub key_packages: Vec<Vec<u8>>,
 
     /// Public key package for verification.
@@ -104,6 +117,17 @@ pub struct SigningKeyGenResult {
     /// This determines which signing/verification algorithm to use.
     #[zeroize(skip)]
     pub mode: SigningMode,
+}
+
+impl fmt::Debug for SigningKeyGenResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SigningKeyGenResult")
+            .field("key_package_count", &self.key_packages.len())
+            .field("key_packages", &"<redacted>")
+            .field("public_key_package_len", &self.public_key_package.len())
+            .field("mode", &self.mode)
+            .finish()
+    }
 }
 
 impl SigningKeyGenResult {

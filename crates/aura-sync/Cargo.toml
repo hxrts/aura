@@ -30,6 +30,7 @@ aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", versi
 aura-authorization = { package = "hxrts-aura-authorization", path = "../aura-authorization", version = "=0.2.0" }
 aura-maintenance = { package = "hxrts-aura-maintenance", path = "../aura-maintenance", version = "=0.2.0" }
 aura-rendezvous = { package = "hxrts-aura-rendezvous", path = "../aura-rendezvous", version = "=0.2.0" }
+aura-signature = { package = "hxrts-aura-signature", path = "../aura-signature", version = "=0.2.0" }
 aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0" }
 aura-anti-entropy = { package = "hxrts-aura-anti-entropy", path = "../aura-anti-entropy", version = "=0.2.0" }
 aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.2.0" }

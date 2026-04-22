@@ -14,6 +14,7 @@ use aura_core::threshold::ParticipantIdentity;
 use aura_core::time::PhysicalTime;
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::{DeviceId, Hash32};
+use aura_protocol::{IngressSource, VerifiedIngressEvidence};
 
 /// Inputs required to initiate a ceremony.
 #[derive(Debug, Clone)]
@@ -66,12 +67,47 @@ impl CeremonyRunner {
             .await
     }
 
-    /// Record an acceptance response from a participant.
-    pub async fn record_response(
+    /// Record an acceptance response produced by the local owner/runtime.
+    pub async fn record_local_response(
         &self,
         ceremony_id: &CeremonyId,
         participant: ParticipantIdentity,
     ) -> Result<bool, IntentError> {
+        self.tracker.mark_accepted(ceremony_id, participant).await
+    }
+
+    /// Record an acceptance response from a remote participant after ingress
+    /// verification has authenticated the source.
+    pub async fn record_verified_response<E>(
+        &self,
+        ceremony_id: &CeremonyId,
+        participant: ParticipantIdentity,
+        evidence: &E,
+    ) -> Result<bool, IntentError>
+    where
+        E: VerifiedIngressEvidence + ?Sized,
+    {
+        let source = evidence.ingress_evidence().metadata().source();
+        let matches_participant = match (&participant, source) {
+            (ParticipantIdentity::Device(device), IngressSource::Device(source_device)) => {
+                *device == source_device
+            }
+            (
+                ParticipantIdentity::Guardian(authority),
+                IngressSource::Authority(source_authority),
+            ) => *authority == source_authority,
+            (
+                ParticipantIdentity::GroupMember { member, .. },
+                IngressSource::Authority(source_authority),
+            ) => *member == source_authority,
+            _ => false,
+        };
+        if !matches_participant {
+            return Err(IntentError::validation_failed(
+                "verified ingress source does not match ceremony participant",
+            ));
+        }
+
         self.tracker.mark_accepted(ceremony_id, participant).await
     }
 

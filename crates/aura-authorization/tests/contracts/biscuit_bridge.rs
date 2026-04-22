@@ -2,7 +2,7 @@
 //! basic authorization flow through the BiscuitAuthorizationBridge.
 
 use super::common;
-use aura_authorization::biscuit_evaluator::BiscuitAuthorizationBridge;
+use aura_authorization::biscuit_evaluator::{BiscuitAuthorizationBridge, VerifiedBiscuitToken};
 use aura_authorization::BiscuitError;
 use aura_core::capability_name;
 use aura_core::types::scope::{AuthorityOp, AuthorizationOp, ResourceScope};
@@ -33,6 +33,25 @@ fn biscuit_bridge_authorizes_basic_token() {
     assert!(result.authorized);
 }
 
+#[test]
+fn verified_biscuit_token_rejects_wrong_root() {
+    let issuer = biscuit_auth::KeyPair::new();
+    let wrong_root = biscuit_auth::KeyPair::new();
+    let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
+    builder
+        .add_fact(fact!("capability(\"read\")"))
+        .unwrap_or_else(|err| panic!("failed to add read capability fact: {err:?}"));
+    let token = builder
+        .build(&issuer)
+        .unwrap_or_else(|err| panic!("failed to build read-capability token: {err:?}"));
+    let token_bytes = token
+        .to_vec()
+        .unwrap_or_else(|err| panic!("failed to serialize token: {err:?}"));
+
+    assert!(VerifiedBiscuitToken::from_bytes(&token_bytes, issuer.public()).is_ok());
+    assert!(VerifiedBiscuitToken::from_bytes(&token_bytes, wrong_root.public()).is_err());
+}
+
 /// Bridge extracts token facts from Biscuit blocks — needed for
 /// Datalog policy evaluation to access issuer/authority metadata.
 #[test]
@@ -43,8 +62,10 @@ fn biscuit_bridge_extracts_token_facts() {
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build empty biscuit token: {err:?}"));
     let bridge = BiscuitAuthorizationBridge::new(keypair.public(), common::authority_id(2));
+    let verified = VerifiedBiscuitToken::from_token(&token, keypair.public())
+        .unwrap_or_else(|err| panic!("failed to verify token for diagnostics: {err:?}"));
 
-    let facts = bridge.extract_token_facts_from_blocks(&token);
+    let facts = bridge.extract_diagnostic_token_facts(&verified);
     assert!(!facts.is_empty());
     assert!(facts.iter().any(|f| f.contains("authority(")));
 }

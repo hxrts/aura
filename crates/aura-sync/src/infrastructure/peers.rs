@@ -484,11 +484,18 @@ impl PeerManager {
         &mut self,
         device_id: DeviceId,
         token_bytes: Vec<u8>,
+        now: &PhysicalTime,
     ) -> SyncResult<()> {
         // Check sync capability using Biscuit token if evaluator available
-        let has_sync_capability = if let Some(ref evaluator) = self.guard_evaluator {
+        let evaluator = self.guard_evaluator.as_ref().ok_or_else(|| {
+            sync_config_error(
+                "sync",
+                "Biscuit guard evaluator required before accepting peer tokens",
+            )
+        })?;
+        let has_sync_capability = {
             let validated = self
-                .validate_biscuit_token(&token_bytes, evaluator)
+                .validate_biscuit_token(&token_bytes, evaluator, now.ts_ms / 1000)
                 .await
                 .unwrap_or(false);
             tracing::debug!(
@@ -497,12 +504,6 @@ impl PeerManager {
                 "Peer token validated via Biscuit guard evaluator"
             );
             validated
-        } else {
-            tracing::debug!(
-                device_id = %device_id,
-                "No Biscuit evaluator available, assuming sync capability"
-            );
-            true
         };
 
         let peer = self.peer_info_mut(device_id)?;
@@ -516,6 +517,7 @@ impl PeerManager {
         &self,
         token_bytes: &[u8],
         evaluator: &BiscuitGuardEvaluator,
+        current_time_seconds: u64,
     ) -> SyncResult<bool> {
         // Get the root public key from configuration or authority context
         let root_public_key = self.get_root_public_key().await?;
@@ -537,7 +539,12 @@ impl PeerManager {
 
         // Check if the token grants sync capability using the guard evaluator
         let capability = SyncCapability::RequestDigest.as_name();
-        match evaluator.check_guard_default_time(&biscuit_token, &capability, &sync_resource) {
+        match evaluator.check_guard(
+            &biscuit_token,
+            &capability,
+            &sync_resource,
+            current_time_seconds,
+        ) {
             Ok(has_permission) => {
                 tracing::debug!(
                     has_sync_capability = has_permission,

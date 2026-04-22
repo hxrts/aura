@@ -953,7 +953,7 @@ impl OtaActivationServiceApi {
         if commitment.ready {
             let runner_id = Self::runner_ceremony_id(ceremony_id);
             self.ceremony_runner
-                .record_response(&runner_id, ParticipantIdentity::device(commitment.device))
+                .record_local_response(&runner_id, ParticipantIdentity::device(commitment.device))
                 .await
                 .map_err(|e| AgentError::internal(format!("Failed to record OTA response: {e}")))?;
         }

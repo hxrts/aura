@@ -8,7 +8,13 @@
 
 pub mod authorization; // Biscuit-based authorization bridge
 pub mod guards;
+pub mod ingress;
 pub mod prelude;
 
 pub use authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
 pub use guards::*;
+pub use ingress::{
+    DecodedIngress, IngressSource, IngressVerificationCheck, IngressVerificationError,
+    IngressVerificationEvidence, IngressVerificationEvidenceBuilder, VerifiedIngress,
+    VerifiedIngressEvidence, VerifiedIngressMetadata, REQUIRED_INGRESS_VERIFICATION_CHECKS,
+};

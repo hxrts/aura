@@ -46,6 +46,7 @@ use aura_core::{
 };
 use aura_effects::RuntimeCapabilityHandler;
 use aura_protocol::effects::TreeEffects;
+use aura_signature::threshold_signing_context_transcript_bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -494,10 +495,14 @@ impl ThresholdSigningService {
         ))
     }
 
-    /// Serialize operation for signing
-    fn serialize_operation(operation: &SignableOperation) -> Result<Vec<u8>, AuraError> {
-        serde_json::to_vec(operation)
-            .map_err(|e| AuraError::internal(format!("Failed to serialize operation: {}", e)))
+    /// Serialize non-tree signing context for signing.
+    fn serialize_signing_context(
+        context: &SigningContext,
+        epoch: u64,
+    ) -> Result<Vec<u8>, AuraError> {
+        threshold_signing_context_transcript_bytes(context, epoch).map_err(|e| {
+            AuraError::internal(format!("Failed to encode signing context transcript: {e}"))
+        })
     }
 
     /// Compute a binding message for tree operations that matches tree verification.
@@ -848,7 +853,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         // Serialize or bind the operation for signing
         let message = match &context.operation {
             SignableOperation::TreeOp(op) => Self::tree_op_message(op, &state)?,
-            _ => Self::serialize_operation(&context.operation)?,
+            _ => Self::serialize_signing_context(&context, state.epoch)?,
         };
 
         // Log the approval context for audit
@@ -1474,10 +1479,15 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_operation() {
-        let op = SignableOperation::TreeOp(test_tree_op());
-        let result = ThresholdSigningService::serialize_operation(&op);
+    fn test_serialize_signing_context() {
+        let context = SigningContext::message(
+            test_authority(),
+            "test.threshold".to_string(),
+            vec![1, 2, 3],
+        );
+        let result = ThresholdSigningService::serialize_signing_context(&context, 1);
         assert!(result.is_ok());
+        assert!(!result.unwrap().is_empty());
     }
 
     #[tokio::test]

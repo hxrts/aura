@@ -18,7 +18,7 @@ use aura_guards::chain::create_send_guard;
 use aura_protocol::effects::EffectApiEffects;
 use aura_recovery::capabilities::RecoveryCapability;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Recovery operation state
@@ -114,7 +114,10 @@ pub struct RecoveryRequest {
 }
 
 /// Guardian approval for a recovery operation
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+// Clone/serde are retained for verified recovery protocol handoff and API
+// envelopes. Debug remains manually redacted because signature/share bytes can
+// contain recovery-sensitive material.
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct GuardianApproval {
     #[zeroize(skip)]
     /// Recovery ceremony ID being approved
@@ -126,14 +129,34 @@ pub struct GuardianApproval {
     /// with any embedded recovery share bytes.
     pub signature: Vec<u8>,
     /// Optional encrypted share data. Zeroized on drop.
+    // aura-security: raw-secret-field-justified verified recovery API payload until approval envelopes move to EncryptedSecretBlob.
     pub share_data: Option<Vec<u8>>,
     #[zeroize(skip)]
     /// Approval timestamp
     pub approved_at: u64,
 }
 
+impl fmt::Debug for GuardianApproval {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GuardianApproval")
+            .field("recovery_id", &self.recovery_id)
+            .field("guardian_id", &self.guardian_id)
+            .field("signature_len", &self.signature.len())
+            .field("signature", &"<redacted>")
+            .field(
+                "share_data_len",
+                &self.share_data.as_ref().map(std::vec::Vec::len),
+            )
+            .field("share_data", &"<redacted>")
+            .field("approved_at", &self.approved_at)
+            .finish()
+    }
+}
+
 /// Recovery operation result
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+// Clone/serde are retained for the recovery API result envelope. Debug remains
+// manually redacted because key_material may contain recovered secret bytes.
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct RecoveryResult {
     #[zeroize(skip)]
     /// Whether recovery succeeded
@@ -145,11 +168,29 @@ pub struct RecoveryResult {
     /// Final state
     pub state: RecoveryState,
     /// Recovered key material (if applicable). Zeroized on drop.
+    // aura-security: raw-secret-field-justified recovery API payload until result envelopes move to SecretBytes.
     pub key_material: Option<Vec<u8>>,
     /// Guardian approvals received
     pub approvals: Vec<GuardianApproval>,
     /// Error message if failed
     pub error: Option<String>,
+}
+
+impl fmt::Debug for RecoveryResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecoveryResult")
+            .field("success", &self.success)
+            .field("recovery_id", &self.recovery_id)
+            .field("state", &self.state)
+            .field(
+                "key_material_len",
+                &self.key_material.as_ref().map(std::vec::Vec::len),
+            )
+            .field("key_material", &"<redacted>")
+            .field("approvals_count", &self.approvals.len())
+            .field("error", &self.error)
+            .finish()
+    }
 }
 
 /// Active recovery ceremony

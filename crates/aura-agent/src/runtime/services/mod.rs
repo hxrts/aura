@@ -18,6 +18,7 @@ pub mod flow_budget_manager;
 pub mod hold_manager;
 pub mod invariant;
 pub mod invitation_manager;
+pub mod key_resolution;
 pub mod lan_discovery;
 pub mod lan_listener_service;
 pub mod lan_transport;
@@ -59,6 +60,10 @@ pub use hold_manager::{
     QueuedAccountabilityReply, QueuedSyncRetrieval, VerifiedServiceWitness, VerifierRole,
 };
 pub(crate) use invitation_manager::InvitationManager;
+pub use key_resolution::{
+    KeyResolutionError, TrustedKeyDomain, TrustedKeyResolutionService, TrustedKeyStatus,
+    TrustedPublicKey,
+};
 pub use lan_listener_service::LanTransportListenerService;
 pub use lan_transport::LanTransportService;
 pub use local_health_observer::{

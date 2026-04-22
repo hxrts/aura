@@ -29,7 +29,7 @@ use crate::errors::AuraError;
 use crate::{AttestedOp, TreeOpKind};
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 // === Size bounds for serialized cryptographic data (Safety §2) ===
@@ -62,13 +62,26 @@ pub const MAX_MESSAGE_BYTES: usize = 1024;
 /// separate DKG or resharing ceremonies.
 ///
 /// This wraps the frost-ed25519 SigningShare type for serialization.
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+// Clone/serde are retained for the explicit FROST share handoff and secure
+// storage APIs that currently carry Share as data. Debug remains manually
+// redacted because `value` is a serialized signing share.
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Share {
     /// Share identifier (1..=n)
     pub identifier: u16,
     /// Security-sensitive serialized signing share. Zeroized on drop.
     #[serde(with = "serde_bytes")]
     pub value: Vec<u8>,
+}
+
+impl fmt::Debug for Share {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Share")
+            .field("identifier", &self.identifier)
+            .field("value_len", &self.value.len())
+            .field("value", &"<redacted>")
+            .finish()
+    }
 }
 
 impl Share {
@@ -108,13 +121,26 @@ impl Share {
 /// context to prevent reuse across different operations.
 ///
 /// This wraps the frost-ed25519 SigningNonces type.
-#[derive(Debug, Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+// Serde is retained for the explicit nonce persistence shape; Clone is kept for
+// the existing signing-session data flow. Debug remains manually redacted
+// because `value` is serialized signing nonce material.
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Nonce {
     /// Nonce identifier (for tracking)
     pub id: [u8; 32],
     /// Security-sensitive serialized signing nonces. Zeroized on drop.
     #[serde(with = "serde_bytes")]
     pub value: Vec<u8>,
+}
+
+impl fmt::Debug for Nonce {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Nonce")
+            .field("id", &self.id)
+            .field("value_len", &self.value.len())
+            .field("value", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Token representing a cached nonce for pipelined commitment optimization

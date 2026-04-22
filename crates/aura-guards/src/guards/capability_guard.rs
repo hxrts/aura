@@ -74,6 +74,7 @@ impl CapabilityGuard {
         operation: &AuthorityOp,
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<bool> {
         let scope = ResourceScope::Authority {
             authority_id: *authority_id,
@@ -82,7 +83,14 @@ impl CapabilityGuard {
         let flow_cost = Self::authority_op_flow_cost(operation);
         let capability =
             CapabilityId::try_from(operation.as_str()).expect("authority ops use valid names");
-        self.evaluate_scope_bool(token, capability, scope, flow_cost, flow_budget)
+        self.evaluate_scope_bool(
+            token,
+            capability,
+            scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        )
     }
 
     /// Get flow cost for an authority operation
@@ -106,6 +114,7 @@ impl CapabilityGuard {
         operation: &AuthorityOp,
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<(bool, GuardResult)> {
         let scope = ResourceScope::Authority {
             authority_id: *authority_id,
@@ -114,7 +123,14 @@ impl CapabilityGuard {
         let flow_cost = Self::authority_op_flow_cost(operation);
         let capability =
             CapabilityId::try_from(operation.as_str()).expect("authority ops use valid names");
-        self.evaluate_scope_with_result(token, capability, scope, flow_cost, flow_budget)
+        self.evaluate_scope_with_result(
+            token,
+            capability,
+            scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        )
     }
 
     /// Evaluate a context operation
@@ -124,6 +140,7 @@ impl CapabilityGuard {
         operation: &ContextOp,
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<bool> {
         let scope = ResourceScope::Context {
             context_id: *context_id,
@@ -132,7 +149,14 @@ impl CapabilityGuard {
         let flow_cost = Self::context_op_flow_cost(operation);
         let capability =
             CapabilityId::try_from(operation.as_str()).expect("context ops use valid names");
-        self.evaluate_scope_bool(token, capability, scope, flow_cost, flow_budget)
+        self.evaluate_scope_bool(
+            token,
+            capability,
+            scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        )
     }
 
     /// Get flow cost for a context operation
@@ -173,12 +197,17 @@ impl CapabilityGuard {
         scope: ResourceScope,
         flow_cost: FlowCost,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<(bool, GuardResult)> {
         let token = self.require_token(token)?;
-        match self
-            .evaluator
-            .evaluate_guard(token, &capability, &scope, flow_cost, flow_budget, 0)
-        {
+        match self.evaluator.evaluate_guard(
+            token,
+            &capability,
+            &scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        ) {
             Ok(result) => Ok((true, result)),
             Err(super::GuardError::MissingCapability { .. }) => Ok((false, Self::denied_result())),
             Err(error) => Err(Self::map_guard_error(error)),
@@ -192,9 +221,17 @@ impl CapabilityGuard {
         scope: ResourceScope,
         flow_cost: FlowCost,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<bool> {
-        self.evaluate_scope_with_result(token, capability, scope, flow_cost, flow_budget)
-            .map(|(authorized, _)| authorized)
+        self.evaluate_scope_with_result(
+            token,
+            capability,
+            scope,
+            flow_cost,
+            flow_budget,
+            current_time_seconds,
+        )
+        .map(|(authorized, _)| authorized)
     }
 }
 
@@ -208,6 +245,7 @@ pub trait CapabilityGuardExt {
         operation: &AuthorityOp,
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<GuardResult>;
 }
 
@@ -218,9 +256,16 @@ impl CapabilityGuardExt for CapabilityGuard {
         operation: &AuthorityOp,
         token: Option<&Biscuit>,
         flow_budget: &mut FlowBudget,
+        current_time_seconds: u64,
     ) -> Result<GuardResult> {
         let (authorized, result) = self
-            .evaluate_authority_op_with_result(authority_id, operation, token, flow_budget)
+            .evaluate_authority_op_with_result(
+                authority_id,
+                operation,
+                token,
+                flow_budget,
+                current_time_seconds,
+            )
             .await?;
 
         // The result already contains the correct values from the evaluator
@@ -262,6 +307,7 @@ mod tests {
                 &AuthorityOp::AddDevice,
                 None,
                 &mut budget,
+                1,
             )
             .await;
 

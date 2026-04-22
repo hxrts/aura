@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 #[cfg(target_arch = "wasm32")]
 use web_sys::js_sys;
 
@@ -189,7 +190,7 @@ pub(super) async fn attempt_network_send_envelope(
     timeout_deferred_network_stage(effects, stage, async {
         let mut last_error = None;
         for attempt in 0..INVITATION_BEST_EFFORT_NETWORK_SEND_ATTEMPTS {
-            match effects.send_envelope(envelope.clone()).await {
+            match send_guarded_transport_envelope(effects, envelope.clone()).await {
                 Ok(()) => return Ok(()),
                 Err(error) => {
                     last_error = Some(error.to_string());

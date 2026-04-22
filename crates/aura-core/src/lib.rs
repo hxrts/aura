@@ -101,6 +101,8 @@ pub mod reactive;
 pub mod reconfiguration;
 /// Relational domain types for cross-authority coordination
 pub mod relational;
+/// Secret-material wrappers with redacted diagnostics and zeroization.
+pub mod secrets;
 /// Core algebraic types and semilattice laws
 pub mod semilattice;
 /// Unified threshold signing types
@@ -122,6 +124,8 @@ pub mod conformance;
 pub mod constants;
 /// Unified fault schema for simulator/chaos/replay workflows
 pub mod faults;
+/// Trusted key-resolution interfaces for verifier boundaries.
+pub mod key_resolution;
 /// Convenient re-exports of commonly used types
 pub mod prelude;
 /// Protocol types for version negotiation and capabilities
@@ -152,6 +156,10 @@ pub use capability_name::{CapabilityName, CapabilityNameError};
 pub use domain::journal::{
     ActorId, AuthLevel, Cap, Fact, FactKey, FactOpId, FactTimestamp, FactValue, Journal,
 };
+pub use secrets::{
+    EncryptedSecretBlob, PrivateKeyBytes, SecretBytes, SecretExportContext, SecretExportKind,
+    SigningShareBytes,
+};
 #[doc = "internal: Semilattice traits are implementation details, use Journal API instead"]
 pub use semilattice::{
     Bottom, CmState, CvState, DeltaState, JoinSemilattice, MeetSemiLattice, MvState, Top,
@@ -166,6 +174,9 @@ pub use conformance::{
     AURA_CONFORMANCE_SCHEMA_VERSION, AURA_EFFECT_ENVELOPE_CLASSIFICATIONS,
 };
 pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
+pub use key_resolution::{
+    KeyResolutionError, TrustedKeyDomain, TrustedKeyResolver, TrustedKeyStatus, TrustedPublicKey,
+};
 pub use ownership::{
     actor_owned, capability_gated, issue_operation_context, issue_operation_handle,
     issue_owner_token, move_owned, ownership_capability_token_request_for, ActorDeclaration,

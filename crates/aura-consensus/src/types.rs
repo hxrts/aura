@@ -16,6 +16,37 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::num::NonZeroU64;
 
+#[derive(Debug, Clone, Serialize)]
+struct ConsensusCommitTranscriptPayload<'a> {
+    consensus_id: ConsensusId,
+    prestate_hash: Hash32,
+    operation_hash: Hash32,
+    operation_bytes: &'a [u8],
+    threshold: u16,
+}
+
+/// Canonical transcript bytes signed by consensus witnesses for a commit.
+pub fn consensus_commit_transcript_bytes(
+    consensus_id: ConsensusId,
+    prestate_hash: Hash32,
+    operation_hash: Hash32,
+    operation_bytes: &[u8],
+    threshold: u16,
+) -> Result<Vec<u8>> {
+    aura_signature::encode_transcript(
+        "aura.consensus.commit",
+        1,
+        &ConsensusCommitTranscriptPayload {
+            consensus_id,
+            prestate_hash,
+            operation_hash,
+            operation_bytes,
+            threshold,
+        },
+    )
+    .map_err(|error| AuraError::crypto(format!("Consensus commit transcript failed: {error}")))
+}
+
 /// Unique identifier for a consensus instance
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ConsensusId(pub Hash32);
@@ -146,9 +177,17 @@ impl CommitFact {
                 AuraError::invalid(format!("Invalid group public key package: {e}"))
             })?;
 
+        let transcript = consensus_commit_transcript_bytes(
+            self.consensus_id,
+            self.prestate_hash,
+            self.operation_hash,
+            &self.operation_bytes,
+            self.threshold,
+        )?;
+
         frost_verify_aggregate(
             frost_pkg.verifying_key(),
-            &self.operation_bytes,
+            &transcript,
             &self.threshold_signature.signature,
         )
         .map_err(|e| AuraError::crypto(format!("Threshold signature verification failed: {e}")))?;
@@ -292,8 +331,20 @@ impl ConsensusResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Imports for future time-based consensus features
-    // use aura_core::time::{PhysicalTime, TimeStamp};
+    use aura_core::frost::ThresholdSignature;
+    use aura_core::time::{PhysicalTime, TimeStamp};
+    use aura_signature::encode_transcript;
+
+    fn physical_time(ts_ms: u64) -> ProvenancedTime {
+        ProvenancedTime {
+            stamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            }),
+            proofs: Vec::new(),
+            origin: None,
+        }
+    }
 
     #[test]
     fn test_consensus_id_generation() {
@@ -319,5 +370,38 @@ mod tests {
         assert_eq!(config.threshold(), 2);
         assert_eq!(config.timeout_ms.get(), 30000);
         assert!(config.enable_pipelining);
+    }
+
+    #[test]
+    fn consensus_commit_transcript_binds_prestate_and_operation() {
+        let participant = AuthorityId::new_from_entropy([7u8; 32]);
+        let commit = CommitFact::new(
+            ConsensusId(Hash32::from([1u8; 32])),
+            Hash32::from([2u8; 32]),
+            Hash32::from([3u8; 32]),
+            vec![4, 5, 6],
+            ThresholdSignature {
+                signature: vec![7; 64],
+                signers: vec![1],
+            },
+            None,
+            vec![participant],
+            1,
+            false,
+            physical_time(100),
+        );
+        let mut different_prestate = commit.clone();
+        different_prestate.prestate_hash = Hash32::from([9u8; 32]);
+        let mut different_operation = commit.clone();
+        different_operation.operation_bytes = vec![9, 9, 9];
+        different_operation.operation_hash = Hash32::from([8u8; 32]);
+
+        let base = encode_transcript("aura.consensus.commit", 1, &commit).unwrap();
+        let prestate = encode_transcript("aura.consensus.commit", 1, &different_prestate).unwrap();
+        let operation =
+            encode_transcript("aura.consensus.commit", 1, &different_operation).unwrap();
+
+        assert_ne!(base, prestate);
+        assert_ne!(base, operation);
     }
 }

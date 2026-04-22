@@ -502,7 +502,7 @@ async fn amp_list_channel_participants_includes_transported_channel_acceptance()
     .notify_channel_invitation_acceptance(receiver_effects.as_ref(), &imported.invitation_id)
     .await
     .expect("resend channel invitation acceptance");
-    let acceptance_envelope = sender_effects
+    let mut acceptance_envelope = sender_effects
         .receive_envelope()
         .await
         .expect("sender should receive transported channel acceptance envelope");
@@ -521,6 +521,16 @@ async fn amp_list_channel_participants_includes_transported_channel_acceptance()
             .and_then(serde_json::Value::as_str),
         Some(invitation.invitation_id.as_str()),
     );
+    acceptance_envelope.receipt = Some(aura_core::effects::transport::TransportReceipt {
+        context: acceptance_envelope.context,
+        src: acceptance_envelope.source,
+        dst: acceptance_envelope.destination,
+        epoch: 1,
+        cost: 1,
+        nonce: 1,
+        prev: [0u8; 32],
+        sig: vec![1],
+    });
     sender_effects.requeue_envelope(acceptance_envelope);
     let first_outcome = sender_bridge
         .process_ceremony_messages()

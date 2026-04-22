@@ -16,6 +16,7 @@ use crate::runtime::services::ceremony_runner::{
 use crate::runtime::services::{
     CeremonyTracker, ReconfigurationManager, SessionDelegationTransfer,
 };
+use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId, TaskSupervisor};
 use aura_core::crypto::Ed25519Signature;
@@ -25,18 +26,22 @@ use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::identifiers::{AuthorityId, RecoveryId};
 use aura_core::util::serialization::{from_slice, to_vec};
-use aura_core::TimeEffects;
+use aura_core::{ContextId, Hash32, TimeEffects};
 use aura_journal::fact::{ProtocolRelationalFact, RelationalFact};
 use aura_protocol::effects::{ChoreographicRole, RoleIndex, TreeEffects};
-use aura_recovery::ceremony_runners::{AbortCeremony, CommitCeremony, ProposeRotation};
+use aura_protocol::{
+    DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
+    VerifiedIngressMetadata,
+};
+use aura_recovery::ceremony_runners::{AbortCeremony, ProposeRotation};
 // Note: RespondCeremony is a received message type (Guardian -> Initiator) so we don't need
 // to construct it - we only match on the type name suffix when processing received messages.
 use aura_recovery::guardian_ceremony::{
-    CeremonyAbort, CeremonyCommit, CeremonyProposal, CeremonyResponse, CeremonyResponseMsg,
-    GuardianRotationOp,
+    CeremonyAbort, CeremonyProposal, CeremonyResponse, CeremonyResponseMsg, GuardianRotationOp,
 };
 use aura_recovery::guardian_membership::{
-    ChangeCompletion, GuardianVote, MembershipChange, MembershipProposal,
+    guardian_vote_signature_digest, ChangeCompletion, GuardianVote, MembershipChange,
+    MembershipProposal,
 };
 use aura_recovery::guardian_setup::{
     build_setup_completion, validate_setup_inputs, GuardianAcceptance, GuardianInvitation,
@@ -47,6 +52,7 @@ use aura_recovery::recovery_protocol::{
     RecoveryOutcome, RecoveryRequest as ProtocolRecoveryRequest,
 };
 use aura_recovery::types::{GuardianProfile, GuardianSet};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
@@ -423,27 +429,185 @@ impl RecoveryServiceApi {
     /// # Returns
     /// The updated recovery state
     pub async fn submit_approval(&self, approval: GuardianApproval) -> AgentResult<RecoveryState> {
+        let approval = self.verified_recovery_approval(approval).await?;
         let state = self
             .handler
-            .submit_approval(&self.effects, approval.clone())
+            .submit_approval(&self.effects, approval.payload().clone())
             .await?;
-        let ceremony_id = CeremonyId::new(approval.recovery_id.to_string());
+        let ceremony_id = CeremonyId::new(approval.payload().recovery_id.to_string());
         let _ = self
             .ceremony_runner
-            .record_response(
+            .record_verified_response(
                 &ceremony_id,
-                aura_core::threshold::ParticipantIdentity::guardian(approval.guardian_id),
+                aura_core::threshold::ParticipantIdentity::guardian(approval.payload().guardian_id),
+                &approval,
             )
             .await
             .map_err(|e| {
                 AgentError::internal(format!("Failed to record recovery approval: {e}"))
             })?;
-        if let Some(recovery) = self.handler.get_recovery(&approval.recovery_id).await {
+        if let Some(recovery) = self
+            .handler
+            .get_recovery(&approval.payload().recovery_id)
+            .await
+        {
             let _ = self
-                .execute_recovery_protocol_guardian(&approval, recovery.request.account_authority)
+                .execute_recovery_protocol_guardian(
+                    approval.payload(),
+                    recovery.request.account_authority,
+                )
                 .await;
         }
         Ok(state)
+    }
+
+    async fn verified_recovery_approval(
+        &self,
+        approval: GuardianApproval,
+    ) -> AgentResult<VerifiedIngress<GuardianApproval>> {
+        let recovery = self
+            .handler
+            .get_recovery(&approval.recovery_id)
+            .await
+            .ok_or_else(|| {
+                AgentError::runtime(format!(
+                    "Recovery ceremony not found: {}",
+                    approval.recovery_id
+                ))
+            })?;
+        let guardian_is_member = recovery.request.guardians.contains(&approval.guardian_id);
+        let duplicate_approval = recovery
+            .approvals
+            .iter()
+            .any(|existing| existing.guardian_id == approval.guardian_id);
+        let context =
+            ContextId::new_from_entropy(hash(approval.recovery_id.to_string().as_bytes()));
+        let payload_hash = Hash32::from_value(&approval)
+            .map_err(|error| AgentError::internal(format!("hash recovery approval: {error}")))?;
+        let metadata = VerifiedIngressMetadata::new(
+            IngressSource::Authority(approval.guardian_id),
+            context,
+            None,
+            payload_hash,
+            1,
+        );
+        let evidence = IngressVerificationEvidence::builder(metadata)
+            .peer_identity(
+                guardian_is_member,
+                "approval guardian must be in recovery set",
+            )
+            .and_then(|builder| {
+                builder.envelope_authenticity(
+                    !approval.signature.is_empty(),
+                    "guardian approval signature must be present",
+                )
+            })
+            .and_then(|builder| {
+                builder.capability_authorization(
+                    guardian_is_member,
+                    "guardian must be authorized by the recovery request",
+                )
+            })
+            .and_then(|builder| {
+                builder.namespace_scope(
+                    recovery.request.guardians.contains(&approval.guardian_id),
+                    "recovery approval must target an active recovery guardian scope",
+                )
+            })
+            .and_then(|builder| builder.schema_version(true, "recovery approval schema v1"))
+            .and_then(|builder| {
+                builder.replay_freshness(
+                    !duplicate_approval,
+                    "guardian approval must not duplicate an existing approval",
+                )
+            })
+            .and_then(|builder| {
+                builder.signer_membership(guardian_is_member, "guardian signer must be enrolled")
+            })
+            .and_then(|builder| {
+                builder.proof_evidence(
+                    !approval.signature.is_empty(),
+                    "guardian signature evidence must be present",
+                )
+            })
+            .and_then(|builder| builder.build())
+            .map_err(|error| {
+                AgentError::internal(format!("verify recovery approval ingress: {error}"))
+            })?;
+        DecodedIngress::new(approval, evidence.metadata().clone())
+            .verify(evidence)
+            .map_err(|error| AgentError::internal(format!("promote recovery approval: {error}")))
+    }
+
+    fn verified_recovery_session_payload<T: Serialize>(
+        source: AuthorityId,
+        context_entropy: &[u8],
+        payload: T,
+        signer_member: bool,
+        proof_present: bool,
+    ) -> AgentResult<VerifiedIngress<T>> {
+        let context = ContextId::new_from_entropy(hash(context_entropy));
+        let payload_hash = Hash32::from_value(&payload).map_err(|error| {
+            AgentError::internal(format!("hash recovery session payload: {error}"))
+        })?;
+        let metadata = VerifiedIngressMetadata::new(
+            IngressSource::Authority(source),
+            context,
+            None,
+            payload_hash,
+            1,
+        );
+        let evidence = IngressVerificationEvidence::builder(metadata)
+            .peer_identity(
+                signer_member,
+                "recovery session sender must be an expected guardian",
+            )
+            .and_then(|builder| {
+                builder.envelope_authenticity(
+                    proof_present,
+                    "recovery session payload must carry signature or key proof evidence",
+                )
+            })
+            .and_then(|builder| {
+                builder.capability_authorization(
+                    signer_member,
+                    "recovery session sender must be authorized for this ceremony",
+                )
+            })
+            .and_then(|builder| {
+                builder.namespace_scope(
+                    !context_entropy.is_empty(),
+                    "recovery session payload must be ceremony scoped",
+                )
+            })
+            .and_then(|builder| builder.schema_version(true, "recovery session schema v1"))
+            .and_then(|builder| {
+                builder.replay_freshness(
+                    proof_present,
+                    "recovery session payload must include replay-resistant proof material",
+                )
+            })
+            .and_then(|builder| {
+                builder.signer_membership(
+                    signer_member,
+                    "recovery session signer must be an expected guardian",
+                )
+            })
+            .and_then(|builder| {
+                builder.proof_evidence(
+                    proof_present,
+                    "recovery session proof evidence must be present",
+                )
+            })
+            .and_then(|builder| builder.build())
+            .map_err(|error| {
+                AgentError::internal(format!("verify recovery session ingress: {error}"))
+            })?;
+        DecodedIngress::new(payload, evidence.metadata().clone())
+            .verify(evidence)
+            .map_err(|error| {
+                AgentError::internal(format!("promote recovery session payload: {error}"))
+            })
     }
 
     /// Complete a recovery ceremony
@@ -906,7 +1070,6 @@ impl RecoveryServiceApi {
     ) -> AgentResult<()> {
         use crate::core::AgentError;
 
-        use aura_core::effects::TransportEffects;
         use aura_core::ContextId;
         use aura_recovery::guardian_ceremony::CeremonyProposal;
 
@@ -972,9 +1135,7 @@ impl RecoveryServiceApi {
             receipt: None, // Receipts would be added by guard chain in production
         };
 
-        // Send via transport effects
-        self.effects
-            .send_envelope(envelope)
+        send_guarded_transport_envelope(&self.effects, envelope)
             .await
             .map_err(|e| AgentError::effects(format!("Failed to send invitation: {}", e)))?;
 
@@ -988,7 +1149,7 @@ impl RecoveryServiceApi {
     }
 
     /// Execute guardian ceremony as initiator using choreographic protocol.
-    /// Returns the list of guardians who accepted (for recording in the tracker).
+    /// Returns verified guardian responses for tracker recording.
     pub async fn execute_guardian_ceremony_initiator(
         &self,
         ceremony_id: aura_recovery::CeremonyId,
@@ -996,7 +1157,7 @@ impl RecoveryServiceApi {
         operation: GuardianRotationOp,
         guardians: Vec<AuthorityId>,
         key_packages: Vec<Vec<u8>>,
-    ) -> AgentResult<Vec<AuthorityId>> {
+    ) -> AgentResult<Vec<VerifiedIngress<CeremonyResponseMsg>>> {
         if guardians.len() != key_packages.len() {
             return Err(AgentError::invalid(
                 "guardian list and key package length mismatch",
@@ -1113,35 +1274,38 @@ impl RecoveryServiceApi {
                                 "guardian ceremony response decode failed: {error}"
                             ))
                         })?;
+                    let response_guardian = response.guardian_id;
+                    let response_context = response.ceremony_id.to_string();
+                    let response_member = sorted_guardians.contains(&response_guardian);
+                    let response_has_proof = !response.signature.is_empty();
+                    let response = Self::verified_recovery_session_payload(
+                        response_guardian,
+                        response_context.as_bytes(),
+                        response,
+                        response_member,
+                        response_has_proof,
+                    )?;
                     responses.push(response);
 
                     if !branch_queued && responses.len() == 2 {
                         let accepted: Vec<AuthorityId> = responses
                             .iter()
-                            .filter(|response| response.response == CeremonyResponse::Accept)
-                            .map(|response| response.guardian_id)
+                            .filter(|response| {
+                                response.payload().response == CeremonyResponse::Accept
+                            })
+                            .map(|response| response.payload().guardian_id)
                             .collect();
-                        let declined = responses
-                            .iter()
-                            .any(|response| response.response == CeremonyResponse::Decline);
+                        let declined = responses.iter().any(|response| {
+                            response.payload().response == CeremonyResponse::Decline
+                        });
                         let finalize =
                             !declined && accepted.len() >= operation.threshold_k as usize;
-                        session.queue_choice_label(if finalize { "finalize" } else { "cancel" });
                         if finalize {
-                            let commit = CommitCeremony(CeremonyCommit {
-                                ceremony_id,
-                                new_epoch: operation.new_epoch,
-                                threshold_signature: Vec::new(),
-                                participants: accepted,
-                            });
-                            let payload = to_vec(&commit).map_err(|error| {
-                                AgentError::internal(format!(
-                                    "guardian ceremony commit encode failed: {error}"
-                                ))
-                            })?;
-                            session.queue_send_bytes(payload.clone());
-                            session.queue_send_bytes(payload);
+                            return Err(AgentError::internal(
+                                "guardian ceremony commit requires an aggregated threshold signature; placeholder commits are disabled",
+                            ));
                         } else {
+                            session.queue_choice_label("cancel");
                             let reason = if declined {
                                 "guardian_declined"
                             } else {
@@ -1188,9 +1352,10 @@ impl RecoveryServiceApi {
                 match round.step {
                     StepResult::AllDone => {
                         let accepted = responses
-                            .iter()
-                            .filter(|response| response.response == CeremonyResponse::Accept)
-                            .map(|response| response.guardian_id)
+                            .into_iter()
+                            .filter(|response| {
+                                response.payload().response == CeremonyResponse::Accept
+                            })
                             .collect();
                         break Ok(accepted);
                     }
@@ -1222,123 +1387,16 @@ impl RecoveryServiceApi {
         response: CeremonyResponse,
         role_index: usize,
     ) -> AgentResult<()> {
-        let authority_id = self.handler.authority_context().authority_id();
-
-        // Determine which guardian role this peer plays
-        let active_role_name = match role_index {
-            0 => "Guardian1",
-            1 => "Guardian2",
-            _ => {
-                return Err(AgentError::invalid(format!(
-                    "Invalid guardian role index: {} (must be 0 or 1)",
-                    role_index
-                )));
-            }
-        };
-
-        let response_msg = CeremonyResponseMsg {
-            ceremony_id,
-            guardian_id: authority_id,
-            response,
-            signature: Vec::new(),
-        };
-        let session_id = Self::ceremony_session_id(ceremony_id);
-        let roles = vec![Self::role(initiator_id, 0), Self::role(authority_id, 0)];
-        let manifest = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest();
-        let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
-        let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
-        let mut attempt = 0usize;
-
-        let result = loop {
-            let open_result = open_owned_manifest_vm_session_admitted(
-                self.effects.clone(),
-                session_id,
-                roles.clone(),
-                &manifest,
-                active_role_name,
-                &global_type,
-                &local_types,
-                crate::runtime::AuraVmSchedulerSignals::default(),
-            )
-            .await;
-
-            let mut session = match open_result {
-                Ok(session) => session,
-                Err(error)
-                    if matches!(
-                        &error,
-                        crate::runtime::SessionIngressError::SessionStart {
-                            reason: crate::runtime::SessionStartFailureReason::AlreadyExists,
-                            ..
-                        }
-                    ) =>
-                {
-                    if attempt >= CHOREO_START_RETRY_LIMIT {
-                        break Err(AgentError::internal(
-                            "guardian ceremony start failed: another session is still active"
-                                .to_string(),
-                        ));
-                    }
-                    attempt += 1;
-                    sleep(Duration::from_millis(CHOREO_START_RETRY_DELAY_MS)).await;
-                    continue;
-                }
-                Err(error) => {
-                    break Err(AgentError::internal(format!(
-                        "guardian ceremony start failed: {error}"
-                    )));
-                }
-            };
-            session.queue_send_bytes(to_vec(&response_msg).map_err(|error| {
-                AgentError::internal(format!("guardian ceremony response encode failed: {error}"))
-            })?);
-            let peer_roles =
-                BTreeMap::from([("Initiator".to_string(), Self::role(initiator_id, 0))]);
-
-            let loop_result = loop {
-                let round = session
-                    .advance_round(active_role_name, &peer_roles)
-                    .await
-                    .map_err(|error| AgentError::internal(error.to_string()))?;
-
-                if let Some(blocked) = round.blocked_receive {
-                    session
-                        .inject_blocked_receive(&blocked)
-                        .map_err(|error| AgentError::internal(error.to_string()))?;
-                    continue;
-                }
-
-                match round.host_wait_status {
-                    AuraVmHostWaitStatus::Idle => {}
-                    AuraVmHostWaitStatus::TimedOut => {
-                        break Err(AgentError::internal(
-                            "guardian ceremony VM timed out while waiting for receive".to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Cancelled => {
-                        break Err(AgentError::internal(
-                            "guardian ceremony VM cancelled while waiting for receive".to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
-                }
-
-                match round.step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(
-                            "guardian ceremony VM became stuck without a pending receive"
-                                .to_string(),
-                        ));
-                    }
-                }
-            };
-
-            let _ = session.close().await;
-            break loop_result;
-        };
-        result
+        if role_index > 1 {
+            return Err(AgentError::invalid(format!(
+                "Invalid guardian role index: {} (must be 0 or 1)",
+                role_index
+            )));
+        }
+        let _ = (initiator_id, ceremony_id, response);
+        Err(AgentError::internal(
+            "guardian ceremony response requires a guardian signature; unsigned responses are disabled",
+        ))
     }
 
     /// Execute guardian setup ceremony as initiator using choreographic protocol.
@@ -1431,13 +1489,21 @@ impl RecoveryServiceApi {
                                 "guardian acceptance decode failed: {error}"
                             ))
                         })?;
+                    let acceptance_guardian = acceptance.guardian_id;
+                    let acceptance_context = acceptance.setup_id.clone();
+                    let acceptance_member = guardians.contains(&acceptance_guardian);
+                    let acceptance_has_proof = !acceptance.public_key.is_empty();
+                    let acceptance = Self::verified_recovery_session_payload(
+                        acceptance_guardian,
+                        acceptance_context.as_bytes(),
+                        acceptance,
+                        acceptance_member,
+                        acceptance_has_proof,
+                    )?;
                     acceptances.push(acceptance);
                     if !completion_queued && acceptances.len() == guardians.len() {
-                        let completion = build_guardian_setup_completion(
-                            setup_id,
-                            threshold,
-                            acceptances.clone(),
-                        );
+                        let completion =
+                            build_guardian_setup_completion(setup_id, threshold, &acceptances);
                         let payload = to_vec(&completion).map_err(|error| {
                             AgentError::internal(format!(
                                 "guardian setup completion encode failed: {error}"
@@ -1476,7 +1542,7 @@ impl RecoveryServiceApi {
                         break Ok(build_guardian_setup_completion(
                             setup_id,
                             threshold,
-                            acceptances.clone(),
+                            &acceptances,
                         ));
                     }
                     StepResult::Continue => {}
@@ -1753,13 +1819,24 @@ impl RecoveryServiceApi {
                     let vote: GuardianVote = from_slice(&blocked.payload).map_err(|error| {
                         AgentError::internal(format!("guardian vote decode failed: {error}"))
                     })?;
+                    let vote_guardian = vote.guardian_id;
+                    let vote_context = vote.change_id.clone();
+                    let vote_member = guardians.contains(&vote_guardian);
+                    let vote_has_proof = !vote.vote_signature.is_empty();
+                    let vote = Self::verified_recovery_session_payload(
+                        vote_guardian,
+                        vote_context.as_bytes(),
+                        vote,
+                        vote_member,
+                        vote_has_proof,
+                    )?;
                     votes.push(vote);
 
                     if !completion_queued && votes.len() == 3 {
                         let accepted_guardians: Vec<AuthorityId> = votes
                             .iter()
-                            .filter(|vote| vote.approved)
-                            .map(|vote| vote.guardian_id)
+                            .filter(|vote| vote.payload().approved)
+                            .map(|vote| vote.payload().guardian_id)
                             .collect();
                         let completion = ChangeCompletion {
                             change_id: change_id.clone(),
@@ -1812,8 +1889,8 @@ impl RecoveryServiceApi {
                     StepResult::AllDone => {
                         let accepted_guardians: Vec<AuthorityId> = votes
                             .iter()
-                            .filter(|vote| vote.approved)
-                            .map(|vote| vote.guardian_id)
+                            .filter(|vote| vote.payload().approved)
+                            .map(|vote| vote.payload().guardian_id)
                             .collect();
                         break Ok(ChangeCompletion {
                             change_id: change_id.clone(),
@@ -1892,12 +1969,10 @@ impl RecoveryServiceApi {
             .map(|t| t.ts_ms)
             .unwrap_or_default();
 
-        // Create vote signature
-        let mut sig_input = Vec::new();
-        sig_input.extend_from_slice(&authority_id.to_bytes());
-        sig_input.extend_from_slice(proposal.change_id.as_bytes());
-        sig_input.push(approved as u8);
-        let vote_signature = hash(&sig_input).to_vec();
+        let vote_signature = guardian_vote_signature_digest(&proposal, authority_id, approved)
+            .map_err(|error| {
+                AgentError::effects(format!("guardian vote signing failed: {error}"))
+            })?;
 
         let vote = GuardianVote {
             change_id: proposal.change_id.clone(),
@@ -2162,13 +2237,28 @@ async fn execute_recovery_protocol_coordinator(
                     from_slice(&blocked.payload).map_err(|error| {
                         AgentError::internal(format!("guardian approval decode failed: {error}"))
                     })?;
-                approvals.push(approval.clone());
+                let approval_guardian = approval.guardian_id;
+                let approval_context = approval.recovery_id.to_string();
+                let approval_member = approval_guardian == guardian_id;
+                let approval_has_proof = approval.signature.0.iter().any(|byte| *byte != 0);
+                let approval = RecoveryServiceApi::verified_recovery_session_payload(
+                    approval_guardian,
+                    approval_context.as_bytes(),
+                    approval,
+                    approval_member,
+                    approval_has_proof,
+                )?;
+                approvals.push(approval);
+                let outcome_approvals: Vec<ProtocolGuardianApproval> = approvals
+                    .iter()
+                    .map(|approval| approval.payload().clone())
+                    .collect();
                 session.queue_send_bytes(
                     to_vec(&RecoveryOutcome {
                         success: true,
                         recovery_grant: None,
                         error: None,
-                        approvals: approvals.clone(),
+                        approvals: outcome_approvals,
                     })
                     .map_err(|error| {
                         AgentError::internal(format!("recovery outcome encode failed: {error}"))
@@ -2245,9 +2335,16 @@ fn validate_guardian_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> 
 fn build_guardian_setup_completion(
     setup_id: &str,
     threshold: u16,
-    acceptances: Vec<GuardianAcceptance>,
+    acceptances: &[VerifiedIngress<GuardianAcceptance>],
 ) -> SetupCompletion {
-    build_setup_completion(setup_id, threshold, acceptances)
+    build_setup_completion(
+        setup_id,
+        threshold,
+        acceptances
+            .iter()
+            .map(|acceptance| acceptance.payload().clone())
+            .collect(),
+    )
 }
 
 #[cfg(test)]

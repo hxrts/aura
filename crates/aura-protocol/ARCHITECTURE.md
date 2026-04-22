@@ -11,6 +11,7 @@ Coordinate multi-party protocols and guard-chain enforcement. This crate provide
 | Guarded transport operations and protocol outcomes | Runtime composition or lifecycle management (Layer 6) |
 | Orchestrated consensus and anti-entropy flows | Application-specific protocol logic (Layer 5) |
 | Guard chain integration on every send | Production effect implementations |
+| Re-export of guard-owned verified ingress types | Direct remote data persistence |
 | Session types and choreographic annotations | |
 
 ## Dependencies
@@ -28,6 +29,8 @@ Coordinate multi-party protocols and guard-chain enforcement. This crate provide
 ## Invariants
 
 - No production effect implementations live in Layer 4.
+- Peer-originated data must cross the guard-owned verified ingress typestate
+  boundary before it is eligible for state mutation.
 - Guard chain is enforced on every send.
 - Journal facts and budgets are coupled atomically before transport.
 
@@ -63,6 +66,7 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 | Surface | Category | Notes |
 |---------|----------|-------|
 | protocol/session handlers and core builder/config modules | `MoveOwned` | Session transfer, delegation, and typed orchestration boundaries. |
+| guard-owned verified remote-ingress boundary re-export | `MoveOwned`, capability-gated | Carries checked evidence before decoded peer data can flow into mutation APIs. |
 | long-lived coordinators such as `transport_coordinator` and peer-connection retry actors | `ActorOwned` | Justified orchestration coordinators only; not the default model for protocol logic. |
 | guard-chain and effect integration surfaces | capability-gated orchestration | Capability, flow, and journal coupling remain explicit on send paths. |
 | observed-only surfaces | none local | Observation belongs in higher layers consuming protocol outputs. |
@@ -97,6 +101,7 @@ just check-arch
 | Intent state lattice ordering incorrect | `src/state/intent_state.rs` (inline, 7 tests) | Covered |
 | Peer connection retry budget wrong | `src/handlers/peer_connection.rs` (inline) | Covered |
 | Admission capability validation fails | `src/admission.rs` (inline) | Covered |
+| Decoded peer data is treated as verified ingress | `aura-guards/src/ingress.rs` (inline) | Initial typestate coverage |
 
 ## References
 

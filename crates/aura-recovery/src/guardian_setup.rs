@@ -46,6 +46,7 @@ pub struct EncryptedKeyShare {
     /// FROST participant index (1-based)
     pub signer_index: u16,
     /// Encrypted key package bytes (ChaCha20-Poly1305)
+    // aura-security: raw-secret-field-justified encrypted recovery wire payload; plaintext share must use secret wrappers before encryption.
     pub encrypted_share: Vec<u8>,
     /// Nonce used for encryption
     pub nonce: [u8; 12],
@@ -851,6 +852,43 @@ mod tests {
 
         assert!(completion.success);
         assert_eq!(accepted_guardians, vec![accepted.guardian_id]);
+    }
+
+    #[test]
+    fn guardian_setup_acceptance_transcript_binds_setup_and_guardian() {
+        let acceptance = GuardianAcceptance {
+            guardian_id: test_authority_id(1),
+            setup_id: "setup-1".to_string(),
+            accepted: true,
+            public_key: vec![1, 2, 3],
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1,
+                uncertainty: None,
+            }),
+        };
+        let mut different_setup = acceptance.clone();
+        different_setup.setup_id = "setup-2".to_string();
+        let mut different_guardian = acceptance.clone();
+        different_guardian.guardian_id = test_authority_id(2);
+
+        let base =
+            aura_signature::encode_transcript("aura.guardian-setup.acceptance", 1, &acceptance)
+                .unwrap();
+        let setup = aura_signature::encode_transcript(
+            "aura.guardian-setup.acceptance",
+            1,
+            &different_setup,
+        )
+        .unwrap();
+        let guardian = aura_signature::encode_transcript(
+            "aura.guardian-setup.acceptance",
+            1,
+            &different_guardian,
+        )
+        .unwrap();
+
+        assert_ne!(base, setup);
+        assert_ne!(base, guardian);
     }
 
     #[test]

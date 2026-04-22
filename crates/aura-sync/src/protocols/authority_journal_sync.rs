@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::{binary_deserialize, binary_serialize, SyncResult};
 use crate::infrastructure::RetryPolicy;
+use crate::protocols::journal_apply::{JournalApplyService, RemoteJournalDelta};
 use aura_core::time::OrderTime;
-use aura_core::{hash, Authority, AuthorityId};
+use aura_core::{hash, Authority, AuthorityId, ContextId};
+use aura_guards::{DecodedIngress, VerifiedIngress};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
 use std::collections::BTreeSet;
@@ -84,7 +86,19 @@ pub struct AuthoritySyncResult {
     pub duration: Duration,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AuthorityFactsFromPeer {
+    remote_journal: Journal,
+    fact_ids: Vec<OrderTime>,
+}
+
 impl AuthorityJournalSyncProtocol {
+    fn authority_sync_context(authority_id: AuthorityId) -> ContextId {
+        let mut entropy = [0u8; 32];
+        entropy[..16].copy_from_slice(authority_id.uuid().as_bytes());
+        ContextId::new_from_entropy(entropy)
+    }
+
     async fn elapsed_duration<E: AuraEffects>(&self, effects: &E, start_ms: u64) -> Duration {
         Duration::from_millis(
             effects
@@ -193,20 +207,37 @@ impl AuthorityJournalSyncProtocol {
             .await?;
 
         // Apply remote → local (persist local journal with received facts)
+        let facts_from_peer = crate::protocols::ingress::verified_authority_payload(
+            peer_id,
+            Self::authority_sync_context(peer_id),
+            1,
+            AuthorityFactsFromPeer {
+                remote_journal,
+                fact_ids: to_receive,
+            },
+        )?;
         let facts_received = self
-            .receive_facts(effects, peer_id, remote_journal, to_receive)
+            .receive_facts(effects, peer_id, facts_from_peer)
             .await?;
+        let facts_received_count = facts_received.payload().len();
 
-        let mut merged_local = local_journal.clone();
-        for fact in &facts_received {
-            merged_local.add_fact(fact.clone())?;
-        }
+        let (payload, evidence) = facts_received.into_parts();
+        let verified_delta = DecodedIngress::new(
+            RemoteJournalDelta::from_facts(payload),
+            evidence.metadata().clone(),
+        )
+        .verify(evidence)
+        .map_err(|e| {
+            aura_core::AuraError::invalid(format!("verify authority journal delta: {e}"))
+        })?;
+        let (merged_local, _outcome) = JournalApplyService::new()
+            .apply_verified_delta(local_journal.clone(), verified_delta)?;
         self.persist_authority_journal(effects, local_authority.authority_id(), &merged_local)
             .await?;
 
         Ok(AuthoritySyncResult {
             facts_sent: facts_sent.len(),
-            facts_received: facts_received.len(),
+            facts_received: facts_received_count,
             synchronized_authorities: vec![peer_id],
             duration: Duration::default(),
         })
@@ -308,21 +339,32 @@ impl AuthorityJournalSyncProtocol {
         (to_send, to_receive)
     }
 
-    /// Send facts to peer (storage-backed merge)
+    /// Send facts to peer (storage-backed merge through canonical apply boundary)
     async fn send_facts<E: AuraEffects>(
         &self,
         effects: &E,
         peer_id: AuthorityId,
-        mut peer_journal: Journal,
+        peer_journal: Journal,
         facts: Vec<Fact>,
     ) -> SyncResult<Vec<Fact>> {
         if facts.is_empty() {
             return Ok(facts);
         }
 
-        for fact in &facts {
-            peer_journal.add_fact(fact.clone())?;
-        }
+        let verified_delta = crate::protocols::ingress::verified_authority_payload(
+            peer_id,
+            Self::authority_sync_context(peer_id),
+            1,
+            RemoteJournalDelta::from_facts(facts.clone()),
+        )?;
+        let (delta, evidence) = verified_delta.into_parts();
+        let verified_delta = DecodedIngress::new(delta, evidence.metadata().clone())
+            .verify(evidence)
+            .map_err(|e| {
+                aura_core::AuraError::invalid(format!("verify authority send facts: {e}"))
+            })?;
+        let (peer_journal, _outcome) =
+            JournalApplyService::new().apply_verified_delta(peer_journal, verified_delta)?;
 
         self.persist_authority_journal(effects, peer_id, &peer_journal)
             .await?;
@@ -334,11 +376,23 @@ impl AuthorityJournalSyncProtocol {
         &self,
         _effects: &E,
         peer_id: AuthorityId,
-        remote_journal: Journal,
-        fact_ids: Vec<OrderTime>,
-    ) -> SyncResult<Vec<Fact>> {
+        facts_from_peer: VerifiedIngress<AuthorityFactsFromPeer>,
+    ) -> SyncResult<VerifiedIngress<Vec<Fact>>> {
+        let (
+            AuthorityFactsFromPeer {
+                remote_journal,
+                fact_ids,
+            },
+            evidence,
+        ) = facts_from_peer.into_parts();
+
         if fact_ids.is_empty() {
-            return Ok(Vec::new());
+            let verified_empty = DecodedIngress::new(Vec::new(), evidence.metadata().clone())
+                .verify(evidence)
+                .map_err(|e| {
+                    aura_core::AuraError::invalid(format!("verify empty authority facts: {e}"))
+                })?;
+            return Ok(verified_empty);
         }
 
         let received = self.collect_facts_by_orders(&remote_journal, &fact_ids);
@@ -349,7 +403,9 @@ impl AuthorityJournalSyncProtocol {
             peer_id
         );
 
-        Ok(received)
+        DecodedIngress::new(received, evidence.metadata().clone())
+            .verify(evidence)
+            .map_err(|e| aura_core::AuraError::invalid(format!("verify authority facts: {e}")))
     }
 
     async fn persist_authority_journal<E: AuraEffects>(

@@ -112,11 +112,11 @@ impl CryptoSubsystem {
         }
     }
 
-    /// Create a crypto subsystem with deterministic seed for testing
+    /// Create a crypto subsystem with deterministic seed for simulation/tests.
     #[allow(dead_code)] // Used by deterministic and integration tests until runtime builders own all crypto construction.
-    pub fn seeded(seed: [u8; 32], base_path: std::path::PathBuf) -> Self {
+    pub fn for_simulation_seed(seed: [u8; 32], base_path: std::path::PathBuf) -> Self {
         Self {
-            handler: RealCryptoHandler::seeded(seed),
+            handler: RealCryptoHandler::for_simulation_seed(seed),
             rng: CryptoRng::deterministic(StdRng::from_seed(seed)),
             secure_storage: Arc::new(RealSecureStorageHandler::with_base_path(base_path)),
         }
@@ -208,8 +208,8 @@ mod tests {
     fn test_seeded_crypto_subsystem() {
         let temp_dir = std::env::temp_dir().join("crypto_subsystem_seeded_test");
         let seed = [42u8; 32];
-        let subsystem1 = CryptoSubsystem::seeded(seed, temp_dir.clone());
-        let subsystem2 = CryptoSubsystem::seeded(seed, temp_dir);
+        let subsystem1 = CryptoSubsystem::for_simulation_seed(seed, temp_dir.clone());
+        let subsystem2 = CryptoSubsystem::for_simulation_seed(seed, temp_dir);
 
         // Seeded subsystems should produce same random values
         let bytes1 = subsystem1.random_bytes(16);

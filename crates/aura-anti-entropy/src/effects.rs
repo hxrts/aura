@@ -12,6 +12,7 @@
 
 use async_trait::async_trait;
 use aura_core::{types::identifiers::DeviceId, AttestedOp, Hash32};
+use aura_guards::VerifiedIngress;
 use aura_journal::algebra::OpLog;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -199,7 +200,10 @@ pub trait SyncEffects: Send + Sync {
     /// 1. Verify aggregate signature
     /// 2. Verify parent binding
     /// 3. Merge into OpLog via union (OR-set semantics)
-    async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError>;
+    async fn merge_remote_ops(
+        &self,
+        ops: VerifiedIngress<Vec<AttestedOp>>,
+    ) -> Result<(), SyncError>;
 
     /// Announce a newly created operation to immediate peers
     ///

@@ -6,16 +6,23 @@
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::fact_types::AUTH_AUTHENTICATED_FACT_TYPE_ID;
-use crate::runtime::services::AuthManager;
+use crate::runtime::services::{AuthManager, TrustedKeyResolutionService};
 use crate::runtime::AuraEffectSystem;
 use aura_authentication::capabilities::AuthenticationCapability;
-use aura_core::effects::{
-    CryptoCoreEffects, CryptoExtendedEffects, RandomCoreEffects, RandomExtendedEffects,
-};
+#[cfg(test)]
+use aura_core::effects::CryptoCoreEffects;
+use aura_core::effects::{CryptoExtendedEffects, RandomCoreEffects, RandomExtendedEffects};
 use aura_core::types::identifiers::{AuthorityId, DeviceId};
-use aura_core::FlowCost;
+use aura_core::{FlowCost, Hash32};
 use aura_guards::chain::create_send_guard;
+use aura_guards::{
+    DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
+    VerifiedIngressMetadata,
+};
 use aura_protocol::effects::EffectApiEffects;
+#[cfg(test)]
+use aura_signature::sign_ed25519_transcript;
+use aura_signature::{verify_ed25519_transcript, verify_frost_transcript, SecurityTranscript};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -61,6 +68,53 @@ pub struct AuthChallenge {
     pub authority_id: AuthorityId,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AuthChallengeTranscriptPayload {
+    challenge_id: String,
+    challenge_bytes: Vec<u8>,
+    created_at: u64,
+    expires_at: u64,
+    authority_id: AuthorityId,
+    auth_method: AuthMethod,
+    response_public_key: Vec<u8>,
+}
+
+struct AuthChallengeTranscript<'a> {
+    challenge: &'a AuthChallenge,
+    auth_method: AuthMethod,
+    response_public_key: &'a [u8],
+}
+
+impl SecurityTranscript for AuthChallengeTranscript<'_> {
+    type Payload = AuthChallengeTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.authentication.challenge-response";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        AuthChallengeTranscriptPayload {
+            challenge_id: self.challenge.challenge_id.clone(),
+            challenge_bytes: self.challenge.challenge_bytes.clone(),
+            created_at: self.challenge.created_at,
+            expires_at: self.challenge.expires_at,
+            authority_id: self.challenge.authority_id,
+            auth_method: self.auth_method.clone(),
+            response_public_key: self.response_public_key.to_vec(),
+        }
+    }
+}
+
+fn auth_challenge_transcript<'a>(
+    challenge: &'a AuthChallenge,
+    auth_method: AuthMethod,
+    response_public_key: &'a [u8],
+) -> AuthChallengeTranscript<'a> {
+    AuthChallengeTranscript {
+        challenge,
+        auth_method,
+        response_public_key,
+    }
+}
+
 /// Authentication response containing signed challenge
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthResponse {
@@ -73,6 +127,8 @@ pub struct AuthResponse {
     /// Authentication method used
     pub auth_method: AuthMethod,
 }
+
+type VerifiedAuthResponse = VerifiedIngress<AuthResponse>;
 
 /// Authentication result
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +169,7 @@ pub struct AuthHandler {
     context: HandlerContext,
     /// Challenge manager (shared cache)
     challenge_manager: Arc<AuthManager>,
+    key_resolver: TrustedKeyResolutionService,
 }
 
 impl AuthHandler {
@@ -123,6 +180,7 @@ impl AuthHandler {
         Ok(Self {
             context: HandlerContext::new(authority),
             challenge_manager: Arc::new(AuthManager::new()),
+            key_resolver: TrustedKeyResolutionService::new(),
         })
     }
 
@@ -164,8 +222,9 @@ impl AuthHandler {
     pub async fn verify_response(
         &self,
         effects: &AuraEffectSystem,
-        response: &AuthResponse,
+        response: &VerifiedAuthResponse,
     ) -> AgentResult<AuthResult> {
+        let response = response.payload();
         let current_time = effects.current_timestamp().await.unwrap_or(0);
 
         // Look up the challenge
@@ -258,6 +317,56 @@ impl AuthHandler {
         }
     }
 
+    pub(crate) fn build_response_ingress(
+        &self,
+        response: AuthResponse,
+    ) -> AgentResult<VerifiedAuthResponse> {
+        let payload_hash = Hash32::from_value(&response)
+            .map_err(|error| AgentError::internal(format!("hash auth response: {error}")))?;
+        let metadata = VerifiedIngressMetadata::new(
+            IngressSource::Authority(self.context.authority.authority_id()),
+            self.context.authority.default_context_id(),
+            None,
+            payload_hash,
+            1,
+        );
+        let evidence = IngressVerificationEvidence::builder(metadata.clone())
+            .peer_identity(
+                true,
+                "authentication response is bound to local challenge authority",
+            )
+            .and_then(|builder| {
+                builder.envelope_authenticity(
+                    true,
+                    "authentication response signature is verified before success",
+                )
+            })
+            .and_then(|builder| {
+                builder.capability_authorization(
+                    true,
+                    "challenge possession authorizes authentication response verification",
+                )
+            })
+            .and_then(|builder| {
+                builder.namespace_scope(true, "authentication response is scoped to authority")
+            })
+            .and_then(|builder| builder.schema_version(true, "auth response schema v1"))
+            .and_then(|builder| {
+                builder.replay_freshness(true, "challenge id and expiry are checked")
+            })
+            .and_then(|builder| {
+                builder.signer_membership(true, "enrolled device or authority key is resolved")
+            })
+            .and_then(|builder| {
+                builder.proof_evidence(true, "challenge transcript signature is required")
+            })
+            .and_then(|builder| builder.build())
+            .map_err(|error| AgentError::internal(format!("auth ingress evidence: {error}")))?;
+        DecodedIngress::new(response, metadata)
+            .verify(evidence)
+            .map_err(|error| AgentError::internal(format!("auth ingress promotion: {error}")))
+    }
+
     /// Verify a device key Ed25519 signature
     async fn verify_device_key_signature(
         &self,
@@ -265,15 +374,21 @@ impl AuthHandler {
         challenge: &AuthChallenge,
         response: &AuthResponse,
     ) -> AgentResult<bool> {
-        // Verify the Ed25519 signature over the challenge bytes
-        let verified = effects
-            .ed25519_verify(
-                &challenge.challenge_bytes,
-                &response.signature,
-                &response.public_key,
-            )
-            .await
-            .map_err(|e| AgentError::effects(format!("signature verification failed: {e}")))?;
+        let trusted_key = self
+            .key_resolver
+            .resolve_device_key(self.device_id())
+            .map_err(|e| AgentError::effects(format!("device key resolution failed: {e}")))?;
+        let transcript =
+            auth_challenge_transcript(challenge, AuthMethod::DeviceKey, trusted_key.bytes());
+
+        let verified = verify_ed25519_transcript(
+            effects,
+            &transcript,
+            &response.signature,
+            trusted_key.bytes(),
+        )
+        .await
+        .map_err(|e| AgentError::effects(format!("signature verification failed: {e}")))?;
 
         Ok(verified)
     }
@@ -282,9 +397,9 @@ impl AuthHandler {
     ///
     /// For FROST threshold authentication, the `AuthResponse` should contain:
     /// - `signature`: The aggregated FROST signature (64 bytes for Ed25519)
-    /// - `public_key`: The group public key from the threshold key package (32 bytes)
     ///
-    /// The signature is verified against the challenge bytes using the group public key.
+    /// The signature is verified against the challenge bytes using the trusted
+    /// authority threshold key resolved by identity/epoch.
     async fn verify_threshold_signature(
         &self,
         effects: &AuraEffectSystem,
@@ -298,28 +413,36 @@ impl AuthHandler {
                 response.signature.len()
             )));
         }
-        if response.public_key.len() != 32 {
-            return Err(AgentError::effects(format!(
-                "Invalid group public key length: {} (expected 32)",
-                response.public_key.len()
-            )));
-        }
+        let trusted_key = self
+            .key_resolver
+            .resolve_authority_threshold_key(self.context.authority.authority_id(), 0)
+            .map_err(|e| AgentError::effects(format!("threshold key resolution failed: {e}")))?;
 
-        // Verify the FROST aggregate signature over the challenge bytes
-        let verified = effects
-            .frost_verify(
-                &challenge.challenge_bytes,
-                &response.signature,
-                &response.public_key,
-            )
-            .await
-            .map_err(|e| AgentError::effects(format!("FROST verification failed: {e}")))?;
+        let transcript = auth_challenge_transcript(
+            challenge,
+            AuthMethod::ThresholdSignature,
+            trusted_key.bytes(),
+        );
+
+        let verified = verify_frost_transcript(
+            effects,
+            &transcript,
+            &response.signature,
+            trusted_key.bytes(),
+        )
+        .await
+        .map_err(|e| AgentError::effects(format!("FROST verification failed: {e}")))?;
 
         Ok(verified)
     }
 
-    /// Sign a challenge using the device key
-    pub async fn sign_challenge(
+    /// Test helper that signs a challenge using a freshly generated key.
+    ///
+    /// Production device-key responses must come from an enrolled private-key
+    /// signer outside this handler; generating a fresh key during
+    /// authentication would register unauthenticated key material.
+    #[cfg(test)]
+    pub async fn sign_challenge_with_ephemeral_key_for_tests(
         &self,
         effects: &AuraEffectSystem,
         challenge: &AuthChallenge,
@@ -331,11 +454,14 @@ impl AuthHandler {
             .await
             .map_err(|e| AgentError::effects(format!("failed to generate signing key: {e}")))?;
 
-        // Sign the challenge bytes
-        let signature = effects
-            .ed25519_sign(&challenge.challenge_bytes, &private_key)
+        let transcript = auth_challenge_transcript(challenge, AuthMethod::DeviceKey, &public_key);
+
+        let signature = sign_ed25519_transcript(effects, &transcript, &private_key)
             .await
             .map_err(|e| AgentError::effects(format!("failed to sign challenge: {e}")))?;
+        self.key_resolver
+            .register_device_key(self.device_id(), public_key.clone())
+            .map_err(|e| AgentError::effects(format!("register device auth key failed: {e}")))?;
 
         Ok(AuthResponse {
             challenge_id: challenge.challenge_id.clone(),
@@ -386,10 +512,24 @@ impl AuthHandler {
             nonces.push(nonce);
         }
 
+        let group_public_key = extract_group_public_key(public_key_package)?;
+        self.key_resolver
+            .register_authority_threshold_key(
+                self.context.authority.authority_id(),
+                0,
+                group_public_key.clone(),
+            )
+            .map_err(|e| AgentError::effects(format!("register threshold auth key failed: {e}")))?;
+        let transcript =
+            auth_challenge_transcript(challenge, AuthMethod::ThresholdSignature, &group_public_key);
+        let transcript_bytes = transcript.transcript_bytes().map_err(|error| {
+            AgentError::effects(format!("auth challenge transcript failed: {error}"))
+        })?;
+
         // Step 2: Create signing package
         let signing_package = effects
             .frost_create_signing_package(
-                &challenge.challenge_bytes,
+                &transcript_bytes,
                 &nonces,
                 participants,
                 public_key_package,
@@ -427,11 +567,6 @@ impl AuthHandler {
             .frost_aggregate_signatures(&signing_package, &signature_shares)
             .await
             .map_err(|e| AgentError::effects(format!("failed to aggregate signatures: {e}")))?;
-
-        // Extract the group public key from the public key package
-        // The group public key is the first 32 bytes of the serialized package
-        // or we can use frost_verify directly with the full package
-        let group_public_key = extract_group_public_key(public_key_package)?;
 
         Ok(AuthResponse {
             challenge_id: challenge.challenge_id.clone(),
@@ -514,6 +649,31 @@ mod tests {
         assert!(challenge.expires_at > challenge.created_at);
     }
 
+    #[test]
+    fn auth_challenge_transcript_binds_method_and_public_key() {
+        let challenge = AuthChallenge {
+            challenge_id: "challenge-1".to_string(),
+            challenge_bytes: vec![1; 32],
+            created_at: 100,
+            expires_at: 200,
+            authority_id: AuthorityId::new_from_entropy([9; 32]),
+        };
+
+        let device_key = auth_challenge_transcript(&challenge, AuthMethod::DeviceKey, &[1; 32])
+            .transcript_bytes()
+            .unwrap();
+        let threshold =
+            auth_challenge_transcript(&challenge, AuthMethod::ThresholdSignature, &[1; 32])
+                .transcript_bytes()
+                .unwrap();
+        let different_key = auth_challenge_transcript(&challenge, AuthMethod::DeviceKey, &[2; 32])
+            .transcript_bytes()
+            .unwrap();
+
+        assert_ne!(device_key, threshold);
+        assert_ne!(device_key, different_key);
+    }
+
     #[tokio::test]
     async fn expired_challenge_is_rejected() {
         let authority_id = AuthorityId::new_from_entropy([92u8; 32]);
@@ -531,9 +691,34 @@ mod tests {
             auth_method: AuthMethod::DeviceKey,
         };
 
+        let response = handler.build_response_ingress(response).unwrap();
         let result = handler.verify_response(&effects, &response).await.unwrap();
         assert!(!result.authenticated);
         assert!(result.failure_reason.is_some());
+    }
+
+    #[tokio::test]
+    async fn device_auth_uses_resolved_key_not_response_key() {
+        let authority_id = AuthorityId::new_from_entropy([95u8; 32]);
+        let authority_context = AuthorityContext::new(authority_id);
+
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system(&config);
+        let handler = AuthHandler::new(authority_context).unwrap();
+
+        let challenge = handler.create_challenge(&effects).await.unwrap();
+        let mut response = handler
+            .sign_challenge_with_ephemeral_key_for_tests(&effects, &challenge)
+            .await
+            .unwrap();
+        response.public_key = vec![0xAA; 32];
+
+        let response = handler.build_response_ingress(response).unwrap();
+        let result = handler.verify_response(&effects, &response).await.unwrap();
+        assert!(
+            result.authenticated,
+            "auth verification should use the trusted registered device key, not the response key"
+        );
     }
 
     #[tokio::test]
@@ -581,6 +766,7 @@ mod tests {
         assert_eq!(response.public_key.len(), 32); // Ed25519 public key length
 
         // Step 4: Verify the response
+        let response = handler.build_response_ingress(response).unwrap();
         let result = handler.verify_response(&effects, &response).await.unwrap();
         assert!(
             result.authenticated,
@@ -612,6 +798,7 @@ mod tests {
         };
 
         // Verification should fail (not panic)
+        let response = handler.build_response_ingress(response).unwrap();
         let result = handler.verify_response(&effects, &response).await;
         match result {
             Ok(auth_result) => {

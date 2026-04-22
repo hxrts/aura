@@ -41,7 +41,7 @@
 //! journal facts using join-semilattice operations.
 
 use super::{GuardEffects, GuardOperationId, ProtocolGuard};
-use aura_core::{AuraResult, Journal, RetryPolicy, TimeEffects};
+use aura_core::{AuraError, AuraResult, Journal, RetryPolicy, TimeEffects};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
 use std::{collections::HashMap, future::Future, time::Duration};
@@ -454,10 +454,11 @@ impl JournalCoupler {
         debug!("Coupling journal operations with send");
 
         // Get the current journal state
-        let current_journal = effect_system
-            .get_journal()
-            .await
-            .unwrap_or_else(|_| Journal::new());
+        let current_journal = effect_system.get_journal().await.map_err(|error| {
+            AuraError::internal(format!(
+                "journal coupling failed to load current journal: {error}"
+            ))
+        })?;
 
         // Apply any pending annotations for this send operation
         let (updated_journal, applied_ops) = self
@@ -505,13 +506,8 @@ impl JournalCoupler {
                     };
                     Ok((updated_journal, journal_op))
                 } else {
-                    // No specific delta - return unchanged journal
-                    Ok((
-                        current_journal.clone(),
-                        JournalOperation::MergeFacts {
-                            facts: Journal::new(),
-                            description: "No-op facts addition".to_string(),
-                        },
+                    Err(AuraError::invalid(
+                        "journal AddFacts annotation missing required delta",
                     ))
                 }
             }
@@ -529,12 +525,8 @@ impl JournalCoupler {
                     };
                     Ok((updated_journal, journal_op))
                 } else {
-                    Ok((
-                        current_journal.clone(),
-                        JournalOperation::RefineCapabilities {
-                            refinement: Journal::new(),
-                            description: "No-op capability refinement".to_string(),
-                        },
+                    Err(AuraError::invalid(
+                        "journal RefineCaps annotation missing required delta",
                     ))
                 }
             }
@@ -555,12 +547,8 @@ impl JournalCoupler {
                     };
                     Ok((final_journal, journal_op))
                 } else {
-                    Ok((
-                        current_journal.clone(),
-                        JournalOperation::GeneralMerge {
-                            delta: Journal::new(),
-                            description: "No-op general merge".to_string(),
-                        },
+                    Err(AuraError::invalid(
+                        "journal Merge annotation missing required delta",
                     ))
                 }
             }
@@ -594,26 +582,9 @@ impl JournalCoupler {
                     };
                     Ok((final_journal, journal_op))
                 } else {
-                    // No delta provided - this is a no-op but may indicate a bug
-                    warn!(
-                        custom_op = custom_op,
-                        "Custom journal operation '{}' has no delta - no journal changes applied. \
-                         If this is intentional, consider using a different operation type.",
-                        custom_op
-                    );
-
-                    let journal_op = JournalOperation::CustomOperation {
-                        name: custom_op.clone(),
-                        data: serde_json::json!({
-                            "delta_applied": false,
-                            "warning": "No delta provided for custom operation"
-                        }),
-                        description: annotation
-                            .description
-                            .clone()
-                            .unwrap_or_else(|| format!("Custom operation (no-op): {custom_op}")),
-                    };
-                    Ok((current_journal.clone(), journal_op))
+                    Err(AuraError::invalid(format!(
+                        "custom journal operation '{custom_op}' missing required delta"
+                    )))
                 }
             }
         }
@@ -652,7 +623,15 @@ impl ProtocolGuard {
 
         // Phase 1: Evaluate authorization guards (using existing guard evaluation)
         use crate::guards::execution::evaluate_guard;
-        let guard_result = evaluate_guard(self).await?;
+        let current_time_seconds = effect_system
+            .physical_time()
+            .await
+            .map_err(|error| {
+                aura_core::AuraError::internal(format!("guard time unavailable: {error}"))
+            })?
+            .ts_ms
+            / 1000;
+        let guard_result = evaluate_guard(self, current_time_seconds).await?;
 
         if !guard_result.passed {
             warn!(

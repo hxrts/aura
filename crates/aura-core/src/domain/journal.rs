@@ -869,7 +869,10 @@ impl Default for Fact {
 ///
 /// This follows the meet-semilattice laws where adding blocks strictly reduces authority.
 /// See docs/106_authorization.md for the formal specification.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+// Clone/equality/serde are part of the journal semilattice contract for Cap meet
+// and replication. Debug remains manually redacted because token bytes are bearer
+// material.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Cap {
     /// Security-sensitive serialized Biscuit bearer token bytes. Zeroized on drop.
     token_bytes: Vec<u8>,
@@ -880,6 +883,17 @@ pub struct Cap {
     /// Required for proper meet semantics and token verification
     #[serde(default)]
     root_key_bytes: Vec<u8>,
+}
+
+impl fmt::Debug for Cap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cap")
+            .field("token_bytes_len", &self.token_bytes.len())
+            .field("token_bytes", &"<redacted>")
+            .field("root_key_bytes_len", &self.root_key_bytes.len())
+            .field("root_key_bytes", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Authentication levels (kept for compatibility)

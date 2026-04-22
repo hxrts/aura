@@ -696,10 +696,14 @@ ci-testkit-exception-boundary:
 ci-ownership-policy:
     just _policy-check check ownership-policy
 
+ci-security-boundary-policy:
+    just _policy-check check security-boundary-policy
+
 ci-ratchet-audit:
     just clippy
     just lint-arch-syntax
     just ci-annotation-ratchet
+    just ci-security-boundary-policy
     just ci-ownership-policy
     just ci-browser-driver-contract-sync
     just web-check
@@ -1084,6 +1088,7 @@ ci-dry-run profile="push":
     add_step "Shared Flow Policy"         "nix develop --command just ci-shared-flow-policy"
     add_step "Build Check"                "nix develop --command just ci-build"
     add_step "Clippy Check"               "nix develop --command just ci-clippy"
+    add_step "Security Boundary Policy"   "nix develop --command just ci-security-boundary-policy"
     add_step "Ownership Policy"           "nix develop --command just ci-ownership-policy"
     add_step "Tests + Protocol Compat"    "nix develop --command bash -lc 'just ci-test && just ci-protocol-compat'"
 

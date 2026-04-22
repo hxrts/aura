@@ -7,7 +7,7 @@ use super::{
     messages::{
         ConsensusError, ConsensusMessage, ConsensusPhase, ConsensusRequest, ConsensusResponse,
     },
-    types::{CommitFact, ConsensusConfig, ConsensusId},
+    types::{consensus_commit_transcript_bytes, CommitFact, ConsensusConfig, ConsensusId},
     witness::{WitnessSet, WitnessTracker},
 };
 use async_lock::RwLock;
@@ -220,12 +220,15 @@ impl FrostConsensusOrchestrator {
                     .await;
                 if let Some((commitment, token)) = witness_state.take_nonce(self.config.epoch) {
                     // Generate partial signature
-                    let signature = self.sign_with_nonce(
+                    let transcript = consensus_commit_transcript_bytes(
+                        consensus_id,
+                        request.prestate_hash,
+                        request.operation_hash,
                         &request.operation_bytes,
-                        share,
-                        &token,
-                        &aggregated_nonces,
+                        self.config.threshold(),
                     )?;
+                    let signature =
+                        self.sign_with_nonce(&transcript, share, &token, &aggregated_nonces)?;
 
                     // Use operation_hash as result_id (deterministic execution assumption)
                     let _ = tracker.add_signature(*witness_id, signature, request.operation_hash);
@@ -287,12 +290,15 @@ impl FrostConsensusOrchestrator {
 
         for (witness_id, token) in nonce_tokens {
             if let Some(share) = self.key_packages.get(&witness_id) {
-                let signature = self.sign_with_nonce(
+                let transcript = consensus_commit_transcript_bytes(
+                    consensus_id,
+                    request.prestate_hash,
+                    request.operation_hash,
                     &request.operation_bytes,
-                    share,
-                    &token,
-                    &aggregated_nonces,
+                    self.config.threshold(),
                 )?;
+                let signature =
+                    self.sign_with_nonce(&transcript, share, &token, &aggregated_nonces)?;
 
                 // Use operation_hash as result_id (deterministic execution assumption)
                 let _ = tracker.add_signature(witness_id, signature, request.operation_hash);
@@ -335,7 +341,14 @@ impl FrostConsensusOrchestrator {
         // Aggregate signatures
         let participants = tracker.get_participants();
 
-        let threshold_signature = self.aggregate_signatures(&tracker, &instance.operation_bytes)?;
+        let transcript = consensus_commit_transcript_bytes(
+            consensus_id,
+            instance.prestate_hash,
+            instance.operation_hash,
+            &instance.operation_bytes,
+            self.config.threshold(),
+        )?;
+        let threshold_signature = self.aggregate_signatures(&tracker, &transcript)?;
 
         // Create commit fact
         let timestamp = ProvenancedTime {

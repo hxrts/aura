@@ -6,7 +6,7 @@ use super::{types::ProtocolStats, ConsensusProtocol};
 use crate::{
     messages::{ConsensusMessage, ConsensusPhase},
     protocol::guards::{ConsensusResultGuard, SignRequestGuard},
-    types::CommitFact,
+    types::{consensus_commit_transcript_bytes, CommitFact},
     ConsensusId,
 };
 use aura_core::{
@@ -171,13 +171,16 @@ impl ConsensusProtocol {
             debug!(witness = %witness, signer = %commitment.signer, "Using nonce commitment for aggregation");
         }
 
-        let aggregated_sig = frost_aggregate(
-            &signatures,
+        let transcript = consensus_commit_transcript_bytes(
+            consensus_id,
+            instance.prestate_hash,
+            instance.operation_hash,
             &instance.operation_bytes,
-            &commitments,
-            &frost_group_pkg,
-        )
-        .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {e}")))?;
+            self.config.threshold(),
+        )?;
+        let aggregated_sig =
+            frost_aggregate(&signatures, &transcript, &commitments, &frost_group_pkg)
+                .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {e}")))?;
 
         let threshold_signature = aura_core::frost::ThresholdSignature {
             signature: aggregated_sig,

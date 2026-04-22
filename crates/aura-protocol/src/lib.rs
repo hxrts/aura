@@ -86,6 +86,11 @@ pub mod state;
 pub mod termination;
 pub mod types;
 
+pub use aura_guards::{
+    DecodedIngress, IngressSource, IngressVerificationCheck, IngressVerificationError,
+    IngressVerificationEvidence, IngressVerificationEvidenceBuilder, VerifiedIngress,
+    VerifiedIngressEvidence, VerifiedIngressMetadata, REQUIRED_INGRESS_VERIFICATION_CHECKS,
+};
 pub use error::ProtocolError;
 
 // Re-export session types for convenient access

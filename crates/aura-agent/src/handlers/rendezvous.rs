@@ -10,6 +10,7 @@ use super::shared::{
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::{RendezvousManager, ServiceRegistry};
+use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use crate::runtime::AuraEffectSystem;
 use aura_consensus::protocol::run_consensus;
 use aura_core::crypto::single_signer::SingleSignerKeyPackage;
@@ -90,7 +91,7 @@ impl RendezvousHandler {
         effects: &AuraEffectSystem,
     ) -> AgentResult<
         Option<(
-            aura_authorization::Biscuit,
+            aura_authorization::VerifiedBiscuitToken,
             aura_authorization::BiscuitAuthorizationBridge,
         )>,
     > {
@@ -109,8 +110,11 @@ impl RendezvousHandler {
             aura_authorization::PublicKey::from_bytes(&root_pk_bytes).map_err(|error| {
                 AgentError::effects(format!("parse biscuit root public key cache: {error}"))
             })?;
-        let biscuit = aura_authorization::Biscuit::from(&token_bytes, root_public_key)
-            .map_err(|error| AgentError::effects(format!("parse biscuit token cache: {error}")))?;
+        let biscuit =
+            aura_authorization::VerifiedBiscuitToken::from_bytes(&token_bytes, root_public_key)
+                .map_err(|error| {
+                    AgentError::effects(format!("parse biscuit token cache: {error}"))
+                })?;
         let bridge = aura_authorization::BiscuitAuthorizationBridge::new(
             root_public_key,
             self.context.authority.authority_id(),
@@ -136,7 +140,7 @@ impl RendezvousHandler {
             .iter()
             .filter_map(|capability| {
                 let capability_name = capability.as_name();
-                match bridge.has_capability_with_time(
+                match bridge.has_verified_capability_with_time(
                     &token,
                     capability_name.as_str(),
                     current_time_seconds,
@@ -985,8 +989,7 @@ async fn execute_send_handshake(
         receipt: receipt.map(transport_receipt_from_flow),
     };
 
-    effects
-        .send_envelope(envelope)
+    send_guarded_transport_envelope(effects, envelope)
         .await
         .map_err(|e| AgentError::effects(format!("Rendezvous handshake send failed: {e}")))?;
     Ok(())
@@ -1028,8 +1031,7 @@ async fn execute_send_handshake_response(
         receipt: receipt.map(transport_receipt_from_flow),
     };
 
-    effects
-        .send_envelope(envelope)
+    send_guarded_transport_envelope(effects, envelope)
         .await
         .map_err(|e| AgentError::effects(format!("Rendezvous handshake response failed: {e}")))?;
     Ok(())

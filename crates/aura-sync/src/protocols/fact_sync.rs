@@ -40,18 +40,25 @@
 //! let config = FactSyncConfig::default();
 //! let protocol = FactSyncProtocol::new(config, indexed_journal);
 //!
-//! let (result, facts_to_send) = protocol
-//!     .sync_with_peer(peer_root, &peer_bloom, incoming_facts)
-//!     .await?;
+//! let peer_data = FactSyncPeerData {
+//!     context_id,
+//!     peer_root,
+//!     peer_bloom,
+//!     incoming_facts,
+//! };
+//! let verified_peer_data = verify_peer_data(peer_data)?;
+//! let (result, facts_to_send) = protocol.sync_with_peer(verified_peer_data).await?;
 //! ```
 
 use crate::core::binary_serialize;
+use crate::protocols::journal_apply::JournalApplyService;
 use crate::verification::{MerkleComparison, MerkleVerifier, VerificationResult};
 use aura_core::domain::journal::FactValue;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::BloomFilter;
-use aura_core::{hash, AuraError};
+use aura_core::{hash, AuraError, ContextId};
+use aura_guards::{DecodedIngress, VerifiedIngress};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -154,6 +161,20 @@ pub struct FactSyncStats {
     pub total_rejected: u64,
 }
 
+/// Peer-originated fact-sync data after transport/session receipt and before
+/// Merkle verification.
+#[derive(Debug, Clone)]
+pub struct FactSyncPeerData {
+    /// Context whose facts are being synchronized.
+    pub context_id: ContextId,
+    /// Merkle root claimed by the peer.
+    pub peer_root: [u8; 32],
+    /// Serialized Bloom filter from the peer.
+    pub peer_bloom: Vec<u8>,
+    /// Facts received from the peer.
+    pub incoming_facts: Vec<IndexedFact>,
+}
+
 // =============================================================================
 // FactSyncProtocol
 // =============================================================================
@@ -228,10 +249,16 @@ impl FactSyncProtocol {
     /// is the list of facts that should be sent back to the peer.
     pub async fn sync_with_peer(
         &self,
-        peer_root: [u8; 32],
-        peer_bloom: &[u8],
-        incoming_facts: Vec<IndexedFact>,
+        peer_data: VerifiedIngress<FactSyncPeerData>,
     ) -> Result<(FactSyncResult, Vec<IndexedFact>), AuraError> {
+        let (peer_data, evidence) = peer_data.into_parts();
+        let FactSyncPeerData {
+            context_id: _,
+            peer_root,
+            peer_bloom,
+            incoming_facts,
+        } = peer_data;
+
         // Step 1: Compare Merkle roots
         let comparison = self.verifier.compare_roots(peer_root).await?;
 
@@ -260,9 +287,15 @@ impl FactSyncProtocol {
                 merkle_root: self.verifier.local_merkle_root().await?,
             }
         };
+        let verified_facts =
+            DecodedIngress::new(verification.verified.clone(), evidence.metadata().clone())
+                .verify(evidence)
+                .map_err(|e| AuraError::invalid(format!("verify fact-sync apply boundary: {e}")))?;
+        let _verified_facts =
+            JournalApplyService::new().accept_verified_relational_facts(verified_facts)?;
 
         // Step 3: Compute facts to send to peer
-        let facts_to_send = self.compute_facts_to_send(peer_bloom).await?;
+        let facts_to_send = self.compute_facts_to_send(&peer_bloom).await?;
 
         let result = FactSyncResult {
             facts_received: (verification.verified.len() + verification.rejected.len()) as u64,
@@ -432,13 +465,14 @@ fn bloom_insert(filter: &mut BloomFilter, fact: &IndexedFact) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocols::journal_apply::apply_path_hits_for_tests;
     use async_trait::async_trait;
     use aura_core::domain::journal::FactValue;
     use aura_core::effects::indexed::{FactId, FactStreamReceiver, IndexStats};
     use aura_core::effects::TimeError;
     use aura_core::effects::{BloomConfig, BloomFilter};
     use aura_core::time::PhysicalTime;
-    use aura_core::AuthorityId;
+    use aura_core::{AuthorityId, ContextId};
     use std::sync::Mutex;
 
     /// Fixed time for deterministic tests
@@ -578,6 +612,33 @@ mod tests {
         }
     }
 
+    fn verified_peer_data(
+        peer_root: [u8; 32],
+        peer_bloom: Vec<u8>,
+        incoming_facts: Vec<IndexedFact>,
+    ) -> aura_guards::VerifiedIngress<FactSyncPeerData> {
+        let mut hash_material = Vec::new();
+        hash_material.extend_from_slice(&peer_root);
+        hash_material.extend_from_slice(&peer_bloom);
+        for fact in &incoming_facts {
+            hash_material.extend_from_slice(&fact.id.0.to_le_bytes());
+            hash_material.extend_from_slice(fact.predicate.as_bytes());
+        }
+        crate::protocols::ingress::verified_authority_payload_with_hash(
+            AuthorityId::new_from_entropy([9u8; 32]),
+            ContextId::new_from_entropy([8u8; 32]),
+            1,
+            aura_core::Hash32::from_bytes(&hash_material),
+            FactSyncPeerData {
+                context_id: ContextId::new_from_entropy([8u8; 32]),
+                peer_root,
+                peer_bloom,
+                incoming_facts,
+            },
+        )
+        .unwrap()
+    }
+
     #[aura_macros::aura_test]
     async fn test_sync_skipped_when_roots_match() {
         let root = [1u8; 32];
@@ -585,7 +646,10 @@ mod tests {
         let time = MockTimeEffects::new(TEST_TIME_MS);
         let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal, time);
 
-        let (result, facts_to_send) = protocol.sync_with_peer(root, &[], vec![]).await.unwrap();
+        let (result, facts_to_send) = protocol
+            .sync_with_peer(verified_peer_data(root, Vec::new(), vec![]))
+            .await
+            .unwrap();
 
         assert!(result.skipped);
         assert!(result.in_sync);
@@ -595,6 +659,7 @@ mod tests {
 
     #[aura_macros::aura_test]
     async fn test_sync_with_different_roots() {
+        let before = apply_path_hits_for_tests();
         let local_root = [1u8; 32];
         let remote_root = [2u8; 32];
         let local_facts = vec![create_test_fact(1), create_test_fact(2)];
@@ -607,7 +672,7 @@ mod tests {
 
         let incoming = vec![create_test_fact(3)];
         let (result, facts_to_send) = protocol
-            .sync_with_peer(remote_root, &[], incoming)
+            .sync_with_peer(verified_peer_data(remote_root, Vec::new(), incoming))
             .await
             .unwrap();
 
@@ -616,6 +681,7 @@ mod tests {
         assert_eq!(result.facts_verified, 1);
         assert_eq!(result.facts_rejected, 0);
         assert_eq!(facts_to_send.len(), 2); // All local facts
+        assert!(apply_path_hits_for_tests() > before);
     }
 
     #[aura_macros::aura_test]
@@ -633,7 +699,7 @@ mod tests {
 
         let incoming = vec![create_test_fact(1)];
         let (result, _) = protocol
-            .sync_with_peer(remote_root, &[], incoming)
+            .sync_with_peer(verified_peer_data(remote_root, Vec::new(), incoming))
             .await
             .unwrap();
 
@@ -660,7 +726,7 @@ mod tests {
         let protocol = FactSyncProtocol::new(config, journal, time);
 
         let (_, facts_to_send) = protocol
-            .sync_with_peer(remote_root, &[], vec![])
+            .sync_with_peer(verified_peer_data(remote_root, Vec::new(), vec![]))
             .await
             .unwrap();
 
@@ -685,7 +751,7 @@ mod tests {
         let serialized = aura_core::util::serialization::to_vec(&filter).unwrap();
 
         let (_, facts_to_send) = protocol
-            .sync_with_peer(remote_root, &serialized, vec![])
+            .sync_with_peer(verified_peer_data(remote_root, serialized, vec![]))
             .await
             .unwrap();
 

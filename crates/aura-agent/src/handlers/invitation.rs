@@ -63,26 +63,29 @@ use aura_invitation::protocol::exchange::telltale_session_types_invitation::mess
     InvitationOffer as ExchangeInvitationOffer,
     InvitationResponse as ExchangeInvitationResponse,
 };
+#[cfg(all(test, feature = "choreo-backend-telltale-machine"))]
+use aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::message_wrappers::GuardianAccept as GuardianInvitationAccept;
 use aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::message_wrappers::{
-    GuardianAccept as GuardianInvitationAccept,
-    GuardianConfirm as GuardianInvitationConfirm,
-    GuardianRequest as GuardianInvitationRequest,
+    GuardianConfirm as GuardianInvitationConfirm, GuardianRequest as GuardianInvitationRequest,
 };
 use aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::message_wrappers::{
     DeviceEnrollmentAccept as DeviceEnrollmentAcceptWrapper,
     DeviceEnrollmentConfirm as DeviceEnrollmentConfirmWrapper,
     DeviceEnrollmentRequest as DeviceEnrollmentRequestWrapper,
 };
+#[cfg(all(test, feature = "choreo-backend-telltale-machine"))]
+use aura_invitation::{GuardianAccept, InvitationResponse};
 use aura_invitation::{
-    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest,
-    GuardianAccept, GuardianConfirm, GuardianRequest, InvitationAck, InvitationOffer,
-    InvitationOperation, InvitationResponse,
+    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianConfirm,
+    GuardianRequest, InvitationAck, InvitationOffer, InvitationOperation,
 };
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use aura_journal::DomainFact;
+use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::ChoreographyError;
 use aura_core::effects::TransportError;
@@ -348,7 +351,7 @@ impl InvitationHandler {
         effects: &AuraEffectSystem,
     ) -> AgentResult<
         Option<(
-            aura_authorization::Biscuit,
+            aura_authorization::VerifiedBiscuitToken,
             aura_authorization::BiscuitAuthorizationBridge,
         )>,
     > {
@@ -367,8 +370,11 @@ impl InvitationHandler {
             aura_authorization::PublicKey::from_bytes(&root_pk_bytes).map_err(|error| {
                 AgentError::effects(format!("parse biscuit root public key cache: {error}"))
             })?;
-        let biscuit = aura_authorization::Biscuit::from(&token_bytes, root_public_key)
-            .map_err(|error| AgentError::effects(format!("parse biscuit token cache: {error}")))?;
+        let biscuit =
+            aura_authorization::VerifiedBiscuitToken::from_bytes(&token_bytes, root_public_key)
+                .map_err(|error| {
+                    AgentError::effects(format!("parse biscuit token cache: {error}"))
+                })?;
         let bridge = aura_authorization::BiscuitAuthorizationBridge::new(
             root_public_key,
             self.context.authority.authority_id(),
@@ -412,7 +418,7 @@ impl InvitationHandler {
             .iter()
             .filter_map(|capability| {
                 let capability_name: CapabilityName = capability.as_name();
-                match bridge.has_capability_with_time(
+                match bridge.has_verified_capability_with_time(
                     &token,
                     capability_name.as_str(),
                     current_time_seconds,
@@ -2094,7 +2100,7 @@ impl InvitationHandler {
     }
 }
 
-#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop)]
 struct DeviceEnrollmentInvitation {
     #[zeroize(skip)]
     subject_authority: AuthorityId,
@@ -2113,6 +2119,23 @@ struct DeviceEnrollmentInvitation {
     /// Baseline tree ops can embed serialized device-enrollment material and
     /// are treated as sensitive during invitation handling.
     baseline_tree_ops: Vec<Vec<u8>>,
+}
+
+impl fmt::Debug for DeviceEnrollmentInvitation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeviceEnrollmentInvitation")
+            .field("subject_authority", &self.subject_authority)
+            .field("device_id", &self.device_id)
+            .field("pending_epoch", &self.pending_epoch)
+            .field("key_package_len", &self.key_package.len())
+            .field("key_package", &"<redacted>")
+            .field("threshold_config_len", &self.threshold_config.len())
+            .field("threshold_config", &"<redacted>")
+            .field("public_key_package_len", &self.public_key_package.len())
+            .field("baseline_tree_ops_count", &self.baseline_tree_ops.len())
+            .field("baseline_tree_ops", &"<redacted>")
+            .finish()
+    }
 }
 
 // =============================================================================
@@ -2545,7 +2568,7 @@ async fn execute_notify_peer(
             emit_browser_harness_debug_event("invite_notify_error", &error.to_string());
             return Err(error);
         }
-    } else if let Err(error) = effects.send_envelope(envelope).await {
+    } else if let Err(error) = send_guarded_transport_envelope(effects, envelope).await {
         emit_browser_harness_debug_event("invite_notify_error", &error.to_string());
         return Err(AgentError::effects(format!(
             "Failed to notify peer with invitation: {error}"

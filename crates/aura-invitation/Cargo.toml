@@ -18,6 +18,7 @@ aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", versi
 aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.2.0" }
 aura-authorization = { package = "hxrts-aura-authorization", path = "../aura-authorization", version = "=0.2.0" }
 aura-authentication = { package = "hxrts-aura-authentication", path = "../aura-authentication", version = "=0.2.0" }
+aura-signature = { package = "hxrts-aura-signature", path = "../aura-signature", version = "=0.2.0" }
 aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.2.0" }
 aura-composition = { package = "hxrts-aura-composition", path = "../aura-composition", version = "=0.2.0" }
 aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.2.0" }

@@ -299,6 +299,23 @@ impl InvitationHandler {
         let authority_id = self.context.authority.authority_id();
         let (_local_role, peer_role, roles) =
             Self::invitation_exchange_peer_roles(authority_id, invitation.sender_id);
+        let _ = (effects, invitation, accepted, peer_role, roles);
+        Err(AgentError::internal(
+            "invitation exchange response requires a receiver signature; unsigned responses are disabled",
+        ))
+    }
+
+    #[cfg(all(test, feature = "choreo-backend-telltale-machine"))]
+    #[allow(dead_code)]
+    async fn execute_invitation_exchange_receiver_vm_unsigned_for_tests(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+        accepted: bool,
+    ) -> AgentResult<()> {
+        let authority_id = self.context.authority.authority_id();
+        let (_local_role, peer_role, roles) =
+            Self::invitation_exchange_peer_roles(authority_id, invitation.sender_id);
         let session_id = Self::invitation_session_id(&invitation.invitation_id);
         let response = ExchangeInvitationResponse(InvitationResponse {
             invitation_id: invitation.invitation_id.clone(),
