@@ -398,7 +398,7 @@ impl DeviceEpochRotationService {
         let participant = ParticipantIdentity::device(self.effects.device_id());
         let location = SecureStorageLocation::with_sub_key(
             "participant_shares",
-            format!("{}/{}", proposal.subject_authority, proposal.pending_epoch),
+            format!("{}:{}", proposal.subject_authority, proposal.pending_epoch),
             participant.storage_key(),
         );
 
@@ -502,7 +502,7 @@ impl DeviceEpochRotationService {
         let participant = ParticipantIdentity::device(device_id);
         let key_location = SecureStorageLocation::with_sub_key(
             "participant_shares",
-            format!("{}/{}", self.authority_id, ceremony_state.new_epoch),
+            format!("{}:{}", self.authority_id, ceremony_state.new_epoch),
             participant.storage_key(),
         );
         let key_package = self

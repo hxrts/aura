@@ -92,7 +92,7 @@ pub(crate) async fn load_consensus_key_material(
         let authority = participant_identity_to_authority_id(participant)?;
         let location = SecureStorageLocation::with_sub_key(
             "participant_shares",
-            format!("{}/{}", authority_id, epoch),
+            format!("{}:{}", authority_id, epoch),
             participant.storage_key(),
         );
         let bytes = effects
@@ -298,7 +298,7 @@ mod tests {
         let (new_epoch, _, _) = effects
             .rotate_keys(&authority, 1, 1, &participants)
             .await
-            .expect("effect-layer rotate_keys should still write legacy metadata");
+            .expect("effect-layer rotate_keys should write shared threshold metadata");
         effects
             .commit_key_rotation(&authority, new_epoch)
             .await

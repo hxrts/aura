@@ -7,11 +7,9 @@
 
 use async_lock::Mutex;
 use async_trait::async_trait;
-use aura_core::effects::{Cut, Partial, ProposalId, Snapshot, TreeOperationEffects};
+use aura_core::effects::{Cut, ProposalId, Snapshot, TreeOperationEffects};
 use aura_core::util::serialization::to_vec;
-use aura_core::{
-    AttestedOp, AuraError, DeviceId, Epoch, Hash32, LeafId, LeafNode, NodeIndex, Policy,
-};
+use aura_core::{AttestedOp, AuraError, Epoch, Hash32, LeafId, LeafNode, NodeIndex, Policy};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -130,33 +128,6 @@ impl TreeOperationEffects for DummyTreeHandler {
         Ok(proposal_id)
     }
 
-    async fn approve_snapshot(&self, proposal_id: ProposalId) -> Result<Partial, AuraError> {
-        let state = self.state.lock().await;
-        if !state.snapshots.contains_key(&proposal_id) {
-            return Err(AuraError::not_found(format!(
-                "DummyTreeHandler snapshot proposal not found: {proposal_id}"
-            )));
-        }
-        Ok(Partial {
-            signature_share: proposal_id.as_bytes().to_vec(),
-            participant_id: DeviceId::new_from_entropy([0u8; 32]),
-        })
-    }
-
-    async fn finalize_snapshot(&self, proposal_id: ProposalId) -> Result<Snapshot, AuraError> {
-        self.state
-            .lock()
-            .await
-            .snapshots
-            .get(&proposal_id)
-            .cloned()
-            .ok_or_else(|| {
-                AuraError::not_found(format!(
-                    "DummyTreeHandler snapshot proposal not found: {proposal_id}"
-                ))
-            })
-    }
-
     async fn apply_snapshot(&self, snapshot: &Snapshot) -> Result<(), AuraError> {
         let mut state = self.state.lock().await;
         state.current_state = snapshot.tree_state.clone();
@@ -183,13 +154,13 @@ mod tests {
             .await
             .expect("snapshot proposal should succeed");
         let snapshot = handler
-            .finalize_snapshot(proposal)
+            .state
+            .lock()
             .await
-            .expect("snapshot finalization should succeed");
-        handler
-            .approve_snapshot(proposal)
-            .await
-            .expect("snapshot approval should succeed");
+            .snapshots
+            .get(&proposal)
+            .cloned()
+            .expect("snapshot proposal should store snapshot state");
         handler
             .apply_snapshot(&snapshot)
             .await

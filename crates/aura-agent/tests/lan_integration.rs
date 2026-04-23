@@ -27,6 +27,7 @@ use aura_rendezvous::LanDiscoveryConfig;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
 
 type TestResult<T = ()> = anyhow::Result<T>;
@@ -39,6 +40,49 @@ const SIGNAL_PROPAGATION_TIMEOUT: Duration = Duration::from_secs(60);
 const FACT_PROPAGATION_TIMEOUT: Duration = Duration::from_secs(12);
 const DESCRIPTOR_CACHE_TIMEOUT: Duration = Duration::from_secs(30);
 const CHANNEL_INVITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+async fn send_test_raw_envelope_for_lan(
+    effects: &Arc<aura_agent::AuraEffectSystem>,
+    envelope: aura_core::effects::transport::TransportEnvelope,
+) -> TestResult {
+    let payload = aura_core::util::serialization::to_vec(&envelope)?;
+    send_test_raw_bytes_for_lan(effects, payload).await
+}
+
+async fn send_test_raw_bytes_for_lan(
+    effects: &Arc<aura_agent::AuraEffectSystem>,
+    payload: Vec<u8>,
+) -> TestResult {
+    let transport = effects
+        .lan_transport()
+        .ok_or_else(|| anyhow!("LAN transport service not enabled"))?;
+    let address = transport
+        .advertised_addrs()
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow!("LAN transport listener has no advertised TCP address"))?;
+    let mut stream = tokio::net::TcpStream::connect(address).await?;
+    stream
+        .write_all(&(payload.len() as u32).to_be_bytes())
+        .await?;
+    stream.write_all(&payload).await?;
+    Ok(())
+}
+
+fn lan_test_receipt(
+    envelope: &aura_core::effects::transport::TransportEnvelope,
+) -> aura_core::effects::transport::TransportReceipt {
+    aura_core::effects::transport::TransportReceipt {
+        context: envelope.context,
+        src: envelope.source,
+        dst: envelope.destination,
+        epoch: 1,
+        cost: 1,
+        nonce: 1,
+        prev: [0u8; 32],
+        sig: vec![7u8],
+    }
+}
 
 fn next_lan_port() -> u16 {
     NEXT_LAN_PORT.fetch_add(1, Ordering::Relaxed)
@@ -214,6 +258,34 @@ async fn wait_for_envelope(
     .map_err(|_| aura_core::effects::TransportError::NoMessage)?
 }
 
+async fn assert_no_envelope_received(
+    effects: &Arc<aura_agent::AuraEffectSystem>,
+    timeout_window: Duration,
+) -> TestResult {
+    let result = timeout(timeout_window, async {
+        loop {
+            match effects.receive_envelope().await {
+                Ok(envelope) => return Err(anyhow!("unexpected envelope received: {envelope:?}")),
+                Err(aura_core::effects::TransportError::NoMessage) => {
+                    sleep(Duration::from_millis(50)).await;
+                }
+                Err(error) => {
+                    return Err(anyhow!(
+                        "receive failed while expecting no envelope: {error}"
+                    ))
+                }
+            }
+        }
+    })
+    .await;
+
+    match result {
+        Ok(Err(error)) => Err(error),
+        Ok(Ok(())) => unreachable!("loop only exits through an error"),
+        Err(_) => Ok(()),
+    }
+}
+
 #[tokio::test]
 async fn test_device_enrollment_export_includes_sender_hint() -> TestResult {
     let _guard = lock_lan_test().await;
@@ -247,41 +319,36 @@ async fn test_device_enrollment_export_includes_sender_hint() -> TestResult {
     Ok(())
 }
 
-async fn wait_for_chat_fact(
+async fn assert_chat_fact_not_committed(
     effects: &Arc<aura_agent::AuraEffectSystem>,
     authority_id: AuthorityId,
     channel_id: aura_core::types::identifiers::ChannelId,
 ) -> TestResult {
-    timeout(Duration::from_secs(5), async {
-        loop {
-            let committed = effects
-                .load_committed_facts(authority_id)
-                .await
-                .unwrap_or_default();
-            let found = committed.into_iter().any(|fact| {
-                let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
-                    fact.content
-                else {
-                    return false;
-                };
-                if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
-                    return false;
-                }
-                matches!(
-                    ChatFact::from_envelope(&envelope),
-                    Some(ChatFact::ChannelCreated { channel_id: seen, .. }) if seen == channel_id
-                )
-            });
-
-            if found {
-                break;
-            }
-
-            sleep(Duration::from_millis(50)).await;
+    sleep(Duration::from_millis(250)).await;
+    let committed = effects
+        .load_committed_facts(authority_id)
+        .await
+        .unwrap_or_default();
+    let found = committed.into_iter().any(|fact| {
+        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content else {
+            return false;
+        };
+        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+            return false;
         }
-    })
-    .await
-    .map_err(|_| anyhow!("timed out waiting for committed chat fact"))
+        matches!(
+            ChatFact::from_envelope(&envelope),
+            Some(ChatFact::ChannelCreated { channel_id: seen, .. }) if seen == channel_id
+        )
+    });
+
+    if found {
+        return Err(anyhow!(
+            "raw LAN chat fact should not have been committed directly"
+        ));
+    }
+
+    Ok(())
 }
 
 async fn wait_for_matching_chat_fact(
@@ -610,20 +677,25 @@ async fn test_lan_discovery_and_tcp_envelope() -> TestResult {
     wait_for_lan_peer(&agent_a, &agent_b).await?;
     wait_for_lan_peer(&agent_b, &agent_a).await?;
 
-    let effects_a = agent_a.runtime().effects();
     let effects_b = agent_b.runtime().effects();
 
     let payload = b"lan-envelope-test".to_vec();
-    let envelope = aura_core::effects::transport::TransportEnvelope {
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert(
+        "content-type".to_string(),
+        "application/aura-test-envelope".to_string(),
+    );
+    let mut envelope = aura_core::effects::transport::TransportEnvelope {
         source: agent_a.authority_id(),
         destination: agent_b.authority_id(),
         context: ContextId::new_from_entropy(hash(&agent_b.authority_id().to_bytes())),
         payload: payload.clone(),
-        metadata: std::collections::HashMap::new(),
+        metadata,
         receipt: None,
     };
+    envelope.receipt = Some(lan_test_receipt(&envelope));
 
-    effects_a.send_envelope(envelope).await?;
+    send_test_raw_envelope_for_lan(&effects_b, envelope).await?;
     let received = wait_for_envelope(&effects_b).await?;
 
     assert_eq!(received.payload, payload);
@@ -634,7 +706,7 @@ async fn test_lan_discovery_and_tcp_envelope() -> TestResult {
 }
 
 #[tokio::test]
-async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestResult {
+async fn test_lan_chat_fact_requires_normal_runtime_processing_path() -> TestResult {
     let _lan_lock = lock_lan_test().await;
     let port = next_lan_port();
     let agent_a = create_lan_agent(9, port).await?;
@@ -643,7 +715,6 @@ async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestR
     wait_for_lan_peer(&agent_a, &agent_b).await?;
     wait_for_lan_peer(&agent_b, &agent_a).await?;
 
-    let effects_a = agent_a.runtime().effects();
     let effects_b = agent_b.runtime().effects();
 
     let context_id = ContextId::new_from_entropy([42u8; 32]);
@@ -666,7 +737,7 @@ async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestR
         "application/aura-chat-fact".to_string(),
     );
 
-    let envelope = aura_core::effects::transport::TransportEnvelope {
+    let mut envelope = aura_core::effects::transport::TransportEnvelope {
         source: agent_a.authority_id(),
         destination: agent_b.authority_id(),
         context: ContextId::new_from_entropy(hash(&agent_b.authority_id().to_bytes())),
@@ -674,9 +745,76 @@ async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestR
         metadata,
         receipt: None,
     };
+    envelope.receipt = Some(lan_test_receipt(&envelope));
 
-    effects_a.send_envelope(envelope).await?;
-    wait_for_chat_fact(&effects_b, agent_b.authority_id(), channel_id).await?;
+    send_test_raw_envelope_for_lan(&effects_b, envelope).await?;
+    let received = wait_for_envelope(&effects_b).await?;
+    assert_eq!(received.source, agent_a.authority_id());
+    assert_eq!(received.destination, agent_b.authority_id());
+    assert_eq!(
+        received.metadata.get("content-type").map(String::as_str),
+        Some("application/aura-chat-fact")
+    );
+    assert_chat_fact_not_committed(&effects_b, agent_b.authority_id(), channel_id).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_lan_listener_rejects_unsigned_tcp_envelope() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
+    let port = next_lan_port();
+    let agent_a = create_lan_agent(21, port).await?;
+    let agent_b = create_lan_agent(22, port).await?;
+
+    wait_for_lan_peer(&agent_a, &agent_b).await?;
+    wait_for_lan_peer(&agent_b, &agent_a).await?;
+
+    let effects_b = agent_b.runtime().effects();
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert(
+        "content-type".to_string(),
+        "application/aura-test-envelope".to_string(),
+    );
+    let envelope = aura_core::effects::transport::TransportEnvelope {
+        source: agent_a.authority_id(),
+        destination: agent_b.authority_id(),
+        context: ContextId::new_from_entropy(hash(&agent_b.authority_id().to_bytes())),
+        payload: b"unsigned-lan-envelope".to_vec(),
+        metadata,
+        receipt: None,
+    };
+
+    send_test_raw_envelope_for_lan(&effects_b, envelope).await?;
+    assert_no_envelope_received(&effects_b, Duration::from_millis(750)).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_lan_listener_rejects_oversized_tcp_frame() -> TestResult {
+    let _lan_lock = lock_lan_test().await;
+    let port = next_lan_port();
+    let agent_b = create_lan_agent(23, port).await?;
+    let effects_b = agent_b.runtime().effects();
+    let baseline_metrics = effects_b
+        .lan_transport()
+        .ok_or_else(|| anyhow!("LAN transport service not enabled"))?
+        .metrics()
+        .await;
+
+    send_test_raw_bytes_for_lan(&effects_b, vec![0u8; 140 * 1024]).await?;
+    assert_no_envelope_received(&effects_b, Duration::from_millis(750)).await?;
+
+    let updated_metrics = effects_b
+        .lan_transport()
+        .ok_or_else(|| anyhow!("LAN transport service not enabled"))?
+        .metrics()
+        .await;
+    assert!(
+        updated_metrics.frames_rejected > baseline_metrics.frames_rejected,
+        "oversized TCP frame should increment rejection metrics"
+    );
 
     Ok(())
 }

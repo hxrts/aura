@@ -887,6 +887,45 @@ fn scan_capability_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<S
         );
     }
 
+    if path != "crates/aura-macros/src/bin/arch_lints.rs" {
+        scan_line_patterns(
+            file,
+            source,
+            &[
+                (
+                    "ProtocolGuard::new_for_testing(",
+                    "ProtocolGuard::new_for_testing is restricted to test-scoped code; production guards must use an explicit authorization requirement",
+                ),
+                (
+                    "ProtocolGuardRequirement::RequiredTokens(Vec::new())",
+                    "empty ProtocolGuardRequirement::RequiredTokens is forbidden; use real verified tokens or an explicit UnauthenticatedAllowed policy",
+                ),
+                (
+                    "ProtocolGuardRequirement::RequiredTokens(vec![])",
+                    "empty ProtocolGuardRequirement::RequiredTokens is forbidden; use real verified tokens or an explicit UnauthenticatedAllowed policy",
+                ),
+                (
+                    "RequiredTokens(Vec::new())",
+                    "empty ProtocolGuardRequirement::RequiredTokens is forbidden; use real verified tokens or an explicit UnauthenticatedAllowed policy",
+                ),
+                (
+                    "RequiredTokens(vec![])",
+                    "empty ProtocolGuardRequirement::RequiredTokens is forbidden; use real verified tokens or an explicit UnauthenticatedAllowed policy",
+                ),
+                (
+                    "BiscuitAuthorizationBridge::new_mock(",
+                    "mock Biscuit authorization bridge construction is restricted to test-scoped code",
+                ),
+                (
+                    "WotAuthorizationHandler::new_mock(",
+                    "mock WoT authorization handler construction is restricted to test-scoped code",
+                ),
+            ],
+            &ignored_lines,
+            &mut violations,
+        );
+    }
+
     scan_line_patterns(
         file,
         source,
@@ -1305,17 +1344,37 @@ fn collect_ignored_test_lines(item: &Item, ignored: &mut Vec<(usize, usize)>) {
             }
         }
     }
+
+    if let Item::Impl(item_impl) = item {
+        for impl_item in &item_impl.items {
+            if impl_item_is_test_scoped(impl_item) {
+                let span = impl_item.span();
+                ignored.push((span.start().line, span.end().line));
+            }
+        }
+    }
 }
 
 fn item_is_test_scoped(item: &Item) -> bool {
     match item {
         Item::Fn(item_fn) => attrs_mark_test_scope(&item_fn.attrs),
         Item::Mod(item_mod) => item_mod.ident == "tests" || attrs_mark_test_scope(&item_mod.attrs),
-        Item::Impl(_) => false,
+        Item::Impl(item_impl) => attrs_mark_test_scope(&item_impl.attrs),
+        Item::Macro(item_macro) => attrs_mark_test_scope(&item_macro.attrs),
         Item::Struct(item_struct) => attrs_mark_test_scope(&item_struct.attrs),
         Item::Enum(item_enum) => attrs_mark_test_scope(&item_enum.attrs),
         Item::Const(item_const) => attrs_mark_test_scope(&item_const.attrs),
         Item::Trait(item_trait) => attrs_mark_test_scope(&item_trait.attrs),
+        _ => false,
+    }
+}
+
+fn impl_item_is_test_scoped(item: &ImplItem) -> bool {
+    match item {
+        ImplItem::Fn(item_fn) => attrs_mark_test_scope(&item_fn.attrs),
+        ImplItem::Const(item_const) => attrs_mark_test_scope(&item_const.attrs),
+        ImplItem::Type(item_type) => attrs_mark_test_scope(&item_type.attrs),
+        ImplItem::Macro(item_macro) => attrs_mark_test_scope(&item_macro.attrs),
         _ => false,
     }
 }

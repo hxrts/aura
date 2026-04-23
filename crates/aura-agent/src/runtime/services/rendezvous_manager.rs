@@ -593,7 +593,8 @@ impl RendezvousManager {
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        if self.config.bootstrap_broker.enabled && self.config.bootstrap_broker.bind_addr.is_some()
+        if self.config.bootstrap_broker.enabled
+            && self.config.bootstrap_broker.resolved_bind_addr().is_some()
         {
             if let Err(error) = self.start_bootstrap_broker(service_tasks.clone()).await {
                 self.shared.owner.take_commands().await;
@@ -1102,13 +1103,26 @@ impl RendezvousManager {
 
     #[cfg(not(target_arch = "wasm32"))]
     async fn start_bootstrap_broker(&self, tasks: TaskGroup) -> Result<(), ServiceError> {
-        let Some(bind_addr) = self.config.bootstrap_broker.bind_addr.as_deref() else {
+        let Some(bind_addr) = self.config.bootstrap_broker.resolved_bind_addr() else {
             return Ok(());
         };
+        let auth_token = self
+            .config
+            .bootstrap_broker
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| {
+                ServiceError::startup_failed(
+                    self.name(),
+                    "bootstrap broker auth token is required".to_string(),
+                )
+            })?;
 
         let broker = LocalBootstrapBrokerService::bind(
             bind_addr,
             self.config.bootstrap_broker.registration_ttl(),
+            auth_token,
+            self.config.bootstrap_broker.lan_bind_policy,
         )
         .await
         .map_err(|error| ServiceError::startup_failed(self.name(), error))?;
@@ -1160,26 +1174,63 @@ impl RendezvousManager {
         let registration = BootstrapBrokerRegistration {
             authority_id: self.authority_id.to_string(),
             address,
+            invitation_retrieval_token: self
+                .config
+                .bootstrap_broker
+                .invitation_retrieval_token
+                .clone()
+                .ok_or_else(|| {
+                    RendezvousManagerError::BootstrapBroker(
+                        "bootstrap broker invitation retrieval token is required".to_string(),
+                    )
+                })?,
             nickname_suggestion,
         };
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(broker) = self.local_bootstrap_broker().await {
-            broker.register(registration).await;
+            broker
+                .register(registration)
+                .await
+                .map_err(RendezvousManagerError::BootstrapBroker)?;
             return Ok(());
         }
 
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
-            return register_remote_candidate(base_url, &registration)
+            let auth_token = self
+                .config
+                .bootstrap_broker
+                .auth_token
+                .as_deref()
+                .ok_or_else(|| {
+                    RendezvousManagerError::BootstrapBroker(
+                        "bootstrap broker auth token is required".to_string(),
+                    )
+                })?;
+            return register_remote_candidate(base_url, auth_token, &registration)
                 .await
                 .map_err(RendezvousManagerError::BootstrapBroker);
         }
 
         #[cfg(target_arch = "wasm32")]
         if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
-            return super::bootstrap_broker::register_remote_candidate(base_url, &registration)
-                .await
-                .map_err(RendezvousManagerError::BootstrapBroker);
+            let auth_token = self
+                .config
+                .bootstrap_broker
+                .auth_token
+                .as_deref()
+                .ok_or_else(|| {
+                    RendezvousManagerError::BootstrapBroker(
+                        "bootstrap broker auth token is required".to_string(),
+                    )
+                })?;
+            return super::bootstrap_broker::register_remote_candidate(
+                base_url,
+                auth_token,
+                &registration,
+            )
+            .await
+            .map_err(RendezvousManagerError::BootstrapBroker);
         }
 
         Ok(())
@@ -1210,7 +1261,17 @@ impl RendezvousManager {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
             let mut seen = HashSet::new();
-            let candidates = fetch_remote_candidates(base_url)
+            let auth_token = self
+                .config
+                .bootstrap_broker
+                .auth_token
+                .as_deref()
+                .ok_or_else(|| {
+                    RendezvousManagerError::BootstrapBroker(
+                        "bootstrap broker auth token is required".to_string(),
+                    )
+                })?;
+            let candidates = fetch_remote_candidates(base_url, auth_token)
                 .await
                 .map_err(RendezvousManagerError::BootstrapBroker)?
                 .into_iter()
@@ -1225,7 +1286,17 @@ impl RendezvousManager {
         #[cfg(target_arch = "wasm32")]
         if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
             let mut seen = std::collections::HashSet::new();
-            let candidates = fetch_remote_candidates(base_url)
+            let auth_token = self
+                .config
+                .bootstrap_broker
+                .auth_token
+                .as_deref()
+                .ok_or_else(|| {
+                    RendezvousManagerError::BootstrapBroker(
+                        "bootstrap broker auth token is required".to_string(),
+                    )
+                })?;
+            let candidates = fetch_remote_candidates(base_url, auth_token)
                 .await
                 .map_err(RendezvousManagerError::BootstrapBroker)?
                 .into_iter()
@@ -1258,12 +1329,25 @@ impl RendezvousManager {
 
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(broker) = self.local_bootstrap_broker().await {
-            broker.queue_invitation(invitation).await;
+            broker
+                .queue_invitation(invitation)
+                .await
+                .map_err(RendezvousManagerError::BootstrapBroker)?;
             return Ok(());
         }
 
         if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
-            return send_remote_invitation(base_url, &invitation)
+            let auth_token = self
+                .config
+                .bootstrap_broker
+                .auth_token
+                .as_deref()
+                .ok_or_else(|| {
+                    RendezvousManagerError::BootstrapBroker(
+                        "bootstrap broker auth token is required".to_string(),
+                    )
+                })?;
+            return send_remote_invitation(base_url, auth_token, &invitation)
                 .await
                 .map_err(RendezvousManagerError::BootstrapBroker);
         }
@@ -1282,15 +1366,51 @@ impl RendezvousManager {
 
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(broker) = self.local_bootstrap_broker().await {
-            return Ok(broker
-                .take_invitations(&self.authority_id.to_string())
-                .await);
+            let retrieval_token = self
+                .config
+                .bootstrap_broker
+                .invitation_retrieval_token
+                .as_deref()
+                .ok_or_else(|| {
+                    RendezvousManagerError::BootstrapBroker(
+                        "bootstrap broker invitation retrieval token is required".to_string(),
+                    )
+                })?;
+            return broker
+                .take_invitations(&self.authority_id.to_string(), retrieval_token)
+                .await
+                .map_err(RendezvousManagerError::BootstrapBroker);
         }
 
         if let Some(base_url) = self.config.bootstrap_broker.base_url.as_deref() {
-            return take_remote_invitations(base_url, &self.authority_id.to_string())
-                .await
-                .map_err(RendezvousManagerError::BootstrapBroker);
+            let auth_token = self
+                .config
+                .bootstrap_broker
+                .auth_token
+                .as_deref()
+                .ok_or_else(|| {
+                    RendezvousManagerError::BootstrapBroker(
+                        "bootstrap broker auth token is required".to_string(),
+                    )
+                })?;
+            let retrieval_token = self
+                .config
+                .bootstrap_broker
+                .invitation_retrieval_token
+                .as_deref()
+                .ok_or_else(|| {
+                    RendezvousManagerError::BootstrapBroker(
+                        "bootstrap broker invitation retrieval token is required".to_string(),
+                    )
+                })?;
+            return take_remote_invitations(
+                base_url,
+                auth_token,
+                &self.authority_id.to_string(),
+                retrieval_token,
+            )
+            .await
+            .map_err(RendezvousManagerError::BootstrapBroker);
         }
 
         Ok(Vec::new())
@@ -1628,7 +1748,8 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
     authority: &AuthorityId,
 ) -> Option<([u8; 32], [u8; 32])> {
     // Try to retrieve key from epoch 1 (bootstrap epoch)
-    let location = SecureStorageLocation::new("signing_keys", format!("{}/1/1", authority));
+    let location =
+        SecureStorageLocation::with_sub_key("signing_keys", format!("{}:1", authority), "1");
     let caps = vec![SecureStorageCapability::Read];
 
     match effects.secure_retrieve(&location, &caps).await {
@@ -1655,7 +1776,7 @@ mod tests {
     };
     use aura_core::effects::{
         CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
-        SecureStorageError,
+        SecureGeneratedKey, SecureStorageError,
     };
     use aura_core::time::PhysicalTime;
     use aura_core::FlowCost;
@@ -1743,8 +1864,8 @@ mod tests {
             _: &SecureStorageLocation,
             _: &str,
             _: &[SecureStorageCapability],
-        ) -> Result<Option<Vec<u8>>, SecureStorageError> {
-            Ok(None)
+        ) -> Result<SecureGeneratedKey, SecureStorageError> {
+            Ok(SecureGeneratedKey::OpaqueHandle(String::new()))
         }
         async fn secure_create_time_bound_token(
             &self,

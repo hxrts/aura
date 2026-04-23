@@ -26,21 +26,6 @@ use aura_core::TrustedKeyResolver;
 use aura_signature::verify_threshold_signing_context_transcript;
 use std::sync::Arc;
 
-fn compatibility_signature(shares: &[RecoveryShare]) -> ThresholdSignature {
-    shares
-        .first()
-        .map(|first_share| {
-            ThresholdSignature::new(
-                first_share.partial_signature.clone(),
-                1,
-                vec![0],
-                Vec::new(),
-                0,
-            )
-        })
-        .unwrap_or_else(|| ThresholdSignature::new(vec![0u8; 64], 0, Vec::new(), Vec::new(), 0))
-}
-
 /// Base trait for all recovery coordinators.
 ///
 /// Coordinators are stateless - they derive state from facts in the journal.
@@ -125,19 +110,15 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
 
     /// Create a success response with collected guardian signatures.
     ///
-    /// Note: Each share contains an individual guardian's signature. The combined
-    /// "aggregate" signature in the response is the first valid signature (for
-    /// compatibility). True aggregation across authorities is not meaningful since
-    /// each guardian signs with different keys.
+    /// Each share contains an individual guardian signature. The top-level
+    /// signature is only populated when an actual aggregate or explicit response
+    /// signature exists in the evidence.
     pub fn success_response(
         key_material: Option<Vec<u8>>,
         shares: Vec<RecoveryShare>,
         evidence: RecoveryEvidence,
     ) -> RecoveryResponse {
-        // Use first valid signature as the "aggregate" for backward compatibility.
-        // In practice, verification checks each guardian's individual signature
-        // against their own public key.
-        let signature = compatibility_signature(&shares);
+        let signature = evidence.threshold_signature.clone();
         RecoveryResponse::success(key_material, shares, evidence, signature)
     }
 
@@ -151,7 +132,7 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
         evidence: RecoveryEvidence,
         signature: ThresholdSignature,
     ) -> RecoveryResponse {
-        RecoveryResponse::success(key_material, shares, evidence, signature)
+        RecoveryResponse::success(key_material, shares, evidence, Some(signature))
     }
 
     /// Create an error response.
@@ -208,5 +189,36 @@ pub trait BaseCoordinatorAccess<E: RecoveryEffects> {
     /// Shortcut to effect system
     fn base_effect_system(&self) -> &Arc<E> {
         self.base().effect_system()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{RecoveryEvidence, RecoveryShare};
+
+    #[test]
+    fn success_response_does_not_fabricate_aggregate_signature() {
+        let guardian = AuthorityId::new_from_entropy([7; 32]);
+        let share = RecoveryShare {
+            guardian_id: guardian,
+            guardian_label: None,
+            share: vec![1, 2, 3],
+            partial_signature: vec![9; 64],
+            issued_at_ms: 42,
+        };
+        let evidence = RecoveryEvidence {
+            approving_guardians: vec![guardian],
+            threshold_signature: None,
+            ..RecoveryEvidence::default()
+        };
+
+        let response = BaseCoordinator::<aura_testkit::MockEffects>::success_response(
+            None,
+            vec![share],
+            evidence,
+        );
+
+        assert!(response.signature.is_none());
     }
 }

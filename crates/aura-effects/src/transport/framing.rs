@@ -18,11 +18,18 @@ pub struct FrameHeader {
     /// Frame type identifier
     pub frame_type: FrameType,
     /// Payload length in bytes
-    pub payload_length: u32,
+    payload_length: u32,
     /// Frame flags
     pub flags: u8,
     /// Frame sequence number
     pub sequence: u64,
+}
+
+impl FrameHeader {
+    /// Payload length declared by the wire header.
+    pub fn payload_length(&self) -> u32 {
+        self.payload_length
+    }
 }
 
 /// Frame type enumeration
@@ -168,6 +175,13 @@ impl FramingHandler {
 
     /// Serialize frame to bytes
     pub fn serialize_frame(&self, frame: &Frame) -> TransportResult<Vec<u8>> {
+        let payload_length = u32::try_from(frame.payload.len()).map_err(|_| {
+            TransportError::Protocol(format!(
+                "Frame too large: {} > {}",
+                frame.payload.len(),
+                self.max_frame_size
+            ))
+        })?;
         if (frame.payload.len() as u32) > self.max_frame_size {
             return Err(TransportError::Protocol(format!(
                 "Frame too large: {} > {}",
@@ -175,12 +189,17 @@ impl FramingHandler {
                 self.max_frame_size
             )));
         }
+        if frame.header.payload_length as usize != frame.payload.len() {
+            return Err(TransportError::Protocol(
+                "Frame header payload length does not match payload".to_string(),
+            ));
+        }
 
         let mut buffer = Vec::with_capacity(FRAME_HEADER_SIZE + frame.payload.len());
 
         // Serialize header
         buffer.push(frame.header.frame_type as u8);
-        buffer.extend_from_slice(&frame.header.payload_length.to_be_bytes());
+        buffer.extend_from_slice(&payload_length.to_be_bytes());
         buffer.push(frame.header.flags);
         buffer.extend_from_slice(&frame.header.sequence.to_be_bytes());
 
@@ -205,9 +224,9 @@ impl FramingHandler {
 
         // Validate payload length
         let expected_total_size = FRAME_HEADER_SIZE + payload_length as usize;
-        if data.len() < expected_total_size {
+        if data.len() != expected_total_size {
             return Err(TransportError::Protocol(
-                "Insufficient data for frame payload".to_string(),
+                "Frame payload length is not canonical".to_string(),
             ));
         }
 

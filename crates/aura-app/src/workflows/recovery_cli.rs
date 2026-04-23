@@ -143,14 +143,25 @@ pub fn build_protocol_request(
     new_public_key: PublicKeyPackage,
     justification: String,
 ) -> RecoveryRequest {
+    let recovery_id = RecoveryId::new(account_authority.to_string());
+    let operation =
+        aura_recovery::recovery_protocol::RecoveryOperation::ReplaceTree { new_public_key };
+    let prestate_hash = Hash32::from_value(&serde_json::json!({
+        "recovery_id": recovery_id.as_str(),
+        "account_authority": account_authority,
+        "new_tree_commitment": commitment,
+        "operation": &operation,
+        "justification": &justification,
+    }))
+    .unwrap_or_else(|_| Hash32::from_bytes(account_authority.to_bytes().as_slice()));
+
     RecoveryRequest {
-        recovery_id: RecoveryId::new(account_authority.to_string()),
+        recovery_id,
         account_authority,
         new_tree_commitment: commitment,
-        operation: aura_recovery::recovery_protocol::RecoveryOperation::ReplaceTree {
-            new_public_key,
-        },
+        operation,
         justification,
+        prestate_hash,
     }
 }
 

@@ -35,6 +35,7 @@ serde_json = { workspace = true }
 telltale = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+curve25519-dalek = { workspace = true }
 
 [dev-dependencies]
 aura-testkit = { package = "aura-testkit", path = "../aura-testkit" }

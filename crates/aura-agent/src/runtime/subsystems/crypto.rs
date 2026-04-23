@@ -13,7 +13,7 @@
 
 #![allow(clippy::disallowed_types)]
 
-use aura_effects::{crypto::RealCryptoHandler, secure::RealSecureStorageHandler};
+use aura_effects::{crypto::RealCryptoHandler, secure::ProductionSecureStorageHandler};
 use parking_lot::Mutex;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
@@ -98,7 +98,7 @@ pub struct CryptoSubsystem {
     /// Secure storage for key material (FROST keys, device keys)
     ///
     /// Uses platform-specific secure storage (Keychain, TPM, Keystore)
-    secure_storage: Arc<RealSecureStorageHandler>,
+    secure_storage: Arc<ProductionSecureStorageHandler>,
 }
 
 impl CryptoSubsystem {
@@ -108,7 +108,9 @@ impl CryptoSubsystem {
         Self {
             handler: RealCryptoHandler::new(),
             rng: CryptoRng::thread_local(),
-            secure_storage: Arc::new(RealSecureStorageHandler::with_base_path(base_path)),
+            secure_storage: Arc::new(
+                ProductionSecureStorageHandler::filesystem_fallback_for_non_production(base_path),
+            ),
         }
     }
 
@@ -118,7 +120,9 @@ impl CryptoSubsystem {
         Self {
             handler: RealCryptoHandler::for_simulation_seed(seed),
             rng: CryptoRng::deterministic(StdRng::from_seed(seed)),
-            secure_storage: Arc::new(RealSecureStorageHandler::with_base_path(base_path)),
+            secure_storage: Arc::new(
+                ProductionSecureStorageHandler::filesystem_fallback_for_non_production(base_path),
+            ),
         }
     }
 
@@ -126,7 +130,7 @@ impl CryptoSubsystem {
     pub fn from_parts(
         handler: RealCryptoHandler,
         rng: CryptoRng,
-        secure_storage: Arc<RealSecureStorageHandler>,
+        secure_storage: Arc<ProductionSecureStorageHandler>,
     ) -> Self {
         Self {
             handler,
@@ -147,7 +151,7 @@ impl CryptoSubsystem {
     }
 
     /// Get shared secure storage handler
-    pub fn secure_storage(&self) -> Arc<RealSecureStorageHandler> {
+    pub fn secure_storage(&self) -> Arc<ProductionSecureStorageHandler> {
         self.secure_storage.clone()
     }
 
@@ -188,7 +192,7 @@ impl std::fmt::Debug for CryptoSubsystem {
         f.debug_struct("CryptoSubsystem")
             .field("handler", &"<RealCryptoHandler>")
             .field("rng", &format_args!("{:?}", self.rng))
-            .field("secure_storage", &"<Arc<RealSecureStorageHandler>>")
+            .field("secure_storage", &"<Arc<ProductionSecureStorageHandler>>")
             .finish()
     }
 }

@@ -92,6 +92,9 @@ pub mod guardian_membership;
 /// Recovery protocol using relational contexts
 pub mod recovery_protocol;
 
+/// Canonical recovery approval signing transcripts
+pub mod recovery_approval;
+
 /// Consensus-based recovery approval ceremony
 pub mod recovery_ceremony;
 

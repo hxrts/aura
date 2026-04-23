@@ -27,6 +27,7 @@ use aura_consensus::dkg::recovery::recover_share_from_transcript;
 use aura_consensus::dkg::{DkgTranscript, DkgTranscriptStore, StorageTranscriptStore};
 use aura_core::crypto::single_signer::{SigningMode, SingleSignerPublicKeyPackage};
 use aura_core::crypto::tree_signing;
+use aura_core::effects::RandomCoreEffects;
 use aura_core::effects::{
     crypto::KeyGenerationMethod, CryptoExtendedEffects, SecureStorageCapability,
     SecureStorageEffects, SecureStorageLocation,
@@ -47,10 +48,27 @@ use aura_core::{
 use aura_effects::RuntimeCapabilityHandler;
 use aura_protocol::effects::TreeEffects;
 use aura_signature::threshold_signing_context_transcript_bytes;
+use chacha20poly1305::{
+    aead::{Aead, Payload},
+    ChaCha20Poly1305, KeyInit, Nonce,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+const PARTICIPANT_KEY_PACKAGE_ENVELOPE_VERSION: u8 = 1;
+const PARTICIPANT_KEY_PACKAGE_AAD_DOMAIN: &str = "aura:participant-key-package-envelope:v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ParticipantKeyPackageEnvelope {
+    version: u8,
+    authority: AuthorityId,
+    epoch: u64,
+    recipient: ParticipantIdentity,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+}
 
 #[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -333,6 +351,185 @@ impl ThresholdSigningService {
         hex::encode(&digest[..8])
     }
 
+    fn participant_share_location(
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> SecureStorageLocation {
+        SecureStorageLocation::with_sub_key(
+            "participant_shares",
+            format!("{}:{}", authority, epoch),
+            participant.storage_key(),
+        )
+    }
+
+    fn participant_wrap_key_location(
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> SecureStorageLocation {
+        SecureStorageLocation::with_sub_key(
+            "participant_share_wrap_keys",
+            format!("{}:{}", authority, epoch),
+            participant.storage_key(),
+        )
+    }
+
+    fn participant_key_package_aad(
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> Vec<u8> {
+        format!(
+            "{}:{}:{}:{}",
+            PARTICIPANT_KEY_PACKAGE_AAD_DOMAIN,
+            authority,
+            epoch,
+            participant.storage_key()
+        )
+        .into_bytes()
+    }
+
+    async fn load_or_create_participant_wrap_key(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> Result<[u8; 32], AuraError> {
+        let location = Self::participant_wrap_key_location(authority, epoch, participant);
+        let caps = [
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+        match self.effects.secure_retrieve(&location, &caps).await {
+            Ok(bytes) => bytes.try_into().map_err(|_| {
+                AuraError::internal("participant share wrapping key has invalid length")
+            }),
+            Err(_) => {
+                let key = self.effects.random_bytes_32().await;
+                self.effects
+                    .secure_store(&location, &key, &caps)
+                    .await
+                    .map_err(|e| {
+                        AuraError::internal(format!(
+                            "Failed to store participant share wrapping key: {e}"
+                        ))
+                    })?;
+                Ok(key)
+            }
+        }
+    }
+
+    async fn encrypt_participant_key_package(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+        key_package: &[u8],
+    ) -> Result<Vec<u8>, AuraError> {
+        let wrap_key = self
+            .load_or_create_participant_wrap_key(authority, epoch, participant)
+            .await?;
+        let cipher = ChaCha20Poly1305::new((&wrap_key).into());
+        let nonce = self.effects.random_bytes(12).await;
+        let aad = Self::participant_key_package_aad(authority, epoch, participant);
+        let ciphertext = cipher
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: key_package,
+                    aad: &aad,
+                },
+            )
+            .map_err(|e| AuraError::internal(format!("Failed to encrypt key package: {e}")))?;
+        let envelope = ParticipantKeyPackageEnvelope {
+            version: PARTICIPANT_KEY_PACKAGE_ENVELOPE_VERSION,
+            authority: *authority,
+            epoch,
+            recipient: participant.clone(),
+            nonce,
+            ciphertext,
+        };
+        serde_json::to_vec(&envelope).map_err(|e| {
+            AuraError::internal(format!("Failed to serialize key package envelope: {e}"))
+        })
+    }
+
+    async fn decrypt_participant_key_package(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+        envelope_bytes: &[u8],
+    ) -> Result<Vec<u8>, AuraError> {
+        let envelope: ParticipantKeyPackageEnvelope = serde_json::from_slice(envelope_bytes)
+            .map_err(|e| AuraError::internal(format!("Invalid key package envelope: {e}")))?;
+        if envelope.version != PARTICIPANT_KEY_PACKAGE_ENVELOPE_VERSION
+            || envelope.authority != *authority
+            || envelope.epoch != epoch
+            || envelope.recipient != *participant
+            || envelope.nonce.len() != 12
+        {
+            return Err(AuraError::internal(
+                "key package envelope metadata does not match storage location",
+            ));
+        }
+        let wrap_key = self
+            .load_or_create_participant_wrap_key(authority, epoch, participant)
+            .await?;
+        let cipher = ChaCha20Poly1305::new((&wrap_key).into());
+        let aad = Self::participant_key_package_aad(authority, epoch, participant);
+        cipher
+            .decrypt(
+                Nonce::from_slice(&envelope.nonce),
+                Payload {
+                    msg: &envelope.ciphertext,
+                    aad: &aad,
+                },
+            )
+            .map_err(|e| AuraError::internal(format!("Failed to decrypt key package: {e}")))
+    }
+
+    async fn store_participant_key_package(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+        location: &SecureStorageLocation,
+        key_package: &[u8],
+    ) -> Result<(), AuraError> {
+        let envelope = self
+            .encrypt_participant_key_package(authority, epoch, participant, key_package)
+            .await?;
+        self.effects
+            .secure_store(
+                location,
+                &envelope,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to store key package envelope: {e}")))
+    }
+
+    async fn retrieve_participant_key_package(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+        location: &SecureStorageLocation,
+    ) -> Result<Vec<u8>, AuraError> {
+        let envelope = self
+            .effects
+            .secure_retrieve(location, &[SecureStorageCapability::Read])
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to load key package: {e}")))?;
+        self.decrypt_participant_key_package(authority, epoch, participant, &envelope)
+            .await
+    }
+
     /// Load a finalized DKG transcript by blob reference.
     pub async fn load_dkg_transcript(&self, reference: Hash32) -> Result<DkgTranscript, AuraError> {
         let store = self.transcript_store();
@@ -461,23 +658,17 @@ impl ThresholdSigningService {
 
         // Load key package from secure storage
         // Location: signing_keys/<authority>/<epoch>/1
+        let participant = ParticipantIdentity::guardian(*authority);
         let location = SecureStorageLocation::with_sub_key(
             "signing_keys",
-            format!("{}/{}", authority, state.epoch),
+            format!("{}:{}", authority, state.epoch),
             "1",
         );
 
         let key_package = self
-            .effects
-            .secure_retrieve(
-                &location,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
+            .retrieve_participant_key_package(authority, state.epoch, &participant, &location)
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to load key package: {}", e)))?;
+            .map_err(|e| AuraError::internal(format!("Failed to load key package: {e}")))?;
 
         // Direct Ed25519 signing (no FROST overhead)
         let signature = self
@@ -570,9 +761,6 @@ impl ThresholdSigningService {
         message: &[u8],
         state: &SigningContextState,
     ) -> Result<ThresholdSignature, AuraError> {
-        use aura_core::effects::SecureStorageCapability;
-        use aura_core::effects::SecureStorageLocation;
-
         struct SignerMaterial {
             signer_id: u16,
             key_package: Vec<u8>,
@@ -582,15 +770,10 @@ impl ThresholdSigningService {
         let mut missing = Vec::new();
 
         for participant in &state.participants {
-            let location = SecureStorageLocation::with_sub_key(
-                "participant_shares",
-                format!("{}/{}", authority, state.epoch),
-                participant.storage_key(),
-            );
+            let location = Self::participant_share_location(authority, state.epoch, participant);
 
             match self
-                .effects
-                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .retrieve_participant_key_package(authority, state.epoch, participant, &location)
                 .await
             {
                 Ok(key_package) => {
@@ -701,41 +884,31 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         // Location: signing_keys/<authority>/<epoch>/1
         let location = SecureStorageLocation::with_sub_key(
             "signing_keys",
-            format!("{}/{}", authority, epoch),
+            format!("{}:{}", authority, epoch),
             "1", // signer index 1
         );
 
-        self.effects
-            .secure_store(
-                &location,
-                &key_result.key_packages[0],
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to store key package: {}", e)))?;
+        self.store_participant_key_package(
+            authority,
+            epoch,
+            &participant,
+            &location,
+            &key_result.key_packages[0],
+        )
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to store key package: {}", e)))?;
 
         // Store participant share for consensus/DKG helpers.
-        let participant_location = SecureStorageLocation::with_sub_key(
-            "participant_shares",
-            format!("{}/{}", authority, epoch),
-            participant.storage_key(),
-        );
-        self.effects
-            .secure_store(
-                &participant_location,
-                &key_result.key_packages[0],
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
-            .await
-            .map_err(|e| {
-                AuraError::internal(format!("Failed to store participant share: {}", e))
-            })?;
+        let participant_location = Self::participant_share_location(authority, epoch, &participant);
+        self.store_participant_key_package(
+            authority,
+            epoch,
+            &participant,
+            &participant_location,
+            &key_result.key_packages[0],
+        )
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to store participant share: {}", e)))?;
 
         // Persist public key package for consensus helpers.
         let pubkey_location = SecureStorageLocation::with_sub_key(
@@ -1032,29 +1205,23 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             let _ = signer_index; // Used for logging below
 
             // Store at: participant_shares/<authority>/<epoch>/<participant_key>
-            let location = SecureStorageLocation::with_sub_key(
-                "participant_shares",
-                format!("{}/{}", authority, new_epoch),
-                participant.storage_key(),
-            );
+            let location = Self::participant_share_location(authority, new_epoch, participant);
 
-            self.effects
-                .secure_store(
-                    &location,
-                    key_package,
-                    &[
-                        SecureStorageCapability::Read,
-                        SecureStorageCapability::Write,
-                    ],
-                )
-                .await
-                .map_err(|e| {
-                    AuraError::internal(format!(
-                        "Failed to store key package for participant {}: {}",
-                        participant.debug_label(),
-                        e
-                    ))
-                })?;
+            self.store_participant_key_package(
+                authority,
+                new_epoch,
+                participant,
+                &location,
+                key_package,
+            )
+            .await
+            .map_err(|e| {
+                AuraError::internal(format!(
+                    "Failed to store key package for participant {}: {}",
+                    participant.debug_label(),
+                    e
+                ))
+            })?;
 
             tracing::debug!(
                 ?authority,
@@ -1374,7 +1541,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             for participant in &metadata.participants {
                 let share_location = SecureStorageLocation::with_sub_key(
                     "participant_shares",
-                    format!("{}/{}", authority, failed_epoch),
+                    format!("{}:{}", authority, failed_epoch),
                     participant.storage_key(),
                 );
 
@@ -1541,5 +1708,46 @@ mod tests {
         assert_eq!(state.epoch, new_epoch);
         assert_eq!(state.threshold, 1);
         assert_eq!(state.agreement_mode, AgreementMode::ConsensusFinalized);
+    }
+
+    #[tokio::test]
+    async fn participant_key_packages_are_wrapped_before_secure_storage() {
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = ThresholdSigningService::new(effects.clone());
+        let authority = test_authority();
+        let participants = vec![ParticipantIdentity::Device(effects.device_id())];
+
+        let (new_epoch, key_packages, _) = service
+            .rotate_keys(&authority, 1, 1, &participants)
+            .await
+            .expect("rotate keys");
+        let raw_key_package = &key_packages[0];
+        let participant = &participants[0];
+        let location =
+            ThresholdSigningService::participant_share_location(&authority, new_epoch, participant);
+
+        let stored = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .expect("stored wrapped participant package");
+        assert!(
+            !stored
+                .windows(raw_key_package.len())
+                .any(|window| window == raw_key_package),
+            "participant key package was stored directly"
+        );
+
+        let envelope: ParticipantKeyPackageEnvelope =
+            serde_json::from_slice(&stored).expect("stored package envelope");
+        assert_eq!(envelope.version, PARTICIPANT_KEY_PACKAGE_ENVELOPE_VERSION);
+        assert_eq!(envelope.recipient, *participant);
+        assert_ne!(envelope.ciphertext, *raw_key_package);
+
+        let decrypted = service
+            .decrypt_participant_key_package(&authority, new_epoch, participant, &stored)
+            .await
+            .expect("decrypt participant package");
+        assert_eq!(decrypted, *raw_key_package);
     }
 }

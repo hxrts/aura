@@ -7,6 +7,7 @@ use super::socket::authoritative_harness_snapshot_readiness;
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
+use aura_app::harness_mode_enabled;
 use aura_app::ui::contract::{
     screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
     ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
@@ -34,12 +35,18 @@ static UI_STATE_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
 static LAST_WRITTEN_SNAPSHOT: OnceLock<Mutex<Option<Vec<u8>>>> = OnceLock::new();
 
 fn configured_ui_state_file() -> Option<&'static PathBuf> {
+    if !harness_mode_enabled() {
+        return None;
+    }
     UI_STATE_FILE
         .get_or_init(|| std::env::var_os(UI_STATE_FILE_ENV).map(PathBuf::from))
         .as_ref()
 }
 
 fn configured_ui_state_socket() -> Option<&'static PathBuf> {
+    if !harness_mode_enabled() {
+        return None;
+    }
     UI_STATE_SOCKET
         .get_or_init(|| std::env::var_os(UI_STATE_SOCKET_ENV).map(PathBuf::from))
         .as_ref()

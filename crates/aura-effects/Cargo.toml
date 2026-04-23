@@ -70,6 +70,18 @@ tokio = { workspace = true, features = ["fs", "net"] }
 tokio-tungstenite = { workspace = true }
 socket2 = { workspace = true }
 
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["linux-native-sync-persistent", "crypto-rust"] }
+
+[target.'cfg(any(target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 indexed_db_futures = { version = "0.6.4", features = ["serde"] }
 js-sys = { workspace = true }

@@ -18,6 +18,10 @@ use aura_core::effects::{
 use aura_core::hash;
 use aura_core::util::serialization::to_vec;
 use aura_core::Hash32;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use zeroize::Zeroize;
 
 /// Derive an encryption key using the specified context and version
@@ -132,13 +136,19 @@ pub fn compute_dealer_transcript_hash(
     Ok(Hash32(hasher.finalize()))
 }
 
-/// Real crypto handler using actual cryptographic operations.
+/// Real handler using cryptographic operations.
 /// Can be seeded for deterministic testing or use OS entropy in production.
 // aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md optional seed is simulation/test-only configuration; production constructors use OS entropy.
 #[derive(Debug, Clone)]
 pub struct RealCryptoHandler {
-    /// Optional seed for deterministic randomness in testing
-    seed: Option<[u8; 32]>,
+    /// Optional deterministic state for simulation/testing.
+    seeded: Option<Arc<SeededCryptoState>>,
+}
+
+#[derive(Debug)]
+struct SeededCryptoState {
+    seed: [u8; 32],
+    counter: AtomicU64,
 }
 
 impl Default for RealCryptoHandler {
@@ -148,23 +158,40 @@ impl Default for RealCryptoHandler {
 }
 
 impl RealCryptoHandler {
-    /// Create a new real crypto handler using OS entropy
+    /// Create a real crypto handler using OS entropy
     pub fn new() -> Self {
-        Self { seed: None }
+        Self { seeded: None }
     }
 
     /// Create a deterministic crypto handler for simulation or tests.
     ///
     /// Production runtime construction must use `RealCryptoHandler::new()`.
     pub fn for_simulation_seed(seed: [u8; 32]) -> Self {
-        Self { seed: Some(seed) }
+        Self {
+            seeded: Some(Arc::new(SeededCryptoState {
+                seed,
+                counter: AtomicU64::new(0),
+            })),
+        }
+    }
+
+    fn deterministic_seed(&self, domain: &'static [u8], context: &[u8]) -> Option<[u8; 32]> {
+        let state = self.seeded.as_ref()?;
+        let counter = state.counter.fetch_add(1, Ordering::SeqCst);
+        let mut hasher = hash::hasher();
+        hasher.update(b"aura.seeded.crypto.v1");
+        hasher.update(&state.seed);
+        hasher.update(&counter.to_le_bytes());
+        hasher.update(domain);
+        hasher.update(&(context.len() as u64).to_le_bytes());
+        hasher.update(context);
+        Some(hasher.finalize())
     }
 
     /// Get random bytes using the handler's RNG strategy
-    fn get_random_bytes(&self, len: usize) -> Result<Vec<u8>, CryptoError> {
+    fn get_random_bytes(&self, len: usize, domain: &'static [u8]) -> Result<Vec<u8>, CryptoError> {
         let mut bytes = vec![0u8; len];
-        if let Some(seed) = self.seed {
-            // Use seeded randomness
+        if let Some(seed) = self.deterministic_seed(domain, &len.to_le_bytes()) {
             use rand::{RngCore, SeedableRng};
             let mut rng = rand_chacha::ChaCha20Rng::from_seed(seed);
             rng.fill_bytes(&mut bytes);
@@ -186,14 +213,14 @@ impl RandomCoreEffects for RealCryptoHandler {
     // OS RNG failure indicates system compromise or resource exhaustion.
     #[allow(clippy::expect_used)]
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        self.get_random_bytes(len)
+        self.get_random_bytes(len, b"random_bytes")
             .expect("Fatal: cryptographic RNG failure")
     }
 
     #[allow(clippy::expect_used)]
     async fn random_bytes_32(&self) -> [u8; 32] {
         let bytes = self
-            .get_random_bytes(32)
+            .get_random_bytes(32, b"random_bytes_32")
             .expect("Fatal: cryptographic RNG failure");
         let mut result = [0u8; 32];
         result.copy_from_slice(&bytes);
@@ -203,7 +230,7 @@ impl RandomCoreEffects for RealCryptoHandler {
     #[allow(clippy::expect_used)]
     async fn random_u64(&self) -> u64 {
         let bytes = self
-            .get_random_bytes(8)
+            .get_random_bytes(8, b"random_u64")
             .expect("Fatal: cryptographic RNG failure");
         u64::from_le_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
@@ -245,20 +272,21 @@ impl CryptoCoreEffects for RealCryptoHandler {
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
-        let (signing_key, verifying_key) = match self.seed {
-            Some(seed) => {
-                let mut rng = ChaCha20Rng::from_seed(seed);
-                let signing_key = SigningKey::generate(&mut rng);
-                let verifying_key = VerifyingKey::from(&signing_key);
-                (signing_key, verifying_key)
-            }
-            None => {
-                let mut rng = rand::rngs::OsRng;
-                let signing_key = SigningKey::generate(&mut rng);
-                let verifying_key = VerifyingKey::from(&signing_key);
-                (signing_key, verifying_key)
-            }
-        };
+        let (signing_key, verifying_key) =
+            match self.deterministic_seed(b"ed25519_generate_keypair", b"single-signer-keypair") {
+                Some(seed) => {
+                    let mut rng = ChaCha20Rng::from_seed(seed);
+                    let signing_key = SigningKey::generate(&mut rng);
+                    let verifying_key = VerifyingKey::from(&signing_key);
+                    (signing_key, verifying_key)
+                }
+                None => {
+                    let mut rng = rand::rngs::OsRng;
+                    let signing_key = SigningKey::generate(&mut rng);
+                    let verifying_key = VerifyingKey::from(&signing_key);
+                    (signing_key, verifying_key)
+                }
+            };
 
         Ok((
             signing_key.to_bytes().to_vec(),
@@ -308,7 +336,7 @@ impl CryptoCoreEffects for RealCryptoHandler {
     }
 
     fn is_simulated(&self) -> bool {
-        false
+        self.seeded.is_some()
     }
 
     fn crypto_capabilities(&self) -> Vec<String> {
@@ -508,11 +536,12 @@ impl CryptoExtendedEffects for RealCryptoHandler {
 
         let mut attempt: u8 = 0;
         let generation_result = loop {
-            let attempt_seed = match self.seed {
-                Some(mut seed) => {
-                    seed[0] = seed[0].wrapping_add(attempt);
-                    seed
-                }
+            let mut context = Vec::new();
+            context.extend_from_slice(&threshold.to_le_bytes());
+            context.extend_from_slice(&max_signers.to_le_bytes());
+            context.push(attempt);
+            let attempt_seed = match self.deterministic_seed(b"frost_generate_keys", &context) {
+                Some(seed) => seed,
                 None => {
                     let mut seed = [0u8; 32];
                     getrandom::getrandom(&mut seed).map_err(|e| {
@@ -591,7 +620,7 @@ impl CryptoExtendedEffects for RealCryptoHandler {
 
         // Generate nonces using the actual signing share from the key package
         let (nonces, commitments) = {
-            match self.seed {
+            match self.deterministic_seed(b"frost_generate_nonces", key_package) {
                 Some(seed) => {
                     let mut rng = ChaCha20Rng::from_seed(seed);
                     frost::round1::commit(signing_share, &mut rng)
@@ -952,6 +981,21 @@ mod frost_tests {
     use super::*;
 
     #[tokio::test]
+    async fn seeded_random_calls_are_distinct_and_reproducible() {
+        let seed = [0x42; 32];
+        let crypto = RealCryptoHandler::for_simulation_seed(seed);
+
+        let first = crypto.random_bytes(32).await;
+        let second = crypto.random_bytes(32).await;
+
+        assert_ne!(first, second, "seeded RNG must not replay per-call output");
+
+        let replay = RealCryptoHandler::for_simulation_seed(seed);
+        assert_eq!(first, replay.random_bytes(32).await);
+        assert_eq!(second, replay.random_bytes(32).await);
+    }
+
+    #[tokio::test]
     async fn test_frost_key_generation_basic() {
         // Test basic FROST key generation works
         use crate::crypto::RealCryptoHandler;
@@ -1032,6 +1076,53 @@ mod frost_tests {
         assert_ne!(
             key_gen_result2.public_key_package, key_gen_result.public_key_package,
             "Different key generation runs should produce different keys"
+        );
+    }
+
+    #[tokio::test]
+    async fn seeded_frost_nonce_generation_does_not_reuse_nonces_for_same_share() {
+        let crypto = RealCryptoHandler::for_simulation_seed([0x51; 32]);
+        let key_gen_result = crypto
+            .frost_generate_keys(2, 3)
+            .await
+            .expect("seeded FROST key generation should succeed");
+
+        let first = crypto
+            .frost_generate_nonces(&key_gen_result.key_packages[0])
+            .await
+            .expect("first nonce generation should succeed");
+        let second = crypto
+            .frost_generate_nonces(&key_gen_result.key_packages[0])
+            .await
+            .expect("second nonce generation should succeed");
+
+        assert_ne!(
+            first, second,
+            "seeded FROST nonce generation must not reuse nonces for the same key share"
+        );
+
+        let replay = RealCryptoHandler::for_simulation_seed([0x51; 32]);
+        let replay_keys = replay
+            .frost_generate_keys(2, 3)
+            .await
+            .expect("seeded FROST key generation should be reproducible");
+        assert_eq!(
+            key_gen_result.public_key_package,
+            replay_keys.public_key_package
+        );
+        assert_eq!(
+            first,
+            replay
+                .frost_generate_nonces(&replay_keys.key_packages[0])
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            second,
+            replay
+                .frost_generate_nonces(&replay_keys.key_packages[0])
+                .await
+                .unwrap()
         );
     }
 

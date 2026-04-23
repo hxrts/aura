@@ -14,6 +14,7 @@ workspace = true
 [features]
 default = []
 web = ["dioxus/web"]
+harness = []
 
 [dependencies]
 aura-app = { package = "hxrts-aura-app", path = "../aura-app", version = "=0.2.0", features = ["web-js"] }

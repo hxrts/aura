@@ -34,6 +34,7 @@ pub(crate) fn snapshot_with_capabilities(
         capabilities,
         1,
         1000,
+        [authority_seed; 16],
     )
 }
 

@@ -4,6 +4,7 @@
 //! Wraps `RecoveryHandler` with ergonomic methods and proper error handling.
 
 use super::recovery::{
+    recovery_guardian_private_key_storage_key, recovery_guardian_public_key_storage_key,
     GuardianApproval, RecoveryHandler, RecoveryOperation, RecoveryRequest, RecoveryResult,
     RecoveryState,
 };
@@ -14,19 +15,22 @@ use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
 use crate::runtime::services::{
-    CeremonyTracker, ReconfigurationManager, SessionDelegationTransfer,
+    CeremonyTracker, ReconfigurationManager, SessionDelegationTransfer, TrustedKeyResolutionService,
 };
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId, TaskSupervisor};
 use aura_core::crypto::Ed25519Signature;
-use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
+use aura_core::effects::{
+    CryptoCoreEffects, CryptoExtendedEffects, PhysicalTimeEffects, RandomCoreEffects,
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
+};
 use aura_core::hash::hash;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::identifiers::{AuthorityId, RecoveryId};
 use aura_core::util::serialization::{from_slice, to_vec};
-use aura_core::{ContextId, Hash32, TimeEffects};
+use aura_core::{ContextId, Ed25519VerifyingKey, Hash32, TimeEffects};
 use aura_journal::fact::{ProtocolRelationalFact, RelationalFact};
 use aura_protocol::effects::{ChoreographicRole, RoleIndex, TreeEffects};
 use aura_protocol::{
@@ -40,12 +44,13 @@ use aura_recovery::guardian_ceremony::{
     CeremonyAbort, CeremonyProposal, CeremonyResponse, CeremonyResponseMsg, GuardianRotationOp,
 };
 use aura_recovery::guardian_membership::{
-    guardian_vote_signature_digest, ChangeCompletion, GuardianVote, MembershipChange,
-    MembershipProposal,
+    sign_guardian_vote, verify_guardian_vote_signature, ChangeCompletion, GuardianVote,
+    MembershipChange, MembershipProposal,
 };
 use aura_recovery::guardian_setup::{
-    build_setup_completion, validate_setup_inputs, GuardianAcceptance, GuardianInvitation,
-    SetupCompletion,
+    build_setup_completion_with_material, encrypt_guardian_share, sign_guardian_setup_acceptance,
+    validate_setup_inputs, verify_guardian_setup_acceptance_signature, EncryptedKeyShare,
+    GuardianAcceptance, GuardianInvitation, SetupCompletion,
 };
 use aura_recovery::recovery_protocol::{
     GuardianApproval as ProtocolGuardianApproval, RecoveryOperation as ProtocolRecoveryOperation,
@@ -53,7 +58,7 @@ use aura_recovery::recovery_protocol::{
 };
 use aura_recovery::types::{GuardianProfile, GuardianSet};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use telltale_machine::StepResult;
@@ -64,6 +69,7 @@ const CHOREO_START_RETRY_DELAY_MS: u64 = 50;
 const CHOREO_START_RETRY_LIMIT: usize = 40;
 const RECOVERY_CLEANUP_INTERVAL: StdDuration = StdDuration::from_secs(5);
 const RECOVERY_TIMEOUT_REASON: &str = "Recovery timed out";
+const GUARDIAN_SETUP_ACCEPTANCE_MAX_SKEW_MS: u64 = 5 * 60 * 1000;
 
 /// Recovery service API
 ///
@@ -785,6 +791,7 @@ impl RecoveryServiceApi {
             new_tree_commitment,
             operation,
             justification: request.justification.clone(),
+            prestate_hash: request.prestate_hash,
         })
     }
 
@@ -1425,6 +1432,14 @@ impl RecoveryServiceApi {
 
         let authority_id = self.handler.authority_context().authority_id();
         let timestamp = self.guardian_setup_timestamp().await?;
+        let invitation = GuardianInvitation {
+            setup_id: setup_id.to_string(),
+            account_id,
+            target_guardians: guardians.clone(),
+            threshold,
+            timestamp: timestamp.clone(),
+        };
+        let guardian_key_resolver = self.trusted_guardian_setup_keys(&guardians).await?;
         let session_id = guardian_setup_session_id(setup_id);
         let roles = vec![
             Self::role(authority_id, 0),
@@ -1459,22 +1474,15 @@ impl RecoveryServiceApi {
             .map_err(|error| AgentError::internal(error.to_string()))?;
 
             for _ in 0..guardians.len() {
-                session.queue_send_bytes(
-                    to_vec(&GuardianInvitation {
-                        setup_id: setup_id.to_string(),
-                        account_id,
-                        target_guardians: guardians.clone(),
-                        threshold,
-                        timestamp: timestamp.clone(),
-                    })
-                    .map_err(|error| {
-                        AgentError::internal(format!("guardian invitation encode failed: {error}"))
-                    })?,
-                );
+                session.queue_send_bytes(to_vec(&invitation).map_err(|error| {
+                    AgentError::internal(format!("guardian invitation encode failed: {error}"))
+                })?);
             }
 
             let mut acceptances = Vec::new();
+            let mut seen_guardians = BTreeSet::new();
             let mut completion_queued = false;
+            let mut completion: Option<SetupCompletion> = None;
 
             let loop_result = loop {
                 let round = session
@@ -1489,26 +1497,26 @@ impl RecoveryServiceApi {
                                 "guardian acceptance decode failed: {error}"
                             ))
                         })?;
-                    let acceptance_guardian = acceptance.guardian_id;
-                    let acceptance_context = acceptance.setup_id.clone();
-                    let acceptance_member = guardians.contains(&acceptance_guardian);
-                    let acceptance_has_proof = !acceptance.public_key.is_empty();
-                    let acceptance = Self::verified_recovery_session_payload(
-                        acceptance_guardian,
-                        acceptance_context.as_bytes(),
-                        acceptance,
-                        acceptance_member,
-                        acceptance_has_proof,
-                    )?;
+                    let acceptance = self
+                        .verify_guardian_setup_acceptance_for_invitation(
+                            &invitation,
+                            &guardians,
+                            &guardian_key_resolver,
+                            &mut seen_guardians,
+                            acceptance,
+                        )
+                        .await?;
                     acceptances.push(acceptance);
                     if !completion_queued && acceptances.len() == guardians.len() {
-                        let completion =
-                            build_guardian_setup_completion(setup_id, threshold, &acceptances);
-                        let payload = to_vec(&completion).map_err(|error| {
+                        let built_completion = self
+                            .build_verified_guardian_setup_completion(&invitation, &acceptances)
+                            .await?;
+                        let payload = to_vec(&built_completion).map_err(|error| {
                             AgentError::internal(format!(
                                 "guardian setup completion encode failed: {error}"
                             ))
                         })?;
+                        completion = Some(built_completion);
                         for _ in 0..guardians.len() {
                             session.queue_send_bytes(payload.clone());
                         }
@@ -1539,11 +1547,12 @@ impl RecoveryServiceApi {
 
                 match round.step {
                     StepResult::AllDone => {
-                        break Ok(build_guardian_setup_completion(
-                            setup_id,
-                            threshold,
-                            &acceptances,
-                        ));
+                        break completion.ok_or_else(|| {
+                            AgentError::internal(
+                                "guardian setup completed without a verified completion payload"
+                                    .to_string(),
+                            )
+                        });
                     }
                     StepResult::Continue => {}
                     StepResult::Stuck => {
@@ -1592,17 +1601,67 @@ impl RecoveryServiceApi {
 
         let setup_id = invitation.setup_id.clone();
         let timestamp = self.guardian_setup_timestamp().await?;
-        let (_, public_key) = self
+        let signing_private_key = self
+            .effects
+            .retrieve(&recovery_guardian_private_key_storage_key(authority_id))
+            .await
+            .map_err(|error| {
+                AgentError::effects(format!(
+                    "guardian setup signing key retrieval failed: {error}"
+                ))
+            })?
+            .ok_or_else(|| {
+                AgentError::invalid(
+                    "guardian setup acceptance requires a registered guardian signing key"
+                        .to_string(),
+                )
+            })?;
+        let (share_private_key, public_key) = self
             .effects
             .ed25519_generate_keypair()
             .await
             .map_err(|e| AgentError::internal(format!("guardian keygen failed: {e}")))?;
+        let key_location = SecureStorageLocation::with_sub_key(
+            "guardian_acceptance_keys",
+            &setup_id,
+            authority_id.to_string(),
+        );
+        self.effects
+            .secure_store(
+                &key_location,
+                &share_private_key,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|error| {
+                AgentError::effects(format!(
+                    "guardian setup acceptance key storage failed: {error}"
+                ))
+            })?;
+        let signature = sign_guardian_setup_acceptance(
+            self.effects.as_ref(),
+            &invitation,
+            authority_id,
+            accepted,
+            &public_key,
+            &timestamp,
+            &signing_private_key,
+        )
+        .await
+        .map_err(|error| {
+            AgentError::effects(format!("guardian setup acceptance signing failed: {error}"))
+        })?;
         let acceptance = GuardianAcceptance {
             guardian_id: authority_id,
             setup_id: setup_id.clone(),
+            account_id: invitation.account_id,
             accepted,
             public_key,
             timestamp,
+            signature,
         };
         let session_id = guardian_setup_session_id(&setup_id);
         let roles = vec![
@@ -1736,6 +1795,7 @@ impl RecoveryServiceApi {
         &self,
         change: MembershipChange,
         guardians: Vec<AuthorityId>,
+        guardian_verifying_keys: BTreeMap<AuthorityId, Vec<u8>>,
         threshold: u32,
         new_threshold: Option<u16>,
     ) -> AgentResult<ChangeCompletion> {
@@ -1772,6 +1832,20 @@ impl RecoveryServiceApi {
         let manifest = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::composition_manifest();
         let global_type = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::global_type();
         let local_types = aura_recovery::guardian_membership::telltale_session_types_guardian_membership_change::vm_artifacts::local_types();
+        let proposal = MembershipProposal {
+            change_id: change_id.clone(),
+            account_id: authority_id,
+            proposer_id: authority_id,
+            change: change.clone(),
+            threshold: threshold as u16,
+            new_threshold,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            }),
+        };
+        let guardian_key_resolver =
+            trusted_guardian_vote_keys(&guardians, &guardian_verifying_keys)?;
 
         let completion = async {
             let mut session = open_owned_manifest_vm_session_admitted(
@@ -1788,25 +1862,13 @@ impl RecoveryServiceApi {
             .map_err(|error| AgentError::internal(error.to_string()))?;
 
             for _ in 0..3 {
-                session.queue_send_bytes(
-                    to_vec(&MembershipProposal {
-                        change_id: change_id.clone(),
-                        account_id: authority_id,
-                        proposer_id: authority_id,
-                        change: change.clone(),
-                        new_threshold,
-                        timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                            ts_ms: now_ms,
-                            uncertainty: None,
-                        }),
-                    })
-                    .map_err(|error| {
-                        AgentError::internal(format!("membership proposal encode failed: {error}"))
-                    })?,
-                );
+                session.queue_send_bytes(to_vec(&proposal).map_err(|error| {
+                    AgentError::internal(format!("membership proposal encode failed: {error}"))
+                })?);
             }
 
             let mut votes = Vec::new();
+            let mut seen_guardians = BTreeSet::new();
             let mut completion_queued = false;
 
             let loop_result = loop {
@@ -1819,17 +1881,15 @@ impl RecoveryServiceApi {
                     let vote: GuardianVote = from_slice(&blocked.payload).map_err(|error| {
                         AgentError::internal(format!("guardian vote decode failed: {error}"))
                     })?;
-                    let vote_guardian = vote.guardian_id;
-                    let vote_context = vote.change_id.clone();
-                    let vote_member = guardians.contains(&vote_guardian);
-                    let vote_has_proof = !vote.vote_signature.is_empty();
-                    let vote = Self::verified_recovery_session_payload(
-                        vote_guardian,
-                        vote_context.as_bytes(),
-                        vote,
-                        vote_member,
-                        vote_has_proof,
-                    )?;
+                    let vote = self
+                        .verify_membership_vote_for_proposal(
+                            &proposal,
+                            &guardians,
+                            &guardian_key_resolver,
+                            &mut seen_guardians,
+                            vote,
+                        )
+                        .await?;
                     votes.push(vote);
 
                     if !completion_queued && votes.len() == 3 {
@@ -1928,6 +1988,251 @@ impl RecoveryServiceApi {
         Ok(completion)
     }
 
+    async fn verify_membership_vote_for_proposal(
+        &self,
+        proposal: &MembershipProposal,
+        guardians: &[AuthorityId],
+        guardian_key_resolver: &TrustedKeyResolutionService,
+        seen_guardians: &mut BTreeSet<AuthorityId>,
+        vote: GuardianVote,
+    ) -> AgentResult<VerifiedIngress<GuardianVote>> {
+        let vote_guardian = vote.guardian_id;
+        let vote_context = vote.change_id.clone();
+        let vote_member = guardians.contains(&vote_guardian);
+        if !seen_guardians.insert(vote_guardian) {
+            return Err(AgentError::invalid(format!(
+                "duplicate guardian membership vote from {vote_guardian}"
+            )));
+        }
+        let signature_verified = verify_guardian_vote_signature(
+            self.effects.as_ref(),
+            proposal,
+            &vote,
+            guardian_key_resolver,
+        )
+        .await
+        .map_err(|error| {
+            AgentError::effects(format!("guardian vote verification failed: {error}"))
+        })?;
+        Self::verified_recovery_session_payload(
+            vote_guardian,
+            vote_context.as_bytes(),
+            vote,
+            vote_member,
+            signature_verified,
+        )
+    }
+
+    async fn trusted_guardian_setup_keys(
+        &self,
+        guardians: &[AuthorityId],
+    ) -> AgentResult<TrustedKeyResolutionService> {
+        let resolver = TrustedKeyResolutionService::new();
+        for guardian in guardians {
+            let key = self
+                .effects
+                .retrieve(&recovery_guardian_public_key_storage_key(*guardian))
+                .await
+                .map_err(|error| {
+                    AgentError::effects(format!(
+                        "trusted guardian setup key retrieval failed for {guardian}: {error}"
+                    ))
+                })?
+                .ok_or_else(|| {
+                    AgentError::invalid(format!(
+                        "missing trusted guardian setup key for {guardian}"
+                    ))
+                })?;
+            resolver
+                .register_guardian_key(*guardian, key)
+                .map_err(|error| {
+                    AgentError::invalid(format!(
+                        "invalid trusted guardian setup key for {guardian}: {error}"
+                    ))
+                })?;
+        }
+        Ok(resolver)
+    }
+
+    async fn verify_guardian_setup_acceptance_for_invitation(
+        &self,
+        invitation: &GuardianInvitation,
+        guardians: &[AuthorityId],
+        guardian_key_resolver: &TrustedKeyResolutionService,
+        seen_guardians: &mut BTreeSet<AuthorityId>,
+        acceptance: GuardianAcceptance,
+    ) -> AgentResult<VerifiedIngress<GuardianAcceptance>> {
+        let guardian_id = acceptance.guardian_id;
+        if !guardians.contains(&guardian_id) {
+            return Err(AgentError::invalid(format!(
+                "guardian setup acceptance from unknown guardian {guardian_id}"
+            )));
+        }
+        if !seen_guardians.insert(guardian_id) {
+            return Err(AgentError::invalid(format!(
+                "duplicate guardian setup acceptance from {guardian_id}"
+            )));
+        }
+        if acceptance.setup_id != invitation.setup_id {
+            return Err(AgentError::invalid(format!(
+                "guardian setup acceptance has mismatched setup id: expected {}, got {}",
+                invitation.setup_id, acceptance.setup_id
+            )));
+        }
+        if acceptance.account_id != invitation.account_id {
+            return Err(AgentError::invalid(format!(
+                "guardian setup acceptance has mismatched account id: expected {}, got {}",
+                invitation.account_id, acceptance.account_id
+            )));
+        }
+        if acceptance.public_key.is_empty() {
+            return Err(AgentError::invalid(
+                "guardian setup acceptance must include a public key".to_string(),
+            ));
+        }
+        Ed25519VerifyingKey::try_from_slice(&acceptance.public_key).map_err(|error| {
+            AgentError::invalid(format!(
+                "guardian setup acceptance public key is malformed: {error}"
+            ))
+        })?;
+        let invitation_ms = physical_timestamp_ms(&invitation.timestamp)?;
+        let acceptance_ms = physical_timestamp_ms(&acceptance.timestamp)?;
+        let now_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|error| {
+                AgentError::effects(format!(
+                    "guardian setup acceptance freshness check failed: {error}"
+                ))
+            })?
+            .ts_ms;
+        if acceptance_ms < invitation_ms {
+            return Err(AgentError::invalid(
+                "guardian setup acceptance timestamp predates the invitation".to_string(),
+            ));
+        }
+        if now_ms.abs_diff(acceptance_ms) > GUARDIAN_SETUP_ACCEPTANCE_MAX_SKEW_MS {
+            return Err(AgentError::invalid(
+                "guardian setup acceptance timestamp is stale".to_string(),
+            ));
+        }
+        let signature_verified = verify_guardian_setup_acceptance_signature(
+            self.effects.as_ref(),
+            invitation,
+            &acceptance,
+            guardian_key_resolver,
+        )
+        .await
+        .map_err(|error| {
+            AgentError::effects(format!(
+                "guardian setup acceptance verification failed: {error}"
+            ))
+        })?;
+        let acceptance_context = acceptance.setup_id.clone();
+        Self::verified_recovery_session_payload(
+            guardian_id,
+            acceptance_context.as_bytes(),
+            acceptance,
+            true,
+            signature_verified,
+        )
+    }
+
+    async fn build_verified_guardian_setup_completion(
+        &self,
+        invitation: &GuardianInvitation,
+        acceptances: &[VerifiedIngress<GuardianAcceptance>],
+    ) -> AgentResult<SetupCompletion> {
+        let mut accepted_acceptances: Vec<GuardianAcceptance> = acceptances
+            .iter()
+            .filter(|acceptance| acceptance.payload().accepted)
+            .map(|acceptance| acceptance.payload().clone())
+            .collect();
+        accepted_acceptances.sort_by_key(|acceptance| acceptance.guardian_id);
+
+        let (encrypted_shares, public_key_package) =
+            if accepted_acceptances.len() >= invitation.threshold as usize {
+                self.generate_guardian_setup_completion_material(
+                    invitation,
+                    invitation.threshold,
+                    &accepted_acceptances,
+                )
+                .await?
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
+        build_setup_completion_with_material(
+            &invitation.setup_id,
+            invitation.threshold,
+            acceptances
+                .iter()
+                .map(|acceptance| acceptance.payload().clone())
+                .collect(),
+            encrypted_shares,
+            public_key_package,
+        )
+        .map_err(AgentError::invalid)
+    }
+
+    async fn generate_guardian_setup_completion_material(
+        &self,
+        invitation: &GuardianInvitation,
+        threshold: u16,
+        accepted_acceptances: &[GuardianAcceptance],
+    ) -> AgentResult<(Vec<EncryptedKeyShare>, Vec<u8>)> {
+        let accepted_count = u16::try_from(accepted_acceptances.len()).map_err(|_| {
+            AgentError::invalid("guardian setup accepted guardian count exceeds u16".to_string())
+        })?;
+        let signing_keys = self
+            .effects
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                threshold,
+                accepted_count,
+            )
+            .await
+            .map_err(|error| {
+                AgentError::effects(format!("guardian setup key generation failed: {error}"))
+            })?;
+        if signing_keys.public_key_package.is_empty() {
+            return Err(AgentError::internal(
+                "guardian setup key generation returned an empty public key package".to_string(),
+            ));
+        }
+        if signing_keys.key_packages.len() != accepted_acceptances.len() {
+            return Err(AgentError::internal(format!(
+                "guardian setup key generation returned {} shares for {} guardians",
+                signing_keys.key_packages.len(),
+                accepted_acceptances.len()
+            )));
+        }
+
+        let mut encrypted_shares = Vec::with_capacity(accepted_acceptances.len());
+        for (idx, acceptance) in accepted_acceptances.iter().enumerate() {
+            let signer_index = u16::try_from(idx + 1).map_err(|_| {
+                AgentError::internal("guardian setup signer index overflow".to_string())
+            })?;
+            encrypted_shares.push(
+                encrypt_guardian_share(
+                    self.effects.as_ref(),
+                    invitation,
+                    acceptance,
+                    signer_index,
+                    &signing_keys.key_packages[idx],
+                    &signing_keys.public_key_package,
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::effects(format!("guardian setup share encryption failed: {error}"))
+                })?,
+            );
+        }
+
+        Ok((encrypted_shares, signing_keys.public_key_package.clone()))
+    }
+
     /// Vote on a guardian membership change as a guardian.
     ///
     /// Executes the GuardianMembershipChange choreography as a Guardian role.
@@ -1948,6 +2253,7 @@ impl RecoveryServiceApi {
         guardian_index: usize,
         approved: bool,
         rationale: String,
+        guardian_private_key: &[u8],
     ) -> AgentResult<GuardianVote> {
         let authority_id = self.handler.authority_context().authority_id();
 
@@ -1969,10 +2275,20 @@ impl RecoveryServiceApi {
             .map(|t| t.ts_ms)
             .unwrap_or_default();
 
-        let vote_signature = guardian_vote_signature_digest(&proposal, authority_id, approved)
-            .map_err(|error| {
-                AgentError::effects(format!("guardian vote signing failed: {error}"))
-            })?;
+        let vote_timestamp = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: now_ms,
+            uncertainty: None,
+        });
+        let vote_signature = sign_guardian_vote(
+            self.effects.as_ref(),
+            &proposal,
+            authority_id,
+            approved,
+            &vote_timestamp,
+            guardian_private_key,
+        )
+        .await
+        .map_err(|error| AgentError::effects(format!("guardian vote signing failed: {error}")))?;
 
         let vote = GuardianVote {
             change_id: proposal.change_id.clone(),
@@ -1980,10 +2296,7 @@ impl RecoveryServiceApi {
             approved,
             vote_signature,
             rationale,
-            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: now_ms,
-                uncertainty: None,
-            }),
+            timestamp: vote_timestamp,
         };
 
         let session_id = membership_session_id(&proposal.change_id);
@@ -2328,39 +2641,167 @@ fn membership_session_id(change_id: &str) -> Uuid {
     Uuid::from_bytes(bytes)
 }
 
+fn trusted_guardian_vote_keys(
+    guardians: &[AuthorityId],
+    guardian_verifying_keys: &BTreeMap<AuthorityId, Vec<u8>>,
+) -> AgentResult<TrustedKeyResolutionService> {
+    let resolver = TrustedKeyResolutionService::new();
+    for guardian in guardians {
+        let key = guardian_verifying_keys.get(guardian).ok_or_else(|| {
+            AgentError::invalid(format!("missing trusted guardian vote key for {guardian}"))
+        })?;
+        resolver
+            .register_guardian_key(*guardian, key.clone())
+            .map_err(|error| {
+                AgentError::invalid(format!(
+                    "invalid trusted guardian vote key for {guardian}: {error}"
+                ))
+            })?;
+    }
+    Ok(resolver)
+}
+
 fn validate_guardian_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> AgentResult<()> {
     validate_setup_inputs(guardians, threshold).map_err(AgentError::invalid)
 }
 
-fn build_guardian_setup_completion(
-    setup_id: &str,
-    threshold: u16,
-    acceptances: &[VerifiedIngress<GuardianAcceptance>],
-) -> SetupCompletion {
-    build_setup_completion(
-        setup_id,
-        threshold,
-        acceptances
-            .iter()
-            .map(|acceptance| acceptance.payload().clone())
-            .collect(),
-    )
+fn physical_timestamp_ms(timestamp: &TimeStamp) -> AgentResult<u64> {
+    match timestamp {
+        TimeStamp::PhysicalClock(physical) => Ok(physical.ts_ms),
+        other => Err(AgentError::invalid(format!(
+            "guardian setup requires physical timestamps, got {other:?}"
+        ))),
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::recovery::{
+        recovery_guardian_private_key_storage_key, recovery_guardian_public_key_storage_key,
+    };
     use super::*;
+    use crate::core::config::StorageConfig;
     use crate::core::AgentConfig;
+    use aura_core::effects::StorageCoreEffects;
+    use aura_recovery::recovery_approval::{
+        recovery_operation_hash, RecoveryApprovalTranscript, RecoveryApprovalTranscriptPayload,
+    };
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
         AuthorityContext::new(authority_id)
     }
 
+    fn isolated_test_config() -> (tempfile::TempDir, AgentConfig) {
+        let temp = tempfile::tempdir().unwrap();
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        (temp, config)
+    }
+
+    async fn signed_test_approval(
+        effects: &AuraEffectSystem,
+        request: &RecoveryRequest,
+        guardian_id: AuthorityId,
+        approved_at: u64,
+    ) -> GuardianApproval {
+        let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+        effects
+            .store(
+                &recovery_guardian_public_key_storage_key(guardian_id),
+                public_key,
+            )
+            .await
+            .unwrap();
+        let operation_hash = recovery_operation_hash(&request.operation).unwrap();
+        let transcript = RecoveryApprovalTranscript::new(RecoveryApprovalTranscriptPayload {
+            recovery_id: request.recovery_id.clone(),
+            account_authority: request.account_authority,
+            operation_hash,
+            prestate_hash: request.prestate_hash,
+            approved: true,
+            approved_at_ms: approved_at,
+            guardian_id,
+        });
+        let signature = aura_signature::sign_ed25519_transcript(effects, &transcript, &private_key)
+            .await
+            .unwrap();
+        GuardianApproval {
+            recovery_id: request.recovery_id.clone(),
+            guardian_id,
+            signature,
+            share_data: None,
+            approved_at,
+            prestate_hash: request.prestate_hash,
+        }
+    }
+
+    async fn store_guardian_setup_signing_keypair(
+        effects: &AuraEffectSystem,
+        guardian_id: AuthorityId,
+    ) -> (Vec<u8>, Vec<u8>) {
+        let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+        effects
+            .store(
+                &recovery_guardian_private_key_storage_key(guardian_id),
+                private_key.clone(),
+            )
+            .await
+            .unwrap();
+        effects
+            .store(
+                &recovery_guardian_public_key_storage_key(guardian_id),
+                public_key.clone(),
+            )
+            .await
+            .unwrap();
+        (private_key, public_key)
+    }
+
+    async fn signed_guardian_setup_acceptance(
+        effects: &AuraEffectSystem,
+        invitation: &GuardianInvitation,
+        guardian_id: AuthorityId,
+        accepted: bool,
+        guardian_private_key: &[u8],
+        acceptance_timestamp_ms: u64,
+        public_key: Vec<u8>,
+    ) -> GuardianAcceptance {
+        let timestamp = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: acceptance_timestamp_ms,
+            uncertainty: None,
+        });
+        let signature = sign_guardian_setup_acceptance(
+            effects,
+            invitation,
+            guardian_id,
+            accepted,
+            &public_key,
+            &timestamp,
+            guardian_private_key,
+        )
+        .await
+        .unwrap();
+        GuardianAcceptance {
+            guardian_id,
+            setup_id: invitation.setup_id.clone(),
+            account_id: invitation.account_id,
+            accepted,
+            public_key,
+            timestamp,
+            signature,
+        }
+    }
+
     #[tokio::test]
     async fn test_recovery_service_creation() {
         let authority_context = create_test_authority(150);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let service = RecoveryServiceApi::new_for_test(effects, authority_context);
@@ -2370,9 +2811,9 @@ mod tests {
     #[tokio::test]
     async fn test_add_device_recovery() {
         let authority_context = create_test_authority(151);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
 
         let guardians = vec![
             AuthorityId::new_from_entropy([152u8; 32]),
@@ -2397,9 +2838,9 @@ mod tests {
     #[tokio::test]
     async fn test_remove_device_recovery() {
         let authority_context = create_test_authority(154);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([155u8; 32])];
 
@@ -2414,7 +2855,7 @@ mod tests {
     #[tokio::test]
     async fn test_replace_tree_recovery() {
         let authority_context = create_test_authority(156);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
@@ -2442,7 +2883,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_guardians_recovery() {
         let authority_context = create_test_authority(160);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
@@ -2470,9 +2911,9 @@ mod tests {
     #[tokio::test]
     async fn test_full_recovery_flow() {
         let authority_context = create_test_authority(164);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([165u8; 32])];
 
@@ -2492,13 +2933,7 @@ mod tests {
         assert!(service.is_pending(&request.recovery_id).await);
 
         // Submit approval
-        let approval = GuardianApproval {
-            recovery_id: request.recovery_id.clone(),
-            guardian_id: guardians[0],
-            signature: vec![0u8; 64],
-            share_data: None,
-            approved_at: 12345,
-        };
+        let approval = signed_test_approval(&effects, &request, guardians[0], 12345).await;
         service.submit_approval(approval).await.unwrap();
 
         // Complete
@@ -2509,7 +2944,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_active() {
         let authority_context = create_test_authority(166);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
@@ -2547,7 +2982,7 @@ mod tests {
     #[tokio::test]
     async fn test_expired_recovery_cleanup_cancels_and_marks_ceremony_failed() {
         let authority_context = create_test_authority(169);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
@@ -2584,7 +3019,7 @@ mod tests {
     #[tokio::test]
     async fn test_membership_change_requires_three_guardians() {
         let authority_context = create_test_authority(170);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
@@ -2600,6 +3035,7 @@ mod tests {
                     guardian: GuardianProfile::new(AuthorityId::new_from_entropy([173u8; 32])),
                 },
                 guardians,
+                BTreeMap::new(),
                 2,
                 None,
             )
@@ -2615,7 +3051,7 @@ mod tests {
     #[tokio::test]
     async fn test_membership_change_invalid_guardian_index() {
         let authority_context = create_test_authority(174);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = RecoveryServiceApi::new_for_test(effects, authority_context).unwrap();
 
@@ -2626,6 +3062,7 @@ mod tests {
             change: MembershipChange::AddGuardian {
                 guardian: GuardianProfile::new(AuthorityId::new_from_entropy([177u8; 32])),
             },
+            threshold: 2,
             new_threshold: None,
             timestamp: TimeStamp::PhysicalClock(PhysicalTime {
                 ts_ms: 1000,
@@ -2641,6 +3078,7 @@ mod tests {
                 3, // Invalid
                 true,
                 "Test vote".to_string(),
+                &[],
             )
             .await;
 
@@ -2649,6 +3087,81 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Guardian index must be 0, 1, or 2"));
+    }
+
+    #[tokio::test]
+    async fn test_membership_vote_verification_rejects_duplicate_guardian_vote() {
+        let authority_context = create_test_authority(180);
+        let proposer = authority_context.authority_id();
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
+        let guardian = AuthorityId::new_from_entropy([181u8; 32]);
+        let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+        let proposal = MembershipProposal {
+            change_id: "test-change-duplicate".to_string(),
+            account_id: AuthorityId::new_from_entropy([182u8; 32]),
+            proposer_id: proposer,
+            change: MembershipChange::AddGuardian {
+                guardian: GuardianProfile::new(AuthorityId::new_from_entropy([183u8; 32])),
+            },
+            threshold: 2,
+            new_threshold: None,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1000,
+                uncertainty: None,
+            }),
+        };
+        let vote_timestamp = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1001,
+            uncertainty: None,
+        });
+        let signature = sign_guardian_vote(
+            effects.as_ref(),
+            &proposal,
+            guardian,
+            true,
+            &vote_timestamp,
+            &private_key,
+        )
+        .await
+        .unwrap();
+        let vote = GuardianVote {
+            change_id: proposal.change_id.clone(),
+            guardian_id: guardian,
+            approved: true,
+            vote_signature: signature,
+            rationale: "approved".to_string(),
+            timestamp: vote_timestamp,
+        };
+        let guardians = vec![guardian];
+        let verifying_keys = BTreeMap::from([(guardian, public_key)]);
+        let key_resolver =
+            trusted_guardian_vote_keys(&guardians, &verifying_keys).expect("trusted key resolver");
+        let mut seen = BTreeSet::new();
+
+        service
+            .verify_membership_vote_for_proposal(
+                &proposal,
+                &guardians,
+                &key_resolver,
+                &mut seen,
+                vote.clone(),
+            )
+            .await
+            .expect("first vote verifies");
+        let duplicate = service
+            .verify_membership_vote_for_proposal(
+                &proposal,
+                &guardians,
+                &key_resolver,
+                &mut seen,
+                vote,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(duplicate.to_string().contains("duplicate guardian"));
     }
 
     #[tokio::test]
@@ -2668,7 +3181,7 @@ mod tests {
         let authority_context = create_test_authority(179);
         let account_authority = authority_context.authority_id();
         let context_id = crate::core::default_context_id_for_authority(account_authority);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_for_authority(&config, account_authority)
                 .unwrap(),
@@ -2728,5 +3241,280 @@ mod tests {
                 )) if *account_id == account_authority && *guardian_id == replacement_guardian
             )
         }));
+    }
+
+    #[tokio::test]
+    async fn guardian_setup_acceptance_rejects_duplicate_guardians() {
+        let authority_context = create_test_authority(210);
+        let account_authority = authority_context.authority_id();
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
+        let now_ms = effects.physical_time().await.unwrap().ts_ms;
+        let guardians = vec![
+            AuthorityId::new_from_entropy([211u8; 32]),
+            AuthorityId::new_from_entropy([212u8; 32]),
+            AuthorityId::new_from_entropy([213u8; 32]),
+        ];
+        let invitation = GuardianInvitation {
+            setup_id: "setup-dup".to_string(),
+            account_id: account_authority,
+            target_guardians: guardians.clone(),
+            threshold: 2,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: now_ms.saturating_sub(10),
+                uncertainty: None,
+            }),
+        };
+        let (guardian_private_key, _) =
+            store_guardian_setup_signing_keypair(&effects, guardians[0]).await;
+        let _ = store_guardian_setup_signing_keypair(&effects, guardians[1]).await;
+        let _ = store_guardian_setup_signing_keypair(&effects, guardians[2]).await;
+        let resolver = service
+            .trusted_guardian_setup_keys(&guardians)
+            .await
+            .unwrap();
+        let (_, valid_public_key) = effects.ed25519_generate_keypair().await.unwrap();
+        let first = signed_guardian_setup_acceptance(
+            &effects,
+            &invitation,
+            guardians[0],
+            true,
+            &guardian_private_key,
+            now_ms,
+            valid_public_key.clone(),
+        )
+        .await;
+        let second = signed_guardian_setup_acceptance(
+            &effects,
+            &invitation,
+            guardians[0],
+            true,
+            &guardian_private_key,
+            now_ms,
+            valid_public_key,
+        )
+        .await;
+
+        let mut seen = BTreeSet::new();
+        service
+            .verify_guardian_setup_acceptance_for_invitation(
+                &invitation,
+                &guardians,
+                &resolver,
+                &mut seen,
+                first,
+            )
+            .await
+            .unwrap();
+        let error = service
+            .verify_guardian_setup_acceptance_for_invitation(
+                &invitation,
+                &guardians,
+                &resolver,
+                &mut seen,
+                second,
+            )
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("duplicate guardian setup acceptance"));
+    }
+
+    #[tokio::test]
+    async fn guardian_setup_acceptance_rejects_forged_and_malformed_payloads() {
+        let authority_context = create_test_authority(214);
+        let account_authority = authority_context.authority_id();
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
+        let now_ms = effects.physical_time().await.unwrap().ts_ms;
+        let guardians = vec![
+            AuthorityId::new_from_entropy([215u8; 32]),
+            AuthorityId::new_from_entropy([216u8; 32]),
+            AuthorityId::new_from_entropy([217u8; 32]),
+        ];
+        let invitation = GuardianInvitation {
+            setup_id: "setup-forged".to_string(),
+            account_id: account_authority,
+            target_guardians: guardians.clone(),
+            threshold: 2,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: now_ms.saturating_sub(10),
+                uncertainty: None,
+            }),
+        };
+        let (guardian_private_key, _) =
+            store_guardian_setup_signing_keypair(&effects, guardians[0]).await;
+        let (other_private_key, _) =
+            store_guardian_setup_signing_keypair(&effects, guardians[1]).await;
+        let _ = store_guardian_setup_signing_keypair(&effects, guardians[2]).await;
+        let resolver = service
+            .trusted_guardian_setup_keys(&guardians)
+            .await
+            .unwrap();
+
+        let forged = signed_guardian_setup_acceptance(
+            &effects,
+            &invitation,
+            guardians[0],
+            true,
+            &other_private_key,
+            now_ms,
+            vec![8u8; 32],
+        )
+        .await;
+        let malformed = signed_guardian_setup_acceptance(
+            &effects,
+            &invitation,
+            guardians[0],
+            true,
+            &guardian_private_key,
+            now_ms,
+            vec![1, 2, 3],
+        )
+        .await;
+
+        let mut seen = BTreeSet::new();
+        assert!(service
+            .verify_guardian_setup_acceptance_for_invitation(
+                &invitation,
+                &guardians,
+                &resolver,
+                &mut seen,
+                forged,
+            )
+            .await
+            .is_err());
+        let mut seen = BTreeSet::new();
+        let error = service
+            .verify_guardian_setup_acceptance_for_invitation(
+                &invitation,
+                &guardians,
+                &resolver,
+                &mut seen,
+                malformed,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("public key is malformed"));
+    }
+
+    #[tokio::test]
+    async fn guardian_setup_builds_verified_completion_with_crypto_material() {
+        let authority_context = create_test_authority(218);
+        let account_authority = authority_context.authority_id();
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
+        let now_ms = effects.physical_time().await.unwrap().ts_ms;
+        let guardians = vec![
+            AuthorityId::new_from_entropy([219u8; 32]),
+            AuthorityId::new_from_entropy([220u8; 32]),
+            AuthorityId::new_from_entropy([221u8; 32]),
+        ];
+        let invitation = GuardianInvitation {
+            setup_id: "setup-success".to_string(),
+            account_id: account_authority,
+            target_guardians: guardians.clone(),
+            threshold: 2,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: now_ms.saturating_sub(10),
+                uncertainty: None,
+            }),
+        };
+        let (g1_private, _) = store_guardian_setup_signing_keypair(&effects, guardians[0]).await;
+        let (g2_private, _) = store_guardian_setup_signing_keypair(&effects, guardians[1]).await;
+        let (g3_private, _) = store_guardian_setup_signing_keypair(&effects, guardians[2]).await;
+        let resolver = service
+            .trusted_guardian_setup_keys(&guardians)
+            .await
+            .unwrap();
+        let (_, g1_public) = effects.ed25519_generate_keypair().await.unwrap();
+        let (_, g2_public) = effects.ed25519_generate_keypair().await.unwrap();
+        let (_, g3_public) = effects.ed25519_generate_keypair().await.unwrap();
+
+        let acceptance_1 = signed_guardian_setup_acceptance(
+            &effects,
+            &invitation,
+            guardians[0],
+            true,
+            &g1_private,
+            now_ms,
+            g1_public,
+        )
+        .await;
+        let acceptance_2 = signed_guardian_setup_acceptance(
+            &effects,
+            &invitation,
+            guardians[1],
+            true,
+            &g2_private,
+            now_ms,
+            g2_public,
+        )
+        .await;
+        let acceptance_3 = signed_guardian_setup_acceptance(
+            &effects,
+            &invitation,
+            guardians[2],
+            false,
+            &g3_private,
+            now_ms,
+            g3_public,
+        )
+        .await;
+
+        let mut seen = BTreeSet::new();
+        let verified = vec![
+            service
+                .verify_guardian_setup_acceptance_for_invitation(
+                    &invitation,
+                    &guardians,
+                    &resolver,
+                    &mut seen,
+                    acceptance_1,
+                )
+                .await
+                .unwrap(),
+            service
+                .verify_guardian_setup_acceptance_for_invitation(
+                    &invitation,
+                    &guardians,
+                    &resolver,
+                    &mut seen,
+                    acceptance_2,
+                )
+                .await
+                .unwrap(),
+            service
+                .verify_guardian_setup_acceptance_for_invitation(
+                    &invitation,
+                    &guardians,
+                    &resolver,
+                    &mut seen,
+                    acceptance_3,
+                )
+                .await
+                .unwrap(),
+        ];
+
+        let completion = service
+            .build_verified_guardian_setup_completion(&invitation, &verified)
+            .await
+            .unwrap();
+        assert!(completion.success);
+        assert_eq!(completion.encrypted_shares.len(), 2);
+        assert!(!completion.public_key_package.is_empty());
+        let share_guardians: BTreeSet<_> = completion
+            .encrypted_shares
+            .iter()
+            .map(|share| share.guardian_id)
+            .collect();
+        assert_eq!(
+            share_guardians,
+            BTreeSet::from([guardians[0], guardians[1]])
+        );
     }
 }

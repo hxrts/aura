@@ -31,16 +31,18 @@ use crate::InvitationServiceApi;
 use device_enrollment::InvitationDeviceEnrollmentHandler;
 use guardian::InvitationGuardianHandler;
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
+use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::amp::{ChannelBootstrapPackage, ChannelCreateParams};
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::effects::{
-    AmpChannelEffects, ChannelJoinParams, FlowBudgetEffects, TransportEffects, TransportEnvelope,
-    TransportReceipt,
+    AmpChannelEffects, ChannelJoinParams, CryptoExtendedEffects, FlowBudgetEffects,
+    ThresholdSigningEffects, TransportEffects, TransportEnvelope, TransportReceipt,
 };
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
+use aura_core::threshold::{ApprovalContext, SignableOperation, SigningContext, ThresholdSignature};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::Hash32;
@@ -69,17 +71,19 @@ use aura_invitation::protocol::guardian::telltale_session_types_invitation_guard
     GuardianConfirm as GuardianInvitationConfirm, GuardianRequest as GuardianInvitationRequest,
 };
 use aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::message_wrappers::{
-    DeviceEnrollmentAccept as DeviceEnrollmentAcceptWrapper,
     DeviceEnrollmentConfirm as DeviceEnrollmentConfirmWrapper,
     DeviceEnrollmentRequest as DeviceEnrollmentRequestWrapper,
 };
 #[cfg(all(test, feature = "choreo-backend-telltale-machine"))]
 use aura_invitation::{GuardianAccept, InvitationResponse};
 use aura_invitation::{
-    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianConfirm,
-    GuardianRequest, InvitationAck, InvitationOffer, InvitationOperation,
+    DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianConfirm, GuardianRequest,
+    InvitationAck, InvitationOffer, InvitationOperation,
 };
-use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+use aura_signature::{
+    threshold_signing_context_transcript_bytes, verify_ed25519_transcript, SecurityTranscript,
+};
+use aura_rendezvous::TransportHint;
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
@@ -117,7 +121,10 @@ mod vm_loop;
 // Re-export types from aura_invitation for public API
 pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
 use shareable::StoredImportedInvitation;
-pub use shareable::{ShareableInvitation, ShareableInvitationError};
+pub use shareable::{
+    ShareableInvitation, ShareableInvitationError, ShareableInvitationSenderProof,
+    ShareableInvitationTransportMetadata,
+};
 
 const CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE: &str =
     "application/aura-contact-invitation-acceptance";
@@ -136,12 +143,12 @@ const INVITATION_ACCEPT_GUARD_STAGE_TIMEOUT_MS: u64 = 5_000;
 const INVITATION_ACCEPT_MATERIALIZE_STAGE_TIMEOUT_MS: u64 = 15_000;
 const INVITATION_ACCEPT_CHOREOGRAPHY_STAGE_TIMEOUT_MS: u64 = 30_000;
 const INVITATION_VM_LOOP_TIMEOUT_MS: u64 = 30_000;
-const DESCRIPTOR_VALIDITY_WINDOW_MS: u64 = 86_400_000; // 24h
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ContactInvitationAcceptance {
     invitation_id: InvitationId,
     acceptor_id: AuthorityId,
+    signature: ThresholdSignature,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -151,6 +158,76 @@ struct ChannelInvitationAcceptance {
     context_id: ContextId,
     channel_id: ChannelId,
     channel_name: Option<String>,
+    signature: ThresholdSignature,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct ContactInvitationAcceptanceTranscriptPayload {
+    invitation_id: InvitationId,
+    sender_id: AuthorityId,
+    acceptor_id: AuthorityId,
+    expires_at: Option<u64>,
+    decision: &'static str,
+}
+
+struct ContactInvitationAcceptanceTranscript<'a> {
+    invitation: &'a Invitation,
+    acceptor_id: AuthorityId,
+}
+
+impl SecurityTranscript for ContactInvitationAcceptanceTranscript<'_> {
+    type Payload = ContactInvitationAcceptanceTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.contact-acceptance";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        ContactInvitationAcceptanceTranscriptPayload {
+            invitation_id: self.invitation.invitation_id.clone(),
+            sender_id: self.invitation.sender_id,
+            acceptor_id: self.acceptor_id,
+            expires_at: self.invitation.expires_at,
+            decision: "accepted",
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct ChannelInvitationAcceptanceTranscriptPayload {
+    invitation_id: InvitationId,
+    sender_id: AuthorityId,
+    acceptor_id: AuthorityId,
+    context_id: ContextId,
+    channel_id: ChannelId,
+    channel_name: Option<String>,
+    expires_at: Option<u64>,
+    decision: &'static str,
+}
+
+struct ChannelInvitationAcceptanceTranscript<'a> {
+    invitation: &'a Invitation,
+    acceptor_id: AuthorityId,
+    context_id: ContextId,
+    channel_id: ChannelId,
+    channel_name: Option<String>,
+}
+
+impl SecurityTranscript for ChannelInvitationAcceptanceTranscript<'_> {
+    type Payload = ChannelInvitationAcceptanceTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.channel-acceptance";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        ChannelInvitationAcceptanceTranscriptPayload {
+            invitation_id: self.invitation.invitation_id.clone(),
+            sender_id: self.invitation.sender_id,
+            acceptor_id: self.acceptor_id,
+            context_id: self.context_id,
+            channel_id: self.channel_id,
+            channel_name: self.channel_name.clone(),
+            expires_at: self.invitation.expires_at,
+            decision: "accepted",
+        }
+    }
 }
 
 /// Result of an invitation action
@@ -490,9 +567,12 @@ impl InvitationHandler {
         Self::persist_imported_invitation(effects, own_id, &invitation).await
     }
 
-    fn validate_importable_shareable_invitation(
+    async fn validate_importable_shareable_invitation(
         &self,
+        effects: &AuraEffectSystem,
         shareable: &ShareableInvitation,
+        sender_proof: Option<&ShareableInvitationSenderProof>,
+        transport: &ShareableInvitationTransportMetadata,
     ) -> AgentResult<()> {
         // `from_code` already guarantees a well-formed `sender_id` and a
         // recognized `InvitationType`. Validate the remaining authoritative
@@ -503,6 +583,40 @@ impl InvitationHandler {
                 shareable.sender_id,
                 shareable.context_id,
             )?;
+        }
+
+        if let Some(expires_at) = shareable.expires_at {
+            let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
+            if now_ms > expires_at {
+                return Err(AgentError::invalid("invite code expired"));
+            }
+        }
+
+        if !effects.is_testing() {
+            let proof = sender_proof.ok_or_else(|| {
+                AgentError::invalid(ShareableInvitationError::MissingSenderProof.to_string())
+            })?;
+            if !shareable.sender_id_bound_to_public_key(&proof.public_key) {
+                return Err(AgentError::invalid(
+                    ShareableInvitationError::InvalidSenderProof.to_string(),
+                ));
+            }
+            let trusted_key_from_sender_identity = proof.public_key.as_slice();
+            let verified = verify_ed25519_transcript(
+                effects,
+                &shareable.signing_transcript_with_transport(transport),
+                &proof.signature,
+                trusted_key_from_sender_identity,
+            )
+            .await
+            .map_err(|error| {
+                AgentError::effects(format!("verify invitation sender proof: {error}"))
+            })?;
+            if !verified {
+                return Err(AgentError::invalid(
+                    ShareableInvitationError::InvalidSenderProof.to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -904,12 +1018,8 @@ impl InvitationHandler {
                 &invitation.invitation_type,
             )
         {
-            // Reissuance: we always emit a ContactFact::Added here so the
-            // recorded invitation_code reflects the latest invitation the
-            // sender issued. The signal-view reducer only overwrites the
-            // code when the incoming fact carries one, so re-emits with
-            // the new code update the contact record; nickname and other
-            // fields are preserved by the reducer on idempotent re-adds.
+            // Reissuance keeps contact membership materialized, but shareable
+            // codes are no longer reconstructed from unsigned invitation state.
             let sender_contact_exists = self
                 .sender_contact_exists(
                     effects.as_ref(),
@@ -920,14 +1030,6 @@ impl InvitationHandler {
             let should_emit_contact_fact = !sender_contact_exists;
             let should_update_code = sender_contact_exists;
             if should_emit_contact_fact || should_update_code {
-                // Derive the shareable code from the invitation so the
-                // contact record persists the code that was (or will be)
-                // exported for this invitation. Errors fall through as
-                // None — the contact is still valid without the code.
-                let invitation_code =
-                    crate::handlers::invitation::shareable::ShareableInvitation::from(&invitation)
-                        .to_code()
-                        .ok();
                 let contact_fact = ContactFact::Added {
                     context_id: invitation.context_id,
                     owner_id: invitation.sender_id,
@@ -937,7 +1039,7 @@ impl InvitationHandler {
                         ts_ms: current_time,
                         uncertainty: None,
                     },
-                    invitation_code,
+                    invitation_code: None,
                 };
 
                 timeout_prepare_invitation_stage(
@@ -1591,10 +1693,11 @@ impl InvitationHandler {
     ) -> AgentResult<Invitation> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        let shareable = ShareableInvitation::from_code(code)
-            .map_err(|e| crate::core::AgentError::invalid(format!("{e}")))?;
-        let sender_hint_addr = ShareableInvitation::sender_addr_from_code(code);
-        let sender_device_id = ShareableInvitation::sender_device_id_from_code(code);
+        let (shareable, sender_proof, transport_metadata) =
+            ShareableInvitation::from_code_with_proof_and_transport(code)
+                .map_err(|e| crate::core::AgentError::invalid(format!("{e}")))?;
+        let sender_hint_addr = transport_metadata.sender_hint.clone();
+        let sender_device_id = transport_metadata.sender_device_id;
         tracing::info!(
             invitation_id = %shareable.invitation_id,
             sender = %shareable.sender_id,
@@ -1623,7 +1726,13 @@ impl InvitationHandler {
             return Ok(existing);
         }
 
-        self.validate_importable_shareable_invitation(&shareable)?;
+        self.validate_importable_shareable_invitation(
+            effects,
+            &shareable,
+            sender_proof.as_ref(),
+            &transport_metadata,
+        )
+        .await?;
 
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
         // Persist the imported invitation with local status so later
@@ -1749,101 +1858,13 @@ impl InvitationHandler {
         addr: Option<&str>,
         now_ms: u64,
     ) {
-        fn descriptor_hint_from_addr(addr: Option<&str>) -> Option<TransportHint> {
-            let addr = addr?;
-            if addr.starts_with("ws://") || addr.starts_with("wss://") {
-                let normalized = addr
-                    .trim_start_matches("ws://")
-                    .trim_start_matches("wss://");
-                TransportHint::websocket_direct(normalized).ok()
-            } else if addr.starts_with("tcp://") {
-                let normalized = addr.trim_start_matches("tcp://");
-                TransportHint::tcp_direct(normalized).ok()
-            } else {
-                // Treat bare host:port hints as TCP. WebSocket hints must carry an
-                // explicit scheme so browser runtimes never misclassify raw TCP
-                // listener addresses as websocket endpoints.
-                TransportHint::tcp_direct(addr).ok()
-            }
-        }
-
-        fn promote_transport_hint(transport_hints: &mut Vec<TransportHint>, hint: TransportHint) {
-            transport_hints.retain(|existing| existing != &hint);
-            transport_hints.insert(0, hint);
-        }
-
-        let Some(manager) = effects.rendezvous_manager() else {
-            return;
-        };
-        let peer_context_id = default_context_id_for_authority(peer);
-        // Placeholder descriptors are transport-hint carriers only. Their
-        // cryptographic fields remain zero-filled until a real rendezvous
-        // descriptor arrives from the peer or is materialized from invite data.
-        let descriptor = if let Some(existing) = manager.get_descriptor(peer_context_id, peer).await
-        {
-            let mut transport_hints = existing.transport_hints.clone();
-            if let Some(hint) = descriptor_hint_from_addr(addr) {
-                promote_transport_hint(&mut transport_hints, hint);
-            }
-            RendezvousDescriptor {
-                authority_id: existing.authority_id,
-                device_id: device_id.or(existing.device_id),
-                context_id: existing.context_id,
-                transport_hints,
-                handshake_psk_commitment: existing.handshake_psk_commitment,
-                public_key: existing.public_key,
-                valid_from: existing.valid_from.min(now_ms.saturating_sub(1)),
-                valid_until: existing
-                    .valid_until
-                    .max(now_ms.saturating_add(DESCRIPTOR_VALIDITY_WINDOW_MS)),
-                nonce: existing.nonce,
-                nickname_suggestion: existing.nickname_suggestion.clone(),
-            }
-        } else {
-            RendezvousDescriptor {
-                authority_id: peer,
-                device_id,
-                context_id: peer_context_id,
-                transport_hints: descriptor_hint_from_addr(addr).into_iter().collect(),
-                handshake_psk_commitment: [0u8; 32],
-                public_key: [0u8; 32],
-                valid_from: now_ms.saturating_sub(1),
-                valid_until: now_ms.saturating_add(DESCRIPTOR_VALIDITY_WINDOW_MS),
-                nonce: [0u8; 32],
-                nickname_suggestion: None,
-            }
-        };
-        let _ = manager.cache_descriptor(descriptor).await;
-
-        let local_context_id = self.context.authority.default_context_id();
-        if local_context_id != peer_context_id {
-            let mut local_descriptor = manager
-                .get_descriptor(local_context_id, peer)
-                .await
-                .unwrap_or_else(|| RendezvousDescriptor {
-                    authority_id: peer,
-                    device_id,
-                    context_id: local_context_id,
-                    transport_hints: Vec::new(),
-                    handshake_psk_commitment: [0u8; 32],
-                    public_key: [0u8; 32],
-                    valid_from: now_ms.saturating_sub(1),
-                    valid_until: now_ms.saturating_add(DESCRIPTOR_VALIDITY_WINDOW_MS),
-                    nonce: [0u8; 32],
-                    nickname_suggestion: None,
-                });
-            if local_descriptor.device_id.is_none() {
-                local_descriptor.device_id = device_id;
-            }
-            if let Some(hint) = descriptor_hint_from_addr(addr) {
-                promote_transport_hint(&mut local_descriptor.transport_hints, hint);
-            }
-            local_descriptor.valid_from = local_descriptor.valid_from.min(now_ms.saturating_sub(1));
-            local_descriptor.valid_until = local_descriptor
-                .valid_until
-                .max(now_ms.saturating_add(DESCRIPTOR_VALIDITY_WINDOW_MS));
-            let _ = manager.cache_descriptor(local_descriptor).await;
-        }
+        let _ = (effects, now_ms);
+        tracing::debug!(
+            peer = %peer,
+            sender_device_id = ?device_id,
+            sender_hint = ?addr,
+            "Ignoring unauthenticated invitation sender hint for authoritative routing"
+        );
     }
 
     /// Decline an invitation
@@ -2501,16 +2522,14 @@ async fn execute_notify_peer(
             break;
         }
 
-        let (shareable, context_id) = shareable.ok_or_else(|| {
+        let (shareable, _context_id) = shareable.ok_or_else(|| {
             AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
         })?;
 
-        (
-            shareable
-                .to_code()
-                .map_err(|error| AgentError::invalid(error.to_string()))?,
-            context_id,
-        )
+        let _ = shareable;
+        return Err(AgentError::invalid(
+            ShareableInvitationError::MissingSenderProof.to_string(),
+        ));
     };
     let mut metadata = HashMap::new();
     metadata.insert(
@@ -2579,6 +2598,113 @@ async fn execute_notify_peer(
     Ok(())
 }
 
+fn contact_invitation_acceptance_transcript(
+    invitation: &Invitation,
+    acceptor_id: AuthorityId,
+) -> ContactInvitationAcceptanceTranscript<'_> {
+    ContactInvitationAcceptanceTranscript {
+        invitation,
+        acceptor_id,
+    }
+}
+
+fn channel_invitation_acceptance_transcript(
+    invitation: &Invitation,
+    acceptor_id: AuthorityId,
+    context_id: ContextId,
+    channel_id: ChannelId,
+    channel_name: Option<String>,
+) -> ChannelInvitationAcceptanceTranscript<'_> {
+    ChannelInvitationAcceptanceTranscript {
+        invitation,
+        acceptor_id,
+        context_id,
+        channel_id,
+        channel_name,
+    }
+}
+
+async fn sign_invitation_acceptance_transcript<T>(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+    transcript: &T,
+) -> AgentResult<ThresholdSignature>
+where
+    T: SecurityTranscript + ?Sized,
+{
+    let payload = transcript
+        .transcript_bytes()
+        .map_err(|error| AgentError::invalid(error.to_string()))?;
+    effects
+        .sign(SigningContext {
+            authority,
+            operation: SignableOperation::Message {
+                domain: T::DOMAIN_SEPARATOR.to_string(),
+                payload,
+            },
+            approval_context: ApprovalContext::SelfOperation,
+        })
+        .await
+        .map_err(|error| AgentError::effects(error.to_string()))
+}
+
+async fn verify_invitation_acceptance_signature<T>(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+    transcript: &T,
+    signature: &ThresholdSignature,
+) -> AgentResult<()>
+where
+    T: SecurityTranscript + ?Sized,
+{
+    if signature.signature.is_empty() {
+        return Err(AgentError::invalid(
+            "invitation acceptance signature must be non-empty".to_string(),
+        ));
+    }
+    if signature.public_key_package.is_empty() {
+        return Err(AgentError::invalid(
+            "invitation acceptance public key package must be present".to_string(),
+        ));
+    }
+
+    let mode = if signature.is_single_signer() {
+        SigningMode::SingleSigner
+    } else {
+        SigningMode::Threshold
+    };
+    let payload = transcript
+        .transcript_bytes()
+        .map_err(|error| AgentError::invalid(error.to_string()))?;
+    let verification_message = threshold_signing_context_transcript_bytes(
+        &SigningContext {
+            authority,
+            operation: SignableOperation::Message {
+                domain: T::DOMAIN_SEPARATOR.to_string(),
+                payload,
+            },
+            approval_context: ApprovalContext::SelfOperation,
+        },
+        signature.epoch,
+    )
+    .map_err(|error| AgentError::invalid(error.to_string()))?;
+    let verified = effects
+        .verify_signature(
+            &verification_message,
+            signature.signature_bytes(),
+            signature.public_key_bytes(),
+            mode,
+        )
+        .await
+        .map_err(|error| AgentError::effects(error.to_string()))?;
+    if !verified {
+        return Err(AgentError::invalid(
+            "invitation acceptance signature verification failed".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
     TransportReceipt {
         context: receipt.ctx,
@@ -2589,6 +2715,28 @@ fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
         nonce: receipt.nonce.value(),
         prev: receipt.prev.0,
         sig: receipt.sig.into_bytes(),
+    }
+}
+
+fn deterministic_test_transport_receipt(envelope: &TransportEnvelope) -> TransportReceipt {
+    TransportReceipt {
+        context: envelope.context,
+        src: envelope.source,
+        dst: envelope.destination,
+        epoch: 1,
+        cost: 1,
+        nonce: 1,
+        prev: [0u8; 32],
+        sig: vec![1u8],
+    }
+}
+
+fn attach_invitation_test_receipt_if_needed(
+    effects: &AuraEffectSystem,
+    envelope: &mut TransportEnvelope,
+) {
+    if envelope.receipt.is_none() && effects.is_testing() {
+        envelope.receipt = Some(deterministic_test_transport_receipt(envelope));
     }
 }
 

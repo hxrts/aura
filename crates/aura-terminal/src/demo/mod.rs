@@ -45,7 +45,8 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use aura_app::ui::types::GuardianBinding;
-use aura_core::effects::{amp::AmpChannelEffects, StorageCoreEffects};
+use aura_core::effects::transport::{TransportEnvelope, TransportError};
+use aura_core::effects::{amp::AmpChannelEffects, StorageCoreEffects, TransportEffects};
 use aura_core::hash::hash;
 use aura_core::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_simulator::{ComposedSimulationEnvironment, SimulationEffectComposer};
@@ -54,6 +55,16 @@ use std::str::FromStr;
 use crate::ids;
 use crate::tui::effects::{AuraEvent, EffectCommand, EventFilter, EventSubscription};
 use identities::{demo_authority_id, demo_device_id, GuardianAcceptance};
+
+async fn send_demo_raw_envelope_for_simulation<E>(
+    effects: &E,
+    envelope: TransportEnvelope,
+) -> Result<(), TransportError>
+where
+    E: TransportEffects + ?Sized,
+{
+    effects.send_envelope(envelope).await
+}
 
 /// High-level demo progression phases used by the simulator integration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -375,8 +386,6 @@ impl SimulatedAgent {
 
     /// Check for and process incoming transport messages (guardian invitations, etc.)
     pub async fn process_transport_messages(&mut self) -> TerminalResult<Vec<AgentResponse>> {
-        use aura_core::effects::TransportEffects;
-
         let mut responses = Vec::new();
         // Collect guardian bindings to add after releasing the lock
         let mut guardian_bindings_to_add: Vec<(AuthorityId, ContextId)> = Vec::new();
@@ -455,7 +464,12 @@ impl SimulatedAgent {
                                 };
 
                                 // Send through transport effects
-                                if let Err(e) = effects.send_envelope(response_envelope).await {
+                                if let Err(e) = send_demo_raw_envelope_for_simulation(
+                                    effects,
+                                    response_envelope,
+                                )
+                                .await
+                                {
                                     tracing::error!(
                                         "{} failed to send acceptance response: {}",
                                         self.name,

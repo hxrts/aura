@@ -9,7 +9,7 @@ pub use crate::guards::execution::execute_guarded_operation;
 pub use crate::guards::executor::{execute_guarded_choreography, BorrowedEffectInterpreter};
 pub use crate::guards::{
     GuardContextProvider, GuardEffects, GuardOperation, GuardedExecutionResult, JournalCoupler,
-    LeakageBudget, ProtocolGuard,
+    LeakageBudget, ProtocolGuard, ProtocolGuardRequirement, UnauthenticatedAllowed,
 };
 
 /// Composite effect requirements for guard-chain usage.

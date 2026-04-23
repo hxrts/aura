@@ -143,6 +143,16 @@ async fn start_recovery(
         guardians: guardian_authorities.clone(),
         threshold,
         requested_at: current_time,
+        prestate_hash: Hash32::from_value(&serde_json::json!({
+            "account_authority": account_authority,
+            "operation": RecoveryOperation::ReplaceTree {
+                new_public_key: new_public_key_bytes.clone(),
+            },
+            "guardians": &guardian_authorities,
+            "threshold": threshold,
+            "requested_at": current_time,
+        }))
+        .map_err(|e| TerminalError::Operation(format!("Failed to hash recovery prestate: {e}")))?,
         expires_at: None,
     };
 
@@ -325,13 +335,7 @@ async fn approve_recovery(
         key_material: None,
         guardian_shares: vec![share.clone()],
         evidence,
-        signature: aura_core::threshold::ThresholdSignature::new(
-            vec![0; 64],
-            0,
-            vec![0],
-            Vec::new(),
-            0,
-        ),
+        signature: None,
     };
 
     // Persist approval (terminal handles serialization format)

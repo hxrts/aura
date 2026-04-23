@@ -9,18 +9,31 @@ use crate::core::config::SyncConfig;
 use crate::core::{exchange_json_with_peer, sync_session_error};
 use crate::protocols::journal_apply::{JournalApplyService, RemoteJournalDelta};
 use aura_authorization::VerifiedBiscuitToken;
-use aura_core::effects::PhysicalTimeEffects;
+use aura_core::effects::{PhysicalTimeEffects, StorageCoreEffects};
 use aura_core::types::identifiers::ContextId;
 use aura_core::{time::OrderTime, AuraError, AuthorityId, Result};
 use aura_guards::{DecodedIngress, VerifiedIngress};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
-use hex;
+use biscuit_auth::macros::*;
+use biscuit_auth::AuthorizerLimits;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
+
+const NAMESPACED_SYNC_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
+    max_facts: 10_000,
+    max_iterations: 1_000,
+    max_time: Duration::from_millis(50),
+};
+
+fn parse_context_participants(bytes: &[u8]) -> Result<Vec<AuthorityId>> {
+    serde_json::from_slice(bytes)
+        .map_err(|e| AuraError::permission_denied(format!("malformed context participants: {e}")))
+}
 
 /// Namespace-aware synchronization coordinator
 #[derive(Debug, Clone)]
@@ -189,7 +202,7 @@ impl NamespacedSync {
     }
 
     /// Check if peer is authorized to sync authority namespace
-    async fn check_sync_authorization<E: AuraEffects>(
+    async fn check_sync_authorization<E: StorageCoreEffects>(
         &self,
         effects: &E,
         peer: &AuthorityId,
@@ -221,7 +234,7 @@ impl NamespacedSync {
     }
 
     /// Check if peer is a participant in context
-    async fn check_context_participant<E: AuraEffects>(
+    async fn check_context_participant<E: StorageCoreEffects>(
         &self,
         effects: &E,
         peer: &AuthorityId,
@@ -239,26 +252,20 @@ impl NamespacedSync {
                     .await;
             }
             Err(e) => {
-                tracing::debug!("Could not get context participants for {}: {}", context, e);
-                // Fall back to token authorization if storage lookup fails
-                return self
-                    .check_context_authorization_via_token(effects, peer, context)
-                    .await;
+                return Err(AuraError::permission_denied(format!(
+                    "Could not load context participants for {context}: {e}"
+                )));
             }
         };
 
-        // Try to deserialize participants list
-        if let Ok(participants_str) = String::from_utf8(participants_data) {
-            // Simple format: comma-separated authority IDs
-            let peer_str = peer.to_string();
-            if participants_str.contains(&peer_str) {
-                tracing::debug!(
-                    "Peer {} is explicit participant in context {}",
-                    peer,
-                    context
-                );
-                return Ok(true);
-            }
+        let participants = parse_context_participants(&participants_data)?;
+        if participants.iter().any(|participant| participant == peer) {
+            tracing::debug!(
+                "Peer {} is explicit participant in context {}",
+                peer,
+                context
+            );
+            return Ok(true);
         }
 
         // If not in explicit participants list, check via token authorization
@@ -267,7 +274,7 @@ impl NamespacedSync {
     }
 
     /// Check context authorization via token-based capabilities
-    async fn check_context_authorization_via_token<E: AuraEffects>(
+    async fn check_context_authorization_via_token<E: StorageCoreEffects>(
         &self,
         effects: &E,
         peer: &AuthorityId,
@@ -292,7 +299,7 @@ impl NamespacedSync {
             .await
     }
 
-    async fn load_peer_token<E: AuraEffects>(
+    async fn load_peer_token<E: StorageCoreEffects>(
         &self,
         effects: &E,
         peer: &AuthorityId,
@@ -308,7 +315,7 @@ impl NamespacedSync {
         }
     }
 
-    async fn validate_token<E: AuraEffects>(
+    async fn validate_token<E: StorageCoreEffects>(
         &self,
         effects: &E,
         token_bytes: &[u8],
@@ -320,47 +327,72 @@ impl NamespacedSync {
             AuraError::invalid(format!("Biscuit parse failed for {operation}: {e}"))
         })?;
 
-        // Minimal policy: if token parses and targets the namespace, accept.
         let mut authorizer = token
             .authorizer()
             .map_err(|e| AuraError::invalid(format!("Biscuit authorizer build failed: {e}")))?;
-        let scope_str = format!("{scope:?}");
-        // Minimal policy: ensure the token can be evaluated without failing and record the
-        // operation scope for auditing. Additional caveats should be attached by the caller.
+
+        match scope {
+            aura_core::types::scope::ResourceScope::Authority { authority_id, .. } => {
+                if operation != "sync:authority" {
+                    return Ok(false);
+                }
+                let authority = authority_id.to_string();
+                authorizer
+                    .add_policy(policy!(
+                        "allow if capability({operation}), sync_authority({authority})"
+                    ))
+                    .map_err(|e| {
+                        AuraError::invalid(format!("Biscuit authority sync policy failed: {e}"))
+                    })?;
+            }
+            aura_core::types::scope::ResourceScope::Context { context_id, .. } => {
+                if operation != "sync:context" {
+                    return Ok(false);
+                }
+                let context = context_id.to_string();
+                authorizer
+                    .add_policy(policy!(
+                        "allow if capability({operation}), sync_context({context})"
+                    ))
+                    .map_err(|e| {
+                        AuraError::invalid(format!("Biscuit context sync policy failed: {e}"))
+                    })?;
+            }
+            aura_core::types::scope::ResourceScope::Storage { .. } => return Ok(false),
+        }
+
         authorizer
-            .allow()
-            .map_err(|e| AuraError::invalid(format!("Biscuit allow rule failed: {e}")))?;
-        authorizer
-            .authorize()
+            .authorize_with_limits(NAMESPACED_SYNC_BISCUIT_LIMITS)
             .map_err(|e| AuraError::permission_denied(format!("Biscuit evaluation failed: {e}")))?;
         tracing::debug!(
             "Validated Biscuit token for {} on scope {} (root verified)",
             operation,
-            scope_str
+            scope.resource_pattern()
         );
         Ok(true)
     }
 
-    async fn load_root_public_key<E: AuraEffects>(
+    async fn load_root_public_key<E: StorageCoreEffects>(
         &self,
         effects: &E,
     ) -> Result<biscuit_auth::PublicKey> {
-        if let Ok(Some(bytes)) = effects.retrieve("biscuit_root_public_key").await {
-            if bytes.len() == 32 {
-                if let Ok(pk) = biscuit_auth::PublicKey::from_bytes(bytes.as_slice()) {
-                    return Ok(pk);
-                }
-            }
+        let bytes = effects
+            .retrieve("biscuit_root_public_key")
+            .await
+            .map_err(|e| {
+                AuraError::permission_denied(format!("load sync Biscuit root key failed: {e}"))
+            })?
+            .ok_or_else(|| AuraError::permission_denied("missing sync Biscuit root key"))?;
+
+        if bytes.len() != 32 {
+            return Err(AuraError::invalid(format!(
+                "sync Biscuit root key must be 32 bytes, got {}",
+                bytes.len()
+            )));
         }
 
-        // Development fallback key
-        let dev_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
-        let dev_bytes = hex::decode(dev_key_hex)
-            .map_err(|e| AuraError::invalid(format!("decode dev root key: {e}")))?;
-        let mut key_array = [0u8; 32];
-        key_array.copy_from_slice(&dev_bytes[..32]);
-        biscuit_auth::PublicKey::from_bytes(&key_array)
-            .map_err(|e| AuraError::invalid(format!("load dev root key: {e}")))
+        biscuit_auth::PublicKey::from_bytes(bytes.as_slice())
+            .map_err(|e| AuraError::invalid(format!("load sync Biscuit root key failed: {e}")))
     }
 
     /// Process incoming sync request with pagination support
@@ -581,9 +613,67 @@ impl NamespacedAntiEntropy {
 mod tests {
     use super::*;
     use crate::protocols::journal_apply::apply_path_hits_for_tests;
+    use aura_core::effects::StorageCoreEffects;
     use aura_core::time::{OrderTime, TimeStamp};
     use aura_core::Hash32;
     use aura_journal::{FactContent, SnapshotFact};
+
+    enum SyncTokenScope {
+        Authority(AuthorityId),
+        Context(ContextId),
+    }
+
+    fn sync_for_namespace(namespace: JournalNamespace) -> NamespacedSync {
+        let journal = Arc::new(RwLock::new(Journal::new(namespace.clone())));
+        NamespacedSync::new(namespace, journal)
+    }
+
+    fn token_with_sync_facts(
+        capability: &str,
+        scope: SyncTokenScope,
+    ) -> (biscuit_auth::KeyPair, Vec<u8>) {
+        let keypair = biscuit_auth::KeyPair::new();
+        let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
+        builder
+            .add_fact(fact!("capability({capability})"))
+            .expect("add capability fact");
+        match scope {
+            SyncTokenScope::Authority(authority_id) => {
+                let authority = authority_id.to_string();
+                builder
+                    .add_fact(fact!("sync_authority({authority})"))
+                    .expect("add authority scope fact");
+            }
+            SyncTokenScope::Context(context_id) => {
+                let context = context_id.to_string();
+                builder
+                    .add_fact(fact!("sync_context({context})"))
+                    .expect("add context scope fact");
+            }
+        }
+        let token = builder.build(&keypair).expect("build sync token");
+        let token_bytes = token.to_vec().expect("serialize sync token");
+        (keypair, token_bytes)
+    }
+
+    async fn store_sync_root_and_peer_token(
+        effects: &aura_testkit::mock_effects::MockEffects,
+        peer: AuthorityId,
+        keypair: &biscuit_auth::KeyPair,
+        token_bytes: Vec<u8>,
+    ) {
+        effects
+            .store(
+                "biscuit_root_public_key",
+                keypair.public().to_bytes().to_vec(),
+            )
+            .await
+            .expect("store sync root");
+        effects
+            .store(&format!("peer_tokens/{peer}"), token_bytes)
+            .await
+            .expect("store peer token");
+    }
 
     #[aura_macros::aura_test]
     async fn test_namespace_sync_creation() {
@@ -636,5 +726,129 @@ mod tests {
 
         assert_eq!(stats.facts_received, 1);
         assert!(apply_path_hits_for_tests() > before);
+    }
+
+    #[aura_macros::aura_test]
+    async fn namespaced_sync_authorizes_exact_authority_capability_and_scope() {
+        let peer = AuthorityId::new_from_entropy([10u8; 32]);
+        let authority = AuthorityId::new_from_entropy([11u8; 32]);
+        let sync = sync_for_namespace(JournalNamespace::Authority(authority));
+        let effects = aura_testkit::mock_effects::MockEffects::deterministic();
+        let (keypair, token_bytes) =
+            token_with_sync_facts("sync:authority", SyncTokenScope::Authority(authority));
+        store_sync_root_and_peer_token(&effects, peer, &keypair, token_bytes).await;
+
+        assert!(sync
+            .check_sync_authorization(&effects, &peer, &authority)
+            .await
+            .expect("exact sync authority token authorizes"));
+    }
+
+    #[aura_macros::aura_test]
+    async fn namespaced_sync_denies_wrong_authority_capability() {
+        let peer = AuthorityId::new_from_entropy([12u8; 32]);
+        let authority = AuthorityId::new_from_entropy([13u8; 32]);
+        let sync = sync_for_namespace(JournalNamespace::Authority(authority));
+        let effects = aura_testkit::mock_effects::MockEffects::deterministic();
+        let (keypair, token_bytes) =
+            token_with_sync_facts("read", SyncTokenScope::Authority(authority));
+        store_sync_root_and_peer_token(&effects, peer, &keypair, token_bytes).await;
+
+        assert!(sync
+            .check_sync_authorization(&effects, &peer, &authority)
+            .await
+            .is_err());
+    }
+
+    #[aura_macros::aura_test]
+    async fn namespaced_sync_denies_wrong_authority_scope() {
+        let peer = AuthorityId::new_from_entropy([14u8; 32]);
+        let authority = AuthorityId::new_from_entropy([15u8; 32]);
+        let other_authority = AuthorityId::new_from_entropy([16u8; 32]);
+        let sync = sync_for_namespace(JournalNamespace::Authority(authority));
+        let effects = aura_testkit::mock_effects::MockEffects::deterministic();
+        let (keypair, token_bytes) =
+            token_with_sync_facts("sync:authority", SyncTokenScope::Authority(other_authority));
+        store_sync_root_and_peer_token(&effects, peer, &keypair, token_bytes).await;
+
+        assert!(sync
+            .check_sync_authorization(&effects, &peer, &authority)
+            .await
+            .is_err());
+    }
+
+    #[aura_macros::aura_test]
+    async fn namespaced_sync_missing_root_key_fails_closed() {
+        let peer = AuthorityId::new_from_entropy([17u8; 32]);
+        let authority = AuthorityId::new_from_entropy([18u8; 32]);
+        let sync = sync_for_namespace(JournalNamespace::Authority(authority));
+        let effects = aura_testkit::mock_effects::MockEffects::deterministic();
+        let (_keypair, token_bytes) =
+            token_with_sync_facts("sync:authority", SyncTokenScope::Authority(authority));
+        effects
+            .store(&format!("peer_tokens/{peer}"), token_bytes)
+            .await
+            .expect("store peer token");
+
+        assert!(sync
+            .check_sync_authorization(&effects, &peer, &authority)
+            .await
+            .is_err());
+    }
+
+    #[aura_macros::aura_test]
+    async fn namespaced_sync_denies_wrong_context_scope() {
+        let peer = AuthorityId::new_from_entropy([19u8; 32]);
+        let context = ContextId::new_from_entropy([20u8; 32]);
+        let other_context = ContextId::new_from_entropy([21u8; 32]);
+        let sync = sync_for_namespace(JournalNamespace::Context(context));
+        let effects = aura_testkit::mock_effects::MockEffects::deterministic();
+        let (keypair, token_bytes) =
+            token_with_sync_facts("sync:context", SyncTokenScope::Context(other_context));
+        store_sync_root_and_peer_token(&effects, peer, &keypair, token_bytes).await;
+
+        assert!(sync
+            .check_context_authorization_via_token(&effects, &peer, &context)
+            .await
+            .is_err());
+    }
+
+    #[aura_macros::aura_test]
+    async fn context_participants_are_structured_and_exact() {
+        let peer = AuthorityId::new_from_entropy([22u8; 32]);
+        let other_peer = AuthorityId::new_from_entropy([23u8; 32]);
+        let context = ContextId::new_from_entropy([24u8; 32]);
+        let sync = sync_for_namespace(JournalNamespace::Context(context));
+        let effects = aura_testkit::mock_effects::MockEffects::deterministic();
+        let participants = serde_json::to_vec(&vec![other_peer]).expect("serialize participants");
+        effects
+            .store(&format!("context_participants/{context}"), participants)
+            .await
+            .expect("store participant list");
+
+        assert!(!sync
+            .check_context_participant(&effects, &peer, &context)
+            .await
+            .expect("well-formed non-member list falls through to denied token auth"));
+    }
+
+    #[aura_macros::aura_test]
+    async fn context_participants_reject_legacy_comma_strings() {
+        let peer = AuthorityId::new_from_entropy([25u8; 32]);
+        let context = ContextId::new_from_entropy([26u8; 32]);
+        let sync = sync_for_namespace(JournalNamespace::Context(context));
+        let effects = aura_testkit::mock_effects::MockEffects::deterministic();
+        effects
+            .store(
+                &format!("context_participants/{context}"),
+                format!("{peer},{}", AuthorityId::new_from_entropy([27u8; 32])).into_bytes(),
+            )
+            .await
+            .expect("store malformed participant list");
+
+        assert!(sync
+            .check_context_participant(&effects, &peer, &context)
+            .await
+            .is_err());
     }
 }

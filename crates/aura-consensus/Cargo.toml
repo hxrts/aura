@@ -29,6 +29,7 @@ aura-signature = { package = "hxrts-aura-signature", path = "../aura-signature",
 telltale = { workspace = true }
 
 frost-ed25519 = { workspace = true }
+frost-core = { workspace = true }
 curve25519-dalek = { workspace = true }
 ed25519-dalek = { workspace = true }
 getrandom = { workspace = true }

@@ -45,13 +45,6 @@ pub struct Cut {
     pub cid: Hash32,
 }
 
-/// Partial signature share for snapshot approval (effect interface version)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Partial {
-    pub signature_share: Vec<u8>,
-    pub participant_id: crate::types::identifiers::DeviceId,
-}
-
 /// Immutable snapshot containing compacted tree state (effect interface version)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -304,47 +297,6 @@ pub trait TreeOperationEffects: Send + Sync {
     ///
     /// Caller must have `CanProposeSnapshot` capability.
     async fn propose_snapshot(&self, cut: Cut) -> Result<ProposalId, AuraError>;
-
-    /// Add partial approval to a snapshot proposal
-    ///
-    /// Provides a FROST signature share approving the snapshot proposal.
-    ///
-    /// ## Parameters
-    ///
-    /// - `proposal_id`: The proposal being approved
-    ///
-    /// ## Returns
-    ///
-    /// A `Partial` containing the caller's signature share.
-    ///
-    /// ## Authorization
-    ///
-    /// Caller must have signing authority in the current threshold policy.
-    async fn approve_snapshot(&self, proposal_id: ProposalId) -> Result<Partial, AuraError>;
-
-    /// Finalize a snapshot after threshold approval
-    ///
-    /// Aggregates partial signatures and creates the snapshot if threshold is met.
-    ///
-    /// ## Parameters
-    ///
-    /// - `proposal_id`: The proposal to finalize
-    ///
-    /// ## Returns
-    ///
-    /// A `Snapshot` containing the compacted tree state.
-    ///
-    /// ## Behavior
-    ///
-    /// - Verifies threshold of partial signatures collected
-    /// - Aggregates signatures using FROST
-    /// - Creates immutable snapshot
-    /// - Does NOT automatically prune OpLog (separate operation)
-    ///
-    /// ## Authorization
-    ///
-    /// Any device can attempt finalization; verification is cryptographic.
-    async fn finalize_snapshot(&self, proposal_id: ProposalId) -> Result<Snapshot, AuraError>;
 
     /// Apply a snapshot to local state
     ///

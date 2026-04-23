@@ -464,33 +464,27 @@ impl Default for AuthService {
 // Helper Functions
 // =============================================================================
 
-/// Generate a short hex representation of an AuthorityId
-fn authority_hex_short(id: AuthorityId) -> String {
-    let bytes = id.to_bytes();
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3]
-    )
-}
-
 /// Generate a unique session ID based on the snapshot
 fn generate_session_id(snapshot: &GuardSnapshot) -> String {
-    format!(
-        "session_{}_{}_{}",
-        authority_hex_short(snapshot.authority_id),
-        snapshot.epoch,
-        snapshot.now_ms
-    )
+    generate_freshness_id("session", snapshot)
 }
 
 /// Generate a unique request ID for guardian approval
 fn generate_request_id(snapshot: &GuardSnapshot) -> String {
-    format!(
-        "guardian_req_{}_{}_{}",
-        authority_hex_short(snapshot.authority_id),
-        snapshot.epoch,
-        snapshot.now_ms
-    )
+    generate_freshness_id("guardian_req", snapshot)
+}
+
+fn generate_freshness_id(prefix: &str, snapshot: &GuardSnapshot) -> String {
+    let mut material = Vec::with_capacity(prefix.len() + 16 + 32 + 32 + 8);
+    material.extend_from_slice(prefix.as_bytes());
+    material.extend_from_slice(&snapshot.freshness_nonce);
+    material.extend_from_slice(&snapshot.authority_id.to_bytes());
+    if let Some(context_id) = snapshot.context_id {
+        material.extend_from_slice(&context_id.to_bytes());
+    }
+    material.extend_from_slice(&snapshot.epoch.to_le_bytes());
+    let digest = aura_core::Hash32::new(aura_core::hash::hash(&material));
+    format!("{prefix}_{}", digest.to_hex())
 }
 
 // =============================================================================

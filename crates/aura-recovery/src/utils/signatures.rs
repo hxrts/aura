@@ -17,7 +17,6 @@
 //! 5. Threshold is met when enough guardians have submitted valid signatures
 
 use crate::types::RecoveryShare;
-use aura_core::threshold::ThresholdSignature;
 
 /// Utility functions for signature operations in recovery ceremonies.
 ///
@@ -27,25 +26,6 @@ use aura_core::threshold::ThresholdSignature;
 pub struct SignatureUtils;
 
 impl SignatureUtils {
-    /// Get the signature from a recovery share as a ThresholdSignature.
-    ///
-    /// Each share contains an individual guardian's signature from their
-    /// authority's FROST keys.
-    pub fn share_signature(share: &RecoveryShare) -> ThresholdSignature {
-        ThresholdSignature::new(
-            share.partial_signature.clone(),
-            1,          // Single signer (the guardian's authority)
-            vec![1],    // Signer index
-            Vec::new(), // Public key would need to be looked up
-            0,          // Epoch
-        )
-    }
-
-    /// Create an empty threshold signature for error cases.
-    pub fn empty() -> ThresholdSignature {
-        ThresholdSignature::new(vec![0u8; 64], 0, Vec::new(), Vec::new(), 0)
-    }
-
     /// Validate that a recovery share has a properly-sized signature.
     ///
     /// A valid Ed25519 signature is exactly 64 bytes. FROST threshold signatures
@@ -98,23 +78,6 @@ mod tests {
             partial_signature: signature,
             issued_at_ms: 1234567890,
         }
-    }
-
-    #[test]
-    fn test_share_signature() {
-        let share = create_test_share(vec![1; 64]);
-        let sig = SignatureUtils::share_signature(&share);
-
-        assert_eq!(sig.signature_bytes().len(), 64);
-        assert!(sig.is_single_signer());
-    }
-
-    #[test]
-    fn test_empty_signature() {
-        let signature = SignatureUtils::empty();
-
-        assert_eq!(signature.signature_bytes().len(), 64);
-        assert!(signature.signers.is_empty());
     }
 
     #[test]

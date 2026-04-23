@@ -38,7 +38,7 @@ use aura_core::{execute_with_timeout_budget, AuraError, AuthorityId, ContextId, 
 use aura_effects::{
     crypto::RealCryptoHandler,
     encrypted_storage::{EncryptedStorage, EncryptedStorageConfig},
-    secure::RealSecureStorageHandler,
+    secure::ProductionSecureStorageHandler,
     storage::FilesystemStorageHandler,
     time::{OrderClockHandler, PhysicalTimeHandler},
 };
@@ -103,6 +103,64 @@ const CHOREO_FLOW_COST_PER_KB: u32 = 1;
 const AMP_CONTENT_TYPE: &str = "application/aura-amp";
 const TEST_SEED_DERIVATION_DOMAIN: &str = "aura:test-seed:v1";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AuthorizationRuntimeMode {
+    Production,
+    Testing,
+    Harness,
+    Simulation,
+}
+
+impl AuthorizationRuntimeMode {
+    fn from_runtime(execution_mode: ExecutionMode, harness_mode_enabled: bool) -> Self {
+        if harness_mode_enabled {
+            return Self::Harness;
+        }
+        match execution_mode {
+            ExecutionMode::Production => Self::Production,
+            ExecutionMode::Testing => Self::Testing,
+            ExecutionMode::Simulation { .. } => Self::Simulation,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct AuthorizationRuntimeConfig {
+    mode: AuthorizationRuntimeMode,
+    authority_id: AuthorityId,
+    root_public_key: PublicKey,
+}
+
+impl AuthorizationRuntimeConfig {
+    fn from_verifying_key(
+        authority_id: AuthorityId,
+        execution_mode: ExecutionMode,
+        harness_mode_enabled: bool,
+        verifying_key: &[u8],
+    ) -> Result<Self, AuraError> {
+        if verifying_key.is_empty() {
+            return Err(AuraError::invalid(
+                "Biscuit authorization root public key is required",
+            ));
+        }
+        if verifying_key.iter().all(|byte| *byte == 0) {
+            return Err(AuraError::invalid(
+                "Biscuit authorization root public key must not be all zero",
+            ));
+        }
+        let root_public_key = PublicKey::from_bytes(verifying_key).map_err(|error| {
+            AuraError::invalid(format!(
+                "Biscuit authorization root public key is invalid: {error}"
+            ))
+        })?;
+        Ok(Self {
+            mode: AuthorizationRuntimeMode::from_runtime(execution_mode, harness_mode_enabled),
+            authority_id,
+            root_public_key,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TestSeedUsage {
     identity: String,
@@ -144,7 +202,11 @@ pub struct AuraEffectSystem {
 
     // === Storage Infrastructure ===
     storage_handler: Arc<
-        EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
+        EncryptedStorage<
+            FilesystemStorageHandler,
+            RealCryptoHandler,
+            ProductionSecureStorageHandler,
+        >,
     >,
     tree_handler: PersistentTreeHandler,
     sync_handler: PersistentSyncHandler,
@@ -159,7 +221,11 @@ pub struct AuraEffectSystem {
         aura_effects::crypto::RealCryptoHandler,
     >,
     leakage_handler: aura_effects::leakage::ProductionLeakageHandler<
-        EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
+        EncryptedStorage<
+            FilesystemStorageHandler,
+            RealCryptoHandler,
+            ProductionSecureStorageHandler,
+        >,
     >,
 
     // === Reactive System ===
@@ -339,6 +405,10 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
     ) -> Self {
         Self::maybe_start_deadlock_detector();
+        assert!(
+            !execution_mode.is_production() || crypto_seed.is_none(),
+            "production effect system must not use seeded crypto"
+        );
         let authority = authority_id;
         let device_id = config.device_id();
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
@@ -354,9 +424,13 @@ impl AuraEffectSystem {
             Some(seed) => CryptoRng::deterministic(StdRng::from_seed(seed)),
             None => CryptoRng::thread_local(),
         };
-        let secure_storage_handler = Arc::new(RealSecureStorageHandler::with_base_path(
-            config.storage.base_path.clone(),
-        ));
+        let secure_storage_handler = Arc::new(if execution_mode.is_production() {
+            ProductionSecureStorageHandler::for_production(config.storage.base_path.clone())
+        } else {
+            ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+                config.storage.base_path.clone(),
+            )
+        });
         let crypto = CryptoSubsystem::from_parts(
             crypto_handler.clone(),
             random_rng,
@@ -371,6 +445,8 @@ impl AuraEffectSystem {
             &crypto_handler,
             &journal_verifying_key,
             &auth_time,
+            execution_mode,
+            harness_mode_enabled,
         );
         let encrypted_storage_config = {
             let mut cfg = EncryptedStorageConfig::default()
@@ -830,19 +906,25 @@ impl AuraEffectSystem {
         wait_for_batch.await;
     }
 
-    pub fn requeue_envelope(&self, envelope: TransportEnvelope) {
-        self.queue_runtime_envelope(envelope);
+    pub fn requeue_envelope(
+        &self,
+        envelope: TransportEnvelope,
+    ) -> crate::runtime::subsystems::transport::QueueEnvelopeOutcome {
+        self.queue_runtime_envelope(envelope)
     }
 
-    pub(crate) fn queue_runtime_envelope(&self, envelope: TransportEnvelope) {
+    pub(crate) fn queue_runtime_envelope(
+        &self,
+        envelope: TransportEnvelope,
+    ) -> crate::runtime::subsystems::transport::QueueEnvelopeOutcome {
         if let Some(session_id) = Self::choreography_session_id_from_envelope(&envelope) {
             self.choreography_state
                 .write()
                 .queue_session_envelope(session_id, envelope);
-            return;
+            return crate::runtime::subsystems::transport::QueueEnvelopeOutcome::Queued;
         }
 
-        self.transport.queue_envelope(envelope);
+        self.transport.queue_envelope(envelope)
     }
 
     fn choreography_session_id_from_envelope(
@@ -1632,13 +1714,25 @@ impl AuraEffectSystem {
         crypto_handler: &RealCryptoHandler,
         verifying_key: &[u8],
         time_handler: &PhysicalTimeHandler,
+        execution_mode: ExecutionMode,
+        harness_mode_enabled: bool,
     ) -> aura_authorization::effects::WotAuthorizationHandler<RealCryptoHandler> {
-        let public_key = PublicKey::from_bytes(verifying_key)
-            .expect("Biscuit authorization requires a configured root public key");
+        let runtime_config = AuthorizationRuntimeConfig::from_verifying_key(
+            authority,
+            execution_mode,
+            harness_mode_enabled,
+            verifying_key,
+        )
+        .expect("Biscuit authorization requires a valid configured root public key");
+        tracing::debug!(
+            authorization_mode = ?runtime_config.mode,
+            authority = %runtime_config.authority_id,
+            "Initialized Biscuit authorization runtime"
+        );
         let handler = aura_authorization::effects::WotAuthorizationHandler::new(
             crypto_handler.clone(),
-            public_key,
-            authority,
+            runtime_config.root_public_key,
+            runtime_config.authority_id,
         );
         let time_handler = time_handler.clone();
         handler.with_time_provider(Arc::new(move || time_handler.physical_time_now_ms() / 1000))
@@ -1650,7 +1744,11 @@ impl AuraEffectSystem {
     ) -> aura_journal::JournalHandler<
         RealCryptoHandler,
         Arc<
-            EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
+            EncryptedStorage<
+                FilesystemStorageHandler,
+                RealCryptoHandler,
+                ProductionSecureStorageHandler,
+            >,
         >,
         JournalBiscuitAuthorizationHandler,
     > {
@@ -1671,7 +1769,7 @@ impl AuraEffectSystem {
             },
         );
 
-        aura_journal::JournalHandlerFactory::create(
+        let handler = aura_journal::JournalHandlerFactory::create(
             self.authority_id,
             self.crypto.handler().clone(),
             self.storage_handler.clone(),
@@ -1683,7 +1781,14 @@ impl AuraEffectSystem {
                     .to_vec(),
             ),
             None, // Fact registry is accessed via AuraEffectSystem::fact_registry() instead
-        )
+        );
+        if self.execution_mode.is_deterministic() {
+            handler.with_unsigned_receipt_bypass_for_simulation(
+                "deterministic runtime accepts unsigned simulation receipts explicitly",
+            )
+        } else {
+            handler
+        }
     }
 }
 
@@ -1696,6 +1801,67 @@ mod tests {
     use aura_protocol::amp::AmpJournalEffects;
     use aura_protocol::effects::SyncEffects;
     use aura_protocol::effects::TreeEffects;
+
+    #[test]
+    fn authorization_runtime_config_rejects_missing_or_invalid_root_keys() {
+        let authority = AuthorityId::new_from_entropy([0xA5; 32]);
+
+        assert!(AuthorizationRuntimeConfig::from_verifying_key(
+            authority,
+            ExecutionMode::Production,
+            false,
+            &[],
+        )
+        .is_err());
+        assert!(AuthorizationRuntimeConfig::from_verifying_key(
+            authority,
+            ExecutionMode::Production,
+            false,
+            &[0; 32],
+        )
+        .is_err());
+        assert!(AuthorizationRuntimeConfig::from_verifying_key(
+            authority,
+            ExecutionMode::Production,
+            false,
+            &[1, 2, 3],
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn authorization_runtime_config_records_runtime_mode() {
+        let authority = AuthorityId::new_from_entropy([0xA6; 32]);
+        let issuer = aura_authorization::TokenAuthority::new(authority);
+        let root_key = issuer.root_public_key().to_bytes();
+
+        let production = AuthorizationRuntimeConfig::from_verifying_key(
+            authority,
+            ExecutionMode::Production,
+            false,
+            &root_key,
+        )
+        .expect("production root key should parse");
+        assert_eq!(production.mode, AuthorizationRuntimeMode::Production);
+
+        let harness = AuthorizationRuntimeConfig::from_verifying_key(
+            authority,
+            ExecutionMode::Testing,
+            true,
+            &root_key,
+        )
+        .expect("harness root key should parse");
+        assert_eq!(harness.mode, AuthorizationRuntimeMode::Harness);
+
+        let simulation = AuthorizationRuntimeConfig::from_verifying_key(
+            authority,
+            ExecutionMode::Simulation { seed: 7 },
+            false,
+            &root_key,
+        )
+        .expect("simulation root key should parse");
+        assert_eq!(simulation.mode, AuthorizationRuntimeMode::Simulation);
+    }
 
     #[tokio::test]
     async fn test_frost_integration_through_effect_system() {
@@ -1850,6 +2016,39 @@ mod tests {
             aura_core::threshold::AgreementMode::Provisional
         );
     }
+
+    #[tokio::test]
+    async fn test_bootstrapped_authority_signs_and_exposes_public_key_package() {
+        let config = AgentConfig::default();
+        let effect_system = crate::testing::simulation_effect_system(&config);
+        let authority = AuthorityId::new_from_entropy([34u8; 32]);
+
+        let bootstrapped_public_key = effect_system
+            .bootstrap_authority(&authority)
+            .await
+            .expect("bootstrap should succeed");
+
+        assert!(effect_system.has_signing_capability(&authority).await);
+        assert_eq!(
+            effect_system.public_key_package(&authority).await,
+            Some(bootstrapped_public_key.clone())
+        );
+
+        let signature = effect_system
+            .sign(aura_core::threshold::SigningContext {
+                authority,
+                operation: aura_core::threshold::SignableOperation::Message {
+                    domain: "aura.test.threshold-signing".to_string(),
+                    payload: b"bootstrap-signature".to_vec(),
+                },
+                approval_context: aura_core::threshold::ApprovalContext::SelfOperation,
+            })
+            .await
+            .expect("bootstrapped authority should sign");
+
+        assert!(signature.is_single_signer());
+        assert_eq!(signature.public_key_package, bootstrapped_public_key);
+    }
 }
 
 // Note: RelationshipFormationEffects is a composite trait that is automatically implemented
@@ -1912,7 +2111,7 @@ impl AuraEffectSystem {
 
         // Delete participant shares for this epoch
         let shares_location =
-            SecureStorageLocation::new("participant_shares", format!("{}/{}", authority, epoch));
+            SecureStorageLocation::new("participant_shares", format!("{}:{}", authority, epoch));
         let _ = self
             .crypto
             .secure_storage()

@@ -19,6 +19,7 @@ use crate::harness::publication::{
     initialize_harness_publication_state, published_ui_snapshot_value,
     refresh_semantic_submit_surface, semantic_submit_surface_state, PublicationBindingMode,
 };
+use crate::shell::storage::harness_session;
 use crate::task_owner::shared_web_task_owner;
 
 fn current_controller() -> Result<Arc<UiController>, JsValue> {
@@ -27,10 +28,14 @@ fn current_controller() -> Result<Arc<UiController>, JsValue> {
 }
 
 pub(crate) fn install_page_owned_mutation_queues(window: &web_sys::Window) -> Result<(), JsValue> {
+    let _session = harness_session()
+        .ok_or_else(|| JsValue::from_str("authenticated harness session required"))?;
     page_owned_queue::install(window)
 }
 
 pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
+    let _session = harness_session()
+        .ok_or_else(|| JsValue::from_str("authenticated harness session required"))?;
     let harness = Object::new();
     let observe = Object::new();
 

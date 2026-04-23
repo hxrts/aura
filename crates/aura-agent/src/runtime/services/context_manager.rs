@@ -9,6 +9,9 @@ use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
+const CONTEXT_ID_DERIVATION_DOMAIN: &[u8] = b"aura.context-manager.context-id.v1";
+const MAX_CONTEXT_ID_GENERATION_ATTEMPTS: usize = 16;
+
 #[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ContextManagerCommand {
@@ -77,6 +80,10 @@ pub enum ContextError {
     },
     #[error("Context already exists: {0:?}")]
     AlreadyExists(ContextId),
+    #[error("Context id generation exhausted for authority: {0:?}")]
+    IdGenerationExhausted(AuthorityId),
+    #[error("Context nonce exhausted for authority: {0:?}")]
+    NonceExhausted(AuthorityId),
 }
 
 /// Context manager service
@@ -99,6 +106,7 @@ pub struct ContextManager {
 struct ContextManagerState {
     contexts: HashMap<ContextId, Context>,
     authority_contexts: HashMap<AuthorityId, Vec<ContextId>>,
+    next_context_nonce: HashMap<AuthorityId, u64>,
 }
 
 impl ContextManagerState {
@@ -178,25 +186,25 @@ impl ContextManager {
         authority: AuthorityId,
         timestamp: u64,
     ) -> Result<ContextId, ContextError> {
-        // Generate a new context ID
-        let context_id =
-            ContextId::new_from_entropy(aura_core::hash::hash(&timestamp.to_le_bytes()));
-
-        let context = Context::new(context_id, authority, timestamp);
-
         with_state_mut_validated(
             &self.state,
             |state| {
-                if state.contexts.contains_key(&context_id) {
-                    return Err(ContextError::AlreadyExists(context_id));
+                for _ in 0..MAX_CONTEXT_ID_GENERATION_ATTEMPTS {
+                    let context_id = state.next_context_id(authority, timestamp)?;
+                    if state.contexts.contains_key(&context_id) {
+                        continue;
+                    }
+
+                    let context = Context::new(context_id, authority, timestamp);
+                    state.contexts.insert(context_id, context);
+                    state
+                        .authority_contexts
+                        .entry(authority)
+                        .or_default()
+                        .push(context_id);
+                    return Ok(context_id);
                 }
-                state.contexts.insert(context_id, context);
-                state
-                    .authority_contexts
-                    .entry(authority)
-                    .or_default()
-                    .push(context_id);
-                Ok(context_id)
+                Err(ContextError::IdGenerationExhausted(authority))
             },
             |state| state.validate(),
         )
@@ -342,5 +350,89 @@ impl ContextManager {
             .filter(|(_, ctx)| ctx.status == ContextStatus::Active)
             .map(|(id, _)| *id)
             .collect())
+    }
+}
+
+impl ContextManagerState {
+    fn next_context_id(
+        &mut self,
+        authority: AuthorityId,
+        timestamp: u64,
+    ) -> Result<ContextId, ContextError> {
+        let nonce = self.next_context_nonce.entry(authority).or_default();
+        let current_nonce = *nonce;
+        *nonce = nonce
+            .checked_add(1)
+            .ok_or(ContextError::NonceExhausted(authority))?;
+        Ok(derive_context_id(authority, timestamp, current_nonce))
+    }
+}
+
+fn derive_context_id(authority: AuthorityId, timestamp: u64, nonce: u64) -> ContextId {
+    let mut hasher = aura_core::hash::hasher();
+    hasher.update(CONTEXT_ID_DERIVATION_DOMAIN);
+    hasher.update(authority.to_string().as_bytes());
+    hasher.update(&timestamp.to_le_bytes());
+    hasher.update(&nonce.to_le_bytes());
+    ContextId::new_from_entropy(hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[tokio::test]
+    async fn same_timestamp_different_authorities_produce_distinct_context_ids() {
+        let manager = ContextManager::new(&AgentConfig::default());
+        let timestamp = 1_700_000_000_000;
+        let first_authority = AuthorityId::new_from_entropy([11u8; 32]);
+        let second_authority = AuthorityId::new_from_entropy([12u8; 32]);
+
+        let first = manager
+            .create_context(first_authority, timestamp)
+            .await
+            .expect("first context");
+        let second = manager
+            .create_context(second_authority, timestamp)
+            .await
+            .expect("second context");
+        let timestamp_only =
+            ContextId::new_from_entropy(aura_core::hash::hash(&timestamp.to_le_bytes()));
+
+        assert_ne!(first, second);
+        assert_ne!(first, timestamp_only);
+        assert_ne!(second, timestamp_only);
+    }
+
+    #[tokio::test]
+    async fn repeated_same_authority_same_timestamp_uses_monotonic_nonce() {
+        let manager = ContextManager::new(&AgentConfig::default());
+        let authority = AuthorityId::new_from_entropy([13u8; 32]);
+        let timestamp = 1_700_000_000_001;
+
+        let first = manager
+            .create_context(authority, timestamp)
+            .await
+            .expect("first context");
+        let second = manager
+            .create_context(authority, timestamp)
+            .await
+            .expect("second context");
+        let third = manager
+            .create_context(authority, timestamp)
+            .await
+            .expect("third context");
+
+        let unique: HashSet<_> = [first, second, third].into_iter().collect();
+        assert_eq!(unique.len(), 3);
+        assert_eq!(
+            manager
+                .list_contexts_for_authority(authority)
+                .await
+                .expect("authority contexts")
+                .len(),
+            3
+        );
     }
 }

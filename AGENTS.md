@@ -39,6 +39,7 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 | Test | `just test` | Run all tests |
 | Test | `just test-crate <name>` | Test specific crate |
 | Test | `just ci-dry-run` | Local CI checks |
+| Security | `just ci-security-audit` | Dependency advisory policy gate (`cargo deny` with RustSec fetch) |
 | Nix | `nix build` | Hermetic build |
 | Nix | `nix flake check` | Hermetic tests |
 | Nix | `crate2nix generate` | Regenerate after dep changes |

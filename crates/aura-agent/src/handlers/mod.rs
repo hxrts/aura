@@ -43,8 +43,8 @@ pub use ota_activation_service::OtaActivationServiceApi;
 
 // Re-export recovery types for public API
 pub use recovery::{
-    GuardianApproval, RecoveryHandler, RecoveryOperation, RecoveryRequest, RecoveryResult,
-    RecoveryState,
+    recovery_guardian_public_key_storage_key, GuardianApproval, RecoveryHandler, RecoveryOperation,
+    RecoveryRequest, RecoveryResult, RecoveryState,
 };
 pub use recovery_service::RecoveryServiceApi;
 

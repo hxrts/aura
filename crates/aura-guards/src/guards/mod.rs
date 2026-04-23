@@ -85,10 +85,14 @@
 //!
 //! ### Advanced Protocol Guards
 //! ```rust,ignore
-//! use crate::guards::{ProtocolGuard, GuardedExecution};
+//! use crate::guards::{ProtocolGuard, ProtocolGuardRequirement, GuardedExecution};
 //!
-//! let guard = ProtocolGuard::new(root_public_key, authority_id, "complex_operation")
-//!     .require_token(biscuit_token)
+//! let guard = ProtocolGuard::new(
+//!     root_public_key,
+//!     authority_id,
+//!     "complex_operation",
+//!     ProtocolGuardRequirement::required_tokens(vec![biscuit_token])?,
+//! )?
 //!     .delta_facts(vec![fact1, fact2])
 //!     .leakage_budget(LeakageBudget::new(1, 2, 0));
 //!
@@ -132,8 +136,8 @@ use aura_core::effects::{
     AuthorizationEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
     StorageEffects,
 };
-use aura_core::AuraResult;
 use aura_core::AuthorityId;
+use aura_core::{AuraError, AuraResult};
 use biscuit_auth::PublicKey;
 use std::future::Future;
 
@@ -177,12 +181,34 @@ pub struct ProtocolGuard {
     pub observable_by: Vec<AdversaryClass>,
     /// Required Biscuit authorization tokens for this operation
     pub required_tokens: Vec<VerifiedBiscuitToken>,
+    /// Authorization policy for this operation.
+    pub authorization_policy: ProtocolGuardRequirement,
     /// Facts to be merged into the journal after successful execution
     pub delta_facts: Vec<serde_json::Value>, // JSON-encoded facts until typed fact system
     /// Privacy leakage budget for this operation
     pub leakage_budget: LeakageBudget,
     /// Operation identifier for logging and metrics
     pub operation_id: GuardOperationId,
+}
+
+/// Explicit authorization requirement for a protocol guard.
+#[derive(Debug, Clone)]
+pub enum ProtocolGuardRequirement {
+    /// Operation requires one or more verified Biscuit tokens.
+    RequiredTokens(Vec<VerifiedBiscuitToken>),
+    /// Operation is intentionally unauthenticated with bounded metadata.
+    UnauthenticatedAllowed(UnauthenticatedAllowed),
+}
+
+/// Metadata required for an explicitly unauthenticated guarded operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnauthenticatedAllowed {
+    /// Stable policy reason code, for example `bootstrap.discovery.readonly`.
+    pub reason_code: String,
+    /// Narrow operation/surface scope covered by this exception.
+    pub scope: String,
+    /// Authoritative documentation or work-item reference.
+    pub doc_ref: String,
 }
 
 /// Privacy leakage budget tracking across adversary classes
@@ -222,6 +248,8 @@ pub struct ExecutionMetrics {
     pub total_execution_time_us: u64,
     /// Number of authorization checks performed
     pub authorization_checks: u32,
+    /// Whether this operation used an explicit unauthenticated policy.
+    pub unauthenticated_allowed: bool,
     /// Number of facts applied
     pub facts_applied: u32,
 }
@@ -237,8 +265,23 @@ impl ProtocolGuard {
         root_public_key: PublicKey,
         authority_id: AuthorityId,
         operation_id: impl Into<GuardOperationId>,
-    ) -> Self {
-        Self {
+        requirement: ProtocolGuardRequirement,
+    ) -> AuraResult<Self> {
+        let required_tokens = match &requirement {
+            ProtocolGuardRequirement::RequiredTokens(tokens) => {
+                if tokens.is_empty() {
+                    return Err(AuraError::invalid(
+                        "protected protocol guard requires at least one authorization token",
+                    ));
+                }
+                tokens.clone()
+            }
+            ProtocolGuardRequirement::UnauthenticatedAllowed(policy) => {
+                policy.validate()?;
+                Vec::new()
+            }
+        };
+        Ok(Self {
             root_public_key,
             authority_id,
             context_id: aura_core::ContextId::new_from_entropy([2u8; 32]),
@@ -247,22 +290,61 @@ impl ProtocolGuard {
                 AdversaryClass::Neighbor,
                 AdversaryClass::InGroup,
             ],
-            required_tokens: Vec::new(),
+            required_tokens,
+            authorization_policy: requirement,
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
             operation_id: operation_id.into(),
-        }
+        })
+    }
+
+    /// Create a protected protocol guard with explicit required tokens.
+    pub fn with_required_tokens(
+        root_public_key: PublicKey,
+        authority_id: AuthorityId,
+        operation_id: impl Into<GuardOperationId>,
+        tokens: Vec<VerifiedBiscuitToken>,
+    ) -> AuraResult<Self> {
+        let guard = Self::new(
+            root_public_key,
+            authority_id,
+            operation_id,
+            ProtocolGuardRequirement::RequiredTokens(tokens),
+        )?;
+        Ok(guard)
+    }
+
+    /// Create an explicitly unauthenticated protocol guard.
+    pub fn allow_unauthenticated(
+        root_public_key: PublicKey,
+        authority_id: AuthorityId,
+        operation_id: impl Into<GuardOperationId>,
+        policy: UnauthenticatedAllowed,
+    ) -> AuraResult<Self> {
+        Self::new(
+            root_public_key,
+            authority_id,
+            operation_id,
+            ProtocolGuardRequirement::UnauthenticatedAllowed(policy),
+        )
     }
 
     /// Add a required authorization token to this guard
     pub fn require_token(mut self, token: VerifiedBiscuitToken) -> Self {
         self.required_tokens.push(token);
+        self.authorization_policy =
+            ProtocolGuardRequirement::RequiredTokens(self.required_tokens.clone());
         self
     }
 
     /// Add multiple required authorization tokens to this guard
     pub fn require_tokens(mut self, tokens: Vec<VerifiedBiscuitToken>) -> Self {
-        self.required_tokens.extend(tokens);
+        if !tokens.is_empty() {
+            self.required_tokens.extend(tokens);
+            self.authorization_policy =
+                ProtocolGuardRequirement::RequiredTokens(self.required_tokens.clone());
+            return self;
+        }
         self
     }
 
@@ -308,10 +390,31 @@ impl ProtocolGuard {
                 AdversaryClass::InGroup,
             ],
             required_tokens: Vec::new(),
+            authorization_policy: ProtocolGuardRequirement::RequiredTokens(Vec::new()),
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
             operation_id: operation_id.into(),
         }
+    }
+
+    /// Create an explicitly unauthenticated protocol guard for tests.
+    #[cfg(test)]
+    pub fn new_unauthenticated_for_testing(operation_id: impl Into<GuardOperationId>) -> Self {
+        let keypair = biscuit_auth::KeyPair::new();
+        let authority_id = AuthorityId::new_from_entropy([0u8; 32]);
+
+        Self::allow_unauthenticated(
+            keypair.public(),
+            authority_id,
+            operation_id,
+            UnauthenticatedAllowed::new(
+                "test.unauthenticated",
+                "crate-local guard tests",
+                "crates/aura-guards/src/guards/mod.rs",
+            )
+            .expect("valid test unauthenticated policy"),
+        )
+        .expect("valid test unauthenticated guard")
     }
 
     /// Set the context ID for leakage accounting
@@ -324,6 +427,53 @@ impl ProtocolGuard {
     pub fn observable_by(mut self, observers: Vec<AdversaryClass>) -> Self {
         self.observable_by = observers;
         self
+    }
+}
+
+impl ProtocolGuardRequirement {
+    /// Construct the required-token policy marker.
+    pub fn required_tokens(tokens: Vec<VerifiedBiscuitToken>) -> AuraResult<Self> {
+        if tokens.is_empty() {
+            return Err(AuraError::invalid(
+                "protected protocol guard requires at least one authorization token",
+            ));
+        }
+        Ok(Self::RequiredTokens(tokens))
+    }
+
+    /// Construct an explicit unauthenticated policy marker.
+    pub fn unauthenticated(policy: UnauthenticatedAllowed) -> AuraResult<Self> {
+        policy.validate()?;
+        Ok(Self::UnauthenticatedAllowed(policy))
+    }
+}
+
+impl UnauthenticatedAllowed {
+    /// Create unauthenticated-operation policy metadata.
+    pub fn new(
+        reason_code: impl Into<String>,
+        scope: impl Into<String>,
+        doc_ref: impl Into<String>,
+    ) -> AuraResult<Self> {
+        let policy = Self {
+            reason_code: reason_code.into(),
+            scope: scope.into(),
+            doc_ref: doc_ref.into(),
+        };
+        policy.validate()?;
+        Ok(policy)
+    }
+
+    fn validate(&self) -> AuraResult<()> {
+        if self.reason_code.trim().is_empty()
+            || self.scope.trim().is_empty()
+            || self.doc_ref.trim().is_empty()
+        {
+            return Err(AuraError::invalid(
+                "unauthenticated guard policy requires reason_code, scope, and doc_ref",
+            ));
+        }
+        Ok(())
     }
 }
 

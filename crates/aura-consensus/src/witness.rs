@@ -673,4 +673,35 @@ mod tests {
         assert!(tracker.has_signature_threshold(2));
         assert_eq!(tracker.get_participants().len(), 2);
     }
+
+    #[test]
+    fn test_witness_tracker_rejects_replayed_share() {
+        let mut tracker = WitnessTracker::with_threshold(2);
+        let witness = AuthorityId::new_from_entropy([9u8; 32]);
+        let result_id = Hash32::new([3u8; 32]);
+
+        tracker
+            .add_signature(
+                witness,
+                PartialSignature {
+                    signer: 1,
+                    signature: vec![7u8; 32],
+                },
+                result_id,
+            )
+            .expect("first share should be recorded");
+
+        let error = tracker
+            .add_signature(
+                witness,
+                PartialSignature {
+                    signer: 1,
+                    signature: vec![8u8; 32],
+                },
+                result_id,
+            )
+            .expect_err("replayed share should be rejected");
+
+        assert!(error.to_string().contains("Duplicate share"));
+    }
 }

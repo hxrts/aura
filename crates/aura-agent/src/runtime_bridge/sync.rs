@@ -144,26 +144,11 @@ pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), Inte
                 .map_err(|e| bridge_internal("Sync failed", e))
         };
 
-        let mut pull_error: Option<IntentError> = None;
-        #[cfg(target_arch = "wasm32")]
-        let skip_harness_browser_fact_pull = super::browser_harness_page_enabled();
-        #[cfg(not(target_arch = "wasm32"))]
-        let skip_harness_browser_fact_pull = false;
-        for peer in authority_peers {
-            if skip_harness_browser_fact_pull {
-                tracing::debug!(peer = %peer, "skipping harness browser relational fact sync pull");
-                continue;
-            }
-            if let Err(error) = bridge.pull_remote_relational_facts(peer).await {
-                tracing::warn!(peer = %peer, error = %error, "fact sync pull failed");
-                if pull_error.is_none() {
-                    pull_error = Some(error);
-                }
-            }
-        }
-
-        if let Some(error) = pull_error {
-            last_sync_error = Some(error);
+        if !authority_peers.is_empty() {
+            tracing::debug!(
+                peer_count = authority_peers.len(),
+                "skipping removed direct LAN relational fact pull; authenticated sync services own ingress"
+            );
         }
 
         match sync_result {

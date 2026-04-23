@@ -1457,6 +1457,7 @@ pub fn run_ownership_policy() -> Result<()> {
     run_trusted_key_resolution_boundary()?;
     run_security_bypass_symbols()?;
     run_secret_field_wrappers()?;
+    run_security_bug_class_regressions()?;
     run_security_exception_metadata()?;
     run_security_boolean_escape_hatch_boundary()?;
     run_harness_ownership_policy()?;
@@ -1477,10 +1478,298 @@ pub fn run_security_boundary_policy() -> Result<()> {
     run_invitation_legacy_fallback_boundary()?;
     run_security_bypass_symbols()?;
     run_secret_field_wrappers()?;
+    run_security_bug_class_regressions()?;
     run_security_exception_metadata()?;
     run_security_boolean_escape_hatch_boundary()?;
     println!("security boundary policy: clean");
     Ok(())
+}
+
+pub fn run_security_bug_class_regressions() -> Result<()> {
+    let repo_root = repo_root()?;
+    let crates_dir = repo_root.join("crates");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&crates_dir) {
+        let rel = security_rel_path(&repo_root, &path);
+        if security_bug_class_skip_file(&rel) {
+            continue;
+        }
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let trimmed = line.trim_start();
+            if trimmed.is_empty() || trimmed.starts_with("//") {
+                continue;
+            }
+            let context = lines[idx.saturating_sub(12)..lines.len().min(idx + 13)].join("\n");
+
+            if is_plain_biscuit_authorize(line, &context)
+                && !known_security_bug_class_violation(&rel, line, "biscuit-authorize-limits")
+            {
+                violations.push(format!(
+                    "{rel}:{} production Biscuit evaluation must use authorize_with_limits(...)",
+                    idx + 1
+                ));
+            }
+
+            if is_independent_storage_biscuit_allow(line)
+                && !known_security_bug_class_violation(&rel, line, "storage-biscuit-policy-shape")
+            {
+                violations.push(format!(
+                    "{rel}:{} storage Biscuit allow policy must conjunct authority/account, capability, operation, and resource",
+                    idx + 1
+                ));
+            }
+
+            if starts_secure_generate_key_signature(trimmed) {
+                let signature = signature_window(&lines, idx);
+                if returns_raw_secret_bytes(&signature)
+                    && !known_security_bug_class_violation(
+                        &rel,
+                        &signature,
+                        "secure-generate-key-return",
+                    )
+                {
+                    violations.push(format!(
+                        "{rel}:{} secure_generate_key must return public material or an opaque handle, not Vec<u8> secret material",
+                        idx + 1
+                    ));
+                }
+            }
+
+            if returns_generated_secret_material(line, &context)
+                && !known_security_bug_class_violation(&rel, line, "secure-generate-key-return")
+            {
+                violations.push(format!(
+                    "{rel}:{} generated secure key material is returned to callers",
+                    idx + 1
+                ));
+            }
+
+            if is_peer_bloom_deserialize(line, &context)
+                && !known_security_bug_class_violation(&rel, line, "wire-deserialize-validation")
+            {
+                violations.push(format!(
+                    "{rel}:{} peer BloomFilter deserialization must immediately validate wire invariants",
+                    idx + 1
+                ));
+            }
+
+            if is_frame_canonicality_smell(line, &context)
+                && !known_security_bug_class_violation(&rel, line, "frame-canonicality")
+            {
+                violations.push(format!(
+                    "{rel}:{} frame payload length must be private/derived or serialization must prove it matches payload.len()",
+                    idx + 1
+                ));
+            }
+
+            if is_harness_ingress_env_smell(line, &context, &rel)
+                && !known_security_bug_class_violation(&rel, line, "harness-ingress-gating")
+            {
+                violations.push(format!(
+                    "{rel}:{} harness ingress/export must be gated by typed harness mode/capability, not env/path presence alone",
+                    idx + 1
+                ));
+            }
+
+            if is_predictable_freshness_id(line, &rel)
+                && !known_security_bug_class_violation(&rel, line, "predictable-freshness-id")
+            {
+                violations.push(format!(
+                    "{rel}:{} auth/session/request ids must come from RandomEffects or an owner-scoped nonce, not timestamp/epoch formatting",
+                    idx + 1
+                ));
+            }
+
+            if is_string_prefix_authorization(line, &context, &rel)
+                && !known_security_bug_class_violation(&rel, line, "string-prefix-authorization")
+            {
+                violations.push(format!(
+                    "{rel}:{} authorization/resource matching must use typed segment-aware matching, not starts_with/contains string checks",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!("security-bug-class-regressions:\n{}", violations.join("\n"));
+    }
+
+    println!("security bug-class regression policy: clean");
+    Ok(())
+}
+
+fn security_rel_path(repo_root: &Path, path: &Path) -> String {
+    path.strip_prefix(repo_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn security_bug_class_skip_file(rel: &str) -> bool {
+    rel.contains("crates/aura-testkit/")
+        || rel.contains("crates/aura-harness/")
+        || rel.contains("crates/aura-simulator/")
+        || rel.contains("crates/aura-quint/")
+        || rel.contains("crates/aura-macros/")
+        || rel.contains("crates/aura-terminal/src/demo/")
+        || rel.contains("/tests/")
+        || rel.contains("/benches/")
+        || rel.ends_with("/tests.rs")
+        || rel.ends_with("/test_support.rs")
+        || rel.ends_with("/benches.rs")
+}
+
+fn is_plain_biscuit_authorize(line: &str, context: &str) -> bool {
+    line.contains(".authorize()")
+        && !line.contains("authorize_with_limits")
+        && (context.contains("Biscuit")
+            || context.contains("Authorizer")
+            || context.contains("authorizer"))
+}
+
+fn is_independent_storage_biscuit_allow(line: &str) -> bool {
+    line.contains("policy!(")
+        && (line.contains("allow if authority_id(") || line.contains("allow if account("))
+        && !(line.contains("capability(") && line.contains("resource("))
+}
+
+fn starts_secure_generate_key_signature(trimmed: &str) -> bool {
+    trimmed.starts_with("async fn secure_generate_key(")
+        || trimmed.starts_with("pub async fn secure_generate_key(")
+}
+
+fn returns_raw_secret_bytes(signature: &str) -> bool {
+    signature.contains("Result<Option<Vec<u8>>")
+        || signature.contains("Result < Option < Vec < u8 > >")
+        || signature.contains("Result<Vec<u8>>")
+        || signature.contains("Result < Vec < u8 >")
+}
+
+fn returns_generated_secret_material(line: &str, context: &str) -> bool {
+    context.contains("secure_generate_key")
+        && (line.contains("Ok(Some(material))")
+            || line.contains("Ok(Some(key))")
+            || line.contains("Ok(Some(key_bytes))"))
+}
+
+fn is_peer_bloom_deserialize(line: &str, context: &str) -> bool {
+    (line.contains("from_slice::<BloomFilter>")
+        || line.contains("serde_json::from_slice::<BloomFilter>")
+        || line.contains("binary_deserialize::<BloomFilter>"))
+        && !context.contains("validate_wire")
+        && !context.contains(".validate()")
+}
+
+fn is_frame_canonicality_smell(line: &str, context: &str) -> bool {
+    (line.contains("pub payload_length:") && context.contains("pub payload: Vec<u8>"))
+        || (line.contains("frame.header.payload_length.to_be_bytes()")
+            && !context.contains("payload_length != frame.payload.len()")
+            && !context.contains("payload_length == frame.payload.len()"))
+        || (line.contains("data.len() < expected_total_size")
+            && context.contains("deserialize_frame")
+            && !context.contains("data.len() != expected_total_size"))
+}
+
+fn is_harness_ingress_env_smell(line: &str, context: &str, rel: &str) -> bool {
+    if !rel.starts_with("crates/aura-terminal/src/") {
+        return false;
+    }
+    if line.contains("const COMMAND_SOCKET_ENV")
+        || line.contains("const UI_STATE_FILE_ENV")
+        || line.contains("const UI_STATE_SOCKET_ENV")
+        || line.contains("write_snapshot_file(")
+        || line.contains("read_to_end(&mut payload)")
+        || line.contains("ensure_harness_command_listener().await")
+    {
+        return false;
+    }
+    let reads_tui_harness_env = line.contains("AURA_TUI_COMMAND_SOCKET")
+        || line.contains("AURA_TUI_UI_STATE_FILE")
+        || line.contains("AURA_TUI_UI_STATE_SOCKET");
+    let binds_or_exports = line.contains("UnixListener::bind")
+        || line.contains("read_to_end(&mut payload)")
+        || line.contains("write_snapshot_file(")
+        || line.contains("ensure_harness_command_listener().await");
+    (reads_tui_harness_env || binds_or_exports)
+        && !context.contains("configured_command_socket")
+        && !context.contains("configured_ui_state_file")
+        && !context.contains("configured_ui_state_socket")
+        && !context.contains("AURA_HARNESS_MODE")
+        && !context.contains("HarnessMode")
+        && !context.contains("harness_mode_enabled")
+        && !context.contains("harness runtime mode")
+        && !context.contains("typed harness")
+}
+
+fn is_predictable_freshness_id(line: &str, rel: &str) -> bool {
+    if !(rel.starts_with("crates/aura-authentication/src/")
+        || rel.starts_with("crates/aura-agent/src/")
+        || rel.starts_with("crates/aura-core/src/context.rs"))
+    {
+        return false;
+    }
+    (line.contains("format!(\"session_")
+        || line.contains("format!(\"challenge_")
+        || line.contains("format!(\"guardian_req_")
+        || line.contains("derive_session_id("))
+        && (line.contains("snapshot.epoch")
+            || line.contains("snapshot.now_ms")
+            || line.contains("authority_id")
+            || line.contains("context_id")
+            || line.contains("execution_mode")
+            || line.contains("session_{}"))
+}
+
+fn is_string_prefix_authorization(line: &str, context: &str, rel: &str) -> bool {
+    let sensitive_path = rel.starts_with("crates/aura-authorization/src/")
+        || rel.starts_with("crates/aura-store/src/")
+        || rel.starts_with("crates/aura-sync/src/");
+    if !sensitive_path {
+        return false;
+    }
+    if context.contains("fn is_same_or_child_path(") && line.contains("suffix.starts_with('/')") {
+        return false;
+    }
+    let has_prefix_match = line.contains(".starts_with(");
+    let has_string_substring_match = line.contains("_str.contains(")
+        || line.contains(".as_str().contains(")
+        || line.contains("resource.contains(")
+        || line.contains("path.contains(")
+        || line.contains("scope.contains(")
+        || line.contains("namespace.contains(")
+        || line.contains("participant.contains(")
+        || line.contains("participants.contains(");
+    if !(has_prefix_match || has_string_substring_match) {
+        return false;
+    }
+    let lowered = format!("{context}\n{line}").to_ascii_lowercase();
+    [
+        "auth",
+        "authority",
+        "capability",
+        "content_id",
+        "namespace",
+        "participant",
+        "peer",
+        "permission",
+        "resource",
+        "scope",
+        "storage",
+        "token",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
+}
+
+fn known_security_bug_class_violation(rel: &str, line: &str, class: &str) -> bool {
+    let _ = (rel, line, class);
+    false
 }
 
 pub fn run_biscuit_verifier_boundary() -> Result<()> {

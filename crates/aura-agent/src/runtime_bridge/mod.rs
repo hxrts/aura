@@ -52,10 +52,10 @@ use aura_core::Hash32;
 use aura_core::OwnedTaskSpawner;
 use aura_core::Prestate;
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
+use aura_journal::fact::FactContent;
 use aura_journal::fact::{
     ChannelBootstrap, ChannelBumpReason, FactOptions, ProposedChannelEpochBump, RelationalFact,
 };
-use aura_journal::fact::{Fact as TypedFact, FactContent};
 use aura_journal::DomainFact;
 use aura_journal::ProtocolRelationalFact;
 use aura_protocol::amp::{
@@ -63,24 +63,16 @@ use aura_protocol::amp::{
     ChannelParticipantEvent,
 };
 use aura_protocol::effects::TreeEffects;
-use aura_protocol::{
-    DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngressMetadata,
-};
 use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
 use aura_social::{is_user_banned, is_user_muted};
-use futures::{SinkExt, StreamExt};
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{futures::WebSocket, Message};
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio_tungstenite::connect_async;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio_tungstenite::tungstenite::Message;
 
 mod amp;
 mod consensus;
@@ -95,18 +87,15 @@ mod sync;
 use amp::map_amp_error;
 use consensus::{map_consensus_error, persist_consensus_dkg_transcript};
 use error_boundary::{
-    bridge_internal, bridge_network, bridge_network_message, bridge_service_unavailable,
+    bridge_internal, bridge_network, bridge_service_unavailable,
     bridge_service_unavailable_with_detail, bridge_validation_message,
 };
 use invitation::convert_invitation_to_bridge_info;
 
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
-const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request";
-const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
 // Fixed local bridge deadlines. These bound one bridge-owned stage or wire
 // exchange and should stay code-defined unless they become true runtime policy
 // knobs with external operators.
-const FACT_SYNC_SOCKET_TIMEOUT_MS: u64 = 750;
 const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 8_000;
 const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
 // Harness-only convergence tuning. These affect local retry pacing for tests
@@ -449,22 +438,6 @@ fn harness_sync_backoff_ms() -> u64 {
         .unwrap_or(DEFAULT_HARNESS_SYNC_BACKOFF_MS)
 }
 
-#[cfg(target_arch = "wasm32")]
-fn browser_harness_page_enabled() -> bool {
-    let Some(window) = web_sys::window() else {
-        return false;
-    };
-    let Ok(search) = window.location().search() else {
-        return false;
-    };
-    let query = search.strip_prefix('?').unwrap_or(&search);
-    let harness_page = query.split('&').any(|pair: &str| {
-        pair.split_once('=')
-            .is_some_and(|(key, value)| key == "__aura_harness_instance" && !value.is_empty())
-    });
-    harness_page
-}
-
 /// Wrapper to implement RuntimeBridge for AuraAgent
 ///
 /// This struct wraps an Arc<AuraAgent> to provide the RuntimeBridge implementation.
@@ -538,298 +511,16 @@ impl AgentRuntimeBridge {
         }
     }
 
+    #[allow(dead_code)] // Kept only for explicit fail-closed regression tests.
     pub(super) async fn pull_remote_relational_facts(
         &self,
         peer: AuthorityId,
     ) -> Result<usize, IntentError> {
         tracing::info!(peer = %peer, "pull_remote_relational_facts start");
-        let Some(rendezvous) = self.agent.runtime().rendezvous() else {
-            return Err(service_unavailable("rendezvous_service"));
-        };
-
-        let context = default_context_id_for_authority(peer);
-        let descriptor = rendezvous.get_descriptor(context, peer).await.ok_or_else(|| {
-            bridge_validation_message(format!(
-                "No current-context rendezvous descriptor available for relational fact pull to {peer}"
-            ))
-        })?;
-
-        let addr: Option<String> = descriptor
-            .transport_hints
-            .iter()
-            .find_map(|hint| match hint {
-                aura_rendezvous::TransportHint::WebSocketDirect { addr, .. } => {
-                    Some(addr.to_string())
-                }
-                _ => None,
-            });
-        let Some(addr) = addr else {
-            return Err(bridge_validation_message(format!(
-                "No websocket direct transport hint available for relational fact pull to {peer}"
-            )));
-        };
-
-        let url = if addr.starts_with("ws://") || addr.starts_with("wss://") {
-            addr
-        } else {
-            format!("ws://{addr}")
-        };
-
-        if self.agent.runtime().effects().harness_mode_enabled()
-            && (url.starts_with("ws://") || url.starts_with("wss://"))
-        {
-            return Err(bridge_network_message(format!(
-                "Harness browser mailbox transport does not support relational fact sync pull to {peer}"
-            )));
-        }
-
-        let request = TransportEnvelope {
-            destination: peer,
-            source: self.agent.authority_id(),
-            context,
-            payload: Vec::new(),
-            metadata: std::collections::HashMap::from([(
-                "content-type".to_string(),
-                FACT_SYNC_REQUEST_CONTENT_TYPE.to_string(),
-            )]),
-            receipt: None,
-        };
-
-        let bytes = aura_core::util::serialization::to_vec(&request)
-            .map_err(|e| bridge_internal("Encode fact sync request failed", e))?;
-
-        let effects = self.agent.runtime().effects();
-        let (response_envelope, remote_facts): (TransportEnvelope, Vec<RelationalFact>) =
-            execute_with_effect_timeout(
-                &effects,
-                Duration::from_millis(FACT_SYNC_SOCKET_TIMEOUT_MS),
-                || async move {
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        run_local_ws(move || async move {
-                            let mut socket = WebSocket::open(&url).map_err(|e| {
-                                bridge_network(
-                                    "Open fact sync websocket failed",
-                                    format!("{url}: {e}"),
-                                )
-                            })?;
-                            socket
-                                .send(Message::Bytes(bytes))
-                                .await
-                                .map_err(|e| bridge_network("Send fact sync request failed", e))?;
-
-                            let response = socket.next().await.ok_or_else(|| {
-                                bridge_network_message("Fact sync websocket closed before response")
-                            })?;
-                            let payload = match response
-                                .map_err(|e| bridge_network("Fact sync websocket read failed", e))?
-                            {
-                                Message::Bytes(payload) => payload,
-                                _ => {
-                                    return Err(bridge_network_message(
-                                        "Fact sync websocket returned non-binary payload",
-                                    ));
-                                }
-                            };
-
-                            let envelope: TransportEnvelope =
-                                aura_core::util::serialization::from_slice(&payload).map_err(
-                                    |e| bridge_internal("Decode fact sync response failed", e),
-                                )?;
-
-                            if envelope
-                                .metadata
-                                .get("content-type")
-                                .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
-                            {
-                                return Err(bridge_network_message(
-                                    "Fact sync response had unexpected content type",
-                                ));
-                            }
-
-                            let facts =
-                                aura_core::util::serialization::from_slice(&envelope.payload)
-                                    .map_err(|e| {
-                                        bridge_internal("Decode fact sync payload failed", e)
-                                    })?;
-                            Ok((envelope, facts))
-                        })
-                        .await
-                    }
-
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        let (mut socket, _) = connect_async(&url).await.map_err(|e| {
-                            bridge_network("Open fact sync websocket failed", format!("{url}: {e}"))
-                        })?;
-                        socket
-                            .send(Message::Binary(bytes))
-                            .await
-                            .map_err(|e| bridge_network("Send fact sync request failed", e))?;
-
-                        let response = socket.next().await.ok_or_else(|| {
-                            bridge_network_message("Fact sync websocket closed before response")
-                        })?;
-                        let payload = match response
-                            .map_err(|e| bridge_network("Fact sync websocket read failed", e))?
-                        {
-                            Message::Binary(payload) => payload,
-                            _ => {
-                                return Err(bridge_network_message(
-                                    "Fact sync websocket returned non-binary payload",
-                                ));
-                            }
-                        };
-
-                        let envelope: TransportEnvelope =
-                            aura_core::util::serialization::from_slice(&payload).map_err(|e| {
-                                bridge_internal("Decode fact sync response failed", e)
-                            })?;
-
-                        if envelope
-                            .metadata
-                            .get("content-type")
-                            .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
-                        {
-                            return Err(bridge_network_message(
-                                "Fact sync response had unexpected content type",
-                            ));
-                        }
-
-                        let facts = aura_core::util::serialization::from_slice(&envelope.payload)
-                            .map_err(|e| {
-                            bridge_internal("Decode fact sync payload failed", e)
-                        })?;
-                        Ok((envelope, facts))
-                    }
-                },
-            )
-            .await
-            .map_err(|error| match error {
-                TimeoutRunError::Timeout(_) => bridge_network_message(format!(
-                    "Fact sync websocket timed out after {FACT_SYNC_SOCKET_TIMEOUT_MS}ms"
-                )),
-                TimeoutRunError::Operation(error) => error,
-            })?;
-        let response_schema = response_envelope
-            .metadata
-            .get("wire-format-version")
-            .and_then(|version| version.parse::<u16>().ok())
-            .unwrap_or(aura_protocol::messages::WIRE_FORMAT_VERSION);
-        let response_evidence = IngressVerificationEvidence::builder(VerifiedIngressMetadata::new(
-            IngressSource::Authority(response_envelope.source),
-            response_envelope.context,
-            None,
-            Hash32::from_bytes(&response_envelope.payload),
-            response_schema,
+        let _ = peer;
+        Err(bridge_validation_message(
+            "Direct LAN relational fact pull has been removed; use authenticated sync services instead",
         ))
-        .peer_identity(
-            response_envelope.source == peer,
-            "fact sync response source must match requested peer",
-        )
-        .and_then(|builder| {
-            builder.envelope_authenticity(
-                !response_envelope.payload.is_empty(),
-                "fact sync response payload must be present",
-            )
-        })
-        .and_then(|builder| {
-            builder.capability_authorization(
-                response_envelope.destination == self.agent.authority_id(),
-                "fact sync response must target this authority",
-            )
-        })
-        .and_then(|builder| {
-            builder.namespace_scope(
-                response_envelope
-                    .metadata
-                    .get("content-type")
-                    .is_some_and(|value| value == FACT_SYNC_RESPONSE_CONTENT_TYPE),
-                "fact sync response content type must match",
-            )
-        })
-        .and_then(|builder| {
-            builder.schema_version(
-                response_schema <= aura_protocol::messages::WIRE_FORMAT_VERSION,
-                "unsupported fact sync response schema",
-            )
-        })
-        .and_then(|builder| {
-            builder.replay_freshness(
-                !response_envelope.payload.is_empty(),
-                "fact sync response payload must be non-empty",
-            )
-        })
-        .and_then(|builder| {
-            builder.signer_membership(
-                response_envelope.source == peer,
-                "fact sync response signer must match requested peer",
-            )
-        })
-        .and_then(|builder| {
-            builder.proof_evidence(
-                response_envelope.context == context,
-                "fact sync response context must match request context",
-            )
-        })
-        .and_then(|builder| builder.build())
-        .map_err(|e| bridge_internal("Verify fact sync response ingress failed", e))?;
-        let remote_facts = DecodedIngress::new(remote_facts, response_evidence.metadata().clone())
-            .verify(response_evidence)
-            .map_err(|e| bridge_internal("Promote fact sync response ingress failed", e))?;
-
-        tracing::info!(
-            peer = %peer,
-            fact_count = remote_facts.payload().len(),
-            "pull_remote_relational_facts response"
-        );
-
-        if remote_facts.payload().is_empty() {
-            return Ok(0);
-        }
-
-        let local = effects
-            .load_committed_facts(self.agent.authority_id())
-            .await
-            .map_err(|e| bridge_internal("Load local facts failed", e))?;
-
-        let mut known = HashSet::new();
-        for fact in local {
-            let TypedFact { content, .. } = fact;
-            if let FactContent::Relational(rel) = content {
-                if let Ok(bytes) = aura_core::util::serialization::to_vec(&rel) {
-                    known.insert(bytes);
-                }
-            }
-        }
-
-        let mut new_facts = Vec::new();
-        let (remote_facts, _) = remote_facts.into_parts();
-        for fact in remote_facts {
-            let bytes = aura_core::util::serialization::to_vec(&fact)
-                .map_err(|e| bridge_internal("Encode relational fact failed", e))?;
-            if known.insert(bytes) {
-                new_facts.push(fact);
-            }
-        }
-
-        if new_facts.is_empty() {
-            tracing::info!(peer = %peer, "pull_remote_relational_facts no new facts");
-            return Ok(0);
-        }
-
-        effects
-            .commit_relational_facts(new_facts.clone())
-            .await
-            .map_err(|e| bridge_internal("Merge synced facts failed", e))?;
-
-        tracing::info!(
-            peer = %peer,
-            committed = new_facts.len(),
-            "pull_remote_relational_facts committed"
-        );
-
-        Ok(new_facts.len())
     }
 }
 

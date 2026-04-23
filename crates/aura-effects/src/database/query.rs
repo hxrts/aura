@@ -29,8 +29,15 @@
 //! ```
 
 use aura_core::{domain::journal::FactValue, types::identifiers::AuthorityId, AuraError};
-use biscuit_auth::Authorizer;
+use biscuit_auth::{Authorizer, AuthorizerLimits};
 use std::collections::HashMap;
+use std::time::Duration;
+
+const QUERY_AUTHORIZE_LIMITS: AuthorizerLimits = AuthorizerLimits {
+    max_facts: 10_000,
+    max_iterations: 1_000,
+    max_time: Duration::from_millis(50),
+};
 use thiserror::Error;
 
 /// Errors specific to query operations
@@ -358,7 +365,7 @@ impl AuraQuery {
         // Run the authorizer to derive facts
         // Note: We're using authorize() even without policies, as it triggers fact derivation
         // We expect this to fail (no allow policies), but the facts are still derived
-        let _ = authorizer.authorize();
+        let _ = authorizer.authorize_with_limits(QUERY_AUTHORIZE_LIMITS);
 
         // Extract derived facts by dumping the world and filtering for the rule head
         let head_predicate = extract_rule_head(rule)?;

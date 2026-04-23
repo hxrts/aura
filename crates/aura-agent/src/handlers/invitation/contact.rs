@@ -106,10 +106,10 @@ impl<'a> InvitationContactHandler<'a> {
                 )
             })
             .and_then(|builder| builder.build())
-            .map_err(|error| AgentError::internal(format!("verify invitation ingress: {error}")))?;
+            .map_err(|_| AgentError::internal("verify invitation ingress failed"))?;
         DecodedIngress::new(payload, evidence.metadata().clone())
             .verify(evidence)
-            .map_err(|error| AgentError::internal(format!("promote invitation ingress: {error}")))
+            .map_err(|_| AgentError::internal("promote invitation ingress failed"))
     }
 
     async fn publish_channel_acceptance_chat_projection(
@@ -275,12 +275,27 @@ impl<'a> InvitationContactHandler<'a> {
             );
         }
 
+        let signature = sign_invitation_acceptance_transcript(
+            effects,
+            acceptor_id,
+            &contact_invitation_acceptance_transcript(&invitation, acceptor_id),
+        )
+        .await?;
         let acceptance = ContactInvitationAcceptance {
             invitation_id: invitation.invitation_id.clone(),
             acceptor_id,
+            signature,
         };
         let payload =
             serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
+        let delivery_context = default_context_id_for_authority(invitation.sender_id);
+        let flow_receipt = execute_charge_flow_budget(
+            FlowCost::new(1),
+            delivery_context,
+            invitation.sender_id,
+            effects,
+        )
+        .await?;
 
         let mut metadata = crate::handlers::shared::build_transport_metadata(
             CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE,
@@ -321,14 +336,18 @@ impl<'a> InvitationContactHandler<'a> {
         let envelope = TransportEnvelope {
             destination: invitation.sender_id,
             source: acceptor_id,
-            context: default_context_id_for_authority(invitation.sender_id),
+            context: delivery_context,
             payload,
             metadata,
-            receipt: None,
+            receipt: flow_receipt.map(transport_receipt_from_flow),
         };
+        let mut envelope = envelope;
+        attach_invitation_test_receipt_if_needed(effects, &mut envelope);
 
-        attempt_network_send_envelope(effects, "contact invitation acceptance send", envelope)
-            .await?;
+        crate::runtime::transport_boundary::send_guarded_transport_envelope(effects, envelope)
+            .await
+            .map_err(aura_core::AuraError::from)
+            .map_err(AgentError::from)?;
 
         Ok(())
     }
@@ -422,6 +441,70 @@ impl<'a> InvitationContactHandler<'a> {
                         continue;
                     }
 
+                    let Some(invitation) = InvitationHandler::load_created_invitation(
+                        effects.as_ref(),
+                        self.handler.context.authority.authority_id(),
+                        &acceptance.invitation_id,
+                    )
+                    .await
+                    else {
+                        tracing::debug!(
+                            invitation_id = %acceptance.invitation_id,
+                            "Ignoring acceptance for unknown invitation"
+                        );
+                        in_flight_envelope = None;
+                        continue;
+                    };
+
+                    if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
+                    let now_ms =
+                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
+                    if invitation.is_expired(now_ms)
+                        || invitation.status == InvitationStatus::Accepted
+                    {
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
+                    let Some(envelope) = in_flight_envelope.as_ref() else {
+                        continue;
+                    };
+                    if envelope.source != acceptance.acceptor_id {
+                        tracing::warn!(
+                            envelope_source = %envelope.source,
+                            acceptor_id = %acceptance.acceptor_id,
+                            invitation_id = %acceptance.invitation_id,
+                            "Rejected contact invitation acceptance with mismatched source authority"
+                        );
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
+                    if let Err(error) = verify_invitation_acceptance_signature(
+                        effects.as_ref(),
+                        acceptance.acceptor_id,
+                        &contact_invitation_acceptance_transcript(
+                            &invitation,
+                            acceptance.acceptor_id,
+                        ),
+                        &acceptance.signature,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            error = %error,
+                            invitation_id = %acceptance.invitation_id,
+                            acceptor_id = %acceptance.acceptor_id,
+                            "Rejected contact invitation acceptance with invalid signature"
+                        );
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
                     let acceptor_addr = in_flight_envelope
                         .as_ref()
                         .and_then(|envelope| envelope.metadata.get("acceptor-addr"))
@@ -444,34 +527,6 @@ impl<'a> InvitationContactHandler<'a> {
                             )
                             .await;
                     }
-
-                    let Some(invitation) = InvitationHandler::load_created_invitation(
-                        effects.as_ref(),
-                        self.handler.context.authority.authority_id(),
-                        &acceptance.invitation_id,
-                    )
-                    .await
-                    else {
-                        tracing::debug!(
-                            invitation_id = %acceptance.invitation_id,
-                            "Ignoring acceptance for unknown invitation"
-                        );
-                        in_flight_envelope = None;
-                        continue;
-                    };
-
-                    if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
-                        in_flight_envelope = None;
-                        continue;
-                    }
-
-                    if invitation.status == InvitationStatus::Accepted {
-                        in_flight_envelope = None;
-                        continue;
-                    }
-
-                    let now_ms =
-                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
                     let context_id = self.handler.context.authority.default_context_id();
 
                     let fact = InvitationFact::accepted_ms(
@@ -488,15 +543,6 @@ impl<'a> InvitationContactHandler<'a> {
                     .await?;
                     effects.await_next_view_update().await;
 
-                    // Derive the shareable code from the originating
-                    // invitation so the contact record persists the code
-                    // that was exported for this invitation.
-                    let invitation_code =
-                        crate::handlers::invitation::shareable::ShareableInvitation::from(
-                            &invitation,
-                        )
-                        .to_code()
-                        .ok();
                     let contact_fact = ContactFact::Added {
                         context_id,
                         owner_id: self.handler.context.authority.authority_id(),
@@ -506,7 +552,7 @@ impl<'a> InvitationContactHandler<'a> {
                             ts_ms: now_ms,
                             uncertainty: None,
                         },
-                        invitation_code,
+                        invitation_code: None,
                     };
 
                     effects
@@ -610,6 +656,67 @@ impl<'a> InvitationContactHandler<'a> {
                         continue;
                     }
 
+                    let invitation = InvitationHandler::load_created_invitation(
+                        effects.as_ref(),
+                        self.handler.context.authority.authority_id(),
+                        &acceptance.invitation_id,
+                    )
+                    .await;
+
+                    let Some(invitation) = invitation else {
+                        in_flight_envelope = None;
+                        continue;
+                    };
+                    if !matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                        in_flight_envelope = None;
+                        continue;
+                    }
+                    let now_ms =
+                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
+                    if invitation.is_expired(now_ms)
+                        || invitation.status == InvitationStatus::Accepted
+                    {
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
+                    let Some(envelope) = in_flight_envelope.as_ref() else {
+                        continue;
+                    };
+                    if envelope.source != acceptance.acceptor_id {
+                        tracing::warn!(
+                            envelope_source = %envelope.source,
+                            acceptor_id = %acceptance.acceptor_id,
+                            invitation_id = %acceptance.invitation_id,
+                            "Rejected channel invitation acceptance with mismatched source authority"
+                        );
+                        in_flight_envelope = None;
+                        continue;
+                    }
+                    if let Err(error) = verify_invitation_acceptance_signature(
+                        effects.as_ref(),
+                        acceptance.acceptor_id,
+                        &channel_invitation_acceptance_transcript(
+                            &invitation,
+                            acceptance.acceptor_id,
+                            acceptance.context_id,
+                            acceptance.channel_id,
+                            acceptance.channel_name.clone(),
+                        ),
+                        &acceptance.signature,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            error = %error,
+                            invitation_id = %acceptance.invitation_id,
+                            acceptor_id = %acceptance.acceptor_id,
+                            "Rejected channel invitation acceptance with invalid signature"
+                        );
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
                     let acceptor_addr = in_flight_envelope
                         .as_ref()
                         .and_then(|envelope| envelope.metadata.get("acceptor-addr"))
@@ -619,9 +726,6 @@ impl<'a> InvitationContactHandler<'a> {
                         .and_then(|envelope| envelope.metadata.get("acceptor-device-id"))
                         .and_then(|value| value.parse().ok());
                     if acceptor_addr.is_some() || acceptor_device_id.is_some() {
-                        let now_ms =
-                            InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
-                                .await;
                         self.handler
                             .cache_peer_descriptor_for_peer(
                                 effects.as_ref(),
@@ -633,22 +737,6 @@ impl<'a> InvitationContactHandler<'a> {
                             .await;
                     }
 
-                    let invitation = InvitationHandler::load_created_invitation(
-                        effects.as_ref(),
-                        self.handler.context.authority.authority_id(),
-                        &acceptance.invitation_id,
-                    )
-                    .await;
-
-                    if invitation.as_ref().is_some_and(|invitation| {
-                        !matches!(invitation.invitation_type, InvitationType::Channel { .. })
-                    }) {
-                        in_flight_envelope = None;
-                        continue;
-                    }
-
-                    let now_ms =
-                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
                     let fact = InvitationFact::accepted_ms(
                         acceptance.invitation_id.clone(),
                         acceptance.acceptor_id,
@@ -684,121 +772,58 @@ impl<'a> InvitationContactHandler<'a> {
                         InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
                             .await;
                     let local_authority = self.handler.context.authority.authority_id();
-                    let home_name = if let Some(invitation) = invitation.as_ref() {
-                        let mut updated = invitation.clone();
-                        updated.status = InvitationStatus::Accepted;
-                        updated.receiver_id = acceptance.acceptor_id;
-                        tracing::debug!(
-                            invitation_id = %updated.invitation_id,
-                            sender_id = %updated.sender_id,
-                            receiver_id = %updated.receiver_id,
-                            invitation_context = %updated.context_id,
-                            acceptance_context = %acceptance.context_id,
-                            channel_id = %acceptance.channel_id,
-                            "processed channel invitation acceptance for created invitation"
-                        );
-                        InvitationHandler::persist_created_invitation(
-                            effects.as_ref(),
-                            local_authority,
-                            &updated,
-                        )
-                        .await?;
-                        self.handler.invitation_cache.cache_invitation(updated.clone()).await;
-                        let InvitationType::Channel {
-                            home_id,
-                            nickname_suggestion,
-                            ..
-                        } = &updated.invitation_type
-                        else {
-                            return Err(AgentError::internal(
-                                "channel invitation acceptance persisted a non-channel invitation"
-                                    .to_string(),
-                            ));
-                        };
-                        let home_name =
-                            require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
-                        self.publish_channel_acceptance_chat_projection(
-                            effects.as_ref(),
-                            updated.context_id,
-                            *home_id,
-                            &home_name,
-                            updated.sender_id,
-                            updated.receiver_id,
-                        )
-                        .await?;
-                        crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
-                            &reactive,
-                            *home_id,
-                            &home_name,
-                            updated.sender_id,
-                            updated.receiver_id,
-                            updated.context_id,
-                            now_ms,
-                        )
-                        .await
-                        .map_err(AgentError::runtime)?;
-                        home_name
-                    } else {
-                        let resolved_home_name = acceptance
-                            .channel_name
-                            .as_ref()
-                            .map(|value| value.trim().to_string())
-                            .filter(|value| !value.is_empty());
-                        let resolved_home_name = match resolved_home_name {
-                            Some(home_name) => Some(home_name),
-                            None => self
-                                .handler
-                                .channel_created_fact_name(
-                                    effects.as_ref(),
-                                    local_authority,
-                                    acceptance.context_id,
-                                    acceptance.channel_id,
-                                )
-                                .await
-                                .map(|value| value.trim().to_string())
-                                .filter(|value| !value.is_empty()),
-                        };
-                        let Some(home_name) = resolved_home_name
-                        else {
-                            tracing::warn!(
-                                invitation_id = %acceptance.invitation_id,
-                                acceptor_id = %acceptance.acceptor_id,
-                                context_id = %acceptance.context_id,
-                                channel_id = %acceptance.channel_id,
-                                "Ignoring channel acceptance without created invitation or canonical channel name"
-                            );
-                            in_flight_envelope = None;
-                            continue;
-                        };
-                        tracing::warn!(
-                            invitation_id = %acceptance.invitation_id,
-                            acceptor_id = %acceptance.acceptor_id,
-                            context_id = %acceptance.context_id,
-                            channel_id = %acceptance.channel_id,
-                            "Materializing channel acceptance without created invitation record"
-                        );
-                        self.publish_channel_acceptance_chat_projection(
-                            effects.as_ref(),
-                            acceptance.context_id,
-                            acceptance.channel_id,
-                            &home_name,
-                            local_authority,
-                            acceptance.acceptor_id,
-                        )
-                        .await?;
-                        crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
-                            &reactive,
-                            acceptance.channel_id,
-                            &home_name,
-                            local_authority,
-                            acceptance.acceptor_id,
-                            acceptance.context_id,
-                            now_ms,
-                        )
-                        .await
-                        .map_err(AgentError::runtime)?;
-                        home_name
+                    let mut updated = invitation.clone();
+                    updated.status = InvitationStatus::Accepted;
+                    updated.receiver_id = acceptance.acceptor_id;
+                    tracing::debug!(
+                        invitation_id = %updated.invitation_id,
+                        sender_id = %updated.sender_id,
+                        receiver_id = %updated.receiver_id,
+                        invitation_context = %updated.context_id,
+                        acceptance_context = %acceptance.context_id,
+                        channel_id = %acceptance.channel_id,
+                        "processed channel invitation acceptance for created invitation"
+                    );
+                    InvitationHandler::persist_created_invitation(
+                        effects.as_ref(),
+                        local_authority,
+                        &updated,
+                    )
+                    .await?;
+                    self.handler.invitation_cache.cache_invitation(updated.clone()).await;
+                    let InvitationType::Channel {
+                        home_id,
+                        nickname_suggestion,
+                        ..
+                    } = &updated.invitation_type
+                    else {
+                        return Err(AgentError::internal(
+                            "channel invitation acceptance persisted a non-channel invitation"
+                                .to_string(),
+                        ));
                     };
+                    let home_name =
+                        require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
+                    self.publish_channel_acceptance_chat_projection(
+                        effects.as_ref(),
+                        updated.context_id,
+                        *home_id,
+                        &home_name,
+                        updated.sender_id,
+                        updated.receiver_id,
+                    )
+                    .await?;
+                    crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                        &reactive,
+                        *home_id,
+                        &home_name,
+                        updated.sender_id,
+                        updated.receiver_id,
+                        updated.context_id,
+                        now_ms,
+                    )
+                    .await
+                    .map_err(AgentError::runtime)?;
                     let _ = home_name;
 
                     processed = processed.saturating_add(1);
@@ -970,16 +995,12 @@ impl<'a> InvitationContactHandler<'a> {
                     inv.sender_id
                 };
                 let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
-                let code = crate::handlers::invitation::shareable::ShareableInvitation::from(&inv)
-                    .to_code()
-                    .ok();
                 tracing::debug!(
                     contact_id = %other,
                     nickname = %nickname,
-                    has_code = code.is_some(),
                     "resolve_contact_invitation: resolved from cache"
                 );
-                return Ok(Some((other, nickname, code)));
+                return Ok(Some((other, nickname, None)));
             }
         } else {
             tracing::debug!(
@@ -1002,14 +1023,12 @@ impl<'a> InvitationContactHandler<'a> {
                 if shareable.sender_id != own_id {
                     let other = shareable.sender_id;
                     let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
-                    let code = shareable.to_code().ok();
                     tracing::debug!(
                         contact_id = %other,
                         nickname = %nickname,
-                        has_code = code.is_some(),
                         "resolve_contact_invitation: resolved from persisted store"
                     );
-                    return Ok(Some((other, nickname, code)));
+                    return Ok(Some((other, nickname, None)));
                 }
             }
         } else {

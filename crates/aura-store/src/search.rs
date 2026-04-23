@@ -16,6 +16,16 @@ fn insert_metadata(metadata: &mut BTreeMap<String, String>, key: String, value: 
     metadata.insert(key, value);
 }
 
+fn is_same_or_child_path(candidate: &str, parent: &str) -> bool {
+    let candidate = candidate.trim_matches('/');
+    let parent = parent.trim_matches('/');
+    parent.is_empty()
+        || candidate == parent
+        || candidate
+            .strip_prefix(parent)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
 /// Search scope for limiting search domains
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SearchScope {
@@ -42,7 +52,7 @@ impl SearchScope {
     pub fn contains_content(&self, content_id: &str) -> bool {
         match self {
             Self::Global => true,
-            Self::Namespace(ns) => content_id.starts_with(ns),
+            Self::Namespace(ns) => is_same_or_child_path(content_id, ns),
             Self::Content(ids) => ids.contains(&content_id.to_string()),
         }
     }

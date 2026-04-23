@@ -872,8 +872,8 @@ impl InvitationServiceApi {
     /// # Returns
     /// A shareable code string (format: `aura:v1:<base64>`)
     pub fn export_invitation(invitation: &Invitation) -> Result<String, ShareableInvitationError> {
-        let shareable = ShareableInvitation::from(invitation);
-        shareable.to_code()
+        let _ = invitation;
+        Err(ShareableInvitationError::MissingSenderProof)
     }
 
     /// Export an invitation as a shareable code string with transport metadata.

@@ -20,27 +20,34 @@ use crate::{
     coordinator::{BaseCoordinator, BaseCoordinatorAccess, RecoveryCoordinator},
     effects::RecoveryEffects,
     facts::RecoveryFact,
-    types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
-    utils::{
-        workflow::{
-            context_id_from_operation_id, current_physical_time_or_zero, exact_physical_time,
-            persist_recovery_fact, trace_id,
-        },
-        EvidenceBuilder,
+    types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse},
+    utils::workflow::{
+        context_id_from_operation_id, current_physical_time_or_zero, persist_recovery_fact,
+        trace_id,
     },
     RecoveryResult,
 };
 use async_trait::async_trait;
-use aura_core::effects::{PhysicalTimeEffects, SecureStorageLocation};
+use aura_core::effects::{CryptoEffects, SecureStorageLocation};
+use aura_core::key_resolution::TrustedKeyResolver;
 use aura_core::time::TimeStamp;
 use aura_core::types::identifiers::AuthorityId;
+use aura_core::{AuraError, Hash32};
 use aura_macros::tell;
+use aura_signature::{sign_ed25519_transcript, verify_ed25519_transcript, SecurityTranscript};
+use curve25519_dalek::{montgomery::MontgomeryPoint, scalar::Scalar};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::sync::Arc;
+
+const GUARDIAN_SHARE_ENCRYPTION_PROTOCOL_VERSION: u8 = 1;
+const GUARDIAN_SHARE_ENCRYPTION_KDF_DOMAIN: &[u8] = b"aura.recovery.guardian-share.v1";
 
 /// Encrypted FROST key share for a guardian
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedKeyShare {
+    /// Guardian share encryption protocol version.
+    pub protocol_version: u8,
     /// Guardian this share is encrypted for
     pub guardian_id: AuthorityId,
     /// FROST participant index (1-based)
@@ -50,8 +57,14 @@ pub struct EncryptedKeyShare {
     pub encrypted_share: Vec<u8>,
     /// Nonce used for encryption
     pub nonce: [u8; 12],
-    /// Untrusted key material: ephemeral agreement key carried by the remote setup payload.
+    /// X25519 ephemeral sender key derived via the reviewed Ed25519->X25519 conversion path.
     pub ephemeral_public_key: Vec<u8>,
+    /// Recipient Ed25519 public key authenticated in the signed guardian acceptance.
+    pub recipient_public_key: Vec<u8>,
+    /// Hash of the setup completion public key package this share is bound to.
+    pub public_key_package_hash: Hash32,
+    /// Hash binding ciphertext, nonce, setup/account/guardian scope, and key-agreement keys.
+    pub binding_hash: Hash32,
 }
 
 /// Guardian setup invitation data
@@ -76,12 +89,16 @@ pub struct GuardianAcceptance {
     pub guardian_id: AuthorityId,
     /// Setup ID being accepted
     pub setup_id: String,
+    /// Account authority being set up
+    pub account_id: AuthorityId,
     /// Whether the guardian accepted
     pub accepted: bool,
     /// Untrusted key material: claimed guardian relationship key; verification must resolve expected guardian state separately.
     pub public_key: Vec<u8>,
     /// Timestamp of acceptance
     pub timestamp: TimeStamp,
+    /// Cryptographic signature binding the guardian decision to the full setup transcript.
+    pub signature: Vec<u8>,
 }
 
 /// Explicit guardian decision for setup participation.
@@ -119,6 +136,73 @@ pub struct SetupCompletion {
     pub public_key_package: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct GuardianAcceptanceTranscriptPayload {
+    setup_id: String,
+    account_id: AuthorityId,
+    target_guardians: Vec<AuthorityId>,
+    threshold: u16,
+    invitation_timestamp: TimeStamp,
+    guardian_id: AuthorityId,
+    accepted: bool,
+    public_key: Vec<u8>,
+    acceptance_timestamp: TimeStamp,
+}
+
+struct GuardianAcceptanceTranscript<'a> {
+    invitation: &'a GuardianInvitation,
+    guardian_id: AuthorityId,
+    accepted: bool,
+    public_key: &'a [u8],
+    acceptance_timestamp: &'a TimeStamp,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GuardianShareKeyAgreementTranscript<'a> {
+    protocol_version: u8,
+    setup_id: &'a str,
+    account_id: AuthorityId,
+    guardian_id: AuthorityId,
+    signer_index: u16,
+    recipient_public_key: &'a [u8],
+    ephemeral_public_key: &'a [u8],
+    public_key_package_hash: Hash32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GuardianShareBindingTranscript<'a> {
+    protocol_version: u8,
+    setup_id: &'a str,
+    account_id: AuthorityId,
+    guardian_id: AuthorityId,
+    signer_index: u16,
+    recipient_public_key: &'a [u8],
+    ephemeral_public_key: &'a [u8],
+    public_key_package_hash: Hash32,
+    encrypted_share_hash: Hash32,
+    nonce: [u8; 12],
+}
+
+impl SecurityTranscript for GuardianAcceptanceTranscript<'_> {
+    type Payload = GuardianAcceptanceTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.recovery.guardian-setup.acceptance";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        GuardianAcceptanceTranscriptPayload {
+            setup_id: self.invitation.setup_id.clone(),
+            account_id: self.invitation.account_id,
+            target_guardians: self.invitation.target_guardians.clone(),
+            threshold: self.invitation.threshold,
+            invitation_timestamp: self.invitation.timestamp.clone(),
+            guardian_id: self.guardian_id,
+            accepted: self.accepted,
+            public_key: self.public_key.to_vec(),
+            acceptance_timestamp: self.acceptance_timestamp.clone(),
+        }
+    }
+}
+
 /// Explicit outcome for a guardian setup completion payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupCompletionOutcome {
@@ -139,26 +223,6 @@ impl SetupCompletion {
 
 const GUARDIAN_SETUP_INPUT_VALIDATION_CAPABILITY: &str = "guardian_setup_input_validation";
 const GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY: &str = "guardian_setup_completion_build";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SetupAcceptanceProgress {
-    BelowThreshold { accepted: usize, threshold: u16 },
-    ThresholdReached { accepted: usize, threshold: u16 },
-}
-
-fn classify_setup_acceptances(accepted: usize, threshold: u16) -> SetupAcceptanceProgress {
-    if accepted >= threshold as usize {
-        SetupAcceptanceProgress::ThresholdReached {
-            accepted,
-            threshold,
-        }
-    } else {
-        SetupAcceptanceProgress::BelowThreshold {
-            accepted,
-            threshold,
-        }
-    }
-}
 
 /// Validate the feature-level guardian setup parameter shape.
 #[aura_macros::capability_boundary(
@@ -188,23 +252,54 @@ pub fn validate_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> Resul
 }
 
 /// Build the final setup completion payload from guardian responses.
-#[must_use]
+pub fn build_setup_completion(
+    setup_id: &str,
+    threshold: u16,
+    acceptances: Vec<GuardianAcceptance>,
+) -> Result<SetupCompletion, String> {
+    build_setup_completion_with_material(setup_id, threshold, acceptances, Vec::new(), Vec::new())
+}
+
+/// Build the final setup completion payload from verified guardian responses and generated shares.
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "guardian_setup_completion_build",
     family = "runtime_helper"
 )]
-pub fn build_setup_completion(
+pub fn build_setup_completion_with_material(
     setup_id: &str,
     threshold: u16,
     acceptances: Vec<GuardianAcceptance>,
-) -> SetupCompletion {
+    encrypted_shares: Vec<EncryptedKeyShare>,
+    public_key_package: Vec<u8>,
+) -> Result<SetupCompletion, String> {
     let _ = GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY;
     let accepted_guardians: Vec<AuthorityId> = acceptances
         .iter()
         .filter(|acceptance| acceptance.decision() == GuardianDecision::Accepted)
         .map(|acceptance| acceptance.guardian_id)
         .collect();
+    let success = accepted_guardians.len() >= threshold as usize;
+    let share_guardians: BTreeSet<AuthorityId> = encrypted_shares
+        .iter()
+        .map(|share| share.guardian_id)
+        .collect();
+    let accepted_guardian_set: BTreeSet<AuthorityId> = accepted_guardians.iter().copied().collect();
+
+    if success {
+        if encrypted_shares.is_empty() {
+            return Err("guardian setup completion requires encrypted shares".to_string());
+        }
+        if public_key_package.is_empty() {
+            return Err("guardian setup completion requires a public key package".to_string());
+        }
+        if share_guardians != accepted_guardian_set {
+            return Err(
+                "guardian setup completion shares must exactly match accepted guardians"
+                    .to_string(),
+            );
+        }
+    }
 
     let guardian_set = GuardianSet::new(
         accepted_guardians
@@ -214,14 +309,382 @@ pub fn build_setup_completion(
             .collect(),
     );
 
-    SetupCompletion {
+    Ok(SetupCompletion {
         setup_id: setup_id.to_string(),
-        success: accepted_guardians.len() >= threshold as usize,
+        success,
         guardian_set,
         threshold,
-        encrypted_shares: Vec::new(),
-        public_key_package: Vec::new(),
+        encrypted_shares,
+        public_key_package,
+    })
+}
+
+/// Encode the canonical guardian setup acceptance transcript.
+pub fn guardian_setup_acceptance_transcript_bytes(
+    invitation: &GuardianInvitation,
+    guardian_id: AuthorityId,
+    accepted: bool,
+    public_key: &[u8],
+    acceptance_timestamp: &TimeStamp,
+) -> RecoveryResult<Vec<u8>> {
+    GuardianAcceptanceTranscript {
+        invitation,
+        guardian_id,
+        accepted,
+        public_key,
+        acceptance_timestamp,
     }
+    .transcript_bytes()
+    .map_err(|error| AuraError::crypto(format!("guardian setup transcript failed: {error}")))
+}
+
+/// Sign a guardian setup acceptance with the guardian's Ed25519 key.
+pub async fn sign_guardian_setup_acceptance<E>(
+    effects: &E,
+    invitation: &GuardianInvitation,
+    guardian_id: AuthorityId,
+    accepted: bool,
+    public_key: &[u8],
+    acceptance_timestamp: &TimeStamp,
+    private_key: &[u8],
+) -> RecoveryResult<Vec<u8>>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    let transcript = GuardianAcceptanceTranscript {
+        invitation,
+        guardian_id,
+        accepted,
+        public_key,
+        acceptance_timestamp,
+    };
+    sign_ed25519_transcript(effects, &transcript, private_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!("guardian setup acceptance signing failed: {error}"))
+        })
+}
+
+/// Verify a guardian setup acceptance against trusted guardian verification keys.
+pub async fn verify_guardian_setup_acceptance_signature<E>(
+    effects: &E,
+    invitation: &GuardianInvitation,
+    acceptance: &GuardianAcceptance,
+    key_resolver: &impl TrustedKeyResolver,
+) -> RecoveryResult<bool>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    if acceptance.setup_id != invitation.setup_id || acceptance.account_id != invitation.account_id
+    {
+        return Ok(false);
+    }
+    let trusted_key = key_resolver
+        .resolve_guardian_key(acceptance.guardian_id)
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "trusted guardian setup key resolution failed for {}: {error}",
+                acceptance.guardian_id
+            ))
+        })?;
+    let transcript = GuardianAcceptanceTranscript {
+        invitation,
+        guardian_id: acceptance.guardian_id,
+        accepted: acceptance.accepted,
+        public_key: &acceptance.public_key,
+        acceptance_timestamp: &acceptance.timestamp,
+    };
+    verify_ed25519_transcript(
+        effects,
+        &transcript,
+        &acceptance.signature,
+        trusted_key.bytes(),
+    )
+    .await
+    .map_err(|error| {
+        AuraError::crypto(format!(
+            "guardian setup acceptance verification failed: {error}"
+        ))
+    })
+}
+
+fn to_x25519_scalar(private_key: &[u8; 32]) -> Scalar {
+    Scalar::from_bytes_mod_order(*private_key)
+}
+
+fn x25519_shared_secret(private_key: &[u8; 32], public_key: &[u8; 32]) -> [u8; 32] {
+    let scalar = to_x25519_scalar(private_key);
+    let point = MontgomeryPoint(*public_key);
+    (scalar * point).to_bytes()
+}
+
+fn guardian_share_kdf_transcript(
+    setup_id: &str,
+    account_id: AuthorityId,
+    guardian_id: AuthorityId,
+    signer_index: u16,
+    recipient_public_key: &[u8],
+    ephemeral_public_key: &[u8],
+    public_key_package_hash: Hash32,
+) -> RecoveryResult<Vec<u8>> {
+    aura_core::util::serialization::to_vec(&GuardianShareKeyAgreementTranscript {
+        protocol_version: GUARDIAN_SHARE_ENCRYPTION_PROTOCOL_VERSION,
+        setup_id,
+        account_id,
+        guardian_id,
+        signer_index,
+        recipient_public_key,
+        ephemeral_public_key,
+        public_key_package_hash,
+    })
+    .map_err(|error| AuraError::crypto(format!("guardian share transcript encode failed: {error}")))
+}
+
+fn guardian_share_binding_hash(
+    setup_id: &str,
+    account_id: AuthorityId,
+    guardian_id: AuthorityId,
+    signer_index: u16,
+    recipient_public_key: &[u8],
+    ephemeral_public_key: &[u8],
+    public_key_package_hash: Hash32,
+    encrypted_share_hash: Hash32,
+    nonce: [u8; 12],
+) -> RecoveryResult<Hash32> {
+    Hash32::from_value(&GuardianShareBindingTranscript {
+        protocol_version: GUARDIAN_SHARE_ENCRYPTION_PROTOCOL_VERSION,
+        setup_id,
+        account_id,
+        guardian_id,
+        signer_index,
+        recipient_public_key,
+        ephemeral_public_key,
+        public_key_package_hash,
+        encrypted_share_hash,
+        nonce,
+    })
+    .map_err(|error| AuraError::crypto(format!("guardian share binding hash failed: {error}")))
+}
+
+/// Encrypt a guardian key share using X25519 key agreement derived from the
+/// reviewed Ed25519->X25519 conversion path.
+pub async fn encrypt_guardian_share<E>(
+    effects: &E,
+    invitation: &GuardianInvitation,
+    acceptance: &GuardianAcceptance,
+    signer_index: u16,
+    key_package: &[u8],
+    public_key_package: &[u8],
+) -> RecoveryResult<EncryptedKeyShare>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    if !acceptance.accepted {
+        return Err(AuraError::invalid(
+            "guardian share encryption requires an accepted guardian".to_string(),
+        ));
+    }
+    if acceptance.setup_id != invitation.setup_id || acceptance.account_id != invitation.account_id
+    {
+        return Err(AuraError::invalid(
+            "guardian share encryption requires an acceptance bound to the active setup"
+                .to_string(),
+        ));
+    }
+
+    let recipient_x25519_public = effects
+        .convert_ed25519_to_x25519_public(&acceptance.public_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!("guardian recipient key conversion failed: {error}"))
+        })?;
+    let (ephemeral_private_key, ephemeral_ed25519_public_key) =
+        effects.ed25519_generate_keypair().await.map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian share ephemeral key generation failed: {error}"
+            ))
+        })?;
+    let ephemeral_x25519_private = effects
+        .convert_ed25519_to_x25519_private(&ephemeral_private_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian share ephemeral private-key conversion failed: {error}"
+            ))
+        })?;
+    let ephemeral_x25519_public = effects
+        .convert_ed25519_to_x25519_public(&ephemeral_ed25519_public_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian share ephemeral public-key conversion failed: {error}"
+            ))
+        })?;
+    let shared_secret = x25519_shared_secret(&ephemeral_x25519_private, &recipient_x25519_public);
+    let public_key_package_hash = Hash32::from_bytes(public_key_package);
+    let kdf_info = guardian_share_kdf_transcript(
+        &invitation.setup_id,
+        invitation.account_id,
+        acceptance.guardian_id,
+        signer_index,
+        &acceptance.public_key,
+        &ephemeral_x25519_public,
+        public_key_package_hash,
+    )?;
+    let encryption_key = effects
+        .kdf_derive(
+            &shared_secret,
+            GUARDIAN_SHARE_ENCRYPTION_KDF_DOMAIN,
+            &kdf_info,
+            32,
+        )
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian share encryption key derivation failed: {error}"
+            ))
+        })?;
+    let nonce_bytes = effects.random_bytes(12).await;
+    let mut nonce = [0u8; 12];
+    nonce.copy_from_slice(&nonce_bytes);
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&encryption_key);
+    let encrypted_share = effects
+        .chacha20_encrypt(key_package, &key_array, &nonce)
+        .await
+        .map_err(|error| AuraError::crypto(format!("guardian share encryption failed: {error}")))?;
+    let encrypted_share_hash = Hash32::from_bytes(&encrypted_share);
+    let binding_hash = guardian_share_binding_hash(
+        &invitation.setup_id,
+        invitation.account_id,
+        acceptance.guardian_id,
+        signer_index,
+        &acceptance.public_key,
+        &ephemeral_x25519_public,
+        public_key_package_hash,
+        encrypted_share_hash,
+        nonce,
+    )?;
+
+    Ok(EncryptedKeyShare {
+        protocol_version: GUARDIAN_SHARE_ENCRYPTION_PROTOCOL_VERSION,
+        guardian_id: acceptance.guardian_id,
+        signer_index,
+        encrypted_share,
+        nonce,
+        ephemeral_public_key: ephemeral_x25519_public.to_vec(),
+        recipient_public_key: acceptance.public_key.clone(),
+        public_key_package_hash,
+        binding_hash,
+    })
+}
+
+/// Decrypt and verify a guardian key share.
+pub async fn decrypt_guardian_share<E>(
+    effects: &E,
+    account_id: AuthorityId,
+    guardian_id: AuthorityId,
+    setup_id: &str,
+    public_key_package: &[u8],
+    encrypted_share: &EncryptedKeyShare,
+    recipient_private_key: &[u8],
+) -> RecoveryResult<Vec<u8>>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    if encrypted_share.protocol_version != GUARDIAN_SHARE_ENCRYPTION_PROTOCOL_VERSION {
+        return Err(AuraError::invalid(format!(
+            "unsupported guardian share encryption version {}",
+            encrypted_share.protocol_version
+        )));
+    }
+    if encrypted_share.guardian_id != guardian_id {
+        return Err(AuraError::invalid(
+            "guardian share recipient does not match the requested guardian".to_string(),
+        ));
+    }
+    let derived_recipient_public_key = effects
+        .ed25519_public_key(recipient_private_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian recipient public-key derivation failed: {error}"
+            ))
+        })?;
+    if derived_recipient_public_key != encrypted_share.recipient_public_key {
+        return Err(AuraError::invalid(
+            "guardian share recipient key does not match the stored acceptance key".to_string(),
+        ));
+    }
+    let recipient_x25519_private = effects
+        .convert_ed25519_to_x25519_private(recipient_private_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian recipient private-key conversion failed: {error}"
+            ))
+        })?;
+    let ephemeral_public_key: [u8; 32] = encrypted_share
+        .ephemeral_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| AuraError::invalid("guardian share ephemeral key must be 32 bytes"))?;
+    let public_key_package_hash = Hash32::from_bytes(public_key_package);
+    if encrypted_share.public_key_package_hash != public_key_package_hash {
+        return Err(AuraError::invalid(
+            "guardian share public key package hash does not match completion data".to_string(),
+        ));
+    }
+    let encrypted_share_hash = Hash32::from_bytes(&encrypted_share.encrypted_share);
+    let expected_binding_hash = guardian_share_binding_hash(
+        setup_id,
+        account_id,
+        guardian_id,
+        encrypted_share.signer_index,
+        &encrypted_share.recipient_public_key,
+        &encrypted_share.ephemeral_public_key,
+        public_key_package_hash,
+        encrypted_share_hash,
+        encrypted_share.nonce,
+    )?;
+    if encrypted_share.binding_hash != expected_binding_hash {
+        return Err(AuraError::invalid(
+            "guardian share binding hash does not match ciphertext or setup metadata".to_string(),
+        ));
+    }
+    let shared_secret = x25519_shared_secret(&recipient_x25519_private, &ephemeral_public_key);
+    let kdf_info = guardian_share_kdf_transcript(
+        setup_id,
+        account_id,
+        guardian_id,
+        encrypted_share.signer_index,
+        &encrypted_share.recipient_public_key,
+        &encrypted_share.ephemeral_public_key,
+        public_key_package_hash,
+    )?;
+    let decryption_key = effects
+        .kdf_derive(
+            &shared_secret,
+            GUARDIAN_SHARE_ENCRYPTION_KDF_DOMAIN,
+            &kdf_info,
+            32,
+        )
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian share decryption key derivation failed: {error}"
+            ))
+        })?;
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&decryption_key);
+    effects
+        .chacha20_decrypt(
+            &encrypted_share.encrypted_share,
+            &key_array,
+            &encrypted_share.nonce,
+        )
+        .await
+        .map_err(|error| AuraError::crypto(format!("guardian share decryption failed: {error}")))
 }
 
 // Guardian Setup Choreography - 3 phase protocol
@@ -271,231 +734,18 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         persist_recovery_fact(self.effect_system().as_ref(), &fact).await
     }
 
-    fn setup_id(account_id: &AuthorityId, now_ms: u64) -> String {
-        format!("setup_{account_id}_{now_ms}")
-    }
-
     fn setup_context_id(setup_id: &str) -> aura_core::types::identifiers::ContextId {
         context_id_from_operation_id(setup_id)
-    }
-
-    async fn emit_failed_setup(
-        &self,
-        context_id: aura_core::types::identifiers::ContextId,
-        setup_id: &str,
-        reason: impl Into<String>,
-    ) -> RecoveryResult<()> {
-        let failed_fact = RecoveryFact::GuardianSetupFailed {
-            context_id,
-            reason: reason.into(),
-            trace_id: trace_id(setup_id),
-            failed_at: current_physical_time_or_zero(self.effect_system().as_ref()).await,
-        };
-        self.emit_fact(failed_fact).await
     }
 
     /// Execute guardian setup ceremony.
     pub async fn execute_setup(
         &self,
-        request: RecoveryRequest,
+        _request: RecoveryRequest,
     ) -> RecoveryResult<RecoveryResponse> {
-        // Get current timestamp for unique ID generation
-        let now_ms = self
-            .effect_system()
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0);
-
-        // Create context ID for this setup ceremony using hash of account + timestamp
-        let setup_id = Self::setup_id(&request.account_id, now_ms);
-        let context_id = Self::setup_context_id(&setup_id);
-
-        // Emit GuardianSetupInitiated fact
-        let guardian_ids: Vec<AuthorityId> =
-            request.guardians.iter().map(|g| g.authority_id).collect();
-
-        let initiated_fact = RecoveryFact::GuardianSetupInitiated {
-            context_id,
-            initiator_id: request.initiator_id,
-            trace_id: trace_id(&setup_id),
-            guardian_ids: guardian_ids.clone(),
-            threshold: request.threshold,
-            initiated_at: exact_physical_time(now_ms),
-        };
-        self.emit_fact(initiated_fact).await?;
-
-        // Validate that we have guardians
-        if request.guardians.is_empty() {
-            let _ = self
-                .emit_failed_setup(context_id, &setup_id, "No guardians specified")
-                .await;
-            return Ok(RecoveryResponse::error("No guardians specified"));
-        }
-
-        // Create invitation
-        let invitation = GuardianInvitation {
-            setup_id: setup_id.clone(),
-            account_id: request.account_id,
-            target_guardians: guardian_ids.clone(),
-            threshold: request.threshold,
-            timestamp: TimeStamp::PhysicalClock(exact_physical_time(now_ms)),
-        };
-
-        // Execute the choreographic protocol using the runtime adapter.
-        let acceptances = self.execute_choreographic_setup(invitation).await?;
-
-        // Check if we have enough acceptances
-        debug_assert!(
-            acceptances
-                .iter()
-                .all(|acceptance| acceptance.setup_id == setup_id),
-            "guardian acceptances must all belong to the active setup"
-        );
-        debug_assert!(
-            acceptances
-                .iter()
-                .all(|acceptance| acceptance.decision() == GuardianDecision::Accepted),
-            "local setup helper should only surface accepted guardians"
-        );
-
-        match classify_setup_acceptances(acceptances.len(), request.threshold) {
-            SetupAcceptanceProgress::BelowThreshold {
-                accepted,
-                threshold,
-            } => {
-                let reason =
-                    format!("Insufficient guardian acceptances: got {accepted}, need {threshold}");
-                let _ = self
-                    .emit_failed_setup(context_id, &setup_id, reason.clone())
-                    .await;
-
-                return Ok(RecoveryResponse::error(reason));
-            }
-            SetupAcceptanceProgress::ThresholdReached { .. } => {}
-        }
-
-        // Generate threshold keys for the recovery authority
-        let num_guardians = acceptances.len() as u16;
-        let threshold = request.threshold;
-
-        tracing::info!(
-            threshold = %threshold,
-            guardians = %num_guardians,
-            "Generating threshold keys for guardian recovery authority"
-        );
-
-        let frost_keys = self
-            .effect_system()
-            .generate_signing_keys_with(
-                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
-                threshold,
-                num_guardians,
-            )
-            .await
-            .map_err(|e| crate::RecoveryError::internal(format!("Key generation failed: {e}")))?;
-
-        // Encrypt each guardian's key share
-        let mut encrypted_shares = Vec::with_capacity(acceptances.len());
-        let mut shares = Vec::with_capacity(acceptances.len());
-
-        for (idx, acceptance) in acceptances.iter().enumerate() {
-            let signer_index = (idx + 1) as u16; // FROST uses 1-based indices
-            let key_package = &frost_keys.key_packages[idx];
-
-            // Generate ephemeral keypair for key agreement
-            let (ephemeral_private, ephemeral_public) = self
-                .effect_system()
-                .ed25519_generate_keypair()
-                .await
-                .map_err(|e| {
-                    crate::RecoveryError::internal(format!("Ephemeral key generation failed: {e}"))
-                })?;
-
-            // Derive a symmetric key from the shared secret.
-            // (ephemeral_private XOR guardian_public as a simple shared secret)
-            let shared_secret_input = [
-                ephemeral_private.as_slice(),
-                acceptance.public_key.as_slice(),
-            ]
-            .concat();
-            let encryption_key = self
-                .effect_system()
-                .kdf_derive(
-                    &shared_secret_input,
-                    b"aura-guardian-share-v1",
-                    format!("guardian:{}", acceptance.guardian_id).as_bytes(),
-                    32,
-                )
-                .await
-                .map_err(|e| {
-                    crate::RecoveryError::internal(format!("Key derivation failed: {e}"))
-                })?;
-
-            // Generate random nonce for encryption
-            let nonce_bytes = self.effect_system().random_bytes(12).await;
-            let mut nonce = [0u8; 12];
-            nonce.copy_from_slice(&nonce_bytes);
-
-            // Encrypt the key package with ChaCha20-Poly1305
-            let mut key_array = [0u8; 32];
-            key_array.copy_from_slice(&encryption_key);
-            let encrypted_share = self
-                .effect_system()
-                .chacha20_encrypt(key_package, &key_array, &nonce)
-                .await
-                .map_err(|e| {
-                    crate::RecoveryError::internal(format!("Share encryption failed: {e}"))
-                })?;
-
-            tracing::debug!(
-                guardian = %acceptance.guardian_id,
-                signer_index = %signer_index,
-                share_len = %key_package.len(),
-                encrypted_len = %encrypted_share.len(),
-                "Encrypted FROST share for guardian"
-            );
-
-            encrypted_shares.push(EncryptedKeyShare {
-                guardian_id: acceptance.guardian_id,
-                signer_index,
-                encrypted_share: encrypted_share.clone(),
-                nonce,
-                ephemeral_public_key: ephemeral_public,
-            });
-
-            // Create RecoveryShare with the encrypted share data
-            shares.push(RecoveryShare {
-                guardian_id: acceptance.guardian_id,
-                guardian_label: None,
-                share: encrypted_share, // Now contains actual encrypted FROST share
-                partial_signature: Vec::new(), // Will be filled during recovery signing
-                issued_at_ms: now_ms,
-            });
-        }
-
-        tracing::info!(
-            guardians = %shares.len(),
-            public_key_len = %frost_keys.public_key_package.len(),
-            "FROST key shares generated and encrypted for all guardians"
-        );
-
-        // Emit completion fact
-        let completed_fact = RecoveryFact::GuardianSetupCompleted {
-            context_id,
-            guardian_ids: shares.iter().map(|s| s.guardian_id).collect(),
-            trace_id: trace_id(&setup_id),
-            threshold: request.threshold,
-            completed_at: current_physical_time_or_zero(self.effect_system().as_ref()).await,
-        };
-        self.emit_fact(completed_fact).await?;
-
-        // Create evidence
-        let evidence = EvidenceBuilder::success(context_id, request.account_id, &shares, now_ms);
-
-        Ok(BaseCoordinator::<E>::success_response(
-            None, shares, evidence,
-        ))
+        return Err(crate::RecoveryError::internal(
+            "guardian setup coordinator no longer fabricates local guardian acceptances; use the authenticated runtime choreography",
+        ));
     }
 
     /// Execute as guardian (accept setup invitation).
@@ -513,6 +763,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         &self,
         invitation: GuardianInvitation,
         guardian_id: AuthorityId,
+        guardian_signing_private_key: &[u8],
     ) -> RecoveryResult<GuardianAcceptance> {
         let physical_time = current_physical_time_or_zero(self.effect_system().as_ref()).await;
 
@@ -555,66 +806,27 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         };
         self.emit_fact(accepted_fact).await?;
 
+        let timestamp = TimeStamp::PhysicalClock(physical_time);
+        let signature = sign_guardian_setup_acceptance(
+            self.effect_system().as_ref(),
+            &invitation,
+            guardian_id,
+            true,
+            &public_key,
+            &timestamp,
+            guardian_signing_private_key,
+        )
+        .await?;
+
         Ok(GuardianAcceptance {
             guardian_id,
-            setup_id: invitation.setup_id,
+            setup_id: invitation.setup_id.clone(),
+            account_id: invitation.account_id,
             accepted: true,
             public_key,
-            timestamp: TimeStamp::PhysicalClock(physical_time),
+            timestamp,
+            signature,
         })
-    }
-
-    /// Execute choreographic setup protocol (Phase 1-2).
-    ///
-    /// # Note
-    /// This is a simulation/test helper that generates acceptances locally.
-    /// Real deployments use network choreography via the protocol layer.
-    async fn execute_choreographic_setup(
-        &self,
-        invitation: GuardianInvitation,
-    ) -> RecoveryResult<Vec<GuardianAcceptance>> {
-        let physical_time = self
-            .effect_system()
-            .physical_time()
-            .await
-            .map_err(|e| aura_core::AuraError::internal(format!("Time error: {e}")))?;
-
-        // Generate real acceptances with cryptographic keys
-        let mut acceptances = Vec::new();
-        for guardian_id in &invitation.target_guardians {
-            // Generate real Ed25519 keypair for each guardian
-            let (private_key, public_key) = self
-                .effect_system()
-                .ed25519_generate_keypair()
-                .await
-                .map_err(|e| {
-                crate::RecoveryError::internal(format!("Guardian key generation failed: {e}"))
-            })?;
-
-            // Store the private key for later share decryption
-            let storage_key = format!(
-                "guardian_acceptance_keys/{}/{}",
-                invitation.setup_id, guardian_id
-            );
-            self.effect_system()
-                .store(&storage_key, private_key.clone())
-                .await
-                .map_err(|e| {
-                    crate::RecoveryError::internal(format!(
-                        "Failed to store acceptance private key: {e}"
-                    ))
-                })?;
-
-            acceptances.push(GuardianAcceptance {
-                guardian_id: *guardian_id,
-                setup_id: invitation.setup_id.clone(),
-                accepted: true,
-                public_key,
-                timestamp: TimeStamp::PhysicalClock(physical_time.clone()),
-            });
-        }
-
-        Ok(acceptances)
     }
 
     /// Receive and decrypt a FROST share as a guardian.
@@ -632,6 +844,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         account_id: AuthorityId,
         guardian_id: AuthorityId,
         setup_id: &str,
+        public_key_package: &[u8],
         encrypted_share: &EncryptedKeyShare,
     ) -> RecoveryResult<()> {
         // Retrieve the private key we stored during acceptance
@@ -647,35 +860,17 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                 crate::RecoveryError::internal("No acceptance private key found".to_string())
             })?;
 
-        // Derive decryption key from shared secret (private_key + ephemeral_public_key)
-        let shared_secret_input = [
-            encrypted_share.ephemeral_public_key.as_slice(),
-            private_key.as_slice(),
-        ]
-        .concat();
-        let decryption_key = self
-            .effect_system()
-            .kdf_derive(
-                &shared_secret_input,
-                b"aura-guardian-share-v1",
-                format!("guardian:{guardian_id}").as_bytes(),
-                32,
-            )
-            .await
-            .map_err(|e| crate::RecoveryError::internal(format!("Key derivation failed: {e}")))?;
-
-        // Decrypt the FROST share
-        let mut key_array = [0u8; 32];
-        key_array.copy_from_slice(&decryption_key);
-        let decrypted_share = self
-            .effect_system()
-            .chacha20_decrypt(
-                &encrypted_share.encrypted_share,
-                &key_array,
-                &encrypted_share.nonce,
-            )
-            .await
-            .map_err(|e| crate::RecoveryError::internal(format!("Share decryption failed: {e}")))?;
+        let decrypted_share = decrypt_guardian_share(
+            self.effect_system().as_ref(),
+            account_id,
+            guardian_id,
+            setup_id,
+            public_key_package,
+            encrypted_share,
+            &private_key,
+        )
+        .await
+        .map_err(|e| crate::RecoveryError::internal(format!("Share decryption failed: {e}")))?;
 
         tracing::info!(
             account = %account_id,
@@ -715,33 +910,152 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::GuardianProfile;
+    use aura_core::effects::CryptoCoreEffects;
+    use aura_core::key_resolution::{
+        KeyResolutionError, TrustedKeyDomain, TrustedKeyResolver, TrustedPublicKey,
+    };
     use aura_core::time::PhysicalTime;
+    use aura_core::{DeviceId, Hash32};
+    use aura_effects::crypto::RealCryptoHandler;
     use aura_testkit::MockEffects;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     fn test_authority_id(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
     }
 
-    fn create_test_request() -> crate::types::RecoveryRequest {
-        let guardians = vec![
-            GuardianProfile::with_label(test_authority_id(1), "Guardian 1".to_string()),
-            GuardianProfile::with_label(test_authority_id(2), "Guardian 2".to_string()),
-            GuardianProfile::with_label(test_authority_id(3), "Guardian 3".to_string()),
-        ];
-
-        crate::types::RecoveryRequest {
-            initiator_id: test_authority_id(0),
+    fn test_invitation() -> GuardianInvitation {
+        GuardianInvitation {
+            setup_id: "test-setup-123".to_string(),
             account_id: test_authority_id(10),
-            context: aura_authentication::RecoveryContext {
-                operation_type: aura_authentication::RecoveryOperationType::DeviceKeyRecovery,
-                justification: "Test recovery".to_string(),
-                is_emergency: false,
-                timestamp: 0,
-            },
+            target_guardians: vec![
+                test_authority_id(1),
+                test_authority_id(2),
+                test_authority_id(3),
+            ],
             threshold: 2,
-            guardians: crate::types::GuardianSet::new(guardians),
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1000,
+                uncertainty: None,
+            }),
+        }
+    }
+
+    fn test_acceptance(
+        invitation: &GuardianInvitation,
+        guardian_id: AuthorityId,
+        accepted: bool,
+    ) -> GuardianAcceptance {
+        GuardianAcceptance {
+            guardian_id,
+            setup_id: invitation.setup_id.clone(),
+            account_id: invitation.account_id,
+            accepted,
+            public_key: vec![1; 32],
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1_100,
+                uncertainty: None,
+            }),
+            signature: vec![7; 64],
+        }
+    }
+
+    async fn real_crypto_acceptance(
+        crypto: &RealCryptoHandler,
+        invitation: &GuardianInvitation,
+        guardian_id: AuthorityId,
+    ) -> (GuardianAcceptance, Vec<u8>) {
+        let (guardian_private_key, guardian_public_key) =
+            crypto.ed25519_generate_keypair().await.unwrap();
+        let timestamp = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1_200,
+            uncertainty: None,
+        });
+        let signature = sign_guardian_setup_acceptance(
+            crypto,
+            invitation,
+            guardian_id,
+            true,
+            &guardian_public_key,
+            &timestamp,
+            &guardian_private_key,
+        )
+        .await
+        .unwrap();
+        (
+            GuardianAcceptance {
+                guardian_id,
+                setup_id: invitation.setup_id.clone(),
+                account_id: invitation.account_id,
+                accepted: true,
+                public_key: guardian_public_key,
+                timestamp,
+                signature,
+            },
+            guardian_private_key,
+        )
+    }
+
+    #[derive(Default)]
+    struct StaticGuardianKeyResolver {
+        guardians: BTreeMap<AuthorityId, TrustedPublicKey>,
+    }
+
+    impl StaticGuardianKeyResolver {
+        fn with_guardian(mut self, guardian: AuthorityId, key: Vec<u8>) -> Self {
+            self.guardians.insert(
+                guardian,
+                TrustedPublicKey::active(
+                    TrustedKeyDomain::Guardian,
+                    None,
+                    key.clone(),
+                    Hash32::from_bytes(&key),
+                ),
+            );
+            self
+        }
+    }
+
+    impl TrustedKeyResolver for StaticGuardianKeyResolver {
+        fn resolve_authority_threshold_key(
+            &self,
+            _authority: AuthorityId,
+            _epoch: u64,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::AuthorityThreshold,
+            })
+        }
+
+        fn resolve_device_key(
+            &self,
+            _device: DeviceId,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::Device,
+            })
+        }
+
+        fn resolve_guardian_key(
+            &self,
+            guardian: AuthorityId,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            self.guardians
+                .get(&guardian)
+                .cloned()
+                .ok_or(KeyResolutionError::Unknown {
+                    domain: TrustedKeyDomain::Guardian,
+                })
+        }
+
+        fn resolve_release_key(
+            &self,
+            _authority: AuthorityId,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::Release,
+            })
         }
     }
 
@@ -754,54 +1068,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_guardian_setup_execute() {
+    async fn test_guardian_setup_execute_is_fail_closed_without_runtime_choreography() {
         let effects = Arc::new(MockEffects::deterministic());
         let coordinator = GuardianSetupCoordinator::new(effects);
 
-        let request = create_test_request();
-        let response = coordinator.execute_setup(request).await;
-
-        assert!(response.is_ok());
-        let resp = response.unwrap();
-        assert!(resp.success);
-        assert!(!resp.guardian_shares.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_guardian_setup_empty_guardians() {
-        let effects = Arc::new(MockEffects::deterministic());
-        let coordinator = GuardianSetupCoordinator::new(effects);
-
-        let mut request = create_test_request();
-        request.guardians = crate::types::GuardianSet::new(vec![]);
-
-        let response = coordinator.execute_setup(request).await;
-
-        assert!(response.is_ok());
-        let resp = response.unwrap();
-        assert!(!resp.success);
-        assert!(resp.error.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_accept_as_guardian() {
-        let effects = Arc::new(MockEffects::deterministic());
-        let coordinator = GuardianSetupCoordinator::new(effects);
-
-        let invitation = GuardianInvitation {
-            setup_id: "test-setup-123".to_string(),
+        let request = crate::types::RecoveryRequest {
+            initiator_id: test_authority_id(0),
             account_id: test_authority_id(10),
-            target_guardians: vec![test_authority_id(1), test_authority_id(2)],
+            context: aura_authentication::RecoveryContext {
+                operation_type: aura_authentication::RecoveryOperationType::DeviceKeyRecovery,
+                justification: "Test recovery".to_string(),
+                is_emergency: false,
+                timestamp: 0,
+            },
             threshold: 2,
-            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
+            guardians: crate::types::GuardianSet::new(vec![]),
         };
+        let response = coordinator.execute_setup(request).await;
 
+        assert!(response.is_err());
+        assert!(response
+            .unwrap_err()
+            .to_string()
+            .contains("no longer fabricates local guardian acceptances"));
+    }
+
+    #[tokio::test]
+    async fn test_accept_as_guardian_signs_acceptance() {
+        let effects = Arc::new(MockEffects::deterministic());
+        let coordinator = GuardianSetupCoordinator::new(effects.clone());
+        let invitation = test_invitation();
         let guardian_id = test_authority_id(1);
+        let (guardian_signing_private_key, signing_public_key) =
+            effects.ed25519_generate_keypair().await.unwrap();
         let acceptance = coordinator
-            .accept_as_guardian(invitation, guardian_id)
+            .accept_as_guardian(
+                invitation.clone(),
+                guardian_id,
+                &guardian_signing_private_key,
+            )
             .await;
 
         assert!(acceptance.is_ok());
@@ -809,6 +1114,163 @@ mod tests {
         assert!(acc.accepted);
         assert_eq!(acc.guardian_id, guardian_id);
         assert!(!acc.public_key.is_empty());
+        assert!(!acc.signature.is_empty());
+
+        let resolver =
+            StaticGuardianKeyResolver::default().with_guardian(guardian_id, signing_public_key);
+        assert!(verify_guardian_setup_acceptance_signature(
+            effects.as_ref(),
+            &invitation,
+            &acc,
+            &resolver,
+        )
+        .await
+        .unwrap());
+    }
+
+    #[tokio::test]
+    async fn guardian_share_round_trip_uses_converted_x25519_key_agreement() {
+        let crypto = RealCryptoHandler::for_simulation_seed([0x31; 32]);
+        let invitation = test_invitation();
+        let (acceptance, guardian_private_key) =
+            real_crypto_acceptance(&crypto, &invitation, test_authority_id(1)).await;
+        let public_key_package = vec![0xAB; 48];
+        let key_package = vec![0xCD; 64];
+
+        let encrypted_share = encrypt_guardian_share(
+            &crypto,
+            &invitation,
+            &acceptance,
+            1,
+            &key_package,
+            &public_key_package,
+        )
+        .await
+        .unwrap();
+        let decrypted = decrypt_guardian_share(
+            &crypto,
+            invitation.account_id,
+            acceptance.guardian_id,
+            &invitation.setup_id,
+            &public_key_package,
+            &encrypted_share,
+            &guardian_private_key,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(decrypted, key_package);
+        assert_eq!(
+            encrypted_share.protocol_version,
+            GUARDIAN_SHARE_ENCRYPTION_PROTOCOL_VERSION
+        );
+    }
+
+    #[tokio::test]
+    async fn guardian_share_rejects_swapped_recipient_and_ephemeral_keys() {
+        let crypto = RealCryptoHandler::for_simulation_seed([0x32; 32]);
+        let invitation = test_invitation();
+        let (acceptance_a, guardian_private_key_a) =
+            real_crypto_acceptance(&crypto, &invitation, test_authority_id(1)).await;
+        let (acceptance_b, guardian_private_key_b) =
+            real_crypto_acceptance(&crypto, &invitation, test_authority_id(2)).await;
+        let public_key_package = vec![0x55; 48];
+        let key_package_a = vec![0x11; 64];
+        let key_package_b = vec![0x22; 64];
+
+        let share_a = encrypt_guardian_share(
+            &crypto,
+            &invitation,
+            &acceptance_a,
+            1,
+            &key_package_a,
+            &public_key_package,
+        )
+        .await
+        .unwrap();
+        let share_b = encrypt_guardian_share(
+            &crypto,
+            &invitation,
+            &acceptance_b,
+            2,
+            &key_package_b,
+            &public_key_package,
+        )
+        .await
+        .unwrap();
+
+        let wrong_recipient = decrypt_guardian_share(
+            &crypto,
+            invitation.account_id,
+            acceptance_a.guardian_id,
+            &invitation.setup_id,
+            &public_key_package,
+            &share_a,
+            &guardian_private_key_b,
+        )
+        .await;
+        assert!(wrong_recipient.is_err());
+
+        let mut swapped_ephemeral = share_a.clone();
+        swapped_ephemeral.ephemeral_public_key = share_b.ephemeral_public_key.clone();
+        let swapped_ephemeral_result = decrypt_guardian_share(
+            &crypto,
+            invitation.account_id,
+            acceptance_a.guardian_id,
+            &invitation.setup_id,
+            &public_key_package,
+            &swapped_ephemeral,
+            &guardian_private_key_a,
+        )
+        .await;
+        assert!(swapped_ephemeral_result.is_err());
+    }
+
+    #[tokio::test]
+    async fn guardian_share_rejects_tampered_ciphertext_and_wrong_setup() {
+        let crypto = RealCryptoHandler::for_simulation_seed([0x33; 32]);
+        let invitation = test_invitation();
+        let (acceptance, guardian_private_key) =
+            real_crypto_acceptance(&crypto, &invitation, test_authority_id(1)).await;
+        let public_key_package = vec![0x77; 48];
+        let key_package = vec![0x44; 64];
+
+        let share = encrypt_guardian_share(
+            &crypto,
+            &invitation,
+            &acceptance,
+            1,
+            &key_package,
+            &public_key_package,
+        )
+        .await
+        .unwrap();
+
+        let mut tampered = share.clone();
+        tampered.encrypted_share[0] ^= 0x01;
+        let tampered_result = decrypt_guardian_share(
+            &crypto,
+            invitation.account_id,
+            acceptance.guardian_id,
+            &invitation.setup_id,
+            &public_key_package,
+            &tampered,
+            &guardian_private_key,
+        )
+        .await;
+        assert!(tampered_result.is_err());
+
+        let wrong_setup_result = decrypt_guardian_share(
+            &crypto,
+            invitation.account_id,
+            acceptance.guardian_id,
+            "wrong-setup-id",
+            &public_key_package,
+            &share,
+            &guardian_private_key,
+        )
+        .await;
+        assert!(wrong_setup_result.is_err());
     }
 
     #[test]
@@ -822,28 +1284,27 @@ mod tests {
 
     #[test]
     fn build_setup_completion_derives_guardian_set_from_acceptances() {
-        let accepted = GuardianAcceptance {
-            guardian_id: test_authority_id(1),
-            setup_id: "setup-1".to_string(),
-            accepted: true,
-            public_key: vec![1, 2, 3],
-            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 1,
-                uncertainty: None,
-            }),
-        };
-        let declined = GuardianAcceptance {
-            guardian_id: test_authority_id(2),
-            setup_id: "setup-1".to_string(),
-            accepted: false,
-            public_key: vec![4, 5, 6],
-            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 2,
-                uncertainty: None,
-            }),
-        };
-
-        let completion = build_setup_completion("setup-1", 1, vec![accepted.clone(), declined]);
+        let invitation = test_invitation();
+        let accepted = test_acceptance(&invitation, test_authority_id(1), true);
+        let declined = test_acceptance(&invitation, test_authority_id(2), false);
+        let completion = build_setup_completion_with_material(
+            &invitation.setup_id,
+            1,
+            vec![accepted.clone(), declined],
+            vec![EncryptedKeyShare {
+                protocol_version: GUARDIAN_SHARE_ENCRYPTION_PROTOCOL_VERSION,
+                guardian_id: accepted.guardian_id,
+                signer_index: 1,
+                encrypted_share: vec![1, 2, 3],
+                nonce: [0u8; 12],
+                ephemeral_public_key: vec![9; 32],
+                recipient_public_key: accepted.public_key.clone(),
+                public_key_package_hash: Hash32::from_bytes(&[8; 32]),
+                binding_hash: Hash32::from_bytes(&[1, 2, 3]),
+            }],
+            vec![8; 32],
+        )
+        .unwrap();
         let accepted_guardians: Vec<AuthorityId> = completion
             .guardian_set
             .iter()
@@ -855,54 +1316,76 @@ mod tests {
     }
 
     #[test]
-    fn guardian_setup_acceptance_transcript_binds_setup_and_guardian() {
-        let acceptance = GuardianAcceptance {
-            guardian_id: test_authority_id(1),
-            setup_id: "setup-1".to_string(),
-            accepted: true,
-            public_key: vec![1, 2, 3],
-            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 1,
+    fn guardian_setup_acceptance_transcript_binds_setup_guardian_and_account() {
+        let invitation = test_invitation();
+        let base = guardian_setup_acceptance_transcript_bytes(
+            &invitation,
+            test_authority_id(1),
+            true,
+            &[1, 2, 3],
+            &TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1_100,
                 uncertainty: None,
             }),
-        };
-        let mut different_setup = acceptance.clone();
-        different_setup.setup_id = "setup-2".to_string();
-        let mut different_guardian = acceptance.clone();
-        different_guardian.guardian_id = test_authority_id(2);
-
-        let base =
-            aura_signature::encode_transcript("aura.guardian-setup.acceptance", 1, &acceptance)
-                .unwrap();
-        let setup = aura_signature::encode_transcript(
-            "aura.guardian-setup.acceptance",
-            1,
-            &different_setup,
         )
         .unwrap();
-        let guardian = aura_signature::encode_transcript(
-            "aura.guardian-setup.acceptance",
-            1,
-            &different_guardian,
+        let setup = guardian_setup_acceptance_transcript_bytes(
+            &GuardianInvitation {
+                setup_id: "different".to_string(),
+                ..invitation.clone()
+            },
+            test_authority_id(1),
+            true,
+            &[1, 2, 3],
+            &TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1_100,
+                uncertainty: None,
+            }),
+        )
+        .unwrap();
+        let account = guardian_setup_acceptance_transcript_bytes(
+            &GuardianInvitation {
+                account_id: test_authority_id(99),
+                ..invitation.clone()
+            },
+            test_authority_id(1),
+            true,
+            &[1, 2, 3],
+            &TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1_100,
+                uncertainty: None,
+            }),
+        )
+        .unwrap();
+        let guardian = guardian_setup_acceptance_transcript_bytes(
+            &invitation,
+            test_authority_id(2),
+            true,
+            &[1, 2, 3],
+            &TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1_100,
+                uncertainty: None,
+            }),
         )
         .unwrap();
 
         assert_ne!(base, setup);
+        assert_ne!(base, account);
         assert_ne!(base, guardian);
     }
 
     #[test]
+    fn build_setup_completion_rejects_empty_crypto_material_for_success() {
+        let invitation = test_invitation();
+        let accepted = test_acceptance(&invitation, test_authority_id(1), true);
+        let error = build_setup_completion(&invitation.setup_id, 1, vec![accepted]).unwrap_err();
+        assert!(error.contains("encrypted shares"));
+    }
+
+    #[test]
     fn guardian_acceptance_exposes_explicit_decision() {
-        let accepted = GuardianAcceptance {
-            guardian_id: test_authority_id(1),
-            setup_id: "setup-2".to_string(),
-            accepted: true,
-            public_key: vec![1],
-            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 3,
-                uncertainty: None,
-            }),
-        };
+        let invitation = test_invitation();
+        let accepted = test_acceptance(&invitation, test_authority_id(1), true);
         let declined = GuardianAcceptance {
             accepted: false,
             ..accepted.clone()
@@ -917,10 +1400,22 @@ mod tests {
         let completion = SetupCompletion {
             setup_id: "setup-3".to_string(),
             success: true,
-            guardian_set: GuardianSet::new(vec![GuardianProfile::new(test_authority_id(1))]),
+            guardian_set: GuardianSet::new(vec![crate::types::GuardianProfile::new(
+                test_authority_id(1),
+            )]),
             threshold: 1,
-            encrypted_shares: Vec::new(),
-            public_key_package: Vec::new(),
+            encrypted_shares: vec![EncryptedKeyShare {
+                protocol_version: GUARDIAN_SHARE_ENCRYPTION_PROTOCOL_VERSION,
+                guardian_id: test_authority_id(1),
+                signer_index: 1,
+                encrypted_share: vec![1],
+                nonce: [0u8; 12],
+                ephemeral_public_key: vec![2; 32],
+                recipient_public_key: vec![3; 32],
+                public_key_package_hash: Hash32::from_bytes(&[4; 32]),
+                binding_hash: Hash32::from_bytes(&[5; 32]),
+            }],
+            public_key_package: vec![3; 32],
         };
 
         assert_eq!(completion.outcome(), SetupCompletionOutcome::Succeeded);

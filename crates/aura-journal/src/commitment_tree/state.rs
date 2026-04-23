@@ -105,6 +105,11 @@ impl TreeTopology {
             Vec::new()
         }
     }
+
+    /// Get the root branch node, if one has been materialized.
+    pub fn root_node(&self) -> Option<NodeIndex> {
+        self.root_node
+    }
 }
 
 /// Materialized tree state at a specific epoch
@@ -229,6 +234,11 @@ impl TreeState {
     /// Get children of a branch node
     pub fn get_children(&self, node: NodeIndex) -> BTreeSet<NodeIndex> {
         self.tree_topology.get_children(node)
+    }
+
+    /// Get the root branch node, if one exists.
+    pub fn root_node(&self) -> Option<NodeIndex> {
+        self.tree_topology.root_node()
     }
 
     /// Get parent branch of a leaf

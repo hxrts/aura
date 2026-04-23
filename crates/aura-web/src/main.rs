@@ -24,13 +24,15 @@ cfg_if! {
         use shell::{apply_harness_mode_document_flags, App};
 
         pub(crate) use shell::{
-            active_storage_prefix, clear_pending_device_enrollment_code, clear_storage_key,
-            bootstrap_broker_url, device_enrollment_bootstrap_name,
-            dual_demo_web_enabled, harness_instance_id, harness_mode_enabled,
-            load_pending_account_bootstrap, load_pending_device_enrollment_code,
-            load_selected_runtime_identity, logged_optional, pending_account_bootstrap_key,
-            pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
-            persist_selected_runtime_identity, selected_runtime_identity_key,
+            active_storage_prefix, bootstrap_broker_auth_token,
+            bootstrap_broker_invitation_token, bootstrap_broker_url,
+            clear_pending_device_enrollment_code, clear_storage_key,
+            device_enrollment_bootstrap_name, dual_demo_web_enabled, harness_instance_id,
+            harness_mode_enabled, load_pending_account_bootstrap,
+            load_pending_device_enrollment_code, load_selected_runtime_identity,
+            logged_optional, pending_account_bootstrap_key, pending_device_enrollment_code_key,
+            persist_pending_device_enrollment_code, persist_selected_runtime_identity,
+            selected_runtime_identity_key,
             stage_initial_web_account_bootstrap, stage_runtime_bound_web_account_bootstrap,
             submit_runtime_bootstrap_handoff, submit_runtime_bootstrap_handoff_accepted,
         };
@@ -128,6 +130,26 @@ mod tests {
         assert!(source.contains("run_background_sync_pass(tick_app_core).await;"));
         assert!(source.contains("\"Browser maintenance paused; refresh to resume\""));
         assert!(source.contains("\"WEB_GENERATION_MAINTENANCE_SLEEP_FAILED\""));
+    }
+
+    #[test]
+    fn web_harness_install_requires_feature_and_token_gated_session() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let storage_path = repo_root.join("crates/aura-web/src/shell/storage.rs");
+        let install_path = repo_root.join("crates/aura-web/src/harness/install.rs");
+        let storage_source = std::fs::read_to_string(&storage_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", storage_path.display()));
+        let install_source = std::fs::read_to_string(&install_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", install_path.display()));
+
+        assert!(storage_source.contains("cfg!(feature = \"harness\")"));
+        assert!(storage_source.contains("__aura_harness_token"));
+        assert!(storage_source.contains("MIN_HARNESS_TOKEN_LEN"));
+        assert!(
+            storage_source.contains("pub(crate) fn harness_session() -> Option<HarnessSession>")
+        );
+        assert!(install_source.contains("authenticated harness session required"));
+        assert!(install_source.contains("let _session = harness_session()"));
     }
 
     #[test]

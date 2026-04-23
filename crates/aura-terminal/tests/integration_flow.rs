@@ -52,8 +52,8 @@ use aura_core::effects::StorageCoreEffects;
 use aura_core::effects::StorageEffects;
 use aura_core::types::identifiers::AuthorityId;
 use aura_effects::{
-    EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
-    RealSecureStorageHandler,
+    EncryptedStorage, EncryptedStorageConfig, FilesystemFallbackSecureStorageHandler,
+    FilesystemStorageHandler, RealCryptoHandler,
 };
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
@@ -134,7 +134,7 @@ impl TestAgent {
         let storage = EncryptedStorage::new(
             FilesystemStorageHandler::from_path(self.test_dir.clone()),
             Arc::new(RealCryptoHandler::new()),
-            Arc::new(RealSecureStorageHandler::with_base_path(
+            Arc::new(FilesystemFallbackSecureStorageHandler::with_base_path(
                 self.test_dir.clone(),
             )),
             EncryptedStorageConfig::default(),

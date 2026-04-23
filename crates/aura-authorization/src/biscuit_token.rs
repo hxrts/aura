@@ -156,13 +156,14 @@ impl BiscuitTokenManager {
         operation: &str,
         resource_prefix: &str,
     ) -> Result<Biscuit, BiscuitError> {
-        let prefix = resource_prefix.to_string();
+        let resource_pattern = segment_scope_regex(resource_prefix);
         let attenuated = self.current_token.append(block!(
             r#"
             check if operation({operation});
-            check if resource($res), $res.starts_with({prefix});
+            check if resource($res), $res.matches({resource_pattern});
         "#,
             operation = operation,
+            resource_pattern = resource_pattern,
         ))?;
         Ok(attenuated)
     }
@@ -193,6 +194,29 @@ impl BiscuitTokenManager {
     pub fn deserialize_token(bytes: &[u8], root_key: &PublicKey) -> Result<Biscuit, BiscuitError> {
         VerifiedBiscuitToken::from_bytes(bytes, *root_key).map(|token| token.token().clone())
     }
+}
+
+fn segment_scope_regex(resource_prefix: &str) -> String {
+    let normalized = if resource_prefix == "/" {
+        "/".to_string()
+    } else {
+        resource_prefix.trim_end_matches('/').to_string()
+    };
+    if normalized == "/" {
+        return "^/.*$".to_string();
+    }
+
+    let mut escaped = String::with_capacity(normalized.len());
+    for ch in normalized.chars() {
+        match ch {
+            '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$' | '\\' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    format!("^{escaped}(/.*)?$")
 }
 
 /// Serializable wrapper for Biscuit tokens

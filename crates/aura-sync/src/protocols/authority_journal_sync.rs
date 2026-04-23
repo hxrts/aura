@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 use crate::core::{binary_deserialize, binary_serialize, SyncResult};
 use crate::infrastructure::RetryPolicy;
 use crate::protocols::journal_apply::{JournalApplyService, RemoteJournalDelta};
-use aura_core::time::OrderTime;
+use aura_core::time::{OrderTime, TimeStamp};
 use aura_core::{hash, Authority, AuthorityId, ContextId};
 use aura_guards::{DecodedIngress, VerifiedIngress};
-use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
+use aura_journal::{Fact, FactContent, FactJournal as Journal, JournalNamespace, RelationalFact};
 use aura_protocol::effects::AuraEffects;
 use std::collections::BTreeSet;
 
@@ -135,6 +135,90 @@ impl AuthorityJournalSyncProtocol {
             .collect()
     }
 
+    fn validate_authority_journal(
+        &self,
+        expected_authority: AuthorityId,
+        journal: &Journal,
+    ) -> SyncResult<()> {
+        match journal.namespace {
+            JournalNamespace::Authority(authority) if authority == expected_authority => Ok(()),
+            ref namespace => Err(aura_core::AuraError::permission_denied(format!(
+                "authority journal sync expected namespace Authority({expected_authority}), got {namespace:?}"
+            ))),
+        }
+    }
+
+    fn validate_authority_fact(
+        &self,
+        _expected_authority: AuthorityId,
+        fact: &Fact,
+    ) -> SyncResult<()> {
+        if let TimeStamp::OrderClock(order) = &fact.timestamp {
+            if order != &fact.order {
+                return Err(aura_core::AuraError::invalid(
+                    "authority journal fact order timestamp does not match fact order",
+                ));
+            }
+        }
+
+        match &fact.content {
+            FactContent::AttestedOp(_) => Err(aura_core::AuraError::permission_denied(
+                "legacy authority attested facts lack epoch-bound trusted-key evidence for sync verification",
+            )),
+            FactContent::RendezvousReceipt { .. } => {
+                Err(aura_core::AuraError::permission_denied(
+                    "legacy rendezvous receipt facts lack epoch-bound trusted-key evidence for authority sync verification",
+                ))
+            }
+            FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
+                if envelope.schema_version == 0 {
+                    return Err(aura_core::AuraError::invalid(
+                        "relational fact envelope schema version must be non-zero",
+                    ));
+                }
+                Err(aura_core::AuraError::permission_denied(
+                    "relational context fact cannot be applied through authority journal sync",
+                ))
+            }
+            FactContent::Relational(_) => Err(aura_core::AuraError::permission_denied(
+                "relational context fact cannot be applied through authority journal sync",
+            )),
+            FactContent::Snapshot(_) => Err(aura_core::AuraError::permission_denied(
+                "unsigned snapshot fact cannot be applied through authority journal sync",
+            )),
+        }
+    }
+
+    fn validate_requested_authority_facts(
+        &self,
+        expected_authority: AuthorityId,
+        remote_journal: &Journal,
+        requested_orders: &[OrderTime],
+        received: &[Fact],
+    ) -> SyncResult<()> {
+        self.validate_authority_journal(expected_authority, remote_journal)?;
+        let requested: BTreeSet<_> = requested_orders.iter().cloned().collect();
+        if requested.len() != requested_orders.len() {
+            return Err(aura_core::AuraError::invalid(
+                "authority journal delta request contains duplicate fact orders",
+            ));
+        }
+        if received.len() != requested.len() {
+            return Err(aura_core::AuraError::invalid(
+                "authority journal delta response did not contain every requested fact",
+            ));
+        }
+        for fact in received {
+            if !requested.contains(&fact.order) {
+                return Err(aura_core::AuraError::invalid(
+                    "authority journal delta response included an unrequested fact",
+                ));
+            }
+            self.validate_authority_fact(expected_authority, fact)?;
+        }
+        Ok(())
+    }
+
     /// Create a new authority journal sync protocol
     pub fn new(config: AuthorityJournalSyncConfig) -> Self {
         Self { config }
@@ -214,10 +298,10 @@ impl AuthorityJournalSyncProtocol {
             &remote_digest,
         );
 
-        // Apply local → remote (persist remote journal with new facts)
-        let facts_sent = self
-            .send_facts(effects, peer_id, remote_journal.clone(), to_send)
-            .await?;
+        // Outbound facts must be transported to a peer-owned apply endpoint.
+        // This local sync protocol must not mutate another authority's journal
+        // storage key directly.
+        let facts_sent = to_send.len();
 
         // Apply remote → local (persist local journal with received facts)
         let facts_from_peer = crate::protocols::ingress::verified_authority_payload(
@@ -249,7 +333,7 @@ impl AuthorityJournalSyncProtocol {
             .await?;
 
         Ok(AuthoritySyncResult {
-            facts_sent: facts_sent.len(),
+            facts_sent,
             facts_received: facts_received_count,
             synchronized_authorities: vec![peer_id],
             duration: Duration::default(),
@@ -352,38 +436,6 @@ impl AuthorityJournalSyncProtocol {
         (to_send, to_receive)
     }
 
-    /// Send facts to peer (storage-backed merge through canonical apply boundary)
-    async fn send_facts<E: AuraEffects>(
-        &self,
-        effects: &E,
-        peer_id: AuthorityId,
-        peer_journal: Journal,
-        facts: Vec<Fact>,
-    ) -> SyncResult<Vec<Fact>> {
-        if facts.is_empty() {
-            return Ok(facts);
-        }
-
-        let verified_delta = crate::protocols::ingress::verified_authority_payload(
-            peer_id,
-            Self::authority_sync_context(peer_id),
-            1,
-            RemoteJournalDelta::from_facts(facts.clone()),
-        )?;
-        let (delta, evidence) = verified_delta.into_parts();
-        let verified_delta = DecodedIngress::new(delta, evidence.metadata().clone())
-            .verify(evidence)
-            .map_err(|e| {
-                aura_core::AuraError::invalid(format!("verify authority send facts: {e}"))
-            })?;
-        let (peer_journal, _outcome) =
-            JournalApplyService::new().apply_verified_delta(peer_journal, verified_delta)?;
-
-        self.persist_authority_journal(effects, peer_id, &peer_journal)
-            .await?;
-        Ok(facts)
-    }
-
     /// Receive facts from peer (select missing facts by order)
     async fn receive_facts<E: AuraEffects>(
         &self,
@@ -409,6 +461,7 @@ impl AuthorityJournalSyncProtocol {
         }
 
         let received = self.collect_facts_by_orders(&remote_journal, &fact_ids);
+        self.validate_requested_authority_facts(peer_id, &remote_journal, &fact_ids, &received)?;
 
         tracing::debug!(
             "Fetched {} facts from peer {} based on delta plan",
@@ -448,6 +501,8 @@ pub fn create_default_sync_protocol() -> AuthorityJournalSyncProtocol {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::Hash32;
+    use aura_journal::{FactAttestedOp as AttestedOp, TreeOpKind};
 
     #[test]
     fn test_sync_config_defaults() {
@@ -458,5 +513,121 @@ mod tests {
             config.signature_policy,
             AuthorityJournalSignaturePolicy::Required
         );
+    }
+
+    fn authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn order(seed: u8) -> OrderTime {
+        OrderTime([seed; 32])
+    }
+
+    fn attested_fact(order_seed: u8, signature: Vec<u8>) -> Fact {
+        let order = order(order_seed);
+        Fact::new(
+            order.clone(),
+            TimeStamp::OrderClock(order),
+            FactContent::AttestedOp(AttestedOp {
+                tree_op: TreeOpKind::RotateEpoch,
+                parent_commitment: Hash32([1; 32]),
+                new_commitment: Hash32([2; 32]),
+                witness_threshold: 1,
+                signature,
+            }),
+        )
+    }
+
+    #[test]
+    fn authority_journal_validation_rejects_legacy_attested_fact_without_epoch_evidence() {
+        let protocol = AuthorityJournalSyncProtocol::new(AuthorityJournalSyncConfig::default());
+        let authority = authority(1);
+        let fact = attested_fact(7, vec![9; 64]);
+        let mut journal = Journal::new(JournalNamespace::Authority(authority));
+        journal.add_fact(fact.clone()).expect("fact inserts");
+
+        assert!(protocol
+            .validate_requested_authority_facts(authority, &journal, &[fact.order.clone()], &[fact])
+            .is_err());
+    }
+
+    #[test]
+    fn authority_journal_validation_rejects_wrong_namespace() {
+        let protocol = AuthorityJournalSyncProtocol::new(AuthorityJournalSyncConfig::default());
+        let expected_authority = authority(1);
+        let fact = attested_fact(7, vec![9; 64]);
+        let context = AuthorityJournalSyncProtocol::authority_sync_context(authority(2));
+        let mut journal = Journal::new(JournalNamespace::Context(context));
+        journal.add_fact(fact.clone()).expect("fact inserts");
+
+        assert!(protocol
+            .validate_requested_authority_facts(
+                expected_authority,
+                &journal,
+                &[fact.order.clone()],
+                &[fact]
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn authority_journal_validation_rejects_wrong_authority_namespace() {
+        let protocol = AuthorityJournalSyncProtocol::new(AuthorityJournalSyncConfig::default());
+        let expected_authority = authority(1);
+        let wrong_authority = authority(2);
+        let fact = attested_fact(7, vec![9; 64]);
+        let mut journal = Journal::new(JournalNamespace::Authority(wrong_authority));
+        journal.add_fact(fact.clone()).expect("fact inserts");
+
+        assert!(protocol
+            .validate_requested_authority_facts(
+                expected_authority,
+                &journal,
+                &[fact.order.clone()],
+                &[fact]
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn authority_journal_validation_rejects_unsigned_attested_fact() {
+        let protocol = AuthorityJournalSyncProtocol::new(AuthorityJournalSyncConfig::default());
+        let authority = authority(1);
+        let fact = attested_fact(7, vec![0; 64]);
+        let mut journal = Journal::new(JournalNamespace::Authority(authority));
+        journal.add_fact(fact.clone()).expect("fact inserts");
+
+        assert!(protocol
+            .validate_requested_authority_facts(authority, &journal, &[fact.order.clone()], &[fact])
+            .is_err());
+    }
+
+    #[test]
+    fn authority_journal_validation_rejects_missing_order_delta_fact() {
+        let protocol = AuthorityJournalSyncProtocol::new(AuthorityJournalSyncConfig::default());
+        let authority = authority(1);
+        let journal = Journal::new(JournalNamespace::Authority(authority));
+
+        assert!(protocol
+            .validate_requested_authority_facts(authority, &journal, &[order(8)], &[])
+            .is_err());
+    }
+
+    #[test]
+    fn authority_journal_validation_rejects_duplicate_order_delta_request() {
+        let protocol = AuthorityJournalSyncProtocol::new(AuthorityJournalSyncConfig::default());
+        let authority = authority(1);
+        let fact = attested_fact(7, vec![9; 64]);
+        let mut journal = Journal::new(JournalNamespace::Authority(authority));
+        journal.add_fact(fact.clone()).expect("fact inserts");
+
+        assert!(protocol
+            .validate_requested_authority_facts(
+                authority,
+                &journal,
+                &[fact.order.clone(), fact.order.clone()],
+                &[fact]
+            )
+            .is_err());
     }
 }

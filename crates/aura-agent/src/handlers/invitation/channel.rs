@@ -145,12 +145,25 @@ impl<'a> InvitationChannelHandler<'a> {
         self.ensure_sender_peer_channel(effects, invitation.sender_id, invitation_context)
             .await?;
 
+        let signature = sign_invitation_acceptance_transcript(
+            effects,
+            acceptor_id,
+            &channel_invitation_acceptance_transcript(
+                &invitation,
+                acceptor_id,
+                invitation_context,
+                home_id,
+                nickname_suggestion.clone(),
+            ),
+        )
+        .await?;
         let acceptance = ChannelInvitationAcceptance {
             invitation_id: invitation.invitation_id.clone(),
             acceptor_id,
             context_id: invitation_context,
             channel_id: home_id,
             channel_name: nickname_suggestion.clone(),
+            signature,
         };
         let payload =
             serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
@@ -194,6 +207,8 @@ impl<'a> InvitationChannelHandler<'a> {
             metadata,
             receipt: None,
         };
+        let mut envelope = envelope;
+        attach_invitation_test_receipt_if_needed(effects, &mut envelope);
 
         attempt_network_send_envelope(
             effects,
@@ -236,6 +251,8 @@ impl<'a> InvitationChannelHandler<'a> {
                 ),
                 receipt: None,
             };
+            let mut update_envelope = update_envelope;
+            attach_invitation_test_receipt_if_needed(effects, &mut update_envelope);
             attempt_network_send_envelope(
                 effects,
                 "channel invitation acceptance chat projection envelope send failed",

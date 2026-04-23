@@ -15,7 +15,9 @@ use aura_core::effects::{AdmissionError, PhysicalTimeEffects, RuntimeCapabilityE
 use aura_core::threshold::{AgreementMode, ParticipantIdentity};
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::Epoch;
-use aura_core::{AuraError, DeviceId, Hash32};
+#[cfg(test)]
+use aura_core::DeviceId;
+use aura_core::{AuraError, Hash32};
 use aura_effects::RuntimeCapabilityHandler;
 use aura_mpst::upstream::runtime::{
     ChoreoHandler, ChoreoHandlerExt, ChoreoResult, ChoreographyError as TelltaleChoreographyError,
@@ -27,14 +29,15 @@ use aura_sync::protocols::ota_ceremony::telltale_session_types_ota_activation::o
     runners::run_coordinator, OTAActivationProtocolRole as OtaActivationRole,
 };
 use aura_sync::protocols::ota_ceremony::{
-    compute_ota_ceremony_prestate_hash, create_ota_activation_signature,
+    compute_ota_ceremony_prestate_hash, create_ota_activation_certificate,
     emit_ota_ceremony_aborted_fact, emit_ota_ceremony_committed_fact,
     emit_ota_ceremony_initiated_fact, emit_ota_commitment_received_fact,
     emit_ota_threshold_reached_fact,
-    telltale_session_types_ota_activation::BranchLabel as OtaBranchLabel, OTACeremonyAbort,
+    telltale_session_types_ota_activation::BranchLabel as OtaBranchLabel,
+    validate_ota_quorum_commitment, verify_ota_readiness_commitment, OTACeremonyAbort,
     OTACeremonyAbortReason, OTACeremonyCommit, OTACeremonyConfig, OTACeremonyId, OTACeremonyState,
-    OTACeremonyStatus, OTAReadinessOutcome, OTAReadinessWitness, ReadinessCommitment,
-    UpgradeProposal,
+    OTACeremonyStatus, OTAQuorumMember, OTAReadinessOutcome, OTAReadinessWitness,
+    ReadinessCommitment, UpgradeProposal,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
@@ -128,25 +131,27 @@ impl OtaCoordinatorProtocolRuntime {
     async fn finish_selected_decision(&mut self) -> AgentResult<()> {
         match self.pending_decision.clone() {
             Some(OtaProtocolDecision::Commit) => {
-                let (activation_epoch, ready_devices, commitments) = {
+                let (activation_epoch, proposal_hash, prestate_hash, ready_devices, certificate) = {
                     let mut state = self.state.write().await;
                     state.status = OTACeremonyStatus::Committed;
                     state.agreement_mode = AgreementMode::ConsensusFinalized;
                     (
                         state.proposal.activation_epoch,
+                        state.proposal_hash,
+                        state.prestate_hash,
                         state.ready_devices(),
-                        state.commitments.values().cloned().collect::<Vec<_>>(),
+                        create_ota_activation_certificate(&state.ready_commitments())
+                            .map_err(map_ota_error)?,
                     )
                 };
-                let threshold_signature =
-                    create_ota_activation_signature(self.ceremony_id, &commitments)
-                        .map_err(map_ota_error)?;
                 emit_ota_ceremony_committed_fact(
                     &*self.effects,
                     self.ceremony_id,
                     activation_epoch,
+                    &proposal_hash,
+                    &prestate_hash,
                     &ready_devices,
-                    &threshold_signature,
+                    &certificate,
                 )
                 .await
                 .map_err(map_ota_error)?;
@@ -207,8 +212,8 @@ impl OtaCoordinatorProtocolRuntime {
             .map_err(map_handler_time_read_error)?
             .ts_ms;
 
-        let (threshold_reached, ready_count, ready_devices) = {
-            let mut state = self.state.write().await;
+        let (proposal_hash, activation_epoch, trusted_public_key_package) = {
+            let state = self.state.read().await;
 
             if state.status != OTACeremonyStatus::CollectingCommitments {
                 return Err(AgentError::runtime(format!(
@@ -217,18 +222,18 @@ impl OtaCoordinatorProtocolRuntime {
                 )));
             }
 
-            if commitment.prestate_hash != current_prestate {
+            if current_prestate != state.prestate_hash
+                || commitment.prestate_hash != state.prestate_hash
+            {
                 return Err(AgentError::invalid(
                     "Prestate hash mismatch - state has changed since commitment was created",
                 ));
             }
 
-            if commitment.ceremony_id != self.ceremony_id {
-                return Err(AgentError::invalid("Commitment is for different ceremony"));
-            }
-
             if now > state.started_at_ms.saturating_add(state.timeout_ms) {
                 let reason = OTACeremonyAbortReason::TimedOut;
+                drop(state);
+                let mut state = self.state.write().await;
                 state.status = OTACeremonyStatus::Aborted {
                     reason: reason.clone(),
                 };
@@ -236,10 +241,28 @@ impl OtaCoordinatorProtocolRuntime {
                 return Ok(OTAReadinessOutcome::Collecting);
             }
 
-            if state.commitments.contains_key(&commitment.device) {
-                return Err(AgentError::invalid("Device has already committed"));
-            }
+            let member =
+                validate_ota_quorum_commitment(&state, &commitment).map_err(map_ota_error)?;
 
+            (
+                state.proposal_hash,
+                state.proposal.activation_epoch,
+                member.public_key_package.clone(),
+            )
+        };
+
+        verify_ota_readiness_commitment(
+            &*self.effects,
+            &commitment,
+            proposal_hash,
+            activation_epoch,
+            &trusted_public_key_package,
+        )
+        .await
+        .map_err(map_ota_error)?;
+
+        let (threshold_reached, ready_count, ready_devices) = {
+            let mut state = self.state.write().await;
             state
                 .commitments
                 .insert(commitment.device, commitment.clone());
@@ -666,14 +689,22 @@ fn map_runtime_error(error: AgentError) -> TelltaleChoreographyError {
 fn build_ota_ceremony_state(
     ceremony_id: OTACeremonyId,
     proposal: UpgradeProposal,
+    prestate_hash: Hash32,
+    quorum_members: Vec<OTAQuorumMember>,
     config: &OTACeremonyConfig,
     started_at_ms: u64,
 ) -> OTACeremonyState {
     OTACeremonyState {
         ceremony_id,
+        proposal_hash: proposal.compute_hash(),
+        prestate_hash,
         proposal,
         status: OTACeremonyStatus::CollectingCommitments,
         agreement_mode: AgreementMode::CoordinatorSoftSafe,
+        quorum_members: quorum_members
+            .into_iter()
+            .map(|member| (member.device, member))
+            .collect(),
         commitments: HashMap::new(),
         threshold: config.threshold,
         quorum_size: config.quorum_size,
@@ -856,7 +887,7 @@ impl OtaActivationServiceApi {
         &self,
         proposal: UpgradeProposal,
         current_epoch: Epoch,
-        participants: Vec<DeviceId>,
+        participants: Vec<OTAQuorumMember>,
         threshold_k: u16,
     ) -> AgentResult<OTACeremonyId> {
         self.admit_protocol_manifest().await?;
@@ -887,6 +918,8 @@ impl OtaActivationServiceApi {
         let state = Arc::new(RwLock::new(build_ota_ceremony_state(
             ceremony_id,
             proposal.clone(),
+            prestate_hash,
+            participants.clone(),
             &self.config,
             started_at_ms,
         )));
@@ -898,8 +931,7 @@ impl OtaActivationServiceApi {
         let runner_id = Self::runner_ceremony_id(ceremony_id);
         let runner_participants = participants
             .iter()
-            .copied()
-            .map(ParticipantIdentity::device)
+            .map(|member| ParticipantIdentity::device(member.device))
             .collect::<Vec<_>>();
         self.ceremony_runner
             .start(CeremonyInitRequest {
@@ -1039,6 +1071,7 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::runtime::services::CeremonyTracker;
+    use aura_core::crypto::SingleSignerPublicKeyPackage;
     use aura_core::effects::time::PhysicalTimeEffects;
     use aura_core::{AuthorityId, SemanticVersion};
     use aura_protocol::admission::{
@@ -1113,10 +1146,17 @@ mod tests {
         }
     }
 
-    fn participants() -> Vec<DeviceId> {
+    fn participants() -> Vec<OTAQuorumMember> {
         [11_u128, 12, 13]
             .into_iter()
-            .map(|raw| DeviceId::from_uuid(Uuid::from_u128(raw)))
+            .enumerate()
+            .map(|(index, raw)| OTAQuorumMember {
+                device: DeviceId::from_uuid(Uuid::from_u128(raw)),
+                authority: AuthorityId::new_from_entropy([(index as u8) + 21; 32]),
+                public_key_package: SingleSignerPublicKeyPackage::new(vec![(index as u8) + 41; 32])
+                    .to_bytes()
+                    .expect("serialize quorum public key package"),
+            })
             .collect()
     }
 

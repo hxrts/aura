@@ -25,16 +25,20 @@
 //! `aura_journal::commitment_tree::storage`, ensuring both handlers operate on
 //! the same source of truth.
 
-use crate::effects::tree::{Cut, Partial, ProposalId, Snapshot, TreeEffects};
+use crate::effects::tree::{Cut, ProposalId, Snapshot, TreeEffects};
 use async_trait::async_trait;
 use aura_core::effects::storage::StorageEffects;
 use aura_core::tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind};
+use aura_core::util::serialization::to_vec;
 use aura_core::Epoch;
 use aura_core::{hash, AuraError, Hash32};
 use aura_journal::commitment_tree::reduce;
 use aura_journal::commitment_tree::storage as tree_storage;
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+
+const SNAPSHOT_SIGNATURE_DOMAIN: &[u8] = b"AURA_TREE_SNAPSHOT_V1";
 
 /// Persistent commitment tree handler backed by StorageEffects.
 ///
@@ -253,6 +257,100 @@ impl PersistentTreeHandler {
     }
 }
 
+#[derive(Serialize)]
+struct SnapshotTranscript {
+    proposal_id: ProposalId,
+    cut: Cut,
+    snapshot_epoch: Epoch,
+    snapshot_commitment: Hash32,
+    root_node: NodeIndex,
+    root_policy: Policy,
+    root_child_count: usize,
+    required_signers: u16,
+    participants: Vec<LeafId>,
+}
+
+fn snapshot_root_node(
+    state: &aura_journal::commitment_tree::TreeState,
+) -> Result<NodeIndex, AuraError> {
+    state
+        .root_node()
+        .ok_or_else(|| AuraError::invalid("Snapshot tree state is missing a root branch"))
+}
+
+fn snapshot_transcript(
+    proposal_id: ProposalId,
+    snapshot: &Snapshot,
+) -> Result<SnapshotTranscript, AuraError> {
+    if snapshot.cut.epoch != snapshot.tree_state.epoch {
+        return Err(AuraError::invalid(format!(
+            "Snapshot epoch mismatch: cut={} state={}",
+            u64::from(snapshot.cut.epoch),
+            u64::from(snapshot.tree_state.epoch)
+        )));
+    }
+
+    if snapshot.cut.commitment != Hash32(snapshot.tree_state.root_commitment) {
+        return Err(AuraError::invalid(
+            "Snapshot cut commitment does not match tree state root commitment",
+        ));
+    }
+
+    let root_node = snapshot_root_node(&snapshot.tree_state)?;
+    let root_policy = snapshot
+        .tree_state
+        .get_policy(&root_node)
+        .copied()
+        .ok_or_else(|| AuraError::invalid("Snapshot tree state is missing a root policy"))?;
+    let root_child_count = snapshot.tree_state.get_children(root_node).len();
+    let required_signers = root_policy
+        .required_signers(root_child_count)
+        .map_err(|error| {
+            AuraError::invalid(format!("Invalid root snapshot threshold policy: {error}"))
+        })?;
+
+    Ok(SnapshotTranscript {
+        proposal_id,
+        cut: snapshot.cut.clone(),
+        snapshot_epoch: snapshot.tree_state.epoch,
+        snapshot_commitment: Hash32(snapshot.tree_state.root_commitment),
+        root_node,
+        root_policy,
+        root_child_count,
+        required_signers,
+        participants: snapshot.tree_state.list_leaf_ids(),
+    })
+}
+
+fn snapshot_transcript_bytes(
+    proposal_id: ProposalId,
+    snapshot: &Snapshot,
+) -> Result<Vec<u8>, AuraError> {
+    let transcript = snapshot_transcript(proposal_id, snapshot)?;
+    let mut bytes = SNAPSHOT_SIGNATURE_DOMAIN.to_vec();
+    bytes.extend(to_vec(&transcript).map_err(|error| {
+        AuraError::serialization(format!("serialize snapshot transcript: {error}"))
+    })?);
+    Ok(bytes)
+}
+
+fn verify_snapshot_signature(snapshot: &Snapshot) -> Result<(), AuraError> {
+    use aura_core::crypto::tree_signing::frost_verify_aggregate;
+    use frost_ed25519::VerifyingKey;
+
+    let root_node = snapshot_root_node(&snapshot.tree_state)?;
+    let signing_key = snapshot
+        .tree_state
+        .get_signing_key(&root_node)
+        .ok_or_else(|| AuraError::invalid("Snapshot tree state is missing a root signing key"))?;
+    let transcript = snapshot_transcript_bytes(snapshot.proposal_id, snapshot)?;
+    let verifying_key = VerifyingKey::deserialize(*signing_key.group_key()).map_err(|error| {
+        AuraError::crypto(format!("Invalid snapshot group public key: {error}"))
+    })?;
+
+    frost_verify_aggregate(&verifying_key, &transcript, &snapshot.aggregate_signature)
+}
+
 #[async_trait]
 impl TreeEffects for PersistentTreeHandler {
     async fn get_current_state(
@@ -372,30 +470,10 @@ impl TreeEffects for PersistentTreeHandler {
         Ok(ProposalId::new(hash::hash(&bytes)))
     }
 
-    async fn approve_snapshot(&self, proposal_id: ProposalId) -> Result<Partial, AuraError> {
-        let signature_share = proposal_id.0.to_vec();
-        Ok(Partial {
-            signature_share,
-            participant_id: aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]),
-        })
-    }
-
-    async fn finalize_snapshot(&self, proposal_id: ProposalId) -> Result<Snapshot, AuraError> {
-        let state = self.reduce_state().await?;
-        Ok(Snapshot {
-            cut: Cut {
-                epoch: state.epoch,
-                commitment: Hash32(state.root_commitment),
-                cid: Hash32(proposal_id.0),
-            },
-            tree_state: state,
-            aggregate_signature: proposal_id.0.to_vec(),
-        })
-    }
-
     async fn apply_snapshot(&self, snapshot: &Snapshot) -> Result<(), AuraError> {
         // Ensure initialized first (so we know what to clear)
         self.ensure_initialized().await?;
+        verify_snapshot_signature(snapshot)?;
 
         // Clear in-memory cache
         {
@@ -424,5 +502,192 @@ impl TreeEffects for PersistentTreeHandler {
         // Snapshot application replaces history; we store no additional ops
         let _ = snapshot;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::effects::crypto::{CryptoExtendedEffects, KeyGenerationMethod};
+    use aura_core::effects::storage::{StorageCoreEffects, StorageError, StorageExtendedEffects};
+    use aura_core::tree::{BranchNode, BranchSigningKey};
+    use aura_effects::crypto::RealCryptoHandler;
+    use std::collections::HashMap;
+    use tokio::sync::RwLock;
+
+    #[derive(Debug, Default)]
+    struct TestStorage {
+        data: RwLock<HashMap<String, Vec<u8>>>,
+    }
+
+    #[async_trait]
+    impl StorageCoreEffects for TestStorage {
+        async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+            self.data.write().await.insert(key.to_string(), value);
+            Ok(())
+        }
+
+        async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+            Ok(self.data.read().await.get(key).cloned())
+        }
+
+        async fn remove(&self, key: &str) -> Result<bool, StorageError> {
+            Ok(self.data.write().await.remove(key).is_some())
+        }
+
+        async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+            let data = self.data.read().await;
+            Ok(match prefix {
+                Some(prefix) => data
+                    .keys()
+                    .filter(|key| key.starts_with(prefix))
+                    .cloned()
+                    .collect(),
+                None => data.keys().cloned().collect(),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl StorageExtendedEffects for TestStorage {}
+
+    fn test_tree_state(group_public_key: [u8; 32]) -> aura_journal::commitment_tree::TreeState {
+        let mut state = aura_journal::commitment_tree::TreeState::new();
+        state.set_epoch(Epoch::new(7));
+        state.set_root_commitment(hash::hash(b"snapshot-root"));
+        state.add_branch_with_parent(
+            BranchNode {
+                node: NodeIndex(0),
+                policy: Policy::threshold(2, 2).expect("valid threshold policy"),
+                commitment: hash::hash(b"root-branch"),
+            },
+            None,
+        );
+        state.add_branch_with_parent(
+            BranchNode {
+                node: NodeIndex(1),
+                policy: Policy::Any,
+                commitment: hash::hash(b"child-branch"),
+            },
+            Some(NodeIndex(0)),
+        );
+        state.add_branch_with_parent(
+            BranchNode {
+                node: NodeIndex(2),
+                policy: Policy::Any,
+                commitment: hash::hash(b"child-branch-2"),
+            },
+            Some(NodeIndex(0)),
+        );
+        state.add_leaf_under(
+            LeafNode::new_device(
+                LeafId(1),
+                aura_core::DeviceId::new_from_entropy([9u8; 32]),
+                vec![7u8; 32],
+            )
+            .expect("leaf"),
+            NodeIndex(1),
+        );
+        state.add_leaf_under(
+            LeafNode::new_device(
+                LeafId(2),
+                aura_core::DeviceId::new_from_entropy([10u8; 32]),
+                vec![8u8; 32],
+            )
+            .expect("leaf"),
+            NodeIndex(2),
+        );
+        state.set_signing_key(
+            NodeIndex(0),
+            BranchSigningKey::new(group_public_key, Epoch::new(7)),
+        );
+        state
+    }
+
+    fn snapshot_without_signature(
+        proposal_id: ProposalId,
+        state: aura_journal::commitment_tree::TreeState,
+    ) -> Snapshot {
+        Snapshot {
+            proposal_id,
+            cut: Cut {
+                epoch: state.epoch,
+                commitment: Hash32(state.root_commitment),
+                cid: Hash32(hash::hash(b"snapshot-cut")),
+            },
+            tree_state: state,
+            aggregate_signature: Vec::new(),
+        }
+    }
+
+    async fn signed_snapshot() -> Snapshot {
+        let crypto = RealCryptoHandler::for_simulation_seed([11u8; 32]);
+        let keys = crypto
+            .generate_signing_keys_with(KeyGenerationMethod::DealerBased, 2, 2)
+            .await
+            .expect("signing keys");
+        let public_key_package =
+            frost_ed25519::keys::PublicKeyPackage::deserialize(&keys.public_key_package)
+                .expect("public key package");
+        let group_public_key = public_key_package.verifying_key().serialize();
+        let proposal_id = ProposalId::new(hash::hash(b"signed-snapshot-proposal"));
+        let mut snapshot =
+            snapshot_without_signature(proposal_id, test_tree_state(group_public_key));
+        let nonces_1 = crypto
+            .frost_generate_nonces(&keys.key_packages[0])
+            .await
+            .expect("nonces");
+        let nonces_2 = crypto
+            .frost_generate_nonces(&keys.key_packages[1])
+            .await
+            .expect("nonces");
+        let message = snapshot_transcript_bytes(snapshot.proposal_id, &snapshot)
+            .expect("snapshot transcript");
+        let signing_package = crypto
+            .frost_create_signing_package(
+                &message,
+                &[nonces_1.clone(), nonces_2.clone()],
+                &[1u16, 2u16],
+                &keys.public_key_package,
+            )
+            .await
+            .expect("signing package");
+        let share_1 = crypto
+            .frost_sign_share(&signing_package, &keys.key_packages[0], &nonces_1)
+            .await
+            .expect("sign share");
+        let share_2 = crypto
+            .frost_sign_share(&signing_package, &keys.key_packages[1], &nonces_2)
+            .await
+            .expect("sign share");
+        snapshot.aggregate_signature = crypto
+            .frost_aggregate_signatures(&signing_package, &[share_1, share_2])
+            .await
+            .expect("aggregate signature");
+        snapshot
+    }
+
+    #[tokio::test]
+    async fn apply_snapshot_rejects_placeholder_proposal_id_bytes() {
+        let handler = PersistentTreeHandler::new(Arc::new(TestStorage::default()));
+        let mut snapshot = signed_snapshot().await;
+        snapshot.aggregate_signature = snapshot.proposal_id.as_bytes().to_vec();
+
+        let error = handler
+            .apply_snapshot(&snapshot)
+            .await
+            .expect_err("proposal-id bytes are not a valid snapshot signature");
+        assert!(error.to_string().contains("Invalid signature length"));
+    }
+
+    #[tokio::test]
+    async fn apply_snapshot_accepts_valid_signed_snapshot() {
+        let handler = PersistentTreeHandler::new(Arc::new(TestStorage::default()));
+        let snapshot = signed_snapshot().await;
+
+        handler
+            .apply_snapshot(&snapshot)
+            .await
+            .expect("valid signed snapshot should apply");
     }
 }

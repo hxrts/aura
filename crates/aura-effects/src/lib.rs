@@ -150,7 +150,7 @@ pub use random::RealRandomHandler;
 pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
 pub use route_crypto::RealRouteCryptoHandler;
 pub use runtime_capability::RuntimeCapabilityHandler;
-pub use secure::RealSecureStorageHandler;
+pub use secure::{FilesystemFallbackSecureStorageHandler, ProductionSecureStorageHandler};
 #[cfg(feature = "simulation")]
 pub use simulation::FallbackSimulationHandler;
 #[allow(deprecated)]

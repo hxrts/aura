@@ -38,13 +38,15 @@
 //! - **Deterministic ID**: `CeremonyId = H(prestate_hash || upgrade_hash || nonce)`
 //! - **Epoch Fencing**: Hard forks enforce coordinated epoch boundaries
 
-use aura_core::effects::JournalEffects;
-use aura_core::threshold::{AgreementMode, ThresholdSignature};
+use aura_core::crypto::SigningMode;
+use aura_core::effects::{CryptoEffects, JournalEffects};
+use aura_core::threshold::{AgreementMode, SigningContext, ThresholdSignature};
 use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Hash32, SemanticVersion};
 use aura_macros::tell;
+use aura_signature::threshold_signing_context_transcript_bytes;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use uuid::Uuid;
 
 use super::ota::{UpgradeKind, UpgradeProposal as OTAProposal};
@@ -162,7 +164,7 @@ impl UpgradeProposal {
 }
 
 /// A device's commitment to an upgrade activation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReadinessCommitment {
     /// The ceremony being committed to
     pub ceremony_id: OTACeremonyId,
@@ -187,6 +189,17 @@ pub struct ReadinessCommitment {
     pub signature: ThresholdSignature,
     /// Timestamp of commitment
     pub committed_at_ms: u64,
+}
+
+/// Trusted quorum membership for one OTA readiness signer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OTAQuorumMember {
+    /// Device admitted to the ceremony quorum.
+    pub device: DeviceId,
+    /// Authority expected to sign readiness for the device.
+    pub authority: AuthorityId,
+    /// Trusted public key package for verifying the authority's readiness signature.
+    pub public_key_package: Vec<u8>,
 }
 
 /// Current status of an OTA ceremony.
@@ -276,10 +289,16 @@ pub struct OTACeremonyState {
     pub ceremony_id: OTACeremonyId,
     /// The upgrade proposal
     pub proposal: UpgradeProposal,
+    /// Hash of the exact proposal bound into readiness signatures.
+    pub proposal_hash: Hash32,
+    /// Prestate hash fixed when the ceremony was initiated.
+    pub prestate_hash: Hash32,
     /// Current status
     pub status: OTACeremonyStatus,
     /// Agreement mode (A1/A2/A3)
     pub agreement_mode: AgreementMode,
+    /// Trusted quorum membership for readiness verification.
+    pub quorum_members: HashMap<DeviceId, OTAQuorumMember>,
     /// Readiness commitments by device
     pub commitments: HashMap<DeviceId, ReadinessCommitment>,
     /// Required threshold (M-of-N)
@@ -295,8 +314,7 @@ pub struct OTACeremonyState {
 impl OTACeremonyState {
     /// Count ready devices.
     pub fn ready_count(&self) -> u32 {
-        let ready_count = self.commitments.values().filter(|c| c.ready).count();
-        ready_count as u32
+        self.ready_authorities().len() as u32
     }
 
     /// Check if threshold is met.
@@ -311,6 +329,65 @@ impl OTACeremonyState {
             .filter_map(|(id, c)| if c.ready { Some(*id) } else { None })
             .collect()
     }
+
+    /// Get ready authorities contributing to readiness threshold.
+    pub fn ready_authorities(&self) -> BTreeSet<AuthorityId> {
+        self.commitments
+            .values()
+            .filter(|commitment| commitment.ready)
+            .map(|commitment| commitment.authority)
+            .collect()
+    }
+
+    /// Get verified ready commitments in deterministic device order.
+    pub fn ready_commitments(&self) -> Vec<ReadinessCommitment> {
+        let mut commitments = self
+            .commitments
+            .values()
+            .filter(|commitment| commitment.ready)
+            .cloned()
+            .collect::<Vec<_>>();
+        commitments.sort_by_key(|commitment| commitment.device.to_bytes());
+        commitments
+    }
+}
+
+/// Validate quorum membership and uniqueness for one readiness commitment.
+pub fn validate_ota_quorum_commitment<'a>(
+    state: &'a OTACeremonyState,
+    commitment: &ReadinessCommitment,
+) -> AuraResult<&'a OTAQuorumMember> {
+    if commitment.ceremony_id != state.ceremony_id {
+        return Err(AuraError::invalid("Commitment is for different ceremony"));
+    }
+    if commitment.prestate_hash != state.prestate_hash {
+        return Err(AuraError::invalid(
+            "Prestate hash mismatch - state has changed since commitment was created",
+        ));
+    }
+    if state.commitments.contains_key(&commitment.device) {
+        return Err(AuraError::invalid("Device has already committed"));
+    }
+
+    let member = state
+        .quorum_members
+        .get(&commitment.device)
+        .ok_or_else(|| AuraError::invalid("Device is not part of the OTA quorum"))?;
+    if member.authority != commitment.authority {
+        return Err(AuraError::invalid(
+            "Commitment authority does not match the configured OTA quorum member",
+        ));
+    }
+    if state
+        .commitments
+        .values()
+        .any(|existing| existing.authority == commitment.authority)
+    {
+        return Err(AuraError::invalid(
+            "Authority has already contributed an OTA readiness vote",
+        ));
+    }
+    Ok(member)
 }
 
 // =============================================================================
@@ -342,8 +419,12 @@ pub enum OTACeremonyFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
         device: String,
+        authority: String,
+        prestate_hash: String,
         ready: bool,
         reason: Option<String>,
+        committed_at_ms: u64,
+        signature: ThresholdSignature,
         timestamp_ms: u64,
     },
     /// Threshold reached
@@ -363,8 +444,10 @@ pub enum OTACeremonyFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
         activation_epoch: Epoch,
+        proposal_hash: String,
+        prestate_hash: String,
         ready_devices: Vec<String>,
-        threshold_signature: Vec<u8>,
+        readiness_certificate: Vec<ReadinessCommitment>,
         timestamp_ms: u64,
     },
     /// Ceremony aborted
@@ -517,32 +600,84 @@ where
     Ok(Hash32::from_bytes(&journal_bytes))
 }
 
-/// Create the aggregated readiness-signature bundle for OTA activation.
-pub fn create_ota_activation_signature(
-    ceremony_id: OTACeremonyId,
+/// Build the deterministic certificate set persisted for a committed OTA activation.
+pub fn create_ota_activation_certificate(
     commitments: &[ReadinessCommitment],
-) -> AuraResult<Vec<u8>> {
-    let ready_commitments: Vec<&ReadinessCommitment> = commitments
+) -> AuraResult<Vec<ReadinessCommitment>> {
+    let mut ready_commitments: Vec<ReadinessCommitment> = commitments
         .iter()
         .filter(|commitment| commitment.ready)
+        .cloned()
         .collect();
 
     if ready_commitments.is_empty() {
+        return Err(AuraError::invalid("No ready device commitments to certify"));
+    }
+
+    ready_commitments.sort_by_key(|commitment| commitment.device.to_bytes());
+    Ok(ready_commitments)
+}
+
+/// Build the canonical readiness signing context for a commitment.
+pub fn ota_readiness_signing_context(
+    commitment: &ReadinessCommitment,
+    proposal_hash: Hash32,
+    activation_epoch: Epoch,
+) -> SigningContext {
+    SigningContext::ota_activation(
+        commitment.authority,
+        *commitment.ceremony_id.0.as_bytes(),
+        *proposal_hash.as_bytes(),
+        *commitment.prestate_hash.as_bytes(),
+        activation_epoch,
+        commitment.device,
+        commitment.ready,
+        commitment.committed_at_ms,
+    )
+}
+
+/// Verify one readiness commitment against the trusted quorum member key.
+pub async fn verify_ota_readiness_commitment<C>(
+    crypto: &C,
+    commitment: &ReadinessCommitment,
+    proposal_hash: Hash32,
+    activation_epoch: Epoch,
+    trusted_public_key_package: &[u8],
+) -> AuraResult<()>
+where
+    C: CryptoEffects + ?Sized,
+{
+    if commitment.signature.public_key_package != trusted_public_key_package {
         return Err(AuraError::invalid(
-            "No ready device signatures to aggregate",
+            "OTA readiness signature public key package mismatch",
         ));
     }
 
-    let mut aggregated = Vec::new();
-    aggregated.extend_from_slice(ceremony_id.0.as_bytes());
-    aggregated.extend_from_slice(&(ready_commitments.len() as u16).to_le_bytes());
-
-    for commitment in ready_commitments {
-        aggregated.extend_from_slice(&commitment.authority.to_bytes());
-        let sig_len = commitment.signature.signature.len() as u16;
-        aggregated.extend_from_slice(&sig_len.to_le_bytes());
-        aggregated.extend_from_slice(&commitment.signature.signature);
+    let context = ota_readiness_signing_context(commitment, proposal_hash, activation_epoch);
+    let transcript =
+        threshold_signing_context_transcript_bytes(&context, commitment.signature.epoch).map_err(
+            |error| AuraError::invalid(format!("OTA readiness transcript failed: {error}")),
+        )?;
+    let mode = if commitment.signature.is_single_signer() {
+        SigningMode::SingleSigner
+    } else {
+        SigningMode::Threshold
+    };
+    let verified = crypto
+        .verify_signature(
+            &transcript,
+            commitment.signature.signature_bytes(),
+            trusted_public_key_package,
+            mode,
+        )
+        .await
+        .map_err(|error| {
+            AuraError::invalid(format!("OTA readiness verification failed: {error}"))
+        })?;
+    if !verified {
+        return Err(AuraError::invalid(
+            "OTA readiness signature did not verify against the trusted quorum key",
+        ));
     }
-
-    Ok(aggregated)
+    Ok(())
 }

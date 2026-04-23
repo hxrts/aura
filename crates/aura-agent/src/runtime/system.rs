@@ -3,6 +3,8 @@
 //! Main runtime system that orchestrates all agent operations.
 
 use super::services::ceremony_runner::CeremonyRunner;
+#[cfg(not(target_arch = "wasm32"))]
+use super::services::lan_transport::LanTransportMetrics;
 use super::services::rendezvous_manager::RendezvousManagerError;
 use super::services::AnonymousPathManager;
 use super::services::{
@@ -22,29 +24,16 @@ use crate::handlers::RendezvousHandler;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::task_registry::TaskGroup;
 use crate::task_registry::TaskSupervisionError;
-#[cfg(not(target_arch = "wasm32"))]
-use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::effects::time::PhysicalTimeEffects;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::transport::{TransportEnvelope, MAX_TRANSPORT_SIGNATURE_BYTES};
-#[cfg(not(target_arch = "wasm32"))]
-use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
 use aura_core::types::identifiers::AuthorityId;
 #[cfg(not(target_arch = "wasm32"))]
-use aura_core::util::serialization::from_slice;
 use aura_core::DeviceId;
 use aura_core::{
     execute_with_timeout_budget, OwnedShutdownToken, OwnedTaskSpawner, TimeoutBudget,
     TimeoutRunError,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use aura_guards::GuardContextProvider;
-#[cfg(not(target_arch = "wasm32"))]
-use aura_journal::fact::{FactContent, RelationalFact};
-#[cfg(not(target_arch = "wasm32"))]
-use aura_journal::DomainFact;
-#[cfg(not(target_arch = "wasm32"))]
-use aura_protocol::amp::get_channel_state;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_protocol::{
     DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
@@ -52,27 +41,89 @@ use aura_protocol::{
 };
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 #[cfg(not(target_arch = "wasm32"))]
-use aura_sync::protocols::journal_apply::JournalApplyService;
-#[cfg(not(target_arch = "wasm32"))]
 use futures::{SinkExt, StreamExt};
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
-use tokio_tungstenite::accept_async;
+use tokio::sync::{Mutex as AsyncMutex, OwnedSemaphorePermit, Semaphore};
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_tungstenite::accept_async_with_config;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 const MIN_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
 #[cfg(not(target_arch = "wasm32"))]
-const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
+const MAX_LAN_FRAME_BYTES: usize = 128 * 1024;
 #[cfg(not(target_arch = "wasm32"))]
-const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request";
+const MAX_LAN_CONCURRENT_CONNECTIONS: usize = 64;
 #[cfg(not(target_arch = "wasm32"))]
-const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
+const MAX_LAN_FRAMES_PER_PEER_WINDOW: u32 = 32;
+#[cfg(not(target_arch = "wasm32"))]
+const LAN_PEER_RATE_WINDOW_MS: u64 = 1_000;
 
 mod lifecycle;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Copy)]
+struct PeerIngressWindow {
+    window_started_ms: u64,
+    frames_seen: u32,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+struct LanIngressController {
+    active_connections: Arc<Semaphore>,
+    peer_windows: Arc<AsyncMutex<HashMap<IpAddr, PeerIngressWindow>>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl LanIngressController {
+    fn new() -> Self {
+        Self {
+            active_connections: Arc::new(Semaphore::new(MAX_LAN_CONCURRENT_CONNECTIONS)),
+            peer_windows: Arc::new(AsyncMutex::new(HashMap::new())),
+        }
+    }
+
+    fn try_acquire_connection(&self) -> Option<OwnedSemaphorePermit> {
+        self.active_connections.clone().try_acquire_owned().ok()
+    }
+
+    async fn allow_frame(&self, peer: IpAddr, now_ms: u64) -> bool {
+        let mut windows = self.peer_windows.lock().await;
+        let entry = windows.entry(peer).or_insert(PeerIngressWindow {
+            window_started_ms: now_ms,
+            frames_seen: 0,
+        });
+        if now_ms.saturating_sub(entry.window_started_ms) >= LAN_PEER_RATE_WINDOW_MS {
+            entry.window_started_ms = now_ms;
+            entry.frames_seen = 0;
+        }
+        if entry.frames_seen >= MAX_LAN_FRAMES_PER_PEER_WINDOW {
+            return false;
+        }
+        entry.frames_seen = entry.frames_seen.saturating_add(1);
+        true
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn lan_websocket_config() -> WebSocketConfig {
+    WebSocketConfig {
+        max_message_size: Some(MAX_LAN_FRAME_BYTES),
+        max_frame_size: Some(MAX_LAN_FRAME_BYTES),
+        ..WebSocketConfig::default()
+    }
+}
 
 pub(crate) fn sync_peer_reconcile_interval(sync_manager: &SyncServiceManager) -> Duration {
     sync_manager.config().auto_sync_interval.clamp(
@@ -783,11 +834,13 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
     let listener = lan_transport.listener();
     let websocket_listener = lan_transport.websocket_listener();
     let metrics = lan_transport.metrics_handle();
+    let ingress_controller = LanIngressController::new();
     let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
         Arc::new(effects.time_effects().clone());
     let websocket_effects = effects.clone();
     let tcp_accept_group = parent_tasks.clone();
     let tcp_connection_group = tcp_accept_group.clone();
+    let tcp_ingress_controller = ingress_controller.clone();
     let _tcp_accept_task_handle =
         tcp_accept_group.spawn_cancellable_named("tcp_accept_loop", async move {
             loop {
@@ -809,10 +862,31 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                         continue;
                     }
                 };
+                let Some(connection_permit) = tcp_ingress_controller.try_acquire_connection() else {
+                    let now_ms = time_effects
+                        .physical_time()
+                        .await
+                        .ok()
+                        .map(|t| t.ts_ms)
+                        .unwrap_or(0);
+                    tracing::warn!(
+                        addr = %addr,
+                        limit = MAX_LAN_CONCURRENT_CONNECTIONS,
+                        "LAN transport rejected connection because the connection budget is exhausted"
+                    );
+                    let mut metrics = metrics.write().await;
+                    metrics.connections_rejected =
+                        metrics.connections_rejected.saturating_add(1);
+                    if now_ms > 0 {
+                        metrics.last_error_ms = now_ms;
+                    }
+                    continue;
+                };
 
                 let effects = effects.clone();
                 let metrics = metrics.clone();
                 let time_effects = time_effects.clone();
+                let ingress_controller = tcp_ingress_controller.clone();
                 let connection_group = tcp_connection_group.clone();
                 let now_ms = time_effects
                     .physical_time()
@@ -828,99 +902,129 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                     }
                 }
                 let _connection_task =
-                connection_group.spawn_named(format!("tcp_connection.{addr}"), async move {
-                let mut len_buf = [0u8; 4];
-                if let Err(err) = stream.read_exact(&mut len_buf).await {
-                    tracing::debug!(error = %err, addr = %addr, "LAN transport read len failed");
-                    let now_ms = time_effects
-                        .physical_time()
-                        .await
-                        .ok()
-                        .map(|t| t.ts_ms)
-                        .unwrap_or(0);
-                    let mut metrics = metrics.write().await;
-                    metrics.read_errors = metrics.read_errors.saturating_add(1);
-                    if now_ms > 0 {
-                        metrics.last_error_ms = now_ms;
-                    }
-                    return;
-                }
-                let len = u32::from_be_bytes(len_buf) as usize;
-                if len == 0 || len > 1024 * 1024 {
-                    tracing::debug!(addr = %addr, len = len, "LAN transport invalid frame size");
-                    let now_ms = time_effects
-                        .physical_time()
-                        .await
-                        .ok()
-                        .map(|t| t.ts_ms)
-                        .unwrap_or(0);
-                    let mut metrics = metrics.write().await;
-                    metrics.decode_errors = metrics.decode_errors.saturating_add(1);
-                    if now_ms > 0 {
-                        metrics.last_error_ms = now_ms;
-                    }
-                    return;
-                }
-                let mut payload = vec![0u8; len];
-                if let Err(err) = stream.read_exact(&mut payload).await {
-                    tracing::debug!(
-                        error = %err,
-                        addr = %addr,
-                        "LAN transport read payload failed"
-                    );
-                    let now_ms = time_effects
-                        .physical_time()
-                        .await
-                        .ok()
-                        .map(|t| t.ts_ms)
-                        .unwrap_or(0);
-                    let mut metrics = metrics.write().await;
-                    metrics.read_errors = metrics.read_errors.saturating_add(1);
-                    if now_ms > 0 {
-                        metrics.last_error_ms = now_ms;
-                    }
-                    return;
-                }
+                    connection_group.spawn_named(format!("tcp_connection.{addr}"), async move {
+                        let _connection_permit = connection_permit;
+                        let mut len_buf = [0u8; 4];
+                        if let Err(err) = stream.read_exact(&mut len_buf).await {
+                            tracing::debug!(
+                                error = %err,
+                                addr = %addr,
+                                "LAN transport read len failed"
+                            );
+                            let now_ms = time_effects
+                                .physical_time()
+                                .await
+                                .ok()
+                                .map(|t| t.ts_ms)
+                                .unwrap_or(0);
+                            let mut metrics = metrics.write().await;
+                            metrics.read_errors = metrics.read_errors.saturating_add(1);
+                            if now_ms > 0 {
+                                metrics.last_error_ms = now_ms;
+                            }
+                            return;
+                        }
+                        let len = u32::from_be_bytes(len_buf) as usize;
+                        if len == 0 || len > MAX_LAN_FRAME_BYTES {
+                            tracing::debug!(
+                                addr = %addr,
+                                len = len,
+                                max_len = MAX_LAN_FRAME_BYTES,
+                                "LAN transport invalid frame size"
+                            );
+                            let now_ms = time_effects
+                                .physical_time()
+                                .await
+                                .ok()
+                                .map(|t| t.ts_ms)
+                                .unwrap_or(0);
+                            let mut metrics = metrics.write().await;
+                            metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);
+                            if now_ms > 0 {
+                                metrics.last_error_ms = now_ms;
+                            }
+                            return;
+                        }
+                        let mut payload = vec![0u8; len];
+                        if let Err(err) = stream.read_exact(&mut payload).await {
+                            tracing::debug!(
+                                error = %err,
+                                addr = %addr,
+                                "LAN transport read payload failed"
+                            );
+                            let now_ms = time_effects
+                                .physical_time()
+                                .await
+                                .ok()
+                                .map(|t| t.ts_ms)
+                                .unwrap_or(0);
+                            let mut metrics = metrics.write().await;
+                            metrics.read_errors = metrics.read_errors.saturating_add(1);
+                            if now_ms > 0 {
+                                metrics.last_error_ms = now_ms;
+                            }
+                            return;
+                        }
 
-                let envelope = match aura_core::util::serialization::from_slice(&payload) {
-                    Ok(envelope) => envelope,
-                    Err(err) => {
-                        tracing::debug!(error = %err, addr = %addr, "LAN transport decode failed");
                         let now_ms = time_effects
                             .physical_time()
                             .await
                             .ok()
                             .map(|t| t.ts_ms)
                             .unwrap_or(0);
-                        let mut metrics = metrics.write().await;
-                        metrics.decode_errors = metrics.decode_errors.saturating_add(1);
-                        if now_ms > 0 {
-                            metrics.last_error_ms = now_ms;
+                        if !ingress_controller.allow_frame(addr.ip(), now_ms).await {
+                            tracing::warn!(
+                                addr = %addr,
+                                per_peer_limit = MAX_LAN_FRAMES_PER_PEER_WINDOW,
+                                window_ms = LAN_PEER_RATE_WINDOW_MS,
+                                "LAN transport rate-limited inbound frame"
+                            );
+                            let mut metrics = metrics.write().await;
+                            metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);
+                            if now_ms > 0 {
+                                metrics.last_error_ms = now_ms;
+                            }
+                            return;
                         }
-                        return;
-                    }
-                };
-                let now_ms = time_effects
-                    .physical_time()
-                    .await
-                    .ok()
-                    .map(|t| t.ts_ms)
-                    .unwrap_or(0);
-                {
-                    let mut metrics = metrics.write().await;
-                    metrics.frames_received = metrics.frames_received.saturating_add(1);
-                    metrics.bytes_received = metrics.bytes_received.saturating_add(len as u64);
-                    if now_ms > 0 {
-                        metrics.last_frame_ms = now_ms;
-                    }
-                }
 
-                let _ = handle_inbound_transport_envelope(effects, envelope).await;
-                });
+                        let envelope = match aura_core::util::serialization::from_slice(&payload) {
+                            Ok(envelope) => envelope,
+                            Err(err) => {
+                                tracing::debug!(
+                                    error = %err,
+                                    addr = %addr,
+                                    "LAN transport decode failed"
+                                );
+                                let now_ms = time_effects
+                                    .physical_time()
+                                    .await
+                                    .ok()
+                                    .map(|t| t.ts_ms)
+                                    .unwrap_or(0);
+                                let mut metrics = metrics.write().await;
+                                metrics.decode_errors = metrics.decode_errors.saturating_add(1);
+                                if now_ms > 0 {
+                                    metrics.last_error_ms = now_ms;
+                                }
+                                return;
+                            }
+                        };
+                        {
+                            let mut metrics = metrics.write().await;
+                            metrics.frames_received = metrics.frames_received.saturating_add(1);
+                            metrics.bytes_received = metrics.bytes_received.saturating_add(len as u64);
+                            if now_ms > 0 {
+                                metrics.last_frame_ms = now_ms;
+                            }
+                        }
+
+                        let _ = handle_inbound_transport_envelope(effects, metrics, envelope).await;
+                    });
             }
         });
 
     let metrics = lan_transport.metrics_handle();
+    let ingress_controller = ingress_controller.clone();
     let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
         Arc::new(websocket_effects.time_effects().clone());
     let websocket_accept_group = parent_tasks.clone();
@@ -935,15 +1039,42 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                         continue;
                     }
                 };
+                let Some(connection_permit) = ingress_controller.try_acquire_connection() else {
+                    let now_ms = time_effects
+                        .physical_time()
+                        .await
+                        .ok()
+                        .map(|t| t.ts_ms)
+                        .unwrap_or(0);
+                    tracing::warn!(
+                        addr = %addr,
+                        limit = MAX_LAN_CONCURRENT_CONNECTIONS,
+                        "LAN websocket rejected connection because the connection budget is exhausted"
+                    );
+                    let mut metrics = metrics.write().await;
+                    metrics.connections_rejected =
+                        metrics.connections_rejected.saturating_add(1);
+                    if now_ms > 0 {
+                        metrics.last_error_ms = now_ms;
+                    }
+                    continue;
+                };
 
                 let effects = websocket_effects.clone();
                 let metrics = metrics.clone();
                 let time_effects = time_effects.clone();
+                let ingress_controller = ingress_controller.clone();
                 let connection_group = websocket_connection_group.clone();
                 let _connection_task = connection_group.spawn_named(
                     format!("websocket_connection.{addr}"),
                     async move {
-                        let websocket = match accept_async(stream).await {
+                        let _connection_permit = connection_permit;
+                        let websocket = match accept_async_with_config(
+                            stream,
+                            Some(lan_websocket_config()),
+                        )
+                        .await
+                        {
                             Ok(websocket) => websocket,
                             Err(err) => {
                                 tracing::debug!(
@@ -973,6 +1104,46 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                             }
 
                             let payload = message.into_data();
+                            if payload.len() > MAX_LAN_FRAME_BYTES {
+                                let now_ms = time_effects
+                                    .physical_time()
+                                    .await
+                                    .ok()
+                                    .map(|t| t.ts_ms)
+                                    .unwrap_or(0);
+                                tracing::warn!(
+                                    addr = %addr,
+                                    len = payload.len(),
+                                    max_len = MAX_LAN_FRAME_BYTES,
+                                    "LAN websocket frame exceeded configured size budget"
+                                );
+                                let mut metrics = metrics.write().await;
+                                metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);
+                                if now_ms > 0 {
+                                    metrics.last_error_ms = now_ms;
+                                }
+                                return;
+                            }
+                            let now_ms = time_effects
+                                .physical_time()
+                                .await
+                                .ok()
+                                .map(|t| t.ts_ms)
+                                .unwrap_or(0);
+                            if !ingress_controller.allow_frame(addr.ip(), now_ms).await {
+                                tracing::warn!(
+                                    addr = %addr,
+                                    per_peer_limit = MAX_LAN_FRAMES_PER_PEER_WINDOW,
+                                    window_ms = LAN_PEER_RATE_WINDOW_MS,
+                                    "LAN websocket rate-limited inbound frame"
+                                );
+                                let mut metrics = metrics.write().await;
+                                metrics.frames_rejected = metrics.frames_rejected.saturating_add(1);
+                                if now_ms > 0 {
+                                    metrics.last_error_ms = now_ms;
+                                }
+                                return;
+                            }
                             let envelope = match aura_core::util::serialization::from_slice::<
                                 TransportEnvelope,
                             >(&payload)
@@ -1007,7 +1178,12 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                             }
 
                             if let Some(response) =
-                                handle_inbound_transport_envelope(effects.clone(), envelope).await
+                                handle_inbound_transport_envelope(
+                                    effects.clone(),
+                                    metrics.clone(),
+                                    envelope,
+                                )
+                                .await
                             {
                                 match aura_core::util::serialization::to_vec(&response) {
                                     Ok(bytes) => {
@@ -1044,6 +1220,7 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
 #[cfg(not(target_arch = "wasm32"))]
 async fn handle_inbound_transport_envelope(
     effects: Arc<AuraEffectSystem>,
+    metrics: Arc<tokio::sync::RwLock<LanTransportMetrics>>,
     envelope: TransportEnvelope,
 ) -> Option<TransportEnvelope> {
     let ingress = match verify_lan_transport_ingress(envelope) {
@@ -1053,182 +1230,15 @@ async fn handle_inbound_transport_envelope(
             return None;
         }
     };
-    let envelope = ingress.payload();
-
-    if envelope
-        .metadata
-        .get("content-type")
-        .is_some_and(|content_type| content_type == FACT_SYNC_REQUEST_CONTENT_TYPE)
-    {
-        let local_authority = GuardContextProvider::authority_id(effects.as_ref());
-        let facts = match effects.load_committed_facts(local_authority).await {
-            Ok(facts) => facts
-                .into_iter()
-                .filter_map(|fact| match fact.content {
-                    FactContent::Relational(rel) => Some(rel),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-            Err(err) => {
-                tracing::debug!(
-                    error = %err,
-                    "Failed to load committed facts for fact sync response"
-                );
-                Vec::new()
-            }
-        };
-
-        let payload = match aura_core::util::serialization::to_vec(&facts) {
-            Ok(payload) => payload,
-            Err(err) => {
-                tracing::debug!(
-                    error = %err,
-                    "Failed to encode fact sync response payload"
-                );
-                return None;
-            }
-        };
-
-        let mut metadata = std::collections::HashMap::new();
-        metadata.insert(
-            "content-type".to_string(),
-            FACT_SYNC_RESPONSE_CONTENT_TYPE.to_string(),
-        );
-
-        return Some(TransportEnvelope {
-            destination: envelope.source,
-            source: envelope.destination,
-            context: envelope.context,
-            payload,
-            metadata,
-            receipt: None,
-        });
-    }
-
-    if envelope
-        .metadata
-        .get("content-type")
-        .is_some_and(|content_type| content_type == CHAT_FACT_CONTENT_TYPE)
-    {
-        tracing::debug!(
-            source = %envelope.source,
-            destination = %envelope.destination,
-            context = %envelope.context,
-            "recv-chat-fact"
-        );
-        match from_slice::<RelationalFact>(&envelope.payload) {
-            Ok(fact) => {
-                let fact = match DecodedIngress::new(fact, ingress.evidence().metadata().clone())
-                    .verify(ingress.evidence().clone())
-                {
-                    Ok(fact) => fact,
-                    Err(error) => {
-                        tracing::warn!(
-                            error = %error,
-                            "LAN transport failed to promote chat fact ingress"
-                        );
-                        return None;
-                    }
-                };
-                if let RelationalFact::Generic {
-                    envelope: chat_envelope,
-                    ..
-                } = fact.payload()
-                {
-                    if chat_envelope.type_id.as_str() == CHAT_FACT_TYPE_ID {
-                        if let Some(ChatFact::ChannelCreated {
-                            context_id,
-                            channel_id,
-                            creator_id,
-                            ..
-                        }) = ChatFact::from_envelope(&chat_envelope)
-                        {
-                            let local_authority = envelope.destination;
-                            if get_channel_state(effects.as_ref(), context_id, channel_id)
-                                .await
-                                .is_err()
-                            {
-                                if let Err(err) = effects
-                                    .create_channel(ChannelCreateParams {
-                                        context: context_id,
-                                        channel: Some(channel_id),
-                                        skip_window: None,
-                                        topic: None,
-                                    })
-                                    .await
-                                {
-                                    if get_channel_state(effects.as_ref(), context_id, channel_id)
-                                        .await
-                                        .is_err()
-                                    {
-                                        tracing::warn!(
-                                            context_id = %context_id,
-                                            channel_id = %channel_id,
-                                            error = %err,
-                                            "Failed to provision AMP channel checkpoint from inbound chat fact"
-                                        );
-                                    }
-                                }
-
-                                let mut participants = vec![local_authority];
-                                if creator_id != local_authority {
-                                    participants.push(creator_id);
-                                }
-
-                                for participant in participants {
-                                    if let Err(err) = effects
-                                        .join_channel(ChannelJoinParams {
-                                            context: context_id,
-                                            channel: channel_id,
-                                            participant,
-                                        })
-                                        .await
-                                    {
-                                        tracing::debug!(
-                                            context_id = %context_id,
-                                            channel_id = %channel_id,
-                                            participant = %participant,
-                                            error = %err,
-                                            "AMP join provisioning from inbound chat fact failed"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let fact = match JournalApplyService::new().accept_verified_relational_facts(fact) {
-                    Ok(fact) => fact,
-                    Err(error) => {
-                        tracing::debug!(
-                            error = %error,
-                            "LAN transport failed verified apply boundary for incoming chat fact"
-                        );
-                        return None;
-                    }
-                };
-                let (fact, _) = fact.into_parts();
-                if let Err(err) = effects.commit_relational_facts(vec![fact]).await {
-                    tracing::debug!(
-                        error = %err,
-                        "LAN transport failed to commit incoming chat fact envelope"
-                    );
-                }
-                return None;
-            }
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    "LAN transport received invalid chat fact envelope payload"
-                );
-                return None;
-            }
-        }
-    }
-
     let (envelope, _) = ingress.into_parts();
-    effects.requeue_envelope(envelope);
+    if matches!(
+        effects.requeue_envelope(envelope),
+        crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow
+    ) {
+        tracing::warn!("dropping LAN envelope because the runtime inbox is at capacity");
+        let mut metrics = metrics.write().await;
+        metrics.queue_drops = metrics.queue_drops.saturating_add(1);
+    }
     None
 }
 
@@ -1476,6 +1486,32 @@ mod tests {
     use crate::runtime::builder::EffectSystemBuilder;
     use crate::runtime::services::SyncManagerConfig;
     use aura_core::ContextId;
+    use std::collections::HashMap;
+
+    fn test_envelope() -> TransportEnvelope {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            "application/aura-test-envelope".to_string(),
+        );
+        TransportEnvelope {
+            destination: AuthorityId::new_from_entropy([1u8; 32]),
+            source: AuthorityId::new_from_entropy([2u8; 32]),
+            context: ContextId::new_from_entropy([3u8; 32]),
+            payload: b"payload".to_vec(),
+            metadata,
+            receipt: Some(aura_core::effects::transport::TransportReceipt {
+                context: ContextId::new_from_entropy([3u8; 32]),
+                src: AuthorityId::new_from_entropy([2u8; 32]),
+                dst: AuthorityId::new_from_entropy([1u8; 32]),
+                epoch: 1,
+                cost: 1,
+                nonce: 7,
+                prev: [0u8; 32],
+                sig: vec![9u8],
+            }),
+        }
+    }
 
     #[test]
     fn runtime_activity_gate_transitions_and_rejects_new_public_work() {
@@ -1552,6 +1588,88 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(service_names.contains(&"runtime_maintenance"));
+    }
+
+    #[test]
+    fn lan_ingress_rejects_missing_receipt() {
+        let mut envelope = test_envelope();
+        envelope.receipt = None;
+
+        let error = verify_lan_transport_ingress(envelope)
+            .expect_err("unsigned LAN envelope must be rejected");
+
+        assert!(matches!(error, LanTransportIngressError::MissingReceipt));
+    }
+
+    #[test]
+    fn lan_ingress_rejects_route_mismatch() {
+        let mut envelope = test_envelope();
+        envelope.receipt.as_mut().expect("receipt").dst = AuthorityId::new_from_entropy([4u8; 32]);
+
+        let error = verify_lan_transport_ingress(envelope)
+            .expect_err("mismatched receipt route must be rejected");
+
+        assert!(matches!(
+            error,
+            LanTransportIngressError::ReceiptRouteMismatch
+        ));
+    }
+
+    #[test]
+    fn lan_ingress_rejects_missing_content_type() {
+        let mut envelope = test_envelope();
+        envelope.metadata.clear();
+
+        let error = verify_lan_transport_ingress(envelope)
+            .expect_err("content-type is required for LAN ingress");
+
+        assert!(matches!(
+            error,
+            LanTransportIngressError::MissingContentType
+        ));
+    }
+
+    #[test]
+    fn lan_ingress_accepts_bounded_receipt_and_matching_route() {
+        let envelope = test_envelope();
+
+        let verified =
+            verify_lan_transport_ingress(envelope).expect("valid LAN ingress should verify");
+        let (envelope, metadata) = verified.into_parts();
+
+        assert_eq!(
+            metadata.metadata().source_authority(),
+            Some(envelope.source)
+        );
+        assert_eq!(
+            envelope.metadata.get("content-type").map(String::as_str),
+            Some("application/aura-test-envelope")
+        );
+    }
+
+    #[test]
+    fn lan_websocket_config_bounds_message_and_frame_sizes() {
+        let config = lan_websocket_config();
+
+        assert_eq!(config.max_message_size, Some(MAX_LAN_FRAME_BYTES));
+        assert_eq!(config.max_frame_size, Some(MAX_LAN_FRAME_BYTES));
+    }
+
+    #[tokio::test]
+    async fn lan_ingress_controller_rate_limits_per_peer() {
+        let controller = LanIngressController::new();
+        let peer = std::net::Ipv4Addr::LOCALHOST.into();
+
+        for _ in 0..MAX_LAN_FRAMES_PER_PEER_WINDOW {
+            assert!(controller.allow_frame(peer, 1).await);
+        }
+
+        assert!(!controller.allow_frame(peer, 1).await);
+        assert!(
+            controller
+                .allow_frame(peer, LAN_PEER_RATE_WINDOW_MS + 1)
+                .await
+        );
     }
 
     #[test]

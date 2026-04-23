@@ -382,7 +382,11 @@ fmt-check:
 
 # Run security audit
 audit:
-    cargo audit
+    just ci-security-audit
+
+# Run dependency advisory policy gate
+ci-security-audit:
+    GIT_CONFIG_GLOBAL=/dev/null cargo deny check advisories --hide-inclusion-graph
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Architecture Checks

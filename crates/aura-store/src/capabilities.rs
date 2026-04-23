@@ -29,6 +29,16 @@
 
 use serde::{Deserialize, Serialize};
 
+fn is_same_or_child_path(candidate: &str, parent: &str) -> bool {
+    let candidate = candidate.trim_matches('/');
+    let parent = parent.trim_matches('/');
+    parent.is_empty()
+        || candidate == parent
+        || candidate
+            .strip_prefix(parent)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
 /// Storage capability metadata specifying required access level
 ///
 /// **Note**: This type describes capability *requirements* as metadata.
@@ -111,10 +121,10 @@ impl StorageResource {
         match (self, other) {
             (StorageResource::Global, _) => true,
             (StorageResource::Namespace(ns1), StorageResource::Content(content_id)) => {
-                content_id.starts_with(ns1)
+                is_same_or_child_path(content_id, ns1)
             }
             (StorageResource::Namespace(ns1), StorageResource::Namespace(ns2)) => {
-                ns2.starts_with(ns1)
+                is_same_or_child_path(ns2, ns1)
             }
             _ => self == other,
         }

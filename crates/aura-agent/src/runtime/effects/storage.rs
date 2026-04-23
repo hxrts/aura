@@ -2,8 +2,8 @@ use super::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::{
-    SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
-    StorageCoreEffects, StorageExtendedEffects,
+    SecureGeneratedKey, SecureStorageCapability, SecureStorageEffects, SecureStorageError,
+    SecureStorageLocation, StorageCoreEffects, StorageExtendedEffects,
 };
 use std::collections::HashMap;
 
@@ -113,7 +113,7 @@ impl SecureStorageEffects for AuraEffectSystem {
         location: &SecureStorageLocation,
         context: &str,
         caps: &[SecureStorageCapability],
-    ) -> Result<Option<Vec<u8>>, SecureStorageError> {
+    ) -> Result<SecureGeneratedKey, SecureStorageError> {
         self.crypto
             .secure_storage()
             .secure_generate_key(location, context, caps)

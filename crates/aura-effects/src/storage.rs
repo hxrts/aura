@@ -8,7 +8,7 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs;
 use tokio::fs::DirEntry;
@@ -45,15 +45,9 @@ impl FilesystemStorageHandler {
 #[async_trait]
 impl StorageCoreEffects for FilesystemStorageHandler {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        if key.is_empty() {
-            return Err(StorageError::InvalidKey {
-                reason: "Key cannot be empty".to_string(),
-            });
-        }
-
-        let file_path = self.base_path.join(format!("{key}.dat"));
-        let temp_file_path = self.base_path.join(format!(
-            "{key}.dat.tmp-{}",
+        let file_path = self.path_for_key(key)?;
+        let temp_file_path = file_path.with_extension(format!(
+            "dat.tmp-{}",
             NEXT_TEMP_WRITE_ID.fetch_add(1, Ordering::Relaxed)
         ));
         if let Some(parent) = file_path.parent() {
@@ -93,7 +87,7 @@ impl StorageCoreEffects for FilesystemStorageHandler {
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        let file_path = self.base_path.join(format!("{key}.dat"));
+        let file_path = self.path_for_key(key)?;
 
         if !file_path.exists() {
             return Ok(None);
@@ -107,7 +101,7 @@ impl StorageCoreEffects for FilesystemStorageHandler {
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-        let file_path = self.base_path.join(format!("{key}.dat"));
+        let file_path = self.path_for_key(key)?;
 
         if !file_path.exists() {
             return Ok(false);
@@ -121,6 +115,9 @@ impl StorageCoreEffects for FilesystemStorageHandler {
     }
 
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        if let Some(prefix) = prefix {
+            Self::validate_key_prefix(prefix)?;
+        }
         // Keys may contain path separators (e.g. `journal/facts/...`), so we must
         // traverse the directory tree recursively and strip the `.dat` suffix
         // from persisted filenames.
@@ -154,7 +151,7 @@ impl StorageCoreEffects for FilesystemStorageHandler {
 #[async_trait]
 impl StorageExtendedEffects for FilesystemStorageHandler {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        let file_path = self.base_path.join(format!("{key}.dat"));
+        let file_path = self.path_for_key(key)?;
         Ok(file_path.exists())
     }
 
@@ -162,6 +159,9 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
         &self,
         pairs: std::collections::HashMap<String, Vec<u8>>,
     ) -> Result<(), StorageError> {
+        for key in pairs.keys() {
+            Self::validate_key_segments(key)?;
+        }
         for (k, v) in pairs {
             self.store(&k, v).await?;
         }
@@ -172,6 +172,9 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
         &self,
         keys: &[String],
     ) -> Result<std::collections::HashMap<String, Vec<u8>>, StorageError> {
+        for key in keys {
+            Self::validate_key_segments(key)?;
+        }
         let mut out = std::collections::HashMap::new();
         for key in keys {
             if let Some(val) = self.retrieve(key).await? {
@@ -251,8 +254,158 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
 }
 
 impl FilesystemStorageHandler {
+    fn path_for_key(&self, key: &str) -> Result<PathBuf, StorageError> {
+        let segments = Self::validate_key_segments(key)?;
+        let mut path = self.base_path.clone();
+        for segment in &segments[..segments.len().saturating_sub(1)] {
+            path.push(Self::encode_key_segment(segment));
+        }
+        let last = segments
+            .last()
+            .ok_or_else(|| Self::invalid_key("key cannot be empty"))?;
+        path.push(format!("{}.dat", Self::encode_key_segment(last)));
+        Ok(path)
+    }
+
+    fn validate_key_segments(key: &str) -> Result<Vec<&str>, StorageError> {
+        if key.is_empty() {
+            return Err(Self::invalid_key("key cannot be empty"));
+        }
+        if key.starts_with('/') || key.starts_with('\\') {
+            return Err(Self::invalid_key("key cannot be absolute"));
+        }
+        if key.contains('\0') {
+            return Err(Self::invalid_key("key cannot contain NUL bytes"));
+        }
+        if key.contains('\\') {
+            return Err(Self::invalid_key(
+                "key cannot contain platform backslash separators",
+            ));
+        }
+
+        let segments: Vec<&str> = key.split('/').collect();
+        Self::validate_segments(&segments, false)?;
+        Ok(segments)
+    }
+
+    fn validate_key_prefix(prefix: &str) -> Result<(), StorageError> {
+        if prefix.is_empty() {
+            return Ok(());
+        }
+        if prefix.starts_with('/') || prefix.starts_with('\\') {
+            return Err(Self::invalid_key("key prefix cannot be absolute"));
+        }
+        if prefix.contains('\0') {
+            return Err(Self::invalid_key("key prefix cannot contain NUL bytes"));
+        }
+        if prefix.contains('\\') {
+            return Err(Self::invalid_key(
+                "key prefix cannot contain platform backslash separators",
+            ));
+        }
+
+        let segments: Vec<&str> = prefix.split('/').collect();
+        Self::validate_segments(&segments, true)
+    }
+
+    fn validate_segments(
+        segments: &[&str],
+        allow_trailing_empty: bool,
+    ) -> Result<(), StorageError> {
+        for (index, segment) in segments.iter().enumerate() {
+            let is_trailing_empty =
+                allow_trailing_empty && index + 1 == segments.len() && segment.is_empty();
+            if is_trailing_empty {
+                continue;
+            }
+            if segment.is_empty() {
+                return Err(Self::invalid_key("key cannot contain empty path segments"));
+            }
+            if *segment == "." || *segment == ".." {
+                return Err(Self::invalid_key(
+                    "key cannot contain current or parent directory segments",
+                ));
+            }
+            if index == 0 && Self::is_windows_drive_prefix(segment) {
+                return Err(Self::invalid_key(
+                    "key cannot start with a Windows drive prefix",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn is_windows_drive_prefix(segment: &str) -> bool {
+        let bytes = segment.as_bytes();
+        bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+    }
+
+    fn encode_key_segment(segment: &str) -> String {
+        let mut encoded = String::with_capacity(segment.len());
+        for byte in segment.bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
+                    encoded.push(byte as char)
+                }
+                _ => {
+                    encoded.push('%');
+                    encoded.push(Self::hex_digit(byte >> 4));
+                    encoded.push(Self::hex_digit(byte & 0x0f));
+                }
+            }
+        }
+        encoded
+    }
+
+    fn decode_key_segment(segment: &str) -> Result<String, StorageError> {
+        let bytes = segment.as_bytes();
+        let mut decoded = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] != b'%' {
+                decoded.push(bytes[index]);
+                index += 1;
+                continue;
+            }
+            if index + 2 >= bytes.len() {
+                return Err(Self::invalid_key("stored key segment has invalid escape"));
+            }
+            let high = Self::hex_value(bytes[index + 1])
+                .ok_or_else(|| Self::invalid_key("stored key segment has invalid escape"))?;
+            let low = Self::hex_value(bytes[index + 2])
+                .ok_or_else(|| Self::invalid_key("stored key segment has invalid escape"))?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        }
+        String::from_utf8(decoded)
+            .map_err(|_| Self::invalid_key("stored key segment is not valid UTF-8"))
+    }
+
+    fn hex_digit(value: u8) -> char {
+        match value {
+            0..=9 => (b'0' + value) as char,
+            10..=15 => (b'A' + (value - 10)) as char,
+            _ => '?',
+        }
+    }
+
+    fn hex_value(value: u8) -> Option<u8> {
+        match value {
+            b'0'..=b'9' => Some(value - b'0'),
+            b'a'..=b'f' => Some(value - b'a' + 10),
+            b'A'..=b'F' => Some(value - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    fn invalid_key(reason: impl Into<String>) -> StorageError {
+        StorageError::InvalidKey {
+            reason: reason.into(),
+        }
+    }
+
     async fn visit_entry_for_keys(
-        base: &PathBuf,
+        base: &Path,
         entry: DirEntry,
         prefix: Option<&str>,
         stack: &mut Vec<PathBuf>,
@@ -279,10 +432,14 @@ impl FilesystemStorageHandler {
             StorageError::ReadFailed(format!("Failed to compute relative key path: {e}"))
         })?;
         let rel = rel.with_extension("");
-        let mut key = rel.to_string_lossy().to_string();
-        if std::path::MAIN_SEPARATOR != '/' {
-            key = key.replace(std::path::MAIN_SEPARATOR, "/");
-        }
+        let decoded_segments = rel
+            .components()
+            .map(|component| {
+                let segment = component.as_os_str().to_string_lossy();
+                Self::decode_key_segment(&segment)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let key = decoded_segments.join("/");
 
         if let Some(prefix) = prefix {
             if key.starts_with(prefix) {
@@ -344,5 +501,91 @@ mod tests {
         // Verify it's gone
         let retrieved_after = handler.retrieve(key).await.unwrap();
         assert_eq!(retrieved_after, None);
+    }
+
+    #[tokio::test]
+    async fn filesystem_storage_rejects_path_traversal_keys() {
+        let temp_dir = TempDir::new().unwrap();
+        let handler = FilesystemStorageHandler::new(temp_dir.path().join("storage"));
+
+        for key in [
+            "",
+            "../secret",
+            "/tmp/x",
+            "a/../../x",
+            "C:/x",
+            "C:\\x",
+            "safe\\unsafe",
+            "safe//unsafe",
+            "safe/./unsafe",
+            "safe/\0/unsafe",
+        ] {
+            let error = handler.store(key, b"blocked".to_vec()).await.unwrap_err();
+            assert!(
+                matches!(error, StorageError::InvalidKey { .. }),
+                "expected InvalidKey for {key:?}, got {error:?}"
+            );
+        }
+
+        assert!(!temp_dir.path().join("secret.dat").exists());
+    }
+
+    #[tokio::test]
+    async fn filesystem_storage_safe_logical_prefixes_round_trip() {
+        let temp_dir = TempDir::new().unwrap();
+        let handler = FilesystemStorageHandler::new(temp_dir.path().join("storage"));
+
+        handler
+            .store("journal/facts/ota:proposal:1", b"proposal".to_vec())
+            .await
+            .unwrap();
+        handler
+            .store("journal/facts/ordinary", b"ordinary".to_vec())
+            .await
+            .unwrap();
+        handler
+            .store("other/facts/item", b"other".to_vec())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            handler
+                .retrieve("journal/facts/ota:proposal:1")
+                .await
+                .unwrap(),
+            Some(b"proposal".to_vec())
+        );
+        assert!(handler.exists("journal/facts/ordinary").await.unwrap());
+
+        let listed = handler.list_keys(Some("journal/facts/")).await.unwrap();
+        assert_eq!(
+            listed,
+            vec![
+                "journal/facts/ordinary".to_string(),
+                "journal/facts/ota:proposal:1".to_string()
+            ]
+        );
+
+        assert!(handler.remove("journal/facts/ordinary").await.unwrap());
+        assert!(!handler.exists("journal/facts/ordinary").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn filesystem_storage_batch_operations_validate_keys() {
+        let temp_dir = TempDir::new().unwrap();
+        let handler = FilesystemStorageHandler::new(temp_dir.path().join("storage"));
+        let mut pairs = std::collections::HashMap::new();
+        pairs.insert("valid/key".to_string(), b"ok".to_vec());
+        pairs.insert("../escape".to_string(), b"bad".to_vec());
+
+        let error = handler.store_batch(pairs).await.unwrap_err();
+        assert!(matches!(error, StorageError::InvalidKey { .. }));
+
+        let keys = vec!["valid/key".to_string(), "../escape".to_string()];
+        let error = handler.retrieve_batch(&keys).await.unwrap_err();
+        assert!(matches!(error, StorageError::InvalidKey { .. }));
+
+        let error = handler.list_keys(Some("../")).await.unwrap_err();
+        assert!(matches!(error, StorageError::InvalidKey { .. }));
     }
 }

@@ -27,12 +27,14 @@ use crate::shell::{cancel_generation_maintenance_loops, spawn_generation_mainten
 use crate::task_owner::shared_web_task_owner;
 use crate::web_clipboard::WebClipboardAdapter;
 use crate::{
-    active_storage_prefix, bootstrap_broker_url, clear_storage_key, dual_demo_web_enabled,
-    harness_instance_id, harness_mode_enabled, load_pending_account_bootstrap,
-    load_pending_device_enrollment_code, load_selected_runtime_identity, logged_optional,
-    pending_account_bootstrap_key, pending_device_enrollment_code_key,
-    persist_pending_device_enrollment_code, persist_selected_runtime_identity,
-    selected_runtime_identity_key, submit_runtime_bootstrap_handoff,
+    active_storage_prefix, bootstrap_broker_auth_token, bootstrap_broker_invitation_token,
+    bootstrap_broker_url, clear_pending_device_enrollment_code, clear_storage_key,
+    dual_demo_web_enabled, harness_instance_id, harness_mode_enabled,
+    load_pending_account_bootstrap, load_pending_device_enrollment_code,
+    load_selected_runtime_identity, logged_optional, pending_account_bootstrap_key,
+    pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
+    persist_selected_runtime_identity, selected_runtime_identity_key,
+    submit_runtime_bootstrap_handoff,
     workflows::{self, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest, RebootstrapPolicy},
 };
 use aura_agent::BootstrapBrokerConfig;
@@ -497,7 +499,7 @@ async fn reconcile_pending_device_enrollment_import(
             ),
         ));
     }
-    let _ = pending_code_storage_key;
+    clear_pending_device_enrollment_code(pending_code_storage_key)?;
     Ok(Some(result.bootstrap_name))
 }
 
@@ -593,9 +595,18 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             ..Default::default()
         };
         if let Some(base_url) = bootstrap_broker_url() {
-            config.bootstrap_broker = BootstrapBrokerConfig::default()
+            let broker = BootstrapBrokerConfig::default()
                 .enabled(true)
                 .with_base_url(base_url);
+            let broker = match bootstrap_broker_auth_token() {
+                Some(auth_token) => broker.with_auth_token(auth_token),
+                None => broker,
+            };
+            let broker = match bootstrap_broker_invitation_token() {
+                Some(invitation_token) => broker.with_invitation_retrieval_token(invitation_token),
+                None => broker,
+            };
+            config.bootstrap_broker = broker;
         }
         phase.advance_to(BootstrapPhase::BuildAgent)?;
         let agent = Arc::new(
@@ -1074,6 +1085,24 @@ mod tests {
         assert!(
             bootstrap_block.contains("reconcile_pending_device_enrollment_import("),
             "runtime-identity staged imports should continue through a shell-host owned reconciliation path"
+        );
+    }
+
+    #[test]
+    fn shell_host_clears_pending_device_enrollment_code_after_import() {
+        let source = include_str!("shell_host.rs");
+        let reconcile_start = source
+            .find("async fn reconcile_pending_device_enrollment_import(")
+            .unwrap_or_else(|| panic!("missing reconcile_pending_device_enrollment_import"));
+        let reconcile_end = source[reconcile_start..]
+            .find("fn install_harness_instrumentation")
+            .map(|offset| reconcile_start + offset)
+            .unwrap_or_else(|| panic!("missing install_harness_instrumentation"));
+        let reconcile_block = &source[reconcile_start..reconcile_end];
+        assert!(
+            reconcile_block
+                .contains("clear_pending_device_enrollment_code(pending_code_storage_key)?;"),
+            "successful device enrollment import must clear the one-shot browser enrollment code"
         );
     }
 

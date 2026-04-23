@@ -14,6 +14,10 @@ const HARNESS_MODE_KEY: &str = "AURA_HARNESS_MODE";
 const HARNESS_SCENARIO_SEED_KEY: &str = "AURA_HARNESS_SCENARIO_SEED";
 #[cfg(not(target_arch = "wasm32"))]
 const HARNESS_INSTANCE_ID_KEY: &str = "AURA_HARNESS_INSTANCE_ID";
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+const HARNESS_TOKEN_QUERY_KEY: &str = "__aura_harness_token";
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+const MIN_HARNESS_TOKEN_LEN: usize = 16;
 const HARNESS_TIME_BASE_MS: u64 = 1_700_000_000_000;
 
 static HARNESS_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -68,16 +72,20 @@ fn harness_context() -> Option<HarnessContext> {
             let query = search.strip_prefix('?').unwrap_or(&search);
             let mut instance_id = None;
             let mut scenario_seed = None;
+            let mut token = None;
             for pair in query.split('&') {
                 let Some((key, value)) = pair.split_once('=') else {
                     continue;
                 };
                 if key == "__aura_harness_instance" && !value.is_empty() {
                     instance_id = Some(value.to_string());
+                } else if key == HARNESS_TOKEN_QUERY_KEY && value.len() >= MIN_HARNESS_TOKEN_LEN {
+                    token = Some(value.to_string());
                 } else if key == "__aura_harness_scenario_seed" {
                     scenario_seed = parse_seed(value);
                 }
             }
+            let _token = token?;
             Some(HarnessContext {
                 scenario_seed: scenario_seed?,
                 instance_id: instance_id?,

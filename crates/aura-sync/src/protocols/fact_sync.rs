@@ -362,6 +362,10 @@ impl FactSyncProtocol {
         if self.config.use_bloom_filter && !peer_bloom.is_empty() {
             match aura_core::util::serialization::from_slice::<BloomFilter>(peer_bloom) {
                 Ok(filter) => {
+                    if let Err(err) = filter.validate_wire() {
+                        tracing::warn!("Rejected invalid peer bloom filter: {}", err);
+                        return Ok(self.limited_facts(all_facts));
+                    }
                     let filtered = self.limited_facts(
                         all_facts
                             .into_iter()

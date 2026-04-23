@@ -7,7 +7,8 @@
 #![allow(clippy::expect_used, clippy::disallowed_methods)]
 
 use aura_agent::{
-    AgentBuilder, AgentConfig, AuraAgent, EffectContext, ExecutionMode, SharedTransport,
+    AgentBuilder, AgentConfig, AuraAgent, AuraEffectSystem, EffectContext, ExecutionMode,
+    SharedTransport,
 };
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{ThresholdSigningEffects, TransportEffects};
@@ -20,6 +21,13 @@ use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+async fn send_test_raw_envelope_for_simulation(
+    effects: &Arc<AuraEffectSystem>,
+    envelope: TransportEnvelope,
+) -> Result<(), aura_core::effects::transport::TransportError> {
+    effects.send_envelope(envelope).await
+}
 
 fn test_context(authority_id: AuthorityId, mode: ExecutionMode) -> EffectContext {
     let context_entropy = hash(&authority_id.to_bytes());
@@ -126,7 +134,7 @@ async fn test_two_agent_loopback_communication() -> TestResult {
         receipt: None,
     };
 
-    effects_a.send_envelope(envelope).await?;
+    send_test_raw_envelope_for_simulation(&effects_a, envelope).await?;
 
     // Agent B receives the envelope
     let received = wait_for_envelope(&effects_b, 5).await?;
@@ -162,7 +170,7 @@ async fn test_bidirectional_agent_communication() -> TestResult {
         metadata: HashMap::new(),
         receipt: None,
     };
-    effects_a.send_envelope(envelope_ab).await?;
+    send_test_raw_envelope_for_simulation(&effects_a, envelope_ab).await?;
 
     // B -> A
     let payload_ba = b"message B to A".to_vec();
@@ -174,7 +182,7 @@ async fn test_bidirectional_agent_communication() -> TestResult {
         metadata: HashMap::new(),
         receipt: None,
     };
-    effects_b.send_envelope(envelope_ba).await?;
+    send_test_raw_envelope_for_simulation(&effects_b, envelope_ba).await?;
 
     // Verify both received correctly
     let received_at_b = wait_for_envelope(&effects_b, 5).await?;
@@ -212,7 +220,7 @@ async fn test_sequential_message_exchange() -> TestResult {
             metadata: HashMap::new(),
             receipt: None,
         };
-        effects_a.send_envelope(envelope).await?;
+        send_test_raw_envelope_for_simulation(&effects_a, envelope).await?;
     }
 
     // B should receive all messages in order (FIFO)
@@ -284,40 +292,46 @@ async fn test_three_agent_mesh_communication() -> TestResult {
     let effects_c = agent_c.runtime().effects();
 
     // A -> B
-    effects_a
-        .send_envelope(TransportEnvelope {
+    send_test_raw_envelope_for_simulation(
+        &effects_a,
+        TransportEnvelope {
             source: agent_a.authority_id(),
             destination: agent_b.authority_id(),
             context: ContextId::new_from_entropy(hash(&[1u8; 32])),
             payload: b"A to B".to_vec(),
             metadata: HashMap::new(),
             receipt: None,
-        })
-        .await?;
+        },
+    )
+    .await?;
 
     // B -> C
-    effects_b
-        .send_envelope(TransportEnvelope {
+    send_test_raw_envelope_for_simulation(
+        &effects_b,
+        TransportEnvelope {
             source: agent_b.authority_id(),
             destination: agent_c.authority_id(),
             context: ContextId::new_from_entropy(hash(&[2u8; 32])),
             payload: b"B to C".to_vec(),
             metadata: HashMap::new(),
             receipt: None,
-        })
-        .await?;
+        },
+    )
+    .await?;
 
     // C -> A
-    effects_c
-        .send_envelope(TransportEnvelope {
+    send_test_raw_envelope_for_simulation(
+        &effects_c,
+        TransportEnvelope {
             source: agent_c.authority_id(),
             destination: agent_a.authority_id(),
             context: ContextId::new_from_entropy(hash(&[3u8; 32])),
             payload: b"C to A".to_vec(),
             metadata: HashMap::new(),
             receipt: None,
-        })
-        .await?;
+        },
+    )
+    .await?;
 
     // Verify all messages received
     let recv_b = wait_for_envelope(&effects_b, 5).await?;

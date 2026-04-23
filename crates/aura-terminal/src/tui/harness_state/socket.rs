@@ -2,6 +2,7 @@
 
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{HarnessCommandSender, HarnessCommandSubmission};
+use aura_app::harness_mode_enabled;
 use aura_app::scenario_contract::SemanticCommandValue;
 use aura_app::ui::contract::{HarnessUiCommand, HarnessUiCommandReceipt};
 use aura_app::ui_contract::{HarnessUiOperationHandle, OperationInstanceId};
@@ -105,6 +106,9 @@ impl Drop for HarnessSocketGuard {
 }
 
 fn configured_command_socket() -> Option<&'static PathBuf> {
+    if !harness_mode_enabled() {
+        return None;
+    }
     COMMAND_SOCKET
         .get_or_init(|| std::env::var_os(COMMAND_SOCKET_ENV).map(PathBuf::from))
         .as_ref()

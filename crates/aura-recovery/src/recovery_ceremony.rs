@@ -40,10 +40,16 @@
 //! - **Deterministic ID**: `CeremonyId = H(prestate_hash || request_hash || nonce)`
 //! - **Auditability**: All state changes recorded as journal facts
 
+use crate::recovery_approval::{
+    recovery_operation_hash, verify_recovery_approval_signature, RecoveryApprovalTranscriptPayload,
+};
 use aura_core::domain::FactValue;
-use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
+use aura_core::effects::{
+    CryptoEffects, JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects,
+};
+use aura_core::key_resolution::TrustedKeyResolver;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
-use aura_core::types::identifiers::AuthorityId;
+use aura_core::types::identifiers::{AuthorityId, RecoveryId};
 use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::{AuraError, AuraResult, Hash32};
 use serde::{Deserialize, Serialize};
@@ -407,13 +413,13 @@ pub struct RecoveryCeremonyExecutor<E: RecoveryCeremonyEffects> {
 
 /// Combined effects required for recovery ceremonies.
 pub trait RecoveryCeremonyEffects:
-    JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
+    JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + CryptoEffects + Send + Sync
 {
 }
 
 // Blanket implementation
 impl<T> RecoveryCeremonyEffects for T where
-    T: JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
+    T: JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + CryptoEffects + Send + Sync
 {
 }
 
@@ -442,6 +448,10 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
 
     fn ceremony_hex(ceremony_id: RecoveryCeremonyId) -> String {
         hex::encode(ceremony_id.0.as_bytes())
+    }
+
+    fn approval_recovery_id(ceremony_id: RecoveryCeremonyId) -> RecoveryId {
+        RecoveryId::new(format!("ceremony-{}", Self::ceremony_hex(ceremony_id)))
     }
 
     fn fact_key(kind: &str, ceremony_id: RecoveryCeremonyId) -> String {
@@ -478,6 +488,20 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
 
     fn set_aborted(ceremony: &mut RecoveryCeremonyState, reason: RecoveryCeremonyAbortReason) {
         ceremony.status = RecoveryCeremonyStatus::Aborted { reason };
+    }
+
+    fn validate_approval_signature_shape(signature: &ThresholdSignature) -> AuraResult<()> {
+        if signature.signature_bytes().is_empty() || signature.signers.is_empty() {
+            return Err(AuraError::invalid(
+                "recovery approval requires a non-empty guardian signature",
+            ));
+        }
+        if signature.signature_bytes().iter().all(|byte| *byte == 0) {
+            return Err(AuraError::invalid(
+                "recovery approval guardian signature must not be all zero",
+            ));
+        }
+        Ok(())
     }
 
     fn insert_ceremony(
@@ -564,11 +588,15 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
     }
 
     /// Process a guardian approval.
-    pub async fn process_approval(
+    pub async fn process_approval<R>(
         &mut self,
         ceremony_id: RecoveryCeremonyId,
         approval: RecoveryApproval,
-    ) -> AuraResult<bool> {
+        key_resolver: &R,
+    ) -> AuraResult<bool>
+    where
+        R: TrustedKeyResolver + ?Sized,
+    {
         // Get current prestate and time
         let current_prestate = self.compute_prestate_hash().await?;
         let now = self
@@ -578,11 +606,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
-        // Track if quorum was reached
-        let quorum_reached;
-
-        // Process in a block to limit borrow scope
-        {
+        let verification_payload = {
             let ceremony = self
                 .ceremonies
                 .get_mut(&ceremony_id)
@@ -614,6 +638,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
                     "Guardian not part of this ceremony",
                 ));
             }
+            Self::validate_approval_signature_shape(&approval.signature)?;
 
             // Check timeout
             if now > ceremony.started_at_ms + ceremony.timeout_ms {
@@ -628,20 +653,63 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
                 ));
             }
 
+            RecoveryApprovalTranscriptPayload {
+                recovery_id: Self::approval_recovery_id(ceremony_id),
+                account_authority: ceremony.request.account_authority,
+                operation_hash: recovery_operation_hash(&ceremony.request.operation)?,
+                prestate_hash: ceremony.request.prestate_hash,
+                approved: approval.approved,
+                approved_at_ms: approval.approved_at_ms,
+                guardian_id: approval.guardian,
+            }
+        };
+
+        let verified = verify_recovery_approval_signature(
+            &self.effects,
+            verification_payload,
+            approval.signature.signature_bytes(),
+            key_resolver,
+        )
+        .await?;
+        if !verified {
+            return Err(AuraError::permission_denied(
+                "Guardian recovery approval signature did not verify",
+            ));
+        }
+
+        let quorum_reached = {
+            let ceremony = self
+                .ceremonies
+                .get_mut(&ceremony_id)
+                .ok_or_else(|| AuraError::not_found("Ceremony not found"))?;
+
+            if ceremony.status != RecoveryCeremonyStatus::CollectingApprovals {
+                return Err(AuraError::invalid(format!(
+                    "Ceremony not collecting approvals: {:?}",
+                    ceremony.status
+                )));
+            }
+            if ceremony.approvals.contains_key(&approval.guardian) {
+                return Err(AuraError::invalid(
+                    "Guardian has already submitted approval",
+                ));
+            }
+
             // Store approval
             ceremony
                 .approvals
                 .insert(approval.guardian, approval.clone());
 
             // Check if quorum is now met
-            quorum_reached = ceremony.threshold_met()
+            let quorum_reached = ceremony.threshold_met()
                 && ceremony.status == RecoveryCeremonyStatus::CollectingApprovals;
 
             if quorum_reached {
                 ceremony.status = RecoveryCeremonyStatus::AwaitingExecution;
                 ceremony.agreement_mode = AgreementMode::CoordinatorSoftSafe;
             }
-        }
+            quorum_reached
+        };
 
         // Emit approval received fact
         self.emit_approval_received_fact(
@@ -771,11 +839,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         let prestate_hash = self.compute_prestate_hash().await?;
         let approved_at_ms = self.current_timestamp_ms().await?;
 
-        if signature.signature_bytes().is_empty() || signature.signers.is_empty() {
-            return Err(AuraError::invalid(
-                "recovery approval requires a non-empty guardian signature",
-            ));
-        }
+        Self::validate_approval_signature_shape(&signature)?;
 
         Ok(RecoveryApproval {
             ceremony_id,

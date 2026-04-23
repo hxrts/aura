@@ -16,6 +16,9 @@ Do not add new env reads ad hoc. Add the variable to the appropriate bucket firs
 | `AURA_PATH` | `aura-agent::core::config` | Base root used to resolve the default Aura storage directory |
 | `AURA_BOOTSTRAP_BROKER_BIND` | `aura-terminal::env` | Override bootstrap-broker bind address for mixed native/browser startup |
 | `AURA_BOOTSTRAP_BROKER_URL` | `aura-terminal::env` | Override externally reachable bootstrap-broker base URL |
+| `AURA_BOOTSTRAP_BROKER_ALLOW_LAN_BIND` | `aura-terminal::env` | Explicitly allow a bootstrap broker bind address that is visible off loopback |
+| `AURA_BOOTSTRAP_BROKER_AUTH_TOKEN` | `aura-terminal::env` | Bearer token required for bootstrap-broker HTTP endpoints |
+| `AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN` | `aura-terminal::env` | Unguessable one-time token used to drain bootstrap-broker invitations |
 | `AURA_CLIPBOARD_MODE` | `aura-terminal::env` | Select clipboard behavior for terminal code display (`system`, `file_only`, `disabled`) |
 | `AURA_CLIPBOARD_FILE` | `aura-terminal::env` | Capture clipboard writes to a file for constrained or automated environments |
 | `AURA_DEMO_DEVICE_ID` | `aura-terminal::env` | Enable demo-only neighborhood assist behavior when a demo device id is staged |

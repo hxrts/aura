@@ -1039,7 +1039,7 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         location: &aura_core::effects::SecureStorageLocation,
         key_type: &str,
         _capabilities: &[aura_core::effects::SecureStorageCapability],
-    ) -> Result<Option<Vec<u8>>, AuraError> {
+    ) -> Result<aura_core::effects::SecureGeneratedKey, AuraError> {
         // Generate a deterministic key based on location and type
         let key_bytes: Vec<u8> = match key_type {
             "ed25519" => vec![1u8; 32],
@@ -1049,9 +1049,10 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         // Store private key
         let key = format!("secure_{}", location.full_path());
         let mut state = self.state.lock().unwrap();
-        state.storage.insert(key, key_bytes.clone());
-        // Return public key (mock: same as private for testing)
-        Ok(Some(key_bytes))
+        state.storage.insert(key, key_bytes);
+        Ok(aura_core::effects::SecureGeneratedKey::OpaqueHandle(
+            location.full_path(),
+        ))
     }
 
     async fn secure_create_time_bound_token(

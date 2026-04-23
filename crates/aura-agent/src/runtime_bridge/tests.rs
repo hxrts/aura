@@ -1291,7 +1291,7 @@ async fn is_peer_online_requires_current_context_descriptor() {
 }
 
 #[tokio::test]
-async fn pull_remote_relational_facts_requires_rendezvous_service() {
+async fn pull_remote_relational_facts_is_disabled_without_authenticated_sync_service() {
     let authority = AuthorityId::new_from_entropy([53u8; 32]);
     let peer = AuthorityId::new_from_entropy([54u8; 32]);
     let build_context = EffectContext::new(
@@ -1311,15 +1311,17 @@ async fn pull_remote_relational_facts_requires_rendezvous_service() {
     let error = bridge
         .pull_remote_relational_facts(peer)
         .await
-        .expect_err("missing rendezvous service should be explicit");
+        .expect_err("direct LAN fact pull must fail closed");
     assert!(
-        error.to_string().contains("rendezvous_service"),
-        "expected rendezvous service error, got: {error}"
+        error
+            .to_string()
+            .contains("Direct LAN relational fact pull has been removed"),
+        "expected direct-LAN-removal error, got: {error}"
     );
 }
 
 #[tokio::test]
-async fn pull_remote_relational_facts_requires_websocket_direct_hint() {
+async fn pull_remote_relational_facts_stays_disabled_even_with_rendezvous_hints() {
     let authority = AuthorityId::new_from_entropy([56u8; 32]);
     let peer = AuthorityId::new_from_entropy([57u8; 32]);
     let build_context = EffectContext::new(
@@ -1362,12 +1364,12 @@ async fn pull_remote_relational_facts_requires_websocket_direct_hint() {
     let error = bridge
         .pull_remote_relational_facts(peer)
         .await
-        .expect_err("missing websocket hint should be explicit");
+        .expect_err("direct LAN fact pull must remain unavailable");
     assert!(
         error
             .to_string()
-            .contains("No websocket direct transport hint available"),
-        "expected websocket-hint error, got: {error}"
+            .contains("Direct LAN relational fact pull has been removed"),
+        "expected direct-LAN-removal error, got: {error}"
     );
 }
 

@@ -10,16 +10,19 @@
 //!
 //! Note: LAN discovery is tested separately as it requires actual UDP sockets.
 
+use aura_agent::handlers::invitation::ShareableInvitationSenderProof;
 use aura_agent::handlers::{
     InvitationServiceApi, InvitationStatus, InvitationType, ShareableInvitation,
 };
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
 use aura_core::effects::amp::ChannelCreateParams;
 use aura_core::effects::AmpChannelEffects;
+use aura_core::effects::CryptoCoreEffects;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
 use aura_core::threshold::ParticipantIdentity;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
+use aura_effects::RealCryptoHandler;
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::ProtocolRelationalFact;
 use aura_protocol::amp::AmpJournalEffects;
@@ -62,8 +65,11 @@ async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
 /// Test: Shareable invite code roundtrip
 #[tokio::test]
 async fn test_invitation_code_roundtrip() -> TestResult {
+    let crypto = RealCryptoHandler::for_simulation_seed([0xB7; 32]);
+    let (private_key, public_key) = crypto.ed25519_generate_keypair().await?;
+
     // Create shareable invitation
-    let sender_id = AuthorityId::new_from_entropy([1u8; 32]);
+    let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
     let shareable = ShareableInvitation {
         version: 1,
         invitation_id: InvitationId::new("inv-test-123"),
@@ -76,15 +82,18 @@ async fn test_invitation_code_roundtrip() -> TestResult {
         message: Some("Hello from Alice!".to_string()),
     };
 
-    // Encode to shareable code
-    let code = match shareable.to_code() {
-        Ok(code) => code,
-        Err(error) => {
-            return Err(anyhow::anyhow!(
-                "shareable invitation should serialize: {error}"
-            ))
-        }
-    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        &crypto,
+        &shareable.signing_transcript(),
+        &private_key,
+    )
+    .await?;
+    let code = shareable.to_signed_code(ShareableInvitationSenderProof {
+        scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+        public_key,
+        signature,
+        sender_device_id: None,
+    })?;
     assert!(code.starts_with("aura:v1:"));
 
     // Decode back

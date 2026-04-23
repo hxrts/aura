@@ -70,20 +70,6 @@ impl aura_protocol::effects::TreeEffects for AuraEffectSystem {
         self.tree_handler.propose_snapshot(cut).await
     }
 
-    async fn approve_snapshot(
-        &self,
-        proposal_id: aura_protocol::effects::tree::ProposalId,
-    ) -> Result<aura_protocol::effects::tree::Partial, AuraError> {
-        self.tree_handler.approve_snapshot(proposal_id).await
-    }
-
-    async fn finalize_snapshot(
-        &self,
-        proposal_id: aura_protocol::effects::tree::ProposalId,
-    ) -> Result<aura_protocol::effects::tree::Snapshot, AuraError> {
-        self.tree_handler.finalize_snapshot(proposal_id).await
-    }
-
     async fn apply_snapshot(
         &self,
         snapshot: &aura_protocol::effects::tree::Snapshot,

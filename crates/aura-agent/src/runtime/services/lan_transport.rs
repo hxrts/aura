@@ -57,11 +57,14 @@ cfg_if! {
         #[derive(Debug, Default, Clone)]
         pub struct LanTransportMetrics {
             pub connections_accepted: u64,
+            pub connections_rejected: u64,
             pub accept_errors: u64,
             pub frames_received: u64,
             pub bytes_received: u64,
             pub read_errors: u64,
             pub decode_errors: u64,
+            pub frames_rejected: u64,
+            pub queue_drops: u64,
             pub last_accept_ms: u64,
             pub last_frame_ms: u64,
             pub last_error_ms: u64,
@@ -134,11 +137,14 @@ cfg_if! {
         #[derive(Debug, Default, Clone)]
         pub struct LanTransportMetrics {
             pub connections_accepted: u64,
+            pub connections_rejected: u64,
             pub accept_errors: u64,
             pub frames_received: u64,
             pub bytes_received: u64,
             pub read_errors: u64,
             pub decode_errors: u64,
+            pub frames_rejected: u64,
+            pub queue_drops: u64,
             pub last_accept_ms: u64,
             pub last_frame_ms: u64,
             pub last_error_ms: u64,

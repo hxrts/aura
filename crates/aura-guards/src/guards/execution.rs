@@ -33,16 +33,37 @@ pub async fn evaluate_guard(
         "Evaluating protocol guard with Biscuit tokens"
     );
 
-    if guard.required_tokens.is_empty() {
-        warn!("No authorization tokens configured, denying guarded operation");
-        return Ok(GuardEvaluationResult {
-            passed: false,
-            failed_requirements: vec![
-                "guard has no Biscuit authorization tokens configured".to_string()
-            ],
-            delegation_depth: None,
-            flow_consumed: 0,
-        });
+    match &guard.authorization_policy {
+        super::ProtocolGuardRequirement::UnauthenticatedAllowed(policy) => {
+            info!(
+                operation_id = %guard.operation_id,
+                reason_code = %policy.reason_code,
+                scope = %policy.scope,
+                doc_ref = %policy.doc_ref,
+                "Guard operation explicitly allowed without authentication"
+            );
+            return Ok(GuardEvaluationResult {
+                passed: true,
+                failed_requirements: Vec::new(),
+                delegation_depth: None,
+                flow_consumed: 0,
+                unauthenticated_allowed: true,
+            });
+        }
+        super::ProtocolGuardRequirement::RequiredTokens(_) => {
+            if guard.required_tokens.is_empty() {
+                warn!("No authorization tokens configured, denying guarded operation");
+                return Ok(GuardEvaluationResult {
+                    passed: false,
+                    failed_requirements: vec![
+                        "guard has no Biscuit authorization tokens configured".to_string(),
+                    ],
+                    delegation_depth: None,
+                    flow_consumed: 0,
+                    unauthenticated_allowed: false,
+                });
+            }
+        }
     }
 
     // Get authorization bridge from effect system for Biscuit token verification
@@ -119,6 +140,7 @@ pub async fn evaluate_guard(
         failed_requirements,
         delegation_depth: max_delegation_depth,
         flow_consumed: total_flow_consumed,
+        unauthenticated_allowed: false,
     })
 }
 
@@ -186,6 +208,7 @@ pub struct GuardEvaluationResult {
     pub failed_requirements: Vec<String>,
     pub delegation_depth: Option<u32>,
     pub flow_consumed: u64,
+    pub unauthenticated_allowed: bool,
 }
 
 /// Execute a protocol operation with full guard enforcement
@@ -277,6 +300,7 @@ where
                 delta_apply_time_us: 0,
                 total_execution_time_us: 0,
                 authorization_checks: guard.required_tokens.len() as u32,
+                unauthenticated_allowed: guard_result.unauthenticated_allowed,
                 facts_applied: applied_deltas.len() as u32,
             };
 
@@ -306,6 +330,7 @@ where
                 delta_apply_time_us: 0,
                 total_execution_time_us: 0,
                 authorization_checks: guard.required_tokens.len() as u32,
+                unauthenticated_allowed: guard_result.unauthenticated_allowed,
                 facts_applied: 0,
             };
 
@@ -412,6 +437,10 @@ where
                         delta_apply_time_us: 0,
                         total_execution_time_us: 0,
                         authorization_checks: guard.required_tokens.len() as u32,
+                        unauthenticated_allowed: matches!(
+                            guard.authorization_policy,
+                            super::ProtocolGuardRequirement::UnauthenticatedAllowed(_)
+                        ),
                         facts_applied: guard.delta_facts.len() as u32,
                     },
                 });
@@ -446,4 +475,51 @@ where
     );
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::guards::{ProtocolGuardRequirement, UnauthenticatedAllowed};
+
+    #[tokio::test]
+    async fn forgotten_tokens_deny_guard_evaluation() {
+        let guard = ProtocolGuard::new_for_testing("test.protected.empty");
+        let result = evaluate_guard(&guard, 1_700_000_000)
+            .await
+            .expect("guard evaluation should complete");
+
+        assert!(!result.passed);
+        assert_eq!(result.flow_consumed, 0);
+        assert!(!result.unauthenticated_allowed);
+        assert!(result
+            .failed_requirements
+            .iter()
+            .any(|failure| failure.contains("no Biscuit authorization tokens")));
+    }
+
+    #[tokio::test]
+    async fn explicit_unauthenticated_policy_allows_zero_auth_checks() {
+        let guard = ProtocolGuard::new_unauthenticated_for_testing("test.unauthenticated.read");
+        let result = evaluate_guard(&guard, 1_700_000_000)
+            .await
+            .expect("guard evaluation should complete");
+
+        assert!(result.passed);
+        assert!(result.failed_requirements.is_empty());
+        assert_eq!(result.flow_consumed, 0);
+        assert!(result.unauthenticated_allowed);
+    }
+
+    #[test]
+    fn production_constructor_rejects_empty_required_tokens() {
+        let err = ProtocolGuardRequirement::required_tokens(Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("requires at least one"));
+    }
+
+    #[test]
+    fn unauthenticated_policy_requires_metadata() {
+        let err = UnauthenticatedAllowed::new("", "scope", "doc").unwrap_err();
+        assert!(err.to_string().contains("requires reason_code"));
+    }
 }

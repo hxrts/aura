@@ -203,14 +203,14 @@ pub async fn read_account_config(
 
     use aura_core::effects::StorageCoreEffects;
     use aura_effects::{
-        EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
-        RealSecureStorageHandler,
+        EncryptedStorage, EncryptedStorageConfig, FilesystemFallbackSecureStorageHandler,
+        FilesystemStorageHandler, RealCryptoHandler,
     };
 
     let storage = EncryptedStorage::new(
         FilesystemStorageHandler::from_path(test_dir.to_path_buf()),
         Arc::new(RealCryptoHandler::new()),
-        Arc::new(RealSecureStorageHandler::with_base_path(
+        Arc::new(FilesystemFallbackSecureStorageHandler::with_base_path(
             test_dir.to_path_buf(),
         )),
         EncryptedStorageConfig::default(),

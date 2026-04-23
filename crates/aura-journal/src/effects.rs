@@ -1,4 +1,4 @@
-//! Journal Effects Implementation (Layer 2 - Clean Architecture)
+//! Journal Effects Implementation (Layer 2)
 use crate::extensibility::FactRegistry;
 use async_trait::async_trait;
 use aura_core::effects::BiscuitAuthorizationEffects;
@@ -30,6 +30,7 @@ pub struct JournalHandler<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthori
     authorization: JournalAuthorizationMode<A>,
     authority_id: AuthorityId,
     verifying_key: Option<Vec<u8>>,
+    receipt_signature_mode: ReceiptSignatureMode,
     fact_registry: Option<FactRegistry>,
     _phantom: PhantomData<()>,
 }
@@ -45,6 +46,12 @@ enum JournalAuthorizationMode<A: BiscuitAuthorizationEffects> {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReceiptSignatureMode {
+    ProductionRequired,
+    TestSimulationUnsignedBypass { reason: &'static str },
+}
+
 impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> JournalHandler<C, S, A> {
     fn with_authorization_mode(
         authority_id: AuthorityId,
@@ -58,6 +65,7 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
             authorization,
             authority_id,
             verifying_key: None,
+            receipt_signature_mode: ReceiptSignatureMode::ProductionRequired,
             fact_registry: None,
             _phantom: PhantomData,
         }
@@ -79,9 +87,32 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
         )
     }
 
+    /// Creates a journal handler with explicit test/simulation bypasses for
+    /// authorization and unsigned rendezvous receipts.
+    #[cfg(test)]
+    pub fn new_for_test_with_authorization_and_unsigned_receipt_bypass(
+        authority_id: AuthorityId,
+        crypto: C,
+        storage: S,
+        reason: &'static str,
+    ) -> Self {
+        let mut handler =
+            Self::new_for_test_with_authorization_bypass(authority_id, crypto, storage, reason);
+        handler.receipt_signature_mode =
+            ReceiptSignatureMode::TestSimulationUnsignedBypass { reason };
+        handler
+    }
+
     /// Attach a public verifying key for signature checks (ed25519).
     pub fn with_verifying_key(mut self, verifying_key: Vec<u8>) -> Self {
         self.verifying_key = Some(verifying_key);
+        self
+    }
+
+    /// Explicitly allow unsigned rendezvous receipts for deterministic
+    /// simulation/test runtimes that do not model receipt signing yet.
+    pub fn with_unsigned_receipt_bypass_for_simulation(mut self, reason: &'static str) -> Self {
+        self.receipt_signature_mode = ReceiptSignatureMode::TestSimulationUnsignedBypass { reason };
         self
     }
 
@@ -140,36 +171,60 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
         Ok(())
     }
 
+    fn rendezvous_receipt_signature_message(
+        envelope_id: &[u8; 32],
+        authority_id: &AuthorityId,
+        timestamp: &aura_core::time::TimeStamp,
+    ) -> Result<Vec<u8>, AuraError> {
+        let mut message = Vec::new();
+        message.extend_from_slice(envelope_id);
+        message.extend_from_slice(&authority_id.to_bytes());
+        let ts_bytes = aura_core::util::serialization::to_vec(timestamp)
+            .map_err(|e| AuraError::serialization(e.to_string()))?;
+        message.extend_from_slice(&ts_bytes);
+        Ok(message)
+    }
+
     async fn verify_fact_signature(
         &self,
         content: &crate::fact::FactContent,
     ) -> Result<(), AuraError> {
         if let crate::fact::FactContent::RendezvousReceipt {
             envelope_id,
-            authority_id: _,
+            authority_id,
             timestamp,
             signature,
         } = content
         {
             if signature.is_empty() {
-                return Ok(());
-            }
-            if let Some(pk_bytes) = &self.verifying_key {
-                let mut message = Vec::new();
-                message.extend_from_slice(envelope_id);
-                // Convert timestamp to a deterministic binary representation for signing
-                let ts_bytes = aura_core::util::serialization::to_vec(timestamp)
-                    .unwrap_or_else(|_| Vec::new());
-                message.extend_from_slice(&ts_bytes);
-                let verified = self
-                    .crypto
-                    .ed25519_verify(&message, signature, pk_bytes)
-                    .await?;
-                if !verified {
-                    return Err(AuraError::permission_denied(
-                        "invalid rendezvous receipt signature",
-                    ));
+                match self.receipt_signature_mode {
+                    ReceiptSignatureMode::ProductionRequired => {
+                        return Err(AuraError::permission_denied(
+                            "missing rendezvous receipt signature",
+                        ));
+                    }
+                    ReceiptSignatureMode::TestSimulationUnsignedBypass { reason } => {
+                        tracing::debug!(
+                            reason,
+                            "unsigned rendezvous receipt accepted for test/simulation"
+                        );
+                        return Ok(());
+                    }
                 }
+            }
+            let pk_bytes = self.verifying_key.as_ref().ok_or_else(|| {
+                AuraError::permission_denied("missing rendezvous receipt verifying key")
+            })?;
+            let message =
+                Self::rendezvous_receipt_signature_message(envelope_id, authority_id, timestamp)?;
+            let verified = self
+                .crypto
+                .ed25519_verify(&message, signature, pk_bytes)
+                .await?;
+            if !verified {
+                return Err(AuraError::permission_denied(
+                    "invalid rendezvous receipt signature",
+                ));
             }
         }
         Ok(())
@@ -381,7 +436,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
-    struct TestCrypto;
+    struct TestCrypto {
+        expected_message: Option<Vec<u8>>,
+        expected_signature: Option<Vec<u8>>,
+        expected_public_key: Option<Vec<u8>>,
+    }
 
     #[async_trait]
     impl RandomCoreEffects for TestCrypto {
@@ -432,10 +491,25 @@ mod tests {
 
         async fn ed25519_verify(
             &self,
-            _message: &[u8],
-            _signature: &[u8],
-            _public_key: &[u8],
+            message: &[u8],
+            signature: &[u8],
+            public_key: &[u8],
         ) -> Result<bool, CryptoError> {
+            if let Some(expected) = &self.expected_message {
+                if message != expected {
+                    return Ok(false);
+                }
+            }
+            if let Some(expected) = &self.expected_signature {
+                if signature != expected {
+                    return Ok(false);
+                }
+            }
+            if let Some(expected) = &self.expected_public_key {
+                if public_key != expected {
+                    return Ok(false);
+                }
+            }
             Ok(true)
         }
 
@@ -563,7 +637,7 @@ mod tests {
     fn test_handler(allow: bool) -> JournalHandler<TestCrypto, TestStorage, TestAuthorization> {
         JournalHandlerFactory::create(
             authority(1),
-            TestCrypto,
+            TestCrypto::default(),
             TestStorage::default(),
             (b"policy-token".to_vec(), TestAuthorization { allow }),
             None,
@@ -618,11 +692,15 @@ mod tests {
     }
 
     fn rendezvous_receipt_content() -> FactContent {
+        signed_rendezvous_receipt_content(vec![])
+    }
+
+    fn signed_rendezvous_receipt_content(signature: Vec<u8>) -> FactContent {
         FactContent::RendezvousReceipt {
             envelope_id: [3; 32],
             authority_id: authority(3),
             timestamp: TimeStamp::PhysicalClock(PhysicalTime::exact(1_000)),
-            signature: Vec::new(),
+            signature,
         }
     }
 
@@ -667,7 +745,7 @@ mod tests {
     async fn explicit_test_simulation_bypass_allows_fact_merge() {
         let handler = JournalHandler::<TestCrypto, TestStorage, TestAuthorization>::new_for_test_with_authorization_bypass(
             authority(4),
-            TestCrypto,
+            TestCrypto::default(),
             TestStorage::default(),
             "unit test verifies bypass is explicit",
         );
@@ -675,6 +753,136 @@ mod tests {
             .merge_facts(Journal::new(), fact_journal(attested_content()))
             .await
             .expect("explicit test bypass permits merge");
+        assert!(!merged.read_facts().is_empty());
+    }
+
+    fn receipt_message(
+        authority_id: AuthorityId,
+        timestamp: TimeStamp,
+    ) -> Result<Vec<u8>, AuraError> {
+        JournalHandler::<TestCrypto, TestStorage, TestAuthorization>::rendezvous_receipt_signature_message(
+            &[3; 32],
+            &authority_id,
+            &timestamp,
+        )
+    }
+
+    fn receipt_handler(
+        verifying_key: Option<Vec<u8>>,
+        expected_message: Option<Vec<u8>>,
+        expected_public_key: Option<Vec<u8>>,
+    ) -> JournalHandler<TestCrypto, TestStorage, TestAuthorization> {
+        JournalHandlerFactory::create(
+            authority(1),
+            TestCrypto {
+                expected_message,
+                expected_signature: Some(vec![8; 64]),
+                expected_public_key,
+            },
+            TestStorage::default(),
+            (b"policy-token".to_vec(), TestAuthorization { allow: true }),
+            verifying_key,
+            None,
+        )
+    }
+
+    #[tokio::test]
+    async fn rendezvous_receipt_rejects_empty_signature_in_production() {
+        let handler = receipt_handler(Some(vec![4; 32]), None, None);
+        let result = handler
+            .merge_facts(Journal::new(), fact_journal(rendezvous_receipt_content()))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rendezvous_receipt_rejects_missing_verifying_key_in_production() {
+        let handler = receipt_handler(None, None, None);
+        let result = handler
+            .merge_facts(
+                Journal::new(),
+                fact_journal(signed_rendezvous_receipt_content(vec![8; 64])),
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rendezvous_receipt_rejects_wrong_verifying_key() {
+        let handler = receipt_handler(Some(vec![5; 32]), None, Some(vec![4; 32]));
+        let result = handler
+            .merge_facts(
+                Journal::new(),
+                fact_journal(signed_rendezvous_receipt_content(vec![8; 64])),
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rendezvous_receipt_rejects_wrong_authority_binding() {
+        let expected_message = receipt_message(
+            authority(9),
+            TimeStamp::PhysicalClock(PhysicalTime::exact(1_000)),
+        )
+        .expect("message builds");
+        let handler = receipt_handler(Some(vec![4; 32]), Some(expected_message), Some(vec![4; 32]));
+        let result = handler
+            .merge_facts(
+                Journal::new(),
+                fact_journal(signed_rendezvous_receipt_content(vec![8; 64])),
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rendezvous_receipt_rejects_tampered_timestamp() {
+        let expected_message = receipt_message(
+            authority(3),
+            TimeStamp::PhysicalClock(PhysicalTime::exact(999)),
+        )
+        .expect("message builds");
+        let handler = receipt_handler(Some(vec![4; 32]), Some(expected_message), Some(vec![4; 32]));
+        let result = handler
+            .merge_facts(
+                Journal::new(),
+                fact_journal(signed_rendezvous_receipt_content(vec![8; 64])),
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rendezvous_receipt_accepts_valid_signature() {
+        let expected_message = receipt_message(
+            authority(3),
+            TimeStamp::PhysicalClock(PhysicalTime::exact(1_000)),
+        )
+        .expect("message builds");
+        let handler = receipt_handler(Some(vec![4; 32]), Some(expected_message), Some(vec![4; 32]));
+        let merged = handler
+            .merge_facts(
+                Journal::new(),
+                fact_journal(signed_rendezvous_receipt_content(vec![8; 64])),
+            )
+            .await
+            .expect("valid receipt signature should be accepted");
+        assert!(!merged.read_facts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn unsigned_rendezvous_receipts_require_explicit_test_bypass() {
+        let handler = JournalHandler::<TestCrypto, TestStorage, TestAuthorization>::new_for_test_with_authorization_and_unsigned_receipt_bypass(
+            authority(4),
+            TestCrypto::default(),
+            TestStorage::default(),
+            "unit test verifies unsigned receipt bypass is explicit",
+        );
+        let merged = handler
+            .merge_facts(Journal::new(), fact_journal(rendezvous_receipt_content()))
+            .await
+            .expect("explicit test bypass permits unsigned receipt");
         assert!(!merged.read_facts().is_empty());
     }
 }

@@ -47,8 +47,11 @@
 //! and transport acknowledgements. This module focuses on consensus-backed
 //! relationship invitations (contacts/guardian/channel).
 
+use aura_core::crypto::single_signer::SigningMode;
 use aura_core::domain::FactValue;
-use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
+use aura_core::effects::{
+    CryptoExtendedEffects, JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects,
+};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
@@ -313,13 +316,18 @@ pub struct InvitationCeremonyExecutor<E: InvitationCeremonyEffects> {
 
 /// Combined effects required for invitation ceremonies.
 pub trait InvitationCeremonyEffects:
-    JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
+    JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + CryptoExtendedEffects + Send + Sync
 {
 }
 
 // Blanket implementation
 impl<T> InvitationCeremonyEffects for T where
-    T: JournalEffects + PhysicalTimeEffects + ThresholdSigningEffects + Send + Sync
+    T: JournalEffects
+        + PhysicalTimeEffects
+        + ThresholdSigningEffects
+        + CryptoExtendedEffects
+        + Send
+        + Sync
 {
 }
 
@@ -465,6 +473,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     ) -> AuraResult<bool> {
         let current_prestate = self.compute_prestate_hash().await?;
         let now_ms = self.current_time_ms().await?;
+        self.verify_acceptance_signature(&proposal).await?;
 
         let (accepted, commands) =
             self.plan_process_acceptance(ceremony_id, proposal, current_prestate, now_ms)?;
@@ -723,6 +732,52 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         }
     }
 
+    async fn verify_acceptance_signature(&self, proposal: &AcceptanceProposal) -> AuraResult<()> {
+        if proposal.signature.signature.is_empty() {
+            return Err(AuraError::invalid(
+                "Invitation acceptance signature must be non-empty",
+            ));
+        }
+        if proposal.signature.public_key_package.is_empty() {
+            return Err(AuraError::invalid(
+                "Invitation acceptance public key package must be present",
+            ));
+        }
+
+        let mode = if proposal.signature.is_single_signer() {
+            SigningMode::SingleSigner
+        } else {
+            SigningMode::Threshold
+        };
+        let transcript = invitation_acceptance_transcript_bytes(
+            proposal.invitation_id.clone(),
+            proposal.acceptor,
+            proposal.prestate_hash,
+            proposal.message.clone(),
+        )?;
+        let verified = self
+            .effects
+            .verify_signature(
+                &transcript,
+                proposal.signature.signature_bytes(),
+                proposal.signature.public_key_bytes(),
+                mode,
+            )
+            .await
+            .map_err(|error| {
+                AuraError::crypto(format!(
+                    "Invitation acceptance signature verification failed: {error}"
+                ))
+            })?;
+        if !verified {
+            return Err(AuraError::permission_denied(
+                "Invitation acceptance signature did not verify",
+            ));
+        }
+
+        Ok(())
+    }
+
     // =========================================================================
     // INTERNAL HELPERS
     // =========================================================================
@@ -892,6 +947,8 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::CryptoExtendedEffects;
+    use aura_effects::crypto::RealCryptoHandler;
 
     fn test_prestate() -> Hash32 {
         Hash32([1u8; 32])
@@ -998,6 +1055,82 @@ mod tests {
 
         assert_ne!(base, acceptor);
         assert_ne!(base, prestate);
+    }
+
+    #[tokio::test]
+    async fn acceptance_proposal_signature_verifies_in_single_signer_mode() {
+        let crypto = RealCryptoHandler::default();
+        let key_gen = crypto.generate_signing_keys(1, 1).await.unwrap();
+        let mut key_packages = key_gen.key_packages.clone();
+        let key_package = key_packages.pop().expect("single signer key package");
+        let public_key_package = key_gen.public_key_package.clone();
+        let proposal = AcceptanceProposal {
+            invitation_id: InvitationId::new("inv-acceptance-signed"),
+            acceptor: AuthorityId::new_from_entropy([44u8; 32]),
+            prestate_hash: Hash32([7u8; 32]),
+            message: Some("Accepted".to_string()),
+            signature: ThresholdSignature::single_signer(vec![], vec![], 0),
+        };
+        let transcript = invitation_acceptance_transcript_bytes(
+            proposal.invitation_id.clone(),
+            proposal.acceptor,
+            proposal.prestate_hash,
+            proposal.message.clone(),
+        )
+        .unwrap();
+        let signature = crypto
+            .sign_with_key(&transcript, &key_package, SigningMode::SingleSigner)
+            .await
+            .unwrap();
+        let verified = crypto
+            .verify_signature(
+                &transcript,
+                &signature,
+                &public_key_package,
+                SigningMode::SingleSigner,
+            )
+            .await
+            .unwrap();
+
+        assert!(verified);
+    }
+
+    #[tokio::test]
+    async fn acceptance_proposal_signature_rejects_tampered_prestate() {
+        let crypto = RealCryptoHandler::default();
+        let key_gen = crypto.generate_signing_keys(1, 1).await.unwrap();
+        let mut key_packages = key_gen.key_packages.clone();
+        let key_package = key_packages.pop().expect("single signer key package");
+        let public_key_package = key_gen.public_key_package.clone();
+        let transcript = invitation_acceptance_transcript_bytes(
+            InvitationId::new("inv-acceptance-tampered"),
+            AuthorityId::new_from_entropy([45u8; 32]),
+            Hash32([8u8; 32]),
+            Some("Accepted".to_string()),
+        )
+        .unwrap();
+        let signature = crypto
+            .sign_with_key(&transcript, &key_package, SigningMode::SingleSigner)
+            .await
+            .unwrap();
+        let tampered = invitation_acceptance_transcript_bytes(
+            InvitationId::new("inv-acceptance-tampered"),
+            AuthorityId::new_from_entropy([45u8; 32]),
+            Hash32([9u8; 32]),
+            Some("Accepted".to_string()),
+        )
+        .unwrap();
+        let verified = crypto
+            .verify_signature(
+                &tampered,
+                &signature,
+                &public_key_package,
+                SigningMode::SingleSigner,
+            )
+            .await
+            .unwrap();
+
+        assert!(!verified);
     }
 
     #[test]

@@ -86,8 +86,12 @@ where
         ceremony_id: ceremony_id_hex.clone(),
         trace_id: Some(ceremony_id_hex.clone()),
         device: hex::encode(commitment.device.0.as_bytes()),
+        authority: hex::encode(commitment.authority.to_bytes()),
+        prestate_hash: hex::encode(commitment.prestate_hash.as_bytes()),
         ready: commitment.ready,
         reason: commitment.reason.clone(),
+        committed_at_ms: commitment.committed_at_ms,
+        signature: commitment.signature.clone(),
         timestamp_ms,
     };
 
@@ -127,8 +131,10 @@ pub async fn emit_ota_ceremony_committed_fact<E>(
     effects: &E,
     ceremony_id: OTACeremonyId,
     activation_epoch: Epoch,
+    proposal_hash: &aura_core::Hash32,
+    prestate_hash: &aura_core::Hash32,
     ready_devices: &[DeviceId],
-    threshold_signature: &[u8],
+    readiness_certificate: &[ReadinessCommitment],
 ) -> AuraResult<()>
 where
     E: JournalEffects + PhysicalTimeEffects + ?Sized,
@@ -139,8 +145,10 @@ where
         ceremony_id: ceremony_id_hex.clone(),
         trace_id: Some(ceremony_id_hex.clone()),
         activation_epoch,
+        proposal_hash: hex::encode(proposal_hash.as_bytes()),
+        prestate_hash: hex::encode(prestate_hash.as_bytes()),
         ready_devices: encoded_devices(ready_devices),
-        threshold_signature: threshold_signature.to_vec(),
+        readiness_certificate: readiness_certificate.to_vec(),
         timestamp_ms,
     };
 

@@ -11,15 +11,32 @@ use crate::fact_types::{
 };
 use crate::runtime::services::RecoveryManager;
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::RandomExtendedEffects;
+use aura_core::effects::{RandomExtendedEffects, StorageCoreEffects};
 use aura_core::types::identifiers::{AuthorityId, RecoveryId};
-use aura_core::FlowCost;
+use aura_core::{FlowCost, Hash32};
 use aura_guards::chain::create_send_guard;
 use aura_protocol::effects::EffectApiEffects;
 use aura_recovery::capabilities::RecoveryCapability;
+use aura_recovery::recovery_approval::{
+    recovery_operation_hash, RecoveryApprovalTranscript, RecoveryApprovalTranscriptPayload,
+};
+use aura_signature::verify_ed25519_transcript;
 use serde::{Deserialize, Serialize};
 use std::{fmt, sync::Arc};
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+const RECOVERY_GUARDIAN_PUBLIC_KEY_PREFIX: &str = "recovery_guardian_public_keys";
+const RECOVERY_GUARDIAN_PRIVATE_KEY_PREFIX: &str = "recovery_guardian_private_keys";
+
+/// Storage key for the trusted Ed25519 key used to verify guardian recovery approvals.
+pub fn recovery_guardian_public_key_storage_key(guardian: AuthorityId) -> String {
+    format!("{RECOVERY_GUARDIAN_PUBLIC_KEY_PREFIX}/{guardian}")
+}
+
+/// Storage key for the guardian's local Ed25519 key used to sign recovery and setup responses.
+pub fn recovery_guardian_private_key_storage_key(guardian: AuthorityId) -> String {
+    format!("{RECOVERY_GUARDIAN_PRIVATE_KEY_PREFIX}/{guardian}")
+}
 
 /// Recovery operation state
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +126,8 @@ pub struct RecoveryRequest {
     pub threshold: u32,
     /// Request timestamp
     pub requested_at: u64,
+    /// Prestate hash bound into every guardian approval transcript
+    pub prestate_hash: Hash32,
     /// Optional expiration
     pub expires_at: Option<u64>,
 }
@@ -134,6 +153,9 @@ pub struct GuardianApproval {
     #[zeroize(skip)]
     /// Approval timestamp
     pub approved_at: u64,
+    #[zeroize(skip)]
+    /// Prestate hash the guardian approved
+    pub prestate_hash: Hash32,
 }
 
 impl fmt::Debug for GuardianApproval {
@@ -149,6 +171,7 @@ impl fmt::Debug for GuardianApproval {
             )
             .field("share_data", &"<redacted>")
             .field("approved_at", &self.approved_at)
+            .field("prestate_hash", &self.prestate_hash)
             .finish()
     }
 }
@@ -281,6 +304,14 @@ impl RecoveryHandler {
             RecoveryId::new(format!("recovery-{}", effects.random_uuid().await.simple()));
         let current_time = effects.current_timestamp().await.unwrap_or(0);
         let expires_at = expires_in_ms.map(|ms| current_time + ms);
+        let prestate_hash = Hash32::from_value(&serde_json::json!({
+            "account_authority": self.context.authority.authority_id(),
+            "operation": operation,
+            "guardians": guardians,
+            "threshold": threshold,
+            "requested_at": current_time,
+        }))
+        .map_err(|error| AgentError::internal(format!("hash recovery prestate: {error}")))?;
 
         let request = RecoveryRequest {
             recovery_id: recovery_id.clone(),
@@ -290,6 +321,7 @@ impl RecoveryHandler {
             guardians: guardians.clone(),
             threshold,
             requested_at: current_time,
+            prestate_hash,
             expires_at,
         };
 
@@ -305,6 +337,7 @@ impl RecoveryHandler {
                 "guardians": guardians,
                 "threshold": threshold,
                 "requested_at": current_time,
+                "prestate_hash": prestate_hash,
             }),
         )
         .await?;
@@ -387,6 +420,9 @@ impl RecoveryHandler {
             )));
         }
 
+        self.verify_guardian_approval_signature(effects, &recovery.request, &approval)
+            .await?;
+
         // Journal the approval
         HandlerUtilities::append_relational_fact(
             &self.context.authority,
@@ -397,6 +433,7 @@ impl RecoveryHandler {
                 "recovery_id": approval.recovery_id,
                 "guardian_id": approval.guardian_id,
                 "approved_at": approval.approved_at,
+                "prestate_hash": approval.prestate_hash,
             }),
         )
         .await?;
@@ -445,6 +482,72 @@ impl RecoveryHandler {
             })??;
 
         Ok(updated_state)
+    }
+
+    async fn verify_guardian_approval_signature(
+        &self,
+        effects: &AuraEffectSystem,
+        request: &RecoveryRequest,
+        approval: &GuardianApproval,
+    ) -> AgentResult<()> {
+        if approval.prestate_hash != request.prestate_hash {
+            return Err(AgentError::effects(
+                "guardian approval prestate does not match recovery request".to_string(),
+            ));
+        }
+        if approval.signature.len() != 64 || approval.signature.iter().all(|byte| *byte == 0) {
+            return Err(AgentError::effects(
+                "guardian approval signature is empty, malformed, or all zero".to_string(),
+            ));
+        }
+
+        let trusted_key = effects
+            .retrieve(&recovery_guardian_public_key_storage_key(
+                approval.guardian_id,
+            ))
+            .await
+            .map_err(|error| {
+                AgentError::effects(format!(
+                    "failed to load guardian recovery key for {}: {error}",
+                    approval.guardian_id
+                ))
+            })?
+            .ok_or_else(|| {
+                AgentError::effects(format!(
+                    "missing trusted guardian recovery key for {}",
+                    approval.guardian_id
+                ))
+            })?;
+        if trusted_key.len() != 32 {
+            return Err(AgentError::effects(format!(
+                "trusted guardian recovery key for {} must be 32 bytes",
+                approval.guardian_id
+            )));
+        }
+
+        let operation_hash = recovery_operation_hash(&request.operation)
+            .map_err(|error| AgentError::internal(format!("hash recovery operation: {error}")))?;
+        let transcript = RecoveryApprovalTranscript::new(RecoveryApprovalTranscriptPayload {
+            recovery_id: request.recovery_id.clone(),
+            account_authority: request.account_authority,
+            operation_hash,
+            prestate_hash: request.prestate_hash,
+            approved: true,
+            approved_at_ms: approval.approved_at,
+            guardian_id: approval.guardian_id,
+        });
+        let verified =
+            verify_ed25519_transcript(effects, &transcript, &approval.signature, &trusted_key)
+                .await
+                .map_err(|error| {
+                    AgentError::effects(format!("guardian approval verification failed: {error}"))
+                })?;
+        if !verified {
+            return Err(AgentError::effects(
+                "guardian approval signature did not verify".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Complete a recovery ceremony (called when threshold is met)
@@ -648,17 +751,70 @@ impl RecoveryHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::config::StorageConfig;
     use crate::core::AgentConfig;
+    use aura_core::effects::CryptoCoreEffects;
+    use aura_signature::sign_ed25519_transcript;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
         AuthorityContext::new(authority_id)
     }
 
+    fn isolated_test_config() -> (tempfile::TempDir, AgentConfig) {
+        let temp = tempfile::tempdir().unwrap();
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        (temp, config)
+    }
+
+    async fn signed_test_approval(
+        effects: &AuraEffectSystem,
+        request: &RecoveryRequest,
+        guardian_id: AuthorityId,
+        approved_at: u64,
+        share_data: Option<Vec<u8>>,
+    ) -> GuardianApproval {
+        let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+        effects
+            .store(
+                &recovery_guardian_public_key_storage_key(guardian_id),
+                public_key,
+            )
+            .await
+            .unwrap();
+        let operation_hash = recovery_operation_hash(&request.operation).unwrap();
+        let transcript = RecoveryApprovalTranscript::new(RecoveryApprovalTranscriptPayload {
+            recovery_id: request.recovery_id.clone(),
+            account_authority: request.account_authority,
+            operation_hash,
+            prestate_hash: request.prestate_hash,
+            approved: true,
+            approved_at_ms: approved_at,
+            guardian_id,
+        });
+        let signature = sign_ed25519_transcript(effects, &transcript, &private_key)
+            .await
+            .unwrap();
+        GuardianApproval {
+            recovery_id: request.recovery_id.clone(),
+            guardian_id,
+            signature,
+            share_data,
+            approved_at,
+            prestate_hash: request.prestate_hash,
+        }
+    }
+
     #[tokio::test]
     async fn recovery_can_be_initiated() {
         let authority_context = create_test_authority(130);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
@@ -690,7 +846,7 @@ mod tests {
     #[tokio::test]
     async fn guardian_approvals_can_be_submitted() {
         let authority_context = create_test_authority(134);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
@@ -712,13 +868,7 @@ mod tests {
             .unwrap();
 
         // Submit first approval
-        let approval1 = GuardianApproval {
-            recovery_id: request.recovery_id.clone(),
-            guardian_id: guardians[0],
-            signature: vec![0u8; 64],
-            share_data: None,
-            approved_at: 12345,
-        };
+        let approval1 = signed_test_approval(&effects, &request, guardians[0], 12345, None).await;
         let state = handler.submit_approval(&effects, approval1).await.unwrap();
 
         match state {
@@ -729,13 +879,7 @@ mod tests {
         }
 
         // Submit second approval
-        let approval2 = GuardianApproval {
-            recovery_id: request.recovery_id.clone(),
-            guardian_id: guardians[1],
-            signature: vec![0u8; 64],
-            share_data: None,
-            approved_at: 12346,
-        };
+        let approval2 = signed_test_approval(&effects, &request, guardians[1], 12346, None).await;
         let state = handler.submit_approval(&effects, approval2).await.unwrap();
 
         match state {
@@ -747,9 +891,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn guardian_approval_rejects_zero_signature_before_threshold() {
+        let authority_context = create_test_authority(184);
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let handler = RecoveryHandler::new(authority_context).unwrap();
+        let guardians = vec![AuthorityId::new_from_entropy([185u8; 32])];
+        let request = handler
+            .initiate(
+                &effects,
+                RecoveryOperation::RemoveDevice { leaf_index: 0 },
+                guardians.clone(),
+                1,
+                "Compromised device".to_string(),
+                None,
+            )
+            .await
+            .unwrap();
+        let (_private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+        effects
+            .store(
+                &recovery_guardian_public_key_storage_key(guardians[0]),
+                public_key,
+            )
+            .await
+            .unwrap();
+        let approval = GuardianApproval {
+            recovery_id: request.recovery_id.clone(),
+            guardian_id: guardians[0],
+            signature: vec![0u8; 64],
+            share_data: None,
+            approved_at: 12345,
+            prestate_hash: request.prestate_hash,
+        };
+
+        let error = handler
+            .submit_approval(&effects, approval)
+            .await
+            .expect_err("zero signature must be rejected");
+        assert!(error.to_string().contains("all zero"));
+        assert!(matches!(
+            handler.get_state(&request.recovery_id).await,
+            Some(RecoveryState::Initiated { collected: 0, .. })
+        ));
+    }
+
+    #[tokio::test]
     async fn recovery_can_be_completed() {
         let authority_context = create_test_authority(137);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
@@ -770,13 +960,9 @@ mod tests {
             .unwrap();
 
         // Submit approval
-        let approval = GuardianApproval {
-            recovery_id: request.recovery_id.clone(),
-            guardian_id: guardians[0],
-            signature: vec![0u8; 64],
-            share_data: Some(vec![1, 2, 3]),
-            approved_at: 12345,
-        };
+        let approval =
+            signed_test_approval(&effects, &request, guardians[0], 12345, Some(vec![1, 2, 3]))
+                .await;
         handler.submit_approval(&effects, approval).await.unwrap();
 
         // Complete recovery
@@ -795,7 +981,7 @@ mod tests {
     #[tokio::test]
     async fn recovery_can_be_cancelled() {
         let authority_context = create_test_authority(139);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
@@ -836,7 +1022,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_threshold_is_rejected() {
         let authority_context = create_test_authority(142);
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 

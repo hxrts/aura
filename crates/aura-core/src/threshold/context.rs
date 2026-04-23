@@ -4,7 +4,7 @@
 
 use crate::tree::{TreeCommitment, TreeOp};
 use crate::types::Epoch;
-use crate::AuthorityId;
+use crate::{AuthorityId, DeviceId};
 use serde::{Deserialize, Serialize};
 
 /// Context for a threshold signing operation.
@@ -73,14 +73,18 @@ pub enum SignableOperation {
     OTAActivation {
         /// Unique ceremony identifier
         ceremony_id: [u8; 32],
-        /// Hash of the upgrade package being activated
-        upgrade_hash: [u8; 32],
+        /// Hash of the exact upgrade proposal being activated
+        proposal_hash: [u8; 32],
         /// Hash of the device's prestate at commitment time
         prestate_hash: [u8; 32],
         /// Epoch at which activation will occur
         activation_epoch: Epoch,
+        /// Device making the readiness commitment
+        device: DeviceId,
         /// Whether the device is ready for activation
         ready: bool,
+        /// Timestamp of the readiness commitment
+        committed_at_ms: u64,
     },
 }
 
@@ -183,19 +187,23 @@ impl SigningContext {
     pub fn ota_activation(
         authority: AuthorityId,
         ceremony_id: [u8; 32],
-        upgrade_hash: [u8; 32],
+        proposal_hash: [u8; 32],
         prestate_hash: [u8; 32],
         activation_epoch: Epoch,
+        device: DeviceId,
         ready: bool,
+        committed_at_ms: u64,
     ) -> Self {
         Self {
             authority,
             operation: SignableOperation::OTAActivation {
                 ceremony_id,
-                upgrade_hash,
+                proposal_hash,
                 prestate_hash,
                 activation_epoch,
+                device,
                 ready,
+                committed_at_ms,
             },
             // OTA activation is an elevated operation - it's a hard fork commitment
             approval_context: ApprovalContext::ElevatedOperation {

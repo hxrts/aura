@@ -4,13 +4,17 @@
 //! replacing the device-centric recovery model with authority-based recovery.
 
 use crate::facts::RecoveryFact;
+use crate::recovery_approval::{
+    recovery_operation_hash, verify_recovery_approval_signature, RecoveryApprovalTranscriptPayload,
+};
 use crate::utils::workflow::{context_id_from_operation_id, persist_recovery_fact, trace_id};
 use aura_consensus::relational::run_consensus_with_commit;
 use aura_consensus::types::CommitFact;
 use aura_core::crypto::Ed25519Signature;
-use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
+use aura_core::effects::{CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
+use aura_core::key_resolution::TrustedKeyResolver;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::TimeStamp;
@@ -56,6 +60,8 @@ pub struct RecoveryRequest {
     pub operation: RecoveryOperation,
     /// Justification for recovery
     pub justification: String,
+    /// Prestate hash covered by guardian approvals
+    pub prestate_hash: Hash32,
 }
 
 /// Recovery operation types
@@ -239,10 +245,55 @@ impl RecoveryProtocol {
     }
 
     /// Process guardian approval
-    pub async fn process_guardian_approval(&mut self, approval: GuardianApproval) -> Result<()> {
+    pub async fn process_guardian_approval<E, R>(
+        &mut self,
+        request: &RecoveryRequest,
+        approval: GuardianApproval,
+        crypto: &E,
+        key_resolver: &R,
+    ) -> Result<()>
+    where
+        E: CryptoEffects + Send + Sync + ?Sized,
+        R: TrustedKeyResolver + ?Sized,
+    {
+        if request.account_authority != self.account_authority {
+            return Err(AuraError::invalid("Account authority mismatch"));
+        }
+        if approval.recovery_id != request.recovery_id {
+            return Err(AuraError::invalid("Approval is for different recovery"));
+        }
         // Verify guardian is in the set
         if !self.guardian_authorities.contains(&approval.guardian_id) {
             return Err(AuraError::permission_denied("Guardian not in recovery set"));
+        }
+        let approved_at_ms = match &approval.timestamp {
+            TimeStamp::PhysicalClock(time) => time.ts_ms,
+            _ => {
+                return Err(AuraError::invalid(
+                    "Guardian approval requires a physical approval timestamp",
+                ));
+            }
+        };
+        let operation_hash = recovery_operation_hash(&request.operation)?;
+        let verified = verify_recovery_approval_signature(
+            crypto,
+            RecoveryApprovalTranscriptPayload {
+                recovery_id: request.recovery_id.clone(),
+                account_authority: request.account_authority,
+                operation_hash,
+                prestate_hash: request.prestate_hash,
+                approved: true,
+                approved_at_ms,
+                guardian_id: approval.guardian_id,
+            },
+            approval.signature.as_bytes(),
+            key_resolver,
+        )
+        .await?;
+        if !verified {
+            return Err(AuraError::permission_denied(
+                "Guardian recovery approval signature did not verify",
+            ));
         }
 
         record_unique_approval(&mut self.approvals, approval);
@@ -301,6 +352,195 @@ mod theorem_pack_tests {
                 CAPABILITY_PROTOCOL_MACHINE_ENVELOPE_ADMISSION.to_string(),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod approval_signature_tests {
+    use super::*;
+    use crate::recovery_approval::{
+        recovery_operation_hash, RecoveryApprovalTranscript, RecoveryApprovalTranscriptPayload,
+    };
+    use aura_core::effects::CryptoCoreEffects;
+    use aura_core::key_resolution::{KeyResolutionError, TrustedKeyDomain, TrustedPublicKey};
+    use aura_core::time::PhysicalTime;
+    use aura_effects::crypto::RealCryptoHandler;
+    use aura_signature::sign_ed25519_transcript;
+    use std::collections::BTreeMap;
+
+    #[derive(Default)]
+    struct TestGuardianKeyResolver {
+        keys: BTreeMap<AuthorityId, Vec<u8>>,
+    }
+
+    impl TestGuardianKeyResolver {
+        fn with_guardian_key(mut self, guardian: AuthorityId, key: Vec<u8>) -> Self {
+            self.keys.insert(guardian, key);
+            self
+        }
+    }
+
+    impl TrustedKeyResolver for TestGuardianKeyResolver {
+        fn resolve_authority_threshold_key(
+            &self,
+            _authority: AuthorityId,
+            _epoch: u64,
+        ) -> std::result::Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::AuthorityThreshold,
+            })
+        }
+
+        fn resolve_device_key(
+            &self,
+            _device: aura_core::DeviceId,
+        ) -> std::result::Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::Device,
+            })
+        }
+
+        fn resolve_guardian_key(
+            &self,
+            guardian: AuthorityId,
+        ) -> std::result::Result<TrustedPublicKey, KeyResolutionError> {
+            let key = self
+                .keys
+                .get(&guardian)
+                .ok_or(KeyResolutionError::Unknown {
+                    domain: TrustedKeyDomain::Guardian,
+                })?;
+            Ok(TrustedPublicKey::active(
+                TrustedKeyDomain::Guardian,
+                None,
+                key.clone(),
+                Hash32(hash::hash(key)),
+            ))
+        }
+
+        fn resolve_release_key(
+            &self,
+            _authority: AuthorityId,
+        ) -> std::result::Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::Release,
+            })
+        }
+    }
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_protocol(
+        account_authority: AuthorityId,
+        guardians: Vec<AuthorityId>,
+        threshold: u32,
+    ) -> RecoveryProtocol {
+        let context = Arc::new(RelationalContext::new(
+            std::iter::once(account_authority)
+                .chain(guardians.iter().copied())
+                .collect(),
+        ));
+        RecoveryProtocol::new(context, account_authority, guardians, threshold)
+    }
+
+    fn test_request(account_authority: AuthorityId) -> RecoveryRequest {
+        RecoveryRequest {
+            recovery_id: RecoveryId::new("signed-recovery-test"),
+            account_authority,
+            new_tree_commitment: Hash32([7; 32]),
+            operation: RecoveryOperation::RemoveDevice { leaf_index: 3 },
+            justification: "test".to_string(),
+            prestate_hash: Hash32([8; 32]),
+        }
+    }
+
+    async fn signed_approval(
+        crypto: &RealCryptoHandler,
+        request: &RecoveryRequest,
+        guardian_id: AuthorityId,
+        private_key: &[u8],
+        approved_at_ms: u64,
+    ) -> GuardianApproval {
+        let payload = RecoveryApprovalTranscriptPayload {
+            recovery_id: request.recovery_id.clone(),
+            account_authority: request.account_authority,
+            operation_hash: recovery_operation_hash(&request.operation).unwrap(),
+            prestate_hash: request.prestate_hash,
+            approved: true,
+            approved_at_ms,
+            guardian_id,
+        };
+        let transcript = RecoveryApprovalTranscript::new(payload);
+        let signature = sign_ed25519_transcript(crypto, &transcript, private_key)
+            .await
+            .unwrap();
+        GuardianApproval {
+            guardian_id,
+            recovery_id: request.recovery_id.clone(),
+            signature: Ed25519Signature::try_from(signature).unwrap(),
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: approved_at_ms,
+                uncertainty: None,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_guardian_approval_signature_can_satisfy_threshold() {
+        let crypto = RealCryptoHandler::for_simulation_seed([0xCA; 32]);
+        let account = test_authority(1);
+        let guardian = test_authority(2);
+        let (private_key, public_key) = crypto.ed25519_generate_keypair().await.unwrap();
+        let key_resolver =
+            TestGuardianKeyResolver::default().with_guardian_key(guardian, public_key);
+        let request = test_request(account);
+        let approval = signed_approval(&crypto, &request, guardian, &private_key, 111).await;
+        let mut protocol = test_protocol(account, vec![guardian], 1);
+
+        protocol
+            .process_guardian_approval(&request, approval, &crypto, &key_resolver)
+            .await
+            .unwrap();
+        assert!(protocol.is_threshold_met(&protocol.approvals));
+    }
+
+    #[tokio::test]
+    async fn forged_guardian_approval_does_not_advance_threshold() {
+        let crypto = RealCryptoHandler::for_simulation_seed([0xCB; 32]);
+        let account = test_authority(1);
+        let guardian_a = test_authority(2);
+        let guardian_b = test_authority(3);
+        let (private_a, public_a) = crypto.ed25519_generate_keypair().await.unwrap();
+        let (_private_b, public_b) = crypto.ed25519_generate_keypair().await.unwrap();
+        let key_resolver = TestGuardianKeyResolver::default()
+            .with_guardian_key(guardian_a, public_a)
+            .with_guardian_key(guardian_b, public_b);
+        let request = test_request(account);
+        let valid = signed_approval(&crypto, &request, guardian_a, &private_a, 111).await;
+        let forged = GuardianApproval {
+            guardian_id: guardian_b,
+            recovery_id: request.recovery_id.clone(),
+            signature: Ed25519Signature::try_from(vec![0x42; 64]).unwrap(),
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 112,
+                uncertainty: None,
+            }),
+        };
+        let mut protocol = test_protocol(account, vec![guardian_a, guardian_b], 2);
+
+        assert!(protocol
+            .process_guardian_approval(&request, valid, &crypto, &key_resolver)
+            .await
+            .is_err());
+        assert_eq!(protocol.approvals.len(), 1);
+        assert!(protocol
+            .process_guardian_approval(&request, forged, &crypto, &key_resolver)
+            .await
+            .is_err());
+        assert_eq!(protocol.approvals.len(), 1);
+        assert!(!protocol.is_threshold_met(&protocol.approvals));
     }
 }
 
@@ -396,13 +636,63 @@ impl RecoveryProtocolHandler {
     }
 
     /// Handle guardian approval
-    pub async fn handle_guardian_approval(
+    pub async fn handle_guardian_approval<E, R>(
         &self,
+        request: &RecoveryRequest,
         approval: GuardianApproval,
+        crypto: &E,
+        key_resolver: &R,
         time_effects: &dyn PhysicalTimeEffects,
         network: &dyn NetworkEffects,
         journal: &dyn JournalEffects,
-    ) -> Result<bool> {
+    ) -> Result<bool>
+    where
+        E: CryptoEffects + Send + Sync + ?Sized,
+        R: TrustedKeyResolver + ?Sized,
+    {
+        if request.account_authority != self.protocol.account_authority {
+            return Err(AuraError::invalid("Account authority mismatch"));
+        }
+        if approval.recovery_id != request.recovery_id {
+            return Err(AuraError::invalid("Approval is for different recovery"));
+        }
+        if !self
+            .protocol
+            .guardian_authorities
+            .contains(&approval.guardian_id)
+        {
+            return Err(AuraError::permission_denied("Guardian not in recovery set"));
+        }
+        let approved_at_ms = match &approval.timestamp {
+            TimeStamp::PhysicalClock(time) => time.ts_ms,
+            _ => {
+                return Err(AuraError::invalid(
+                    "Guardian approval requires a physical approval timestamp",
+                ));
+            }
+        };
+        let operation_hash = recovery_operation_hash(&request.operation)?;
+        let verified = verify_recovery_approval_signature(
+            crypto,
+            RecoveryApprovalTranscriptPayload {
+                recovery_id: request.recovery_id.clone(),
+                account_authority: request.account_authority,
+                operation_hash,
+                prestate_hash: request.prestate_hash,
+                approved: true,
+                approved_at_ms,
+                guardian_id: approval.guardian_id,
+            },
+            approval.signature.as_bytes(),
+            key_resolver,
+        )
+        .await?;
+        if !verified {
+            return Err(AuraError::permission_denied(
+                "Guardian recovery approval signature did not verify",
+            ));
+        }
+
         // Create context ID for this recovery ceremony
         let context_id = recovery_context_id(&approval.recovery_id);
 

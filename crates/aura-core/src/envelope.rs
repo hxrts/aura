@@ -28,6 +28,28 @@ pub const ENVELOPE_VERSION_CURRENT: u8 = 1;
 ///
 /// Prevents unbounded allocations during decode.
 pub const MAX_PAYLOAD_BYTES: usize = 64 * 1024; // 64 KiB
+/// Maximum encoded-envelope bytes accepted from a human invite code.
+///
+/// This includes envelope framing overhead plus the payload. Parsers must check
+/// this bound before base64-decoding untrusted invite-code payloads.
+pub const MAX_INVITE_CODE_DECODED_BYTES: usize = MAX_PAYLOAD_BYTES + 1024;
+/// Maximum base64 characters for an encoded envelope invite payload.
+pub const MAX_INVITE_CODE_BASE64_CHARS: usize =
+    max_base64_encoded_len(MAX_INVITE_CODE_DECODED_BYTES);
+/// Maximum characters in an `aura:v{version}:{payload}` envelope invite code.
+pub const MAX_INVITE_CODE_CHARS: usize = "aura:v255:".len() + MAX_INVITE_CODE_BASE64_CHARS;
+
+/// Return the maximum base64 characters required to encode `decoded_len` bytes.
+#[must_use]
+pub const fn max_base64_encoded_len(decoded_len: usize) -> usize {
+    ((decoded_len + 2) / 3) * 4
+}
+
+/// Return an allocation-safe upper bound for decoded bytes from base64 text.
+#[must_use]
+pub const fn base64_decoded_len_upper_bound(encoded_len: usize) -> usize {
+    ((encoded_len + 3) / 4) * 3
+}
 
 /// Unified envelope for shareable Aura payloads.
 ///
@@ -153,6 +175,14 @@ impl AuraEnvelope {
     /// Returns error string if format is invalid or decode fails.
     pub fn from_invite_code(code: &str) -> Result<Self, String> {
         let code = code.trim();
+        if code.len() > MAX_INVITE_CODE_CHARS {
+            return Err(format!(
+                "invite code exceeds {} characters (got {})",
+                MAX_INVITE_CODE_CHARS,
+                code.len()
+            ));
+        }
+
         let code = code.strip_prefix("aura:").ok_or("missing 'aura:' prefix")?;
 
         let (version_part, payload_part) =
@@ -163,6 +193,15 @@ impl AuraEnvelope {
             .ok_or("missing 'v' in version")?
             .parse()
             .map_err(|_| "invalid version number")?;
+
+        if payload_part.len() > MAX_INVITE_CODE_BASE64_CHARS
+            || base64_decoded_len_upper_bound(payload_part.len()) > MAX_INVITE_CODE_DECODED_BYTES
+        {
+            return Err(format!(
+                "invite code payload exceeds {} decoded bytes",
+                MAX_INVITE_CODE_DECODED_BYTES
+            ));
+        }
 
         let bytes = BASE64
             .decode(payload_part)
@@ -245,6 +284,24 @@ mod tests {
         envelope.payload = huge;
         let bytes = envelope.encode().expect("encode");
         assert!(AuraEnvelope::decode(&bytes).is_err());
+    }
+
+    #[test]
+    fn test_invite_code_rejects_oversized_payload_before_decode() {
+        let payload = "A".repeat(MAX_INVITE_CODE_BASE64_CHARS + 1);
+        let code = format!("aura:v1:{payload}");
+        let err = AuraEnvelope::from_invite_code(&code).expect_err("oversized code rejected");
+        assert!(err.contains("invite code payload exceeds"));
+    }
+
+    #[test]
+    fn test_invite_code_accepts_max_payload_envelope() {
+        let original = AuraEnvelope::invite(vec![0xA5; MAX_PAYLOAD_BYTES]);
+        let code = original.to_invite_code().expect("to_invite_code");
+        assert!(code.len() <= MAX_INVITE_CODE_CHARS);
+
+        let decoded = AuraEnvelope::from_invite_code(&code).expect("decode max payload");
+        assert_eq!(decoded, original);
     }
 
     #[test]

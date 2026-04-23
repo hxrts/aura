@@ -46,6 +46,7 @@ rand_core = { workspace = true }
 rand = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
+chacha20poly1305 = { workspace = true }
 
 telltale = { workspace = true }
 telltale-machine = { workspace = true, optional = true, features = ["multi-thread"] }

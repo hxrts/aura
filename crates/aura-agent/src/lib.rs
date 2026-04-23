@@ -169,8 +169,8 @@ pub use handlers::{
 // Recovery types
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use handlers::{
-    GuardianApproval, RecoveryOperation, RecoveryRequest, RecoveryResult, RecoveryServiceApi,
-    RecoveryState,
+    recovery_guardian_public_key_storage_key, GuardianApproval, RecoveryOperation, RecoveryRequest,
+    RecoveryResult, RecoveryServiceApi, RecoveryState,
 };
 
 // Rendezvous types
@@ -241,7 +241,9 @@ pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceMana
 
 // Rendezvous service types
 #[cfg(feature = "choreo-backend-telltale-machine")]
-pub use runtime::services::bootstrap_broker::BootstrapBrokerConfig;
+pub use runtime::services::bootstrap_broker::{
+    BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy,
+};
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::{
     CoverTrafficGenerator, CoverTrafficGeneratorConfig, LocalHealthObserver,

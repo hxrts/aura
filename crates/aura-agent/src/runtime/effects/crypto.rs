@@ -1,6 +1,7 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::crypto::single_signer::SigningMode;
+use aura_core::crypto::tree_signing;
 use aura_core::effects::crypto::{
     FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext, KeyGenerationMethod,
     SigningKeyGenResult,
@@ -9,8 +10,192 @@ use aura_core::effects::{
     CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
 };
+use aura_core::threshold::ParticipantIdentity;
 use aura_core::{AuraError, AuthorityId};
 use aura_signature::threshold_signing_context_transcript_bytes;
+use chacha20poly1305::{
+    aead::{Aead, Payload},
+    ChaCha20Poly1305, KeyInit, Nonce,
+};
+use serde::{Deserialize, Serialize};
+
+const PARTICIPANT_KEY_PACKAGE_ENVELOPE_VERSION: u8 = 1;
+const PARTICIPANT_KEY_PACKAGE_AAD_DOMAIN: &str = "aura:participant-key-package-envelope:v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ParticipantKeyPackageEnvelope {
+    version: u8,
+    authority: AuthorityId,
+    epoch: u64,
+    recipient: ParticipantIdentity,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+}
+
+impl AuraEffectSystem {
+    fn participant_share_location(
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> SecureStorageLocation {
+        SecureStorageLocation::with_sub_key(
+            "participant_shares",
+            format!("{}:{}", authority, epoch),
+            participant.storage_key(),
+        )
+    }
+
+    fn participant_wrap_key_location(
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> SecureStorageLocation {
+        SecureStorageLocation::with_sub_key(
+            "participant_share_wrap_keys",
+            format!("{}:{}", authority, epoch),
+            participant.storage_key(),
+        )
+    }
+
+    fn participant_key_package_aad(
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> Vec<u8> {
+        format!(
+            "{}:{}:{}:{}",
+            PARTICIPANT_KEY_PACKAGE_AAD_DOMAIN,
+            authority,
+            epoch,
+            participant.storage_key()
+        )
+        .into_bytes()
+    }
+
+    async fn load_or_create_participant_wrap_key(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> Result<[u8; 32], AuraError> {
+        let location = Self::participant_wrap_key_location(authority, epoch, participant);
+        let caps = [
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+        match self
+            .crypto
+            .secure_storage()
+            .secure_retrieve(&location, &caps)
+            .await
+        {
+            Ok(bytes) => bytes.try_into().map_err(|_| {
+                AuraError::internal("participant share wrapping key has invalid length")
+            }),
+            Err(_) => {
+                let key = self.random_bytes_32().await;
+                self.crypto
+                    .secure_storage()
+                    .secure_store(&location, &key, &caps)
+                    .await?;
+                Ok(key)
+            }
+        }
+    }
+
+    async fn encrypt_participant_key_package(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+        key_package: &[u8],
+    ) -> Result<Vec<u8>, AuraError> {
+        let wrap_key = self
+            .load_or_create_participant_wrap_key(authority, epoch, participant)
+            .await?;
+        let cipher = ChaCha20Poly1305::new((&wrap_key).into());
+        let nonce = self.random_bytes(12).await;
+        let aad = Self::participant_key_package_aad(authority, epoch, participant);
+        let ciphertext = cipher
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: key_package,
+                    aad: &aad,
+                },
+            )
+            .map_err(|e| AuraError::internal(format!("Failed to encrypt key package: {e}")))?;
+        let envelope = ParticipantKeyPackageEnvelope {
+            version: PARTICIPANT_KEY_PACKAGE_ENVELOPE_VERSION,
+            authority: *authority,
+            epoch,
+            recipient: participant.clone(),
+            nonce,
+            ciphertext,
+        };
+        serde_json::to_vec(&envelope).map_err(|e| {
+            AuraError::internal(format!("Failed to serialize key package envelope: {e}"))
+        })
+    }
+
+    async fn decrypt_participant_key_package(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+        envelope_bytes: &[u8],
+    ) -> Result<Vec<u8>, AuraError> {
+        let envelope: ParticipantKeyPackageEnvelope = serde_json::from_slice(envelope_bytes)
+            .map_err(|e| AuraError::internal(format!("Invalid key package envelope: {e}")))?;
+        if envelope.version != PARTICIPANT_KEY_PACKAGE_ENVELOPE_VERSION
+            || envelope.authority != *authority
+            || envelope.epoch != epoch
+            || envelope.recipient != *participant
+            || envelope.nonce.len() != 12
+        {
+            return Err(AuraError::internal(
+                "key package envelope metadata does not match storage location",
+            ));
+        }
+        let wrap_key = self
+            .load_or_create_participant_wrap_key(authority, epoch, participant)
+            .await?;
+        let cipher = ChaCha20Poly1305::new((&wrap_key).into());
+        let aad = Self::participant_key_package_aad(authority, epoch, participant);
+        cipher
+            .decrypt(
+                Nonce::from_slice(&envelope.nonce),
+                Payload {
+                    msg: &envelope.ciphertext,
+                    aad: &aad,
+                },
+            )
+            .map_err(|e| AuraError::internal(format!("Failed to decrypt key package: {e}")))
+    }
+
+    async fn signing_mode_for_epoch(&self, authority: &AuthorityId, epoch: u64) -> SigningMode {
+        match self.get_threshold_config_metadata(authority, epoch).await {
+            Some(metadata) if metadata.threshold_k > 1 => SigningMode::Threshold,
+            _ => SigningMode::SingleSigner,
+        }
+    }
+
+    fn solo_signing_key_location(authority: &AuthorityId, epoch: u64) -> SecureStorageLocation {
+        SecureStorageLocation::with_sub_key("signing_keys", format!("{}:{}", authority, epoch), "1")
+    }
+
+    fn solo_public_key_location(authority: &AuthorityId, epoch: u64) -> SecureStorageLocation {
+        SecureStorageLocation::new("signing_keys_public", format!("{}:{}", authority, epoch))
+    }
+
+    fn threshold_public_key_location(authority: &AuthorityId, epoch: u64) -> SecureStorageLocation {
+        SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority),
+            format!("{}", epoch),
+        )
+    }
+}
 
 // Implementation of RandomCoreEffects
 #[async_trait]
@@ -317,19 +502,28 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         };
         let location = SecureStorageLocation::with_sub_key(
             key_prefix,
-            format!("{}/0", authority), // epoch 0
+            format!("{}:0", authority), // epoch 0
             "1",                        // signer index 1
         );
         let caps = vec![SecureStorageCapability::Write];
+        let participant = ParticipantIdentity::guardian(*authority);
+        let key_package_envelope = self
+            .encrypt_participant_key_package(
+                authority,
+                0,
+                &participant,
+                &signing_keys.key_packages[0],
+            )
+            .await?;
         self.crypto
             .secure_storage()
-            .secure_store(&location, &signing_keys.key_packages[0], &caps)
+            .secure_store(&location, &key_package_envelope, &caps)
             .await?;
 
         // Store public key package
         let pub_location = SecureStorageLocation::new(
             format!("{}_public", key_prefix),
-            format!("{}/0", authority),
+            format!("{}:0", authority),
         );
         self.crypto
             .secure_storage()
@@ -358,79 +552,140 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         &self,
         context: aura_core::threshold::SigningContext,
     ) -> Result<aura_core::threshold::ThresholdSignature, AuraError> {
-        // Load key package from secure storage using tracked epoch
         let current_epoch = self.get_current_epoch(&context.authority).await;
         let message =
             threshold_signing_context_transcript_bytes(&context, current_epoch).map_err(|e| {
                 AuraError::internal(format!("Failed to encode signing context transcript: {e}"))
             })?;
-        let location = SecureStorageLocation::with_sub_key(
-            "frost_keys",
-            format!("{}/{}", context.authority, current_epoch),
-            "1",
-        );
         let caps = vec![SecureStorageCapability::Read];
-        let key_package = self
-            .crypto
-            .secure_storage()
-            .secure_retrieve(&location, &caps)
-            .await?;
+        let mode = self
+            .signing_mode_for_epoch(&context.authority, current_epoch)
+            .await;
 
-        // Load public key package for current epoch
-        let pub_location = SecureStorageLocation::new(
-            "frost_public_keys",
-            format!("{}/{}", context.authority, current_epoch),
-        );
-        let public_key_package = self
-            .crypto
-            .secure_storage()
-            .secure_retrieve(&pub_location, &caps)
-            .await
-            .unwrap_or_else(|_| vec![0u8; 32]); // Fallback for bootstrapped authorities
+        match mode {
+            SigningMode::SingleSigner => {
+                let key_location =
+                    Self::solo_signing_key_location(&context.authority, current_epoch);
+                let key_package = self
+                    .crypto
+                    .secure_storage()
+                    .secure_retrieve(&key_location, &caps)
+                    .await?;
+                let participant = ParticipantIdentity::guardian(context.authority);
+                let key_package = self
+                    .decrypt_participant_key_package(
+                        &context.authority,
+                        current_epoch,
+                        &participant,
+                        &key_package,
+                    )
+                    .await?;
 
-        // Generate nonces
-        let nonces = self
-            .crypto
-            .handler()
-            .frost_generate_nonces(&key_package)
-            .await
-            .map_err(|e| AuraError::internal(format!("Nonce generation failed: {}", e)))?;
+                let public_key_package = self
+                    .crypto
+                    .secure_storage()
+                    .secure_retrieve(
+                        &Self::solo_public_key_location(&context.authority, current_epoch),
+                        &caps,
+                    )
+                    .await?;
 
-        // Create signing package (single participant)
-        let participants = vec![1u16];
-        let signing_package = self
-            .crypto
-            .handler()
-            .frost_create_signing_package(
-                &message,
-                std::slice::from_ref(&nonces),
-                &participants,
-                &public_key_package,
-            )
-            .await
-            .map_err(|e| AuraError::internal(format!("Signing package creation failed: {}", e)))?;
+                let signature = self
+                    .crypto
+                    .handler()
+                    .sign_with_key(&message, &key_package, SigningMode::SingleSigner)
+                    .await
+                    .map_err(|e| {
+                        AuraError::internal(format!("Single-signer signing failed: {e}"))
+                    })?;
 
-        // Sign
-        let share = self
-            .crypto
-            .handler()
-            .frost_sign_share(&signing_package, &key_package, &nonces)
-            .await
-            .map_err(|e| AuraError::internal(format!("Signature share creation failed: {}", e)))?;
+                Ok(aura_core::threshold::ThresholdSignature::single_signer(
+                    signature,
+                    public_key_package,
+                    current_epoch,
+                ))
+            }
+            SigningMode::Threshold => {
+                let participant = ParticipantIdentity::guardian(context.authority);
+                let key_package = self
+                    .crypto
+                    .secure_storage()
+                    .secure_retrieve(
+                        &Self::participant_share_location(
+                            &context.authority,
+                            current_epoch,
+                            &participant,
+                        ),
+                        &caps,
+                    )
+                    .await?;
+                let key_package = self
+                    .decrypt_participant_key_package(
+                        &context.authority,
+                        current_epoch,
+                        &participant,
+                        &key_package,
+                    )
+                    .await?;
+                let public_key_package = self
+                    .crypto
+                    .secure_storage()
+                    .secure_retrieve(
+                        &Self::threshold_public_key_location(&context.authority, current_epoch),
+                        &caps,
+                    )
+                    .await?;
 
-        // Aggregate (trivial for single signer)
-        let signature = self
-            .crypto
-            .handler()
-            .frost_aggregate_signatures(&signing_package, &[share])
-            .await
-            .map_err(|e| AuraError::internal(format!("Signature aggregation failed: {}", e)))?;
+                let share =
+                    tree_signing::share_from_key_package_bytes(&key_package).map_err(|e| {
+                        AuraError::internal(format!("Failed to decode threshold key package: {e}"))
+                    })?;
+                let nonces = self
+                    .crypto
+                    .handler()
+                    .frost_generate_nonces(&key_package)
+                    .await
+                    .map_err(|e| AuraError::internal(format!("Nonce generation failed: {e}")))?;
+                let participants = vec![share.identifier];
+                let signing_package = self
+                    .crypto
+                    .handler()
+                    .frost_create_signing_package(
+                        &message,
+                        std::slice::from_ref(&nonces),
+                        &participants,
+                        &public_key_package,
+                    )
+                    .await
+                    .map_err(|e| {
+                        AuraError::internal(format!("Signing package creation failed: {e}"))
+                    })?;
+                let partial = self
+                    .crypto
+                    .handler()
+                    .frost_sign_share(&signing_package, &key_package, &nonces)
+                    .await
+                    .map_err(|e| {
+                        AuraError::internal(format!("Signature share creation failed: {e}"))
+                    })?;
+                let signature = self
+                    .crypto
+                    .handler()
+                    .frost_aggregate_signatures(&signing_package, &[partial])
+                    .await
+                    .map_err(|e| {
+                        AuraError::internal(format!("Signature aggregation failed: {e}"))
+                    })?;
 
-        Ok(aura_core::threshold::ThresholdSignature::single_signer(
-            signature,
-            public_key_package,
-            current_epoch,
-        ))
+                Ok(aura_core::threshold::ThresholdSignature::new(
+                    signature,
+                    1,
+                    participants,
+                    public_key_package,
+                    current_epoch,
+                ))
+            }
+        }
     }
 
     async fn threshold_config(
@@ -470,11 +725,14 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
 
     async fn has_signing_capability(&self, authority: &AuthorityId) -> bool {
         let current_epoch = self.get_current_epoch(authority).await;
-        let location = SecureStorageLocation::with_sub_key(
-            "frost_keys",
-            format!("{}/{}", authority, current_epoch),
-            "1",
-        );
+        let location = match self.signing_mode_for_epoch(authority, current_epoch).await {
+            SigningMode::SingleSigner => Self::solo_signing_key_location(authority, current_epoch),
+            SigningMode::Threshold => Self::participant_share_location(
+                authority,
+                current_epoch,
+                &ParticipantIdentity::guardian(*authority),
+            ),
+        };
         self.crypto
             .secure_storage()
             .secure_exists(&location)
@@ -483,7 +741,11 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
     }
 
     async fn public_key_package(&self, authority: &AuthorityId) -> Option<Vec<u8>> {
-        let location = SecureStorageLocation::new("frost_public_keys", format!("{}/0", authority));
+        let current_epoch = self.get_current_epoch(authority).await;
+        let location = match self.signing_mode_for_epoch(authority, current_epoch).await {
+            SigningMode::SingleSigner => Self::solo_public_key_location(authority, current_epoch),
+            SigningMode::Threshold => Self::threshold_public_key_location(authority, current_epoch),
+        };
         let caps = vec![SecureStorageCapability::Read];
         self.crypto
             .secure_storage()
@@ -553,14 +815,13 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             SecureStorageCapability::Write,
         ];
         for (participant, key_package) in participants.iter().zip(key_result.key_packages.iter()) {
-            let location = SecureStorageLocation::with_sub_key(
-                "participant_shares",
-                format!("{}/{}", authority, new_epoch),
-                participant.storage_key(),
-            );
+            let location = Self::participant_share_location(authority, new_epoch, participant);
+            let envelope = self
+                .encrypt_participant_key_package(authority, new_epoch, participant, key_package)
+                .await?;
             self.crypto
                 .secure_storage()
-                .secure_store(&location, key_package, &caps)
+                .secure_store(&location, &envelope, &caps)
                 .await?;
         }
 

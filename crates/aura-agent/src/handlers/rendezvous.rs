@@ -1061,7 +1061,8 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
     authority: &AuthorityId,
 ) -> Option<([u8; 32], [u8; 32])> {
     // Try to retrieve key from epoch 1 (bootstrap epoch)
-    let location = SecureStorageLocation::new("signing_keys", format!("{}/1/1", authority));
+    let location =
+        SecureStorageLocation::with_sub_key("signing_keys", format!("{}:1", authority), "1");
     let caps = vec![SecureStorageCapability::Read];
 
     match effects.secure_retrieve(&location, &caps).await {

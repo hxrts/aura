@@ -155,8 +155,8 @@ impl BiscuitAuthorizationBridge {
             policy!("allow if capability({capability})"),
         )?;
 
-        // Run Datalog evaluation
-        let result = authorizer.authorize();
+        // Run bounded Datalog evaluation
+        let result = authorizer.authorize_with_limits(AURA_BISCUIT_LIMITS);
 
         match result {
             Ok(_) => Ok(true),

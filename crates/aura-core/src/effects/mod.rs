@@ -207,7 +207,8 @@ pub use reliability::{
 pub use route_crypto::{RouteCryptoEffects, RouteCryptoError, RouteHopKeyMaterial};
 pub use runtime_capability::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects};
 pub use secure::{
-    SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
+    SecureGeneratedKey, SecureStorageCapability, SecureStorageEffects, SecureStorageError,
+    SecureStorageLocation,
 };
 #[cfg(feature = "simulation")]
 pub use simulation::{
@@ -259,7 +260,7 @@ pub use guard::{
 pub use ledger::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 pub use sync::SyncMetrics;
 pub use threshold::{PublicKeyPackage, ThresholdSigningEffects, ThresholdSigningError};
-pub use tree::{Cut, Partial, ProposalId, Snapshot, TreeOperationEffects};
+pub use tree::{Cut, ProposalId, Snapshot, TreeOperationEffects};
 
 // Re-export unified error system
 pub use crate::AuraError;

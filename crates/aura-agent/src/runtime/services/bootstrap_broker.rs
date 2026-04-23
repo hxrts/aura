@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::net::IpAddr;
 use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
@@ -20,15 +22,50 @@ use tokio::sync::RwLock;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::time::Instant;
 
+const DEFAULT_LOOPBACK_BIND_ADDR: &str = "127.0.0.1:0";
+#[cfg(not(target_arch = "wasm32"))]
+const AUTHORIZATION_HEADER: &str = "authorization";
+#[cfg(not(target_arch = "wasm32"))]
+const BEARER_PREFIX: &str = "Bearer ";
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_BOOTSTRAP_BODY_BYTES: usize = 16 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_BOOTSTRAP_CANDIDATES: usize = 256;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_PENDING_INVITATIONS: usize = 256;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_INVITATIONS_PER_RECIPIENT: usize = 16;
+
+/// Explicit policy for native bootstrap broker bind exposure.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapBrokerLanBindPolicy {
+    /// Broker binds must remain loopback-only.
+    #[default]
+    LoopbackOnly,
+    /// Development-only exception allowing LAN-visible binds with bearer auth.
+    AllowLanDevOnly,
+}
+
 /// Broker configuration for mixed native/browser bootstrap discovery.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BootstrapBrokerConfig {
     /// Whether broker-backed bootstrap discovery is enabled.
     pub enabled: bool,
-    /// Native bind address for hosting a localhost or LAN-visible broker.
+    /// Native bind address for hosting a broker. Defaults to loopback when the
+    /// native broker is enabled without a remote base URL.
     pub bind_addr: Option<String>,
+    /// LAN-visible HTTP brokers are development-only until TLS is added. They
+    /// require explicit opt-in plus bearer-token authentication.
+    pub lan_bind_policy: BootstrapBrokerLanBindPolicy,
     /// Broker base URL used by runtimes that act as clients only.
     pub base_url: Option<String>,
+    /// Bearer token required by all HTTP broker endpoints.
+    pub auth_token: Option<String>,
+    /// Unguessable one-time credential used by a recipient to drain queued
+    /// invitations. It is registered with the broker but never returned by the
+    /// candidate listing API.
+    pub invitation_retrieval_token: Option<String>,
     /// Registration time-to-live in seconds.
     pub registration_ttl_secs: u64,
 }
@@ -38,7 +75,10 @@ impl Default for BootstrapBrokerConfig {
         Self {
             enabled: false,
             bind_addr: None,
+            lan_bind_policy: BootstrapBrokerLanBindPolicy::LoopbackOnly,
             base_url: None,
+            auth_token: None,
+            invitation_retrieval_token: None,
             registration_ttl_secs: 120,
         }
     }
@@ -50,8 +90,23 @@ impl BootstrapBrokerConfig {
         self
     }
 
+    pub fn with_lan_bind_policy(mut self, policy: BootstrapBrokerLanBindPolicy) -> Self {
+        self.lan_bind_policy = policy;
+        self
+    }
+
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = Some(base_url.into());
+        self
+    }
+
+    pub fn with_auth_token(mut self, auth_token: impl Into<String>) -> Self {
+        self.auth_token = Some(auth_token.into());
+        self
+    }
+
+    pub fn with_invitation_retrieval_token(mut self, token: impl Into<String>) -> Self {
+        self.invitation_retrieval_token = Some(token.into());
         self
     }
 
@@ -63,6 +118,17 @@ impl BootstrapBrokerConfig {
     pub fn registration_ttl(&self) -> Duration {
         Duration::from_secs(self.registration_ttl_secs.max(1))
     }
+
+    pub fn resolved_bind_addr(&self) -> Option<&str> {
+        if !self.enabled || self.base_url.is_some() {
+            return self.bind_addr.as_deref();
+        }
+        Some(
+            self.bind_addr
+                .as_deref()
+                .unwrap_or(DEFAULT_LOOPBACK_BIND_ADDR),
+        )
+    }
 }
 
 /// Wire-format registration payload stored by the bootstrap broker.
@@ -70,6 +136,7 @@ impl BootstrapBrokerConfig {
 pub struct BootstrapBrokerRegistration {
     pub authority_id: String,
     pub address: String,
+    pub invitation_retrieval_token: String,
     pub nickname_suggestion: Option<String>,
 }
 
@@ -100,6 +167,7 @@ pub struct BootstrapBrokerInvitation {
 struct BootstrapBrokerState {
     candidates: HashMap<String, BootstrapBrokerCandidateRecord>,
     invitations: HashMap<String, Vec<String>>,
+    invitation_credentials: HashMap<String, String>,
     started_at: Instant,
 }
 
@@ -109,6 +177,7 @@ impl BootstrapBrokerState {
         Self {
             candidates: HashMap::new(),
             invitations: HashMap::new(),
+            invitation_credentials: HashMap::new(),
             started_at: Instant::now(),
         }
     }
@@ -126,12 +195,23 @@ pub struct LocalBootstrapBrokerService {
     listener: Arc<TcpListener>,
     public_url: String,
     registration_ttl: Duration,
+    auth_token: String,
     shared: Arc<RwLock<BootstrapBrokerState>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl LocalBootstrapBrokerService {
-    pub async fn bind(bind_addr: &str, registration_ttl: Duration) -> Result<Self, String> {
+    pub async fn bind(
+        bind_addr: &str,
+        registration_ttl: Duration,
+        auth_token: impl Into<String>,
+        lan_bind_policy: BootstrapBrokerLanBindPolicy,
+    ) -> Result<Self, String> {
+        validate_bind_addr(bind_addr, lan_bind_policy)?;
+        let auth_token = auth_token.into();
+        if auth_token.is_empty() {
+            return Err("bootstrap broker auth token must not be empty".to_string());
+        }
         let listener = TcpListener::bind(bind_addr)
             .await
             .map_err(|error| format!("bootstrap broker bind failed ({bind_addr}): {error}"))?;
@@ -143,6 +223,7 @@ impl LocalBootstrapBrokerService {
             listener: Arc::new(listener),
             public_url,
             registration_ttl,
+            auth_token,
             shared: Arc::new(RwLock::new(BootstrapBrokerState::new())),
         })
     }
@@ -151,18 +232,10 @@ impl LocalBootstrapBrokerService {
         &self.public_url
     }
 
-    pub async fn register(&self, registration: BootstrapBrokerRegistration) {
+    pub async fn register(&self, registration: BootstrapBrokerRegistration) -> Result<(), String> {
         let now_ms = broker_elapsed_ms(&self.shared).await;
-        let key = format!("{}@{}", registration.authority_id, registration.address);
-        self.shared.write().await.candidates.insert(
-            key,
-            BootstrapBrokerCandidateRecord {
-                authority_id: registration.authority_id,
-                address: registration.address,
-                nickname_suggestion: registration.nickname_suggestion,
-                discovered_at_ms: now_ms,
-            },
-        );
+        prune_candidates(&self.shared, now_ms, self.registration_ttl).await;
+        insert_registration(&self.shared, registration, now_ms).await
     }
 
     pub async fn list_candidates(&self) -> Vec<BootstrapBrokerCandidateRecord> {
@@ -177,29 +250,26 @@ impl LocalBootstrapBrokerService {
             .collect()
     }
 
-    pub async fn queue_invitation(&self, invitation: BootstrapBrokerInvitation) {
-        self.shared
-            .write()
-            .await
-            .invitations
-            .entry(invitation.recipient_authority_id)
-            .or_default()
-            .push(invitation.invitation_code);
+    pub async fn queue_invitation(
+        &self,
+        invitation: BootstrapBrokerInvitation,
+    ) -> Result<(), String> {
+        queue_invitation(&self.shared, invitation).await
     }
 
-    pub async fn take_invitations(&self, authority_id: &str) -> Vec<String> {
-        self.shared
-            .write()
-            .await
-            .invitations
-            .remove(authority_id)
-            .unwrap_or_default()
+    pub async fn take_invitations(
+        &self,
+        authority_id: &str,
+        retrieval_token: &str,
+    ) -> Result<Vec<String>, String> {
+        take_invitations(&self.shared, authority_id, retrieval_token).await
     }
 
     pub fn start(&self, tasks: &TaskGroup) {
         let listener = self.listener.clone();
         let shared = self.shared.clone();
         let registration_ttl = self.registration_ttl;
+        let auth_token = self.auth_token.clone();
         let accept_tasks = tasks.clone();
         let connection_tasks = tasks.clone();
         let _bootstrap_broker_handle =
@@ -209,10 +279,12 @@ impl LocalBootstrapBrokerService {
                         break;
                     };
                     let shared = shared.clone();
+                    let auth_token = auth_token.clone();
                     let connection_tasks = connection_tasks.clone();
                     let _conn_handle =
                         connection_tasks.spawn_named("bootstrap_broker_conn", async move {
-                            handle_http_connection(stream, shared, registration_ttl).await;
+                            handle_http_connection(stream, shared, registration_ttl, auth_token)
+                                .await;
                         });
                 }
             });
@@ -234,10 +306,126 @@ async fn prune_candidates(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn validate_bind_addr(
+    bind_addr: &str,
+    lan_bind_policy: BootstrapBrokerLanBindPolicy,
+) -> Result<(), String> {
+    let host = bind_addr
+        .rsplit_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(bind_addr)
+        .trim_matches(['[', ']']);
+    let is_loopback = host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .map(|addr| addr.is_loopback())
+            .unwrap_or(false);
+    if !is_loopback && lan_bind_policy != BootstrapBrokerLanBindPolicy::AllowLanDevOnly {
+        return Err(
+            "bootstrap broker LAN-visible bind requires explicit AllowLanDevOnly policy"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn insert_registration(
+    shared: &Arc<RwLock<BootstrapBrokerState>>,
+    registration: BootstrapBrokerRegistration,
+    now_ms: u64,
+) -> Result<(), String> {
+    if registration.invitation_retrieval_token.is_empty() {
+        return Err("bootstrap broker invitation retrieval token must not be empty".to_string());
+    }
+    let key = format!("{}@{}", registration.authority_id, registration.address);
+    let mut state = shared.write().await;
+    if !state.candidates.contains_key(&key) && state.candidates.len() >= MAX_BOOTSTRAP_CANDIDATES {
+        if let Some(oldest_key) = state
+            .candidates
+            .iter()
+            .min_by_key(|(_, candidate)| candidate.discovered_at_ms)
+            .map(|(key, _)| key.clone())
+        {
+            state.candidates.remove(&oldest_key);
+        }
+    }
+    state.invitation_credentials.insert(
+        registration.authority_id.clone(),
+        registration.invitation_retrieval_token,
+    );
+    state.candidates.insert(
+        key,
+        BootstrapBrokerCandidateRecord {
+            authority_id: registration.authority_id,
+            address: registration.address,
+            nickname_suggestion: registration.nickname_suggestion,
+            discovered_at_ms: now_ms,
+        },
+    );
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn queue_invitation(
+    shared: &Arc<RwLock<BootstrapBrokerState>>,
+    invitation: BootstrapBrokerInvitation,
+) -> Result<(), String> {
+    let mut state = shared.write().await;
+    let pending_total: usize = state.invitations.values().map(Vec::len).sum();
+    let recipient_pending = state
+        .invitations
+        .get(&invitation.recipient_authority_id)
+        .map(Vec::len)
+        .unwrap_or(0);
+    if pending_total >= MAX_PENDING_INVITATIONS {
+        return Err("bootstrap broker pending invitation limit reached".to_string());
+    }
+    if recipient_pending >= MAX_INVITATIONS_PER_RECIPIENT {
+        return Err("bootstrap broker per-recipient invitation limit reached".to_string());
+    }
+    state
+        .invitations
+        .entry(invitation.recipient_authority_id)
+        .or_default()
+        .push(invitation.invitation_code);
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn take_invitations(
+    shared: &Arc<RwLock<BootstrapBrokerState>>,
+    authority_id: &str,
+    retrieval_token: &str,
+) -> Result<Vec<String>, String> {
+    let mut state = shared.write().await;
+    match state.invitation_credentials.get(authority_id) {
+        Some(expected) if expected == retrieval_token => {}
+        _ => return Err("bootstrap broker invitation credential rejected".to_string()),
+    }
+    let invitations = state.invitations.remove(authority_id).unwrap_or_default();
+    if !invitations.is_empty() {
+        state.invitation_credentials.remove(authority_id);
+    }
+    Ok(invitations)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn request_is_authorized(request: &HttpRequest, auth_token: &str) -> bool {
+    request
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(AUTHORIZATION_HEADER))
+        .map(|(_, value)| value.trim() == format!("{BEARER_PREFIX}{auth_token}"))
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_http_connection(
     mut stream: TcpStream,
     shared: Arc<RwLock<BootstrapBrokerState>>,
     registration_ttl: Duration,
+    auth_token: String,
 ) {
     let request = match read_http_request(&mut stream).await {
         Ok(request) => request,
@@ -257,6 +445,15 @@ async fn handle_http_connection(
         ("OPTIONS", _) => {
             let _ = write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"").await;
         }
+        _ if !request_is_authorized(&request, &auth_token) => {
+            let _ = write_http_response(
+                &mut stream,
+                401,
+                "text/plain; charset=utf-8",
+                b"unauthorized",
+            )
+            .await;
+        }
         ("POST", "/v1/bootstrap/register") => {
             let registration: BootstrapBrokerRegistration =
                 match serde_json::from_slice(&request.body) {
@@ -275,16 +472,17 @@ async fn handle_http_connection(
                 };
 
             let now_ms = broker_elapsed_ms(&shared).await;
-            let key = format!("{}@{}", registration.authority_id, registration.address);
-            shared.write().await.candidates.insert(
-                key,
-                BootstrapBrokerCandidateRecord {
-                    authority_id: registration.authority_id,
-                    address: registration.address,
-                    nickname_suggestion: registration.nickname_suggestion,
-                    discovered_at_ms: now_ms,
-                },
-            );
+            prune_candidates(&shared, now_ms, registration_ttl).await;
+            if let Err(error) = insert_registration(&shared, registration, now_ms).await {
+                let _ = write_http_response(
+                    &mut stream,
+                    429,
+                    "text/plain; charset=utf-8",
+                    error.as_bytes(),
+                )
+                .await;
+                return;
+            }
             let _ = write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"").await;
         }
         ("GET", "/v1/bootstrap/candidates") => {
@@ -323,23 +521,44 @@ async fn handle_http_connection(
                     return;
                 }
             };
-            shared
-                .write()
-                .await
-                .invitations
-                .entry(invitation.recipient_authority_id)
-                .or_default()
-                .push(invitation.invitation_code);
+            if let Err(error) = queue_invitation(&shared, invitation).await {
+                let _ = write_http_response(
+                    &mut stream,
+                    429,
+                    "text/plain; charset=utf-8",
+                    error.as_bytes(),
+                )
+                .await;
+                return;
+            }
             let _ = write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"").await;
         }
         ("GET", path) if path.starts_with("/v1/bootstrap/invitations/") => {
-            let authority_id = path.trim_start_matches("/v1/bootstrap/invitations/");
-            let invitations = shared
-                .write()
-                .await
-                .invitations
-                .remove(authority_id)
-                .unwrap_or_default();
+            let Some((authority_id, retrieval_token)) =
+                invitation_request_parts(path.trim_start_matches("/v1/bootstrap/invitations/"))
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    400,
+                    "text/plain; charset=utf-8",
+                    b"missing invitation retrieval token",
+                )
+                .await;
+                return;
+            };
+            let invitations = match take_invitations(&shared, authority_id, retrieval_token).await {
+                Ok(invitations) => invitations,
+                Err(error) => {
+                    let _ = write_http_response(
+                        &mut stream,
+                        401,
+                        "text/plain; charset=utf-8",
+                        error.as_bytes(),
+                    )
+                    .await;
+                    return;
+                }
+            };
             match serde_json::to_vec(&invitations) {
                 Ok(body) => {
                     let _ = write_http_response(&mut stream, 200, "application/json", &body).await;
@@ -368,7 +587,20 @@ async fn handle_http_connection(
 struct HttpRequest {
     method: String,
     path: String,
+    headers: Vec<(String, String)>,
     body: Vec<u8>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn invitation_request_parts(path_tail: &str) -> Option<(&str, &str)> {
+    let (authority_id, query) = path_tail.split_once('?')?;
+    let token = query
+        .split('&')
+        .find_map(|part| part.strip_prefix("token="))?;
+    if authority_id.is_empty() || token.is_empty() {
+        return None;
+    }
+    Some((authority_id, token))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -407,18 +639,28 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String
         .next()
         .ok_or_else(|| "missing request path".to_string())?
         .to_string();
-    let content_length = lines
-        .find_map(|line| {
+    let headers: Vec<(String, String)> = lines
+        .filter_map(|line| {
             let (name, value) = line.split_once(':')?;
-            if name.eq_ignore_ascii_case("content-length") {
-                value.trim().parse::<usize>().ok()
-            } else {
-                None
-            }
+            Some((name.trim().to_string(), value.trim().to_string()))
+        })
+        .collect();
+    let content_length = headers
+        .iter()
+        .find_map(|(name, value)| {
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.parse::<usize>().ok())
+                .flatten()
         })
         .unwrap_or(0);
+    if content_length > MAX_BOOTSTRAP_BODY_BYTES {
+        return Err("request body exceeds bootstrap broker limit".to_string());
+    }
 
     let mut body = buffer[header_end..].to_vec();
+    if body.len() > MAX_BOOTSTRAP_BODY_BYTES {
+        return Err("request body exceeds bootstrap broker limit".to_string());
+    }
     while body.len() < content_length {
         let read = stream
             .read(&mut scratch)
@@ -428,10 +670,18 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String
             return Err("request body truncated".to_string());
         }
         body.extend_from_slice(&scratch[..read]);
+        if body.len() > MAX_BOOTSTRAP_BODY_BYTES {
+            return Err("request body exceeds bootstrap broker limit".to_string());
+        }
     }
     body.truncate(content_length);
 
-    Ok(HttpRequest { method, path, body })
+    Ok(HttpRequest {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -445,12 +695,14 @@ async fn write_http_response(
         200 => "OK",
         204 => "No Content",
         400 => "Bad Request",
+        401 => "Unauthorized",
         404 => "Not Found",
+        429 => "Too Many Requests",
         500 => "Internal Server Error",
         _ => "OK",
     };
     let headers = format!(
-        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n\r\n",
+        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\n\r\n",
         body.len()
     );
     stream.write_all(headers.as_bytes()).await?;
@@ -475,11 +727,12 @@ pub fn candidates_endpoint(base_url: &str) -> String {
     format!("{}/v1/bootstrap/candidates", normalize_base_url(base_url))
 }
 
-pub fn invitations_endpoint(base_url: &str, authority_id: &str) -> String {
+pub fn invitations_endpoint(base_url: &str, authority_id: &str, retrieval_token: &str) -> String {
     format!(
-        "{}/v1/bootstrap/invitations/{}",
+        "{}/v1/bootstrap/invitations/{}?token={}",
         normalize_base_url(base_url),
-        authority_id
+        authority_id,
+        retrieval_token
     )
 }
 
@@ -521,6 +774,7 @@ fn parse_http_endpoint(url: &str) -> Result<(String, String), String> {
 async fn send_native_http_request(
     method: &str,
     url: &str,
+    auth_token: &str,
     body: Option<&[u8]>,
 ) -> Result<Vec<u8>, String> {
     let (host_port, path) = parse_http_endpoint(url)?;
@@ -529,7 +783,7 @@ async fn send_native_http_request(
         .map_err(|error| format!("bootstrap broker connect failed ({host_port}): {error}"))?;
     let body = body.unwrap_or_default();
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n",
+        "{method} {path} HTTP/1.1\r\nHost: {host_port}\r\nAuthorization: Bearer {auth_token}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n",
         body.len()
     );
     stream
@@ -575,19 +829,28 @@ async fn send_native_http_request(
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn register_remote_candidate(
     base_url: &str,
+    auth_token: &str,
     registration: &BootstrapBrokerRegistration,
 ) -> Result<(), String> {
     let body = serde_json::to_vec(registration)
         .map_err(|error| format!("serialize registration failed: {error}"))?;
-    let _ = send_native_http_request("POST", &register_endpoint(base_url), Some(&body)).await?;
+    let _ = send_native_http_request(
+        "POST",
+        &register_endpoint(base_url),
+        auth_token,
+        Some(&body),
+    )
+    .await?;
     Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch_remote_candidates(
     base_url: &str,
+    auth_token: &str,
 ) -> Result<Vec<BootstrapBrokerCandidateRecord>, String> {
-    let body = send_native_http_request("GET", &candidates_endpoint(base_url), None).await?;
+    let body =
+        send_native_http_request("GET", &candidates_endpoint(base_url), auth_token, None).await?;
     serde_json::from_slice(&body)
         .map_err(|error| format!("broker candidate decode failed: {error}"))
 }
@@ -595,6 +858,7 @@ pub async fn fetch_remote_candidates(
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn send_remote_invitation(
     base_url: &str,
+    auth_token: &str,
     invitation: &BootstrapBrokerInvitation,
 ) -> Result<(), String> {
     let body = serde_json::to_vec(invitation)
@@ -602,6 +866,7 @@ pub async fn send_remote_invitation(
     let _ = send_native_http_request(
         "POST",
         &format!("{}/v1/bootstrap/invitations", normalize_base_url(base_url)),
+        auth_token,
         Some(&body),
     )
     .await?;
@@ -611,10 +876,17 @@ pub async fn send_remote_invitation(
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn take_remote_invitations(
     base_url: &str,
+    auth_token: &str,
     authority_id: &str,
+    retrieval_token: &str,
 ) -> Result<Vec<String>, String> {
-    let body = send_native_http_request("GET", &invitations_endpoint(base_url, authority_id), None)
-        .await?;
+    let body = send_native_http_request(
+        "GET",
+        &invitations_endpoint(base_url, authority_id, retrieval_token),
+        auth_token,
+        None,
+    )
+    .await?;
     serde_json::from_slice(&body)
         .map_err(|error| format!("broker invitation decode failed: {error}"))
 }
@@ -622,12 +894,14 @@ pub async fn take_remote_invitations(
 #[cfg(target_arch = "wasm32")]
 pub async fn register_remote_candidate(
     base_url: &str,
+    auth_token: &str,
     registration: &BootstrapBrokerRegistration,
 ) -> Result<(), String> {
     let body = serde_json::to_string(registration)
         .map_err(|error| format!("serialize registration failed: {error}"))?;
     let request = gloo_net::http::Request::post(&register_endpoint(base_url))
         .header("content-type", "application/json")
+        .header("authorization", &format!("Bearer {auth_token}"))
         .body(body)
         .map_err(|error| format!("build broker register request failed: {error}"))?;
     match request.send().await {
@@ -640,8 +914,10 @@ pub async fn register_remote_candidate(
 #[cfg(target_arch = "wasm32")]
 pub async fn fetch_remote_candidates(
     base_url: &str,
+    auth_token: &str,
 ) -> Result<Vec<BootstrapBrokerCandidateRecord>, String> {
-    let request = gloo_net::http::Request::get(&candidates_endpoint(base_url));
+    let request = gloo_net::http::Request::get(&candidates_endpoint(base_url))
+        .header("authorization", &format!("Bearer {auth_token}"));
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) if endpoint_is_loopback(base_url) => return Ok(Vec::new()),
@@ -656,6 +932,7 @@ pub async fn fetch_remote_candidates(
 #[cfg(target_arch = "wasm32")]
 pub async fn send_remote_invitation(
     base_url: &str,
+    auth_token: &str,
     invitation: &BootstrapBrokerInvitation,
 ) -> Result<(), String> {
     let body = serde_json::to_string(invitation)
@@ -665,6 +942,7 @@ pub async fn send_remote_invitation(
         normalize_base_url(base_url)
     ))
     .header("content-type", "application/json")
+    .header("authorization", &format!("Bearer {auth_token}"))
     .body(body)
     .map_err(|error| format!("build broker invitation request failed: {error}"))?
     .send()
@@ -676,9 +954,16 @@ pub async fn send_remote_invitation(
 #[cfg(target_arch = "wasm32")]
 pub async fn take_remote_invitations(
     base_url: &str,
+    auth_token: &str,
     authority_id: &str,
+    retrieval_token: &str,
 ) -> Result<Vec<String>, String> {
-    let request = gloo_net::http::Request::get(&invitations_endpoint(base_url, authority_id));
+    let request = gloo_net::http::Request::get(&invitations_endpoint(
+        base_url,
+        authority_id,
+        retrieval_token,
+    ))
+    .header("authorization", &format!("Bearer {auth_token}"));
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) if endpoint_is_loopback(base_url) => return Ok(Vec::new()),
@@ -696,19 +981,29 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use crate::runtime::TaskSupervisor;
 
+    const AUTH_TOKEN: &str = "test-broker-auth-token";
+    const INVITE_TOKEN: &str = "test-invitation-retrieval-token";
+
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn local_bootstrap_broker_registers_and_lists_candidates() {
-        let broker = LocalBootstrapBrokerService::bind("127.0.0.1:0", Duration::from_secs(60))
-            .await
-            .expect("broker should bind");
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker should bind");
         broker
             .register(BootstrapBrokerRegistration {
                 authority_id: "01234567-89ab-cdef-0123-456789abcdef".to_string(),
                 address: "127.0.0.1:40123".to_string(),
+                invitation_retrieval_token: INVITE_TOKEN.to_string(),
                 nickname_suggestion: Some("Alice".to_string()),
             })
-            .await;
+            .await
+            .expect("registration should be accepted");
 
         let candidates = broker.list_candidates().await;
         assert_eq!(candidates.len(), 1);
@@ -723,25 +1018,32 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn native_client_round_trips_against_local_broker_http() {
-        let broker = LocalBootstrapBrokerService::bind("127.0.0.1:0", Duration::from_secs(60))
-            .await
-            .expect("broker should bind");
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker should bind");
         let supervisor = TaskSupervisor::new();
         broker.start(&supervisor.group("bootstrap_broker_test"));
         tokio::task::yield_now().await;
 
         register_remote_candidate(
             broker.public_url(),
+            AUTH_TOKEN,
             &BootstrapBrokerRegistration {
                 authority_id: "89abcdef-0123-4567-89ab-cdef01234567".to_string(),
                 address: "127.0.0.1:40124".to_string(),
+                invitation_retrieval_token: INVITE_TOKEN.to_string(),
                 nickname_suggestion: Some("Browser".to_string()),
             },
         )
         .await
         .expect("remote client should register");
 
-        let candidates = fetch_remote_candidates(broker.public_url())
+        let candidates = fetch_remote_candidates(broker.public_url(), AUTH_TOKEN)
             .await
             .expect("remote client should list");
         assert_eq!(candidates.len(), 1);
@@ -755,15 +1057,34 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn native_client_round_trips_broker_invitations() {
-        let broker = LocalBootstrapBrokerService::bind("127.0.0.1:0", Duration::from_secs(60))
-            .await
-            .expect("broker should bind");
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker should bind");
         let supervisor = TaskSupervisor::new();
         broker.start(&supervisor.group("bootstrap_broker_invitation_test"));
         tokio::task::yield_now().await;
 
+        register_remote_candidate(
+            broker.public_url(),
+            AUTH_TOKEN,
+            &BootstrapBrokerRegistration {
+                authority_id: "fedcba98-7654-3210-fedc-ba9876543210".to_string(),
+                address: "127.0.0.1:40125".to_string(),
+                invitation_retrieval_token: INVITE_TOKEN.to_string(),
+                nickname_suggestion: None,
+            },
+        )
+        .await
+        .expect("recipient registration should succeed");
+
         send_remote_invitation(
             broker.public_url(),
+            AUTH_TOKEN,
             &BootstrapBrokerInvitation {
                 recipient_authority_id: "fedcba98-7654-3210-fedc-ba9876543210".to_string(),
                 invitation_code: "invite-123".to_string(),
@@ -772,16 +1093,196 @@ mod tests {
         .await
         .expect("remote invitation send should succeed");
 
-        let invitations =
-            take_remote_invitations(broker.public_url(), "fedcba98-7654-3210-fedc-ba9876543210")
-                .await
-                .expect("remote invitation take should succeed");
+        let invitations = take_remote_invitations(
+            broker.public_url(),
+            AUTH_TOKEN,
+            "fedcba98-7654-3210-fedc-ba9876543210",
+            INVITE_TOKEN,
+        )
+        .await
+        .expect("remote invitation take should succeed");
         assert_eq!(invitations, vec!["invite-123".to_string()]);
 
-        let emptied =
-            take_remote_invitations(broker.public_url(), "fedcba98-7654-3210-fedc-ba9876543210")
+        let replay = take_remote_invitations(
+            broker.public_url(),
+            AUTH_TOKEN,
+            "fedcba98-7654-3210-fedc-ba9876543210",
+            INVITE_TOKEN,
+        )
+        .await
+        .expect_err("retrieval credential should be one-time after draining invitations");
+        assert!(replay.contains("401"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn bootstrap_broker_rejects_unauthorized_http_requests() {
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker should bind");
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("bootstrap_broker_auth_test"));
+        tokio::task::yield_now().await;
+
+        let registration = serde_json::to_vec(&BootstrapBrokerRegistration {
+            authority_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string(),
+            address: "127.0.0.1:43000".to_string(),
+            invitation_retrieval_token: INVITE_TOKEN.to_string(),
+            nickname_suggestion: None,
+        })
+        .expect("registration should encode");
+        let register_error = send_native_http_request(
+            "POST",
+            &register_endpoint(broker.public_url()),
+            "wrong-token",
+            Some(&registration),
+        )
+        .await
+        .expect_err("unauthorized register should be rejected");
+        assert!(register_error.contains("401"));
+
+        let list_error = fetch_remote_candidates(broker.public_url(), "wrong-token")
+            .await
+            .expect_err("unauthorized list should be rejected");
+        assert!(list_error.contains("401"));
+
+        let invitation = serde_json::to_vec(&BootstrapBrokerInvitation {
+            recipient_authority_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string(),
+            invitation_code: "invite-denied".to_string(),
+        })
+        .expect("invitation should encode");
+        let queue_error = send_native_http_request(
+            "POST",
+            &format!(
+                "{}/v1/bootstrap/invitations",
+                normalize_base_url(broker.public_url())
+            ),
+            "wrong-token",
+            Some(&invitation),
+        )
+        .await
+        .expect_err("unauthorized queue should be rejected");
+        assert!(queue_error.contains("401"));
+
+        let drain_error = take_remote_invitations(
+            broker.public_url(),
+            "wrong-token",
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            INVITE_TOKEN,
+        )
+        .await
+        .expect_err("unauthorized drain should be rejected");
+        assert!(drain_error.contains("401"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn bootstrap_broker_rejects_oversized_bodies() {
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker should bind");
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("bootstrap_broker_body_limit_test"));
+        tokio::task::yield_now().await;
+
+        let (host_port, path) =
+            parse_http_endpoint(&register_endpoint(broker.public_url())).expect("valid endpoint");
+        let mut stream = TcpStream::connect(&host_port)
+            .await
+            .expect("broker should accept connections");
+        let request = format!(
+            "POST {path} HTTP/1.1\r\nHost: {host_port}\r\nAuthorization: Bearer {AUTH_TOKEN}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n",
+            MAX_BOOTSTRAP_BODY_BYTES + 1
+        );
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("request headers should write");
+        stream.flush().await.expect("request should flush");
+        let mut response = Vec::new();
+        stream
+            .read_to_end(&mut response)
+            .await
+            .expect("response should read");
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 400"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn bootstrap_broker_prunes_stale_and_bounds_candidates() {
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_millis(1),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker should bind");
+        broker
+            .register(BootstrapBrokerRegistration {
+                authority_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
+                address: "127.0.0.1:41000".to_string(),
+                invitation_retrieval_token: INVITE_TOKEN.to_string(),
+                nickname_suggestion: None,
+            })
+            .await
+            .expect("registration should be accepted");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        assert!(broker.list_candidates().await.is_empty());
+
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker should bind");
+        for index in 0..(MAX_BOOTSTRAP_CANDIDATES + 8) {
+            broker
+                .register(BootstrapBrokerRegistration {
+                    authority_id: format!("authority-{index}"),
+                    address: format!("127.0.0.1:{}", 42000 + index),
+                    invitation_retrieval_token: format!("invite-token-{index}"),
+                    nickname_suggestion: None,
+                })
                 .await
-                .expect("second take should succeed");
-        assert!(emptied.is_empty());
+                .expect("registration should stay bounded");
+        }
+        assert!(broker.list_candidates().await.len() <= MAX_BOOTSTRAP_CANDIDATES);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn bootstrap_broker_lan_bind_requires_explicit_opt_in() {
+        let rejected = LocalBootstrapBrokerService::bind(
+            "0.0.0.0:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect_err("LAN-visible bind should require explicit opt-in");
+        assert!(rejected.contains("AllowLanDevOnly"));
+
+        LocalBootstrapBrokerService::bind(
+            "0.0.0.0:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::AllowLanDevOnly,
+        )
+        .await
+        .expect("explicit LAN-visible bind should be accepted with auth");
     }
 }

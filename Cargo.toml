@@ -68,7 +68,7 @@ homepage = "https://hxrts.com/aura"
 
 [workspace.dependencies]
 # Cryptography
-frost-core = { version = "1.0", features = ["serialization"] }
+frost-core = { version = "1.0", features = ["serialization", "internals"] }
 frost-ed25519 = { version = "1.0", features = ["serialization"] }
 ed25519-dalek = { version = "2.0", features = ["rand_core", "serde"] }
 curve25519-dalek = "4.1"

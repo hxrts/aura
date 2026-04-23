@@ -32,6 +32,9 @@ pub struct ConsensusProtocol {
     /// FROST orchestrator for crypto operations
     pub(crate) frost_orchestrator: FrostConsensusOrchestrator,
 
+    /// Trusted witness signing-share metadata keyed by authority.
+    pub(crate) witness_key_packages: HashMap<AuthorityId, Share>,
+
     /// Group public key package for verification/aggregation
     pub(crate) group_public_key: PublicKeyPackage,
 
@@ -96,7 +99,7 @@ impl ConsensusProtocol {
     ) -> Result<Self> {
         let frost_orchestrator = FrostConsensusOrchestrator::new(
             config.clone(),
-            key_packages,
+            key_packages.clone(),
             group_public_key.clone(),
         )?;
 
@@ -105,6 +108,7 @@ impl ConsensusProtocol {
             context_id,
             config,
             frost_orchestrator,
+            witness_key_packages: key_packages,
             group_public_key,
             instances: RwLock::new(HashMap::new()),
             evidence_tracker: RwLock::new(crate::evidence::EvidenceTracker::new()),

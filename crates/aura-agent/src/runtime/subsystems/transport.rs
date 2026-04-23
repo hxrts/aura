@@ -24,6 +24,14 @@ use std::sync::{
     Arc,
 };
 
+pub(crate) const LOCAL_TRANSPORT_INBOX_CAPACITY: usize = 256;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueEnvelopeOutcome {
+    Queued,
+    DroppedOverflow,
+}
+
 #[derive(Debug, Default)]
 struct TransportStatsCounters {
     envelopes_sent: AtomicU64,
@@ -174,13 +182,18 @@ impl TransportSubsystem {
     }
 
     /// Push an envelope to the inbox
-    pub fn queue_envelope(&self, envelope: TransportEnvelope) {
+    pub fn queue_envelope(&self, envelope: TransportEnvelope) -> QueueEnvelopeOutcome {
         if let Some(shared) = self.shared.shared_transport.as_ref() {
             shared.route_envelope(envelope);
-        } else {
-            let mut inbox = self.shared.inbox.write();
-            inbox.push(envelope);
+            return QueueEnvelopeOutcome::Queued;
         }
+
+        let mut inbox = self.shared.inbox.write();
+        if inbox.len() >= LOCAL_TRANSPORT_INBOX_CAPACITY {
+            return QueueEnvelopeOutcome::DroppedOverflow;
+        }
+        inbox.push(envelope);
+        QueueEnvelopeOutcome::Queued
     }
 
     /// Drain all envelopes from the inbox
@@ -230,6 +243,43 @@ impl TransportSubsystem {
 impl Default for TransportSubsystem {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod bounded_queue_tests {
+    use super::*;
+    use aura_core::types::identifiers::ContextId;
+    use std::collections::HashMap;
+
+    fn envelope(index: u8) -> TransportEnvelope {
+        TransportEnvelope {
+            destination: AuthorityId::new_from_entropy([1u8; 32]),
+            source: AuthorityId::new_from_entropy([index; 32]),
+            context: ContextId::new_from_entropy([2u8; 32]),
+            payload: vec![index],
+            metadata: HashMap::new(),
+            receipt: None,
+        }
+    }
+
+    #[test]
+    fn local_transport_inbox_drops_when_capacity_is_exhausted() {
+        let subsystem = TransportSubsystem::new();
+
+        for index in 0..LOCAL_TRANSPORT_INBOX_CAPACITY {
+            assert_eq!(
+                subsystem.queue_envelope(envelope(index as u8)),
+                QueueEnvelopeOutcome::Queued
+            );
+        }
+
+        assert_eq!(subsystem.inbox_len(), LOCAL_TRANSPORT_INBOX_CAPACITY);
+        assert_eq!(
+            subsystem.queue_envelope(envelope(255)),
+            QueueEnvelopeOutcome::DroppedOverflow
+        );
+        assert_eq!(subsystem.inbox_len(), LOCAL_TRANSPORT_INBOX_CAPACITY);
     }
 }
 

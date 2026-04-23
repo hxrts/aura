@@ -17,6 +17,7 @@ use aura_agent::handlers::InvitationType;
 use aura_agent::{AuraAgent, AuraEffectSystem, EffectContext, SharedTransport};
 use aura_app::ui::workflows::context::default_relational_context;
 use aura_chat::ChatFact;
+use aura_core::effects::transport::{TransportEnvelope, TransportError};
 use aura_core::effects::{
     AmpChannelEffects, ChannelCreateParams, ChannelJoinParams, ChannelSendParams, ExecutionMode,
     PhysicalTimeEffects, TimeEffects, TransportEffects,
@@ -57,6 +58,16 @@ struct PeerObservedMessage {
     message_id: String,
     context: ContextId,
     channel: ChannelId,
+}
+
+async fn send_demo_raw_envelope_for_simulation<E>(
+    effects: &E,
+    envelope: TransportEnvelope,
+) -> Result<(), TransportError>
+where
+    E: TransportEffects + ?Sized,
+{
+    effects.send_envelope(envelope).await
 }
 
 /// Public peer metadata for rich demo seeding in the TUI layer.
@@ -600,7 +611,9 @@ async fn process_peer_transport_messages(
                             receipt: None,
                         };
 
-                        if let Err(e) = effects.send_envelope(response).await {
+                        if let Err(e) =
+                            send_demo_raw_envelope_for_simulation(effects, response).await
+                        {
                             tracing::warn!("{name} failed to send guardian acceptance: {e}");
                         }
                     }
@@ -860,7 +873,9 @@ async fn process_peer_transport_messages(
                             receipt: None,
                         };
 
-                        if let Err(e) = effects.send_envelope(response).await {
+                        if let Err(e) =
+                            send_demo_raw_envelope_for_simulation(effects, response).await
+                        {
                             tracing::warn!(
                                 "{name} failed to send choreography ceremony response: {e}"
                             );
@@ -916,7 +931,9 @@ async fn process_peer_transport_messages(
                             receipt: None,
                         };
 
-                        if let Err(e) = effects.send_envelope(response).await {
+                        if let Err(e) =
+                            send_demo_raw_envelope_for_simulation(effects, response).await
+                        {
                             tracing::warn!(
                                 "{name} failed to send device enrollment acceptance: {e}"
                             );

@@ -18,8 +18,8 @@ use aura_core::AuraError;
 use aura_effects::time::PhysicalTimeHandler;
 use aura_effects::{
     identifiers::{new_authority_id, new_context_id},
-    EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
-    RealSecureStorageHandler,
+    EncryptedStorage, EncryptedStorageConfig, FilesystemFallbackSecureStorageHandler,
+    FilesystemStorageHandler, RealCryptoHandler,
 };
 
 use super::{AccountLoadResult, ACCOUNT_FILENAME, JOURNAL_FILENAME};
@@ -28,12 +28,15 @@ const SELECTED_RUNTIME_IDENTITY_FILENAME: &str = "selected-runtime-identity.json
 const PREPARED_DEVICE_ENROLLMENT_INVITEE_AUTHORITY_FILENAME: &str =
     ".harness-device-enrollment-invitee-authority";
 
-pub(super) type BootstrapStorage =
-    EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>;
+pub(super) type BootstrapStorage = EncryptedStorage<
+    FilesystemStorageHandler,
+    RealCryptoHandler,
+    FilesystemFallbackSecureStorageHandler,
+>;
 
 pub(super) fn open_bootstrap_storage(base_path: &Path) -> BootstrapStorage {
     let crypto = Arc::new(RealCryptoHandler::new());
-    let secure = Arc::new(RealSecureStorageHandler::with_base_path(
+    let secure = Arc::new(FilesystemFallbackSecureStorageHandler::with_base_path(
         base_path.to_path_buf(),
     ));
     EncryptedStorage::new(

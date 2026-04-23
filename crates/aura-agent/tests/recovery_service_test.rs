@@ -5,14 +5,19 @@
 
 use std::future::Future;
 
+use aura_agent::core::config::StorageConfig;
 use aura_agent::core::{AgentConfig, AuthorityContext};
 use aura_agent::handlers::RecoveryHandler;
 use aura_agent::{
-    AgentBuilder, AuraEffectSystem, AuthorityId, EffectContext, ExecutionMode, GuardianApproval,
-    RecoveryState,
+    recovery_guardian_public_key_storage_key, AgentBuilder, AuraEffectSystem, AuthorityId,
+    EffectContext, ExecutionMode, GuardianApproval, RecoveryState,
 };
+use aura_core::effects::{CryptoCoreEffects, StorageCoreEffects};
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{ContextId, DeviceId, RecoveryId};
+use aura_recovery::recovery_approval::{
+    recovery_operation_hash, RecoveryApprovalTranscript, RecoveryApprovalTranscriptPayload,
+};
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {
@@ -24,6 +29,18 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
     )
 }
 
+fn isolated_test_config() -> (tempfile::TempDir, AgentConfig) {
+    let temp = tempfile::tempdir().unwrap();
+    let config = AgentConfig {
+        storage: StorageConfig {
+            base_path: temp.path().join("aura"),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    (temp, config)
+}
+
 async fn run_in_local_set<F>(future: F) -> F::Output
 where
     F: Future,
@@ -31,12 +48,51 @@ where
     tokio::task::LocalSet::new().run_until(future).await
 }
 
+async fn signed_test_approval(
+    effects: &AuraEffectSystem,
+    request: &aura_agent::RecoveryRequest,
+    guardian_id: AuthorityId,
+    approved_at: u64,
+) -> GuardianApproval {
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    effects
+        .store(
+            &recovery_guardian_public_key_storage_key(guardian_id),
+            public_key,
+        )
+        .await
+        .unwrap();
+    let operation_hash = recovery_operation_hash(&request.operation).unwrap();
+    let transcript = RecoveryApprovalTranscript::new(RecoveryApprovalTranscriptPayload {
+        recovery_id: request.recovery_id.clone(),
+        account_authority: request.account_authority,
+        operation_hash,
+        prestate_hash: request.prestate_hash,
+        approved: true,
+        approved_at_ms: approved_at,
+        guardian_id,
+    });
+    let signature = aura_signature::sign_ed25519_transcript(effects, &transcript, &private_key)
+        .await
+        .unwrap();
+    GuardianApproval {
+        recovery_id: request.recovery_id.clone(),
+        guardian_id,
+        signature,
+        share_data: None,
+        approved_at,
+        prestate_hash: request.prestate_hash,
+    }
+}
+
 #[tokio::test]
 async fn test_recovery_service_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     run_in_local_set(async move {
         let authority_id = AuthorityId::new_from_entropy([90u8; 32]);
         let ctx = test_context(authority_id);
+        let (_temp, config) = isolated_test_config();
         let agent = AgentBuilder::new()
+            .with_config(config)
             .with_authority(authority_id)
             .build_testing_async(&ctx)
             .await?;
@@ -56,7 +112,9 @@ async fn test_add_device_recovery_via_agent() -> Result<(), Box<dyn std::error::
     run_in_local_set(async move {
         let authority_id = AuthorityId::new_from_entropy([91u8; 32]);
         let ctx = test_context(authority_id);
+        let (_temp, config) = isolated_test_config();
         let agent = AgentBuilder::new()
+            .with_config(config)
             .with_authority(authority_id)
             .build_testing_async(&ctx)
             .await?;
@@ -90,7 +148,9 @@ async fn test_remove_device_recovery_via_agent() -> Result<(), Box<dyn std::erro
     run_in_local_set(async move {
         let authority_id = AuthorityId::new_from_entropy([94u8; 32]);
         let ctx = test_context(authority_id);
+        let (_temp, config) = isolated_test_config();
         let agent = AgentBuilder::new()
+            .with_config(config)
             .with_authority(authority_id)
             .build_testing_async(&ctx)
             .await?;
@@ -114,7 +174,9 @@ async fn test_replace_tree_recovery_via_agent() -> Result<(), Box<dyn std::error
     run_in_local_set(async move {
         let authority_id = AuthorityId::new_from_entropy([96u8; 32]);
         let ctx = test_context(authority_id);
+        let (_temp, config) = isolated_test_config();
         let agent = AgentBuilder::new()
+            .with_config(config)
             .with_authority(authority_id)
             .build_testing_async(&ctx)
             .await?;
@@ -149,7 +211,9 @@ async fn test_update_guardians_recovery_via_agent() -> Result<(), Box<dyn std::e
     run_in_local_set(async move {
         let authority_id = AuthorityId::new_from_entropy([100u8; 32]);
         let ctx = test_context(authority_id);
+        let (_temp, config) = isolated_test_config();
         let agent = AgentBuilder::new()
+            .with_config(config)
             .with_authority(authority_id)
             .build_testing_async(&ctx)
             .await?;
@@ -184,7 +248,9 @@ async fn test_full_recovery_flow_via_agent() -> Result<(), Box<dyn std::error::E
     run_in_local_set(async move {
         let authority_id = AuthorityId::new_from_entropy([104u8; 32]);
         let ctx = test_context(authority_id);
+        let (_temp, config) = isolated_test_config();
         let agent = AgentBuilder::new()
+            .with_config(config)
             .with_authority(authority_id)
             .build_testing_async(&ctx)
             .await?;
@@ -208,13 +274,8 @@ async fn test_full_recovery_flow_via_agent() -> Result<(), Box<dyn std::error::E
         assert!(recovery.is_pending(&request.recovery_id).await);
 
         // Submit approval
-        let approval = GuardianApproval {
-            recovery_id: request.recovery_id.clone(),
-            guardian_id: guardians[0],
-            signature: vec![0u8; 64],
-            share_data: None,
-            approved_at: 12345,
-        };
+        let effects = agent.runtime().effects();
+        let approval = signed_test_approval(&effects, &request, guardians[0], 12345).await;
         recovery.submit_approval(approval).await?;
 
         // Complete
@@ -230,7 +291,9 @@ async fn test_cancel_recovery_via_agent() -> Result<(), Box<dyn std::error::Erro
     run_in_local_set(async move {
         let authority_id = AuthorityId::new_from_entropy([106u8; 32]);
         let ctx = test_context(authority_id);
+        let (_temp, config) = isolated_test_config();
         let agent = AgentBuilder::new()
+            .with_config(config)
             .with_authority(authority_id)
             .build_testing_async(&ctx)
             .await?;
@@ -268,7 +331,9 @@ async fn test_list_active_via_agent() -> Result<(), Box<dyn std::error::Error>> 
     run_in_local_set(async move {
         let authority_id = AuthorityId::new_from_entropy([108u8; 32]);
         let ctx = test_context(authority_id);
+        let (_temp, config) = isolated_test_config();
         let agent = AgentBuilder::new()
+            .with_config(config)
             .with_authority(authority_id)
             .build_testing_async(&ctx)
             .await?;
@@ -312,7 +377,9 @@ async fn test_get_state_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     run_in_local_set(async move {
         let authority_id = AuthorityId::new_from_entropy([111u8; 32]);
         let ctx = test_context(authority_id);
+        let (_temp, config) = isolated_test_config();
         let agent = AgentBuilder::new()
+            .with_config(config)
             .with_authority(authority_id)
             .build_testing_async(&ctx)
             .await?;

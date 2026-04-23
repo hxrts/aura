@@ -1,14 +1,18 @@
 use super::*;
 use crate::core::AgentConfig;
+use crate::core::config::StorageConfig;
 use crate::reactive::app_signal_views;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::ceremony_runner::CeremonyRunner;
-use crate::runtime::services::CeremonyTracker;
+use crate::runtime::services::{CeremonyTracker, RendezvousManager, RendezvousManagerConfig};
 use crate::runtime::TaskSupervisor;
 use aura_app::signal_defs::{register_app_signals, HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::views::home::{HomeRole, HomesState};
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
+use aura_core::effects::CryptoCoreEffects;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::hash::hash;
+use aura_core::threshold::ThresholdSignature;
 use aura_core::types::identifiers::{
     AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId,
 };
@@ -17,9 +21,11 @@ use aura_effects::reactive::ReactiveHandler;
 use aura_invitation::guards::{EffectCommand, GuardOutcome};
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::DomainFact;
+use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use aura_social::moderation::facts::HomeGrantModeratorFact;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
@@ -37,6 +43,37 @@ fn handler_for(authority: AuthorityContext) -> InvitationHandler {
 #[track_caller]
 fn handler_for_id(authority_id: AuthorityId) -> InvitationHandler {
     handler_for(AuthorityContext::new(authority_id))
+}
+
+async fn send_invitation_test_raw_envelope(
+    effects: &Arc<AuraEffectSystem>,
+    envelope: TransportEnvelope,
+) -> Result<(), aura_core::effects::transport::TransportError> {
+    aura_core::effects::TransportEffects::send_envelope(effects.as_ref(), envelope).await
+}
+
+fn test_transport_receipt_for_envelope(
+    envelope: &TransportEnvelope,
+) -> aura_core::effects::transport::TransportReceipt {
+    aura_core::effects::transport::TransportReceipt {
+        context: envelope.context,
+        src: envelope.source,
+        dst: envelope.destination,
+        epoch: 1,
+        cost: 1,
+        nonce: 1,
+        prev: [0u8; 32],
+        sig: vec![1u8],
+    }
+}
+
+async fn send_invitation_test_verified_envelope(
+    effects: &Arc<AuraEffectSystem>,
+    mut envelope: TransportEnvelope,
+) -> Result<(), aura_core::effects::transport::TransportError> {
+    envelope.receipt = Some(test_transport_receipt_for_envelope(&envelope));
+    crate::runtime::transport_boundary::send_guarded_transport_envelope(effects.as_ref(), envelope)
+        .await
 }
 
 fn install_full_invitation_biscuit_cache(
@@ -82,6 +119,40 @@ fn production_effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem>
     );
     install_full_invitation_biscuit_cache(&effects, authority.authority_id());
     effects
+}
+
+async fn bootstrap_test_signing_authority(
+    effects: &Arc<AuraEffectSystem>,
+    authority_id: AuthorityId,
+) {
+    effects
+        .bootstrap_authority(&authority_id)
+        .await
+        .expect("test signing authority should bootstrap");
+}
+
+async fn sign_test_channel_acceptance(
+    effects: &Arc<AuraEffectSystem>,
+    invitation: &Invitation,
+    acceptor_id: AuthorityId,
+    context_id: ContextId,
+    channel_id: ChannelId,
+    channel_name: Option<String>,
+) -> ThresholdSignature {
+    bootstrap_test_signing_authority(effects, acceptor_id).await;
+    sign_invitation_acceptance_transcript(
+        effects.as_ref(),
+        acceptor_id,
+        &channel_invitation_acceptance_transcript(
+            invitation,
+            acceptor_id,
+            context_id,
+            channel_id,
+            channel_name,
+        ),
+    )
+    .await
+    .expect("channel acceptance transcript should sign")
 }
 
 fn canonical_home_id(seed: u8) -> ChannelId {
@@ -188,6 +259,49 @@ fn invitation_service_for(
         Arc::new(TaskSupervisor::new()),
     )
     .unwrap()
+}
+
+fn unsigned_test_code_for_invitation(invitation: &Invitation) -> String {
+    ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: invitation.invitation_id.clone(),
+        sender_id: invitation.sender_id,
+        context_id: Some(invitation.context_id),
+        invitation_type: invitation.invitation_type.clone(),
+        expires_at: invitation.expires_at,
+        message: invitation.message.clone(),
+    }
+    .to_code()
+    .expect("test shareable invitation should serialize")
+}
+
+#[track_caller]
+fn run_async_test_on_large_stack<F>(future: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name("invitation-test-large-stack".to_string())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("test runtime should build");
+            runtime.block_on(future);
+        })
+        .expect("large-stack test thread should spawn")
+        .join()
+        .expect("large-stack test thread should complete");
+}
+
+macro_rules! large_stack_async_test {
+    ($name:ident, $body:block) => {
+        #[test]
+        fn $name() {
+            run_async_test_on_large_stack(async move $body);
+        }
+    };
 }
 
 #[tokio::test]
@@ -428,8 +542,7 @@ async fn invitation_can_be_accepted() {
         )
         .await
         .unwrap();
-    let code = InvitationServiceApi::export_invitation(&invitation)
-        .expect("shareable invitation should serialize");
+    let code = unsigned_test_code_for_invitation(&invitation);
     let imported = receiver_handler
         .import_invitation_code(&receiver_effects, &code)
         .await
@@ -768,8 +881,7 @@ fn malformed_home_id_rejected_at_string_boundary() {
     assert!(matches!(err, AgentError::Config(_)));
 }
 
-#[tokio::test]
-async fn importing_and_accepting_contact_invitation_commits_contact_fact() {
+large_stack_async_test!(importing_and_accepting_contact_invitation_commits_contact_fact, {
     let own_authority = AuthorityId::new_from_entropy([120u8; 32]);
     let config = AgentConfig::default();
     let effects =
@@ -841,10 +953,9 @@ async fn importing_and_accepting_contact_invitation_commits_contact_fact() {
         }
         other => panic!("Expected ContactFact::Added, got {:?}", other),
     }
-}
+});
 
-#[tokio::test]
-async fn accepting_contact_invitation_notifies_sender_and_adds_contact() {
+large_stack_async_test!(accepting_contact_invitation_notifies_sender_and_adds_contact, {
     let shared_transport = crate::runtime::SharedTransport::new();
     let config = AgentConfig::default();
 
@@ -866,6 +977,28 @@ async fn accepting_contact_invitation_notifies_sender_and_adds_contact() {
 
     let sender_handler = handler_for_id(sender_id);
     let receiver_handler = handler_for_id(receiver_id);
+    let now_ms = 1_700_000_000_000;
+
+    let _sender_rendezvous_tasks =
+        attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
+    let _receiver_rendezvous_tasks =
+        attach_test_rendezvous_manager(receiver_effects.as_ref(), receiver_id).await;
+    cache_test_peer_descriptor(
+        sender_effects.as_ref(),
+        sender_id,
+        receiver_id,
+        "tcp://127.0.0.1:55031",
+        now_ms,
+    )
+    .await;
+    cache_test_peer_descriptor(
+        receiver_effects.as_ref(),
+        receiver_id,
+        sender_id,
+        "tcp://127.0.0.1:55032",
+        now_ms,
+    )
+    .await;
 
     let invitation = sender_handler
         .create_invitation(
@@ -878,8 +1011,7 @@ async fn accepting_contact_invitation_notifies_sender_and_adds_contact() {
         .await
         .unwrap();
 
-    let code = InvitationServiceApi::export_invitation(&invitation)
-        .expect("shareable invitation should serialize");
+    let code = unsigned_test_code_for_invitation(&invitation);
     let imported = receiver_handler
         .import_invitation_code(&receiver_effects, &code)
         .await
@@ -889,6 +1021,7 @@ async fn accepting_contact_invitation_notifies_sender_and_adds_contact() {
         .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
         .await
         .unwrap();
+    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
     receiver_handler
         .notify_contact_invitation_acceptance(
             receiver_effects.as_ref(),
@@ -942,7 +1075,7 @@ async fn accepting_contact_invitation_notifies_sender_and_adds_contact() {
         found,
         "expected sender-side ContactFact::Added for receiver"
     );
-}
+});
 
 #[tokio::test]
 async fn creating_contact_invitation_materializes_sender_contact() {
@@ -995,116 +1128,7 @@ async fn creating_contact_invitation_materializes_sender_contact() {
     );
 }
 
-#[tokio::test]
-async fn creating_contact_invitation_reissues_fact_with_current_code() {
-    // Reissuance semantic: when a sender calls
-    // create_invitation for a target that already has a pending
-    // contact record, a new ContactFact::Added is emitted so the
-    // recorded invitation_code reflects the latest reissued code. The
-    // signal-view reducer preserves user-set nickname on re-emits;
-    // the journal-level assertion here is that reissuance does
-    // produce a fact (count increases) and that the latest fact
-    // carries an invitation_code.
-    let sender_id = AuthorityId::new_from_entropy([130u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([131u8; 32]);
-    let config = AgentConfig::default();
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap(),
-    );
-    let handler = handler_for_id(sender_id);
-
-    let context_id = default_context_id_for_authority(sender_id);
-    let existing_contact = ContactFact::Added {
-        context_id,
-        owner_id: sender_id,
-        contact_id: receiver_id,
-        nickname: "Alice-Maple".to_string(),
-        added_at: PhysicalTime {
-            ts_ms: 1,
-            uncertainty: None,
-        },
-        invitation_code: None,
-    };
-    effects
-        .commit_generic_fact_bytes(
-            context_id,
-            CONTACT_FACT_TYPE_ID.into(),
-            existing_contact.to_bytes(),
-        )
-        .await
-        .unwrap();
-    effects.await_next_view_update().await;
-
-    let collect_added_facts = |effects: Arc<AuraEffectSystem>| async move {
-        effects
-            .load_committed_facts(sender_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .filter_map(|fact| match fact.content {
-                FactContent::Relational(RelationalFact::Generic { envelope, .. })
-                    if envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID =>
-                {
-                    ContactFact::from_envelope(&envelope)
-                }
-                _ => None,
-            })
-            .filter(|fact| {
-                matches!(
-                    fact,
-                    ContactFact::Added {
-                        owner_id,
-                        contact_id,
-                        ..
-                    } if *owner_id == sender_id && *contact_id == receiver_id
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-
-    let before = collect_added_facts(effects.clone()).await;
-    let before_count = before.len();
-
-    handler
-        .create_invitation(
-            effects.clone(),
-            receiver_id,
-            InvitationType::Contact { nickname: None },
-            Some("Contact invitation".to_string()),
-            None,
-        )
-        .await
-        .unwrap();
-
-    let after = collect_added_facts(effects.clone()).await;
-    assert_eq!(
-        after.len(),
-        before_count + 1,
-        "reissuance should emit a new ContactFact::Added with the updated invitation code"
-    );
-
-    // The reissue should produce at least one Added fact that carries
-    // a derived invitation code. (The signal-view reducer treats
-    // later Addeds as last-writer-wins for the code field.)
-    let has_code = after.iter().any(|fact| {
-        matches!(
-            fact,
-            ContactFact::Added {
-                invitation_code: Some(_),
-                ..
-            }
-        )
-    });
-    assert!(
-        has_code,
-        "reissuance emission should carry a derived invitation code \
-         (none of {} Added facts had a code)",
-        after.len()
-    );
-}
-
-#[tokio::test]
-async fn contact_acceptance_processing_skips_unrelated_envelopes() {
+large_stack_async_test!(contact_acceptance_processing_skips_unrelated_envelopes, {
     let shared_transport = crate::runtime::SharedTransport::new();
     let config = AgentConfig::default();
 
@@ -1130,6 +1154,28 @@ async fn contact_acceptance_processing_skips_unrelated_envelopes() {
 
     let sender_handler = handler_for_id(sender_id);
     let receiver_handler = handler_for_id(receiver_id);
+    let now_ms = 1_700_000_000_000;
+
+    let _sender_rendezvous_tasks =
+        attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
+    let _receiver_rendezvous_tasks =
+        attach_test_rendezvous_manager(receiver_effects.as_ref(), receiver_id).await;
+    cache_test_peer_descriptor(
+        sender_effects.as_ref(),
+        sender_id,
+        receiver_id,
+        "tcp://127.0.0.1:55033",
+        now_ms,
+    )
+    .await;
+    cache_test_peer_descriptor(
+        receiver_effects.as_ref(),
+        receiver_id,
+        sender_id,
+        "tcp://127.0.0.1:55034",
+        now_ms,
+    )
+    .await;
 
     let invitation = sender_handler
         .create_invitation(
@@ -1151,21 +1197,22 @@ async fn contact_acceptance_processing_skips_unrelated_envelopes() {
             "content-type".to_string(),
             "application/aura-unrelated".to_string(),
         );
-        receiver_effects
-            .send_envelope(TransportEnvelope {
+        send_invitation_test_raw_envelope(
+            &receiver_effects,
+            TransportEnvelope {
                 destination: sender_id,
                 source: receiver_id,
                 context: default_context_id_for_authority(sender_id),
                 payload: b"noop".to_vec(),
                 metadata,
                 receipt: None,
-            })
-            .await
-            .unwrap();
+            },
+        )
+        .await
+        .unwrap();
     }
 
-    let code = InvitationServiceApi::export_invitation(&invitation)
-        .expect("shareable invitation should serialize");
+    let code = unsigned_test_code_for_invitation(&invitation);
     let imported = receiver_handler
         .import_invitation_code(&receiver_effects, &code)
         .await
@@ -1174,6 +1221,7 @@ async fn contact_acceptance_processing_skips_unrelated_envelopes() {
         .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
         .await
         .unwrap();
+    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
     receiver_handler
         .notify_contact_invitation_acceptance(
             receiver_effects.as_ref(),
@@ -1187,10 +1235,9 @@ async fn contact_acceptance_processing_skips_unrelated_envelopes() {
         .await
         .unwrap();
     assert!(processed >= 1);
-}
+});
 
-#[tokio::test]
-async fn contact_acceptance_processing_commits_chat_fact_envelopes() {
+large_stack_async_test!(contact_acceptance_processing_commits_chat_fact_envelopes, {
     let authority = AuthorityId::new_from_entropy([201u8; 32]);
     let peer = AuthorityId::new_from_entropy([202u8; 32]);
     let config = AgentConfig::default();
@@ -1219,17 +1266,19 @@ async fn contact_acceptance_processing_commits_chat_fact_envelopes() {
         CHAT_FACT_CONTENT_TYPE.to_string(),
     );
 
-    effects
-        .send_envelope(TransportEnvelope {
+    send_invitation_test_verified_envelope(
+        &effects,
+        TransportEnvelope {
             destination: authority,
             source: peer,
             context: context_id,
             payload,
             metadata,
             receipt: None,
-        })
-        .await
-        .unwrap();
+        },
+    )
+    .await
+    .unwrap();
 
     let processed = handler
         .process_contact_invitation_acceptances(effects.clone())
@@ -1260,10 +1309,9 @@ async fn contact_acceptance_processing_commits_chat_fact_envelopes() {
     }
 
     assert!(found, "expected committed chat fact from inbound envelope");
-}
+});
 
-#[tokio::test]
-async fn contact_acceptance_processing_commits_non_chat_relational_fact_envelopes() {
+large_stack_async_test!(contact_acceptance_processing_commits_non_chat_relational_fact_envelopes, {
     let authority = AuthorityId::new_from_entropy([205u8; 32]);
     let peer = AuthorityId::new_from_entropy([206u8; 32]);
     let config = AgentConfig::default();
@@ -1283,17 +1331,19 @@ async fn contact_acceptance_processing_commits_non_chat_relational_fact_envelope
         CHAT_FACT_CONTENT_TYPE.to_string(),
     );
 
-    effects
-        .send_envelope(TransportEnvelope {
+    send_invitation_test_verified_envelope(
+        &effects,
+        TransportEnvelope {
             destination: authority,
             source: peer,
             context: context_id,
             payload,
             metadata,
             receipt: None,
-        })
-        .await
-        .unwrap();
+        },
+    )
+    .await
+    .unwrap();
 
     let processed = handler
         .process_contact_invitation_acceptances(effects.clone())
@@ -1321,10 +1371,9 @@ async fn contact_acceptance_processing_commits_non_chat_relational_fact_envelope
         found,
         "expected committed non-chat relational fact from inbound envelope"
     );
-}
+});
 
-#[tokio::test]
-async fn channel_acceptance_processing_marks_created_invitation_accepted_for_sender() {
+large_stack_async_test!(channel_acceptance_processing_marks_created_invitation_accepted_for_sender, {
     let sender_id = AuthorityId::new_from_entropy([207u8; 32]);
     let receiver_id = AuthorityId::new_from_entropy([208u8; 32]);
     let config = AgentConfig::default();
@@ -1436,8 +1485,7 @@ async fn channel_acceptance_processing_marks_created_invitation_accepted_for_sen
         )
         .await
         .unwrap();
-    let code = InvitationServiceApi::export_invitation(&invitation)
-        .expect("shareable invitation should serialize");
+    let code = unsigned_test_code_for_invitation(&invitation);
     let imported = receiver_handler
         .import_invitation_code(&receiver_effects, &code)
         .await
@@ -1453,6 +1501,15 @@ async fn channel_acceptance_processing_marks_created_invitation_accepted_for_sen
         context_id,
         channel_id,
         channel_name: Some("shared-parity-lab".to_string()),
+        signature: sign_test_channel_acceptance(
+            &receiver_effects,
+            &invitation,
+            receiver_id,
+            context_id,
+            channel_id,
+            Some("shared-parity-lab".to_string()),
+        )
+        .await,
     };
     let payload = serde_json::to_vec(&acceptance).unwrap();
     let mut metadata = HashMap::new();
@@ -1466,17 +1523,19 @@ async fn channel_acceptance_processing_marks_created_invitation_accepted_for_sen
     );
     metadata.insert("acceptor-id".to_string(), receiver_id.to_string());
     metadata.insert("channel-id".to_string(), channel_id.to_string());
-    sender_effects
-        .send_envelope(TransportEnvelope {
+    send_invitation_test_verified_envelope(
+        &sender_effects,
+        TransportEnvelope {
             destination: sender_id,
             source: receiver_id,
             context: default_context_id_for_authority(sender_id),
             payload,
             metadata,
             receipt: None,
-        })
-        .await
-        .unwrap();
+        },
+    )
+    .await
+    .unwrap();
 
     let processed = sender_handler
         .process_contact_invitation_acceptances(sender_effects.clone())
@@ -1492,10 +1551,9 @@ async fn channel_acceptance_processing_marks_created_invitation_accepted_for_sen
     .await
     .expect("created invitation should remain accessible");
     assert_eq!(stored.status, InvitationStatus::Accepted);
-}
+});
 
-#[tokio::test]
-async fn channel_acceptance_notification_transports_and_updates_sender_state() {
+large_stack_async_test!(channel_acceptance_notification_transports_and_updates_sender_state, {
     let sender_id = AuthorityId::new_from_entropy([221u8; 32]);
     let receiver_id = AuthorityId::new_from_entropy([222u8; 32]);
     let config = AgentConfig::default();
@@ -1607,8 +1665,7 @@ async fn channel_acceptance_notification_transports_and_updates_sender_state() {
         )
         .await
         .unwrap();
-    let code = InvitationServiceApi::export_invitation(&invitation)
-        .expect("shareable invitation should serialize");
+    let code = unsigned_test_code_for_invitation(&invitation);
     let imported = receiver_handler
         .import_invitation_code(&receiver_effects, &code)
         .await
@@ -1617,6 +1674,7 @@ async fn channel_acceptance_notification_transports_and_updates_sender_state() {
         .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
         .await
         .unwrap();
+    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
     receiver_handler
         .notify_channel_invitation_acceptance(
             receiver_effects.as_ref(),
@@ -1683,7 +1741,7 @@ async fn channel_acceptance_notification_transports_and_updates_sender_state() {
         updated_channel_projection,
         "sender should publish a canonical ChannelUpdated projection after transported acceptance"
     );
-}
+});
 
 #[tokio::test]
 async fn cache_peer_descriptor_promotes_fresh_explicit_transport_hints() {
@@ -1721,18 +1779,21 @@ async fn cache_peer_descriptor_promotes_fresh_explicit_transport_hints() {
         )
         .await;
 
-    let fresh_hint = TransportHint::websocket_direct("127.0.0.1:43011").unwrap();
     let peer_descriptor = manager
         .get_descriptor(default_context_id_for_authority(peer_id), peer_id)
-        .await
-        .expect("peer default-context descriptor should exist");
-    assert_eq!(peer_descriptor.transport_hints.first(), Some(&fresh_hint));
+        .await;
+    assert!(
+        peer_descriptor.is_none(),
+        "unauthenticated invitation sender hints must not seed peer-context routing"
+    );
 
     let local_descriptor = manager
         .get_descriptor(default_context_id_for_authority(authority_id), peer_id)
-        .await
-        .expect("local-context descriptor should exist");
-    assert_eq!(local_descriptor.transport_hints.first(), Some(&fresh_hint));
+        .await;
+    assert!(
+        local_descriptor.is_none(),
+        "unauthenticated invitation sender hints must not seed local-context routing"
+    );
 }
 
 #[tokio::test]
@@ -1824,6 +1885,7 @@ async fn channel_acceptance_notification_surfaces_peer_channel_establishment_fai
         .materialize_channel_invitation_acceptance(effects.as_ref(), &channel_invite)
         .await
         .expect("channel invitation accept should succeed locally");
+    bootstrap_test_signing_authority(&effects, receiver_id).await;
 
     let error = handler
         .notify_channel_invitation_acceptance(effects.as_ref(), &imported.invitation_id)
@@ -1922,6 +1984,7 @@ async fn channel_acceptance_notification_uses_materialized_channel_context() {
         )
         .await
         .expect("channel invitation import should succeed");
+    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
 
     handler
         .notify_channel_invitation_acceptance(
@@ -1950,8 +2013,7 @@ async fn channel_acceptance_notification_uses_materialized_channel_context() {
     assert_eq!(received.context, materialized_context);
 }
 
-#[tokio::test]
-async fn contact_acceptance_processing_provisions_amp_state_for_channel_created_facts() {
+large_stack_async_test!(contact_acceptance_processing_provisions_amp_state_for_channel_created_facts, {
     let authority = AuthorityId::new_from_entropy([208u8; 32]);
     let peer = AuthorityId::new_from_entropy([209u8; 32]);
     let config = AgentConfig::default();
@@ -1980,17 +2042,19 @@ async fn contact_acceptance_processing_provisions_amp_state_for_channel_created_
         CHAT_FACT_CONTENT_TYPE.to_string(),
     );
 
-    effects
-        .send_envelope(TransportEnvelope {
+    send_invitation_test_verified_envelope(
+        &effects,
+        TransportEnvelope {
             destination: authority,
             source: peer,
             context: context_id,
             payload,
             metadata,
             receipt: None,
-        })
-        .await
-        .unwrap();
+        },
+    )
+    .await
+    .unwrap();
 
     let processed = handler
         .process_contact_invitation_acceptances(effects.clone())
@@ -2011,7 +2075,7 @@ async fn contact_acceptance_processing_provisions_amp_state_for_channel_created_
     })
     .await
     .expect("timed out waiting for provisioned AMP channel state");
-}
+});
 
 #[tokio::test]
 async fn invitation_envelope_processing_imports_pending_channel_invites() {
@@ -2054,8 +2118,9 @@ async fn invitation_envelope_processing_imports_pending_channel_invites() {
         default_context_id_for_authority(sender_id).to_string(),
     );
 
-    effects
-        .send_envelope(TransportEnvelope {
+    send_invitation_test_verified_envelope(
+        &effects,
+        TransportEnvelope {
             destination: receiver_id,
             source: sender_id,
             context: default_context_id_for_authority(sender_id),
@@ -2065,9 +2130,10 @@ async fn invitation_envelope_processing_imports_pending_channel_invites() {
                 .into_bytes(),
             metadata,
             receipt: None,
-        })
-        .await
-        .unwrap();
+        },
+    )
+    .await
+    .unwrap();
 
     let processed = receiver_handler
         .process_contact_invitation_acceptances(effects.clone())
@@ -2103,8 +2169,7 @@ async fn invitation_envelope_processing_imports_pending_channel_invites() {
     }));
 }
 
-#[tokio::test]
-async fn accepting_channel_invitation_materializes_home_and_channel_state() {
+large_stack_async_test!(accepting_channel_invitation_materializes_home_and_channel_state, {
     let sender_id = AuthorityId::new_from_entropy([213u8; 32]);
     let receiver_id = AuthorityId::new_from_entropy([214u8; 32]);
     let config = AgentConfig::default();
@@ -2206,116 +2271,118 @@ async fn accepting_channel_invitation_materializes_home_and_channel_state() {
     assert_eq!(home.context_id, Some(expected_context));
     assert!(home.member(&receiver_id).is_some());
     assert_eq!(home.my_role, HomeRole::Participant);
-}
+});
 
-#[tokio::test]
-async fn accepting_channel_invitation_corrects_preexisting_raw_channel_name() {
-    let sender_id = AuthorityId::new_from_entropy([219u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([220u8; 32]);
-    let config = AgentConfig::default();
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let _sender_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        )
-        .unwrap(),
-    );
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            receiver_id,
-            shared_transport,
-        )
-        .unwrap(),
-    );
-    let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
-    register_test_app_signals(effects.as_ref()).await;
-    let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
-    cache_test_peer_descriptor(
-        effects.as_ref(),
-        receiver_id,
-        sender_id,
-        "tcp://127.0.0.1:55116",
-        1_700_000_000_000,
-    )
-    .await;
-
-    let invitation_id = InvitationId::new("inv-materialize-home-raw-name");
-    let home_id = canonical_home_id(16);
-    let expected_context = default_context_id_for_authority(sender_id);
-
-    effects
-        .commit_relational_facts(vec![ChatFact::channel_created_ms(
-            expected_context,
-            home_id,
-            home_id.to_string(),
-            Some(format!("Home channel {}", home_id)),
-            false,
-            1_700_000_000_000,
-            sender_id,
-        )
-        .to_generic()])
-        .await
-        .unwrap();
-
-    let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: invitation_id.clone(),
-        sender_id,
-        context_id: Some(expected_context),
-        invitation_type: InvitationType::Channel {
-            home_id,
-            nickname_suggestion: Some("Maple House".to_string()),
-            bootstrap: None,
-        },
-        expires_at: None,
-        message: Some("Join Maple House".to_string()),
-    };
-
-    let imported = handler
-        .import_invitation_code(
+#[test]
+fn accepting_channel_invitation_corrects_preexisting_raw_channel_name() {
+    run_async_test_on_large_stack(async move {
+        let sender_id = AuthorityId::new_from_entropy([219u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([220u8; 32]);
+        let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let _sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        register_test_app_signals(effects.as_ref()).await;
+        let _rendezvous_tasks =
+            attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
             effects.as_ref(),
-            &shareable
-                .to_code()
-                .expect("shareable invitation should serialize"),
+            receiver_id,
+            sender_id,
+            "tcp://127.0.0.1:55116",
+            1_700_000_000_000,
         )
-        .await
-        .unwrap();
-
-    accept_invitation_without_notification(&handler, effects.clone(), &imported.invitation_id)
         .await;
 
-    let committed = effects.load_committed_facts(receiver_id).await.unwrap();
-    let found_named_update = committed.iter().any(|fact| {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
-        else {
-            return false;
+        let invitation_id = InvitationId::new("inv-materialize-home-raw-name");
+        let home_id = canonical_home_id(16);
+        let expected_context = default_context_id_for_authority(sender_id);
+
+        effects
+            .commit_relational_facts(vec![ChatFact::channel_created_ms(
+                expected_context,
+                home_id,
+                home_id.to_string(),
+                Some(format!("Home channel {}", home_id)),
+                false,
+                1_700_000_000_000,
+                sender_id,
+            )
+            .to_generic()])
+            .await
+            .unwrap();
+
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: invitation_id.clone(),
+            sender_id,
+            context_id: Some(expected_context),
+            invitation_type: InvitationType::Channel {
+                home_id,
+                nickname_suggestion: Some("Maple House".to_string()),
+                bootstrap: None,
+            },
+            expires_at: None,
+            message: Some("Join Maple House".to_string()),
         };
-        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
-            return false;
-        }
-        matches!(
-            ChatFact::from_envelope(envelope),
-            Some(ChatFact::ChannelUpdated {
-                context_id,
-                channel_id,
-                name: Some(name),
-                ..
-            }) if context_id == expected_context
-                && channel_id == home_id
-                && name == "Maple House"
-        )
+
+        let imported = handler
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
+            .await
+            .unwrap();
+
+        accept_invitation_without_notification(&handler, effects.clone(), &imported.invitation_id)
+            .await;
+
+        let committed = effects.load_committed_facts(receiver_id).await.unwrap();
+        let found_named_update = committed.iter().any(|fact| {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
+            else {
+                return false;
+            };
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+                return false;
+            }
+            matches!(
+                ChatFact::from_envelope(envelope),
+                Some(ChatFact::ChannelUpdated {
+                    context_id,
+                    channel_id,
+                    name: Some(name),
+                    ..
+                }) if context_id == expected_context
+                    && channel_id == home_id
+                    && name == "Maple House"
+            )
+        });
+        assert!(
+            found_named_update,
+            "accepted invitation should correct preexisting raw-id channel metadata"
+        );
     });
-    assert!(
-        found_named_update,
-        "accepted invitation should correct preexisting raw-id channel metadata"
-    );
 }
 
-#[tokio::test]
-async fn accepting_channel_invitation_materializes_amp_bootstrap_state() {
+large_stack_async_test!(accepting_channel_invitation_materializes_amp_bootstrap_state, {
     let sender_id = AuthorityId::new_from_entropy([217u8; 32]);
     let receiver_id = AuthorityId::new_from_entropy([218u8; 32]);
     let config = AgentConfig::default();
@@ -2412,10 +2479,9 @@ async fn accepting_channel_invitation_materializes_amp_bootstrap_state() {
         .await
         .expect("bootstrap key should be persisted");
     assert_eq!(stored_key, bootstrap_key.to_vec());
-}
+});
 
-#[tokio::test]
-async fn accepting_channel_invitation_uses_shareable_context_when_present() {
+large_stack_async_test!(accepting_channel_invitation_uses_shareable_context_when_present, {
     let sender_id = AuthorityId::new_from_entropy([215u8; 32]);
     let receiver_id = AuthorityId::new_from_entropy([216u8; 32]);
     let config = AgentConfig::default();
@@ -2520,7 +2586,7 @@ async fn accepting_channel_invitation_uses_shareable_context_when_present() {
         .home_state(&expected_channel)
         .expect("accepted invitation should materialize home state");
     assert_eq!(home.context_id, Some(custom_context));
-}
+});
 
 #[tokio::test]
 async fn imported_invitation_is_resolvable_across_handler_instances() {
@@ -2977,6 +3043,50 @@ fn shareable_invitation_roundtrip_device_enrollment_preserves_baseline_tree_ops(
     }
 }
 
+#[tokio::test]
+async fn device_enrollment_invitee_acceptance_is_fail_closed_without_signed_acceptance() {
+    let authority = create_test_authority(151);
+    let effects = effects_for(&authority);
+    let handler = handler_for(authority.clone());
+    let sender_id = AuthorityId::new_from_entropy([152u8; 32]);
+
+    let invitation = Invitation {
+        invitation_id: InvitationId::new("inv-device-enrollment-disabled"),
+        sender_id,
+        receiver_id: authority.authority_id(),
+        context_id: default_context_id_for_authority(sender_id),
+        invitation_type: InvitationType::DeviceEnrollment {
+            subject_authority: sender_id,
+            initiator_device_id: DeviceId::new_from_entropy([153u8; 32]),
+            device_id: authority.device_id(),
+            nickname_suggestion: Some("Tablet".to_string()),
+            ceremony_id: CeremonyId::new("ceremony:device-enrollment-disabled"),
+            pending_epoch: 1,
+            key_package: vec![1, 2, 3],
+            threshold_config: vec![4, 5, 6],
+            public_key_package: vec![7, 8, 9],
+            baseline_tree_ops: vec![vec![10, 11, 12]],
+        },
+        created_at: 1_700_000_000_000,
+        expires_at: None,
+        message: None,
+        receiver_nickname: None,
+        status: InvitationStatus::Pending,
+    };
+
+    let error = handler
+        .execute_device_enrollment_invitee(effects, &invitation)
+        .await
+        .expect_err("unsigned device enrollment acceptance should fail closed");
+
+    assert!(
+        error
+            .to_string()
+            .contains("disabled until signed invitee acceptances are implemented"),
+        "unexpected error: {error}"
+    );
+}
+
 #[test]
 fn shareable_invitation_parses_optional_sender_addr_and_device_segments() {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -3012,6 +3122,413 @@ fn shareable_invitation_parses_optional_sender_addr_and_device_segments() {
         ShareableInvitation::sender_device_id_from_code(&code),
         Some(sender_device_id)
     );
+}
+
+#[tokio::test]
+async fn shareable_invitation_signed_envelope_roundtrips_sender_proof() {
+    let authority = create_test_authority(240);
+    let effects = effects_for(&authority);
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-signed-proof"),
+        sender_id,
+        context_id: None,
+        invitation_type: InvitationType::Contact {
+            nickname: Some("Signed".to_string()),
+        },
+        expires_at: Some(1_800_000_000_000),
+        message: Some("signed contact invite".to_string()),
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        effects.as_ref(),
+        &shareable.signing_transcript(),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key: public_key.clone(),
+            signature,
+            sender_device_id: Some(authority.device_id()),
+        })
+        .unwrap();
+
+    let (decoded, proof) = ShareableInvitation::from_code_with_proof(&code).unwrap();
+    let proof = proof.expect("signed envelope should carry proof");
+    assert_eq!(decoded.sender_id, sender_id);
+    assert_eq!(proof.public_key, public_key);
+    assert!(decoded.sender_id_bound_to_public_key(&proof.public_key));
+}
+
+#[tokio::test]
+async fn shareable_invitation_signed_envelope_binds_transport_metadata() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+    let authority = create_test_authority(239);
+    let effects = effects_for(&authority);
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
+    let sender_device_id = DeviceId::new_from_entropy([238u8; 32]);
+    let transport = ShareableInvitationTransportMetadata {
+        sender_hint: Some("tcp://203.0.113.10:45555".to_string()),
+        sender_device_id: Some(sender_device_id),
+    };
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-signed-transport"),
+        sender_id,
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: Some(4_102_444_800_000),
+        message: None,
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        effects.as_ref(),
+        &shareable.signing_transcript_with_transport(&transport),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code_with_transport(
+            ShareableInvitationSenderProof {
+                scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+                public_key: public_key.clone(),
+                signature,
+                sender_device_id: Some(sender_device_id),
+            },
+            transport.clone(),
+        )
+        .unwrap();
+
+    let (decoded, proof, decoded_transport) =
+        ShareableInvitation::from_code_with_proof_and_transport(&code).unwrap();
+    assert_eq!(decoded.sender_id, sender_id);
+    assert_eq!(proof.unwrap().public_key, public_key);
+    assert_eq!(decoded_transport, transport);
+
+    let mut parts: Vec<&str> = code.split(':').collect();
+    let mut envelope: serde_json::Value =
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[2]).unwrap()).unwrap();
+    envelope["transport"]["sender_hint"] =
+        serde_json::Value::String("tcp://203.0.113.11:45555".to_string());
+    let tampered_json = serde_json::to_vec(&envelope).unwrap();
+    let tampered_payload = URL_SAFE_NO_PAD.encode(tampered_json);
+    parts[2] = &tampered_payload;
+    let tampered_code = parts.join(":");
+    let (tampered, proof, tampered_transport) =
+        ShareableInvitation::from_code_with_proof_and_transport(&tampered_code).unwrap();
+    let verified = aura_signature::verify_ed25519_transcript(
+        effects.as_ref(),
+        &tampered.signing_transcript_with_transport(&tampered_transport),
+        &proof.unwrap().signature,
+        &public_key,
+    )
+    .await
+    .unwrap();
+    assert!(!verified);
+}
+
+#[tokio::test]
+async fn production_import_rejects_unsigned_shareable_invitation() {
+    let authority = create_test_authority(241);
+    let temp = tempfile::tempdir().unwrap();
+    let config = AgentConfig {
+        device_id: authority.device_id(),
+        storage: StorageConfig {
+            base_path: temp.path().join("aura"),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let effects = AuraEffectSystem::production(config, authority.authority_id()).unwrap();
+    let handler = handler_for(authority);
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-unsigned-prod"),
+        sender_id: AuthorityId::new_from_entropy([242u8; 32]),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: None,
+        message: None,
+    };
+    let code = shareable.to_code().unwrap();
+
+    let err = handler
+        .import_invitation_code(&effects, &code)
+        .await
+        .expect_err("production import must reject unsigned codes");
+    assert!(err.to_string().contains("missing sender proof"));
+}
+
+#[tokio::test]
+async fn production_import_rejects_sender_id_not_bound_to_signing_key() {
+    let authority = create_test_authority(243);
+    let temp = tempfile::tempdir().unwrap();
+    let config = AgentConfig {
+        device_id: authority.device_id(),
+        storage: StorageConfig {
+            base_path: temp.path().join("aura"),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let effects = AuraEffectSystem::production(config, authority.authority_id()).unwrap();
+    let sender_device_id = authority.device_id();
+    let handler = handler_for(authority);
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-forged-sender-prod"),
+        sender_id: AuthorityId::new_from_entropy([244u8; 32]),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: None,
+        message: None,
+    };
+    assert!(!shareable.sender_id_bound_to_public_key(&public_key));
+    let signature = aura_signature::sign_ed25519_transcript(
+        &effects,
+        &shareable.signing_transcript(),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key,
+            signature,
+            sender_device_id: Some(sender_device_id),
+        })
+        .unwrap();
+
+    let err = handler
+        .import_invitation_code(&effects, &code)
+        .await
+        .expect_err("sender id must be bound to signing key");
+    assert!(err.to_string().contains("sender proof is invalid"));
+}
+
+#[tokio::test]
+async fn production_import_rejects_expired_signed_invitation_code() {
+    let authority = create_test_authority(245);
+    let temp = tempfile::tempdir().unwrap();
+    let config = AgentConfig {
+        device_id: authority.device_id(),
+        storage: StorageConfig {
+            base_path: temp.path().join("aura"),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let effects = AuraEffectSystem::production(config, authority.authority_id()).unwrap();
+    let handler = handler_for(authority);
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-expired-signed-prod"),
+        sender_id: AuthorityId::new_from_entropy(hash(&public_key)),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: Some(1),
+        message: None,
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        &effects,
+        &shareable.signing_transcript(),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key,
+            signature,
+            sender_device_id: None,
+        })
+        .unwrap();
+
+    let err = handler
+        .import_invitation_code(&effects, &code)
+        .await
+        .expect_err("expired signed invite code must be rejected");
+    assert!(err.to_string().contains("invite code expired"));
+}
+
+#[tokio::test]
+async fn production_import_rejects_tampered_signed_invitation_type() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+    let authority = create_test_authority(246);
+    let temp = tempfile::tempdir().unwrap();
+    let config = AgentConfig {
+        device_id: authority.device_id(),
+        storage: StorageConfig {
+            base_path: temp.path().join("aura"),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let effects = AuraEffectSystem::production(config, authority.authority_id()).unwrap();
+    let handler = handler_for(authority);
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-tampered-type-prod"),
+        sender_id: AuthorityId::new_from_entropy(hash(&public_key)),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: Some(4_102_444_800_000),
+        message: None,
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        &effects,
+        &shareable.signing_transcript(),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key,
+            signature,
+            sender_device_id: None,
+        })
+        .unwrap();
+    let mut parts: Vec<&str> = code.split(':').collect();
+    let mut envelope: serde_json::Value =
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[2]).unwrap()).unwrap();
+    envelope["payload"]["invitation_type"] =
+        serde_json::to_value(InvitationType::Guardian {
+            subject_authority: AuthorityId::new_from_entropy([247u8; 32]),
+        })
+        .unwrap();
+    let tampered_json = serde_json::to_vec(&envelope).unwrap();
+    let tampered_payload = URL_SAFE_NO_PAD.encode(tampered_json);
+    parts[2] = &tampered_payload;
+    let tampered_code = parts.join(":");
+
+    let err = handler
+        .import_invitation_code(&effects, &tampered_code)
+        .await
+        .expect_err("tampered signed invite type must be rejected");
+    assert!(err.to_string().contains("sender proof is invalid"));
+}
+
+#[tokio::test]
+async fn production_import_rejects_signed_channel_replay_against_another_context() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+    let authority = create_test_authority(248);
+    let temp = tempfile::tempdir().unwrap();
+    let config = AgentConfig {
+        device_id: authority.device_id(),
+        storage: StorageConfig {
+            base_path: temp.path().join("aura"),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let effects = AuraEffectSystem::production(config, authority.authority_id()).unwrap();
+    let handler = handler_for(authority);
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let original_context = ContextId::new_from_entropy([249u8; 32]);
+    let replay_context = ContextId::new_from_entropy([250u8; 32]);
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-channel-replay-prod"),
+        sender_id: AuthorityId::new_from_entropy(hash(&public_key)),
+        context_id: Some(original_context),
+        invitation_type: InvitationType::Channel {
+            home_id: ChannelId::from_bytes([251u8; 32]),
+            nickname_suggestion: None,
+            bootstrap: None,
+        },
+        expires_at: Some(4_102_444_800_000),
+        message: None,
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        &effects,
+        &shareable.signing_transcript(),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key,
+            signature,
+            sender_device_id: None,
+        })
+        .unwrap();
+    let mut parts: Vec<&str> = code.split(':').collect();
+    let mut envelope: serde_json::Value =
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[2]).unwrap()).unwrap();
+    envelope["payload"]["context_id"] = serde_json::to_value(replay_context).unwrap();
+    let tampered_json = serde_json::to_vec(&envelope).unwrap();
+    let tampered_payload = URL_SAFE_NO_PAD.encode(tampered_json);
+    parts[2] = &tampered_payload;
+    let tampered_code = parts.join(":");
+
+    let err = handler
+        .import_invitation_code(&effects, &tampered_code)
+        .await
+        .expect_err("replayed channel invite context must be rejected");
+    assert!(err.to_string().contains("sender proof is invalid"));
+}
+
+#[tokio::test]
+async fn sender_hint_suffix_does_not_overwrite_trusted_descriptor_route() {
+    let authority = create_test_authority(252);
+    let effects = effects_for(&authority);
+    let manager = RendezvousManager::new_with_default_udp(
+        authority.authority_id(),
+        RendezvousManagerConfig::default(),
+        Arc::new(effects.time_effects().clone()),
+    );
+    effects.attach_rendezvous_manager(manager.clone());
+    let peer = AuthorityId::new_from_entropy([253u8; 32]);
+    let peer_context = default_context_id_for_authority(peer);
+    manager
+        .cache_descriptor(RendezvousDescriptor {
+            authority_id: peer,
+            device_id: None,
+            context_id: peer_context,
+            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:55001").unwrap()],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: [8u8; 32],
+            valid_from: 1,
+            valid_until: u64::MAX,
+            nonce: [9u8; 32],
+            nickname_suggestion: None,
+        })
+        .await
+        .unwrap();
+
+    let handler = handler_for(authority);
+    handler
+        .cache_peer_descriptor_for_peer(
+            effects.as_ref(),
+            peer,
+            Some(DeviceId::new_from_entropy([254u8; 32])),
+            Some("tcp://127.0.0.1:55002"),
+            10,
+        )
+        .await;
+
+    let descriptor = manager.get_descriptor(peer_context, peer).await.unwrap();
+    assert!(matches!(
+        descriptor.transport_hints.as_slice(),
+        [TransportHint::TcpDirect { addr, .. }] if addr.to_string() == "127.0.0.1:55001"
+    ));
 }
 
 #[test]
@@ -3063,6 +3580,110 @@ fn shareable_invitation_parsing_failed() {
         ShareableInvitation::from_code(&code).unwrap_err(),
         ShareableInvitationError::ParsingFailed
     );
+}
+
+#[test]
+fn shareable_invitation_rejects_oversized_payload_before_decode() {
+    let payload = "A".repeat(ShareableInvitation::MAX_PAYLOAD_BASE64_CHARS + 1);
+    let code = format!("aura:v1:{payload}");
+    assert_eq!(
+        ShareableInvitation::from_code(&code).unwrap_err(),
+        ShareableInvitationError::SizeLimitExceeded("payload")
+    );
+}
+
+#[test]
+fn shareable_invitation_rejects_oversized_json_fields() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-large-message"),
+        sender_id: AuthorityId::new_from_entropy([53u8; 32]),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: None,
+        message: Some("x".repeat(ShareableInvitation::MAX_MESSAGE_BYTES + 1)),
+    };
+    let json = serde_json::to_vec(&shareable).expect("json");
+    let code = format!("aura:v1:{}", URL_SAFE_NO_PAD.encode(json));
+
+    assert_eq!(
+        ShareableInvitation::from_code(&code).unwrap_err(),
+        ShareableInvitationError::SizeLimitExceeded("message")
+    );
+}
+
+#[test]
+fn shareable_invitation_rejects_many_colon_segments() {
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-extra-segments"),
+        sender_id: AuthorityId::new_from_entropy([54u8; 32]),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: None,
+        message: None,
+    };
+    let code = format!(
+        "{}:too:many:segments",
+        shareable.to_code().expect("shareable invitation should serialize")
+    );
+
+    assert_eq!(
+        ShareableInvitation::from_code(&code).unwrap_err(),
+        ShareableInvitationError::InvalidFormat
+    );
+}
+
+#[test]
+fn shareable_invitation_rejects_oversized_sender_hint_segment() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+    let sender_device_id = DeviceId::new_from_entropy([55u8; 32]);
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-large-hint"),
+        sender_id: AuthorityId::new_from_entropy([56u8; 32]),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: None,
+        message: None,
+    };
+    let code = format!(
+        "{}:{}:{}",
+        shareable.to_code().expect("shareable invitation should serialize"),
+        URL_SAFE_NO_PAD.encode("x".repeat(ShareableInvitation::MAX_SENDER_HINT_BYTES + 1)),
+        URL_SAFE_NO_PAD.encode(sender_device_id.to_string())
+    );
+
+    assert_eq!(
+        ShareableInvitation::from_code(&code).unwrap_err(),
+        ShareableInvitationError::SizeLimitExceeded("sender_hint")
+    );
+}
+
+#[test]
+fn shareable_invitation_accepts_max_size_message() {
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-max-message"),
+        sender_id: AuthorityId::new_from_entropy([57u8; 32]),
+        context_id: None,
+        invitation_type: InvitationType::Contact {
+            nickname: Some("n".repeat(ShareableInvitation::MAX_NICKNAME_BYTES)),
+        },
+        expires_at: None,
+        message: Some("m".repeat(ShareableInvitation::MAX_MESSAGE_BYTES)),
+    };
+    let code = shareable
+        .to_code()
+        .expect("max-size shareable invitation should serialize");
+    let decoded = ShareableInvitation::from_code(&code)
+        .expect("max-size shareable invitation should parse");
+
+    assert_eq!(decoded.message, shareable.message);
+    assert_eq!(decoded.invitation_id, shareable.invitation_id);
 }
 
 #[test]

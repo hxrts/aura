@@ -32,6 +32,7 @@
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
 use aura_core::FlowCost;
+use aura_core::Hash32;
 use aura_guards::types;
 use aura_signature::session::SessionScope;
 use serde::{Deserialize, Serialize};
@@ -102,6 +103,9 @@ pub struct GuardSnapshot {
     /// Current timestamp in milliseconds
     pub now_ms: u64,
 
+    /// Owner-provided freshness nonce for request/session identifiers.
+    pub freshness_nonce: [u8; 16],
+
     /// Whether this is an emergency operation (bypasses some checks)
     pub is_emergency: bool,
 }
@@ -116,6 +120,7 @@ impl GuardSnapshot {
         capabilities: Vec<types::CapabilityId>,
         epoch: u64,
         now_ms: u64,
+        freshness_nonce: [u8; 16],
     ) -> Self {
         Self {
             authority_id,
@@ -125,6 +130,7 @@ impl GuardSnapshot {
             capabilities,
             epoch,
             now_ms,
+            freshness_nonce,
             is_emergency: false,
         }
     }
@@ -144,6 +150,19 @@ impl GuardSnapshot {
     pub fn has_budget(&self, cost: FlowCost) -> bool {
         self.flow_budget_remaining >= cost
     }
+}
+
+fn snapshot_freshness_id(prefix: &str, snapshot: &GuardSnapshot) -> String {
+    let mut material = Vec::with_capacity(prefix.len() + 16 + 32 + 32 + 8);
+    material.extend_from_slice(prefix.as_bytes());
+    material.extend_from_slice(&snapshot.freshness_nonce);
+    material.extend_from_slice(&snapshot.authority_id.to_bytes());
+    if let Some(context_id) = snapshot.context_id {
+        material.extend_from_slice(&context_id.to_bytes());
+    }
+    material.extend_from_slice(&snapshot.epoch.to_le_bytes());
+    let digest = Hash32::new(aura_core::hash::hash(&material));
+    format!("{prefix}_{}", digest.to_hex())
 }
 
 // =============================================================================
@@ -542,7 +561,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             }
 
             // Generate session ID and challenge
-            let session_id = format!("session_{}", snapshot.epoch);
+            let session_id = snapshot_freshness_id("session", snapshot);
             let expires_at_ms = snapshot.now_ms + 300_000; // 5 minutes
 
             GuardOutcome::allowed(vec![
@@ -621,7 +640,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                 return outcome;
             }
 
-            let session_id = format!("session_{}", snapshot.epoch);
+            let session_id = snapshot_freshness_id("session", snapshot);
             let expires_at_ms = snapshot.now_ms + (duration_seconds * 1000);
 
             GuardOutcome::allowed(vec![
@@ -656,7 +675,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                 return outcome;
             }
 
-            let request_id = format!("guardian_req_{}", snapshot.epoch);
+            let request_id = snapshot_freshness_id("guardian_req", snapshot);
 
             GuardOutcome::allowed(vec![
                 EffectCommand::ChargeFlowBudget {

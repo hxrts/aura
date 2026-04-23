@@ -19,6 +19,10 @@ use aura_core::{
     types::Epoch,
     AuraError, AuthorityId, Hash32, Result,
 };
+use frost_core::{
+    challenge as frost_challenge, compute_binding_factor_list, compute_group_commitment,
+    derive_interpolating_value,
+};
 use rand::SeedableRng;
 use std::collections::{BTreeMap, HashMap};
 use tracing::{debug, info, warn};
@@ -586,6 +590,68 @@ pub fn verify_threshold_signature(
 
     frost_verify_aggregate(verifying_key, message, &signature.signature)
         .map_err(|e| AuraError::crypto(format!("Threshold verify failed: {e}")))
+}
+
+/// Verify a single partial signature against the exact signing transcript.
+pub(crate) fn verify_partial_signature(
+    share: &PartialSignature,
+    message: &[u8],
+    aggregated_nonces: &[NonceCommitment],
+    group_public_key: &PublicKeyPackage,
+) -> Result<()> {
+    let signer_id = share.frost_identifier()?;
+    let signature_share = share.to_frost()?;
+
+    let frost_pkg: frost_ed25519::keys::PublicKeyPackage = group_public_key
+        .clone()
+        .try_into()
+        .map_err(|e| AuraError::crypto(format!("Invalid group public key: {e}")))?;
+
+    let mut commitments = BTreeMap::new();
+    for commitment in aggregated_nonces {
+        let frost_id = frost_ed25519::Identifier::try_from(commitment.signer).map_err(|e| {
+            AuraError::crypto(format!("Invalid signer id {}: {e}", commitment.signer))
+        })?;
+        let frost_commitment = commitment
+            .to_frost()
+            .map_err(|e| AuraError::crypto(format!("Invalid commitment: {e}")))?;
+        commitments.insert(frost_id, frost_commitment);
+    }
+
+    let signing_package = frost_ed25519::SigningPackage::new(commitments, message);
+    let binding_factors =
+        compute_binding_factor_list(&signing_package, frost_pkg.verifying_key(), &[]);
+    let group_commitment = compute_group_commitment(&signing_package, &binding_factors)
+        .map_err(|e| AuraError::crypto(format!("Failed to compute group commitment: {e}")))?;
+    let challenge = frost_challenge(
+        &group_commitment.to_element(),
+        frost_pkg.verifying_key(),
+        signing_package.message().as_slice(),
+    );
+    let lambda_i = derive_interpolating_value(&signer_id, &signing_package)
+        .map_err(|e| AuraError::crypto(format!("Failed to derive interpolating value: {e}")))?;
+    let binding_factor = binding_factors
+        .get(&signer_id)
+        .ok_or_else(|| AuraError::crypto("Missing binding factor for signer"))?;
+    let group_commitment_share = signing_package
+        .signing_commitment(&signer_id)
+        .ok_or_else(|| AuraError::crypto("Missing signing commitment for signer"))?
+        .clone()
+        .to_group_commitment_share(binding_factor);
+    let verifying_share = frost_pkg
+        .verifying_shares()
+        .get(&signer_id)
+        .ok_or_else(|| AuraError::crypto("Missing verifying share for signer"))?;
+
+    signature_share
+        .verify(
+            signer_id,
+            &group_commitment_share,
+            verifying_share,
+            lambda_i,
+            &challenge,
+        )
+        .map_err(|e| AuraError::crypto(format!("Partial signature verification failed: {e}")))
 }
 
 #[cfg(test)]

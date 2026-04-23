@@ -9,11 +9,18 @@ use aura_core::types::scope::{ResourceScope, StoragePath};
 use aura_core::{AuthorityId, FlowBudget, FlowCost};
 use biscuit_auth::{
     macros::{fact, policy, rule},
-    Authorizer, PublicKey,
+    Authorizer, AuthorizerLimits, PublicKey,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 use tracing;
+
+const STORAGE_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
+    max_facts: 10_000,
+    max_iterations: 1_000,
+    max_time: Duration::from_millis(50),
+};
 
 /// Storage resource types for authorization
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -228,7 +235,9 @@ impl BiscuitStorageEvaluator {
         // account-issued device tokens produced by AccountAuthority.
         self.add_authorization_policies(&mut authorizer)?;
 
-        Ok(authorizer.authorize().is_ok())
+        Ok(authorizer
+            .authorize_with_limits(STORAGE_BISCUIT_LIMITS)
+            .is_ok())
     }
 
     /// Verify that token is authorized for the specified authority
@@ -338,30 +347,21 @@ impl BiscuitStorageEvaluator {
         &self,
         authorizer: &mut Authorizer,
     ) -> Result<(), BiscuitStorageError> {
-        // Policy 1: bind token to the authority that owns the storage namespace.
-        // Accept either an explicit authority_id(<uuid>) fact in the token or an
-        // account(<uuid>) fact that matches the authority UUID. This matches the
-        // account-issued device tokens produced by AccountAuthority.
+        // Storage authorization requires a single proof path that binds the
+        // token's authority/account identity to the requested storage owner and
+        // also proves operation/resource coherence. Splitting these into
+        // independent allow policies would allow an identity-only token to pass.
         Self::add_policy(
             authorizer,
-            policy!(
-                "allow if authority_id($auth), expected_authority($expected), $auth == $expected;"
-            ),
+            policy!("allow if authority_id($auth), expected_authority($expected), $auth == $expected, capability($op), operation($op), resource($res);"),
         )?;
 
-        // Policy 2: accept account(<uuid>) facts for backward compatibility with
-        // existing device tokens issued by AccountAuthority.
+        // Accept account(<uuid>) facts for backward compatibility with existing
+        // device tokens issued by AccountAuthority, with the same operation and
+        // resource proof required.
         Self::add_policy(
             authorizer,
-            policy!("allow if account($acct), expected_authority($expected), $acct == $expected;"),
-        )?;
-
-        // Policy 3: enforce capability + operation + resource coherence. Any token
-        // checks (e.g., resource prefix) embedded in the Biscuit must also succeed
-        // because Authorizer evaluates all token checks alongside these facts.
-        Self::add_policy(
-            authorizer,
-            policy!("allow if capability($op), operation($op), resource($res);"),
+            policy!("allow if account($acct), expected_authority($expected), $acct == $expected, capability($op), operation($op), resource($res);"),
         )?;
 
         // Default deny keeps evaluation strict.

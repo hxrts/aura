@@ -45,10 +45,6 @@ impl GuardianProfile {
     }
 }
 
-fn empty_threshold_signature() -> ThresholdSignature {
-    ThresholdSignature::new(vec![0u8; 64], 0, Vec::new(), Vec::new(), 0)
-}
-
 /// Collection of guardian profiles.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GuardianSet {
@@ -188,8 +184,12 @@ pub struct RecoveryResponse {
     pub guardian_shares: Vec<RecoveryShare>,
     /// Evidence of the operation
     pub evidence: RecoveryEvidence,
-    /// Threshold signature
-    pub signature: ThresholdSignature,
+    /// Optional threshold signature.
+    ///
+    /// Guardian recovery often carries individually verifiable guardian
+    /// signatures in `guardian_shares`; do not fabricate an aggregate signature
+    /// when no aggregate was actually produced.
+    pub signature: Option<ThresholdSignature>,
 }
 
 impl RecoveryResponse {
@@ -199,7 +199,7 @@ impl RecoveryResponse {
         key_material: Option<Vec<u8>>,
         guardian_shares: Vec<RecoveryShare>,
         evidence: RecoveryEvidence,
-        signature: ThresholdSignature,
+        signature: Option<ThresholdSignature>,
     ) -> Self {
         Self {
             success,
@@ -216,7 +216,7 @@ impl RecoveryResponse {
         key_material: Option<Vec<u8>>,
         shares: Vec<RecoveryShare>,
         evidence: RecoveryEvidence,
-        signature: ThresholdSignature,
+        signature: Option<ThresholdSignature>,
     ) -> Self {
         Self::build(true, None, key_material, shares, evidence, signature)
     }
@@ -229,7 +229,7 @@ impl RecoveryResponse {
             None,
             Vec::new(),
             RecoveryEvidence::default(),
-            empty_threshold_signature(),
+            None,
         )
     }
 }

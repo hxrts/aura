@@ -155,6 +155,25 @@ impl BloomFilter {
         self.element_count > self.config.expected_elements * 2
             || self.current_false_positive_rate() > self.config.false_positive_rate * 2.0
     }
+
+    /// Validate invariants after deserializing a peer-provided Bloom filter.
+    pub fn validate_wire(&self) -> Result<(), BloomError> {
+        self.config.validate()?;
+        let expected_bytes = self.config.bit_vector_size.div_ceil(8) as usize;
+        if self.bits.len() != expected_bytes {
+            return Err(BloomError::invalid(format!(
+                "Bloom filter bit vector length mismatch: {} != {}",
+                self.bits.len(),
+                expected_bytes
+            )));
+        }
+        if self.element_count > self.config.expected_elements.saturating_mul(2) {
+            return Err(BloomError::invalid(
+                "Bloom filter element count exceeds configured rebuild threshold",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Helper functions for common Bloom filter operations

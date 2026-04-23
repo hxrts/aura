@@ -965,10 +965,12 @@ mod tests {
             location: &SecureStorageLocation,
             _key_type: &str,
             caps: &[SecureStorageCapability],
-        ) -> Result<Option<Vec<u8>>, aura_core::AuraError> {
+        ) -> Result<aura_core::effects::SecureGeneratedKey, aura_core::AuraError> {
             let key = vec![0u8; 32];
             self.secure_store(location, &key, caps).await?;
-            Ok(Some(key))
+            Ok(aura_core::effects::SecureGeneratedKey::OpaqueHandle(
+                location.full_path(),
+            ))
         }
 
         async fn secure_create_time_bound_token(

@@ -13,6 +13,7 @@ use aura_core::{AuthorityId, ContextId};
 use aura_effects::time::PhysicalTimeHandler;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_effects::transport::TransportConfig;
+use aura_rendezvous::RendezvousDescriptor;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use cfg_if::cfg_if;
 #[cfg(not(target_arch = "wasm32"))]
@@ -25,13 +26,20 @@ use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
 use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::net::TcpStream;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
+
+#[cfg(target_arch = "wasm32")]
+const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+#[cfg(target_arch = "wasm32")]
+const HARNESS_TOKEN_QUERY_KEY: &str = "__aura_harness_token";
+#[cfg(target_arch = "wasm32")]
+const MIN_HARNESS_TOKEN_LEN: usize = 16;
 #[cfg(not(target_arch = "wasm32"))]
 async fn execute_transport_timeout<F, Fut, T>(
     timeout: std::time::Duration,
@@ -245,6 +253,14 @@ async fn resolve_move_route(
 ) -> Option<Route> {
     let manager = effects.rendezvous_manager()?;
     let descriptor = manager.get_descriptor(context, peer).await?;
+    if descriptor_has_placeholder_crypto(&descriptor) {
+        tracing::warn!(
+            peer = %peer,
+            context = %context,
+            "Rejecting placeholder rendezvous descriptor for transport route resolution"
+        );
+        return None;
+    }
     let paths = descriptor.advertised_move_paths();
     #[cfg(not(target_arch = "wasm32"))]
     let paths = {
@@ -256,7 +272,65 @@ async fn resolve_move_route(
         });
         paths
     };
-    paths.into_iter().map(|path| path.route).next()
+    paths
+        .into_iter()
+        .map(|path| path.route)
+        .find(|route| direct_route_allowed(effects, route))
+}
+
+fn descriptor_has_placeholder_crypto(descriptor: &RendezvousDescriptor) -> bool {
+    descriptor.public_key == [0u8; 32] || descriptor.handshake_psk_commitment == [0u8; 32]
+}
+
+fn direct_route_allowed(effects: &AuraEffectSystem, route: &Route) -> bool {
+    if effects.is_testing() || !route.is_direct() {
+        return true;
+    }
+
+    let Some(addr) = route_destination_addr(&route.destination) else {
+        return false;
+    };
+    direct_addr_allowed_in_production(&addr)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn direct_addr_allowed_in_production(addr: &str) -> bool {
+    match addr.parse::<SocketAddr>() {
+        Ok(socket) => ip_allowed_for_production_direct_egress(socket.ip()),
+        Err(_) => false,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn direct_addr_allowed_in_production(_addr: &str) -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ip_allowed_for_production_direct_egress(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !(ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || ip.is_multicast()
+                || ip.is_broadcast()
+                || (a == 192 && b == 0 && c == 2)
+                || (a == 198 && b == 51 && c == 100)
+                || (a == 203 && b == 0 && c == 113)
+                || ip.is_unspecified())
+        }
+        IpAddr::V6(ip) => {
+            let segments = ip.segments();
+            !(ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+                || ip.is_unicast_link_local()
+                || ip.is_unique_local()
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8))
+        }
+    }
 }
 
 async fn send_planned_envelope(
@@ -623,22 +697,31 @@ fn harness_browser_transport_ws_url(current_host: &str, harness_mode: bool) -> O
 }
 
 #[cfg(target_arch = "wasm32")]
-fn current_browser_location_and_harness_mode() -> Option<(String, String, bool)> {
+fn current_browser_location_and_authenticated_harness_mode() -> Option<(String, String, bool)> {
     let window = web_sys::window()?;
     let search = window.location().search().ok()?;
     let host = window.location().host().ok()?;
     let origin = window.location().origin().ok()?;
     let query = search.strip_prefix('?').unwrap_or(&search);
-    let harness_mode = query.split('&').any(|pair: &str| {
-        pair.split_once('=')
-            .is_some_and(|(key, value)| key == "__aura_harness_instance" && !value.is_empty())
-    });
+    let mut has_instance = false;
+    let mut has_token = false;
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty() {
+            has_instance = true;
+        } else if key == HARNESS_TOKEN_QUERY_KEY && value.len() >= MIN_HARNESS_TOKEN_LEN {
+            has_token = true;
+        }
+    }
+    let harness_mode = has_instance && has_token;
     Some((host, origin, harness_mode))
 }
 
 #[cfg(target_arch = "wasm32")]
 fn current_browser_harness_enqueue_url() -> Option<String> {
-    let (_host, origin, harness_mode) = current_browser_location_and_harness_mode()?;
+    let (_host, origin, harness_mode) = current_browser_location_and_authenticated_harness_mode()?;
     if !harness_mode || origin.is_empty() {
         return None;
     }
@@ -688,7 +771,9 @@ fn use_native_harness_browser_transport(addr: &str) -> bool {
 #[cfg(target_arch = "wasm32")]
 fn resolve_browser_transport_target(addr: &str) -> (String, bool) {
     let normalized_target = normalize_ws_url(addr);
-    if let Some((host, _origin, harness_mode)) = current_browser_location_and_harness_mode() {
+    if let Some((host, _origin, harness_mode)) =
+        current_browser_location_and_authenticated_harness_mode()
+    {
         if harness_mode && browser_target_uses_harness_transport(&host, &normalized_target) {
             if let Some(enqueue_url) = current_browser_harness_enqueue_url() {
                 return (enqueue_url, true);
@@ -826,6 +911,26 @@ mod tests {
         let resolved = resolve_peer_addr(&effects, primary_context, peer).await;
         assert!(resolved.is_none());
         RuntimeService::stop(&manager).await.unwrap();
+    }
+
+    #[test]
+    fn production_direct_egress_rejects_local_and_private_ip_literals() {
+        assert!(!direct_addr_allowed_in_production("127.0.0.1:55001"));
+        assert!(!direct_addr_allowed_in_production("10.0.0.1:55001"));
+        assert!(!direct_addr_allowed_in_production("172.16.0.1:55001"));
+        assert!(!direct_addr_allowed_in_production("192.168.0.1:55001"));
+        assert!(!direct_addr_allowed_in_production("169.254.1.1:55001"));
+        assert!(!direct_addr_allowed_in_production("[::1]:55001"));
+        assert!(!direct_addr_allowed_in_production("[fc00::1]:55001"));
+        assert!(!direct_addr_allowed_in_production("[fe80::1]:55001"));
+    }
+
+    #[test]
+    fn production_direct_egress_allows_public_ip_literals() {
+        assert!(direct_addr_allowed_in_production("8.8.8.8:443"));
+        assert!(direct_addr_allowed_in_production(
+            "[2001:4860:4860::8888]:443"
+        ));
     }
 
     #[tokio::test]

@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use aura_core::effects::StorageCoreEffects;
 use aura_effects::{
-    EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
-    RealSecureStorageHandler,
+    EncryptedStorage, EncryptedStorageConfig, FilesystemFallbackSecureStorageHandler,
+    FilesystemStorageHandler, RealCryptoHandler,
 };
 
 fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
@@ -25,7 +25,9 @@ async fn encrypted_storage_fs_round_trip_is_not_plaintext_on_disk() {
 
     let storage = FilesystemStorageHandler::new(storage_root.clone());
     let crypto = Arc::new(RealCryptoHandler::new());
-    let secure = Arc::new(RealSecureStorageHandler::with_base_path(secure_root));
+    let secure = Arc::new(FilesystemFallbackSecureStorageHandler::with_base_path(
+        secure_root,
+    ));
 
     let encrypted =
         EncryptedStorage::new(storage, crypto, secure, EncryptedStorageConfig::default());

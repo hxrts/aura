@@ -312,14 +312,22 @@ fn bootstrap_broker_override(current: &mut aura_agent::core::config::AgentConfig
     if let Some(bind_addr) = override_env.bind_addr {
         broker = broker.with_bind_addr(bind_addr);
     }
+    broker = broker.with_lan_bind_policy(override_env.lan_bind_policy);
     if let Some(base_url) = override_env.base_url {
         broker = broker.with_base_url(base_url);
+    }
+    if let Some(auth_token) = override_env.auth_token {
+        broker = broker.with_auth_token(auth_token);
+    }
+    if let Some(invitation_retrieval_token) = override_env.invitation_retrieval_token {
+        broker = broker.with_invitation_retrieval_token(invitation_retrieval_token);
     }
     current.bootstrap_broker = broker;
 
     tracing::info!(
         bind_addr = ?current.bootstrap_broker.bind_addr,
         base_url = ?current.bootstrap_broker.base_url,
+        lan_bind_policy = ?current.bootstrap_broker.lan_bind_policy,
         "Applied bootstrap broker overrides from environment"
     );
 }

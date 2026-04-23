@@ -331,9 +331,15 @@ impl ConsensusResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::frost::ThresholdSignature;
     use aura_core::time::{PhysicalTime, TimeStamp};
+    use aura_core::{
+        crypto::tree_signing::frost_aggregate,
+        frost::{NonceCommitment, PartialSignature, PublicKeyPackage, ThresholdSignature},
+    };
     use aura_signature::encode_transcript;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
+    use std::collections::BTreeMap;
 
     fn physical_time(ts_ms: u64) -> ProvenancedTime {
         ProvenancedTime {
@@ -344,6 +350,105 @@ mod tests {
             proofs: Vec::new(),
             origin: None,
         }
+    }
+
+    fn signed_commit_fact() -> CommitFact {
+        let consensus_id = ConsensusId(Hash32::from([1u8; 32]));
+        let prestate_hash = Hash32::from([2u8; 32]);
+        let operation_hash = Hash32::from([3u8; 32]);
+        let operation_bytes = vec![4, 5, 6];
+        let threshold = 2;
+        let transcript = consensus_commit_transcript_bytes(
+            consensus_id,
+            prestate_hash,
+            operation_hash,
+            &operation_bytes,
+            threshold,
+        )
+        .expect("transcript should build");
+        let mut rng = ChaCha20Rng::from_seed([17u8; 32]);
+        let (secret_shares, frost_group_public_key) = frost_ed25519::keys::generate_with_dealer(
+            2,
+            threshold,
+            frost_ed25519::keys::IdentifierList::Default,
+            &mut rng,
+        )
+        .expect("dealer key generation should succeed");
+
+        let key_packages = secret_shares
+            .into_iter()
+            .map(|(_, secret_share)| {
+                frost_ed25519::keys::KeyPackage::try_from(secret_share)
+                    .expect("secret share should convert to key package")
+            })
+            .collect::<Vec<_>>();
+
+        let mut commitments = BTreeMap::new();
+        let mut signing_inputs = Vec::new();
+        for key_package in key_packages {
+            let (nonces, signing_commitments) =
+                frost_ed25519::round1::commit(key_package.signing_share(), &mut rng);
+            let signer = u16::from_be_bytes([0, key_package.identifier().serialize()[0]]);
+            commitments.insert(
+                signer,
+                NonceCommitment {
+                    signer,
+                    commitment: signing_commitments
+                        .serialize()
+                        .expect("signing commitments should serialize"),
+                },
+            );
+            signing_inputs.push((key_package, nonces));
+        }
+
+        let frost_commitments = commitments
+            .iter()
+            .map(|(signer, commitment)| {
+                let frost_signer = frost_ed25519::Identifier::try_from(*signer)
+                    .expect("signer should convert to FROST identifier");
+                let frost_commitment = commitment
+                    .to_frost()
+                    .expect("commitment should deserialize");
+                (frost_signer, frost_commitment)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let signing_package = frost_ed25519::SigningPackage::new(frost_commitments, &transcript);
+
+        let partials = signing_inputs
+            .into_iter()
+            .map(|(key_package, nonces)| {
+                let signature_share =
+                    frost_ed25519::round2::sign(&signing_package, &nonces, &key_package)
+                        .expect("partial signature should be created");
+                PartialSignature::from_frost(*key_package.identifier(), signature_share)
+            })
+            .collect::<Vec<_>>();
+        let aggregated_signature = frost_aggregate(
+            &partials,
+            &transcript,
+            &commitments,
+            &frost_group_public_key,
+        )
+        .expect("partial signatures should aggregate");
+
+        CommitFact::new(
+            consensus_id,
+            prestate_hash,
+            operation_hash,
+            operation_bytes,
+            ThresholdSignature {
+                signature: aggregated_signature,
+                signers: partials.iter().map(|share| share.signer).collect(),
+            },
+            Some(PublicKeyPackage::from(frost_group_public_key)),
+            vec![
+                AuthorityId::new_from_entropy([7u8; 32]),
+                AuthorityId::new_from_entropy([8u8; 32]),
+            ],
+            threshold,
+            false,
+            physical_time(100),
+        )
     }
 
     #[test]
@@ -403,5 +508,31 @@ mod tests {
 
         assert_ne!(base, prestate);
         assert_ne!(base, operation);
+    }
+
+    #[test]
+    fn commit_fact_verify_rejects_missing_group_public_key() {
+        let mut commit = signed_commit_fact();
+        commit.group_public_key = None;
+
+        let error = commit
+            .verify()
+            .expect_err("commit without group public key should fail verification");
+
+        assert!(error.to_string().contains("Missing group public key"));
+    }
+
+    #[test]
+    fn commit_fact_verify_rejects_invalid_aggregate_output() {
+        let mut commit = signed_commit_fact();
+        commit.threshold_signature.signature[0] ^= 0x01;
+
+        let error = commit
+            .verify()
+            .expect_err("tampered aggregate signature should fail verification");
+
+        assert!(error
+            .to_string()
+            .contains("Threshold signature verification failed"));
     }
 }

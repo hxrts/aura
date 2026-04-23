@@ -19,11 +19,12 @@ use crate::{
 };
 use async_trait::async_trait;
 use aura_core::effects::PhysicalTimeEffects;
+use aura_core::key_resolution::TrustedKeyResolver;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{hash, AuraError, Hash32};
 use aura_macros::tell;
-use aura_signature::SecurityTranscript;
+use aura_signature::{sign_ed25519_transcript, verify_ed25519_transcript, SecurityTranscript};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -60,6 +61,8 @@ pub struct MembershipProposal {
     pub proposer_id: AuthorityId,
     /// The specific membership change being proposed
     pub change: MembershipChange,
+    /// Threshold required to approve the current membership change
+    pub threshold: u16,
     /// New threshold to set after the change (optional)
     pub new_threshold: Option<u16>,
     /// Timestamp of proposal
@@ -89,16 +92,19 @@ struct GuardianVoteTranscriptPayload {
     account_id: AuthorityId,
     proposer_id: AuthorityId,
     change: MembershipChange,
+    threshold: u16,
     new_threshold: Option<u16>,
     proposal_timestamp: TimeStamp,
     guardian_id: AuthorityId,
     approved: bool,
+    vote_timestamp: TimeStamp,
 }
 
 struct GuardianVoteTranscript<'a> {
     proposal: &'a MembershipProposal,
     guardian_id: AuthorityId,
     approved: bool,
+    vote_timestamp: &'a TimeStamp,
 }
 
 impl SecurityTranscript for GuardianVoteTranscript<'_> {
@@ -112,29 +118,91 @@ impl SecurityTranscript for GuardianVoteTranscript<'_> {
             account_id: self.proposal.account_id,
             proposer_id: self.proposal.proposer_id,
             change: self.proposal.change.clone(),
+            threshold: self.proposal.threshold,
             new_threshold: self.proposal.new_threshold,
             proposal_timestamp: self.proposal.timestamp.clone(),
             guardian_id: self.guardian_id,
             approved: self.approved,
+            vote_timestamp: self.vote_timestamp.clone(),
         }
     }
 }
 
-/// Derive the canonical vote-signature digest for a guardian membership change.
-pub fn guardian_vote_signature_digest(
+/// Encode the canonical guardian membership vote transcript.
+pub fn guardian_vote_transcript_bytes(
     proposal: &MembershipProposal,
     guardian_id: AuthorityId,
     approved: bool,
+    vote_timestamp: &TimeStamp,
 ) -> RecoveryResult<Vec<u8>> {
+    GuardianVoteTranscript {
+        proposal,
+        guardian_id,
+        approved,
+        vote_timestamp,
+    }
+    .transcript_bytes()
+    .map_err(|error| AuraError::crypto(format!("guardian vote transcript failed: {error}")))
+}
+
+/// Sign a guardian membership vote with the guardian's Ed25519 key.
+pub async fn sign_guardian_vote<E>(
+    effects: &E,
+    proposal: &MembershipProposal,
+    guardian_id: AuthorityId,
+    approved: bool,
+    vote_timestamp: &TimeStamp,
+    private_key: &[u8],
+) -> RecoveryResult<Vec<u8>>
+where
+    E: aura_core::effects::CryptoEffects + Send + Sync + ?Sized,
+{
     let transcript = GuardianVoteTranscript {
         proposal,
         guardian_id,
         approved,
-    }
-    .transcript_bytes()
-    .map_err(|error| AuraError::crypto(format!("guardian vote transcript failed: {error}")))?;
+        vote_timestamp,
+    };
+    sign_ed25519_transcript(effects, &transcript, private_key)
+        .await
+        .map_err(|error| AuraError::crypto(format!("guardian vote signing failed: {error}")))
+}
 
-    Ok(hash::hash(&transcript).to_vec())
+/// Verify a guardian membership vote against a trusted guardian public key.
+pub async fn verify_guardian_vote_signature<E>(
+    effects: &E,
+    proposal: &MembershipProposal,
+    vote: &GuardianVote,
+    key_resolver: &impl TrustedKeyResolver,
+) -> RecoveryResult<bool>
+where
+    E: aura_core::effects::CryptoEffects + Send + Sync + ?Sized,
+{
+    if vote.change_id != proposal.change_id {
+        return Ok(false);
+    }
+    let trusted_key = key_resolver
+        .resolve_guardian_key(vote.guardian_id)
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "trusted guardian vote key resolution failed for {}: {error}",
+                vote.guardian_id
+            ))
+        })?;
+    let transcript = GuardianVoteTranscript {
+        proposal,
+        guardian_id: vote.guardian_id,
+        approved: vote.approved,
+        vote_timestamp: &vote.timestamp,
+    };
+    verify_ed25519_transcript(
+        effects,
+        &transcript,
+        &vote.vote_signature,
+        trusted_key.bytes(),
+    )
+    .await
+    .map_err(|error| AuraError::crypto(format!("guardian vote verification failed: {error}")))
 }
 
 /// Membership change completion notification
@@ -308,6 +376,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             account_id: request.base.account_id,
             proposer_id: request.base.initiator_id,
             change: request.change.clone(),
+            threshold: request.base.threshold,
             new_threshold: request.new_threshold,
             timestamp: TimeStamp::PhysicalClock(exact_physical_time(now_ms)),
         };
@@ -411,6 +480,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         proposal: MembershipProposal,
         guardian_id: AuthorityId,
         approved: bool,
+        guardian_private_key: &[u8],
     ) -> RecoveryResult<GuardianVote> {
         let rationale = if approved {
             "Change approved after review".to_string()
@@ -427,7 +497,16 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
                 uncertainty: None,
             });
 
-        let vote_signature = guardian_vote_signature_digest(&proposal, guardian_id, approved)?;
+        let vote_timestamp = TimeStamp::PhysicalClock(physical_time.clone());
+        let vote_signature = sign_guardian_vote(
+            self.effect_system().as_ref(),
+            &proposal,
+            guardian_id,
+            approved,
+            &vote_timestamp,
+            guardian_private_key,
+        )
+        .await?;
 
         // Emit MembershipVoteCast fact
         let context_id = context_id_from_operation_id(&proposal.change_id);
@@ -448,7 +527,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             approved,
             vote_signature,
             rationale,
-            timestamp: TimeStamp::PhysicalClock(physical_time),
+            timestamp: vote_timestamp,
         })
     }
 
@@ -463,23 +542,50 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             .await
             .map_err(|e| AuraError::internal(format!("Time error: {e}")))?;
 
-        // Simulate guardian votes
-        let mut votes = Vec::new();
-        for guardian in proposal.account_id.to_bytes().iter().take(2) {
-            let guardian_id = AuthorityId::new_from_entropy(hash::hash(&[*guardian; 32]));
-            let vote_signature = guardian_vote_signature_digest(&proposal, guardian_id, true)?;
-
-            votes.push(GuardianVote {
-                change_id: proposal.change_id.clone(),
-                guardian_id,
-                approved: true,
-                vote_signature,
-                rationale: "Approved - change validated".to_string(),
-                timestamp: TimeStamp::PhysicalClock(physical_time.clone()),
-            });
+        #[cfg(not(test))]
+        {
+            let _ = (proposal, physical_time);
+            return Err(AuraError::internal(
+                "guardian membership votes must be supplied by signed guardian runtimes",
+            ));
         }
 
-        Ok(votes)
+        #[cfg(test)]
+        {
+            // Simulate guardian votes
+            let mut votes = Vec::new();
+            for guardian in proposal.account_id.to_bytes().iter().take(2) {
+                let guardian_id = AuthorityId::new_from_entropy(hash::hash(&[*guardian; 32]));
+                let (private_key, _) = self
+                    .effect_system()
+                    .ed25519_generate_keypair()
+                    .await
+                    .map_err(|error| {
+                        AuraError::crypto(format!("test vote keygen failed: {error}"))
+                    })?;
+                let vote_timestamp = TimeStamp::PhysicalClock(physical_time.clone());
+                let vote_signature = sign_guardian_vote(
+                    self.effect_system().as_ref(),
+                    &proposal,
+                    guardian_id,
+                    true,
+                    &vote_timestamp,
+                    &private_key,
+                )
+                .await?;
+
+                votes.push(GuardianVote {
+                    change_id: proposal.change_id.clone(),
+                    guardian_id,
+                    approved: true,
+                    vote_signature,
+                    rationale: "Approved - change validated".to_string(),
+                    timestamp: vote_timestamp,
+                });
+            }
+
+            Ok(votes)
+        }
     }
 
     /// Broadcast change completion (Phase 3).
@@ -531,8 +637,73 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
 mod tests {
     use super::*;
     use crate::types::GuardianProfile;
+    use aura_core::effects::CryptoCoreEffects;
+    use aura_core::key_resolution::{
+        KeyResolutionError, TrustedKeyDomain, TrustedKeyResolver, TrustedPublicKey,
+    };
     use aura_testkit::MockEffects;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
+
+    #[derive(Default)]
+    struct TestGuardianKeyResolver {
+        keys: BTreeMap<AuthorityId, Vec<u8>>,
+    }
+
+    impl TestGuardianKeyResolver {
+        fn with_guardian_key(mut self, guardian: AuthorityId, key: Vec<u8>) -> Self {
+            self.keys.insert(guardian, key);
+            self
+        }
+    }
+
+    impl TrustedKeyResolver for TestGuardianKeyResolver {
+        fn resolve_authority_threshold_key(
+            &self,
+            _authority: AuthorityId,
+            _epoch: u64,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::AuthorityThreshold,
+            })
+        }
+
+        fn resolve_device_key(
+            &self,
+            _device: aura_core::DeviceId,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::Device,
+            })
+        }
+
+        fn resolve_guardian_key(
+            &self,
+            guardian: AuthorityId,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            let key = self
+                .keys
+                .get(&guardian)
+                .ok_or(KeyResolutionError::Unknown {
+                    domain: TrustedKeyDomain::Guardian,
+                })?;
+            Ok(TrustedPublicKey::active(
+                TrustedKeyDomain::Guardian,
+                None,
+                key.clone(),
+                Hash32(hash::hash(key)),
+            ))
+        }
+
+        fn resolve_release_key(
+            &self,
+            _authority: AuthorityId,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::Release,
+            })
+        }
+    }
 
     fn test_authority_id(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
@@ -608,7 +779,8 @@ mod tests {
     #[tokio::test]
     async fn test_vote_as_guardian() {
         let effects = Arc::new(MockEffects::deterministic());
-        let coordinator = GuardianMembershipCoordinator::new(effects);
+        let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+        let coordinator = GuardianMembershipCoordinator::new(effects.clone());
 
         let proposal = MembershipProposal {
             change_id: "test-change-123".to_string(),
@@ -620,6 +792,7 @@ mod tests {
                     "Guardian 4".to_string(),
                 ),
             },
+            threshold: 2,
             new_threshold: None,
             timestamp: TimeStamp::PhysicalClock(PhysicalTime {
                 ts_ms: 1000,
@@ -629,17 +802,24 @@ mod tests {
 
         let guardian_id = test_authority_id(1);
         let vote = coordinator
-            .vote_as_guardian(proposal, guardian_id, true)
+            .vote_as_guardian(proposal.clone(), guardian_id, true, &private_key)
             .await;
 
         assert!(vote.is_ok());
         let v = vote.unwrap();
         assert!(v.approved);
         assert_eq!(v.guardian_id, guardian_id);
+        let key_resolver =
+            TestGuardianKeyResolver::default().with_guardian_key(guardian_id, public_key);
+        assert!(
+            verify_guardian_vote_signature(effects.as_ref(), &proposal, &v, &key_resolver)
+                .await
+                .unwrap()
+        );
     }
 
     #[test]
-    fn guardian_vote_signature_digest_binds_proposal_context() {
+    fn guardian_vote_transcript_binds_proposal_context() {
         let base = MembershipProposal {
             change_id: "test-change-123".to_string(),
             account_id: test_authority_id(10),
@@ -650,6 +830,7 @@ mod tests {
                     "Guardian 4".to_string(),
                 ),
             },
+            threshold: 2,
             new_threshold: None,
             timestamp: TimeStamp::PhysicalClock(PhysicalTime {
                 ts_ms: 1000,
@@ -659,14 +840,110 @@ mod tests {
         let mut changed_threshold = base.clone();
         changed_threshold.new_threshold = Some(3);
         let guardian_id = test_authority_id(1);
+        let vote_timestamp = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1001,
+            uncertainty: None,
+        });
 
-        let base_digest = guardian_vote_signature_digest(&base, guardian_id, true).unwrap();
-        let threshold_digest =
-            guardian_vote_signature_digest(&changed_threshold, guardian_id, true).unwrap();
-        let denied_digest = guardian_vote_signature_digest(&base, guardian_id, false).unwrap();
+        let base_transcript =
+            guardian_vote_transcript_bytes(&base, guardian_id, true, &vote_timestamp).unwrap();
+        let threshold_transcript =
+            guardian_vote_transcript_bytes(&changed_threshold, guardian_id, true, &vote_timestamp)
+                .unwrap();
+        let denied_transcript =
+            guardian_vote_transcript_bytes(&base, guardian_id, false, &vote_timestamp).unwrap();
 
-        assert_ne!(base_digest, threshold_digest);
-        assert_ne!(base_digest, denied_digest);
+        assert_ne!(base_transcript, threshold_transcript);
+        assert_ne!(base_transcript, denied_transcript);
+    }
+
+    #[tokio::test]
+    async fn guardian_vote_verification_rejects_forged_or_replayed_votes() {
+        let crypto = aura_effects::RealCryptoHandler::for_simulation_seed([0xA7; 32]);
+        let (private_key, public_key) = crypto.ed25519_generate_keypair().await.unwrap();
+        let proposal = MembershipProposal {
+            change_id: "test-change-verify".to_string(),
+            account_id: test_authority_id(10),
+            proposer_id: test_authority_id(0),
+            change: MembershipChange::AddGuardian {
+                guardian: GuardianProfile::with_label(
+                    test_authority_id(4),
+                    "Guardian 4".to_string(),
+                ),
+            },
+            threshold: 2,
+            new_threshold: None,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1000,
+                uncertainty: None,
+            }),
+        };
+        let vote_timestamp = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1001,
+            uncertainty: None,
+        });
+        let guardian_id = test_authority_id(1);
+        let signature = sign_guardian_vote(
+            &crypto,
+            &proposal,
+            guardian_id,
+            true,
+            &vote_timestamp,
+            &private_key,
+        )
+        .await
+        .unwrap();
+        let vote = GuardianVote {
+            change_id: proposal.change_id.clone(),
+            guardian_id,
+            approved: true,
+            vote_signature: signature,
+            rationale: "approved".to_string(),
+            timestamp: vote_timestamp,
+        };
+        let key_resolver =
+            TestGuardianKeyResolver::default().with_guardian_key(guardian_id, public_key);
+
+        assert!(
+            verify_guardian_vote_signature(&crypto, &proposal, &vote, &key_resolver)
+                .await
+                .unwrap()
+        );
+
+        let mut wrong_proposal = proposal.clone();
+        wrong_proposal.change_id = "different-change".to_string();
+        assert!(
+            !verify_guardian_vote_signature(&crypto, &wrong_proposal, &vote, &key_resolver)
+                .await
+                .unwrap()
+        );
+
+        let mut tampered_approval = vote.clone();
+        tampered_approval.approved = false;
+        assert!(!verify_guardian_vote_signature(
+            &crypto,
+            &proposal,
+            &tampered_approval,
+            &key_resolver,
+        )
+        .await
+        .unwrap());
+
+        let mut wrong_guardian = vote.clone();
+        wrong_guardian.guardian_id = test_authority_id(2);
+        assert!(
+            verify_guardian_vote_signature(&crypto, &proposal, &wrong_guardian, &key_resolver)
+                .await
+                .is_err()
+        );
+
+        let mut forged = vote;
+        forged.vote_signature = vec![0; 64];
+        assert!(
+            !verify_guardian_vote_signature(&crypto, &proposal, &forged, &key_resolver)
+                .await
+                .unwrap()
+        );
     }
 
     #[test]

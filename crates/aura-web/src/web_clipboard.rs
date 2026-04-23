@@ -5,6 +5,7 @@
 
 use crate::browser_promises::await_browser_promise_with_timeout;
 use crate::error::{log_web_error, WebUiError};
+use crate::shell::harness_mode_enabled;
 use aura_app::frontend_primitives::{ClipboardPort, FrontendUiOperation as WebUiOperation};
 use js_sys::Reflect;
 use std::sync::RwLock;
@@ -36,35 +37,41 @@ impl ClipboardPort for WebClipboardAdapter {
             }
         }
 
-        if let Some(window) = web_sys::window() {
-            if let Err(error) = Reflect::set(
-                window.as_ref(),
-                &JsValue::from_str("__AURA_HARNESS_CLIPBOARD__"),
-                &JsValue::from_str(text),
-            ) {
-                log_web_error(
-                    "warn",
-                    &WebUiError::operation(
-                        WebUiOperation::MirrorClipboardToHarness,
-                        "WEB_HARNESS_CLIPBOARD_MIRROR_FAILED",
-                        format!("failed to mirror clipboard into harness window state: {error:?}"),
-                    ),
-                );
-            }
-            if let Ok(push) = Reflect::get(
-                window.as_ref(),
-                &JsValue::from_str("__AURA_DRIVER_PUSH_CLIPBOARD"),
-            ) {
-                if let Some(function) = push.dyn_ref::<js_sys::Function>() {
-                    if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(text)) {
-                        log_web_error(
-                            "warn",
-                            &WebUiError::operation(
-                                WebUiOperation::NotifyHarnessClipboardDriver,
-                                "WEB_HARNESS_CLIPBOARD_DRIVER_NOTIFY_FAILED",
-                                format!("failed to notify harness clipboard driver: {error:?}"),
+        if harness_mode_enabled() {
+            if let Some(window) = web_sys::window() {
+                if let Err(error) = Reflect::set(
+                    window.as_ref(),
+                    &JsValue::from_str("__AURA_HARNESS_CLIPBOARD__"),
+                    &JsValue::from_str(text),
+                ) {
+                    log_web_error(
+                        "warn",
+                        &WebUiError::operation(
+                            WebUiOperation::MirrorClipboardToHarness,
+                            "WEB_HARNESS_CLIPBOARD_MIRROR_FAILED",
+                            format!(
+                                "failed to mirror clipboard into harness window state: {error:?}"
                             ),
-                        );
+                        ),
+                    );
+                }
+                if let Ok(push) = Reflect::get(
+                    window.as_ref(),
+                    &JsValue::from_str("__AURA_DRIVER_PUSH_CLIPBOARD"),
+                ) {
+                    if let Some(function) = push.dyn_ref::<js_sys::Function>() {
+                        if let Err(error) =
+                            function.call1(window.as_ref(), &JsValue::from_str(text))
+                        {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::NotifyHarnessClipboardDriver,
+                                    "WEB_HARNESS_CLIPBOARD_DRIVER_NOTIFY_FAILED",
+                                    format!("failed to notify harness clipboard driver: {error:?}"),
+                                ),
+                            );
+                        }
                     }
                 }
             }
@@ -131,14 +138,16 @@ impl ClipboardPort for WebClipboardAdapter {
                 );
             }
         }
-        if let Some(window) = web_sys::window() {
-            if let Ok(value) = Reflect::get(
-                window.as_ref(),
-                &JsValue::from_str("__AURA_HARNESS_CLIPBOARD__"),
-            ) {
-                if let Some(text) = value.as_string() {
-                    if !text.is_empty() {
-                        return text;
+        if harness_mode_enabled() {
+            if let Some(window) = web_sys::window() {
+                if let Ok(value) = Reflect::get(
+                    window.as_ref(),
+                    &JsValue::from_str("__AURA_HARNESS_CLIPBOARD__"),
+                ) {
+                    if let Some(text) = value.as_string() {
+                        if !text.is_empty() {
+                            return text;
+                        }
                     }
                 }
             }

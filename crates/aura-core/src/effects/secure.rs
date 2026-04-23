@@ -123,6 +123,19 @@ impl SecureStorageLocation {
     }
 }
 
+/// Result of secure key generation.
+///
+/// Secret material remains inside secure storage. Implementations may return
+/// public key material for asymmetric key types; otherwise callers receive an
+/// opaque storage handle for later secure operations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SecureGeneratedKey {
+    /// Generated key is available only through secure storage at this handle.
+    OpaqueHandle(String),
+    /// Public key material derived from the generated private key.
+    PublicMaterial(Vec<u8>),
+}
+
 /// Capabilities required for secure storage operations
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SecureStorageCapability {
@@ -271,7 +284,7 @@ pub trait SecureStorageEffects: Send + Sync {
         location: &SecureStorageLocation,
         key_type: &str,
         capabilities: &[SecureStorageCapability],
-    ) -> Result<Option<Vec<u8>>, SecureStorageError>;
+    ) -> Result<SecureGeneratedKey, SecureStorageError>;
 
     /// Create a time-bound access token
     ///
