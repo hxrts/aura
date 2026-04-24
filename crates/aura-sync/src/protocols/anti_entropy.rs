@@ -1571,7 +1571,7 @@ mod tests {
             _peer: &AuthorityId,
             budget: &FlowBudget,
         ) -> Result<FlowBudget, AuraError> {
-            Ok(budget.clone())
+            Ok(*budget)
         }
 
         async fn charge_flow_budget(

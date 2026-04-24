@@ -1107,7 +1107,7 @@ fn send_clipboard_retries_until_clipboard_file_is_written() {
             InstanceConfig {
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
-                data_dir: alice_data.clone(),
+                data_dir: alice_data,
                 device_id: None,
                 bind_address: "127.0.0.1:45011".to_string(),
                 demo_mode: false,
@@ -1241,7 +1241,7 @@ fn send_clipboard_long_payload_is_chunked_and_reassembled() {
             InstanceConfig {
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
-                data_dir: alice_data.clone(),
+                data_dir: alice_data,
                 device_id: None,
                 bind_address: "127.0.0.1:45021".to_string(),
                 demo_mode: false,

@@ -24,7 +24,7 @@ use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId}
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use aura_rendezvous::LanDiscoveryConfig;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -33,6 +33,7 @@ use tokio::time::{sleep, timeout};
 type TestResult<T = ()> = anyhow::Result<T>;
 
 static NEXT_LAN_PORT: AtomicU16 = AtomicU16::new(22000);
+static NEXT_RUN_SCOPE: AtomicU64 = AtomicU64::new(1);
 static LAN_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const LAN_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(90);
@@ -1258,7 +1259,10 @@ async fn test_lan_leave_then_join_reuses_channel_id_cross_instance() -> TestResu
 /// cached in `AuraEffectSystem`, so `publish_descriptor()` passes the guard
 /// chain in production mode.
 async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>> {
-    let run_scope = format!("{seed}-{lan_port}-pid{}", std::process::id());
+    let run_scope = format!(
+        "{seed}-{lan_port}-{}",
+        NEXT_RUN_SCOPE.fetch_add(1, Ordering::Relaxed)
+    );
     let authority_id =
         AuthorityId::new_from_entropy(hash(format!("prod-lan-authority-{run_scope}").as_bytes()));
     let device_id =

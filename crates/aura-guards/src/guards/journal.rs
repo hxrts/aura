@@ -144,10 +144,10 @@ impl JournalCoupler {
     /// Add a journal annotation for an operation
     pub fn add_annotation(
         &mut self,
-        operation_id: impl Into<GuardOperationId>,
+        operation_id: GuardOperationId,
         annotation: JournalAnnotation,
     ) -> &mut Self {
-        self.annotations.insert(operation_id.into(), annotation);
+        self.annotations.insert(operation_id, annotation);
         self
     }
 
@@ -449,7 +449,8 @@ impl JournalCoupler {
         effect_system: &E,
         receipt: &Option<aura_core::Receipt>,
     ) -> AuraResult<CouplingMetrics> {
-        let operation_id = GuardOperationId::Custom("send_coupling".to_string());
+        let operation_id = GuardOperationId::custom("send_coupling")
+            .expect("send_coupling is a valid guard operation id");
 
         debug!("Coupling journal operations with send");
 
@@ -688,7 +689,7 @@ impl JournalCouplerBuilder {
     /// Add a journal annotation
     pub fn with_annotation(
         mut self,
-        operation_id: impl Into<GuardOperationId>,
+        operation_id: GuardOperationId,
         annotation: JournalAnnotation,
     ) -> Self {
         self.coupler.add_annotation(operation_id, annotation);

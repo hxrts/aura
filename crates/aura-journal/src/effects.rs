@@ -356,16 +356,9 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send 
         cost: FlowCost,
     ) -> Result<FlowBudget, AuraError> {
         let mut current = self.get_flow_budget(context, peer).await?;
-        if current.limit > 0 {
-            current
-                .record_charge(cost)
-                .map_err(|e| AuraError::budget_exceeded(e.to_string()))?;
-        } else {
-            let cost_value = u64::from(cost);
-            current.spent = current.spent.checked_add(cost_value).ok_or_else(|| {
-                AuraError::invalid("flow budget overflow while recording unbounded spend")
-            })?;
-        }
+        current
+            .record_charge(cost)
+            .map_err(|e| AuraError::budget_exceeded(e.to_string()))?;
         self.update_flow_budget(context, peer, &current).await
     }
 }

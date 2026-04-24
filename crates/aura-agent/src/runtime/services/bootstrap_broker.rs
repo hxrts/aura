@@ -18,13 +18,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::net::{TcpListener, TcpStream};
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::time::Instant;
+use tokio::time::{timeout, Instant};
 
 const DEFAULT_LOOPBACK_BIND_ADDR: &str = "127.0.0.1:0";
 #[cfg(not(target_arch = "wasm32"))]
 const AUTHORIZATION_HEADER: &str = "authorization";
+#[cfg(not(target_arch = "wasm32"))]
+const INVITATION_RETRIEVAL_HEADER: &str = "x-aura-invitation-retrieval-token";
 #[cfg(not(target_arch = "wasm32"))]
 const BEARER_PREFIX: &str = "Bearer ";
 #[cfg(not(target_arch = "wasm32"))]
@@ -35,6 +37,30 @@ const MAX_BOOTSTRAP_CANDIDATES: usize = 256;
 const MAX_PENDING_INVITATIONS: usize = 256;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_INVITATIONS_PER_RECIPIENT: usize = 16;
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_MAX_BOOTSTRAP_CONNECTIONS: usize = 64;
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_BOOTSTRAP_REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Resource limits for the local bootstrap broker HTTP service.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BootstrapBrokerLimits {
+    /// Maximum number of in-flight HTTP connections served by the broker.
+    pub max_connections: usize,
+    /// Deadline for reading each request header and body chunk.
+    pub request_read_timeout: Duration,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for BootstrapBrokerLimits {
+    fn default() -> Self {
+        Self {
+            max_connections: DEFAULT_MAX_BOOTSTRAP_CONNECTIONS,
+            request_read_timeout: DEFAULT_BOOTSTRAP_REQUEST_READ_TIMEOUT,
+        }
+    }
+}
 
 /// Explicit policy for native bootstrap broker bind exposure.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -197,6 +223,8 @@ pub struct LocalBootstrapBrokerService {
     registration_ttl: Duration,
     auth_token: String,
     shared: Arc<RwLock<BootstrapBrokerState>>,
+    limits: BootstrapBrokerLimits,
+    connection_permits: Arc<Semaphore>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -207,10 +235,33 @@ impl LocalBootstrapBrokerService {
         auth_token: impl Into<String>,
         lan_bind_policy: BootstrapBrokerLanBindPolicy,
     ) -> Result<Self, String> {
+        Self::bind_with_limits(
+            bind_addr,
+            registration_ttl,
+            auth_token,
+            lan_bind_policy,
+            BootstrapBrokerLimits::default(),
+        )
+        .await
+    }
+
+    pub async fn bind_with_limits(
+        bind_addr: &str,
+        registration_ttl: Duration,
+        auth_token: impl Into<String>,
+        lan_bind_policy: BootstrapBrokerLanBindPolicy,
+        limits: BootstrapBrokerLimits,
+    ) -> Result<Self, String> {
         validate_bind_addr(bind_addr, lan_bind_policy)?;
         let auth_token = auth_token.into();
         if auth_token.is_empty() {
             return Err("bootstrap broker auth token must not be empty".to_string());
+        }
+        if limits.max_connections == 0 {
+            return Err("bootstrap broker max connections must be greater than zero".to_string());
+        }
+        if limits.request_read_timeout.is_zero() {
+            return Err("bootstrap broker request read timeout must be non-zero".to_string());
         }
         let listener = TcpListener::bind(bind_addr)
             .await
@@ -225,6 +276,8 @@ impl LocalBootstrapBrokerService {
             registration_ttl,
             auth_token,
             shared: Arc::new(RwLock::new(BootstrapBrokerState::new())),
+            limits,
+            connection_permits: Arc::new(Semaphore::new(limits.max_connections)),
         })
     }
 
@@ -270,21 +323,40 @@ impl LocalBootstrapBrokerService {
         let shared = self.shared.clone();
         let registration_ttl = self.registration_ttl;
         let auth_token = self.auth_token.clone();
+        let limits = self.limits;
+        let permits = self.connection_permits.clone();
         let accept_tasks = tasks.clone();
         let connection_tasks = tasks.clone();
         let _bootstrap_broker_handle =
             accept_tasks.spawn_named("bootstrap_broker_http", async move {
                 loop {
-                    let Ok((stream, _addr)) = listener.accept().await else {
+                    let Ok((mut stream, _addr)) = listener.accept().await else {
                         break;
+                    };
+                    let Ok(permit) = permits.clone().try_acquire_owned() else {
+                        let _ = write_http_response(
+                            &mut stream,
+                            429,
+                            "text/plain; charset=utf-8",
+                            b"too many bootstrap broker connections",
+                        )
+                        .await;
+                        continue;
                     };
                     let shared = shared.clone();
                     let auth_token = auth_token.clone();
                     let connection_tasks = connection_tasks.clone();
                     let _conn_handle =
                         connection_tasks.spawn_named("bootstrap_broker_conn", async move {
-                            handle_http_connection(stream, shared, registration_ttl, auth_token)
-                                .await;
+                            let _permit = permit;
+                            handle_http_connection(
+                                stream,
+                                shared,
+                                registration_ttl,
+                                auth_token,
+                                limits.request_read_timeout,
+                            )
+                            .await;
                         });
                 }
             });
@@ -400,7 +472,7 @@ async fn take_invitations(
 ) -> Result<Vec<String>, String> {
     let mut state = shared.write().await;
     match state.invitation_credentials.get(authority_id) {
-        Some(expected) if expected == retrieval_token => {}
+        Some(expected) if constant_time_eq_str(expected, retrieval_token) => {}
         _ => return Err("bootstrap broker invitation credential rejected".to_string()),
     }
     let invitations = state.invitations.remove(authority_id).unwrap_or_default();
@@ -416,8 +488,25 @@ fn request_is_authorized(request: &HttpRequest, auth_token: &str) -> bool {
         .headers
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(AUTHORIZATION_HEADER))
-        .map(|(_, value)| value.trim() == format!("{BEARER_PREFIX}{auth_token}"))
+        .map(|(_, value)| {
+            let expected = format!("{BEARER_PREFIX}{auth_token}");
+            constant_time_eq_str(value.trim(), &expected)
+        })
         .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn constant_time_eq_str(candidate: &str, expected: &str) -> bool {
+    let candidate = candidate.as_bytes();
+    let expected = expected.as_bytes();
+    let max_len = candidate.len().max(expected.len());
+    let mut diff = candidate.len() ^ expected.len();
+    for idx in 0..max_len {
+        let left = candidate.get(idx).copied().unwrap_or(0);
+        let right = expected.get(idx).copied().unwrap_or(0);
+        diff |= usize::from(left ^ right);
+    }
+    diff == 0
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -426,8 +515,9 @@ async fn handle_http_connection(
     shared: Arc<RwLock<BootstrapBrokerState>>,
     registration_ttl: Duration,
     auth_token: String,
+    request_read_timeout: Duration,
 ) {
-    let request = match read_http_request(&mut stream).await {
+    let request = match read_http_request(&mut stream, request_read_timeout).await {
         Ok(request) => request,
         Err(error) => {
             let _ = write_http_response(
@@ -534,14 +624,25 @@ async fn handle_http_connection(
             let _ = write_http_response(&mut stream, 204, "text/plain; charset=utf-8", b"").await;
         }
         ("GET", path) if path.starts_with("/v1/bootstrap/invitations/") => {
-            let Some((authority_id, retrieval_token)) =
-                invitation_request_parts(path.trim_start_matches("/v1/bootstrap/invitations/"))
+            let Some(authority_id) =
+                invitation_request_authority(path.trim_start_matches("/v1/bootstrap/invitations/"))
             else {
                 let _ = write_http_response(
                     &mut stream,
                     400,
                     "text/plain; charset=utf-8",
-                    b"missing invitation retrieval token",
+                    b"missing invitation authority",
+                )
+                .await;
+                return;
+            };
+            let Some(retrieval_token) = request_header(&request, INVITATION_RETRIEVAL_HEADER)
+            else {
+                let _ = write_http_response(
+                    &mut stream,
+                    401,
+                    "text/plain; charset=utf-8",
+                    b"missing invitation retrieval credential",
                 )
                 .await;
                 return;
@@ -592,25 +693,34 @@ struct HttpRequest {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn invitation_request_parts(path_tail: &str) -> Option<(&str, &str)> {
-    let (authority_id, query) = path_tail.split_once('?')?;
-    let token = query
-        .split('&')
-        .find_map(|part| part.strip_prefix("token="))?;
-    if authority_id.is_empty() || token.is_empty() {
+fn invitation_request_authority(path_tail: &str) -> Option<&str> {
+    if path_tail.is_empty() || path_tail.contains('?') {
         return None;
     }
-    Some((authority_id, token))
+    Some(path_tail)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
+fn request_header<'a>(request: &'a HttpRequest, header_name: &str) -> Option<&'a str> {
+    request
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(header_name))
+        .map(|(_, value)| value.trim())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn read_http_request(
+    stream: &mut TcpStream,
+    request_read_timeout: Duration,
+) -> Result<HttpRequest, String> {
     let mut buffer = Vec::new();
     let mut scratch = [0_u8; 2048];
     let header_end = loop {
-        let read = stream
-            .read(&mut scratch)
+        let read = timeout(request_read_timeout, stream.read(&mut scratch))
             .await
+            .map_err(|_| "request header read timed out".to_string())?
             .map_err(|error| format!("read failed: {error}"))?;
         if read == 0 {
             return Err("request ended before headers were complete".to_string());
@@ -662,9 +772,9 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String
         return Err("request body exceeds bootstrap broker limit".to_string());
     }
     while body.len() < content_length {
-        let read = stream
-            .read(&mut scratch)
+        let read = timeout(request_read_timeout, stream.read(&mut scratch))
             .await
+            .map_err(|_| "request body read timed out".to_string())?
             .map_err(|error| format!("body read failed: {error}"))?;
         if read == 0 {
             return Err("request body truncated".to_string());
@@ -727,12 +837,11 @@ pub fn candidates_endpoint(base_url: &str) -> String {
     format!("{}/v1/bootstrap/candidates", normalize_base_url(base_url))
 }
 
-pub fn invitations_endpoint(base_url: &str, authority_id: &str, retrieval_token: &str) -> String {
+pub fn invitations_endpoint(base_url: &str, authority_id: &str) -> String {
     format!(
-        "{}/v1/bootstrap/invitations/{}?token={}",
+        "{}/v1/bootstrap/invitations/{}",
         normalize_base_url(base_url),
-        authority_id,
-        retrieval_token
+        authority_id
     )
 }
 
@@ -775,6 +884,7 @@ async fn send_native_http_request(
     method: &str,
     url: &str,
     auth_token: &str,
+    extra_headers: &[(&str, &str)],
     body: Option<&[u8]>,
 ) -> Result<Vec<u8>, String> {
     let (host_port, path) = parse_http_endpoint(url)?;
@@ -782,8 +892,12 @@ async fn send_native_http_request(
         .await
         .map_err(|error| format!("bootstrap broker connect failed ({host_port}): {error}"))?;
     let body = body.unwrap_or_default();
+    let mut extra_header_text = String::new();
+    for (name, value) in extra_headers {
+        extra_header_text.push_str(&format!("{name}: {value}\r\n"));
+    }
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {host_port}\r\nAuthorization: Bearer {auth_token}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n",
+        "{method} {path} HTTP/1.1\r\nHost: {host_port}\r\nAuthorization: Bearer {auth_token}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: application/json\r\n{extra_header_text}\r\n",
         body.len()
     );
     stream
@@ -838,6 +952,7 @@ pub async fn register_remote_candidate(
         "POST",
         &register_endpoint(base_url),
         auth_token,
+        &[],
         Some(&body),
     )
     .await?;
@@ -850,7 +965,8 @@ pub async fn fetch_remote_candidates(
     auth_token: &str,
 ) -> Result<Vec<BootstrapBrokerCandidateRecord>, String> {
     let body =
-        send_native_http_request("GET", &candidates_endpoint(base_url), auth_token, None).await?;
+        send_native_http_request("GET", &candidates_endpoint(base_url), auth_token, &[], None)
+            .await?;
     serde_json::from_slice(&body)
         .map_err(|error| format!("broker candidate decode failed: {error}"))
 }
@@ -867,6 +983,7 @@ pub async fn send_remote_invitation(
         "POST",
         &format!("{}/v1/bootstrap/invitations", normalize_base_url(base_url)),
         auth_token,
+        &[],
         Some(&body),
     )
     .await?;
@@ -882,8 +999,9 @@ pub async fn take_remote_invitations(
 ) -> Result<Vec<String>, String> {
     let body = send_native_http_request(
         "GET",
-        &invitations_endpoint(base_url, authority_id, retrieval_token),
+        &invitations_endpoint(base_url, authority_id),
         auth_token,
+        &[(INVITATION_RETRIEVAL_HEADER, retrieval_token)],
         None,
     )
     .await?;
@@ -958,12 +1076,9 @@ pub async fn take_remote_invitations(
     authority_id: &str,
     retrieval_token: &str,
 ) -> Result<Vec<String>, String> {
-    let request = gloo_net::http::Request::get(&invitations_endpoint(
-        base_url,
-        authority_id,
-        retrieval_token,
-    ))
-    .header("authorization", &format!("Bearer {auth_token}"));
+    let request = gloo_net::http::Request::get(&invitations_endpoint(base_url, authority_id))
+        .header("authorization", &format!("Bearer {auth_token}"))
+        .header("x-aura-invitation-retrieval-token", retrieval_token);
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) if endpoint_is_loopback(base_url) => return Ok(Vec::new()),
@@ -1102,6 +1217,10 @@ mod tests {
         .await
         .expect("remote invitation take should succeed");
         assert_eq!(invitations, vec!["invite-123".to_string()]);
+        assert!(
+            !invitations_endpoint(broker.public_url(), "fedcba98-7654-3210-fedc-ba9876543210")
+                .contains(INVITE_TOKEN)
+        );
 
         let replay = take_remote_invitations(
             broker.public_url(),
@@ -1112,6 +1231,45 @@ mod tests {
         .await
         .expect_err("retrieval credential should be one-time after draining invitations");
         assert!(replay.contains("401"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn bootstrap_broker_rejects_query_string_invitation_credentials() {
+        let broker = LocalBootstrapBrokerService::bind(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+        )
+        .await
+        .expect("broker should bind");
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("bootstrap_broker_query_token_test"));
+        tokio::task::yield_now().await;
+
+        register_remote_candidate(
+            broker.public_url(),
+            AUTH_TOKEN,
+            &BootstrapBrokerRegistration {
+                authority_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".to_string(),
+                address: "127.0.0.1:40126".to_string(),
+                invitation_retrieval_token: INVITE_TOKEN.to_string(),
+                nickname_suggestion: None,
+            },
+        )
+        .await
+        .expect("recipient registration should succeed");
+
+        let query_url = format!(
+            "{}/v1/bootstrap/invitations/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?credential={}",
+            normalize_base_url(broker.public_url()),
+            INVITE_TOKEN
+        );
+        let error = send_native_http_request("GET", &query_url, AUTH_TOKEN, &[], None)
+            .await
+            .expect_err("query-string credential should be rejected");
+        assert!(error.contains("400"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1140,6 +1298,7 @@ mod tests {
             "POST",
             &register_endpoint(broker.public_url()),
             "wrong-token",
+            &[],
             Some(&registration),
         )
         .await
@@ -1163,6 +1322,7 @@ mod tests {
                 normalize_base_url(broker.public_url())
             ),
             "wrong-token",
+            &[],
             Some(&invitation),
         )
         .await
@@ -1216,6 +1376,101 @@ mod tests {
             .expect("response should read");
         let response = String::from_utf8_lossy(&response);
         assert!(response.starts_with("HTTP/1.1 400"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn bootstrap_broker_bounds_concurrent_connections() {
+        let broker = LocalBootstrapBrokerService::bind_with_limits(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+            BootstrapBrokerLimits {
+                max_connections: 1,
+                request_read_timeout: Duration::from_millis(250),
+            },
+        )
+        .await
+        .expect("broker should bind");
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("bootstrap_broker_connection_limit_test"));
+        tokio::task::yield_now().await;
+
+        let (host_port, _) =
+            parse_http_endpoint(&candidates_endpoint(broker.public_url())).expect("valid endpoint");
+        let _held = TcpStream::connect(&host_port)
+            .await
+            .expect("first connection should be accepted and hold the permit");
+        tokio::task::yield_now().await;
+
+        let mut second = TcpStream::connect(&host_port)
+            .await
+            .expect("second connection should connect");
+        let mut response = Vec::new();
+        second
+            .read_to_end(&mut response)
+            .await
+            .expect("limit response should read");
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 429"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn bootstrap_broker_times_out_slow_headers_and_bodies() {
+        let broker = LocalBootstrapBrokerService::bind_with_limits(
+            "127.0.0.1:0",
+            Duration::from_secs(60),
+            AUTH_TOKEN,
+            BootstrapBrokerLanBindPolicy::LoopbackOnly,
+            BootstrapBrokerLimits {
+                max_connections: 4,
+                request_read_timeout: Duration::from_millis(25),
+            },
+        )
+        .await
+        .expect("broker should bind");
+        let supervisor = TaskSupervisor::new();
+        broker.start(&supervisor.group("bootstrap_broker_read_timeout_test"));
+        tokio::task::yield_now().await;
+
+        let (host_port, path) =
+            parse_http_endpoint(&register_endpoint(broker.public_url())).expect("valid endpoint");
+        let mut header_stream = TcpStream::connect(&host_port)
+            .await
+            .expect("broker should accept slow header connection");
+        header_stream
+            .write_all(b"GET /v1/bootstrap/candidates HTTP/1.1\r\n")
+            .await
+            .expect("partial header should write");
+        let mut response = Vec::new();
+        header_stream
+            .read_to_end(&mut response)
+            .await
+            .expect("timeout response should read");
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 400"));
+        assert!(response.contains("timed out"));
+
+        let mut body_stream = TcpStream::connect(&host_port)
+            .await
+            .expect("broker should accept slow body connection");
+        let request = format!(
+            "POST {path} HTTP/1.1\r\nHost: {host_port}\r\nAuthorization: Bearer {AUTH_TOKEN}\r\nConnection: close\r\nContent-Length: 4\r\nContent-Type: application/json\r\n\r\n{{"
+        );
+        body_stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("partial body should write");
+        let mut response = Vec::new();
+        body_stream
+            .read_to_end(&mut response)
+            .await
+            .expect("timeout response should read");
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 400"));
+        assert!(response.contains("timed out"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

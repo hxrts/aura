@@ -33,6 +33,9 @@ Synchronization protocol providing fact exchange, merkle verification, anti-entr
 - Sync operations must not bypass guard chain checks in runtime.
 - Protocols should operate on explicit inputs (snapshot, budget, timestamp).
 - Merkle verification ensures fact integrity across peers.
+- Peer Biscuit validation must use a configured trust root and concrete sync
+  authority scope. Missing roots or scopes fail closed; deterministic roots are
+  test fixtures only.
 
 ### InvariantSyncMerkleVerification
 

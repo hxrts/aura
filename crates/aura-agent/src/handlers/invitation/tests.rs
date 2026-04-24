@@ -118,7 +118,7 @@ fn production_effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem>
                 .prefix("aura-agent-invitation-prod-")
                 .tempdir()
                 .expect("production invitation root should build")
-                .into_path()
+                .keep()
                 .join("aura"),
             ..Default::default()
         },

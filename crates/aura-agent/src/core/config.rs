@@ -109,39 +109,29 @@ impl Default for StorageConfig {
 }
 
 /// Explicit encrypted-at-rest policy for agent storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum StorageEncryptionPolicy {
     /// Production storage must be encrypted at rest.
+    #[default]
     Required,
     /// Test-only plaintext storage for focused runtime tests.
     PlaintextForTests,
 }
 
-impl Default for StorageEncryptionPolicy {
-    fn default() -> Self {
-        Self::Required
-    }
-}
-
 /// Secure storage backend selection for local key material.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SecureStorageBackend {
     /// Use the explicit filesystem-backed secure-storage fallback.
     ///
     /// This backend is non-interactive and is therefore the default for local
     /// development, tests, and automation.
+    #[default]
     FilesystemFallback,
     /// Use the platform credential store (Keychain, Keystore, libsecret, etc.).
     ///
     /// This may trigger interactive OS prompts depending on the platform and
     /// deployment environment.
     PlatformCredentialStore,
-}
-
-impl Default for SecureStorageBackend {
-    fn default() -> Self {
-        Self::FilesystemFallback
-    }
 }
 
 /// Network configuration

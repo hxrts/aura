@@ -26,6 +26,8 @@ All transport sends pass through the guard chain defined in [Authorization](106_
 
 Flow budgets limit the amount of data that an authority may send within a context. The flow budget model defines a quota for each `(ContextId, peer)` pair. A reservation system protects against race conditions.
 
+Missing budget state or budget retrieval errors do not create implicit headroom. Zero limits mean no spend is available unless a future explicit typed unlimited-budget policy says otherwise, and guard-time checks must match charge-time semantics.
+
 An authority must reserve budget before sending. A reservation locks a portion of the available budget. The actual charge occurs during the guard chain. If the guard chain succeeds, a receipt is created.
 
 ```rust

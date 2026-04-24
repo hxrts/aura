@@ -44,12 +44,12 @@ where
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("test runtime should build");
+                .unwrap_or_else(|error| panic!("test runtime should build: {error}"));
             runtime.block_on(future)
         })
-        .expect("large-stack test thread should spawn")
+        .unwrap_or_else(|error| panic!("large-stack test thread should spawn: {error}"))
         .join()
-        .expect("large-stack test thread should complete")
+        .unwrap_or_else(|error| panic!("large-stack test thread should complete: {error:?}"))
 }
 
 /// Create a test effect context for async tests
@@ -74,7 +74,7 @@ async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
             base_path: tempfile::Builder::new()
                 .prefix("aura-agent-invitation-service-test-")
                 .tempdir()?
-                .into_path()
+                .keep()
                 .join("aura"),
             ..Default::default()
         },

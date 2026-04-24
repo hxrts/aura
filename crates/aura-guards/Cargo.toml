@@ -34,3 +34,4 @@ biscuit-auth = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true }
 parking_lot = { workspace = true }
+trybuild = { workspace = true }

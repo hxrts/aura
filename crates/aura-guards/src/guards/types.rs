@@ -9,6 +9,46 @@
 use aura_core::{CapabilityName, FlowCost};
 use serde::{Deserialize, Serialize};
 
+/// Errors when constructing a custom guard operation id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuardOperationIdError {
+    value: String,
+}
+
+impl GuardOperationIdError {
+    fn empty(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for GuardOperationIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "guard operation id must not be empty: {:?}", self.value)
+    }
+}
+
+impl std::error::Error for GuardOperationIdError {}
+
+/// Validated custom guard operation id.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CustomGuardOperationId(String);
+
+impl CustomGuardOperationId {
+    pub fn new(value: impl Into<String>) -> Result<Self, GuardOperationIdError> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err(GuardOperationIdError::empty(value));
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Guard capability identifiers are validated Aura capability names.
 pub type CapabilityId = CapabilityName;
 
@@ -270,7 +310,7 @@ pub enum GuardOperationId {
         peer: uuid::Uuid,
         cid: aura_core::Hash32,
     },
-    Custom(String),
+    Custom(CustomGuardOperationId),
 }
 
 impl std::fmt::Display for GuardOperationId {
@@ -287,26 +327,30 @@ impl std::fmt::Display for GuardOperationId {
             GuardOperationId::SyncPushOp { peer, cid } => {
                 write!(f, "push_op_{peer}_{cid:?}")
             }
-            GuardOperationId::Custom(value) => write!(f, "{value}"),
+            GuardOperationId::Custom(value) => write!(f, "{}", value.as_str()),
         }
     }
 }
 
 impl GuardOperationId {
-    pub fn is_empty(&self) -> bool {
-        matches!(self, GuardOperationId::Custom(value) if value.is_empty())
+    pub fn custom(value: impl Into<String>) -> Result<Self, GuardOperationIdError> {
+        CustomGuardOperationId::new(value).map(Self::Custom)
     }
 }
 
-impl From<String> for GuardOperationId {
-    fn from(value: String) -> Self {
-        GuardOperationId::Custom(value)
+impl TryFrom<String> for GuardOperationId {
+    type Error = GuardOperationIdError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::custom(value)
     }
 }
 
-impl From<&str> for GuardOperationId {
-    fn from(value: &str) -> Self {
-        GuardOperationId::Custom(value.to_string())
+impl TryFrom<&str> for GuardOperationId {
+    type Error = GuardOperationIdError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::custom(value)
     }
 }
 

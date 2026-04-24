@@ -26,7 +26,7 @@ use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
 use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 #[cfg(not(target_arch = "wasm32"))]
@@ -326,11 +326,23 @@ fn ip_allowed_for_production_direct_egress(ip: IpAddr) -> bool {
             !(ip.is_loopback()
                 || ip.is_unspecified()
                 || ip.is_multicast()
-                || ip.is_unicast_link_local()
-                || ip.is_unique_local()
+                || is_ipv6_unicast_link_local(ip)
+                || is_ipv6_unique_local(ip)
                 || (segments[0] == 0x2001 && segments[1] == 0x0db8))
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_ipv6_unicast_link_local(ip: Ipv6Addr) -> bool {
+    let first = ip.segments()[0];
+    (first & 0xffc0) == 0xfe80
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_ipv6_unique_local(ip: Ipv6Addr) -> bool {
+    let first = ip.segments()[0];
+    (first & 0xfe00) == 0xfc00
 }
 
 async fn send_planned_envelope(

@@ -603,8 +603,7 @@ const HARNESS_COMMAND_SUBMISSION_TIMEOUT: std::time::Duration = std::time::Durat
 
 fn frame_too_large_error(payload_len: usize, context: &str) -> io::Error {
     io::Error::other(format!(
-        "{context} exceeded harness frame limit ({} > {})",
-        payload_len, HARNESS_COMMAND_MAX_FRAME_BYTES
+        "{context} exceeded harness frame limit ({payload_len} > {HARNESS_COMMAND_MAX_FRAME_BYTES})"
     ))
 }
 

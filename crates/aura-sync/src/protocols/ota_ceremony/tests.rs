@@ -453,7 +453,8 @@ fn test_ota_commit_helper_emits_fact() {
             signature: ThresholdSignature::single_signer(vec![7u8; 64], vec![8u8; 32], 0),
             committed_at_ms: 42,
         };
-        let certificate = create_ota_activation_certificate(&[commitment.clone()]).unwrap();
+        let certificate =
+            create_ota_activation_certificate(std::slice::from_ref(&commitment)).unwrap();
 
         emit_ota_ceremony_committed_fact(
             &effects,

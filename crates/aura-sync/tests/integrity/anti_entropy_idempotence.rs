@@ -36,17 +36,18 @@ fn verified_ops(ops: Vec<AttestedOp>) -> VerifiedIngress<VerifiedRemoteOpsBatch>
         IngressSource::Device(peer),
         context,
         None,
-        Hash32::from_value(&payload).unwrap(),
+        Hash32::from_value(&payload)
+            .unwrap_or_else(|error| panic!("payload hash should serialize: {error}")),
         1,
     );
     let evidence = IngressVerificationEvidence::new(
         metadata.clone(),
         aura_guards::REQUIRED_INGRESS_VERIFICATION_CHECKS,
     )
-    .unwrap();
+    .unwrap_or_else(|error| panic!("ingress evidence should build: {error}"));
     DecodedIngress::new(payload, metadata)
         .verify(evidence)
-        .unwrap()
+        .unwrap_or_else(|error| panic!("decoded ingress should verify: {error}"))
 }
 
 #[test]

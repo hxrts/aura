@@ -15,7 +15,8 @@
 use crate::capabilities::ConsensusCapability;
 use aura_core::{AuraResult, AuthorityId, CapabilityName, ContextId, FlowCost};
 use aura_guards::{
-    GuardContextProvider, GuardEffects, LeakageBudget, SendGuardChain, SendGuardResult,
+    GuardContextProvider, GuardEffects, GuardOperationId, LeakageBudget, SendGuardChain,
+    SendGuardResult,
 };
 
 fn build_guard_chain(
@@ -26,6 +27,8 @@ fn build_guard_chain(
     operation_id: &'static str,
     leakage_budget: Option<LeakageBudget>,
 ) -> SendGuardChain {
+    let operation_id =
+        GuardOperationId::custom(operation_id).expect("consensus guard operations are valid");
     let chain =
         SendGuardChain::new(capability, context, peer, cost).with_operation_id(operation_id);
 

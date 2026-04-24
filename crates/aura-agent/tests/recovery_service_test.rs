@@ -30,7 +30,8 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
 }
 
 fn isolated_test_config() -> (tempfile::TempDir, AgentConfig) {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir()
+        .unwrap_or_else(|error| panic!("failed to create isolated tempdir: {error}"));
     let config = AgentConfig {
         storage: StorageConfig {
             base_path: temp.path().join("aura"),
@@ -54,15 +55,19 @@ async fn signed_test_approval(
     guardian_id: AuthorityId,
     approved_at: u64,
 ) -> GuardianApproval {
-    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let (private_key, public_key) = effects
+        .ed25519_generate_keypair()
+        .await
+        .unwrap_or_else(|error| panic!("failed to generate test guardian keypair: {error}"));
     effects
         .store(
             &recovery_guardian_public_key_storage_key(guardian_id),
             public_key,
         )
         .await
-        .unwrap();
-    let operation_hash = recovery_operation_hash(&request.operation).unwrap();
+        .unwrap_or_else(|error| panic!("failed to store guardian public key: {error}"));
+    let operation_hash = recovery_operation_hash(&request.operation)
+        .unwrap_or_else(|error| panic!("failed to hash recovery operation: {error}"));
     let transcript = RecoveryApprovalTranscript::new(RecoveryApprovalTranscriptPayload {
         recovery_id: request.recovery_id.clone(),
         account_authority: request.account_authority,
@@ -74,7 +79,7 @@ async fn signed_test_approval(
     });
     let signature = aura_signature::sign_ed25519_transcript(effects, &transcript, &private_key)
         .await
-        .unwrap();
+        .unwrap_or_else(|error| panic!("failed to sign guardian approval transcript: {error}"));
     GuardianApproval {
         recovery_id: request.recovery_id.clone(),
         guardian_id,

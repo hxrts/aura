@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/boundaries/guard_operation_id_custom_raw_string.rs:4:47
+  |
+4 |     let _operation = GuardOperationId::Custom(String::new());
+  |                      ------------------------ ^^^^^^^^^^^^^ expected `CustomGuardOperationId`, found `String`
+  |                      |
+  |                      arguments to this enum variant are incorrect
+  |
+note: tuple variant defined here
+ --> src/guards/types.rs
+  |
+  |     Custom(CustomGuardOperationId),
+  |     ^^^^^^

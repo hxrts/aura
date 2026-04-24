@@ -6,7 +6,7 @@ use aura_core::effects::{PhysicalTimeEffects, TransportEffects, WakeCondition};
 use aura_core::hash::hash;
 use aura_core::{AuthorityId, ContextId, FlowCost};
 use aura_guards::prelude::create_send_guard_op;
-use aura_guards::{GuardOperation, JournalCoupler};
+use aura_guards::{GuardOperation, GuardOperationId, JournalCoupler};
 use aura_protocol::effects::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics, RoleIndex,
@@ -119,10 +119,15 @@ impl ChoreographicEffects for AuraEffectSystem {
             peer,
             FlowCost::new(flow_cost),
         )
-        .with_operation_id(format!(
-            "choreography_send_{}_{}_{:?}",
-            session.session_id, context_id, role.device_id
-        ));
+        .with_operation_id(
+            GuardOperationId::custom(format!(
+                "choreography_send_{}_{}_{:?}",
+                session.session_id, context_id, role.device_id
+            ))
+            .map_err(|error| ChoreographyError::InternalError {
+                message: error.to_string(),
+            })?,
+        );
 
         let guard_result =
             guard_chain

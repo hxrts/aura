@@ -262,23 +262,17 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
         // Get current time
         let now = TimeStamp::PhysicalClock(effect_system.physical_time().await?);
 
-        // Get flow budgets
-        // When no budget is explicitly configured (limit=0, the default), use a
-        // generous default so operations aren't blocked.  Flow budget limits are
-        // derived at runtime from Biscuit + policy; a zero-limit default simply
-        // means "not yet configured", not "zero quota".
+        // Get flow budgets. Missing or errored budget state must fail closed;
+        // the journal implementation provides any configured default budget.
         let mut budgets = HashMap::new();
         let budget = effect_system
             .get_flow_budget(&request.context, &request.peer)
             .await
-            .unwrap_or_default();
-        let remaining = if budget.limit == 0 && budget.spent == 0 {
-            // Unconfigured — allow with a generous default
-            FlowCost::new(u32::MAX)
-        } else {
-            aura_core::FlowCost::try_from(budget.remaining())
-                .map_err(|e| AuraError::invalid(e.to_string()))?
-        };
+            .map_err(|error| {
+                AuraError::budget_exceeded(format!("flow budget lookup failed: {error}"))
+            })?;
+        let remaining = aura_core::FlowCost::try_from(budget.remaining())
+            .map_err(|e| AuraError::invalid(e.to_string()))?;
         budgets.insert((request.context, request.peer), remaining);
         let budget_view = FlowBudgetView::new(budgets);
 
@@ -337,10 +331,6 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
     where
         E: GuardContextProvider + PhysicalTimeEffects,
     {
-        if request.operation.is_empty() {
-            return true;
-        }
-
         let (token_b64, root_pk_b64, issuer_authority) =
             match require_biscuit_metadata(effect_system) {
                 Ok(values) => values,
@@ -547,7 +537,8 @@ pub fn convert_send_guard_to_request(
     send_guard: &SendGuardChain,
     authority: AuthorityId,
 ) -> Result<GuardRequest> {
-    let operation = GuardOperationId::from(send_guard.authorization_requirement().as_str());
+    let operation = GuardOperationId::custom(send_guard.authorization_requirement().as_str())
+        .map_err(|error| AuraError::invalid(error.to_string()))?;
     let cost = send_guard.cost();
 
     let request = GuardRequest::new(authority, operation, cost)
@@ -731,12 +722,11 @@ where
     let budget = effect_system
         .get_flow_budget(context, authority)
         .await
-        .unwrap_or_default();
-    let remaining = if budget.limit == 0 && budget.spent == 0 {
-        FlowCost::new(u32::MAX)
-    } else {
-        FlowCost::try_from(budget.remaining()).map_err(|e| AuraError::invalid(e.to_string()))?
-    };
+        .map_err(|error| {
+            AuraError::budget_exceeded(format!("flow budget lookup failed: {error}"))
+        })?;
+    let remaining =
+        FlowCost::try_from(budget.remaining()).map_err(|e| AuraError::invalid(e.to_string()))?;
     budgets.insert((*context, *authority), remaining);
 
     let mut metadata = HashMap::new();
@@ -890,7 +880,7 @@ mod tests {
 
         assert_eq!(
             request.operation,
-            GuardOperationId::from(message_authorization)
+            GuardOperationId::custom(message_authorization).expect("valid guard operation")
         );
         assert_eq!(request.cost, cost);
         assert_eq!(request.context, context);

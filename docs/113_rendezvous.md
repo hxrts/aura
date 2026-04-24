@@ -65,6 +65,8 @@ Aura uses two distinct discovery planes during startup:
 
 The bootstrap broker publishes ephemeral bootstrap descriptors only. It exists to help first-run instances discover one another and exchange invitation or device-enrollment material through the existing enrollment path. It does not create an ordinary rendezvous relationship on its own.
 
+Bootstrap broker URLs carry only non-secret endpoint identifiers. Bearer credentials and invitation retrieval tokens travel in headers or another explicit credential channel, never in URL query strings, so logs, histories, referrers, and diagnostics do not capture secret material.
+
 Bootstrap and stale-node re-entry remain distributed surfaces. Aura does not define a singleton bootstrap registry. Runtime code may combine remembered direct contacts, neighborhood discovery-board publications, bounded bootstrap introductions, and broker-backed ephemeral startup descriptors. `aura-rendezvous` owns schema validation for bootstrap contact hints and neighborhood re-entry hints, but it does not own final route choice or a global bootstrap cache.
 
 Operationally, browser and native first-run startup may become bootstrap-visible only after the first native account runtime exists and begins hosting the broker automatically. For example, in a TUI plus Web startup, the user may create the web account first and the TUI account second. Once the TUI runtime is live, both instances should surface one another as bootstrap candidates without extra user setup steps.

@@ -332,9 +332,13 @@ async fn test_guard_chain_integration() {
     };
 
     // Create a guard request
-    let request = GuardRequest::new(authority, "test_op", FlowCost::new(100))
-        .with_context_id(context)
-        .with_peer(test_authority(1));
+    let request = GuardRequest::new(
+        authority,
+        aura_guards::GuardOperationId::custom("test_op").expect("valid operation"),
+        FlowCost::new(100),
+    )
+    .with_context_id(context)
+    .with_peer(test_authority(1));
 
     // Evaluate with standard guard chain
     let chain = GuardChain::standard();

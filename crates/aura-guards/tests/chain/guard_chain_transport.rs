@@ -21,11 +21,11 @@ use aura_core::types::flow::{FlowCost, FlowNonce, Receipt, ReceiptSig};
 use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult, Cap, FlowBudget, Journal};
 use aura_core::{AuthorityId, ContextId};
-use aura_guards::executor::{execute_guard_plan, GuardPlan};
+use aura_guards::executor::{execute_guard_plan, prepare_snapshot_from_effects, GuardPlan};
 use aura_guards::guards::pure::GuardRequest;
 use aura_guards::guards::traits::GuardContextProvider;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -56,6 +56,7 @@ struct TestEffects {
     storage: Mutex<HashMap<String, Vec<u8>>>,
     journal: Mutex<Journal>,
     flow_budget: Mutex<FlowBudget>,
+    fail_budget_lookup: AtomicBool,
     nonce: AtomicU64,
     time_ms: AtomicU64,
 }
@@ -67,9 +68,18 @@ impl TestEffects {
             storage: Mutex::new(HashMap::new()),
             journal: Mutex::new(Journal::new()),
             flow_budget: Mutex::new(FlowBudget::new(1_000, Epoch::from(1))),
+            fail_budget_lookup: AtomicBool::new(false),
             nonce: AtomicU64::new(0),
             time_ms: AtomicU64::new(1_700_000_000_000),
         }
+    }
+
+    async fn set_flow_budget(&self, budget: FlowBudget) {
+        *self.flow_budget.lock().await = budget;
+    }
+
+    fn fail_budget_lookup(&self) {
+        self.fail_budget_lookup.store(true, Ordering::SeqCst);
     }
 }
 
@@ -219,6 +229,9 @@ impl JournalEffects for TestEffects {
         _context: &ContextId,
         _peer: &AuthorityId,
     ) -> Result<FlowBudget, AuraError> {
+        if self.fail_budget_lookup.load(Ordering::SeqCst) {
+            return Err(AuraError::budget_exceeded("injected budget lookup failure"));
+        }
         Ok(*self.flow_budget.lock().await)
     }
 
@@ -325,10 +338,14 @@ async fn guard_chain_denies_transport_commands() {
     let context = test_context(3);
     let effects = TestEffects::new(authority);
 
-    let request = GuardRequest::new(authority, "amp:send".to_string(), FlowCost::new(1))
-        .with_context_id(context)
-        .with_peer(peer)
-        .with_context(context.to_bytes().to_vec());
+    let request = GuardRequest::new(
+        authority,
+        aura_guards::GuardOperationId::custom("amp:send").expect("valid operation"),
+        FlowCost::new(1),
+    )
+    .with_context_id(context)
+    .with_peer(peer)
+    .with_context(context.to_bytes().to_vec());
 
     let plan = GuardPlan::new(
         request,
@@ -350,4 +367,62 @@ async fn guard_chain_denies_transport_commands() {
     };
     assert!(!result.authorized);
     assert_eq!(send_count.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn guard_plan_fails_closed_on_budget_lookup_error() {
+    let authority = test_authority(11);
+    let peer = test_authority(12);
+    let context = test_context(13);
+    let effects = TestEffects::new(authority);
+    effects.fail_budget_lookup();
+
+    let request = GuardRequest::new(
+        authority,
+        aura_guards::GuardOperationId::custom("amp:send").expect("valid operation"),
+        FlowCost::new(1),
+    )
+    .with_context_id(context)
+    .with_peer(peer)
+    .with_context(context.to_bytes().to_vec());
+
+    let send_count = Arc::new(AtomicUsize::new(0));
+    let interpreter = Arc::new(CountingInterpreter {
+        send_count: send_count.clone(),
+    });
+    let plan = GuardPlan::new(
+        request,
+        vec![EffectCommand::SendEnvelope {
+            to: aura_core::effects::NetworkAddress::from("peer"),
+            peer_id: None,
+            envelope: vec![1, 2, 3],
+        }],
+    );
+
+    let error = execute_guard_plan(&effects, &plan, interpreter)
+        .await
+        .expect_err("budget lookup failure must fail closed");
+    assert!(error.to_string().contains("flow budget lookup failed"));
+    assert_eq!(send_count.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn zero_flow_budget_does_not_create_implicit_headroom() {
+    let authority = test_authority(21);
+    let context = test_context(22);
+    let effects = TestEffects::new(authority);
+    effects
+        .set_flow_budget(FlowBudget::new(0, Epoch::from(1)))
+        .await;
+
+    let snapshot = prepare_snapshot_from_effects(&effects, &authority, &context)
+        .await
+        .expect("snapshot should build from explicit zero budget");
+    assert_eq!(
+        snapshot.budgets.get(&context, &authority),
+        Some(FlowCost::new(0))
+    );
+    assert!(!snapshot
+        .budgets
+        .has_budget(&context, &authority, FlowCost::new(1)));
 }

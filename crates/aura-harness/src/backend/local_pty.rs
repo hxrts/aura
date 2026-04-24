@@ -79,9 +79,7 @@ fn read_length_prefixed_json<T: DeserializeOwned>(
     let payload_len = u32::from_be_bytes(length_bytes) as usize;
     if payload_len > HARNESS_COMMAND_MAX_FRAME_BYTES {
         anyhow::bail!(
-            "{context} exceeded harness frame limit ({} > {})",
-            payload_len,
-            HARNESS_COMMAND_MAX_FRAME_BYTES
+            "{context} exceeded harness frame limit ({payload_len} > {HARNESS_COMMAND_MAX_FRAME_BYTES})"
         );
     }
     let mut payload = vec![0u8; payload_len];
@@ -2026,7 +2024,9 @@ mod tests {
     fn unique_test_dir(label: &str) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
+        // Use a short fixed tmp root so nix-shell TMPDIR prefixes do not push
+        // Unix-domain socket paths past the platform limit during harness tests.
+        let root = PathBuf::from("/tmp").join(format!(
             "aura-harness-local-{label}-{}-{suffix}",
             std::process::id()
         ));

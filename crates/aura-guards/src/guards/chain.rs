@@ -111,8 +111,8 @@ impl SendGuardChain {
     }
 
     /// Set operation ID for logging and metrics
-    pub fn with_operation_id(mut self, operation_id: impl Into<GuardOperationId>) -> Self {
-        self.operation_id = Some(operation_id.into());
+    pub fn with_operation_id(mut self, operation_id: GuardOperationId) -> Self {
+        self.operation_id = Some(operation_id);
         self
     }
 
@@ -349,7 +349,7 @@ impl SendGuardChain {
 ///     context_id,
 ///     peer_device,
 ///     100, // flow cost
-/// ).with_operation_id(GuardOperationId::from("ping_send"));
+/// ).with_operation_id(GuardOperationId::custom("ping_send")?);
 ///
 /// let result = guard.evaluate(&effect_system).await?;
 /// if result.authorized {
@@ -402,17 +402,15 @@ mod tests {
         let peer = test_peer();
         let cost: FlowCost = 100.into();
 
+        let operation_id = GuardOperationId::custom("test_send").expect("valid operation id");
         let guard = SendGuardChain::new(authorization.clone(), context, peer, cost)
-            .with_operation_id("test_send");
+            .with_operation_id(operation_id.clone());
 
         assert_eq!(guard.message_authorization, authorization);
         assert_eq!(guard.context, context);
         assert_eq!(guard.peer, peer);
         assert_eq!(guard.cost, cost);
-        assert_eq!(
-            guard.operation_id,
-            Some(GuardOperationId::from("test_send"))
-        );
+        assert_eq!(guard.operation_id, Some(operation_id));
     }
 
     /// Convenience factory produces the same result as the full constructor.

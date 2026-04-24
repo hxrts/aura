@@ -107,6 +107,10 @@ See [Effects and Handlers Guide](802_effects_guide.md) for Biscuit workflow impl
 
 Biscuit authorization integrates with the guard chain through three phases: cryptographic verification, synchronous guard evaluation over a prepared `GuardSnapshot`, and effect command interpretation. If any phase fails, the operation returns an error without observable side effects.
 
+Guard operation identifiers are typed guard inputs, not ambient raw strings. Empty or whitespace-only custom operations are rejected before evaluation, and missing authorization metadata is a denial rather than a bypass.
+
+Sync peer-token validation follows the same fail-closed model. Production sync validation requires a configured Biscuit root public key and a concrete authority/operation scope; deterministic roots and dummy scopes are test fixtures only.
+
 See [Effects and Handlers Guide](802_effects_guide.md) for guard chain integration patterns.
 
 ## Authorization Scenarios

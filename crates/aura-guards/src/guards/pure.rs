@@ -64,16 +64,12 @@ pub struct GuardRequest {
 
 impl GuardRequest {
     /// Create a new guard request
-    pub fn new(
-        authority: AuthorityId,
-        operation: impl Into<GuardOperationId>,
-        cost: FlowCost,
-    ) -> Self {
+    pub fn new(authority: AuthorityId, operation: GuardOperationId, cost: FlowCost) -> Self {
         Self {
             authority,
             context: aura_core::ContextId::new_from_entropy([2u8; 32]),
             peer: AuthorityId::new_from_entropy([1u8; 32]),
-            operation: operation.into(),
+            operation,
             cost,
             capability: Cap::default(),
             reveals_metadata: false,
@@ -137,16 +133,14 @@ pub struct CapabilityGuard;
 
 impl Guard for CapabilityGuard {
     fn evaluate(&self, snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
-        if !request.operation.is_empty() {
-            let authz_key = format!("authz:{}", request.operation);
-            match snapshot.metadata.get(&authz_key) {
-                Some("allow") => {}
-                Some("deny") => {
-                    return denied("Authorization denied");
-                }
-                Some(_) | None => {
-                    return denied("Missing authorization decision");
-                }
+        let authz_key = format!("authz:{}", request.operation);
+        match snapshot.metadata.get(&authz_key) {
+            Some("allow") => {}
+            Some("deny") => {
+                return denied("Authorization denied");
+            }
+            Some(_) | None => {
+                return denied("Missing authorization decision");
             }
         }
 
@@ -324,6 +318,10 @@ mod tests {
         aura_core::ContextId::new_from_entropy([73u8; 32])
     }
 
+    fn test_operation() -> GuardOperationId {
+        GuardOperationId::custom("test_op").expect("valid test guard operation")
+    }
+
     fn test_snapshot() -> GuardSnapshot {
         let mut budgets = HashMap::new();
         budgets.insert((test_context(), test_peer()), FlowCost::new(1000));
@@ -348,7 +346,7 @@ mod tests {
     fn test_capability_guard() {
         let guard = CapabilityGuard;
         let snapshot = test_snapshot();
-        let request = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100));
+        let request = GuardRequest::new(test_authority(), test_operation(), FlowCost::new(100));
 
         let outcome = guard.evaluate(&snapshot, &request);
         assert!(outcome.is_authorized());
@@ -369,7 +367,7 @@ mod tests {
         budgets.insert((context, peer), FlowCost::new(1000));
         snapshot.budgets = FlowBudgetView::new(budgets);
 
-        let request = GuardRequest::new(authority, "test_op", FlowCost::new(100))
+        let request = GuardRequest::new(authority, test_operation(), FlowCost::new(100))
             .with_context_id(context)
             .with_peer(peer);
         let outcome = guard.evaluate(&snapshot, &request);
@@ -390,7 +388,7 @@ mod tests {
     fn test_flow_budget_guard_insufficient() {
         let guard = FlowBudgetGuard;
         let snapshot = test_snapshot();
-        let request = GuardRequest::new(test_authority(), "test_op", FlowCost::new(2000));
+        let request = GuardRequest::new(test_authority(), test_operation(), FlowCost::new(2000));
 
         let outcome = guard.evaluate(&snapshot, &request);
         assert!(!outcome.is_authorized());
@@ -405,7 +403,7 @@ mod tests {
     fn test_journal_coupling_guard() {
         let guard = JournalCouplingGuard;
         let snapshot = test_snapshot();
-        let request = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100));
+        let request = GuardRequest::new(test_authority(), test_operation(), FlowCost::new(100));
 
         let outcome = guard.evaluate(&snapshot, &request);
         assert!(outcome.is_authorized());
@@ -424,13 +422,13 @@ mod tests {
         let snapshot = test_snapshot();
 
         // Request without metadata leakage
-        let request1 = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100));
+        let request1 = GuardRequest::new(test_authority(), test_operation(), FlowCost::new(100));
         let outcome1 = guard.evaluate(&snapshot, &request1);
         assert!(outcome1.is_authorized());
         assert!(outcome1.effects.is_empty());
 
         // Request with metadata leakage
-        let request2 = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100))
+        let request2 = GuardRequest::new(test_authority(), test_operation(), FlowCost::new(100))
             .with_metadata_leakage(32);
         let outcome2 = guard.evaluate(&snapshot, &request2);
         assert!(outcome2.is_authorized());
@@ -457,7 +455,7 @@ mod tests {
         budgets.insert((context, peer), FlowCost::new(1000));
         snapshot.budgets = FlowBudgetView::new(budgets);
 
-        let request = GuardRequest::new(authority, "test_op", FlowCost::new(100))
+        let request = GuardRequest::new(authority, test_operation(), FlowCost::new(100))
             .with_context_id(context)
             .with_peer(peer)
             .with_metadata_leakage(16);
@@ -492,7 +490,7 @@ mod tests {
     fn test_guard_chain_early_denial() {
         let chain = GuardChain::standard();
         let snapshot = test_snapshot(); // No budget for unknown authority
-        let request = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100));
+        let request = GuardRequest::new(test_authority(), test_operation(), FlowCost::new(100));
 
         let outcome = chain.evaluate(&snapshot, &request);
         assert!(!outcome.is_authorized());
@@ -518,7 +516,7 @@ mod tests {
         budgets.insert((context, peer), FlowCost::new(1000));
         snapshot.budgets = FlowBudgetView::new(budgets);
 
-        let request = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100))
+        let request = GuardRequest::new(test_authority(), test_operation(), FlowCost::new(100))
             .with_context_id(context)
             .with_peer(peer)
             .with_metadata_leakage(16);
@@ -572,7 +570,7 @@ mod tests {
         // Remove authorization metadata so CapGuard denies
         snapshot.metadata = MetadataView::new(HashMap::new());
 
-        let request = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100))
+        let request = GuardRequest::new(test_authority(), test_operation(), FlowCost::new(100))
             .with_context_id(context)
             .with_peer(peer);
 

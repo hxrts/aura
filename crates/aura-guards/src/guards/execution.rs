@@ -480,11 +480,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::guards::types::GuardOperationId;
     use crate::guards::{ProtocolGuardRequirement, UnauthenticatedAllowed};
 
     #[tokio::test]
     async fn forgotten_tokens_deny_guard_evaluation() {
-        let guard = ProtocolGuard::new_for_testing("test.protected.empty");
+        let guard = ProtocolGuard::new_for_testing(
+            GuardOperationId::custom("test.protected.empty").expect("valid operation"),
+        );
         let result = evaluate_guard(&guard, 1_700_000_000)
             .await
             .expect("guard evaluation should complete");
@@ -500,7 +503,9 @@ mod tests {
 
     #[tokio::test]
     async fn explicit_unauthenticated_policy_allows_zero_auth_checks() {
-        let guard = ProtocolGuard::new_unauthenticated_for_testing("test.unauthenticated.read");
+        let guard = ProtocolGuard::new_unauthenticated_for_testing(
+            GuardOperationId::custom("test.unauthenticated.read").expect("valid operation"),
+        );
         let result = evaluate_guard(&guard, 1_700_000_000)
             .await
             .expect("guard evaluation should complete");

@@ -122,8 +122,7 @@ fn harness_runtime_context() -> io::Result<Option<HarnessRuntimeContext>> {
 
     let token = env::var(HARNESS_RUN_TOKEN_ENV).map_err(|_| {
         io::Error::other(format!(
-            "native harness mode requires {}",
-            HARNESS_RUN_TOKEN_ENV
+            "native harness mode requires {HARNESS_RUN_TOKEN_ENV}"
         ))
     })?;
     if token.len() < HARNESS_AUTH_TOKEN_MIN_LEN {
@@ -135,8 +134,7 @@ fn harness_runtime_context() -> io::Result<Option<HarnessRuntimeContext>> {
     let transient_root = env::var_os(HARNESS_TRANSIENT_ROOT_ENV)
         .ok_or_else(|| {
             io::Error::other(format!(
-                "native harness mode requires {}",
-                HARNESS_TRANSIENT_ROOT_ENV
+                "native harness mode requires {HARNESS_TRANSIENT_ROOT_ENV}"
             ))
         })
         .and_then(|value| normalize_absolute_path(&PathBuf::from(value)))?;

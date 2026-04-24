@@ -23,10 +23,14 @@ fn guard_plan_matches_choreography_request() {
         Err(err) => panic!("plan: {err}"),
     };
 
-    let request = GuardRequest::new(authority, "amp:send".to_string(), FlowCost::new(1))
-        .with_context_id(context)
-        .with_peer(peer)
-        .with_context(context.to_bytes().to_vec());
+    let request = GuardRequest::new(
+        authority,
+        aura_guards::GuardOperationId::custom("amp:send").expect("valid operation"),
+        FlowCost::new(1),
+    )
+    .with_context_id(context)
+    .with_peer(peer)
+    .with_context(context.to_bytes().to_vec());
 
     assert_eq!(plan.request().operation, request.operation);
     assert_eq!(plan.request().cost, request.cost);

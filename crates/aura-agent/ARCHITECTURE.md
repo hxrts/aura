@@ -56,6 +56,11 @@ Summary:
 - For shared semantic flows, `aura-agent` is the primary `ActorOwned` crate. It may own long-lived mutable async runtime state, but it must not leak that ownership into frontend-local semantic lifecycle authorship.
 - Mutable runtime service views such as rendezvous descriptors, provider health, selector state, and hold observations are owned by the actor-owned service registry in `src/runtime/services/service_registry.rs`.
 - Bootstrap discovery is runtime-owned and separate from ordinary rendezvous peer state. Native LAN discovery and broker-backed browser startup both surface `bootstrap candidates`, but those candidates must not be published as ordinary peers until enrollment/acceptance completes.
+- The local bootstrap broker keeps bearer material out of URLs. Invitation
+  retrieval credentials are transported in headers, compared through the
+  constant-time credential helper, and protected by explicit connection and
+  request-read limits. Loopback remains the default bind policy; LAN binding is
+  opt-in.
 - The actor-owned runtime service set includes rendezvous descriptor selection for `Establish`, the bounded `MoveManager` for current movement queues, replay suppression, flush scheduling, and congestion state, and the `HoldManager` for shared custody, selector rotation, bounded holder residency, local GC, and verified-only accountability updates.
 - Adaptive privacy runtime-owned services include `SelectionManager`, `LocalHealthObserver`, `CoverTrafficGenerator`, and `AnonymousPathManager`; they own local health smoothing, weighted selection, cover planning, and anonymous established-path lifecycle inside `aura-agent`.
 - `src/adaptive_privacy_control.rs` owns the Telltale-native protocol

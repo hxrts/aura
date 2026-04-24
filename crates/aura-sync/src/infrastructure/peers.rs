@@ -42,7 +42,7 @@ use crate::capabilities::SyncCapability;
 use crate::core::{physical_time_from_ms, sync_config_error, sync_peer_error, SyncResult};
 use aura_authorization::VerifiedBiscuitToken;
 use aura_core::time::PhysicalTime;
-use aura_core::DeviceId;
+use aura_core::{AuthorityId, DeviceId};
 
 /// Deterministic monotonic counter for test/dev purposes.
 /// Real deployments should use `PhysicalTime` from the time effect provider.
@@ -82,6 +82,18 @@ pub struct PeerDiscoveryConfig {
 
     /// Enable capability-aware peer filtering
     pub capability_filtering: bool,
+
+    /// Configured Biscuit root public key for sync peer-token validation.
+    ///
+    /// Production peer-token validation fails closed when this is absent.
+    #[serde(default)]
+    pub biscuit_root_public_key: Option<[u8; 32]>,
+
+    /// Authority scope used for sync peer-token validation.
+    ///
+    /// Production peer-token validation fails closed when this is absent.
+    #[serde(default)]
+    pub sync_authority_id: Option<AuthorityId>,
 }
 
 impl Default for PeerDiscoveryConfig {
@@ -93,6 +105,8 @@ impl Default for PeerDiscoveryConfig {
             min_trust_level: 50,
             max_tracked_peers: 100,
             capability_filtering: true,
+            biscuit_root_public_key: None,
+            sync_authority_id: None,
         }
     }
 }
@@ -210,6 +224,10 @@ pub struct PeerMetadata {
     /// Whether peer has required sync capabilities (checked via Biscuit tokens)
     pub has_sync_capability: bool,
 
+    /// Evaluated sync capability decisions keyed by capability and resource scope.
+    #[serde(default)]
+    pub evaluated_sync_capabilities: HashMap<String, bool>,
+
     /// Current number of active sync sessions
     pub active_sessions: u32,
 }
@@ -232,6 +250,7 @@ impl PeerMetadata {
             last_successful_sync: now.clone(),
             trust_level: 0,
             has_sync_capability: false,
+            evaluated_sync_capabilities: HashMap::new(),
             active_sessions: 0,
         }
     }
@@ -281,6 +300,19 @@ impl PeerMetadata {
         // Weighted combination: trust > success > load
         (trust_factor * 0.5) + (success_rate * 0.3) + (load_factor * 0.2)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyncCapabilityValidation {
+    cache_key: String,
+    has_permission: bool,
+}
+
+fn sync_capability_cache_key(
+    scope: &aura_core::types::scope::ResourceScope,
+    capability: &str,
+) -> String {
+    format!("{capability}:{scope:?}")
 }
 
 /// Detailed peer information with connection details
@@ -494,23 +526,38 @@ impl PeerManager {
                 "Biscuit guard evaluator required before accepting peer tokens",
             )
         })?;
-        let has_sync_capability = {
-            let validated = self
+        let (capability_cache_key, has_sync_capability) = {
+            let validation = self
                 .validate_biscuit_token(&token_bytes, evaluator, now.ts_ms / 1000)
-                .await
-                .unwrap_or(false);
+                .await?;
             tracing::debug!(
                 device_id = %device_id,
-                validated,
+                validated = validation.has_permission,
                 "Peer token validated via Biscuit guard evaluator"
             );
-            validated
+            (validation.cache_key, validation.has_permission)
         };
 
         let peer = self.peer_info_mut(device_id)?;
         peer.metadata.has_sync_capability = has_sync_capability;
+        peer.metadata
+            .evaluated_sync_capabilities
+            .insert(capability_cache_key, has_sync_capability);
         peer.token = Some(token_bytes);
         Ok(())
+    }
+
+    fn sync_resource_scope(&self) -> SyncResult<aura_core::types::scope::ResourceScope> {
+        let authority_id = self.config.sync_authority_id.ok_or_else(|| {
+            sync_config_error(
+                "sync",
+                "sync authority id required before accepting peer tokens",
+            )
+        })?;
+        Ok(aura_core::types::scope::ResourceScope::Authority {
+            authority_id,
+            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
+        })
     }
 
     /// Validate a Biscuit token using proper root public key verification
@@ -519,27 +566,25 @@ impl PeerManager {
         token_bytes: &[u8],
         evaluator: &BiscuitGuardEvaluator,
         current_time_seconds: u64,
-    ) -> SyncResult<bool> {
-        // Get the root public key from configuration or authority context
-        let root_public_key = self.get_root_public_key().await?;
+    ) -> SyncResult<SyncCapabilityValidation> {
+        let root_public_key = self.get_root_public_key()?;
+        let sync_resource = self.sync_resource_scope()?;
+        let capability = SyncCapability::RequestDigest.as_name();
+        let cache_key = sync_capability_cache_key(&sync_resource, capability.as_str());
 
         // Verify the Biscuit token using the root public key.
         let biscuit_token = match VerifiedBiscuitToken::from_bytes(token_bytes, root_public_key) {
             Ok(token) => token,
             Err(e) => {
                 tracing::debug!("Failed to parse Biscuit token: {}", e);
-                return Ok(false);
+                return Ok(SyncCapabilityValidation {
+                    cache_key,
+                    has_permission: false,
+                });
             }
         };
 
-        // Create a resource scope for sync operations
-        let sync_resource = aura_core::types::scope::ResourceScope::Authority {
-            authority_id: aura_core::AuthorityId::new_from_entropy([1u8; 32]),
-            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
-        };
-
         // Check if the token grants sync capability using the guard evaluator
-        let capability = SyncCapability::RequestDigest.as_name();
         match evaluator.check_guard(
             &biscuit_token,
             &capability,
@@ -551,41 +596,29 @@ impl PeerManager {
                     has_sync_capability = has_permission,
                     "Biscuit token validation completed"
                 );
-                Ok(has_permission)
+                Ok(SyncCapabilityValidation {
+                    cache_key,
+                    has_permission,
+                })
             }
             Err(e) => {
                 tracing::debug!("Biscuit token capability check failed: {}", e);
-                Ok(false)
+                Ok(SyncCapabilityValidation {
+                    cache_key,
+                    has_permission: false,
+                })
             }
         }
     }
 
-    /// Get the root public key for Biscuit token validation
-    async fn get_root_public_key(&self) -> SyncResult<biscuit_auth::PublicKey> {
-        // In a real implementation, this would:
-        // 1. Load from configuration file or environment
-        // 2. Get from authority context via effects system
-        // 3. Retrieve from a trusted key store or HSM
-        // 4. Use key derivation from master authority key
-
-        // Use deterministic development key for tests
-        // This would typically come from the authority's cryptographic material
-        // Generated via: openssl rand -hex 32
-        let dev_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
-        let dev_key_bytes = hex::decode(dev_key_hex).map_err(|e| {
-            sync_peer_error("key_loading", format!("Failed to decode dev key: {e}"))
+    /// Get the configured root public key for Biscuit token validation.
+    fn get_root_public_key(&self) -> SyncResult<biscuit_auth::PublicKey> {
+        let key_array = self.config.biscuit_root_public_key.ok_or_else(|| {
+            sync_config_error(
+                "sync",
+                "Biscuit root public key required before accepting peer tokens",
+            )
         })?;
-
-        if dev_key_bytes.len() != 32 {
-            return Err(sync_peer_error(
-                "key_loading",
-                "Root public key must be exactly 32 bytes",
-            ));
-        }
-
-        let mut key_array = [0u8; 32];
-        key_array.copy_from_slice(&dev_key_bytes);
-
         biscuit_auth::PublicKey::from_bytes(&key_array).map_err(|e| {
             sync_peer_error(
                 "key_loading",
@@ -867,6 +900,8 @@ pub struct PeerManagerStatistics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_guards::{BiscuitAuthorizationBridge, BiscuitGuardEvaluator};
+    use biscuit_auth::{builder::BiscuitBuilder, macros::*, KeyPair};
 
     /// Helper function to create PhysicalTime for tests
     fn test_time(ts_ms: u64) -> PhysicalTime {
@@ -874,6 +909,32 @@ mod tests {
             ts_ms,
             uncertainty: None,
         }
+    }
+
+    fn peer_manager_with_root(keypair: &KeyPair, authority_id: AuthorityId) -> PeerManager {
+        let config = PeerDiscoveryConfig {
+            biscuit_root_public_key: Some(keypair.public().to_bytes()),
+            sync_authority_id: Some(authority_id),
+            ..PeerDiscoveryConfig::default()
+        };
+        let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
+        PeerManager::with_biscuit_authorization(config, BiscuitGuardEvaluator::new(bridge))
+    }
+
+    fn sync_token(keypair: &KeyPair, authority_id: AuthorityId, capability: &str) -> Vec<u8> {
+        let authority = authority_id.to_string();
+        let mut builder = BiscuitBuilder::new();
+        builder
+            .add_fact(fact!("capability({capability})"))
+            .expect("capability fact");
+        builder
+            .add_check(check!("check if authority_id({authority})"))
+            .expect("authority scope check");
+        builder
+            .build(keypair)
+            .expect("token builds")
+            .to_vec()
+            .expect("token serializes")
     }
 
     #[test]
@@ -954,5 +1015,151 @@ mod tests {
         assert_eq!(selected.len(), 2);
         assert_eq!(selected[0], peer1);
         assert_eq!(selected[1], peer2);
+    }
+
+    #[tokio::test]
+    async fn peer_token_validation_requires_configured_root_and_scope() {
+        let keypair = KeyPair::new();
+        let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
+        let config = PeerDiscoveryConfig::default();
+        let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
+        let mut manager =
+            PeerManager::with_biscuit_authorization(config, BiscuitGuardEvaluator::new(bridge));
+        let peer = DeviceId::from_bytes([42; 32]);
+        let now = test_time(1_234_567_890_000);
+        manager.add_peer(peer, &now).expect("peer added");
+
+        let token = sync_token(
+            &keypair,
+            authority_id,
+            SyncCapability::RequestDigest.as_name().as_str(),
+        );
+        let err = manager
+            .update_peer_token(peer, token, &now)
+            .await
+            .expect_err("missing sync Biscuit config must fail closed");
+        assert!(err.to_string().contains("Biscuit root public key required"));
+    }
+
+    #[tokio::test]
+    async fn peer_token_validation_rejects_wrong_root_authority_and_operation() {
+        let trusted = KeyPair::new();
+        let wrong_root = KeyPair::new();
+        let authority_id = AuthorityId::new_from_entropy([10u8; 32]);
+        let wrong_authority = AuthorityId::new_from_entropy([11u8; 32]);
+        let now = test_time(1_234_567_890_000);
+        let mut manager = peer_manager_with_root(&trusted, authority_id);
+
+        let peer_wrong_root = DeviceId::from_bytes([43; 32]);
+        manager.add_peer(peer_wrong_root, &now).expect("peer added");
+        manager
+            .update_peer_token(
+                peer_wrong_root,
+                sync_token(
+                    &wrong_root,
+                    authority_id,
+                    SyncCapability::RequestDigest.as_name().as_str(),
+                ),
+                &now,
+            )
+            .await
+            .expect("invalid token is stored as non-capable");
+        assert!(
+            !manager
+                .get_peer(&peer_wrong_root)
+                .expect("peer exists")
+                .metadata
+                .has_sync_capability
+        );
+
+        let peer_wrong_authority = DeviceId::from_bytes([44; 32]);
+        manager
+            .add_peer(peer_wrong_authority, &now)
+            .expect("peer added");
+        manager
+            .update_peer_token(
+                peer_wrong_authority,
+                sync_token(
+                    &trusted,
+                    wrong_authority,
+                    SyncCapability::RequestDigest.as_name().as_str(),
+                ),
+                &now,
+            )
+            .await
+            .expect("wrong scope is stored as non-capable");
+        assert!(
+            !manager
+                .get_peer(&peer_wrong_authority)
+                .expect("peer exists")
+                .metadata
+                .has_sync_capability
+        );
+
+        let peer_wrong_operation = DeviceId::from_bytes([45; 32]);
+        manager
+            .add_peer(peer_wrong_operation, &now)
+            .expect("peer added");
+        manager
+            .update_peer_token(
+                peer_wrong_operation,
+                sync_token(
+                    &trusted,
+                    authority_id,
+                    SyncCapability::PushOps.as_name().as_str(),
+                ),
+                &now,
+            )
+            .await
+            .expect("wrong capability is stored as non-capable");
+        assert!(
+            !manager
+                .get_peer(&peer_wrong_operation)
+                .expect("peer exists")
+                .metadata
+                .has_sync_capability
+        );
+    }
+
+    #[tokio::test]
+    async fn peer_token_validation_accepts_configured_root_scope_and_operation() {
+        let keypair = KeyPair::new();
+        let authority_id = AuthorityId::new_from_entropy([12u8; 32]);
+        let now = test_time(1_234_567_890_000);
+        let peer = DeviceId::from_bytes([46; 32]);
+        let mut manager = peer_manager_with_root(&keypair, authority_id);
+        manager.add_peer(peer, &now).expect("peer added");
+
+        manager
+            .update_peer_token(
+                peer,
+                sync_token(
+                    &keypair,
+                    authority_id,
+                    SyncCapability::RequestDigest.as_name().as_str(),
+                ),
+                &now,
+            )
+            .await
+            .expect("valid token accepted");
+
+        assert!(
+            manager
+                .get_peer(&peer)
+                .expect("peer exists")
+                .metadata
+                .has_sync_capability
+        );
+        let evaluated = &manager
+            .get_peer(&peer)
+            .expect("peer exists")
+            .metadata
+            .evaluated_sync_capabilities;
+        assert_eq!(evaluated.len(), 1);
+        assert!(evaluated
+            .values()
+            .next()
+            .copied()
+            .expect("sync capability decision recorded"));
     }
 }

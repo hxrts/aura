@@ -46,6 +46,10 @@ Provide the guard chain that enforces authorization, flow budgets, leakage budge
 - Journal coupling is atomic with budget charge.
 - Leakage accounting is recorded as journal facts (RelationalFact::LeakageEvent).
 - Guards are pure and deterministic given the snapshot.
+- Guard operation ids are validated typed values; empty or whitespace-only custom
+  operations must be rejected before guard evaluation.
+- Flow budget lookup errors or missing budget state fail closed. Zero limits do
+  not imply unlimited headroom.
 
 ### InvariantSentMessagesHaveFacts
 
@@ -114,6 +118,8 @@ just check-arch
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
 | Guard chain effect ordering wrong | `src/guards/pure.rs` `test_guard_chain_effect_ordering` | Covered |
+| Empty operation id bypasses authorization | `tests/compile_fail.rs` and guard inline tests | Covered |
+| Budget lookup failure authorizes traffic | `tests/chain/guard_chain_transport.rs` | Covered |
 | CapGuard denial leaks downstream effects | `src/guards/pure.rs` `test_guard_chain_capguard_denial_stops_chain` | Covered |
 | FlowGuard denial leaks downstream effects | `src/guards/pure.rs` `test_guard_chain_early_denial` | Covered |
 | Transport without guard evaluation | `tests/chain/guard_chain_transport.rs` | Covered |

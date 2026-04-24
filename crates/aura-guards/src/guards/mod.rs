@@ -264,7 +264,7 @@ impl ProtocolGuard {
     pub fn new(
         root_public_key: PublicKey,
         authority_id: AuthorityId,
-        operation_id: impl Into<GuardOperationId>,
+        operation_id: GuardOperationId,
         requirement: ProtocolGuardRequirement,
     ) -> AuraResult<Self> {
         let required_tokens = match &requirement {
@@ -294,7 +294,7 @@ impl ProtocolGuard {
             authorization_policy: requirement,
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
-            operation_id: operation_id.into(),
+            operation_id,
         })
     }
 
@@ -302,7 +302,7 @@ impl ProtocolGuard {
     pub fn with_required_tokens(
         root_public_key: PublicKey,
         authority_id: AuthorityId,
-        operation_id: impl Into<GuardOperationId>,
+        operation_id: GuardOperationId,
         tokens: Vec<VerifiedBiscuitToken>,
     ) -> AuraResult<Self> {
         let guard = Self::new(
@@ -318,7 +318,7 @@ impl ProtocolGuard {
     pub fn allow_unauthenticated(
         root_public_key: PublicKey,
         authority_id: AuthorityId,
-        operation_id: impl Into<GuardOperationId>,
+        operation_id: GuardOperationId,
         policy: UnauthenticatedAllowed,
     ) -> AuraResult<Self> {
         Self::new(
@@ -376,7 +376,7 @@ impl ProtocolGuard {
 
     /// Create a protocol guard with local test keys.
     #[cfg(test)]
-    pub fn new_for_testing(operation_id: impl Into<GuardOperationId>) -> Self {
+    pub fn new_for_testing(operation_id: GuardOperationId) -> Self {
         let keypair = biscuit_auth::KeyPair::new();
         let authority_id = AuthorityId::new_from_entropy([0u8; 32]);
 
@@ -393,13 +393,13 @@ impl ProtocolGuard {
             authorization_policy: ProtocolGuardRequirement::RequiredTokens(Vec::new()),
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
-            operation_id: operation_id.into(),
+            operation_id,
         }
     }
 
     /// Create an explicitly unauthenticated protocol guard for tests.
     #[cfg(test)]
-    pub fn new_unauthenticated_for_testing(operation_id: impl Into<GuardOperationId>) -> Self {
+    pub fn new_unauthenticated_for_testing(operation_id: GuardOperationId) -> Self {
         let keypair = biscuit_auth::KeyPair::new();
         let authority_id = AuthorityId::new_from_entropy([0u8; 32]);
 

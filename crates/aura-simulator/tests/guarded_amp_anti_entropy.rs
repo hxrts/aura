@@ -8,7 +8,7 @@ use aura_amp::capabilities::AmpCapability;
 use aura_anti_entropy::{AntiEntropyConfig, AntiEntropyHandler};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::FlowCost;
-use aura_guards::chain::SendGuardChain;
+use aura_guards::{chain::SendGuardChain, GuardOperationId};
 use aura_simulator::handlers::effect_composer::factory::create_deterministic_environment;
 use aura_testkit::DeviceTestFixture;
 use uuid::Uuid;
@@ -36,7 +36,9 @@ async fn simulator_amp_guard_chain_is_deterministic() {
         peer,
         FlowCost::new(1),
     )
-    .with_operation_id("amp_send_sim");
+    .with_operation_id(
+        GuardOperationId::custom("amp_send_sim").expect("valid amp simulator operation id"),
+    );
 
     // Verify guard chain evaluation completes without error
     let _result = guard

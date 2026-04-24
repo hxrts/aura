@@ -1458,6 +1458,11 @@ pub fn run_ownership_policy() -> Result<()> {
     run_security_bypass_symbols()?;
     run_secret_field_wrappers()?;
     run_security_bug_class_regressions()?;
+    run_sync_biscuit_boundary()?;
+    run_guard_operation_boundary()?;
+    run_flow_budget_fail_closed_boundary()?;
+    run_credential_transport_boundary()?;
+    run_runtime_service_io_boundary()?;
     run_security_exception_metadata()?;
     run_security_boolean_escape_hatch_boundary()?;
     run_harness_ownership_policy()?;
@@ -1468,6 +1473,7 @@ pub fn run_ownership_policy() -> Result<()> {
 }
 
 pub fn run_security_boundary_policy() -> Result<()> {
+    run_security_boundary_policy_self_checks()?;
     run_remote_ingress_boundary()?;
     run_canonical_remote_apply_boundary()?;
     run_journal_authorization_wiring_boundary()?;
@@ -1479,9 +1485,94 @@ pub fn run_security_boundary_policy() -> Result<()> {
     run_security_bypass_symbols()?;
     run_secret_field_wrappers()?;
     run_security_bug_class_regressions()?;
+    run_sync_biscuit_boundary()?;
+    run_guard_operation_boundary()?;
+    run_flow_budget_fail_closed_boundary()?;
+    run_credential_transport_boundary()?;
+    run_runtime_service_io_boundary()?;
     run_security_exception_metadata()?;
     run_security_boolean_escape_hatch_boundary()?;
     println!("security boundary policy: clean");
+    Ok(())
+}
+
+fn run_security_boundary_policy_self_checks() -> Result<()> {
+    let samples = [
+        (
+            "sync hard-coded Biscuit root",
+            is_sync_biscuit_boundary_violation("let dev_key_hex = \"0102030405060708090a0b0c0d0e0f\";", ""),
+        ),
+        (
+            "sync dummy ResourceScope authority",
+            is_sync_biscuit_boundary_violation(
+                "AuthorityId::new_from_entropy([1u8; 32])",
+                "ResourceScope::Authority { authority_id: AuthorityId::new_from_entropy([1u8; 32]) }",
+            ),
+        ),
+        (
+            "empty guard operation bypass",
+            is_guard_operation_boundary_violation(
+                "if request.operation.is_empty() {",
+                "if request.operation.is_empty() {\n    return true;\n}",
+            ),
+        ),
+        (
+            "infallible guard operation constructor",
+            is_guard_operation_boundary_violation(
+                "impl From<&str> for GuardOperationId {",
+                "impl From<&str> for GuardOperationId {}",
+            ),
+        ),
+        (
+            "flow budget masked lookup error",
+            is_flow_budget_fail_closed_boundary_violation(
+                ".await.unwrap_or_default()",
+                "get_flow_budget(ctx, peer).await.unwrap_or_default()",
+            ),
+        ),
+        (
+            "implicit max flow budget headroom",
+            is_flow_budget_fail_closed_boundary_violation(
+                "FlowCost::new(u32::MAX)",
+                "FlowCost::new(u32::MAX)",
+            ),
+        ),
+        (
+            "credential in URL query",
+            is_credential_transport_boundary_violation(
+                "let retrieval_token_url = format!(\"/path?token={retrieval_token}\");",
+            ),
+        ),
+        (
+            "direct credential comparison",
+            is_credential_transport_boundary_violation("if auth_token == expected_auth_token {"),
+        ),
+        (
+            "unbounded runtime accept spawn",
+            is_runtime_service_io_boundary_violation(
+                "listener.accept().await",
+                "spawn_named(\"bootstrap_broker_conn\", async move {})",
+            ),
+        ),
+        (
+            "runtime read without deadline",
+            is_runtime_service_io_boundary_violation(
+                "stream.read(&mut buf).await",
+                "let n = stream.read(&mut buf).await?;",
+            ),
+        ),
+    ];
+
+    let failures: Vec<_> = samples
+        .into_iter()
+        .filter_map(|(name, detected)| (!detected).then_some(name))
+        .collect();
+    if !failures.is_empty() {
+        bail!(
+            "security-boundary-policy self-checks failed to detect old shapes: {}",
+            failures.join(", ")
+        );
+    }
     Ok(())
 }
 
@@ -1615,6 +1706,210 @@ pub fn run_security_bug_class_regressions() -> Result<()> {
 
     println!("security bug-class regression policy: clean");
     Ok(())
+}
+
+pub fn run_sync_biscuit_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let target = repo_root.join("crates/aura-sync/src/infrastructure");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&target) {
+        let rel = security_rel_path(&repo_root, &path);
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let context = lines[idx.saturating_sub(8)..lines.len().min(idx + 9)].join("\n");
+            if is_sync_biscuit_boundary_violation(line, &context) {
+                violations.push(format!(
+                    "{rel}:{} production sync Biscuit validation must not use hard-coded roots, literal root bytes, or dummy deterministic scopes",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!("sync-biscuit-boundary:\n{}", violations.join("\n"));
+    }
+
+    println!("sync Biscuit boundary policy: clean");
+    Ok(())
+}
+
+pub fn run_guard_operation_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let target = repo_root.join("crates/aura-guards/src/guards");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&target) {
+        let rel = security_rel_path(&repo_root, &path);
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let window = lines[idx..lines.len().min(idx + 6)].join("\n");
+            if is_guard_operation_boundary_violation(line, &window) {
+                violations.push(format!(
+                    "{rel}:{} guard operation ids must not expose empty-operation authorization bypasses or infallible raw-string construction",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!("guard-operation-boundary:\n{}", violations.join("\n"));
+    }
+
+    println!("guard operation boundary policy: clean");
+    Ok(())
+}
+
+pub fn run_flow_budget_fail_closed_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let target = repo_root.join("crates/aura-guards/src/guards");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&target) {
+        let rel = security_rel_path(&repo_root, &path);
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let context = lines[idx.saturating_sub(4)..lines.len().min(idx + 5)].join("\n");
+            if is_flow_budget_fail_closed_boundary_violation(line, &context) {
+                violations.push(format!(
+                    "{rel}:{} flow-budget lookup errors, missing state, or zero limits must not create implicit headroom",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!(
+            "flow-budget-fail-closed-boundary:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    println!("flow budget fail-closed boundary policy: clean");
+    Ok(())
+}
+
+pub fn run_credential_transport_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let target = repo_root.join("crates/aura-agent/src/runtime/services");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&target) {
+        let rel = security_rel_path(&repo_root, &path);
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            if is_credential_transport_boundary_violation(line) {
+                violations.push(format!(
+                    "{rel}:{} bearer/retrieval credentials must not use URL query transport or direct equality comparisons",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!("credential-transport-boundary:\n{}", violations.join("\n"));
+    }
+
+    println!("credential transport boundary policy: clean");
+    Ok(())
+}
+
+pub fn run_runtime_service_io_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let target = repo_root.join("crates/aura-agent/src/runtime/services");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&target) {
+        let rel = security_rel_path(&repo_root, &path);
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let context = lines[idx.saturating_sub(10)..lines.len().min(idx + 12)].join("\n");
+            if is_runtime_service_io_boundary_violation(line, &context) {
+                violations.push(format!(
+                    "{rel}:{} runtime service accept/read loops must use bounded concurrency and explicit deadlines",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!("runtime-service-io-boundary:\n{}", violations.join("\n"));
+    }
+
+    println!("runtime service I/O boundary policy: clean");
+    Ok(())
+}
+
+fn is_sync_biscuit_boundary_violation(line: &str, context: &str) -> bool {
+    line.contains("dev_key_hex")
+        || line.contains("0102030405060708090a0b0c0d0e0f")
+        || (context.contains("ResourceScope")
+            && line.contains("AuthorityId::new_from_entropy([1u8; 32])"))
+        || line.contains("PublicKey::from_bytes(&[")
+        || line.contains("PublicKey::from_bytes(&[0")
+        || line.contains("PublicKey::from_bytes(&[1")
+}
+
+fn is_guard_operation_boundary_violation(line: &str, context: &str) -> bool {
+    (line.contains("request.operation.is_empty()")
+        && (context.contains("return true") || context.contains("\"allow\"")))
+        || line.contains("impl From<String> for GuardOperationId")
+        || line.contains("impl From<&str> for GuardOperationId")
+}
+
+fn is_flow_budget_fail_closed_boundary_violation(line: &str, context: &str) -> bool {
+    (context.contains("get_flow_budget") && line.contains("unwrap_or_default()"))
+        || line.contains("FlowCost::new(u32::MAX)")
+        || (context.contains("limit == 0")
+            && (context.contains("generous") || context.contains("unconfigured")))
+}
+
+fn is_credential_transport_boundary_violation(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    let credential_context = [
+        "auth_token",
+        "retrieval_token",
+        "bearer",
+        "secret",
+        "credential",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+
+    credential_context
+        && ((line.contains("?token=") || line.contains("strip_prefix(\"token=\")"))
+            || (line.contains("==")
+                && !line.contains("constant_time")
+                && !line.contains("diff ==")))
+}
+
+fn is_runtime_service_io_boundary_violation(line: &str, context: &str) -> bool {
+    (line.contains(".accept().await")
+        && context.contains("spawn_named")
+        && !(context.contains("Semaphore")
+            || context.contains("try_acquire")
+            || context.contains("acquire_owned")))
+        || (line.contains(".read(&mut") && line.contains(".await") && !context.contains("timeout("))
 }
 
 fn security_rel_path(repo_root: &Path, path: &Path) -> String {

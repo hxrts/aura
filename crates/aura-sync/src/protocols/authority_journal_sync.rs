@@ -542,7 +542,12 @@ mod tests {
         journal.add_fact(fact.clone()).expect("fact inserts");
 
         assert!(protocol
-            .validate_requested_authority_facts(authority, &journal, &[fact.order.clone()], &[fact])
+            .validate_requested_authority_facts(
+                authority,
+                &journal,
+                std::slice::from_ref(&fact.order),
+                std::slice::from_ref(&fact),
+            )
             .is_err());
     }
 
@@ -559,8 +564,8 @@ mod tests {
             .validate_requested_authority_facts(
                 expected_authority,
                 &journal,
-                &[fact.order.clone()],
-                &[fact]
+                std::slice::from_ref(&fact.order),
+                std::slice::from_ref(&fact)
             )
             .is_err());
     }
@@ -578,8 +583,8 @@ mod tests {
             .validate_requested_authority_facts(
                 expected_authority,
                 &journal,
-                &[fact.order.clone()],
-                &[fact]
+                std::slice::from_ref(&fact.order),
+                std::slice::from_ref(&fact)
             )
             .is_err());
     }
@@ -593,7 +598,12 @@ mod tests {
         journal.add_fact(fact.clone()).expect("fact inserts");
 
         assert!(protocol
-            .validate_requested_authority_facts(authority, &journal, &[fact.order.clone()], &[fact])
+            .validate_requested_authority_facts(
+                authority,
+                &journal,
+                std::slice::from_ref(&fact.order),
+                std::slice::from_ref(&fact),
+            )
             .is_err());
     }
 

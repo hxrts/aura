@@ -18,7 +18,10 @@ use aura_core::{
     types::identifiers::{AuthorityId, ContextId},
     AuraResult, FlowCost,
 };
-use aura_guards::pure::{Guard, GuardChain, GuardRequest};
+use aura_guards::{
+    pure::{Guard, GuardChain, GuardRequest},
+    GuardOperationId,
+};
 // Note: Examples can use tokio::main for simplicity (arch-check accepts this for examples/)
 use std::collections::HashMap;
 
@@ -136,8 +139,13 @@ async fn run_examples() -> AuraResult<()> {
         rng_seed: [0u8; 32],
     };
 
-    let request = GuardRequest::new(authority, "send_message", FlowCost::new(100))
-        .with_context(b"Hello, World!".to_vec());
+    let request = GuardRequest::new(
+        authority,
+        GuardOperationId::custom("send_message")
+            .map_err(|error| aura_core::AuraError::invalid(error.to_string()))?,
+        FlowCost::new(100),
+    )
+    .with_context(b"Hello, World!".to_vec());
 
     let mut interpreter = SimulationInterpreter::new();
     interpreter.set_budget(context, authority, FlowCost::new(1000));
@@ -152,7 +160,12 @@ async fn run_examples() -> AuraResult<()> {
     println!("\n=== Example 2: Pure Testing ===");
 
     // Test insufficient budget scenario
-    let expensive_request = GuardRequest::new(authority, "expensive_op", FlowCost::new(2000));
+    let expensive_request = GuardRequest::new(
+        authority,
+        GuardOperationId::custom("expensive_op")
+            .map_err(|error| aura_core::AuraError::invalid(error.to_string()))?,
+        FlowCost::new(2000),
+    );
     let result = guard_chain.evaluate(&snapshot, &expensive_request);
 
     println!("Expensive operation denied: {}", !result.is_authorized());
